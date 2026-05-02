@@ -1,4 +1,24 @@
-/user_ids.py
-/credentials.py
+# Secrets / local-only files
+/legacy/user_ids.py
+/legacy/credentials.py
+.env
+.env.*
+!.env.example
 
-*.pyc
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+
+# Logs
+logs/
+
+# Local 17lands response cache for dev iteration
+cache/

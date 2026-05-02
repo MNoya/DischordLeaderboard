@@ -1,0 +1,7 @@
+Generic single-database configuration.
+
+Set DATABASE_URL in the environment, then run:
+
+    alembic upgrade head             # apply all migrations
+    alembic revision --autogenerate -m "msg"  # generate a new migration from model changes
+    alembic downgrade -1             # roll back one migration
