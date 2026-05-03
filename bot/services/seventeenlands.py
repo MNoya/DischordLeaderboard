@@ -11,7 +11,7 @@ import json
 import logging
 import re
 import time
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Callable, Iterable
 
@@ -189,3 +189,54 @@ def aggregate_for_set(drafts: Iterable[dict], set_code: str) -> dict[str, dict]:
             bucket["trophies"] += 1
 
     return result
+
+
+def _parse_17lands_ts(value: str | None) -> datetime | None:
+    """17lands serves timestamps as ``YYYY-MM-DD HH:MM[:SS]`` UTC strings (no tz)."""
+    if not value or not isinstance(value, str):
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def extract_events_for_set(drafts: Iterable[dict], set_code: str) -> list[dict]:
+    """One dict per individual draft event matching ``set_code``.
+
+    Same set-match rule as ``aggregate_for_set`` (substring of ``expansion``).
+    Drafts in formats outside SUPPORTED_FORMATS are skipped — mirrors what
+    aggregation considers "real" for this leaderboard.
+
+    Output dicts use the same field names as ``DraftEvent`` columns so callers
+    can construct rows with ``DraftEvent(**row)`` after attaching ``player_id``
+    and ``set_id``.
+    """
+    out: list[dict] = []
+    for d in drafts:
+        fmt = d.get("format")
+        if fmt not in SUPPORTED_FORMATS:
+            continue
+        expansion = d.get("expansion") or ""
+        if set_code not in expansion:
+            continue
+        event_id = d.get("id")
+        if not event_id:
+            # 17lands has always provided id in observed responses; skip defensively
+            continue
+        out.append({
+            "seventeenlands_event_id": event_id,
+            "format": fmt,
+            "expansion": expansion,
+            "wins": int(d.get("wins") or 0),
+            "losses": int(d.get("losses") or 0),
+            "is_trophy": bool(d.get("event_wins")),
+            "colors": d.get("colors") or None,
+            "start_rank": d.get("start_rank") or None,
+            "end_rank": d.get("end_rank") or None,
+            "started_at": _parse_17lands_ts(d.get("first_event_server_time")),
+            "finished_at": _parse_17lands_ts(d.get("last_event_server_time")),
+        })
+    return out

@@ -100,3 +100,43 @@ class PlayerSetScore(Base):
     __table_args__ = (
         UniqueConstraint("player_id", "set_id", name="uq_player_set_score"),
     )
+
+
+class DraftEvent(Base):
+    """One row per individual 17lands draft event for a player.
+
+    Captured per event (not aggregated) so future features — favorite deck by
+    color, trophy streaks, mythic-rank leaderboards, ALCQ tracking — can derive
+    everything from per-event data. The DB is derived state; 17lands stays the
+    source of truth, and refresh re-fetches every few hours to stay current.
+    """
+    __tablename__ = "draft_events"
+
+    id                      = Column(String, primary_key=True, default=lambda: str(uuid4()))
+    player_id               = Column(String, ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    set_id                  = Column(String, ForeignKey("sets.id"), nullable=False)
+    # 17lands' own event ID — upsert key so re-fetches stay idempotent
+    seventeenlands_event_id = Column(String, nullable=False)
+
+    format     = Column(String, nullable=False)
+    expansion  = Column(String, nullable=False)
+
+    wins       = Column(Integer, nullable=False)
+    losses     = Column(Integer, nullable=False)
+    is_trophy  = Column(Boolean, nullable=False)
+
+    # 17lands case-encodes splash: uppercase = main color, lowercase = splash
+    # (e.g. "WBg" = WB main with green splash). Null for sealed / unfinished events
+    colors     = Column(String, nullable=True)
+    start_rank = Column(String, nullable=True)
+    end_rank   = Column(String, nullable=True)
+
+    started_at  = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+
+    fetched_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("player_id", "seventeenlands_event_id",
+                         name="uq_draft_event_per_player"),
+    )

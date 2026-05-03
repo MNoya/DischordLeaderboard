@@ -10,6 +10,7 @@ from bot.services.seventeenlands import (
     MinIntervalLimiter,
     SeventeenLandsClient,
     aggregate_for_set,
+    extract_events_for_set,
     extract_token,
 )
 
@@ -352,3 +353,123 @@ def test_aggregate_sums_across_all_supported_formats():
     assert result["Sealed"]["trophies"] == 0
     assert result["TradSealed"]["trophies"] == 1
     assert sum(s["games_played"] for s in result.values()) == 24
+
+
+# ---------------------------------------------------------------------------
+# extract_events_for_set
+# ---------------------------------------------------------------------------
+
+
+def _draft(**overrides):
+    base = {
+        "id": "abc123",
+        "format": "PremierDraft",
+        "expansion": "SOS",
+        "wins": 5,
+        "losses": 3,
+        "event_wins": 0,
+        "colors": "WB",
+        "start_rank": "Gold-3",
+        "end_rank": "Platinum-4",
+        "first_event_server_time": "2026-04-28 23:16:43",
+        "last_event_server_time": "2026-04-28 23:39:04",
+    }
+    base.update(overrides)
+    return base
+
+
+def test_extract_events_returns_one_per_draft():
+    drafts = [_draft(id="a"), _draft(id="b"), _draft(id="c")]
+    events = extract_events_for_set(drafts, "SOS")
+    assert [e["seventeenlands_event_id"] for e in events] == ["a", "b", "c"]
+
+
+def test_extract_events_preserves_color_case_for_splash():
+    """Lowercase letters in colors are splash markers — case must survive."""
+    drafts = [
+        _draft(id="main", colors="WB"),
+        _draft(id="splash", colors="WBg"),
+        _draft(id="five", colors="WUBRG"),
+        _draft(id="busy", colors="RGwub"),
+        _draft(id="mono", colors="W"),
+    ]
+    events = extract_events_for_set(drafts, "SOS")
+    by_id = {e["seventeenlands_event_id"]: e["colors"] for e in events}
+    assert by_id == {"main": "WB", "splash": "WBg", "five": "WUBRG",
+                     "busy": "RGwub", "mono": "W"}
+
+
+def test_extract_events_handles_null_colors_and_ranks():
+    drafts = [_draft(colors=None, start_rank=None, end_rank=None)]
+    [event] = extract_events_for_set(drafts, "SOS")
+    assert event["colors"] is None
+    assert event["start_rank"] is None
+    assert event["end_rank"] is None
+
+
+def test_extract_events_trophy_flag_from_event_wins():
+    drafts = [
+        _draft(id="t", event_wins=7),
+        _draft(id="nt", event_wins=0),
+        _draft(id="trad", event_wins=4),
+    ]
+    events = extract_events_for_set(drafts, "SOS")
+    assert {e["seventeenlands_event_id"]: e["is_trophy"] for e in events} == {
+        "t": True, "nt": False, "trad": True,
+    }
+
+
+def test_extract_events_skips_unsupported_formats():
+    drafts = [
+        _draft(id="ok", format="PremierDraft"),
+        _draft(id="bad", format="MidWeekSealed"),
+    ]
+    events = extract_events_for_set(drafts, "SOS")
+    assert [e["seventeenlands_event_id"] for e in events] == ["ok"]
+
+
+def test_extract_events_filters_by_set_substring():
+    """Y26ECL matches set ECL — same rule as aggregate_for_set."""
+    drafts = [
+        _draft(id="alc", expansion="Y26ECL"),
+        _draft(id="std", expansion="ECL"),
+        _draft(id="other", expansion="SOS"),
+    ]
+    events = extract_events_for_set(drafts, "ECL")
+    assert sorted(e["seventeenlands_event_id"] for e in events) == ["alc", "std"]
+
+
+def test_extract_events_skips_events_without_id():
+    drafts = [_draft(id=None), _draft(id="")]
+    assert extract_events_for_set(drafts, "SOS") == []
+
+
+def test_extract_events_parses_timestamps():
+    drafts = [_draft(
+        first_event_server_time="2026-04-28 23:16:43",
+        last_event_server_time="2026-04-28 23:39:04",
+    )]
+    [event] = extract_events_for_set(drafts, "SOS")
+    assert event["started_at"].isoformat() == "2026-04-28T23:16:43"
+    assert event["finished_at"].isoformat() == "2026-04-28T23:39:04"
+
+
+def test_extract_events_handles_minute_precision_timestamps():
+    """Some 17lands timestamps come at minute precision (no seconds)."""
+    drafts = [_draft(
+        first_event_server_time="2026-04-28 23:16",
+        last_event_server_time="2026-04-28 23:39",
+    )]
+    [event] = extract_events_for_set(drafts, "SOS")
+    assert event["started_at"].isoformat() == "2026-04-28T23:16:00"
+    assert event["finished_at"].isoformat() == "2026-04-28T23:39:00"
+
+
+def test_extract_events_handles_missing_timestamps():
+    drafts = [_draft(
+        first_event_server_time=None,
+        last_event_server_time=None,
+    )]
+    [event] = extract_events_for_set(drafts, "SOS")
+    assert event["started_at"] is None
+    assert event["finished_at"] is None

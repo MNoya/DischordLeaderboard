@@ -4,13 +4,14 @@ import pytest
 import requests
 from sqlalchemy import select
 
-from bot.models import MagicSet, Player, PlayerSetScore, PlayerStats
+from bot.models import DraftEvent, MagicSet, Player, PlayerSetScore, PlayerStats
 from bot.services.refresh import (
     aggregate_by_format_and_expansion,
     recompute_player_set_score,
     refresh_active_players,
     refresh_one_player_for_current_set,
     refresh_player,
+    upsert_draft_events,
 )
 
 
@@ -373,3 +374,122 @@ def test_refresh_one_player_for_current_set_writes_rows(session):
         select(PlayerStats).where(PlayerStats.player_id == p.id)
     ).scalars().all()
     assert len(rows) == 1
+
+
+# ---------------------------------------------------------------------------
+# upsert_draft_events
+# ---------------------------------------------------------------------------
+
+
+def _draft(event_id, **overrides):
+    base = {
+        "id": event_id,
+        "format": "PremierDraft",
+        "expansion": "SOS",
+        "wins": 5,
+        "losses": 3,
+        "event_wins": 0,
+        "colors": "WB",
+        "start_rank": "Gold-3",
+        "end_rank": "Platinum-4",
+        "first_event_server_time": "2026-04-28 23:16:43",
+        "last_event_server_time": "2026-04-28 23:39:04",
+    }
+    base.update(overrides)
+    return base
+
+
+def test_upsert_draft_events_inserts_each_event(session):
+    s = _seed_set(session, code="SOS")
+    p = _seed_player(session)
+    session.flush()
+
+    drafts = [_draft("ev-a"), _draft("ev-b"), _draft("ev-c", colors="WBg", event_wins=7)]
+    n = upsert_draft_events(session, p.id, s.id, drafts, "SOS")
+    session.flush()
+
+    assert n == 3
+    rows = session.execute(
+        select(DraftEvent).where(DraftEvent.player_id == p.id)
+    ).scalars().all()
+    assert sorted(r.seventeenlands_event_id for r in rows) == ["ev-a", "ev-b", "ev-c"]
+    by_id = {r.seventeenlands_event_id: r for r in rows}
+    assert by_id["ev-c"].colors == "WBg"
+    assert by_id["ev-c"].is_trophy is True
+
+
+def test_upsert_draft_events_idempotent(session):
+    """Re-running with the same drafts must not duplicate rows."""
+    s = _seed_set(session, code="SOS")
+    p = _seed_player(session)
+    session.flush()
+
+    drafts = [_draft("ev-a"), _draft("ev-b")]
+    upsert_draft_events(session, p.id, s.id, drafts, "SOS")
+    session.flush()
+    upsert_draft_events(session, p.id, s.id, drafts, "SOS")
+    session.flush()
+
+    count = session.execute(
+        select(DraftEvent).where(DraftEvent.player_id == p.id)
+    ).scalars().all()
+    assert len(count) == 2
+
+
+def test_upsert_draft_events_updates_changed_fields(session):
+    """Refetched event with new wins/colors should overwrite the old row."""
+    s = _seed_set(session, code="SOS")
+    p = _seed_player(session)
+    session.flush()
+
+    upsert_draft_events(session, p.id, s.id, [_draft("ev-a", wins=2, colors="WB")], "SOS")
+    session.flush()
+    upsert_draft_events(session, p.id, s.id, [_draft("ev-a", wins=7, colors="WBg", event_wins=7)], "SOS")
+    session.flush()
+
+    [row] = session.execute(
+        select(DraftEvent).where(DraftEvent.player_id == p.id)
+    ).scalars().all()
+    assert row.wins == 7
+    assert row.colors == "WBg"
+    assert row.is_trophy is True
+
+
+def test_upsert_draft_events_isolates_per_player(session):
+    """Same 17lands event id under different players must not collide."""
+    s = _seed_set(session, code="SOS")
+    p1 = _seed_player(session, name="P1", token_suffix="a")
+    p2 = _seed_player(session, name="P2", token_suffix="b")
+    session.flush()
+
+    upsert_draft_events(session, p1.id, s.id, [_draft("shared-id", wins=7)], "SOS")
+    upsert_draft_events(session, p2.id, s.id, [_draft("shared-id", wins=2)], "SOS")
+    session.flush()
+
+    rows = session.execute(select(DraftEvent)).scalars().all()
+    assert len(rows) == 2
+    by_player = {r.player_id: r for r in rows}
+    assert by_player[p1.id].wins == 7
+    assert by_player[p2.id].wins == 2
+
+
+def test_refresh_player_writes_draft_events(session):
+    """refresh_player should populate draft_events alongside player_stats."""
+    s = _seed_set(session, code="SOS")
+    p = _seed_player(session)
+    drafts = [
+        _draft("alpha", wins=7, event_wins=7, colors="WB"),
+        _draft("beta", wins=4, losses=3, event_wins=0, colors="UR"),
+    ]
+    client = FakeClient(drafts=drafts)
+
+    refresh_player(session, client, p, s)
+    session.flush()
+
+    events = session.execute(
+        select(DraftEvent).where(DraftEvent.player_id == p.id)
+    ).scalars().all()
+    assert sorted(e.seventeenlands_event_id for e in events) == ["alpha", "beta"]
+    by_id = {e.seventeenlands_event_id: e for e in events}
+    assert by_id["alpha"].is_trophy is True
+    assert by_id["beta"].colors == "UR"

@@ -77,9 +77,33 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("player_id", "set_id", name="uq_player_set_score"),
     )
+    op.create_table(
+        "draft_events",
+        sa.Column("id", sa.String(), nullable=False),
+        sa.Column("player_id", sa.String(), nullable=False),
+        sa.Column("set_id", sa.String(), nullable=False),
+        sa.Column("seventeenlands_event_id", sa.String(), nullable=False),
+        sa.Column("format", sa.String(), nullable=False),
+        sa.Column("expansion", sa.String(), nullable=False),
+        sa.Column("wins", sa.Integer(), nullable=False),
+        sa.Column("losses", sa.Integer(), nullable=False),
+        sa.Column("is_trophy", sa.Boolean(), nullable=False),
+        sa.Column("colors", sa.String(), nullable=True),
+        sa.Column("start_rank", sa.String(), nullable=True),
+        sa.Column("end_rank", sa.String(), nullable=True),
+        sa.Column("started_at", sa.DateTime(), nullable=True),
+        sa.Column("finished_at", sa.DateTime(), nullable=True),
+        sa.Column("fetched_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
+        sa.ForeignKeyConstraint(["player_id"], ["players.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["set_id"], ["sets.id"]),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("player_id", "seventeenlands_event_id",
+                            name="uq_draft_event_per_player"),
+    )
 
 
 def downgrade() -> None:
+    op.drop_table("draft_events")
     op.drop_table("player_set_scores")
     op.drop_table("player_stats")
     op.drop_table("sets")

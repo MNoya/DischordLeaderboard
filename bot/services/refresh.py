@@ -15,9 +15,9 @@ import requests
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from bot.models import MagicSet, Player, PlayerSetScore, PlayerStats
+from bot.models import DraftEvent, MagicSet, Player, PlayerSetScore, PlayerStats
 from bot.scoring import compute_score
-from bot.services.seventeenlands import SUPPORTED_FORMATS
+from bot.services.seventeenlands import SUPPORTED_FORMATS, extract_events_for_set
 
 logger = logging.getLogger(__name__)
 
@@ -127,9 +127,39 @@ def refresh_player(
             existing.trophies = row["trophies"]
             existing.last_fetched_at = now
 
+    upsert_draft_events(session, player.id, magic_set.id, drafts, magic_set.code)
+
     session.flush()
     recompute_player_set_score(session, player.id, magic_set.id)
     return {"status": "updated", "rows": len(rows)}
+
+
+def upsert_draft_events(
+    session: Session,
+    player_id: str,
+    set_id: str,
+    drafts: Iterable[dict],
+    set_code: str,
+) -> int:
+    """Insert or update one DraftEvent per 17lands draft for this (player, set).
+
+    Idempotent on (player_id, seventeenlands_event_id). Returns the count of
+    events processed (inserts + updates).
+    """
+    events = extract_events_for_set(drafts, set_code)
+    for event in events:
+        existing = session.execute(
+            select(DraftEvent).where(
+                DraftEvent.player_id == player_id,
+                DraftEvent.seventeenlands_event_id == event["seventeenlands_event_id"],
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            session.add(DraftEvent(player_id=player_id, set_id=set_id, **event))
+        else:
+            for k, v in event.items():
+                setattr(existing, k, v)
+    return len(events)
 
 
 def recompute_player_set_score(session: Session, player_id: str, set_id: str) -> PlayerSetScore:
