@@ -22,3 +22,7 @@ logs/
 
 # Local 17lands response cache for dev iteration
 cache/
+
+# Claude Code: user-specific settings and transient agent state
+.claude/settings.local.json
+.claude/worktrees/
