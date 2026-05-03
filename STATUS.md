@@ -232,7 +232,7 @@ DATABASE_URL='<pooler-url-with-encoded-password>' .venv/bin/python -m bot.script
 | A | Push `leaderboard-tweaks` and merge | done | Squashed and merged via PR #1 |
 | B | Reset Supabase schema + re-seed sets | pending | DROP SCHEMA dance above; required before Railway deploys because the schema there is stale |
 | C | Railway deployment | pending | New project from GitHub, env vars: `DATABASE_URL`, `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID` (no `CURRENT_SET_CODE` — code-driven via `bot/sets.py`); Nixpacks auto-detects via `requirements.txt` + `railway.json` |
-| D | Coming-soon placeholder → Netlify | in progress | Static page at `web/index.html` (dark theme, green accent matching the LLU logo, mobile-first single-column with desktop centering, placeholder SOS leaderboard preview). Replaces the React frontend slice for the first deploy so `settings.public_site_url` resolves. |
+| D | Coming-soon placeholder → Netlify | done | Live at https://dischordboard.netlify.app/ from `web/index.html` on `master`. `bot.config.public_site_url` default updated to match. |
 | E | Build React + Vite frontend | parked | Real frontend deferred until after first deploy. Per-player URL pattern `/player/{player_id}` reserved (`_player_url` helper in `bot/commands/leaderboard.py` is unused for now). |
 | F | Pod-draft tracking feature | designed, not built | See `pod-draft-spec.md` |
 
