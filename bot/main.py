@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import logging
+import traceback
 from pathlib import Path
 
 import discord
+from discord import app_commands
 from discord.ext import commands
 from sqlalchemy import select
 
@@ -35,6 +37,23 @@ def configure_logging() -> None:
     root.handlers = [file_handler, console_handler]
 
 
+MSG_GENERIC_ERROR = "⚠️ Something went wrong handling that command. The bot owner has been notified."
+
+
+async def _notify_owner(bot: commands.Bot, header: str, body: str) -> None:
+    """Best-effort DM the bot's owner. Crashes inside the notifier itself are swallowed."""
+    owner_id = bot.owner_id
+    if owner_id is None:
+        return
+    try:
+        owner = bot.get_user(owner_id) or await bot.fetch_user(owner_id)
+        # Discord caps message body at 2000 chars; truncate the traceback to fit comfortably
+        snippet = body[-1700:]
+        await owner.send(f"{header}\n```\n{snippet}\n```")
+    except discord.HTTPException:
+        log.warning("could not DM owner about crash", exc_info=True)
+
+
 def build_bot(guild_id: int) -> commands.Bot:
     intents = discord.Intents.default()
     intents.message_content = True
@@ -52,6 +71,10 @@ def build_bot(guild_id: int) -> commands.Bot:
         from bot.commands.stats import setup as setup_stats
         from bot.commands.help import setup as setup_help
 
+        # Discord doesn't auto-populate owner_id; fetch it so /command crashes can DM the right person
+        app_info = await bot.application_info()
+        bot.owner_id = app_info.owner.id
+
         # Load cogs into memory and mirror to the guild tree so dispatch works.
         # Discord-side sync is handled by the owner-only `!sync` text command, not on startup.
         await setup_signup(bot)
@@ -62,7 +85,36 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_stats(bot)
         await setup_help(bot)
         bot.tree.copy_global_to(guild=guild)
+
+        # Register the persistent leaderboard view so Join buttons on previously-posted
+        # messages keep dispatching after a bot restart
+        from bot.commands.leaderboard import LeaderboardView
+        bot.add_view(LeaderboardView())
+
         log.info("setup_hook: cogs loaded; run `!sync` to publish slash commands to Discord")
+
+    @bot.tree.error
+    async def on_app_command_error(
+        interaction: discord.Interaction, error: app_commands.AppCommandError,
+    ) -> None:
+        """Catch-all so a crashed handler doesn't leave 'thinking…' indefinitely.
+
+        Surfaces a generic ephemeral apology to the invoker and DMs the bot owner
+        with the traceback for diagnosis.
+        """
+        original = getattr(error, "original", error)
+        log.exception("app command crashed: %s", original, exc_info=original)
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(MSG_GENERIC_ERROR, ephemeral=True)
+            else:
+                await interaction.response.send_message(MSG_GENERIC_ERROR, ephemeral=True)
+        except discord.HTTPException:
+            log.warning("could not send generic error to user", exc_info=True)
+
+        cmd_name = interaction.command.qualified_name if interaction.command else "unknown"
+        tb = "".join(traceback.format_exception(type(original), original, original.__traceback__))
+        await _notify_owner(bot, f"⚠️ `/{cmd_name}` crashed:", tb)
 
     async def _reply_quietly(ctx: commands.Context, message: str) -> None:
         """Reply via DM. Invoke `!sync` from a DM with the bot to keep everything private."""
@@ -123,7 +175,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         """
         msg_invalidated_dm = (
             "⚠️ Your 17lands token appears to be invalid (possibly regenerated). "
-            "Please use `/relink` (in DM with the bot) to provide your new token."
+            "Please use `/relink` to provide your new token."
         )
 
         from bot.database import SessionLocal
@@ -160,12 +212,26 @@ def build_bot(guild_id: int) -> commands.Bot:
             except discord.HTTPException as e:
                 log.warning("could not DM player %s: %s", player.id, e)
 
+        # Re-render any leaderboard messages already posted in channels.
+        # Re-resolve the set inside a fresh session — the original magic_set is
+        # detached now that its session closed
+        from bot.commands.leaderboard import edit_tracked_messages_for_set
+        edit_summary = {"edited": 0, "pruned": 0, "errors": 0}
+        with SessionLocal() as session:
+            ms = session.execute(
+                select(MagicSet).where(MagicSet.code == target_code)
+            ).scalar_one_or_none()
+            if ms is not None:
+                edit_summary = await edit_tracked_messages_for_set(bot, ms)
+
         await _reply_quietly(
             ctx,
             f"✅ Refresh complete for `{target_code}`: "
             f"{summary['updated']} updated, "
             f"{summary['invalidated']} invalidated, "
-            f"{summary['errors']} errors.",
+            f"{summary['errors']} errors. "
+            f"Live messages: {edit_summary['edited']} edited, "
+            f"{edit_summary['pruned']} pruned, {edit_summary['errors']} failed.",
         )
 
     @bot.event

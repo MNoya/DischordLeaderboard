@@ -19,12 +19,13 @@ logger = logging.getLogger(__name__)
 CONFIRM_TIMEOUT_S = 5 * 60
 
 MSG_CONFIRM = (
-    "⚠️ This will permanently delete your account and all your stats. "
-    "This cannot be undone. Reply with `YES` to confirm."
+    "⚠️ This will remove you from the LLU leaderboard and delete all your tracked stats here. "
+    "Your 17lands data is unaffected.\n\n"
+    "Reply `yes` to confirm."
 )
-MSG_DELETED = "🗑️ Your account has been permanently deleted. You're welcome to run `/join` in the server again anytime."
-MSG_CANCELLED = "Deletion cancelled. Your account is unchanged."
-MSG_NOT_REGISTERED = "You don't have an account to delete."
+MSG_DELETED = "🗑️ You've been removed from the LLU leaderboard. Run `/join` anytime to come back."
+MSG_CANCELLED = "Deletion cancelled."
+MSG_NOT_REGISTERED = "You're not on the leaderboard."
 
 
 DeleteAccountKind = Literal["deleted", "not_registered"]
@@ -53,7 +54,7 @@ class DeleteAccount(commands.Cog):
         self.bot = bot
 
     # DM-only — registered globally with allowed_contexts so it doesn't appear in any guild slash menu
-    @app_commands.command(name="exile", description="Permanently delete your leaderboard account.")
+    @app_commands.command(name="exile", description="Permanently remove yourself from the leaderboard.")
     @app_commands.allowed_contexts(guilds=False, dms=True, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
     async def delete_account(self, interaction: discord.Interaction) -> None:
@@ -68,10 +69,10 @@ class DeleteAccount(commands.Cog):
             ).scalar_one_or_none()
         if existing is None:
             audit.event("delete_account_short_circuit", user_id=user_id, reason="not_registered")
-            await interaction.response.send_message(MSG_NOT_REGISTERED, ephemeral=True)
+            await interaction.response.send_message(MSG_NOT_REGISTERED, ephemeral=(interaction.guild is not None))
             return
 
-        await interaction.response.send_message(MSG_CONFIRM, ephemeral=True)
+        await interaction.response.send_message(MSG_CONFIRM, ephemeral=(interaction.guild is not None))
 
         def is_user_dm(m: discord.Message) -> bool:
             return m.author.id == interaction.user.id and m.guild is None
@@ -80,19 +81,19 @@ class DeleteAccount(commands.Cog):
             reply = await self.bot.wait_for("message", check=is_user_dm, timeout=CONFIRM_TIMEOUT_S)
         except asyncio.TimeoutError:
             audit.event("delete_account_timeout", user_id=user_id)
-            await interaction.followup.send(MSG_CANCELLED, ephemeral=True)
+            await interaction.followup.send(MSG_CANCELLED, ephemeral=(interaction.guild is not None))
             return
 
         if reply.content.strip().upper() != "YES":
             audit.event("delete_account_declined", user_id=user_id)
-            await interaction.followup.send(MSG_CANCELLED, ephemeral=True)
+            await interaction.followup.send(MSG_CANCELLED, ephemeral=(interaction.guild is not None))
             return
 
         with SessionLocal() as session:
             result = process_delete_account(session, user_id)
 
         audit.event("delete_account_result", user_id=user_id, kind=result.kind, deleted_player_id=result.deleted_player_id)
-        await interaction.followup.send(MSG_DELETED, ephemeral=True)
+        await interaction.followup.send(MSG_DELETED, ephemeral=(interaction.guild is not None))
 
 
 async def setup(bot: commands.Bot) -> None:

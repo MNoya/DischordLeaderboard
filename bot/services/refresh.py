@@ -92,7 +92,7 @@ def refresh_player(
         return {"status": "error", "error": str(e)}
 
     rows = aggregate_by_format_and_expansion(drafts, magic_set.code)
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = datetime.now(timezone.utc)
 
     for row in rows:
         existing = session.execute(
@@ -181,6 +181,7 @@ def recompute_player_set_score(session: Session, player_id: str, set_id: str) ->
     ]
     score = compute_score(stats_dicts)
     total_trophies = sum(r.trophies for r in rows)
+    now = datetime.now(timezone.utc)
 
     existing = session.execute(
         select(PlayerSetScore).where(
@@ -191,11 +192,16 @@ def recompute_player_set_score(session: Session, player_id: str, set_id: str) ->
     if existing is None:
         existing = PlayerSetScore(
             player_id=player_id, set_id=set_id, score=score, trophies=total_trophies,
+            last_calculated_at=now,
         )
         session.add(existing)
     else:
+        # Force-bump last_calculated_at so 'Last updated' tracks every refresh,
+        # not just refreshes that changed the score (onupdate=func.now() only fires
+        # when SQLAlchemy detects an actual UPDATE, which it skips for unchanged rows)
         existing.score = score
         existing.trophies = total_trophies
+        existing.last_calculated_at = now
     return existing
 
 

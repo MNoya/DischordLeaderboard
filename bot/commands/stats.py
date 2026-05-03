@@ -113,10 +113,12 @@ def _format_breakdown(breakdown: list[dict]) -> str:
     for b in breakdown:
         games = b["wins"] + b["losses"]
         winrate = b["wins"] / games if games > 0 else 0.0
+        events_word = "event" if b["events"] == 1 else "events"
+        trophy_word = "trophy" if b["trophies"] == 1 else "trophies"
         lines.append(
-            f"**{b['label']}** — {b['events']} ev, "
+            f"**{b['label']}** — {b['events']} {events_word}, "
             f"{b['wins']}-{b['losses']} ({winrate:.0%}), "
-            f"{b['trophies']} 🏆 → {b['score']:.1f} pts"
+            f"{b['trophies']} {trophy_word} → {b['score']:.1f} pts"
         )
     return "\n".join(lines)
 
@@ -135,9 +137,9 @@ def render_embed(data: StatsData) -> discord.Embed:
 
     if data.last_updated is not None:
         embed.timestamp = data.last_updated
-        embed.set_footer(text=f"{data.set_name} • Last updated")
+        embed.set_footer(text=f"{data.set_code} • Last updated")
     else:
-        embed.set_footer(text=data.set_name)
+        embed.set_footer(text=data.set_code)
     return embed
 
 
@@ -164,11 +166,11 @@ class Stats(commands.Cog):
             if player:
                 msg = f"No active player found with display name `{player}`."
             else:
-                msg = "You're not signed up. Run `/join` to start."
-            await interaction.response.send_message(msg, ephemeral=True)
+                msg = "You're not on the leaderboard. Run `/join` to get started."
+            await interaction.response.send_message(msg, ephemeral=(interaction.guild is not None))
             return
 
-        await interaction.response.send_message(embed=render_embed(data), ephemeral=True)
+        await interaction.response.send_message(embed=render_embed(data), ephemeral=(interaction.guild is not None))
 
 
 async def setup(bot: commands.Bot) -> None:
