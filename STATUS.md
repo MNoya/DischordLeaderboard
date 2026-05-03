@@ -230,7 +230,7 @@ DATABASE_URL='<pooler-url-with-encoded-password>' .venv/bin/python -m bot.script
 | # | Task | Status | Notes |
 |---|---|---|---|
 | A | Push `leaderboard-tweaks` and merge | done | Squashed and merged via PR #1 |
-| B | Reset Supabase schema + re-seed sets | pending | DROP SCHEMA dance above; required before Railway deploys because the schema there is stale |
+| B | Reset Supabase schema + re-seed sets | done | Schema dropped + migrated to head `e8c3a1b2f0d4`; 4 sets seeded (FIN, TLA, ECL, SOS). Pooler URL stashed in gitignored `.env.supabase` for the Railway step. |
 | C | Railway deployment | pending | New project from GitHub, env vars: `DATABASE_URL`, `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID` (no `CURRENT_SET_CODE` — code-driven via `bot/sets.py`); Nixpacks auto-detects via `requirements.txt` + `railway.json` |
 | D | Coming-soon placeholder → Netlify | done | Live at https://dischordboard.netlify.app/ from `web/index.html` on `master`. `bot.config.public_site_url` default updated to match. |
 | E | Build React + Vite frontend | parked | Real frontend deferred until after first deploy. Per-player URL pattern `/player/{player_id}` reserved (`_player_url` helper in `bot/commands/leaderboard.py` is unused for now). |
