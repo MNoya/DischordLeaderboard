@@ -29,8 +29,8 @@ class Player(Base):
     seventeenlands_token = Column(String, nullable=False)
     seventeenlands_url   = Column(String, nullable=False)
     active               = Column(Boolean, nullable=False, default=True)
-    joined_at            = Column(DateTime, nullable=False, server_default=func.now())
-    updated_at           = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+    joined_at            = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at           = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
     token_invalid        = Column(Boolean, nullable=False, default=False)
 
     stats = relationship(
@@ -69,7 +69,7 @@ class PlayerStats(Base):
     wins            = Column(Integer, nullable=False, default=0)
     losses          = Column(Integer, nullable=False, default=0)
     trophies        = Column(Integer, nullable=False, default=0)
-    last_fetched_at = Column(DateTime, nullable=True)
+    last_fetched_at = Column(DateTime(timezone=True), nullable=True)
 
     player = relationship("Player", back_populates="stats")
     set    = relationship("MagicSet", back_populates="stats")
@@ -95,10 +95,30 @@ class PlayerSetScore(Base):
     set_id             = Column(String, ForeignKey("sets.id"), nullable=False)
     score              = Column(Float, nullable=False, default=0)
     trophies           = Column(Integer, nullable=False, default=0)
-    last_calculated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+    last_calculated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     __table_args__ = (
         UniqueConstraint("player_id", "set_id", name="uq_player_set_score"),
+    )
+
+
+class LeaderboardMessage(Base):
+    """Tracks the bot's currently-posted leaderboard embed per (channel, set).
+
+    Lets the bot edit the message in place when data refreshes, and lets
+    /leaderboard delete the previous post and bump a fresh one to the bottom
+    of the channel rather than spamming duplicates.
+    """
+    __tablename__ = "leaderboard_messages"
+
+    id               = Column(String, primary_key=True, default=lambda: str(uuid4()))
+    channel_id       = Column(String, nullable=False)
+    set_id           = Column(String, ForeignKey("sets.id"), nullable=False)
+    message_id       = Column(String, nullable=False)
+    last_rendered_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("channel_id", "set_id", name="uq_leaderboard_message_per_channel_set"),
     )
 
 
@@ -131,10 +151,10 @@ class DraftEvent(Base):
     start_rank = Column(String, nullable=True)
     end_rank   = Column(String, nullable=True)
 
-    started_at  = Column(DateTime, nullable=True)
-    finished_at = Column(DateTime, nullable=True)
+    started_at  = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
 
-    fetched_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+    fetched_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     __table_args__ = (
         UniqueConstraint("player_id", "seventeenlands_event_id",

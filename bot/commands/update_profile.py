@@ -113,7 +113,7 @@ class UpdateProfile(commands.Cog):
             ).scalar_one_or_none()
         if existing is None:
             audit.event("update_profile_short_circuit", user_id=user_id, reason="not_registered")
-            await interaction.response.send_message(MSG_NOT_REGISTERED, ephemeral=True)
+            await interaction.response.send_message(MSG_NOT_REGISTERED, ephemeral=(interaction.guild is not None))
             return
 
         # Token entry always happens via DM regardless of where /relink was invoked
@@ -122,10 +122,10 @@ class UpdateProfile(commands.Cog):
             await dm.send(INSTRUCTIONS)
         except discord.Forbidden:
             audit.event("update_profile_dms_disabled", user_id=user_id)
-            await interaction.response.send_message(MSG_DMS_DISABLED, ephemeral=True)
+            await interaction.response.send_message(MSG_DMS_DISABLED, ephemeral=(interaction.guild is not None))
             return
 
-        await interaction.response.send_message(MSG_DM_SENT, ephemeral=True)
+        await interaction.response.send_message(MSG_DM_SENT, ephemeral=(interaction.guild is not None))
         audit.event("update_profile_dm_sent", user_id=user_id)
 
         def is_user_dm(m: discord.Message) -> bool:

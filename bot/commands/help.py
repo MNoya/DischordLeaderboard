@@ -18,13 +18,13 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
     ("🃏 Anywhere", [
         ("/leaderboard", "Show the current set leaderboard"),
         ("/stats", "See your stats breakdown (or someone else's)"),
-        ("/join", "Sign up for the leaderboard"),
+        ("/join", "Join the leaderboard"),
         ("/retire", "Pause your participation (your stats are kept)"),
         ("/relink", "Update your 17lands token"),
         ("/help", "Show this message"),
     ]),
     ("✉️ DM with the bot", [
-        ("/exile", "Permanently delete your account and all stats"),
+        ("/exile", "Permanently remove yourself from the leaderboard"),
     ]),
 ]
 
@@ -46,7 +46,7 @@ class Help(commands.Cog):
     @app_commands.allowed_installs(guilds=True, users=False)
     async def help(self, interaction: discord.Interaction) -> None:
         audit.event("help_invoked", user_id=str(interaction.user.id))
-        await interaction.response.send_message(embed=render_help_embed(), ephemeral=True)
+        await interaction.response.send_message(embed=render_help_embed(), ephemeral=(interaction.guild is not None))
 
 
 async def setup(bot: commands.Bot) -> None:

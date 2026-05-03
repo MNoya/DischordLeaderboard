@@ -11,7 +11,7 @@ import json
 import logging
 import re
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Callable, Iterable
 
@@ -192,12 +192,16 @@ def aggregate_for_set(drafts: Iterable[dict], set_code: str) -> dict[str, dict]:
 
 
 def _parse_17lands_ts(value: str | None) -> datetime | None:
-    """17lands serves timestamps as ``YYYY-MM-DD HH:MM[:SS]`` UTC strings (no tz)."""
+    """17lands serves timestamps as ``YYYY-MM-DD HH:MM[:SS]`` UTC strings (no tz).
+
+    Returns a timezone-aware UTC datetime so it lands cleanly in our
+    ``DateTime(timezone=True)`` columns and renders correctly via discord.py.
+    """
     if not value or not isinstance(value, str):
         return None
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
         try:
-            return datetime.strptime(value, fmt)
+            return datetime.strptime(value, fmt).replace(tzinfo=timezone.utc)
         except ValueError:
             continue
     return None

@@ -450,8 +450,9 @@ def test_extract_events_parses_timestamps():
         last_event_server_time="2026-04-28 23:39:04",
     )]
     [event] = extract_events_for_set(drafts, "SOS")
-    assert event["started_at"].isoformat() == "2026-04-28T23:16:43"
-    assert event["finished_at"].isoformat() == "2026-04-28T23:39:04"
+    # 17lands serves UTC-naive strings; we tag them as UTC-aware on parse
+    assert event["started_at"].isoformat() == "2026-04-28T23:16:43+00:00"
+    assert event["finished_at"].isoformat() == "2026-04-28T23:39:04+00:00"
 
 
 def test_extract_events_handles_minute_precision_timestamps():
@@ -461,8 +462,8 @@ def test_extract_events_handles_minute_precision_timestamps():
         last_event_server_time="2026-04-28 23:39",
     )]
     [event] = extract_events_for_set(drafts, "SOS")
-    assert event["started_at"].isoformat() == "2026-04-28T23:16:00"
-    assert event["finished_at"].isoformat() == "2026-04-28T23:39:00"
+    assert event["started_at"].isoformat() == "2026-04-28T23:16:00+00:00"
+    assert event["finished_at"].isoformat() == "2026-04-28T23:39:00+00:00"
 
 
 def test_extract_events_handles_missing_timestamps():
