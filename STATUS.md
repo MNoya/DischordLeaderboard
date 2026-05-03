@@ -86,7 +86,10 @@ A Discord bot + (planned) public website for an MTGA community leaderboard calle
 ├── .python-version                # 3.12
 ├── requirements.txt               # prod-only deps (Nixpacks-detected)
 ├── requirements-dev.txt           # adds pytest, testcontainers, responses
+├── web/                           # Static coming-soon site (Netlify)
+│   └── index.html
 ├── mtga-leaderboard-spec.md       # Original project spec
+├── pod-draft-spec.md              # Design for pod-draft tracking feature (not yet built)
 └── STATUS.md                      # This file
 ```
 
@@ -218,7 +221,7 @@ DATABASE_URL='<pooler-url-with-encoded-password>' .venv/bin/python -m bot.script
 
 **17lands cache**: 11 player JSONs at `cache/17lands/<token>__2026-04-21.json`. Re-fetch live with `python -m bot.scripts.refresh_stats` (no `--cache`).
 
-**Branch state**: `leaderboard-tweaks` is 30 commits ahead of `master`, `master` is 21 commits ahead of `origin/master` (51 commits to push total). Working tree clean. Not pushed yet.
+**Branch state**: `leaderboard-tweaks` was squashed and merged to `master` via PR #1. Predeploy work continues on `predeploy-prep` (coming-soon site + pod-draft spec).
 
 ---
 
@@ -226,11 +229,12 @@ DATABASE_URL='<pooler-url-with-encoded-password>' .venv/bin/python -m bot.script
 
 | # | Task | Status | Notes |
 |---|---|---|---|
-| A | Push `leaderboard-tweaks` (or merge → push master) | pending | User will do the push |
+| A | Push `leaderboard-tweaks` and merge | done | Squashed and merged via PR #1 |
 | B | Reset Supabase schema + re-seed sets | pending | DROP SCHEMA dance above; required before Railway deploys because the schema there is stale |
 | C | Railway deployment | pending | New project from GitHub, env vars: `DATABASE_URL`, `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID` (no `CURRENT_SET_CODE` — code-driven via `bot/sets.py`); Nixpacks auto-detects via `requirements.txt` + `railway.json` |
-| D | Build React + Vite frontend | not started | URL pattern reserved: `{public_site_url}/player/{player_id}` (already linked from leaderboard embed title and player rows in the inline-code table) |
-| E | Netlify deployment of frontend | blocked on D | |
+| D | Coming-soon placeholder → Netlify | in progress | Static page at `web/index.html` (dark theme, green accent matching the LLU logo, mobile-first single-column with desktop centering, placeholder SOS leaderboard preview). Replaces the React frontend slice for the first deploy so `settings.public_site_url` resolves. |
+| E | Build React + Vite frontend | parked | Real frontend deferred until after first deploy. Per-player URL pattern `/player/{player_id}` reserved (`_player_url` helper in `bot/commands/leaderboard.py` is unused for now). |
+| F | Pod-draft tracking feature | designed, not built | See `pod-draft-spec.md` |
 
 **Optional micro-cleanup** (no task tracked):
 - Rank movement arrows (▲▼) inspired by scoreboards.dev — needs a previous-rank snapshot table.
@@ -279,7 +283,7 @@ DATABASE_URL='<pooler-url-with-encoded-password>' .venv/bin/python -m bot.script
 
 - Single-page or multi-page? (Spec says single page with set selector dropdown.)
 - Read directly from Supabase via `supabase-js` (anon key + RLS) or proxy through a thin API?
-- URL pattern: leaderboard root + `?set=SOS` query param? Player profile pages live at `/player/{player_id}` (URL already linked from the bot).
+- URL pattern: leaderboard root + `?set=SOS` query param? Player profile pages live at `/player/{player_id}` (helper `_player_url` reserved in `bot/commands/leaderboard.py`, not yet wired into row rendering — wire it up once the frontend ships).
 - Per-format filter tabs (Premier / Trad / Sealed / Quick) — UI pattern?
 - Mobile-first? (Spec says yes — community checks from phones.)
 - "Favorite deck" / color-archetype features now possible via `draft_events` table (per-event color data captured).
