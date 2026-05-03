@@ -6,7 +6,8 @@ from bot.models import Base
 
 # Skip alembic.ini's [logger_*] config — disable_existing_loggers=True there silently kills bot/discord loggers downstream
 config = context.config
-config.set_main_option("sqlalchemy.url", settings.database_url)
+# Escape % so configparser doesn't try to interpolate (Supabase pooler passwords contain percent-encoded chars like %2B)
+config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
 
 target_metadata = Base.metadata
 
