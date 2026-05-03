@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Limited Level-Ups</title>
+    <meta name="description" content="Limited Level-Ups (LLU) — a 17lands-powered community leaderboard for Magic: The Gathering Arena draft. Coming soon." />
+    <meta name="color-scheme" content="dark" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230b0d12'/%3E%3Ctext x='16' y='22' font-family='ui-monospace,Menlo,monospace' font-size='18' font-weight='700' fill='%2322c33b' text-anchor='middle'%3ELLU%3C/text%3E%3C/svg%3E" />
+    <style>
+      :root {
+        --bg: #0b0d12;
+        --bg-elev: #11141b;
+        --fg: #e7eadf;
+        --fg-dim: #7e8a7c;
+        --rule: #1f2a23;
+        --accent: #22c33b;
+      }
+      * { box-sizing: border-box; }
+      html, body { min-height: 100%; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        font-feature-settings: "ss01", "cv11";
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+        background-image:
+          radial-gradient(circle at 18% 8%, rgba(34, 195, 59, 0.10), transparent 55%),
+          radial-gradient(circle at 85% 95%, rgba(20, 130, 35, 0.08), transparent 55%);
+      }
+      main {
+        padding-inline: clamp(20px, 5vw, 56px);
+        padding-block: clamp(24px, 4vh, 80px) clamp(24px, 4vw, 56px);
+      }
+      .stage {
+        max-width: 720px;
+        margin: 0 auto;
+        width: 100%;
+      }
+      h1 {
+        font-size: clamp(36px, 8vw, 84px);
+        line-height: 1.02;
+        letter-spacing: -0.02em;
+        margin: 0 0 8px;
+        font-weight: 700;
+      }
+      h1 .accent { color: var(--accent); }
+      .subtitle {
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: clamp(11px, 1.25vw, 13px);
+        letter-spacing: 0.28em;
+        text-transform: uppercase;
+        color: var(--accent);
+        font-weight: 600;
+        margin: 0 0 16px;
+      }
+      .lede {
+        color: var(--fg-dim);
+        font-size: clamp(15px, 1.6vw, 19px);
+        line-height: 1.45;
+        max-width: 56ch;
+        margin: 0 0 18px;
+      }
+      .lede strong {
+        color: var(--fg);
+        font-weight: 500;
+      }
+      .ctas-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 11px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--fg-dim);
+        margin: 0 0 8px;
+      }
+      .ctas-label .live-dot {
+        width: 6px; height: 6px;
+        border-radius: 999px;
+        background: var(--accent);
+        box-shadow: 0 0 10px var(--accent);
+      }
+      .ctas {
+        display: flex;
+        gap: 14px;
+        flex-wrap: wrap;
+      }
+      .cta {
+        display: inline-flex;
+        flex-direction: column;
+        gap: 3px;
+        padding: 9px 13px;
+        border: 1px solid var(--rule);
+        border-radius: 10px;
+        background: var(--bg-elev);
+        color: var(--fg);
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      }
+      .cta .key {
+        color: var(--accent);
+        font-weight: 700;
+        font-size: 13px;
+      }
+      .cta-desc {
+        color: var(--fg-dim);
+        font-size: 10px;
+        letter-spacing: 0.04em;
+      }
+      .preview {
+        margin-top: 20px;
+        padding-top: 16px;
+        border-top: 1px solid var(--rule);
+      }
+      .preview-label {
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 11px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--fg-dim);
+        margin: 0 0 10px;
+      }
+      .board {
+        border: 1px solid var(--rule);
+        border-radius: 14px;
+        background: var(--bg-elev);
+        overflow: hidden;
+      }
+      .board-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 11px 14px;
+        border-bottom: 1px solid var(--rule);
+      }
+      .board-head h2 {
+        font-size: 15px;
+        margin: 0;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+      }
+      .board-sub {
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 10px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--accent);
+        margin: 3px 0 0;
+      }
+      .board-tag {
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 10px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--fg-dim);
+        padding: 4px 8px;
+        border: 1px dashed var(--rule);
+        border-radius: 6px;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+      .board table {
+        width: 100%;
+        border-collapse: collapse;
+        font-variant-numeric: tabular-nums;
+      }
+      .board th, .board td {
+        padding: 7px 12px;
+        text-align: left;
+        border-bottom: 1px solid var(--rule);
+      }
+      .board tr:last-child td { border-bottom: none; }
+      .board th {
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 10px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--fg-dim);
+        font-weight: 600;
+        padding-top: 9px;
+        padding-bottom: 9px;
+      }
+      .board td { font-size: 13px; }
+      .t-rank {
+        width: 1%;
+        color: var(--fg-dim);
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        padding-right: 6px !important;
+      }
+      .t-name { font-weight: 500; }
+      .t-num {
+        text-align: right;
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        width: 1%;
+        white-space: nowrap;
+      }
+      .board tr.rank-1 .t-rank,
+      .board tr.rank-1 .t-name {
+        color: var(--accent);
+        font-weight: 700;
+      }
+      @media (max-width: 480px) {
+        .board th, .board td { padding: 6px 10px; }
+        .board th { padding-top: 8px; padding-bottom: 8px; }
+        .board-head { padding: 10px 12px; }
+      }
+      @media (min-width: 920px) {
+        main {
+          min-height: 100vh;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+        }
+        .stage { max-width: 880px; }
+        h1 { font-size: clamp(44px, 4vw, 60px); margin-bottom: 14px; }
+        .subtitle { margin-bottom: 24px; }
+        .lede { margin-bottom: 28px; font-size: 19px; line-height: 1.55; }
+        .ctas-label { margin-bottom: 12px; }
+        .preview { margin-top: 56px; padding-top: 40px; }
+        .preview-label { margin-bottom: 16px; }
+        .board-head { padding: 16px 20px; }
+        .board-head h2 { font-size: 17px; }
+        .board-sub { font-size: 11px; margin-top: 5px; }
+        .board th, .board td { padding: 11px 16px; }
+        .board th { padding-top: 13px; padding-bottom: 13px; }
+        .board td { font-size: 14px; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="stage">
+        <h1>Limited <span class="accent">Level-Ups</span></h1>
+        <p class="subtitle">Leaderboard — Coming Soon</p>
+        <p class="lede"><strong>17lands-powered community leaderboard.</strong><br />Currently drafting.</p>
+        <p class="ctas-label"><span class="live-dot"></span>Live on Discord</p>
+        <div class="ctas">
+          <div class="cta">
+            <span class="key">/leaderboard</span>
+            <span class="cta-desc">See standings</span>
+          </div>
+          <div class="cta">
+            <span class="key">/join</span>
+            <span class="cta-desc">Add your stats</span>
+          </div>
+        </div>
+
+        <section class="preview">
+          <p class="preview-label">Preview</p>
+          <div class="board">
+            <header class="board-head">
+              <div>
+                <h2>Secrets of Strixhaven</h2>
+                <p class="board-sub">SOS · Top 8</p>
+              </div>
+              <span class="board-tag">Placeholder</span>
+            </header>
+            <table>
+              <thead>
+                <tr>
+                  <th class="t-rank">#</th>
+                  <th class="t-name">Player</th>
+                  <th class="t-num">Points</th>
+                  <th class="t-num">🏆</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="rank-1">
+                  <td class="t-rank">1</td>
+                  <td class="t-name">Jace</td>
+                  <td class="t-num">168</td>
+                  <td class="t-num">11</td>
+                </tr>
+                <tr>
+                  <td class="t-rank">2</td>
+                  <td class="t-name">Liliana</td>
+                  <td class="t-num">154</td>
+                  <td class="t-num">9</td>
+                </tr>
+                <tr>
+                  <td class="t-rank">3</td>
+                  <td class="t-name">Chandra</td>
+                  <td class="t-num">142</td>
+                  <td class="t-num">8</td>
+                </tr>
+                <tr>
+                  <td class="t-rank">4</td>
+                  <td class="t-name">Nissa</td>
+                  <td class="t-num">122</td>
+                  <td class="t-num">7</td>
+                </tr>
+                <tr>
+                  <td class="t-rank">5</td>
+                  <td class="t-name">Teferi</td>
+                  <td class="t-num">108</td>
+                  <td class="t-num">6</td>
+                </tr>
+                <tr>
+                  <td class="t-rank">6</td>
+                  <td class="t-name">Garruk</td>
+                  <td class="t-num">95</td>
+                  <td class="t-num">5</td>
+                </tr>
+                <tr>
+                  <td class="t-rank">7</td>
+                  <td class="t-name">Kaya</td>
+                  <td class="t-num">79</td>
+                  <td class="t-num">4</td>
+                </tr>
+                <tr>
+                  <td class="t-rank">8</td>
+                  <td class="t-name">Vraska</td>
+                  <td class="t-num">64</td>
+                  <td class="t-num">3</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>
