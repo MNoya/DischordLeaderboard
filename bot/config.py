@@ -9,6 +9,9 @@ class Settings(BaseSettings):
 
     Discord fields are optional so non-bot entry points (alembic CLI, the
     seed script, tests) can construct Settings without them.
+
+    The active set code lives in ``bot/sets.py``, not here — rotate it by
+    bumping ``ACTIVE_SET_CODE`` and redeploying.
     """
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -17,8 +20,6 @@ class Settings(BaseSettings):
     discord_guild_id: int | None = None
     discord_admin_role_id: int | None = None
     discord_botlog_channel_id: int | None = None
-    # Code of the set the leaderboard is currently scoping to. Flip via redeploy.
-    current_set_code: str = "SOS"
     public_site_url: str = "https://your-site.netlify.app"
 
 

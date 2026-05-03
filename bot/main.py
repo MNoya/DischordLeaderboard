@@ -12,6 +12,7 @@ from bot.database import run_migrations
 from bot.models import MagicSet, Player
 from bot.services.refresh import refresh_active_players
 from bot.services.seventeenlands import SeventeenLandsClient
+from bot.sets import ACTIVE_SET_CODE
 
 
 log = logging.getLogger(__name__)
@@ -117,7 +118,7 @@ def build_bot(guild_id: int) -> commands.Bot:
     async def refresh_cmd(ctx: commands.Context, set_code: str | None = None) -> None:
         """Owner-only. Re-pull stats from 17lands for all active players.
 
-        `!refresh`         — refresh the current set (settings.current_set_code)
+        `!refresh`         — refresh the current set (ACTIVE_SET_CODE in bot/sets.py)
         `!refresh CODE`    — refresh a specific set, e.g. `!refresh ECL`
         """
         msg_invalidated_dm = (
@@ -127,7 +128,7 @@ def build_bot(guild_id: int) -> commands.Bot:
 
         from bot.database import SessionLocal
 
-        target_code = set_code or settings.current_set_code
+        target_code = set_code or ACTIVE_SET_CODE
         client = SeventeenLandsClient()
 
         with SessionLocal() as session:

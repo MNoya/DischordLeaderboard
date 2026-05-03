@@ -11,9 +11,9 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from bot import audit
-from bot.config import settings
 from bot.models import MagicSet, Player, PlayerSetScore, PlayerStats
 from bot.scoring import compute_score_breakdown
+from bot.sets import ACTIVE_SET_CODE
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ def process_stats(
         return None
 
     magic_set = session.execute(
-        select(MagicSet).where(MagicSet.code == settings.current_set_code)
+        select(MagicSet).where(MagicSet.code == ACTIVE_SET_CODE)
     ).scalar_one_or_none()
     if magic_set is None:
         return None

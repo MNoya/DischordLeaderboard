@@ -351,7 +351,7 @@ def test_refresh_one_player_no_current_set(session):
 
 
 def test_refresh_one_player_unknown_player_id(session):
-    # Seed SOS to match settings.current_set_code default
+    # Seed SOS to match ACTIVE_SET_CODE default in bot/sets.py
     _seed_set(session, code="SOS")
     result = refresh_one_player_for_current_set(session, FakeClient(), "nonexistent-id")
     assert result == {"status": "no_player"}

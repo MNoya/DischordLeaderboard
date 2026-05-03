@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from bot import audit
 from bot.config import settings
 from bot.models import MagicSet, Player, PlayerSetScore
+from bot.sets import ACTIVE_SET_CODE
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ class LeaderboardData:
 
 def _current_set(session: Session) -> MagicSet | None:
     return session.execute(
-        select(MagicSet).where(MagicSet.code == settings.current_set_code)
+        select(MagicSet).where(MagicSet.code == ACTIVE_SET_CODE)
     ).scalar_one_or_none()
 
 

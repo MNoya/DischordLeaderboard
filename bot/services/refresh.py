@@ -174,12 +174,12 @@ def refresh_one_player_for_current_set(
 ) -> dict:
     """Refresh a single player's stats for whatever set is currently active.
 
-    "Current" is resolved from settings.current_set_code, set via env var.
+    "Current" is resolved from ACTIVE_SET_CODE in bot/sets.py.
     """
-    from bot.config import settings
+    from bot.sets import ACTIVE_SET_CODE
 
     magic_set = session.execute(
-        select(MagicSet).where(MagicSet.code == settings.current_set_code)
+        select(MagicSet).where(MagicSet.code == ACTIVE_SET_CODE)
     ).scalar_one_or_none()
     if magic_set is None:
         return {"status": "no_current_set"}
