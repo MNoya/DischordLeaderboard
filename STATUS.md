@@ -221,7 +221,11 @@ DATABASE_URL='<pooler-url-with-encoded-password>' .venv/bin/python -m bot.script
 
 **17lands cache**: 11 player JSONs at `cache/17lands/<token>__2026-04-21.json`. Re-fetch live with `python -m bot.scripts.refresh_stats` (no `--cache`).
 
-**Branch state**: `leaderboard-tweaks` was squashed and merged to `master` via PR #1. Predeploy work continues on `predeploy-prep` (coming-soon site + pod-draft spec).
+**Branch state**: First deploy shipped. `leaderboard-tweaks` (PR #1) and `predeploy-prep` (PR #2) are merged. Subsequent small commits go directly to `master` per the solo-repo workflow preference (see memory `feedback_solo_repo_direct_master.md`).
+
+**Bot identity**: Discord Application ID `1466076574372724819` (decode-able from the bot token but worth recording). User-facing display name: `DisChord Bot#1519`.
+
+**Production guild**: LLU community server, guild ID `775371722065051658`. Bot was invited via OAuth URL with `bot + applications.commands` scopes and permissions integer `117760` (View Channels + Send Messages + Embed Links + Attach Files + Read Message History). Bot's role at the guild level has those perms; **per-channel permission overrides can still block edits** — e.g. a restricted channel where the bot can post the original `/leaderboard` reply via interaction-token auth but later 403s on `msg.edit` from `broadcast_current_set_update`. Workaround: grant the bot explicit channel access, or use a less restricted channel.
 
 ---
 
@@ -231,7 +235,7 @@ DATABASE_URL='<pooler-url-with-encoded-password>' .venv/bin/python -m bot.script
 |---|---|---|---|
 | A | Push `leaderboard-tweaks` and merge | done | Squashed and merged via PR #1 |
 | B | Reset Supabase schema + re-seed sets | done | Schema dropped + migrated to head `e8c3a1b2f0d4`; 4 sets seeded (FIN, TLA, ECL, SOS). Pooler URL stashed in gitignored `.env.supabase` for the Railway step. |
-| C | Railway deployment | pending | New project from GitHub, env vars: `DATABASE_URL`, `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID` (no `CURRENT_SET_CODE` — code-driven via `bot/sets.py`); Nixpacks auto-detects via `requirements.txt` + `railway.json` |
+| C | Railway deployment | done | Deployed from GitHub `master`. Env vars set: `DATABASE_URL` (Supabase pooler), `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID=775371722065051658` (LLU production guild). Nixpacks build + `railway.json` start command. Bot logged in as `DisChord Bot#1519`, smoke-tested with `/leaderboard` and `/join` in LLU. |
 | D | Coming-soon placeholder → Netlify | done | Live at https://dischordboard.netlify.app/ from `web/index.html` on `master`. `bot.config.public_site_url` default updated to match. |
 | E | Build React + Vite frontend | parked | Real frontend deferred until after first deploy. Per-player URL pattern `/player/{player_id}` reserved (`_player_url` helper in `bot/commands/leaderboard.py` is unused for now). |
 | F | Pod-draft tracking feature | designed, not built | See `pod-draft-spec.md` |
@@ -239,6 +243,7 @@ DATABASE_URL='<pooler-url-with-encoded-password>' .venv/bin/python -m bot.script
 **Optional micro-cleanup** (no task tracked):
 - Rank movement arrows (▲▼) inspired by scoreboards.dev — needs a previous-rank snapshot table.
 - Delete `logs/bot.log` from `.gitignore` since it's now under `logs/` blanket gitignore (low priority — `.gitignore` is fine as is).
+- `edit_tracked_messages_for_set` in `bot/commands/leaderboard.py` only prunes tracking rows on `discord.NotFound` (404). When a channel is permission-restricted the API returns `discord.Forbidden` (403) instead, and the row keeps failing on every `/join` and `!refresh`. Catch `Forbidden` separately — either prune the row (if we treat losing access as permanent) or log + skip with a backoff.
 
 **Deferred / parked decisions**:
 - Per-set scoring config (currently `DEFAULT_QUEUE_GROUPS` is global; per-set future-proofing not built).
