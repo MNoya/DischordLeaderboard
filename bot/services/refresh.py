@@ -18,7 +18,6 @@ from sqlalchemy.orm import Session
 from bot.models import DraftEvent, MagicSet, Player, PlayerSetScore, PlayerStats
 from bot.scoring import compute_score
 from bot.services.seventeenlands import SUPPORTED_FORMATS, extract_events_for_set
-from bot.sets import LEAGUE_FETCH_START_DATE
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +75,7 @@ def refresh_player(
 ) -> dict:
     try:
         drafts = client.fetch_drafts(
-            player.seventeenlands_token, start_date=LEAGUE_FETCH_START_DATE
+            player.seventeenlands_token, start_date=magic_set.start_date
         )
     except requests.HTTPError as e:
         if e.response is not None and e.response.status_code == 404:
