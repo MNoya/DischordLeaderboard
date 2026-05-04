@@ -13,6 +13,7 @@ from bot.services.refresh import (
     refresh_player,
     upsert_draft_events,
 )
+from bot.sets import LEAGUE_FETCH_START_DATE
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +160,7 @@ def test_refresh_player_inserts_rows(session):
     session.flush()
 
     assert result == {"status": "updated", "rows": 2}
-    assert client.calls == [(p.seventeenlands_token, s.start_date)]
+    assert client.calls == [(p.seventeenlands_token, LEAGUE_FETCH_START_DATE)]
     rows = session.execute(
         select(PlayerStats).where(PlayerStats.player_id == p.id)
     ).scalars().all()

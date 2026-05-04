@@ -30,3 +30,7 @@ ALL_SETS: tuple[SetSeed, ...] = (
 )
 
 ACTIVE_SET_CODE = "SOS"
+
+# Floor for 17lands fetches — pinned to the league's first tracked set (ECL)
+# so refreshes don't drag in unrelated draft history from earlier sets
+LEAGUE_FETCH_START_DATE = date(2026, 1, 20)
