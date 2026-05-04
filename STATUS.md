@@ -243,7 +243,6 @@ DATABASE_URL='<pooler-url-with-encoded-password>' .venv/bin/python -m bot.script
 **Optional micro-cleanup** (no task tracked):
 - Rank movement arrows (▲▼) inspired by scoreboards.dev — needs a previous-rank snapshot table.
 - Delete `logs/bot.log` from `.gitignore` since it's now under `logs/` blanket gitignore (low priority — `.gitignore` is fine as is).
-- `edit_tracked_messages_for_set` in `bot/commands/leaderboard.py` only prunes tracking rows on `discord.NotFound` (404). When a channel is permission-restricted the API returns `discord.Forbidden` (403) instead, and the row keeps failing on every `/join` and `!refresh`. Catch `Forbidden` separately — either prune the row (if we treat losing access as permanent) or log + skip with a backoff.
 
 **Deferred / parked decisions**:
 - Per-set scoring config (currently `DEFAULT_QUEUE_GROUPS` is global; per-set future-proofing not built).
