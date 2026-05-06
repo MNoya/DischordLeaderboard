@@ -1,7 +1,14 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
   "build": {
-    "builder": "NIXPACKS"
+    "builder": "NIXPACKS",
+    "watchPatterns": [
+      "bot/**",
+      "alembic/**",
+      "alembic.ini",
+      "requirements.txt",
+      "railway.json"
+    ]
   },
   "deploy": {
     "startCommand": "python -u -m bot.main",

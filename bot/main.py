@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import traceback
 from pathlib import Path
@@ -181,24 +182,34 @@ def build_bot(guild_id: int) -> commands.Bot:
         from bot.database import SessionLocal
 
         target_code = set_code or ACTIVE_SET_CODE
-        client = SeventeenLandsClient()
 
-        with SessionLocal() as session:
-            magic_set = session.execute(
-                select(MagicSet).where(MagicSet.code == target_code)
-            ).scalar_one_or_none()
-            if magic_set is None:
-                await _reply_quietly(ctx, f"❌ No set with code `{target_code}`.")
-                return
+        await _reply_quietly(ctx, f"⏳ Refreshing `{target_code}`…")
 
-            summary = refresh_active_players(session, client, magic_set)
-            invalidated_ids = list(summary.get("invalidated_players", []))
-            invalidated_players: list[Player] = []
-            if invalidated_ids:
-                invalidated_players = session.execute(
+        # 17lands fetches and SQLAlchemy work are blocking; running them inline
+        # would freeze the gateway heartbeat. Push to a worker thread so the
+        # event loop stays free to dispatch other commands while this runs
+        def _run_refresh() -> tuple[dict | None, list[str]]:
+            client = SeventeenLandsClient()
+            with SessionLocal() as session:
+                magic_set = session.execute(
+                    select(MagicSet).where(MagicSet.code == target_code)
+                ).scalar_one_or_none()
+                if magic_set is None:
+                    return None, []
+                summary = refresh_active_players(session, client, magic_set)
+                return summary, list(summary.get("invalidated_players", []))
+
+        summary, invalidated_ids = await asyncio.to_thread(_run_refresh)
+        if summary is None:
+            await _reply_quietly(ctx, f"❌ No set with code `{target_code}`.")
+            return
+
+        invalidated_players: list[Player] = []
+        if invalidated_ids:
+            with SessionLocal() as session:
+                invalidated_players = list(session.execute(
                     select(Player).where(Player.id.in_(invalidated_ids))
-                ).scalars().all()
-                # Detach so we can use them after the session closes
+                ).scalars().all())
                 for p in invalidated_players:
                     session.expunge(p)
 
