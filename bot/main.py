@@ -245,6 +245,16 @@ def build_bot(guild_id: int) -> commands.Bot:
             f"{edit_summary['pruned']} pruned, {edit_summary['errors']} failed.",
         )
 
+        from bot.commands.leaderboard import process_leaderboard, render_embed as render_leaderboard_embed
+        with SessionLocal() as session:
+            full_data = process_leaderboard(session, viewer_discord_id=None, top_n=10**6)
+        if full_data is not None and full_data.top and bot.owner_id is not None:
+            try:
+                owner = bot.get_user(bot.owner_id) or await bot.fetch_user(bot.owner_id)
+                await owner.send(embed=render_leaderboard_embed(full_data))
+            except discord.HTTPException:
+                log.warning("could not DM owner the full leaderboard preview", exc_info=True)
+
     @bot.event
     async def on_ready() -> None:
         log.info("logged in as %s (id=%s)", bot.user, bot.user.id if bot.user else "?")
