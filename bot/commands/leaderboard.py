@@ -492,11 +492,25 @@ class Leaderboard(commands.Cog):
         if data is None:
             await interaction.response.send_message(
                 "No active set is configured. `bot/sets.py::ACTIVE_SET_CODE` doesn't match any registered set.",
+                ephemeral=(interaction.guild is not None),
+            )
+            return
+
+        # Always deliver via DM, regardless of where the slash was invoked.
+        # `allowed_contexts` only governs visibility, not response routing
+        try:
+            dm = await interaction.user.create_dm()
+            await dm.send(embed=render_embed(data), view=render_view())
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                "Couldn't deliver the full leaderboard — open DMs from this server and try again.",
+                ephemeral=(interaction.guild is not None),
             )
             return
 
         await interaction.response.send_message(
-            embed=render_embed(data), view=render_view(),
+            "Full leaderboard sent to your DMs.",
+            ephemeral=(interaction.guild is not None),
         )
 
 
