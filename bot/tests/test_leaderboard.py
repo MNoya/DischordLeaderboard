@@ -135,13 +135,6 @@ def _player_field_value(embed):
     return ""
 
 
-def test_public_embed_omits_viewer_highlight_marker():
-    """Public embed must not show the '← you' marker — channel-visible."""
-    viewer = LeaderboardEntry(2, "bob-id", "Bob", 30.0, 3)
-    embed = render_public_embed(_data(viewer=viewer))
-    assert "← you" not in _player_field_value(embed)
-
-
 def test_public_embed_omits_you_are_line_for_outside_viewer():
     """If viewer is below top, 'You are #N' must not leak into the public message."""
     viewer = LeaderboardEntry(7, "me-id", "Me", 1.0, 0)

@@ -44,7 +44,7 @@ def _current_set(session: Session) -> MagicSet | None:
 
 
 def process_leaderboard(
-    session: Session, viewer_discord_id: str | None, top_n: int = 8
+    session: Session, viewer_discord_id: str | None, top_n: int = 10
 ) -> LeaderboardData | None:
     magic_set = _current_set(session)
     if magic_set is None:
@@ -118,7 +118,7 @@ def _player_url(player_id: str) -> str:
     return f"{settings.public_site_url.rstrip('/')}/player/{player_id}"
 
 
-def _format_leaderboard(top: list[LeaderboardEntry], viewer: LeaderboardEntry | None) -> str:
+def _format_leaderboard(top: list[LeaderboardEntry]) -> str:
     """Wrap each row in inline code (single backticks) — renders as monospace
     without the code-block brick, and spaces are preserved so columns align.
     Same trick scoreboards.dev uses to get tabular layout in an embed.
@@ -152,10 +152,7 @@ def _format_leaderboard(top: list[LeaderboardEntry], viewer: LeaderboardEntry | 
         score = _center_right_bias(str(round(e.score)), score_width)
         trophy = f"{e.trophies:>{trophy_width}}"
         inner = f"{rank} {name}  {score}  {trophy}"
-        line = f"`{inner}`"
-        if viewer is not None and e.rank == viewer.rank:
-            line += " ← you"
-        lines.append(line)
+        lines.append(f"`{inner}`")
     return "\n".join(lines)
 
 
@@ -209,7 +206,7 @@ def render_embed(data: LeaderboardData) -> discord.Embed:
     if not data.top:
         embed.description = "_No players have scored yet for this set._"
     else:
-        embed.description = _format_leaderboard(data.top, viewer=None)
+        embed.description = _format_leaderboard(data.top)
     _apply_footer(embed, data)
     return embed
 
@@ -415,16 +412,18 @@ class Leaderboard(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="leaderboard", description="Show the current set leaderboard.")
+    @app_commands.describe(full="Show every player on the board. Always sent via DM.")
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
-    async def leaderboard(self, interaction: discord.Interaction) -> None:
+    async def leaderboard(self, interaction: discord.Interaction, full: bool = False) -> None:
         from bot.database import SessionLocal
 
         user_id = str(interaction.user.id)
-        audit.event("leaderboard_invoked", user_id=user_id)
+        audit.event("leaderboard_invoked", user_id=user_id, full=full)
 
+        top_n = 10**6 if full else 10
         with SessionLocal() as session:
-            data = process_leaderboard(session, viewer_discord_id=user_id)
+            data = process_leaderboard(session, viewer_discord_id=user_id, top_n=top_n)
             magic_set = _current_set(session)
 
         if data is None or magic_set is None:
@@ -434,10 +433,33 @@ class Leaderboard(commands.Cog):
             )
             return
 
+        in_guild = interaction.guild is not None
+
+        # full=True always lands in DM, regardless of where the command was invoked
+        if full:
+            try:
+                dm = await interaction.user.create_dm()
+                await dm.send(embed=render_embed(data), view=render_view())
+            except discord.Forbidden:
+                await interaction.response.send_message(
+                    "Couldn't deliver the full leaderboard — open DMs from this server and try again.",
+                    ephemeral=True,
+                )
+                return
+            if in_guild:
+                await interaction.response.send_message(
+                    "Full leaderboard sent to your DMs.", ephemeral=True,
+                )
+            else:
+                # Acknowledge the interaction so the slash UI doesn't show "failed"
+                await interaction.response.send_message(
+                    "Check above for the full leaderboard.", ephemeral=False,
+                )
+            return
+
         # In a guild channel: replace any tracked leaderboard message in this channel
         # so the new post lands at the bottom rather than spamming alongside the prior.
         # In a DM: single ephemeral, fully personalized.
-        in_guild = interaction.guild is not None
         if in_guild:
             await interaction.response.defer()
             await _replace_tracked_message(
