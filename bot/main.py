@@ -114,8 +114,9 @@ def build_bot(guild_id: int) -> commands.Bot:
             log.warning("could not send generic error to user", exc_info=True)
 
         cmd_name = interaction.command.qualified_name if interaction.command else "unknown"
+        invoker = f"{interaction.user} (`{interaction.user.id}`)"
         tb = "".join(traceback.format_exception(type(original), original, original.__traceback__))
-        await _notify_owner(bot, f"⚠️ `/{cmd_name}` crashed:", tb)
+        await _notify_owner(bot, f"⚠️ `/{cmd_name}` crashed (invoked by {invoker}):", tb)
 
     async def _reply_quietly(ctx: commands.Context, message: str) -> None:
         """Reply via DM. Invoke `!sync` from a DM with the bot to keep everything private."""
