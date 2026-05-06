@@ -24,6 +24,7 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         ("/help", "Show this message"),
     ]),
     ("✉️ DM with the bot", [
+        ("/leaderboard-full", "See the entire leaderboard"),
         ("/exile", "Permanently remove yourself from the leaderboard"),
     ]),
 ]

@@ -44,7 +44,8 @@ def _current_set(session: Session) -> MagicSet | None:
 
 
 def process_leaderboard(
-    session: Session, viewer_discord_id: str | None, top_n: int = 10
+    session: Session, viewer_discord_id: str | None, top_n: int = 10,
+    include_zero_scores: bool = False,
 ) -> LeaderboardData | None:
     magic_set = _current_set(session)
     if magic_set is None:
@@ -62,10 +63,10 @@ def process_leaderboard(
         (idx + 1, r.id, r.display_name, r.discord_id, float(r.score), int(r.trophies))
         for idx, r in enumerate(rows)
     ]
-    # Hide players with no points yet — they're "drafting but not on the board".
-    # Viewer rank below still considers ALL ranked players so a 0-point viewer can
-    # see their actual position even if they're not in the visible top
-    visible = [row for row in ranked if row[4] > 0]
+    # Default view hides players with no points yet — they're "drafting but
+    # not on the board". The full-DM view passes include_zero_scores=True
+    # so signed-up players who haven't scored still appear
+    visible = ranked if include_zero_scores else [row for row in ranked if row[4] > 0]
     top = [
         LeaderboardEntry(rank=rank, player_id=pid, display_name=name, score=score, trophies=trophies)
         for rank, pid, name, _did, score, trophies in visible[:top_n]
@@ -412,18 +413,16 @@ class Leaderboard(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="leaderboard", description="Show the current set leaderboard.")
-    @app_commands.describe(full="Show every player on the board. Always sent via DM.")
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
-    async def leaderboard(self, interaction: discord.Interaction, full: bool = False) -> None:
+    async def leaderboard(self, interaction: discord.Interaction) -> None:
         from bot.database import SessionLocal
 
         user_id = str(interaction.user.id)
-        audit.event("leaderboard_invoked", user_id=user_id, full=full)
+        audit.event("leaderboard_invoked", user_id=user_id)
 
-        top_n = 10**6 if full else 10
         with SessionLocal() as session:
-            data = process_leaderboard(session, viewer_discord_id=user_id, top_n=top_n)
+            data = process_leaderboard(session, viewer_discord_id=user_id)
             magic_set = _current_set(session)
 
         if data is None or magic_set is None:
@@ -433,33 +432,10 @@ class Leaderboard(commands.Cog):
             )
             return
 
-        in_guild = interaction.guild is not None
-
-        # full=True always lands in DM, regardless of where the command was invoked
-        if full:
-            try:
-                dm = await interaction.user.create_dm()
-                await dm.send(embed=render_embed(data), view=render_view())
-            except discord.Forbidden:
-                await interaction.response.send_message(
-                    "Couldn't deliver the full leaderboard — open DMs from this server and try again.",
-                    ephemeral=True,
-                )
-                return
-            if in_guild:
-                await interaction.response.send_message(
-                    "Full leaderboard sent to your DMs.", ephemeral=True,
-                )
-            else:
-                # Acknowledge the interaction so the slash UI doesn't show "failed"
-                await interaction.response.send_message(
-                    "Check above for the full leaderboard.", ephemeral=False,
-                )
-            return
-
         # In a guild channel: replace any tracked leaderboard message in this channel
         # so the new post lands at the bottom rather than spamming alongside the prior.
         # In a DM: single ephemeral, fully personalized.
+        in_guild = interaction.guild is not None
         if in_guild:
             await interaction.response.defer()
             await _replace_tracked_message(
@@ -494,6 +470,34 @@ class Leaderboard(commands.Cog):
                     await dm.send("You're not on the leaderboard — run `/join` to join.")
             except Exception:
                 logger.warning("/leaderboard DM personal followup failed", exc_info=True)
+
+    @app_commands.command(
+        name="leaderboard-full",
+        description="DM you the entire leaderboard.",
+    )
+    @app_commands.allowed_contexts(guilds=False, dms=True, private_channels=False)
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def leaderboard_full(self, interaction: discord.Interaction) -> None:
+        from bot.database import SessionLocal
+
+        user_id = str(interaction.user.id)
+        audit.event("leaderboard_full_invoked", user_id=user_id)
+
+        with SessionLocal() as session:
+            data = process_leaderboard(
+                session, viewer_discord_id=user_id,
+                top_n=10**6, include_zero_scores=True,
+            )
+
+        if data is None:
+            await interaction.response.send_message(
+                "No active set is configured. `bot/sets.py::ACTIVE_SET_CODE` doesn't match any registered set.",
+            )
+            return
+
+        await interaction.response.send_message(
+            embed=render_embed(data), view=render_view(),
+        )
 
 
 async def setup(bot: commands.Bot) -> None:
