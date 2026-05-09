@@ -7,50 +7,45 @@ import { SurfaceCard } from "./SurfaceCard";
 import { TrophyCount } from "./TrophyCount";
 import { Record } from "./Record";
 
-import { useRecentTrophies } from "../data/hooks";
+import { useArchetypeSummary, useRecentTrophies } from "../data/hooks";
 import { archetypeOf, relativeTime, shortFormatLabel } from "../data/utils";
 import { ARCHETYPE_NAMES } from "../data/filters";
 
 // Sidebar — desktop right rail. Two cards: top archetypes by trophies, recent
-// trophies. The recent-trophies feed is fetched live from
-// `public_recent_trophies` (or the fixture equivalent today).
-//
-// Top archetypes is still synthesised since there's no `public_archetype_summary`
-// view yet — it's a 4-row hand-curated list per set until that ships.
+// trophies. Both feeds are now real:
+//   - top archetypes aggregates public_archetype_leaderboard server-side
+//   - recent trophies from public_recent_trophies
 
 export function LeaderboardSidebar({ setCode }: { setCode: string }) {
-  // Snapshot — until backend exposes a per-set archetype rollup, this is a
-  // hand-curated guess at the metagame's heaviest decks for SOS.
-  const topArchetypes: Array<[string, number]> = [
-    ["WR", 18],
-    ["UR", 14],
-    ["BG", 12],
-    ["WU", 10],
-    ["RG", 8],
-  ];
-
+  const { data: topArchetypes } = useArchetypeSummary(setCode);
   const { data: recent } = useRecentTrophies(setCode, 5);
 
   return (
     <aside className="flex flex-col gap-4">
       <SurfaceCard>
         <SectionLabel className="mb-2.5">TOP ARCHETYPES · BY TROPHIES</SectionLabel>
-        {topArchetypes.map(([code, trophies], i) => (
-          <div
-            key={code}
-            className={
-              "grid grid-cols-[24px_auto_1fr_auto] gap-2 items-center py-2 " +
-              (i ? "border-t border-border" : "")
-            }
-          >
-            <span className="mono text-[11px] text-muted">{i + 1}</span>
-            <Pips colors={code} size={12} />
-            <span className="font-display text-[14px] tracking-[0.05em]">
-              {ARCHETYPE_NAMES[code] ?? code}
-            </span>
-            <TrophyCount count={trophies} size="compact" className="text-muted" />
-          </div>
-        ))}
+        {!topArchetypes ? (
+          <div className="mono text-[11px] text-muted py-2">LOADING…</div>
+        ) : topArchetypes.length === 0 ? (
+          <div className="mono text-[11px] text-muted py-2">NO TROPHIES YET</div>
+        ) : (
+          topArchetypes.slice(0, 5).map((row, i) => (
+            <div
+              key={row.archetype}
+              className={
+                "grid grid-cols-[24px_auto_1fr_auto] gap-2 items-center py-2 " +
+                (i ? "border-t border-border" : "")
+              }
+            >
+              <span className="mono text-[11px] text-muted">{i + 1}</span>
+              <Pips colors={row.archetype} size={12} />
+              <span className="font-display text-[14px] tracking-[0.05em]">
+                {ARCHETYPE_NAMES[row.archetype] ?? row.archetype}
+              </span>
+              <TrophyCount count={row.trophies} size="compact" className="text-muted" />
+            </div>
+          ))
+        )}
       </SurfaceCard>
 
       <SurfaceCard>

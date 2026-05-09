@@ -64,6 +64,17 @@ export interface ArchetypeLeaderboardRow {
   lastCalculatedAt: string;
 }
 
+// Per-set archetype rollup — total trophies, total events, distinct players.
+// Aggregated client-side from public_archetype_leaderboard so no dedicated
+// view is needed.
+export interface ArchetypeSummary {
+  setCode: string;
+  archetype: string;
+  trophies: number;
+  events: number;
+  players: number;
+}
+
 // Recent trophy event, enriched with the player's display name. In production
 // this comes from a `public_recent_trophies` view that joins draft_events
 // (where is_trophy = true) with players, ordered by finished_at DESC.

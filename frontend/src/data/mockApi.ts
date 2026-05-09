@@ -13,6 +13,7 @@
 
 import type {
   ArchetypeLeaderboardRow,
+  ArchetypeSummary,
   LeaderboardRow,
   PlayerDraftEvent,
   PlayerFormatBreakdown,
@@ -78,6 +79,42 @@ export const fetchLeaderboard = (setCode: string): Promise<LeaderboardRow[]> => 
   if (setCode === "SOS") return wait(leaderboardSosFixture);
   // Other sets are scheduled placeholders with no player data yet.
   return wait([]);
+};
+
+// ─── archetype summary (fixture-side) ───────────────────────────────────────
+// Aggregates archetypes from the curated player draft events. Only the 5
+// fixture players contribute, but they cover the SOS top of the leaderboard so
+// the list is representative enough for dev.
+import { archetypeOf } from "./utils";
+
+export const fetchArchetypeSummary = (setCode: string): Promise<ArchetypeSummary[]> => {
+  if (setCode !== "SOS") return wait([]);
+
+  const agg = new Map<string, { trophies: number; events: number; players: Set<string> }>();
+  for (const events of Object.values(REAL_DRAFT_EVENTS)) {
+    for (const e of events) {
+      const arch = archetypeOf(e.colors);
+      if (!arch) continue;
+      const cur = agg.get(arch) ?? { trophies: 0, events: 0, players: new Set() };
+      cur.events += 1;
+      if (e.isTrophy) cur.trophies += 1;
+      cur.players.add(e.slug);
+      agg.set(arch, cur);
+    }
+  }
+
+  return wait(
+    Array.from(agg.entries())
+      .map(([archetype, v]) => ({
+        setCode,
+        archetype,
+        trophies: v.trophies,
+        events: v.events,
+        players: v.players.size,
+      }))
+      .filter((r) => r.trophies > 0)
+      .sort((a, b) => b.trophies - a.trophies),
+  );
 };
 
 // ─── per-format leaderboard (fixture-side, mirrors realApi join) ─────────────

@@ -14,6 +14,7 @@ export const fetchSets = impl.fetchSets;
 export const fetchLeaderboard = impl.fetchLeaderboard;
 export const fetchFormatLeaderboard = impl.fetchFormatLeaderboard;
 export const fetchArchetypeLeaderboard = impl.fetchArchetypeLeaderboard;
+export const fetchArchetypeSummary = impl.fetchArchetypeSummary;
 export const fetchPlayerProfile = impl.fetchPlayerProfile;
 export const fetchPlayerDraftEvents = impl.fetchPlayerDraftEvents;
 export const fetchRecentTrophies = impl.fetchRecentTrophies;

@@ -9,6 +9,7 @@ import { useEffect } from "react";
 
 import {
   fetchArchetypeLeaderboard,
+  fetchArchetypeSummary,
   fetchFormatLeaderboard,
   fetchLeaderboard,
   fetchPlayerDraftEvents,
@@ -76,6 +77,16 @@ export function useDraftEvents(slug: string | undefined, setCode: string) {
     queryKey: ["draft-events", slug, setCode],
     queryFn: () => fetchPlayerDraftEvents(slug!, setCode),
     enabled: !!slug,
+    staleTime: FIVE_MINUTES,
+  });
+}
+
+// Set-wide top archetypes, aggregated from public_archetype_leaderboard.
+export function useArchetypeSummary(setCode: string | undefined) {
+  return useQuery({
+    queryKey: ["archetype-summary", setCode],
+    queryFn: () => fetchArchetypeSummary(setCode!),
+    enabled: !!setCode,
     staleTime: FIVE_MINUTES,
   });
 }

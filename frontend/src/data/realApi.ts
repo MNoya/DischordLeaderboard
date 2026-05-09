@@ -16,6 +16,7 @@ import {
 } from "./adapter";
 import type {
   ArchetypeLeaderboardRow,
+  ArchetypeSummary,
   LeaderboardRow,
   PlayerDraftEvent,
   PlayerFormatBreakdown,
@@ -111,6 +112,33 @@ export async function fetchFormatLeaderboard(
     .map((r, i) => ({ ...r, rank: i + 1 }));
 
   return rows;
+}
+
+// ─── archetype summary (top archetypes by trophies, set-wide) ──────────────
+// Aggregates public_archetype_leaderboard rows across all players. Each row
+// in that view is one (player, set, archetype) cell, so summing trophies and
+// counting rows per archetype gives us totals + player counts for free.
+
+export async function fetchArchetypeSummary(setCode: string): Promise<ArchetypeSummary[]> {
+  const { data, error } = await client()
+    .from("public_archetype_leaderboard")
+    .select("archetype, trophies, events")
+    .eq("set_code", setCode);
+  if (error) throw error;
+
+  const agg = new Map<string, { trophies: number; events: number; players: number }>();
+  for (const r of (data ?? []) as Array<Record<string, unknown>>) {
+    const a = r.archetype as string;
+    const cur = agg.get(a) ?? { trophies: 0, events: 0, players: 0 };
+    cur.trophies += (r.trophies as number) ?? 0;
+    cur.events += (r.events as number) ?? 0;
+    cur.players += 1; // each row is a unique (player, archetype)
+    agg.set(a, cur);
+  }
+  return Array.from(agg.entries())
+    .map(([archetype, v]) => ({ setCode, archetype, ...v }))
+    .filter((r) => r.trophies > 0)
+    .sort((a, b) => b.trophies - a.trophies);
 }
 
 // ─── public_archetype_leaderboard ──────────────────────────────────────────
