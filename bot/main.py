@@ -12,6 +12,7 @@ from sqlalchemy import select
 
 from bot.config import settings
 from bot.database import run_migrations
+from bot.discord_helpers import refresh_player_avatars
 from bot.models import MagicSet, Player
 from bot.services.refresh import refresh_active_players
 from bot.services.seventeenlands import SeventeenLandsClient
@@ -224,6 +225,21 @@ def build_bot(guild_id: int) -> commands.Bot:
             except discord.HTTPException as e:
                 log.warning("could not DM player %s: %s", player.id, e)
 
+        # Refresh Discord avatar hashes for every active player. Cheap (one
+        # cached HTTP call per player) and keeps the leaderboard view's
+        # avatar_url current without needing a manual /relink
+        avatar_summary = {"checked": 0, "updated": 0, "skipped": 0, "errors": 0}
+        try:
+            with SessionLocal() as session:
+                active_players = list(
+                    session.execute(
+                        select(Player).where(Player.active.is_(True))
+                    ).scalars().all()
+                )
+                avatar_summary = await refresh_player_avatars(bot, session, active_players)
+        except Exception:
+            log.warning("avatar refresh sweep failed", exc_info=True)
+
         # Re-render any leaderboard messages already posted in channels.
         # Re-resolve the set inside a fresh session — the original magic_set is
         # detached now that its session closed
@@ -242,6 +258,7 @@ def build_bot(guild_id: int) -> commands.Bot:
             f"{summary['updated']} updated, "
             f"{summary['invalidated']} invalidated, "
             f"{summary['errors']} errors. "
+            f"Avatars: {avatar_summary['updated']}/{avatar_summary['checked']} updated. "
             f"Live messages: {edit_summary['edited']} edited, "
             f"{edit_summary['pruned']} pruned, {edit_summary['errors']} failed.",
         )

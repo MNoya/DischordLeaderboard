@@ -19,6 +19,7 @@ def _seed_set(session, code="SOS"):
 def _seed_player(session, name, discord_id, token_suffix, active=True):
     token = (token_suffix * 32)[:32]
     p = Player(
+        slug=f"{name.lower()}-{discord_id}",
         discord_id=discord_id,
         discord_username=name.lower(),
         display_name=name,

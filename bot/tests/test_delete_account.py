@@ -7,6 +7,7 @@ from datetime import date
 
 def _seed_player(session, discord_id="111"):
     p = Player(
+        slug=f"alice-{discord_id}",
         discord_id=discord_id,
         discord_username="alice",
         display_name="Alice",

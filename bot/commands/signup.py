@@ -13,9 +13,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from bot import audit
+from bot.discord_helpers import extract_avatar_hash
 from bot.models import Player
 from bot.services.refresh import refresh_one_player_for_current_set
 from bot.services.seventeenlands import SeventeenLandsClient, extract_token
+from bot.slug import disambiguate_slug, slugify
 
 logger = logging.getLogger(__name__)
 
@@ -122,11 +124,30 @@ def _seventeenlands_url(token: str) -> str:
     return f"https://www.17lands.com/user_history/{token}"
 
 
-def check_signup_eligibility(session: Session, discord_id: str) -> SignupCheck:
+def _next_available_slug(session: Session, display_name: str) -> str:
+    """Return a unique slug for `display_name`, suffixed -2/-3/... if taken.
+
+    Race-prone in theory (no advisory lock), but signups are rare and the unique
+    constraint will fail-loud if two slugs collide at insert time.
+    """
+    base = slugify(display_name)
+    taken = set(session.execute(
+        select(Player.slug).where(Player.slug.like(f"{base}%"))
+    ).scalars().all())
+    return disambiguate_slug(base, taken)
+
+
+def check_signup_eligibility(
+    session: Session,
+    discord_id: str,
+    avatar_hash: str | None = None,
+) -> SignupCheck:
     """Decide whether the caller needs the full DM flow, a reactivation, or nothing.
 
     A signed-out player (active=False) gets flipped back to active=True and
     returns "reactivated" — no DM dance needed since their token is still good.
+    Avatar hash is refreshed on every reactivation so a long-absent player gets
+    their current avatar picked up automatically.
     """
     existing = session.execute(
         select(Player).where(Player.discord_id == discord_id)
@@ -135,6 +156,8 @@ def check_signup_eligibility(session: Session, discord_id: str) -> SignupCheck:
         return SignupCheck(kind="fresh")
     if not existing.active:
         existing.active = True
+        if avatar_hash is not None and existing.avatar_hash != avatar_hash:
+            existing.avatar_hash = avatar_hash
         session.commit()
         return SignupCheck(kind="reactivated", player_id=existing.id)
     return SignupCheck(kind="already_signed_up", player_id=existing.id)
@@ -147,6 +170,7 @@ def process_signup(
     discord_username: str,
     display_name: str,
     token_input: str,
+    avatar_hash: str | None = None,
 ) -> SignupResult:
     existing_by_discord = session.execute(
         select(Player).where(Player.discord_id == discord_id)
@@ -167,10 +191,13 @@ def process_signup(
     ).scalar_one_or_none()
 
     if by_token is None:
+        slug = _next_available_slug(session, display_name)
         player = Player(
+            slug=slug,
             discord_id=discord_id,
             discord_username=discord_username,
             display_name=display_name,
+            avatar_hash=avatar_hash,
             seventeenlands_token=token,
             seventeenlands_url=_seventeenlands_url(token),
             active=True,
@@ -182,6 +209,7 @@ def process_signup(
     if by_token.discord_id is None:
         by_token.discord_id = discord_id
         by_token.discord_username = discord_username
+        by_token.avatar_hash = avatar_hash
         by_token.seventeenlands_url = _seventeenlands_url(token)
         by_token.token_invalid = False
         by_token.active = True
@@ -230,8 +258,10 @@ class Signup(commands.Cog):
     ) -> None:
         from bot.database import SessionLocal
 
+        avatar_hash = extract_avatar_hash(interaction.user)
+
         with SessionLocal() as session:
-            check = check_signup_eligibility(session, user_id)
+            check = check_signup_eligibility(session, user_id, avatar_hash=avatar_hash)
         if check.kind == "reactivated":
             audit.event("signup_reactivated", user_id=user_id, player_id=check.player_id)
             # Defer because the refresh may take a second or two on a cold rate limiter
@@ -298,6 +328,7 @@ class Signup(commands.Cog):
                 discord_username=username,
                 display_name=interaction.user.display_name,
                 token_input=reply.content,
+                avatar_hash=avatar_hash,
             )
 
         audit.event(

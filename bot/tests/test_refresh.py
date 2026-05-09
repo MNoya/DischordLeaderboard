@@ -130,6 +130,7 @@ def _seed_set(session, code="ECL"):
 def _seed_player(session, name="P", token_suffix="a", active=True, token_invalid=False):
     token = (token_suffix * 32)[:32]
     p = Player(
+        slug=f"{name.lower()}-{token_suffix}",
         display_name=name,
         seventeenlands_token=token,
         seventeenlands_url=f"https://www.17lands.com/user_history/{token}",

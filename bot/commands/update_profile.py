@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from bot import audit
+from bot.discord_helpers import extract_avatar_hash
 from bot.models import Player
 from bot.services.refresh import refresh_one_player_for_current_set
 from bot.services.seventeenlands import SeventeenLandsClient, extract_token
@@ -62,6 +63,7 @@ def process_update_profile(
     client: SeventeenLandsClient,
     discord_id: str,
     token_input: str,
+    avatar_hash: str | None = None,
 ) -> UpdateProfileResult:
     player = session.execute(
         select(Player).where(Player.discord_id == discord_id)
@@ -89,6 +91,8 @@ def process_update_profile(
     player.seventeenlands_token = token
     player.seventeenlands_url = _seventeenlands_url(token)
     player.token_invalid = False
+    if avatar_hash is not None and player.avatar_hash != avatar_hash:
+        player.avatar_hash = avatar_hash
     session.commit()
     return UpdateProfileResult(kind="updated", player_id=player.id)
 
@@ -146,6 +150,7 @@ class UpdateProfile(commands.Cog):
                 client=self.client,
                 discord_id=user_id,
                 token_input=reply.content,
+                avatar_hash=extract_avatar_hash(interaction.user),
             )
 
         audit.event("update_profile_result", user_id=user_id, kind=result.kind, player_id=result.player_id)

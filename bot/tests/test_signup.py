@@ -47,6 +47,7 @@ def test_creates_new_player_when_token_unknown(session):
 
 def test_links_seeded_player_with_null_discord_fields(session):
     seeded = Player(
+        slug="legacyalice",
         display_name="LegacyAlice",
         seventeenlands_token=VALID_TOKEN,
         seventeenlands_url=f"https://www.17lands.com/user_history/{VALID_TOKEN}",
@@ -113,6 +114,7 @@ def test_rejected_by_17lands_writes_nothing(session):
 
 def test_token_already_linked_to_another_discord_user(session):
     other = Player(
+        slug="someone",
         discord_id="999",
         discord_username="someone#0009",
         display_name="Someone",
@@ -141,6 +143,7 @@ def test_token_already_linked_to_another_discord_user(session):
 
 def test_already_signed_up_short_circuits(session):
     me = Player(
+        slug="eve",
         discord_id="666",
         discord_username="eve#0005",
         display_name="Eve",
@@ -171,6 +174,7 @@ def test_already_signed_up_short_circuits(session):
 
 def _seed(session, discord_id, token, active=True):
     p = Player(
+        slug=f"x-{discord_id}",
         discord_id=discord_id,
         discord_username="x",
         display_name="X",

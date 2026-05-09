@@ -23,9 +23,15 @@ class Player(Base):
     __tablename__ = "players"
 
     id                   = Column(String, primary_key=True, default=lambda: str(uuid4()))
+    # URL-safe handle derived from display_name at /join, frozen post-creation.
+    # Used by the frontend for /player/{slug} routing
+    slug                 = Column(String, unique=True, nullable=False)
     discord_id           = Column(String, unique=True, nullable=True)
     discord_username     = Column(String, nullable=True)
     display_name         = Column(String, nullable=False)
+    # Discord avatar hash (the asset key, not the full URL). The leaderboard
+    # view computes the CDN URL server-side so discord_id never leaves the DB
+    avatar_hash          = Column(String, nullable=True)
     seventeenlands_token = Column(String, nullable=False)
     seventeenlands_url   = Column(String, nullable=False)
     active               = Column(Boolean, nullable=False, default=True)
@@ -99,6 +105,32 @@ class PlayerSetScore(Base):
 
     __table_args__ = (
         UniqueConstraint("player_id", "set_id", name="uq_player_set_score"),
+    )
+
+
+class PlayerArchetypeScore(Base):
+    """Pre-computed score per (player, set, archetype). Parallels PlayerSetScore.
+
+    Backs the per-archetype leaderboard. Score is `compute_score` re-run on the
+    player's `draft_events` restricted to this archetype — subset replay.
+    Refreshed alongside PlayerSetScore in `!refresh`.
+    """
+    __tablename__ = "player_archetype_scores"
+
+    id                 = Column(String, primary_key=True, default=lambda: str(uuid4()))
+    player_id          = Column(String, ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    set_id             = Column(String, ForeignKey("sets.id"), nullable=False)
+    # WUBRG-sorted main colors only; '' for colorless
+    archetype          = Column(String, nullable=False)
+    score              = Column(Float, nullable=False, default=0)
+    trophies           = Column(Integer, nullable=False, default=0)
+    events             = Column(Integer, nullable=False, default=0)
+    wins               = Column(Integer, nullable=False, default=0)
+    losses             = Column(Integer, nullable=False, default=0)
+    last_calculated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("player_id", "set_id", "archetype", name="uq_player_set_archetype_score"),
     )
 
 

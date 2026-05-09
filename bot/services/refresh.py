@@ -15,7 +15,14 @@ import requests
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from bot.models import DraftEvent, MagicSet, Player, PlayerSetScore, PlayerStats
+from bot.models import (
+    DraftEvent,
+    MagicSet,
+    Player,
+    PlayerArchetypeScore,
+    PlayerSetScore,
+    PlayerStats,
+)
 from bot.scoring import compute_score
 from bot.services.seventeenlands import SUPPORTED_FORMATS, extract_events_for_set
 
@@ -131,6 +138,7 @@ def refresh_player(
 
     session.flush()
     recompute_player_set_score(session, player.id, magic_set.id)
+    recompute_player_archetype_scores(session, player.id, magic_set.id)
     return {"status": "updated", "rows": len(rows)}
 
 
@@ -203,6 +211,116 @@ def recompute_player_set_score(session: Session, player_id: str, set_id: str) ->
         existing.trophies = total_trophies
         existing.last_calculated_at = now
     return existing
+
+
+_WUBRG = "WUBRG"
+
+
+def _normalize_archetype(colors: str | None) -> str:
+    """WUBRG-sorted main colors only. Splashes (lowercase) are dropped.
+
+    `'WBg'` → `'WB'`. `'WUBR'` → `'WUBR'`. None / empty → ''.
+    """
+    if not colors:
+        return ""
+    main = "".join(c for c in colors if c.isupper())
+    return "".join(sorted(main, key=_WUBRG.index))
+
+
+def recompute_player_archetype_scores(
+    session: Session, player_id: str, set_id: str
+) -> None:
+    """Recompute and upsert per-(player, set, archetype) scores.
+
+    Groups the player's draft_events for this set by WUBRG-normalized main-color
+    archetype, then runs compute_score on each subset (treating it as if those
+    were the player's only events). Subset replay — *"if UW were your only
+    deck, this is your score."*
+
+    Stale rows for archetypes the player no longer has events in are deleted so
+    a player who pivots away from BG doesn't keep a stale BG row forever.
+    """
+    events = session.execute(
+        select(DraftEvent).where(
+            DraftEvent.player_id == player_id,
+            DraftEvent.set_id == set_id,
+        )
+    ).scalars().all()
+
+    # archetype → list of stats_rows (one per (format, expansion) bucket inside)
+    grouped: dict[str, dict[tuple[str, str], dict]] = {}
+    for ev in events:
+        arch = _normalize_archetype(ev.colors)
+        bucket_key = (ev.format, ev.expansion)
+        bucket = grouped.setdefault(arch, {}).setdefault(
+            bucket_key,
+            {
+                "format": ev.format,
+                "expansion": ev.expansion,
+                "events": 0,
+                "wins": 0,
+                "losses": 0,
+                "trophies": 0,
+            },
+        )
+        bucket["events"] += 1
+        bucket["wins"] += ev.wins
+        bucket["losses"] += ev.losses
+        if ev.is_trophy:
+            bucket["trophies"] += 1
+
+    now = datetime.now(timezone.utc)
+    seen_archetypes: set[str] = set()
+
+    for arch, buckets in grouped.items():
+        rows = list(buckets.values())
+        score = compute_score(rows)
+        events_count = sum(r["events"] for r in rows)
+        wins = sum(r["wins"] for r in rows)
+        losses = sum(r["losses"] for r in rows)
+        trophies = sum(r["trophies"] for r in rows)
+        seen_archetypes.add(arch)
+
+        existing = session.execute(
+            select(PlayerArchetypeScore).where(
+                PlayerArchetypeScore.player_id == player_id,
+                PlayerArchetypeScore.set_id == set_id,
+                PlayerArchetypeScore.archetype == arch,
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            session.add(
+                PlayerArchetypeScore(
+                    player_id=player_id,
+                    set_id=set_id,
+                    archetype=arch,
+                    score=score,
+                    trophies=trophies,
+                    events=events_count,
+                    wins=wins,
+                    losses=losses,
+                    last_calculated_at=now,
+                )
+            )
+        else:
+            existing.score = score
+            existing.trophies = trophies
+            existing.events = events_count
+            existing.wins = wins
+            existing.losses = losses
+            existing.last_calculated_at = now
+
+    # Drop archetype rows the player no longer has events in
+    stale = session.execute(
+        select(PlayerArchetypeScore).where(
+            PlayerArchetypeScore.player_id == player_id,
+            PlayerArchetypeScore.set_id == set_id,
+            PlayerArchetypeScore.archetype.notin_(list(seen_archetypes)) if seen_archetypes
+            else PlayerArchetypeScore.archetype.is_not(None),
+        )
+    ).scalars().all()
+    for row in stale:
+        session.delete(row)
 
 
 def refresh_one_player_for_current_set(

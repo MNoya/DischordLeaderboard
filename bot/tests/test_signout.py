@@ -6,6 +6,7 @@ from bot.models import Player
 
 def _seed_player(session, discord_id="111", active=True):
     p = Player(
+        slug=f"alice-{discord_id}",
         discord_id=discord_id,
         discord_username="alice",
         display_name="Alice",

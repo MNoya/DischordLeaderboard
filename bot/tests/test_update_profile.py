@@ -16,6 +16,7 @@ class FakeClient:
 
 def _seed(session, discord_id="111", token=VALID, token_invalid=False):
     p = Player(
+        slug=f"alice-{discord_id}",
         discord_id=discord_id,
         discord_username="alice",
         display_name="Alice",
