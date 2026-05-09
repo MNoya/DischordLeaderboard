@@ -5,15 +5,18 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 // API so dev without Supabase still works.
 //
 // Vite exposes any env var prefixed with VITE_ to the client bundle. The
-// service-role key never appears here — only the anon key, which can only
-// SELECT from the curated public_* views (per spec § RLS / grants).
+// service-role / secret keys never appear here — only the publishable key,
+// which hits the anon role server-side and can only SELECT from the curated
+// public_* views (per spec § RLS / grants).
 
 const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as
+  | string
+  | undefined;
 
 export const supabase: SupabaseClient | null =
-  url && anonKey
-    ? createClient(url, anonKey, {
+  url && publishableKey
+    ? createClient(url, publishableKey, {
         auth: { persistSession: false },
       })
     : null;

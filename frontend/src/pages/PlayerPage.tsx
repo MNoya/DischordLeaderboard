@@ -514,7 +514,7 @@ function Mobile({ profile, events }: { profile: PlayerProfile; events: PlayerDra
 
       <section className="py-4 px-[18px]">
         <SectionLabel size={12} className="mb-2.5">
-          RECENT DRAFTS · {events.length} EVENTS
+          RECENT DRAFTS
         </SectionLabel>
         {events.slice(0, 20).map((e) => (
           <div
