@@ -31,3 +31,11 @@ cache/
 .wrangler
 .dev.vars*
 !.dev.vars.example
+
+# Vite + TypeScript build artifacts
+frontend/dist/
+frontend/node_modules/
+frontend/*.tsbuildinfo
+# Vite reads vite.config.ts directly; the .js/.d.ts emitted by tsc -b is noise
+frontend/vite.config.js
+frontend/vite.config.d.ts
