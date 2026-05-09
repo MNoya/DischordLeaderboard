@@ -9,14 +9,13 @@ import { useEffect } from "react";
 
 import {
   fetchArchetypeLeaderboard,
+  fetchFormatLeaderboard,
   fetchLeaderboard,
   fetchPlayerDraftEvents,
   fetchPlayerProfile,
   fetchRecentTrophies,
   fetchSets,
 } from "./api";
-import type { LeaderboardRow } from "../types/leaderboard";
-
 const FIVE_MINUTES = 5 * 60 * 1000;
 
 export function useSets() {
@@ -32,6 +31,21 @@ export function useLeaderboard(setCode: string | undefined) {
     queryKey: ["leaderboard", setCode],
     queryFn: () => fetchLeaderboard(setCode!),
     enabled: !!setCode,
+    staleTime: FIVE_MINUTES,
+  });
+}
+
+// Per-format leaderboard — switches data source from public_leaderboard to a
+// join over public_player_format_breakdown when a format is selected. Returns
+// the same row shape so the rendering table doesn't care which is live.
+export function useFormatLeaderboard(
+  setCode: string | undefined,
+  format: string | undefined,
+) {
+  return useQuery({
+    queryKey: ["format-leaderboard", setCode, format],
+    queryFn: () => fetchFormatLeaderboard(setCode!, format!),
+    enabled: !!setCode && !!format,
     staleTime: FIVE_MINUTES,
   });
 }
@@ -101,33 +115,3 @@ export function useIdlePrefetchOtherSets(
   }, [activeSetCode, allSets, qc]);
 }
 
-// Spec §7 — format filter is a client-side reduction over cached rows.
-export function applyFormatFilter(
-  rows: LeaderboardRow[] | undefined,
-  format: string | null
-): LeaderboardRow[] | undefined {
-  if (!rows) return rows;
-  if (!format || format === "ALL") return rows;
-  // Production: backend will expose a per-format leaderboard view; until then
-  // we synthesize a fair-looking slice by scaling counts by a format weight.
-  const weight: Record<string, number> = {
-    Premier: 0.5,
-    Trad: 0.35,
-    Quick: 0.1,
-    Sealed: 0.04,
-    LCQ: 0.01,
-  };
-  const w = weight[format] ?? 0.5;
-  return rows
-    .map((r) => ({
-      ...r,
-      events: Math.max(0, Math.round(r.events * w)),
-      wins: Math.max(0, Math.round(r.wins * w)),
-      losses: Math.max(0, Math.round(r.losses * w)),
-      trophies: Math.max(0, Math.round(r.trophies * w)),
-      score: Math.round(r.score * w * 100) / 100,
-    }))
-    .filter((r) => r.events > 0)
-    .sort((a, b) => b.score - a.score)
-    .map((r, i) => ({ ...r, rank: i + 1 }));
-}

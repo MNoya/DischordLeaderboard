@@ -16,9 +16,9 @@ import { DonutChart } from "../components/DonutChart";
 import { TrophyCount } from "../components/TrophyCount";
 
 import {
-  applyFormatFilter,
   useArchetypeLeaderboard,
   useDraftEvents,
+  useFormatLeaderboard,
   useIdlePrefetchOtherSets,
   useLeaderboard,
   usePlayerProfile,
@@ -56,28 +56,29 @@ export function LeaderboardPage() {
   const [format, setFormat] = useState("ALL");
   const [archetype, setArchetype] = useState("ALL");
   const archetypeMode = archetype !== "ALL";
+  const formatMode = !archetypeMode && format !== "ALL";
 
-  // Two data sources, selected at runtime: the main public_leaderboard for the
-  // ALL view, and public_archetype_leaderboard (subset-replay scoring) when an
-  // archetype is selected. Both hooks fire only when their query is enabled.
-  const lb = useLeaderboard(archetypeMode ? undefined : activeSet);
+  // Three data sources, picked by mode (only one fetches at a time):
+  //   default        → public_leaderboard
+  //   formatMode     → public_player_format_breakdown joined with leaderboard
+  //   archetypeMode  → public_archetype_leaderboard (subset-replay scoring)
+  // Per spec, archetype × format is deferred; archetype wins when both are set.
+  const lb = useLeaderboard(archetypeMode || formatMode ? undefined : activeSet);
+  const fmtLb = useFormatLeaderboard(
+    formatMode ? activeSet : undefined,
+    formatMode ? format : undefined,
+  );
   const arch = useArchetypeLeaderboard(
     archetypeMode ? activeSet : undefined,
     archetypeMode ? archetype : undefined,
   );
 
-  const rows: LeaderboardTableRow[] | undefined = archetypeMode ? arch.data : lb.data;
-  const isLoading = archetypeMode ? arch.isLoading : lb.isLoading;
-  const error = (archetypeMode ? arch.error : lb.error) as Error | null;
+  const active = archetypeMode ? arch : formatMode ? fmtLb : lb;
+  const rows: LeaderboardTableRow[] | undefined = active.data;
+  const isLoading = active.isLoading;
+  const error = active.error as Error | null;
 
   useIdlePrefetchOtherSets(activeSet, sets);
-
-  // Archetype leaderboard ignores the format filter (per spec out-of-scope:
-  // archetype × format is deferred). For the main board, format applies.
-  const filtered = useMemo(
-    () => (archetypeMode ? rows : applyFormatFilter(rows as LeaderboardRow[] | undefined, format)),
-    [rows, format, archetypeMode],
-  );
 
   const filterProps: FilterRowProps = { format, setFormat, archetype, setArchetype };
 
@@ -85,7 +86,7 @@ export function LeaderboardPage() {
     <Mobile
       activeSet={activeSet}
       sets={sets}
-      rows={filtered}
+      rows={rows}
       isLoading={isLoading}
       error={error}
       filters={filterProps}
@@ -96,7 +97,7 @@ export function LeaderboardPage() {
       activeSet={activeSet}
       sets={sets}
       setMeta={setMeta}
-      rows={filtered}
+      rows={rows}
       isLoading={isLoading}
       error={error}
       filters={filterProps}

@@ -80,6 +80,42 @@ export const fetchLeaderboard = (setCode: string): Promise<LeaderboardRow[]> => 
   return wait([]);
 };
 
+// ─── per-format leaderboard (fixture-side, mirrors realApi join) ─────────────
+// Fixtures only have full per-format breakdowns for the 5 players we curated.
+// For everyone else we approximate using synthBreakdown so the table still
+// has 30+ rows to render in dev. Real prod uses the actual breakdown view.
+export const fetchFormatLeaderboard = (
+  setCode: string,
+  format: string,
+): Promise<LeaderboardRow[]> => {
+  if (setCode !== "SOS") return wait([]);
+
+  const rows = leaderboardSosFixture
+    .map((player) => {
+      const breakdown = REAL_BREAKDOWNS[player.slug] ?? synthBreakdown(player);
+      const fmt = breakdown.find((f) => f.formatLabel === format);
+      if (!fmt || fmt.events === 0) return null;
+      return {
+        setCode,
+        slug: player.slug,
+        displayName: player.displayName,
+        avatarUrl: player.avatarUrl,
+        rank: 0,
+        score: fmt.scoreContribution,
+        trophies: fmt.trophies,
+        events: fmt.events,
+        wins: fmt.wins,
+        losses: fmt.losses,
+        lastCalculatedAt: player.lastCalculatedAt,
+      } satisfies LeaderboardRow;
+    })
+    .filter((r): r is LeaderboardRow => r !== null)
+    .sort((a, b) => b.score - a.score)
+    .map((r, i) => ({ ...r, rank: i + 1 }));
+
+  return wait(rows);
+};
+
 // ─── public_archetype_leaderboard ────────────────────────────────────────────
 // Switching archetype switches the data source (different scoring), per spec §7.
 export const fetchArchetypeLeaderboard = (

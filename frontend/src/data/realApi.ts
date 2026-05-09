@@ -52,6 +52,67 @@ export async function fetchLeaderboard(setCode: string): Promise<LeaderboardRow[
   return (data ?? []).map((r) => adaptLeaderboardRow(r as Record<string, unknown>));
 }
 
+// ─── per-format leaderboard ────────────────────────────────────────────────
+// No dedicated view yet — we client-side join public_player_format_breakdown
+// (filtered to format_label, sorted by score_contribution) with the leaderboard
+// rows for displayName / avatarUrl / lastCalculatedAt. Players without any
+// events in this format simply don't appear.
+
+export async function fetchFormatLeaderboard(
+  setCode: string,
+  format: string,
+): Promise<LeaderboardRow[]> {
+  const [breakdown, leaderboard] = await Promise.all([
+    client()
+      .from("public_player_format_breakdown")
+      .select("*")
+      .eq("set_code", setCode)
+      .eq("format_label", format),
+    client()
+      .from("public_leaderboard")
+      .select("slug, display_name, avatar_url, last_calculated_at")
+      .eq("set_code", setCode),
+  ]);
+  if (breakdown.error) throw breakdown.error;
+  if (leaderboard.error) throw leaderboard.error;
+
+  const info = new Map(
+    (leaderboard.data ?? []).map((r) => [
+      (r as Record<string, unknown>).slug as string,
+      r as Record<string, unknown>,
+    ]),
+  );
+
+  const rows = (breakdown.data ?? [])
+    .map((raw) => raw as Record<string, unknown>)
+    .filter((r) => {
+      // Drop rows with zero events (the per-format breakdown view doesn't filter
+      // them server-side) and rows whose player isn't on the leaderboard
+      const events = (r.events as number) ?? 0;
+      return events > 0 && info.has(r.slug as string);
+    })
+    .map((r) => {
+      const inf = info.get(r.slug as string)!;
+      return {
+        setCode,
+        slug: r.slug as string,
+        displayName: inf.display_name as string,
+        avatarUrl: (inf.avatar_url ?? null) as string | null,
+        rank: 0, // assigned after sort
+        score: Number(r.score_contribution ?? 0),
+        trophies: r.trophies as number,
+        events: r.events as number,
+        wins: r.wins as number,
+        losses: r.losses as number,
+        lastCalculatedAt: inf.last_calculated_at as string,
+      } satisfies LeaderboardRow;
+    })
+    .sort((a, b) => b.score - a.score)
+    .map((r, i) => ({ ...r, rank: i + 1 }));
+
+  return rows;
+}
+
 // ─── public_archetype_leaderboard ──────────────────────────────────────────
 
 export async function fetchArchetypeLeaderboard(
