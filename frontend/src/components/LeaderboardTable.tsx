@@ -10,6 +10,7 @@ import { cn } from "../lib/utils";
 // content is rendered by the caller.
 
 export interface LeaderboardTableRow {
+  setCode: string;
   slug: string;
   displayName: string;
   avatarUrl: string | null;
@@ -19,6 +20,7 @@ export interface LeaderboardTableRow {
   events: number;
   wins: number;
   losses: number;
+  lastCalculatedAt: string;
 }
 
 const COLS_DESKTOP = "60px 1fr 110px 100px 110px 90px 130px";

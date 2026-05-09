@@ -48,7 +48,7 @@ export function weekOfSet(set: SetSummary | undefined, today: Date = new Date())
 
 // Most-recent `lastCalculatedAt` across rows, formatted as HH:MM UTC for the
 // "UPDATED" badge.
-export function lastUpdated(rows: LeaderboardRow[] | undefined): string {
+export function lastUpdated(rows: ReadonlyArray<{ lastCalculatedAt: string }> | undefined): string {
   if (!rows || rows.length === 0) return "—";
   const latest = rows.reduce(
     (m, r) => (r.lastCalculatedAt > m ? r.lastCalculatedAt : m),
@@ -58,7 +58,7 @@ export function lastUpdated(rows: LeaderboardRow[] | undefined): string {
 }
 
 // Total events across rows, locale-formatted with commas.
-export function sumEvents(rows: LeaderboardRow[] | undefined): string {
+export function sumEvents(rows: ReadonlyArray<{ events: number }> | undefined): string {
   if (!rows) return "0";
   return rows.reduce((s, r) => s + r.events, 0).toLocaleString();
 }

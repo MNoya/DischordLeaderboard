@@ -17,6 +17,7 @@ import { TrophyCount } from "../components/TrophyCount";
 
 import {
   applyFormatFilter,
+  useArchetypeLeaderboard,
   useDraftEvents,
   useIdlePrefetchOtherSets,
   useLeaderboard,
@@ -26,6 +27,7 @@ import {
 import { fmtRange, lastUpdated, mainColors, sumEvents, weekOfSet, winPct } from "../data/utils";
 import { ARCHETYPE_OPTIONS, FORMAT_OPTIONS } from "../data/filters";
 import type { LeaderboardRow, PlayerDraftEvent, PlayerFormatBreakdown, SetSummary } from "../types/leaderboard";
+import type { LeaderboardTableRow } from "../components/LeaderboardTable";
 
 // Per-format swatch colors — must match the real backend `format_label` keys
 // (Premier / Trad / Quick / Sealed / Trad Sealed / Arena Direct / LCQ). Falls
@@ -50,14 +52,32 @@ export function LeaderboardPage() {
   const { data: sets } = useSets();
   const activeSet = params.setCode ?? sets?.find((s) => s.isActive)?.code ?? "SOS";
   const setMeta = sets?.find((s) => s.code === activeSet);
-  const { data: rows, isLoading, error } = useLeaderboard(activeSet);
-
-  useIdlePrefetchOtherSets(activeSet, sets);
 
   const [format, setFormat] = useState("ALL");
   const [archetype, setArchetype] = useState("ALL");
+  const archetypeMode = archetype !== "ALL";
 
-  const filtered = useMemo(() => applyFormatFilter(rows, format), [rows, format]);
+  // Two data sources, selected at runtime: the main public_leaderboard for the
+  // ALL view, and public_archetype_leaderboard (subset-replay scoring) when an
+  // archetype is selected. Both hooks fire only when their query is enabled.
+  const lb = useLeaderboard(archetypeMode ? undefined : activeSet);
+  const arch = useArchetypeLeaderboard(
+    archetypeMode ? activeSet : undefined,
+    archetypeMode ? archetype : undefined,
+  );
+
+  const rows: LeaderboardTableRow[] | undefined = archetypeMode ? arch.data : lb.data;
+  const isLoading = archetypeMode ? arch.isLoading : lb.isLoading;
+  const error = (archetypeMode ? arch.error : lb.error) as Error | null;
+
+  useIdlePrefetchOtherSets(activeSet, sets);
+
+  // Archetype leaderboard ignores the format filter (per spec out-of-scope:
+  // archetype × format is deferred). For the main board, format applies.
+  const filtered = useMemo(
+    () => (archetypeMode ? rows : applyFormatFilter(rows as LeaderboardRow[] | undefined, format)),
+    [rows, format, archetypeMode],
+  );
 
   const filterProps: FilterRowProps = { format, setFormat, archetype, setArchetype };
 
@@ -67,8 +87,9 @@ export function LeaderboardPage() {
       sets={sets}
       rows={filtered}
       isLoading={isLoading}
-      error={error as Error | null}
+      error={error}
       filters={filterProps}
+      archetypeMode={archetypeMode}
     />
   ) : (
     <Desktop
@@ -77,8 +98,9 @@ export function LeaderboardPage() {
       setMeta={setMeta}
       rows={filtered}
       isLoading={isLoading}
-      error={error as Error | null}
+      error={error}
       filters={filterProps}
+      archetypeMode={archetypeMode}
     />
   );
 }
@@ -100,14 +122,16 @@ function Desktop({
   isLoading,
   error,
   filters,
+  archetypeMode,
 }: {
   activeSet: string;
   sets: SetSummary[] | undefined;
   setMeta: SetSummary | undefined;
-  rows: LeaderboardRow[] | undefined;
+  rows: LeaderboardTableRow[] | undefined;
   isLoading: boolean;
   error: Error | null;
   filters: FilterRowProps;
+  archetypeMode: boolean;
 }) {
   const navigate = useNavigate();
   return (
@@ -179,7 +203,7 @@ function FilterRow({
   archetype,
   setArchetype,
   rows,
-}: FilterRowProps & { rows: LeaderboardRow[] | undefined }) {
+}: FilterRowProps & { rows: LeaderboardTableRow[] | undefined }) {
   return (
     <div className="px-10 py-3.5 border-b border-border flex gap-3 items-center">
       <FilterDropdown label="FORMAT" value={format} options={FORMAT_OPTIONS} onChange={setFormat} />
@@ -201,13 +225,15 @@ function Mobile({
   isLoading,
   error,
   filters,
+  archetypeMode: _archetypeMode,
 }: {
   activeSet: string;
   sets: SetSummary[] | undefined;
-  rows: LeaderboardRow[] | undefined;
+  rows: LeaderboardTableRow[] | undefined;
   isLoading: boolean;
   error: Error | null;
   filters: FilterRowProps;
+  archetypeMode: boolean;
 }) {
   const navigate = useNavigate();
   return (
@@ -258,7 +284,7 @@ function Mobile({
 
 // ─── Expanded rows ─────────────────────────────────────────────────────────
 
-function DesktopExpandedRow({ row, onView }: { row: LeaderboardRow; onView: () => void }) {
+function DesktopExpandedRow({ row, onView }: { row: LeaderboardTableRow; onView: () => void }) {
   // Lazy fetch — these only fire when the row is expanded since
   // LeaderboardTable conditionally mounts this component. Cache survives
   // re-collapses and pre-warms the player profile route.
@@ -380,7 +406,7 @@ function MostPlayedDecks({ events }: { events: PlayerDraftEvent[] | undefined })
   );
 }
 
-function MobileExpandedRow({ row, onView }: { row: LeaderboardRow; onView: () => void }) {
+function MobileExpandedRow({ row, onView }: { row: LeaderboardTableRow; onView: () => void }) {
   return (
     <div className="pt-1 pb-3 pr-3.5 pl-9 flex flex-col gap-2 border-t border-dashed border-border2">
       <div className="flex items-center justify-between gap-2 mt-2">

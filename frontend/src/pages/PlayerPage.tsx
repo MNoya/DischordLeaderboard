@@ -13,7 +13,7 @@ import { DonutChart } from "../components/DonutChart";
 import { ErrorState } from "../components/ErrorState";
 import { TrophyCount } from "../components/TrophyCount";
 
-import { useDraftEvents, usePlayerProfile, useSets } from "../data/hooks";
+import { useDraftEvents, useLeaderboard, usePlayerProfile, useSets } from "../data/hooks";
 import { archetypeOf, mainColors, winPct } from "../data/utils";
 import { ARCHETYPE_OPTIONS_LONG, FORMAT_OPTIONS_LONG } from "../data/filters";
 import { cn } from "../lib/utils";
@@ -58,7 +58,17 @@ export function PlayerPage() {
   const setCode = params.setCode ?? sets?.find((s) => s.isActive)?.code ?? "SOS";
   const { data: profile, isLoading, error } = usePlayerProfile(slug, setCode);
   const { data: events } = useDraftEvents(slug, setCode);
+  // Sibling navigation needs the leaderboard rows so we know who's adjacent
+  // by rank. Cached behind TanStack Query — same fetch as the leaderboard
+  // page, so navigating between profiles doesn't re-hit the network.
+  const { data: leaderboardRows } = useLeaderboard(setCode);
   const isMobile = useIsMobile();
+
+  const idx = leaderboardRows?.findIndex((r) => r.slug === slug) ?? -1;
+  const prevSlug = idx > 0 ? leaderboardRows![idx - 1].slug : null;
+  const nextSlug = idx >= 0 && leaderboardRows && idx < leaderboardRows.length - 1
+    ? leaderboardRows[idx + 1].slug
+    : null;
 
   if (error) {
     return (
@@ -80,11 +90,19 @@ export function PlayerPage() {
     );
   }
 
+  const sibling = { setCode, prevSlug, nextSlug };
+
   return isMobile ? (
-    <Mobile profile={profile} events={events ?? []} />
+    <Mobile profile={profile} events={events ?? []} sibling={sibling} />
   ) : (
-    <Desktop profile={profile} events={events ?? []} />
+    <Desktop profile={profile} events={events ?? []} sibling={sibling} />
   );
+}
+
+interface SiblingNav {
+  setCode: string;
+  prevSlug: string | null;
+  nextSlug: string | null;
 }
 
 // ─── Aggregation ───────────────────────────────────────────────────────────
@@ -115,7 +133,15 @@ function aggregate(events: PlayerDraftEvent[]): PlayerAggregates {
 
 // ─── Desktop ───────────────────────────────────────────────────────────────
 
-function Desktop({ profile, events }: { profile: PlayerProfile; events: PlayerDraftEvent[] }) {
+function Desktop({
+  profile,
+  events,
+  sibling,
+}: {
+  profile: PlayerProfile;
+  events: PlayerDraftEvent[];
+  sibling: SiblingNav;
+}) {
   const navigate = useNavigate();
   const wp = winPct(profile.wins, profile.losses);
 
@@ -143,7 +169,10 @@ function Desktop({ profile, events }: { profile: PlayerProfile; events: PlayerDr
         className="px-10 pt-7 pb-[30px] border-b border-border"
         style={{ background: "linear-gradient(180deg, #14181f 0%, #0a0c10 100%)" }}
       >
-        <BackButton onClick={() => navigate(-1)} />
+        <div className="flex items-center justify-between mb-3.5">
+          <BackButton onClick={() => navigate(-1)} inline />
+          <SiblingNavButtons sibling={sibling} navigate={navigate} />
+        </div>
         <div className="flex items-center gap-7">
           <AAvatar displayName={profile.displayName} avatarUrl={profile.avatarUrl} size={120} green />
           <div className="flex-1 min-w-0">
@@ -461,7 +490,15 @@ function DraftLogDesktop({
 
 // ─── Mobile ────────────────────────────────────────────────────────────────
 
-function Mobile({ profile, events }: { profile: PlayerProfile; events: PlayerDraftEvent[] }) {
+function Mobile({
+  profile,
+  events,
+  sibling,
+}: {
+  profile: PlayerProfile;
+  events: PlayerDraftEvent[];
+  sibling: SiblingNav;
+}) {
   const navigate = useNavigate();
   const wp = winPct(profile.wins, profile.losses);
 
@@ -469,6 +506,7 @@ function Mobile({ profile, events }: { profile: PlayerProfile; events: PlayerDra
     <div className="bg-bg text-text min-h-screen">
       <header className="py-3 px-[18px] border-b border-border flex items-center justify-between">
         <BackButton onClick={() => navigate(-1)} compact />
+        <SiblingNavButtons sibling={sibling} navigate={navigate} compact />
       </header>
 
       <section
@@ -552,16 +590,63 @@ function Mobile({ profile, events }: { profile: PlayerProfile; events: PlayerDra
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
-function BackButton({ onClick, compact = false }: { onClick: () => void; compact?: boolean }) {
+function BackButton({
+  onClick,
+  compact = false,
+  inline = false,
+}: {
+  onClick: () => void;
+  compact?: boolean;
+  /** When true, drop the bottom margin so the button can sit in a flex row alongside other controls. */
+  inline?: boolean;
+}) {
   return (
     <button
       onClick={onClick}
       className={cn(
-        "bg-transparent border-none text-muted font-display text-[12px] cursor-pointer flex items-center",
-        compact ? "tracking-[0.15em] gap-1.5" : "tracking-[0.18em] mb-3.5",
+        "bg-transparent border-none text-muted font-display text-[12px] cursor-pointer flex items-center transition-colors hover:text-text",
+        compact ? "tracking-[0.15em] gap-1.5" : "tracking-[0.18em]",
+        !compact && !inline && "mb-3.5",
       )}
     >
       <span>‹</span> {compact ? "BACK" : "BACK TO LEADERBOARD"}
     </button>
+  );
+}
+
+function SiblingNavButtons({
+  sibling,
+  navigate,
+  compact = false,
+}: {
+  sibling: SiblingNav;
+  navigate: ReturnType<typeof useNavigate>;
+  compact?: boolean;
+}) {
+  const baseCls = cn(
+    "bg-transparent border-none font-display tracking-[0.15em] flex items-center gap-1.5 text-[12px] transition-colors",
+    "disabled:opacity-30 disabled:cursor-default cursor-pointer hover:text-text",
+  );
+  const go = (s: string | null) => () => s && navigate(`/${sibling.setCode}/player/${s}`);
+  return (
+    <div className={cn("flex items-center", compact ? "gap-2" : "gap-3")}>
+      <button
+        onClick={go(sibling.prevSlug)}
+        disabled={!sibling.prevSlug}
+        className={cn(baseCls, "text-muted")}
+        aria-label="Previous player"
+      >
+        <span>‹</span> PREV
+      </button>
+      <span className="text-dim text-[12px]">·</span>
+      <button
+        onClick={go(sibling.nextSlug)}
+        disabled={!sibling.nextSlug}
+        className={cn(baseCls, "text-muted")}
+        aria-label="Next player"
+      >
+        NEXT <span>›</span>
+      </button>
+    </div>
   );
 }
