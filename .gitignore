@@ -4,9 +4,6 @@
 .env
 .env.*
 !.env.example
-# Frontend's production env contains only the Supabase URL + publishable key,
-# which are by design public (they end up inlined into the client bundle anyway).
-!frontend/.env.production
 
 # Python
 __pycache__/
