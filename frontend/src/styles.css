@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Global resets + thematic basics. Component styles use Tailwind classes from
+ * tailwind.config.ts (themed colors + font stacks).
+ */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  background: #0a0c10;
+  color: #e6ecf5;
+  font-family: "Space Grotesk", Inter, sans-serif;
+  font-size: 14px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+a {
+  color: inherit;
+}
+
+button {
+  font-family: inherit;
+}
+
+.mono {
+  font-family: "JetBrains Mono", monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.no-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #2a3142 transparent;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+.no-scrollbar::-webkit-scrollbar-thumb {
+  background: #2a3142;
+}
