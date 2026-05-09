@@ -7,11 +7,17 @@
   },
   "build": {
     // Workers Builds runs this before `wrangler deploy`. Vite emits the SPA
-    // into frontend/dist/ which is then served by assets below.
-    "command": "cd frontend && npm install && npm run build"
+    // into frontend/dist/leaderboard/, which is then served at the
+    // /leaderboard URL path by the assets config below. The rm guards against
+    // stale top-level files left over from a previous outDir layout.
+    "command": "cd frontend && npm install && rm -rf dist && npm run build"
   },
   "assets": {
-    "directory": "frontend/dist"
+    "directory": "frontend/dist",
+    // Visitors typing `/leaderboard` see exactly that — no trailing slash —
+    // and `/leaderboard/` 301-redirects to it. Both routes still resolve to
+    // dist/leaderboard/index.html.
+    "html_handling": "drop-trailing-slash"
   },
   "compatibility_flags": [
     "nodejs_compat"
