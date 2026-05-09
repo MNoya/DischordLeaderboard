@@ -5,10 +5,12 @@
   "observability": {
     "enabled": true
   },
+  "build": {
+    // Workers Builds runs this before `wrangler deploy`. Vite emits the SPA
+    // into frontend/dist/ which is then served by assets below.
+    "command": "cd frontend && npm install && npm run build"
+  },
   "assets": {
-    // Serves the built React app. Run `npm --prefix frontend run build` before
-    // `wrangler deploy` (or rely on Cloudflare Pages' build command — see
-    // README / dashboard).
     "directory": "frontend/dist"
   },
   "compatibility_flags": [
