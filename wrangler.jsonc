@@ -6,7 +6,10 @@
     "enabled": true
   },
   "assets": {
-    "directory": "web"
+    // Serves the built React app. Run `npm --prefix frontend run build` before
+    // `wrangler deploy` (or rely on Cloudflare Pages' build command — see
+    // README / dashboard).
+    "directory": "frontend/dist"
   },
   "compatibility_flags": [
     "nodejs_compat"
