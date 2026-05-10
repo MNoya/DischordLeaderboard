@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { ArrowUp, ChevronLeft, ChevronRight, ExternalLink } from "lucide-react";
 import { BsAsterisk, BsPaletteFill } from "react-icons/bs";
 
 import { AppHeader } from "../components/AppHeader";
 import { useIsMobile } from "../lib/use-is-mobile";
-import { AAvatar, SetGlyph, Trophy, fmtPts } from "../components/Brand";
+import { AAvatar, ALogo, SetGlyph, Trophy, fmtPts } from "../components/Brand";
 import { Pip, Pips } from "../components/ManaPips";
 import { StatChip } from "../components/StatChip";
 import { FilterDropdown } from "../components/FilterDropdown";
@@ -105,6 +105,21 @@ export function PlayerPage() {
   const { data: leaderboardRows } = useLeaderboard(setCode);
   const isMobile = useIsMobile();
 
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [slug, setCode]);
+
+  const liveSetCode = sets?.find((s) => s.isActive)?.code;
+  const [topSearchParams] = useSearchParams();
+  useEffect(() => {
+    if (params.setCode && liveSetCode && params.setCode === liveSetCode) {
+      navigate(
+        { pathname: `/player/${slug}`, search: topSearchParams.toString() },
+        { replace: true },
+      );
+    }
+  }, [params.setCode, liveSetCode, slug, navigate, topSearchParams]);
+
   const idx = leaderboardRows?.findIndex((r) => r.slug === slug) ?? -1;
   const prevSlug = idx > 0 ? leaderboardRows![idx - 1].slug : null;
   const nextSlug = idx >= 0 && leaderboardRows && idx < leaderboardRows.length - 1
@@ -112,11 +127,32 @@ export function PlayerPage() {
     : null;
   const sibling: SiblingNav = { setCode, prevSlug, nextSlug };
 
+  const topQs = topSearchParams.toString();
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      const t = e.target;
+      if (t instanceof HTMLElement) {
+        if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable) return;
+      }
+      if (e.key === "ArrowLeft" && prevSlug) {
+        e.preventDefault();
+        navigate({ pathname: `/${setCode}/player/${prevSlug}`, search: topQs });
+      } else if (e.key === "ArrowRight" && nextSlug) {
+        e.preventDefault();
+        navigate({ pathname: `/${setCode}/player/${nextSlug}`, search: topQs });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [prevSlug, nextSlug, setCode, navigate, topQs]);
+
   if (error) {
     return (
-      <div className="bg-bg text-text min-h-screen">
+      <div className="bg-bg text-text min-h-screen animate-fadeIn">
         {isMobile ? (
-          <MobilePlayerHeader sibling={sibling} navigate={navigate} />
+          <MobilePlayerHeader sibling={sibling} navigate={navigate} qs={topQs} />
         ) : (
           <AppHeader subtitle="PLAYER PROFILE" />
         )}
@@ -127,9 +163,9 @@ export function PlayerPage() {
 
   if (isLoading || !profile) {
     return (
-      <div className="bg-bg text-text min-h-screen">
+      <div className="bg-bg text-text min-h-screen animate-fadeIn">
         {isMobile ? (
-          <MobilePlayerHeader sibling={sibling} navigate={navigate} />
+          <MobilePlayerHeader sibling={sibling} navigate={navigate} qs={topQs} />
         ) : (
           <AppHeader subtitle="PLAYER PROFILE" />
         )}
@@ -151,17 +187,56 @@ export function PlayerPage() {
   );
 }
 
+function useUrlFilters(): [
+  string,
+  (v: string) => void,
+  string,
+  (v: string) => void,
+  string,
+] {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const formatFilter = searchParams.get("format") ?? "ALL";
+  const colorsFilter = searchParams.get("colors") ?? "ALL";
+  const update = (key: "format" | "colors", value: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (value === "ALL") next.delete(key);
+      else next.set(key, value);
+      return next;
+    }, { replace: true });
+  };
+  return [
+    formatFilter,
+    (v) => update("format", v),
+    colorsFilter,
+    (v) => update("colors", v),
+    searchParams.toString(),
+  ];
+}
+
 function MobilePlayerHeader({
   sibling,
   navigate,
+  qs = "",
 }: {
   sibling: SiblingNav;
   navigate: ReturnType<typeof useNavigate>;
+  qs?: string;
 }) {
   return (
-    <header className="py-3 px-[18px] border-b border-border flex items-center justify-between">
-      <BackButton onClick={() => navigate(`/${sibling.setCode}`)} compact />
-      <SiblingNavButtons sibling={sibling} compact />
+    <header className="py-3 px-[18px] border-b border-border grid grid-cols-3 items-center">
+      <BackButton
+        onClick={() => navigate({ pathname: `/${sibling.setCode}`, search: qs })}
+        compact
+      />
+      <Link to="/" className="flex justify-center no-underline" aria-label="Home">
+        <div className="flex items-center overflow-visible" style={{ height: 14 }}>
+          <ALogo size={22} />
+        </div>
+      </Link>
+      <div className="justify-self-end">
+        <SiblingNavButtons sibling={sibling} qs={qs} compact />
+      </div>
     </header>
   );
 }
@@ -201,9 +276,9 @@ function MobileSkeleton() {
         </div>
         <div className="px-[18px] py-4 flex items-center gap-3.5">
           <SkeletonBox className="w-[108px] h-[108px] rounded-full" />
-          <div className="flex-1 flex flex-col gap-2">
+          <div className="flex-1 flex flex-col gap-1.5">
             {[0, 1, 2, 3, 4].map((i) => (
-              <SkeletonBox key={i} className="h-4" />
+              <SkeletonBox key={i} className="h-5" />
             ))}
           </div>
         </div>
@@ -278,7 +353,7 @@ function DesktopSkeleton() {
                 <SkeletonBox className="w-[148px] h-[148px] rounded-full shrink-0" />
                 <div className="flex-1 flex flex-col gap-2">
                   {[0, 1, 2, 3, 4].map((i) => (
-                    <SkeletonBox key={i} className="h-4" />
+                    <SkeletonBox key={i} className="h-5" />
                   ))}
                 </div>
               </div>
@@ -358,8 +433,8 @@ function Desktop({
   const navigate = useNavigate();
   const wp = winPct(profile.wins, profile.losses);
 
-  const [formatFilter, setFormatFilter] = useState("ALL");
-  const [colorsFilter, setColorsFilter] = useState("ALL");
+  const [formatFilter, setFormatFilter, colorsFilter, setColorsFilter, qs] =
+    useUrlFilters();
 
   const { chips: colorChips, otherCombos } = useColorChips(profile.setCode);
   const colorOptions = useMemo<FilterOption[]>(() => {
@@ -381,6 +456,7 @@ function Desktop({
           if (colorsFilter === MULTI) {
             if (effectiveColorCount(e.colors) < 4) return false;
           } else if (colorsFilter === OTHER) {
+            if (effectiveColorCount(e.colors) >= 4) return false;
             if (!otherSet.has(colorsOf(e.colors))) return false;
           } else if (colorsOf(e.colors) !== colorsFilter) return false;
         }
@@ -393,7 +469,7 @@ function Desktop({
   const nameFs = nameLen <= 8 ? 64 : nameLen <= 12 ? 52 : nameLen <= 18 ? 40 : 32;
 
   return (
-    <div className="bg-bg text-text min-h-screen">
+    <div className="bg-bg text-text min-h-screen animate-fadeIn">
       <AppHeader subtitle="PLAYER PROFILE" />
 
       <section
@@ -401,14 +477,14 @@ function Desktop({
         style={{ background: "linear-gradient(180deg, #14181f 0%, #0a0c10 100%)" }}
       >
         <div className="flex items-center justify-between mb-3.5">
-          <BackButton onClick={() => navigate(`/${profile.setCode}`)} inline />
-          <SiblingNavButtons sibling={sibling} />
+          <BackButton onClick={() => navigate({ pathname: `/${profile.setCode}`, search: qs })} inline />
+          <SiblingNavButtons sibling={sibling} qs={qs} />
         </div>
         <div className="flex items-center gap-7">
           <AAvatar displayName={profile.displayName} avatarUrl={profile.avatarUrl} size={120} green />
-          <div className="flex-1 min-w-0">
+          <div className="shrink-0">
             <h1
-              className="font-display tracking-[0.03em] m-0 break-words"
+              className="font-display tracking-[0.03em] m-0 whitespace-nowrap"
               style={{ fontSize: nameFs, lineHeight: 0.95 }}
             >
               {profile.displayName.toUpperCase()}
@@ -441,19 +517,20 @@ function Desktop({
 }
 
 function StatStrip({ profile, wp }: { profile: PlayerProfile; wp: string }) {
+  const valueCls = "font-display leading-none text-[clamp(26px,3vw,44px)]";
   const tiles: Array<{ label: string; value: React.ReactNode; accent?: boolean }> = [
     {
       label: "TROPHIES",
       value: (
         <span className="flex items-center gap-1.5">
           <Trophy size={26} color="#ffc63a" />
-          <span className="font-display text-[44px] leading-none">{profile.trophies}</span>
+          <span className={valueCls}>{profile.trophies}</span>
         </span>
       ),
     },
     {
       label: "EVENTS",
-      value: <span className="font-display text-[44px] leading-none">{profile.events}</span>,
+      value: <span className={valueCls}>{profile.events}</span>,
     },
     {
       label: "RECORD",
@@ -463,37 +540,37 @@ function StatStrip({ profile, wp }: { profile: PlayerProfile; wp: string }) {
           wins={profile.wins}
           losses={profile.losses}
           separatorMargin={4}
-          className="font-display text-[44px] leading-none"
+          className={valueCls}
         />
       ),
     },
     {
       label: "WIN %",
       value: (
-        <span className="font-display text-[44px] leading-none">
+        <span className={valueCls}>
           {wp}
-          <span className="text-[22px] text-muted">%</span>
+          <span className="text-[clamp(14px,1.5vw,22px)] text-muted">%</span>
         </span>
       ),
     },
     {
       label: "POINTS",
       value: (
-        <span className="font-display text-[44px] leading-none text-green">{fmtPts(profile.score)}</span>
+        <span className={cn(valueCls, "text-green")}>{fmtPts(profile.score)}</span>
       ),
       accent: true,
     },
   ];
   return (
     <div
-      className="grid border border-border2 bg-bg self-stretch"
-      style={{ flex: "0 0 720px", gridTemplateColumns: "1fr 1fr 1.3fr 1fr 0.9fr" }}
+      className="grid border border-border2 bg-bg self-stretch min-w-0 ml-auto"
+      style={{ flex: "0 1 720px", gridTemplateColumns: "1fr 1fr 1.3fr 1fr 0.9fr" }}
     >
       {tiles.map((t, i) => (
         <div
           key={t.label}
           className={cn(
-            "py-3.5 px-3 flex flex-col items-center text-center",
+            "py-3.5 px-3 flex flex-col items-center text-center min-w-0",
             i < tiles.length - 1 && "border-r border-border2",
           )}
         >
@@ -722,8 +799,12 @@ function DraftLogDesktop({
   setColorsFilter: (v: string) => void;
   colorOptions: FilterOption[];
 }) {
+  const sectionRef = useRef<HTMLElement>(null);
+  const scrollToTop = () =>
+    sectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+
   return (
-    <section className="py-6 px-10">
+    <section ref={sectionRef} className="py-6 px-10">
       <div className="flex justify-between items-center">
         <SectionLabel size={13}>
           EVENT LOG · {filtered.length === events.length ? "ALL" : `${filtered.length} OF ${events.length}`}
@@ -750,49 +831,147 @@ function DraftLogDesktop({
 
       <div className="mt-3">
         {filtered.map((e) => (
-          <div
-            key={e.eventId}
-            className="grid gap-3 py-[11px] border-b border-border items-center"
-            style={{ gridTemplateColumns: "30px 110px 110px 1fr 90px" }}
-          >
-            <span className="text-center">
-              {e.isTrophy ? <Trophy size={18} color="#ffc63a" /> : <span className="text-dim">·</span>}
-            </span>
-            <span className="text-[11px] text-muted">
-              {fmtShortDate(e.finishedAt)}
-            </span>
-            <span className="font-display text-[14px] tracking-[0.08em]">
-              {prettyFormat(e.format).toUpperCase()}
-            </span>
-            {(() => {
-              const { name, splash } = deckColorParts(e.colors);
-              return (
-                <span
-                  className="grid items-center gap-2"
-                  style={{ gridTemplateColumns: "80px 72px 1fr" }}
-                >
-                  <Pips colors={e.colors} size={13} />
-                  <span className="text-[11px] text-muted">{name}</span>
-                  <span className="text-[11px] text-muted">{splash}</span>
-                </span>
-              );
-            })()}
-            <Record
-              mono
-              wins={e.wins}
-              losses={e.losses}
-              color={e.isTrophy ? "#2ee85c" : "#e6ecf5"}
-              className="text-right font-display text-[22px]"
-            />
-          </div>
+          <EventLogRow key={e.eventId} event={e} variant="desktop" />
         ))}
         {filtered.length === 0 && (
           <div className="p-6 text-center text-muted font-display tracking-[0.2em]">
             NO EVENTS MATCH FILTER
           </div>
         )}
+        <GoToTopButton onClick={scrollToTop} />
       </div>
     </section>
+  );
+}
+
+function GoToTopButton({
+  onClick,
+  threshold = 600,
+  compact = false,
+}: {
+  onClick: () => void;
+  threshold?: number;
+  compact?: boolean;
+}) {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setVisible(window.scrollY > threshold);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [threshold]);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label="Go to top"
+      className={cn(
+        "fixed z-30 left-1/2 -translate-x-1/2 bottom-4 md:bottom-6 inline-flex items-center gap-2 bg-surface border border-border2 text-text font-display tracking-[0.18em] shadow-lg cursor-pointer transition-opacity hover:bg-surface2",
+        compact ? "px-3 py-2 text-[11px]" : "px-4 py-2.5 text-[12px]",
+        visible ? "opacity-100" : "opacity-0 pointer-events-none",
+      )}
+    >
+      <ArrowUp size={compact ? 14 : 14} />
+      TOP
+    </button>
+  );
+}
+
+function EventLogRow({ event: e, variant }: { event: PlayerDraftEvent; variant: "desktop" | "mobile" }) {
+  const href = e.seventeenlandsEventId ? `https://www.17lands.com/deck/${e.seventeenlandsEventId}` : null;
+  const linkClass = href ? "cursor-pointer transition-colors hover:bg-surface2 no-underline text-inherit" : "";
+
+  if (variant === "desktop") {
+    const inner = (
+      <>
+        <span className="text-center">
+          {e.isTrophy ? <Trophy size={18} color="#ffc63a" /> : <span className="text-dim">·</span>}
+        </span>
+        <span className="text-[11px] text-muted">{fmtShortDate(e.finishedAt)}</span>
+        <span className="font-display text-[14px] tracking-[0.08em]">
+          {prettyFormat(e.format).toUpperCase()}
+        </span>
+        {(() => {
+          const { name, splash } = deckColorParts(e.colors);
+          return (
+            <span className="grid items-center" style={{ gridTemplateColumns: "100px 60px 1fr" }}>
+              <Pips colors={e.colors} size={13} />
+              <span
+                className="text-[11px] text-muted"
+                style={splash ? undefined : { gridColumn: "span 2" }}
+              >
+                {name}
+              </span>
+              {splash && <span className="text-[11px] text-muted">{splash}</span>}
+            </span>
+          );
+        })()}
+        <Record
+          mono
+          wins={e.wins}
+          losses={e.losses}
+          color={e.isTrophy ? "#2ee85c" : "#e6ecf5"}
+          className="text-right font-display text-[22px]"
+        />
+        <span className="flex justify-center text-dim">
+          {href && <ExternalLink size={11} aria-hidden="true" />}
+        </span>
+      </>
+    );
+    const cls = cn(
+      "grid gap-3 py-[11px] px-2 -mx-2 border-b border-border items-center",
+      linkClass,
+    );
+    const style = { gridTemplateColumns: "30px 110px 110px 1fr 90px 14px" };
+    return href ? (
+      <a href={href} target="_blank" rel="noopener noreferrer" className={cls} style={style}>
+        {inner}
+      </a>
+    ) : (
+      <div className={cls} style={style}>{inner}</div>
+    );
+  }
+
+  // mobile
+  const inner = (
+    <>
+      <span>
+        {e.isTrophy ? <Trophy size={16} color="#ffc63a" /> : <span className="text-dim">·</span>}
+      </span>
+      <div>
+        <div className="flex items-center gap-1.5">
+          <Pips colors={e.colors} size={11} />
+          <span className="font-display text-[13px] tracking-[0.08em]">
+            {prettyFormat(e.format).toUpperCase()}
+          </span>
+        </div>
+        <div className="text-[11px] text-muted mt-0.5">
+          {formatDeckColors(e.colors)} · {fmtShortDate(e.finishedAt)}
+        </div>
+      </div>
+      <span className="inline-flex items-center gap-1.5">
+        <Record
+          mono
+          wins={e.wins}
+          losses={e.losses}
+          color={e.isTrophy ? "#2ee85c" : "#e6ecf5"}
+          className="mono text-[14px] font-semibold"
+        />
+        {href && <ExternalLink size={10} className="text-dim" aria-hidden="true" />}
+      </span>
+    </>
+  );
+  const cls = cn(
+    "grid gap-2.5 py-2.5 px-2 -mx-2 border-b border-border items-center",
+    linkClass,
+  );
+  const style = { gridTemplateColumns: "20px 1fr auto" };
+  return href ? (
+    <a href={href} target="_blank" rel="noopener noreferrer" className={cls} style={style}>
+      {inner}
+    </a>
+  ) : (
+    <div className={cls} style={style}>{inner}</div>
   );
 }
 
@@ -810,12 +989,48 @@ function Mobile({
   const navigate = useNavigate();
   const wp = winPct(profile.wins, profile.losses);
 
+  const [formatFilter, setFormatFilter, colorsFilter, setColorsFilter, qs] =
+    useUrlFilters();
+
+  const { chips: colorChips, otherCombos } = useColorChips(profile.setCode);
+  const colorOptions = useMemo<FilterOption[]>(() => {
+    const opts: FilterOption[] = [{ value: "ALL", label: "ALL COLORS" }];
+    for (const c of colorChips) {
+      if (c === MULTI) opts.push({ value: MULTI, label: "SOUP" });
+      else if (c === OTHER) opts.push({ value: OTHER, label: "OTHER" });
+      else opts.push({ value: c, label: colorsDisplayName(c) });
+    }
+    return opts;
+  }, [colorChips]);
+  const otherSet = useMemo(() => new Set(otherCombos), [otherCombos]);
+
+  const filtered = useMemo(
+    () =>
+      events.filter((e) => {
+        if (formatFilter !== "ALL" && !e.format.toLowerCase().includes(formatFilter.toLowerCase())) return false;
+        if (colorsFilter !== "ALL") {
+          if (colorsFilter === MULTI) {
+            if (effectiveColorCount(e.colors) < 4) return false;
+          } else if (colorsFilter === OTHER) {
+            if (effectiveColorCount(e.colors) >= 4) return false;
+            if (!otherSet.has(colorsOf(e.colors))) return false;
+          } else if (colorsOf(e.colors) !== colorsFilter) return false;
+        }
+        return true;
+      }),
+    [events, formatFilter, colorsFilter, otherSet]
+  );
+
+  const eventLogRef = useRef<HTMLElement>(null);
+  const scrollToTop = () =>
+    eventLogRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+
   return (
-    <div className="bg-bg text-text min-h-screen">
-      <MobilePlayerHeader sibling={sibling} navigate={navigate} />
+    <div className="bg-bg text-text min-h-screen animate-fadeIn">
+      <MobilePlayerHeader sibling={sibling} navigate={navigate} qs={qs} />
 
       <section
-        className="px-[18px] pt-5 pb-8 border-b border-border"
+        className="px-[18px] pt-5 pb-4 border-b border-border"
         style={{ background: "linear-gradient(180deg, #14181f 0%, #0a0c10 100%)" }}
       >
         <div className="flex items-center gap-4">
@@ -856,39 +1071,45 @@ function Mobile({
 
       <MobileBreakdown profile={profile} events={events} />
 
-      <section className="py-4 px-[18px]">
-        <SectionLabel size={12} className="mb-2.5">
-          RECENT DRAFTS
-        </SectionLabel>
-        {events.slice(0, 20).map((e) => (
-          <div
-            key={e.eventId}
-            className="grid gap-2.5 py-2.5 border-b border-border items-center"
-            style={{ gridTemplateColumns: "20px 1fr auto" }}
-          >
-            <span>
-              {e.isTrophy ? <Trophy size={16} color="#ffc63a" /> : <span className="text-dim">·</span>}
-            </span>
-            <div>
-              <div className="flex items-center gap-1.5">
-                <Pips colors={e.colors} size={11} />
-                <span className="font-display text-[13px] tracking-[0.08em]">
-                  {prettyFormat(e.format).toUpperCase()}
-                </span>
-              </div>
-              <div className="text-[11px] text-muted mt-0.5">
-                {formatDeckColors(e.colors)} · {fmtShortDate(e.finishedAt)}
-              </div>
-            </div>
-            <Record
-              mono
-              wins={e.wins}
-              losses={e.losses}
-              color={e.isTrophy ? "#2ee85c" : "#e6ecf5"}
-              className="mono text-[14px] font-semibold"
+      <section ref={eventLogRef} className="py-4 px-[18px]">
+        <div className="flex items-center justify-between mb-2.5 gap-2">
+          <SectionLabel size={12}>
+            EVENT LOG · {filtered.length === events.length ? "ALL" : `${filtered.length} OF ${events.length}`}
+          </SectionLabel>
+        </div>
+        <div className="flex items-stretch gap-2 mb-3">
+          <div className="flex-1 min-w-0 flex">
+            <FilterDropdown
+              label="FORMAT"
+              value={formatFilter}
+              onChange={setFormatFilter}
+              options={FORMAT_OPTIONS_LONG}
+              variant="mobile"
+              renderValue={renderFormatOption}
+              renderOption={renderFormatOption}
             />
           </div>
+          <div className="flex-1 min-w-0 flex">
+            <FilterDropdown
+              label="COLORS"
+              value={colorsFilter}
+              onChange={setColorsFilter}
+              options={colorOptions}
+              variant="mobile"
+              renderValue={renderColorOption}
+              renderOption={renderColorOption}
+            />
+          </div>
+        </div>
+        {filtered.map((e) => (
+          <EventLogRow key={e.eventId} event={e} variant="mobile" />
         ))}
+        {filtered.length === 0 && (
+          <div className="p-6 text-center text-muted font-display tracking-[0.2em] text-[12px]">
+            NO EVENTS MATCH FILTER
+          </div>
+        )}
+        <GoToTopButton onClick={scrollToTop} compact />
       </section>
     </div>
   );
@@ -955,8 +1176,8 @@ function BreakdownTabButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "flex-1 py-2.5 px-1.5 bg-transparent border-none cursor-pointer font-display text-[11px] tracking-[0.16em] transition-colors",
-        active ? "text-green border-b-2 border-green" : "text-muted border-b-2 border-transparent",
+        "flex-1 py-2.5 px-1.5 bg-transparent cursor-pointer font-display text-[11px] tracking-[0.16em] transition-colors border-b-2 border-solid",
+        active ? "text-text border-green" : "text-muted border-transparent",
       )}
       style={active ? { marginBottom: -1 } : undefined}
     >
@@ -1175,9 +1396,11 @@ function BackButton({
 
 function SiblingNavButtons({
   sibling,
+  qs = "",
   compact = false,
 }: {
   sibling: SiblingNav;
+  qs?: string;
   compact?: boolean;
 }) {
   const baseCls = cn(
@@ -1185,9 +1408,10 @@ function SiblingNavButtons({
     "cursor-pointer hover:text-text no-underline text-muted",
   );
   const disabledCls = "opacity-30 cursor-default pointer-events-none text-muted";
-  const hrefFor = (s: string | null) => (s ? `/${sibling.setCode}/player/${s}` : null);
-  const prevTo = hrefFor(sibling.prevSlug);
-  const nextTo = hrefFor(sibling.nextSlug);
+  const toFor = (s: string | null) =>
+    s ? { pathname: `/${sibling.setCode}/player/${s}`, search: qs } : null;
+  const prevTo = toFor(sibling.prevSlug);
+  const nextTo = toFor(sibling.nextSlug);
   return (
     <div className={cn("flex items-center", compact ? "gap-2" : "gap-3")}>
       {prevTo ? (
