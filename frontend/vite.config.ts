@@ -35,7 +35,7 @@ const emitRootRedirectsPlugin = {
   closeBundle() {
     const dest = path.resolve(__dirname, "dist/_redirects");
     fs.mkdirSync(path.dirname(dest), { recursive: true });
-    fs.writeFileSync(dest, "/leaderboard/*  /leaderboard/index.html  200\n");
+    fs.writeFileSync(dest, "/leaderboard/* /leaderboard 200\n");
   },
 };
 
