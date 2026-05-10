@@ -39,6 +39,7 @@ export interface PlayerDraftEvent {
   slug: string;
   setCode: string;
   eventId: string;
+  seventeenlandsEventId?: string | null;
   format: string;
   expansion: string;
   wins: number;
@@ -80,6 +81,7 @@ export interface RecentTrophy {
   slug: string;
   displayName: string;
   avatarUrl: string | null;
+  seventeenlandsEventId?: string | null;
   format: string;
   colors: string;
   wins: number;

@@ -87,6 +87,22 @@ const WEDGE_NAMES: Record<string, string> = {
   BRG: "JUND",
 };
 
+const COLOR_FULL_NAMES: Record<string, string> = {
+  W: "WHITE",
+  U: "BLUE",
+  B: "BLACK",
+  R: "RED",
+  G: "GREEN",
+};
+
+function fourColorMissing(code: string): string | null {
+  if (code.length !== 4) return null;
+  for (const c of "WUBRG") {
+    if (!code.includes(c)) return c;
+  }
+  return null;
+}
+
 export function colorsDisplayName(code: string): string {
   if (code === MULTI) return "SOUP";
   if (code === OTHER) return "OTHER";
@@ -94,6 +110,8 @@ export function colorsDisplayName(code: string): string {
   if (GUILD_NAMES[code]) return GUILD_NAMES[code];
   if (WEDGE_NAMES[code]) return WEDGE_NAMES[code];
   if (code === "WUBRG") return "5-COLOR";
+  const missing = fourColorMissing(code);
+  if (missing) return `4 COLOR NO ${COLOR_FULL_NAMES[missing]}`;
   return code;
 }
 
@@ -112,8 +130,13 @@ export function deckColorParts(colors: string | null | undefined): { name: strin
   if (!colors) return { name: "", splash: "" };
   const main = _wubrgSort(colors.replace(/[a-z]/g, ""));
   const splash = _wubrgSort(colors.replace(/[A-Z]/g, "").toUpperCase());
+  const splashLabel = splash ? `SPLASH ${splash}` : "";
+  // 4-color decks: "NO X" only makes sense when not splashing — splash already names the missing color
+  if (main.length === 4 && splash) {
+    return { name: "4 COLOR", splash: splashLabel };
+  }
   const name = main ? colorsDisplayName(main) : "COLORLESS";
-  return { name, splash: splash ? `SPLASH ${splash}` : "" };
+  return { name, splash: splashLabel };
 }
 
 const comboLabel = (code: string) => `${code} · ${colorsDisplayName(code)}`;

@@ -22,8 +22,8 @@ export function ColorsSwitcher({
   return (
     <div
       className={cn(
-        "flex items-center gap-1 flex-wrap",
-        isMobile && "flex-nowrap overflow-x-auto no-scrollbar pb-2 -mb-2",
+        "flex items-center gap-1 flex-wrap min-w-0",
+        isMobile && "flex-nowrap overflow-x-auto no-scrollbar pb-2 -mb-2 w-full",
       )}
     >
       {codes.map((code) => (
@@ -52,14 +52,16 @@ function Chip({
 }) {
   if (code === "ALL" || code === MULTI || code === OTHER) {
     const label = code === "ALL" ? "ALL" : colorsDisplayName(code);
+    const activeAll = active && code === "ALL";
+    const activeAccent = active && code !== "ALL";
     return (
       <button
         onClick={onClick}
         className={cn(
           "shrink-0 h-[26px] px-2.5 border inline-flex items-center gap-1.5 cursor-pointer transition-colors font-display tracking-[0.18em] text-[11px]",
-          active
-            ? "border-green bg-green/10 text-green"
-            : "border-border2 bg-transparent text-muted hover:bg-surface",
+          activeAccent && "border-green bg-green/10 text-green",
+          activeAll && "border-border2 bg-surface text-text",
+          !active && "border-border2 bg-transparent text-muted hover:bg-surface",
         )}
       >
         {code === MULTI && <BsPaletteFill size={pipSize} aria-hidden="true" />}

@@ -188,6 +188,7 @@ export function useColorChips(setCode: string): { chips: string[]; otherCombos: 
     const otherCombos: string[] = [];
     for (const r of data) {
       if (r.colors === "" || r.colors === MULTI) continue;
+      if (r.colors.length >= 4) continue;
       if (r.events >= threshold) named.push(r.colors);
       else otherCombos.push(r.colors);
     }

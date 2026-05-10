@@ -15,7 +15,7 @@ const YOUTUBE_URL = "https://www.youtube.com/@limitedlevel-ups";
 
 export function AboutPage() {
   return (
-    <div className="bg-bg text-text min-h-screen flex flex-col">
+    <div className="bg-bg text-text min-h-screen flex flex-col animate-fadeIn">
       <AppHeader subtitle="ABOUT" />
       <main className="flex-1 flex flex-col mx-auto w-full max-w-[1040px] px-5 md:px-10 pt-5 md:pt-10 pb-5 md:pb-5 md:relative">
         <Intro />
@@ -151,7 +151,7 @@ function Scoring() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12">
         <div className="flex flex-col gap-2 text-[13px] md:text-[14px] text-muted leading-[1.6]">
           <p>
-            Calculated <span className="text-text">per queue</span>, then added across all queues.<br/>
+            Scored <span className="text-text">independently for each queue</span>, then summed into a single total.<br/>
             The goal is to reward performance while considering volume.</p>
           <p>
             <span className="text-text">Weight</span> values events by difficulty, cost, and
@@ -176,9 +176,9 @@ function Scoring() {
             <span>WEIGHT</span>
           </div>
           <Leader label="Premier Draft" value="10" />
-          <Leader label="Traditional Draft" value="9" />
+          <Leader label="Traditional Draft" value="8" />
           <Leader label="Sealed" note="Includes Arena Direct" value="8" />
-          <Leader label="Quick & Pick Two Draft" value="3" />
+          <Leader label="Quick & Pick Two Draft" value="4" />
           <Leader label="ALCQ Draft 1" value="30" />
           <Leader label="ALCQ Draft 2" note="Per Game Win" value="10" />
         </div>

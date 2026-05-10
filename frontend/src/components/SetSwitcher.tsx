@@ -54,8 +54,26 @@ export function SetSwitcherMobile({
 }) {
   const [open, setOpen] = React.useState(false);
   const active = sets.find((s) => s.code === activeCode) ?? sets[0];
+  const ref = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const onClickOutside = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onClickOutside);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onClickOutside);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
   return (
-    <div className="relative">
+    <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((o) => !o)}
         className="w-full py-1.5 px-2.5 flex items-center gap-2 bg-transparent border border-border2 text-text font-display text-[13px] tracking-[0.12em] cursor-pointer"
@@ -63,7 +81,7 @@ export function SetSwitcherMobile({
         <SetGlyph code={active.code} size={16} />
         <span>{active.code}</span>
         {active.isActive && (
-          <span className="text-muted text-[10px] tracking-[0.18em]">· LIVE SET</span>
+          <span className="text-muted text-[10px] tracking-[0.18em]">· LIVE</span>
         )}
         <span className="flex-1" />
         <span className="text-muted text-[10px]">▾</span>

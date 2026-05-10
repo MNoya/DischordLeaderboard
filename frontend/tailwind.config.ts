@@ -45,9 +45,19 @@ const config: Config = {
           "0%, 100%": { opacity: "1" },
           "50%": { opacity: "0.3" },
         },
+        fadeIn: {
+          "0%": { opacity: "0" },
+          "100%": { opacity: "1" },
+        },
+        fadeUpIn: {
+          "0%": { opacity: "0", transform: "translateY(4px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
       },
       animation: {
         pulse: "pulse 1.4s infinite",
+        fadeIn: "fadeIn 220ms ease-out both",
+        fadeUpIn: "fadeUpIn 260ms ease-out both",
       },
     },
   },

@@ -14,6 +14,8 @@ import {
   adaptLeaderboardRow,
   adaptSet,
 } from "./adapter";
+import { computeScore, type ScoringStatRow } from "./scoring";
+import { colorsOf, effectiveColorCount } from "./utils";
 import type {
   ColorsLeaderboardRow,
   ColorsSummary,
@@ -158,39 +160,109 @@ export async function fetchColorsLeaderboard(
     .map((r, i) => ({ ...r, rank: i + 1 }));
 }
 
-// score sums per-row; approximate since trophy_rate × shrinkage is non-linear
+// OTHER aggregates raw events client-side because the archetype rollup also
+// counts splash-into-MULTI trophies under their main archetype, which would
+// double-count them into the OTHER bucket. By walking events directly we can
+// enforce "main archetype is sub-threshold AND effective < 4" — keeping OTHER
+// and SOUP exclusive — at the cost of fetching the set's full event stream.
 export async function fetchOtherColorsLeaderboard(
   setCode: string,
   otherCombos: string[],
 ): Promise<ColorsLeaderboardRow[]> {
   if (otherCombos.length === 0) return [];
-  const { data, error } = await client()
-    .from("public_archetype_leaderboard")
-    .select("*")
-    .eq("set_code", setCode)
-    .in("archetype", otherCombos);
-  if (error) throw error;
+  const otherSet = new Set(otherCombos);
 
-  const byPlayer = new Map<string, ColorsLeaderboardRow>();
-  for (const raw of data ?? []) {
-    const row = adaptColorsRow(raw as Record<string, unknown>);
-    const existing = byPlayer.get(row.slug);
-    if (!existing) {
-      byPlayer.set(row.slug, { ...row, colors: "OTHER", rank: 0 });
-      continue;
-    }
-    existing.score += row.score;
-    existing.trophies += row.trophies;
-    existing.events += row.events;
-    existing.wins += row.wins;
-    existing.losses += row.losses;
-    if (row.lastCalculatedAt > existing.lastCalculatedAt) {
-      existing.lastCalculatedAt = row.lastCalculatedAt;
-    }
+  // Supabase caps each request at db-max-rows (default 1000). Page until done.
+  const allEvents: Array<Record<string, unknown>> = [];
+  const pageSize = 1000;
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await client()
+      .from("public_player_draft_events")
+      .select("slug, format, colors, wins, losses, is_trophy, finished_at")
+      .eq("set_code", setCode)
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    const batch = (data ?? []) as Array<Record<string, unknown>>;
+    allEvents.push(...batch);
+    if (batch.length < pageSize) break;
   }
-  return Array.from(byPlayer.values())
-    .filter((r) => r.events > 0)
-    .sort((a, b) => b.score - a.score)
+
+  const metaResp = await client()
+    .from("public_leaderboard")
+    .select("slug, display_name, avatar_url, last_calculated_at")
+    .eq("set_code", setCode);
+  if (metaResp.error) throw metaResp.error;
+
+  const metaBySlug = new Map<string, Record<string, unknown>>();
+  for (const m of (metaResp.data ?? []) as Array<Record<string, unknown>>) {
+    metaBySlug.set(m.slug as string, m);
+  }
+
+  interface PlayerAgg {
+    formatRows: ScoringStatRow[];
+    events: number;
+    trophies: number;
+    wins: number;
+    losses: number;
+    lastFinishedAt: string;
+  }
+  const perSlug = new Map<string, PlayerAgg>();
+
+  for (const raw of allEvents) {
+    const colors = (raw.colors as string | null) ?? "";
+    if (effectiveColorCount(colors) >= 4) continue;
+    if (!otherSet.has(colorsOf(colors))) continue;
+
+    const slug = raw.slug as string;
+    const fmt = (raw.format as string) ?? "";
+    const wins = (raw.wins as number) ?? 0;
+    const losses = (raw.losses as number) ?? 0;
+    const isTrophy = Boolean(raw.is_trophy);
+    const finishedAt = (raw.finished_at as string) ?? "";
+
+    let agg = perSlug.get(slug);
+    if (!agg) {
+      agg = { formatRows: [], events: 0, trophies: 0, wins: 0, losses: 0, lastFinishedAt: "" };
+      perSlug.set(slug, agg);
+    }
+    agg.events += 1;
+    agg.wins += wins;
+    agg.losses += losses;
+    if (isTrophy) agg.trophies += 1;
+    agg.formatRows.push({ format: fmt, wins, losses, trophies: isTrophy ? 1 : 0, events: 1 });
+    if (finishedAt > agg.lastFinishedAt) agg.lastFinishedAt = finishedAt;
+  }
+
+  const rows: ColorsLeaderboardRow[] = [];
+  for (const [slug, agg] of perSlug) {
+    if (agg.events === 0) continue;
+    const meta = metaBySlug.get(slug);
+    rows.push({
+      setCode,
+      colors: "OTHER",
+      slug,
+      displayName: (meta?.display_name as string) ?? slug,
+      avatarUrl: (meta?.avatar_url as string | null) ?? null,
+      rank: 0,
+      score: computeScore(agg.formatRows),
+      trophies: agg.trophies,
+      events: agg.events,
+      wins: agg.wins,
+      losses: agg.losses,
+      lastCalculatedAt:
+        agg.lastFinishedAt ||
+        ((meta?.last_calculated_at as string | undefined) ?? new Date(0).toISOString()),
+    });
+  }
+
+  return rows
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      const wpA = a.wins / Math.max(1, a.wins + a.losses);
+      const wpB = b.wins / Math.max(1, b.wins + b.losses);
+      if (wpB !== wpA) return wpB - wpA;
+      return a.slug.localeCompare(b.slug);
+    })
     .map((r, i) => ({ ...r, rank: i + 1 }));
 }
 
@@ -273,6 +345,7 @@ export async function fetchRecentTrophies(
       slug: row.slug as string,
       displayName: row.display_name as string,
       avatarUrl: (row.avatar_url ?? null) as string | null,
+      seventeenlandsEventId: (row.seventeenlands_event_id ?? null) as string | null,
       format: row.format as string,
       colors: row.colors as string,
       wins: row.wins as number,

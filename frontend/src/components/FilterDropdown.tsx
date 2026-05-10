@@ -60,7 +60,7 @@ export function FilterDropdown({
         className={cn(
           "flex items-center gap-2 w-full bg-transparent border border-border2 font-display text-text cursor-pointer transition-colors hover:bg-surface",
           isMobile
-            ? "px-2.5 py-1 text-[11px] tracking-[0.16em]"
+            ? "px-2.5 py-1.5 text-[13px] tracking-[0.12em]"
             : "px-3.5 py-1.5 min-w-[220px] text-[13px] tracking-[0.14em]",
           open && "bg-surface",
         )}
@@ -68,7 +68,7 @@ export function FilterDropdown({
         <span
           className={cn(
             "text-muted tracking-[0.22em]",
-            isMobile ? "text-[9px]" : "text-[11px]",
+            isMobile ? "text-[10px]" : "text-[11px]",
           )}
         >
           {label}
@@ -77,14 +77,14 @@ export function FilterDropdown({
           {renderValue ? renderValue(selected) : selected.label}
         </span>
         <span className="flex-1" />
-        <span className={cn("text-muted", isMobile ? "text-[9px]" : "text-[10px]")}>
+        <span className={cn("text-muted", isMobile ? "text-[10px]" : "text-[10px]")}>
           {open ? "▴" : "▾"}
         </span>
       </button>
 
       {open && (
         <div
-          className="absolute left-0 right-0 top-[calc(100%+4px)] bg-surface border border-border2 z-20 shadow-lg"
+          className="absolute left-0 top-[calc(100%+4px)] min-w-full w-max max-w-[calc(100vw-24px)] bg-surface border border-border2 z-20 shadow-lg"
           role="listbox"
         >
           {options.map((o, i) => {
@@ -100,9 +100,9 @@ export function FilterDropdown({
                 role="option"
                 aria-selected={isSelected}
                 className={cn(
-                  "w-full text-left flex items-center gap-2 font-display cursor-pointer transition-colors",
+                  "w-full text-left flex items-center gap-2 font-display cursor-pointer transition-colors whitespace-nowrap",
                   isMobile
-                    ? "px-2.5 py-2 text-[12px] tracking-[0.12em]"
+                    ? "px-2.5 py-[9px] text-[13px] tracking-[0.1em]"
                     : "px-3.5 py-2 text-[13px] tracking-[0.08em]",
                   i > 0 && "border-t border-border",
                   isSelected ? "bg-surface2 text-text" : "bg-transparent text-text hover:bg-surface2",
