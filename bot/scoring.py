@@ -29,9 +29,9 @@ class QueueGroup:
 
 DEFAULT_QUEUE_GROUPS: tuple[QueueGroup, ...] = (
     QueueGroup("Premier", points=10, formats=("PremierDraft",)),
-    QueueGroup("Traditional", points=9, formats=("TradDraft",)),
+    QueueGroup("Traditional", points=8, formats=("TradDraft",)),
     QueueGroup("Sealed", points=8, formats=("Sealed", "TradSealed", "ArenaDirect_Sealed", "QualifierPlayInSealed")),
-    QueueGroup("Quick", points=3, formats=("QuickDraft", "PickTwoDraft", "Emblem_QuickDraft")),
+    QueueGroup("Quick", points=4, formats=("QuickDraft", "PickTwoDraft", "Emblem_QuickDraft")),
     QueueGroup("LCQ Draft 1", points=30, formats=("LimitedChampionshipQualifier_Draft1",)),
     QueueGroup(
         "LCQ Draft 2",

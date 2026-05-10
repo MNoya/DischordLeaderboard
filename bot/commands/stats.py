@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from bot import audit
+from bot.config import settings
 from bot.models import MagicSet, Player, PlayerSetScore, PlayerStats
 from bot.scoring import compute_score_breakdown
 from bot.sets import ACTIVE_SET_CODE
@@ -23,6 +24,7 @@ class StatsData:
     set_code: str
     set_name: str
     player_name: str
+    player_slug: str
     rank: int | None
     total_score: float
     total_trophies: int
@@ -98,6 +100,7 @@ def process_stats(
         set_code=magic_set.code,
         set_name=magic_set.name,
         player_name=player.display_name,
+        player_slug=player.slug,
         rank=rank,
         total_score=total_score,
         total_trophies=total_trophies,
@@ -124,8 +127,10 @@ def _format_breakdown(breakdown: list[dict]) -> str:
 
 
 def render_embed(data: StatsData) -> discord.Embed:
+    profile_url = f"{settings.public_site_url.rstrip('/')}/player/{data.player_slug}"
     embed = discord.Embed(
         title=f"📊 Stats — {data.player_name}",
+        url=profile_url,
         color=discord.Color.blurple(),
     )
     if data.rank is not None:

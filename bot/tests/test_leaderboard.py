@@ -120,8 +120,8 @@ def _data(viewer=None, top=None, last_updated=None, drafter_count=0):
         set_code="SOS",
         set_name="Secrets of Strixhaven",
         top=top if top is not None else [
-            LeaderboardEntry(1, "alice-id", "Alice", 50.0, 5),
-            LeaderboardEntry(2, "bob-id",   "Bob",   30.0, 3),
+            LeaderboardEntry(1, "alice-id", "alice", "Alice", 50.0, 5),
+            LeaderboardEntry(2, "bob-id",   "bob",   "Bob",   30.0, 3),
         ],
         viewer=viewer,
         last_updated=last_updated,
@@ -138,7 +138,7 @@ def _player_field_value(embed):
 
 def test_public_embed_omits_you_are_line_for_outside_viewer():
     """If viewer is below top, 'You are #N' must not leak into the public message."""
-    viewer = LeaderboardEntry(7, "me-id", "Me", 1.0, 0)
+    viewer = LeaderboardEntry(7, "me-id", "me", "Me", 1.0, 0)
     embed = render_public_embed(_data(viewer=viewer))
     assert embed.description is None or "You are" not in embed.description
 

@@ -12,8 +12,24 @@ from sqlalchemy.orm import Session
 
 from bot import audit
 from bot.config import settings
-from bot.models import LeaderboardMessage, MagicSet, Player, PlayerSetScore, PlayerStats
+from bot.models import LeaderboardMessage, MagicSet, Player, PlayerArchetypeScore, PlayerSetScore, PlayerStats
+from bot.scoring import DEFAULT_QUEUE_GROUPS, compute_score
 from bot.sets import ACTIVE_SET_CODE
+
+
+# Two-color guild → WUBRG-sorted code. Used by /leaderboard color:<guild>.
+GUILD_TO_CODE: dict[str, str] = {
+    "Azorius":  "WU",
+    "Orzhov":   "WB",
+    "Boros":    "WR",
+    "Selesnya": "WG",
+    "Dimir":    "UB",
+    "Izzet":    "UR",
+    "Simic":    "UG",
+    "Rakdos":   "BR",
+    "Golgari":  "BG",
+    "Gruul":    "RG",
+}
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +38,7 @@ logger = logging.getLogger(__name__)
 class LeaderboardEntry:
     rank: int
     player_id: str
+    slug: str
     display_name: str
     score: float
     trophies: int
@@ -52,7 +69,7 @@ def process_leaderboard(
         return None
 
     rows = session.execute(
-        select(Player.id, Player.display_name, Player.discord_id,
+        select(Player.id, Player.slug, Player.display_name, Player.discord_id,
                PlayerSetScore.score, PlayerSetScore.trophies)
         .join(PlayerSetScore, PlayerSetScore.player_id == Player.id)
         .where(Player.active.is_(True), PlayerSetScore.set_id == magic_set.id)
@@ -60,24 +77,24 @@ def process_leaderboard(
     ).all()
 
     ranked = [
-        (idx + 1, r.id, r.display_name, r.discord_id, float(r.score), int(r.trophies))
+        (idx + 1, r.id, r.slug, r.display_name, r.discord_id, float(r.score), int(r.trophies))
         for idx, r in enumerate(rows)
     ]
     # Default view hides players with no points yet — they're "drafting but
     # not on the board". The full-DM view passes include_zero_scores=True
     # so signed-up players who haven't scored still appear
-    visible = ranked if include_zero_scores else [row for row in ranked if row[4] > 0]
+    visible = ranked if include_zero_scores else [row for row in ranked if row[5] > 0]
     top = [
-        LeaderboardEntry(rank=rank, player_id=pid, display_name=name, score=score, trophies=trophies)
-        for rank, pid, name, _did, score, trophies in visible[:top_n]
+        LeaderboardEntry(rank=rank, player_id=pid, slug=slug, display_name=name, score=score, trophies=trophies)
+        for rank, pid, slug, name, _did, score, trophies in visible[:top_n]
     ]
 
     viewer_entry: LeaderboardEntry | None = None
     if viewer_discord_id is not None:
-        for rank, pid, name, did, score, trophies in ranked:
+        for rank, pid, slug, name, did, score, trophies in ranked:
             if did == viewer_discord_id:
                 viewer_entry = LeaderboardEntry(
-                    rank=rank, player_id=pid, display_name=name, score=score, trophies=trophies,
+                    rank=rank, player_id=pid, slug=slug, display_name=name, score=score, trophies=trophies,
                 )
                 break
 
@@ -106,17 +123,155 @@ def process_leaderboard(
     )
 
 
+def process_leaderboard_for_format(
+    session: Session, viewer_discord_id: str | None, format_label: str, top_n: int = 10,
+) -> LeaderboardData | None:
+    """Per-format leaderboard: ranks each player by their score contribution
+    in the named queue group (Premier, Quick, Sealed, etc.).
+    """
+    magic_set = _current_set(session)
+    if magic_set is None:
+        return None
+
+    group = next((g for g in DEFAULT_QUEUE_GROUPS if g.label == format_label), None)
+    if group is None:
+        return None
+
+    rows = session.execute(
+        select(
+            Player.id, Player.slug, Player.display_name, Player.discord_id,
+            PlayerStats.format, PlayerStats.events, PlayerStats.wins,
+            PlayerStats.losses, PlayerStats.trophies,
+        )
+        .join(PlayerStats, PlayerStats.player_id == Player.id)
+        .where(
+            Player.active.is_(True),
+            PlayerStats.set_id == magic_set.id,
+            PlayerStats.format.in_(group.formats),
+        )
+    ).all()
+
+    bucket: dict[str, dict] = {}
+    for r in rows:
+        b = bucket.setdefault(r.id, {
+            "slug": r.slug, "display_name": r.display_name, "discord_id": r.discord_id,
+            "stats": [], "trophies": 0,
+        })
+        b["stats"].append({
+            "format": r.format, "events": int(r.events or 0),
+            "wins": int(r.wins or 0), "losses": int(r.losses or 0),
+            "trophies": int(r.trophies or 0),
+        })
+        b["trophies"] += int(r.trophies or 0)
+
+    scored: list[tuple[float, int, str, str, str, str | None]] = []
+    for pid, b in bucket.items():
+        score = compute_score(b["stats"], groups=(group,))
+        if score <= 0:
+            continue
+        scored.append((score, b["trophies"], pid, b["slug"], b["display_name"], b["discord_id"]))
+
+    scored.sort(key=lambda x: (-x[0], x[4].lower()))
+
+    ranked = [
+        (idx + 1, pid, slug, name, did, score, trophies)
+        for idx, (score, trophies, pid, slug, name, did) in enumerate(scored)
+    ]
+    top = [
+        LeaderboardEntry(rank=rank, player_id=pid, slug=slug, display_name=name, score=score, trophies=trophies)
+        for rank, pid, slug, name, _did, score, trophies in ranked[:top_n]
+    ]
+    viewer_entry: LeaderboardEntry | None = None
+    if viewer_discord_id is not None:
+        for rank, pid, slug, name, did, score, trophies in ranked:
+            if did == viewer_discord_id:
+                viewer_entry = LeaderboardEntry(
+                    rank=rank, player_id=pid, slug=slug, display_name=name, score=score, trophies=trophies,
+                )
+                break
+
+    last_updated = session.execute(
+        select(func.max(PlayerSetScore.last_calculated_at))
+        .where(PlayerSetScore.set_id == magic_set.id)
+    ).scalar()
+
+    return LeaderboardData(
+        set_code=magic_set.code,
+        set_name=magic_set.name,
+        top=top,
+        viewer=viewer_entry,
+        last_updated=last_updated,
+        drafter_count=len(scored),
+    )
+
+
+def process_leaderboard_for_archetype(
+    session: Session, viewer_discord_id: str | None, archetype: str, top_n: int = 10,
+) -> LeaderboardData | None:
+    """Per-archetype (color combo) leaderboard, reading pre-computed
+    PlayerArchetypeScore rows.
+    """
+    magic_set = _current_set(session)
+    if magic_set is None:
+        return None
+
+    rows = session.execute(
+        select(
+            Player.id, Player.slug, Player.display_name, Player.discord_id,
+            PlayerArchetypeScore.score, PlayerArchetypeScore.trophies,
+        )
+        .join(PlayerArchetypeScore, PlayerArchetypeScore.player_id == Player.id)
+        .where(
+            Player.active.is_(True),
+            PlayerArchetypeScore.set_id == magic_set.id,
+            PlayerArchetypeScore.archetype == archetype,
+        )
+        .order_by(PlayerArchetypeScore.score.desc(), Player.display_name.asc())
+    ).all()
+
+    ranked = [
+        (idx + 1, r.id, r.slug, r.display_name, r.discord_id, float(r.score), int(r.trophies))
+        for idx, r in enumerate(rows)
+    ]
+    visible = [row for row in ranked if row[5] > 0]
+    top = [
+        LeaderboardEntry(rank=rank, player_id=pid, slug=slug, display_name=name, score=score, trophies=trophies)
+        for rank, pid, slug, name, _did, score, trophies in visible[:top_n]
+    ]
+    viewer_entry: LeaderboardEntry | None = None
+    if viewer_discord_id is not None:
+        for rank, pid, slug, name, did, score, trophies in ranked:
+            if did == viewer_discord_id:
+                viewer_entry = LeaderboardEntry(
+                    rank=rank, player_id=pid, slug=slug, display_name=name, score=score, trophies=trophies,
+                )
+                break
+
+    last_updated = session.execute(
+        select(func.max(PlayerArchetypeScore.last_calculated_at))
+        .where(PlayerArchetypeScore.set_id == magic_set.id)
+    ).scalar()
+
+    return LeaderboardData(
+        set_code=magic_set.code,
+        set_name=magic_set.name,
+        top=top,
+        viewer=viewer_entry,
+        last_updated=last_updated,
+        drafter_count=len(visible),
+    )
+
+
 MEDAL_EMOJIS = {1: "🥇", 2: "🥈", 3: "🥉"}
 
 
-def _player_url(player_id: str) -> str:
+def _player_url(slug: str) -> str:
     """Build the public-site URL for a player's profile.
 
-    The site doesn't exist yet — this URL pattern is reserved so leaderboard
-    messages already in channels start working without a code change once
-    the frontend ships.
+    The frontend routes profiles at ``/player/{slug}`` where slug is the
+    URL-safe handle frozen at /join.
     """
-    return f"{settings.public_site_url.rstrip('/')}/player/{player_id}"
+    return f"{settings.public_site_url.rstrip('/')}/player/{slug}"
 
 
 def _format_leaderboard(top: list[LeaderboardEntry]) -> str:
@@ -191,6 +346,18 @@ def _apply_footer(embed: discord.Embed, data: LeaderboardData) -> None:
         embed.set_footer(text="\n".join(rows))
 
 
+def _format_profile_links(top: list[LeaderboardEntry], limit: int = 10) -> str:
+    """Compact "Profiles" line: linked names rendered as `[Name](url)` chips.
+
+    Discord doesn't render markdown inside the inline-code rows used for
+    table alignment, so the links live below the table instead.
+    """
+    chunks: list[str] = []
+    for e in top[:limit]:
+        chunks.append(f"[{e.display_name}](<{_player_url(e.slug)}>)")
+    return " · ".join(chunks)
+
+
 def render_embed(data: LeaderboardData) -> discord.Embed:
     """Single leaderboard embed used everywhere — channel posts, DM replies,
     and post-/join previews.
@@ -207,7 +374,9 @@ def render_embed(data: LeaderboardData) -> discord.Embed:
     if not data.top:
         embed.description = "_No players have scored yet for this set._"
     else:
-        embed.description = _format_leaderboard(data.top)
+        table = _format_leaderboard(data.top)
+        links = _format_profile_links(data.top)
+        embed.description = f"{table}\n\n🔗 {links}"
     _apply_footer(embed, data)
     return embed
 
@@ -413,13 +582,73 @@ class Leaderboard(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="leaderboard", description="Show the current set leaderboard.")
+    @app_commands.describe(
+        format="Show only one queue (Premier, Quick, Sealed, Traditional)",
+        color="Show only one guild's archetype (Azorius, Boros, Dimir, ...)",
+    )
+    @app_commands.choices(
+        format=[
+            app_commands.Choice(name="Premier",     value="Premier"),
+            app_commands.Choice(name="Traditional", value="Traditional"),
+            app_commands.Choice(name="Sealed",      value="Sealed"),
+            app_commands.Choice(name="Quick",       value="Quick"),
+        ],
+        color=[
+            app_commands.Choice(name=guild, value=code)
+            for guild, code in GUILD_TO_CODE.items()
+        ],
+    )
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
-    async def leaderboard(self, interaction: discord.Interaction) -> None:
+    async def leaderboard(
+        self,
+        interaction: discord.Interaction,
+        format: app_commands.Choice[str] | None = None,
+        color: app_commands.Choice[str] | None = None,
+    ) -> None:
         from bot.database import SessionLocal
 
         user_id = str(interaction.user.id)
-        audit.event("leaderboard_invoked", user_id=user_id)
+        audit.event(
+            "leaderboard_invoked",
+            user_id=user_id,
+            format=format.value if format else None,
+            color=color.value if color else None,
+        )
+
+        if format is not None and color is not None:
+            await interaction.response.send_message(
+                "Pick one filter — `format` or `color`, not both.",
+                ephemeral=(interaction.guild is not None),
+            )
+            return
+
+        in_guild = interaction.guild is not None
+        ephemeral = in_guild
+
+        if format is not None or color is not None:
+            with SessionLocal() as session:
+                if format is not None:
+                    data = process_leaderboard_for_format(
+                        session, viewer_discord_id=user_id, format_label=format.value,
+                    )
+                    suffix = format.name
+                else:
+                    assert color is not None
+                    data = process_leaderboard_for_archetype(
+                        session, viewer_discord_id=user_id, archetype=color.value,
+                    )
+                    suffix = color.name
+            if data is None:
+                await interaction.response.send_message(
+                    "No active set is configured.",
+                    ephemeral=ephemeral,
+                )
+                return
+            embed = render_public_embed(data)
+            embed.title = f"{embed.title} · {suffix}"
+            await interaction.response.send_message(embed=embed, ephemeral=ephemeral)
+            return
 
         with SessionLocal() as session:
             data = process_leaderboard(session, viewer_discord_id=user_id)
@@ -428,14 +657,13 @@ class Leaderboard(commands.Cog):
         if data is None or magic_set is None:
             await interaction.response.send_message(
                 "No active set is configured. `bot/sets.py::ACTIVE_SET_CODE` doesn't match any registered set.",
-                ephemeral=(interaction.guild is not None),
+                ephemeral=ephemeral,
             )
             return
 
         # In a guild channel: replace any tracked leaderboard message in this channel
         # so the new post lands at the bottom rather than spamming alongside the prior.
         # In a DM: single ephemeral, fully personalized.
-        in_guild = interaction.guild is not None
         if in_guild:
             await interaction.response.defer()
             await _replace_tracked_message(
