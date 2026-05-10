@@ -23,13 +23,14 @@ _AVATAR_URL_SQL = """
 
 
 def upgrade() -> None:
+    # CREATE OR REPLACE VIEW can only append columns to the existing column list,
+    # so the new column has to land at the end of the SELECT.
     op.execute("""
         CREATE OR REPLACE VIEW public_player_draft_events AS
         SELECT
             p.slug,
             s.code AS set_code,
             de.id AS event_id,
-            de.seventeenlands_event_id,
             de.format,
             de.expansion,
             de.wins,
@@ -37,7 +38,8 @@ def upgrade() -> None:
             de.is_trophy,
             de.colors,
             de.started_at,
-            de.finished_at
+            de.finished_at,
+            de.seventeenlands_event_id
         FROM draft_events de
         JOIN players p ON p.id = de.player_id
         JOIN sets s ON s.id = de.set_id
@@ -52,12 +54,12 @@ def upgrade() -> None:
             p.slug,
             p.display_name,
             {_AVATAR_URL_SQL} AS avatar_url,
-            de.seventeenlands_event_id,
             de.format,
             de.colors,
             de.wins,
             de.losses,
-            de.finished_at
+            de.finished_at,
+            de.seventeenlands_event_id
         FROM draft_events de
         JOIN players p ON p.id = de.player_id
         JOIN sets s ON s.id = de.set_id
