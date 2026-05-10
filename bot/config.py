@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     discord_guild_id: int | None = None
     discord_admin_role_id: int | None = None
     discord_botlog_channel_id: int | None = None
-    public_site_url: str = "https://dischordboard.netlify.app"
+    public_site_url: str = "https://dischord.pages.dev/leaderboard"
 
 
 settings = Settings()
