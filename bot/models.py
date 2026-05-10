@@ -135,11 +135,12 @@ class PlayerArchetypeScore(Base):
 
 
 class LeaderboardMessage(Base):
-    """Tracks the bot's currently-posted leaderboard embed per (channel, set).
+    """Tracks every bot-posted leaderboard embed per (channel, set).
 
-    Lets the bot edit the message in place when data refreshes, and lets
-    /leaderboard delete the previous post and bump a fresh one to the bottom
-    of the channel rather than spamming duplicates.
+    Multiple rows per (channel, set) are allowed: a pinned message stays
+    tracked alongside any newer bottom-fresh post. !refresh edits each tracked
+    message in place; /leaderboard deletes the unpinned prior posts and leaves
+    pinned ones alone.
     """
     __tablename__ = "leaderboard_messages"
 
@@ -147,11 +148,11 @@ class LeaderboardMessage(Base):
     channel_id       = Column(String, nullable=False)
     set_id           = Column(String, ForeignKey("sets.id"), nullable=False)
     message_id       = Column(String, nullable=False)
+    # Filter applied at post-time. NULL = unfiltered (overall); 'format' or 'color'
+    # → filter_value holds the queue label or archetype code respectively.
+    filter_type      = Column(String, nullable=True)
+    filter_value     = Column(String, nullable=True)
     last_rendered_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
-
-    __table_args__ = (
-        UniqueConstraint("channel_id", "set_id", name="uq_leaderboard_message_per_channel_set"),
-    )
 
 
 class DraftEvent(Base):

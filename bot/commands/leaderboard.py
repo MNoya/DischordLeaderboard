@@ -457,54 +457,123 @@ def render_view() -> discord.ui.View:
     return LeaderboardView()
 
 
+CODE_TO_COLOR_LABEL: dict[str, str] = {code: label for label, code in COLOR_CHOICES.items()}
+
+
+def render_filtered_data(
+    session: Session,
+    *,
+    filter_type: str | None,
+    filter_value: str | None,
+    viewer_discord_id: str | None,
+) -> tuple["LeaderboardData | None", str | None]:
+    """Resolve a filter into the matching processor + display suffix.
+
+    Returns (data, suffix). suffix is the human label appended to the embed
+    title (e.g. "Premier", "Boros"). Both are None when no active set exists.
+    """
+    if filter_type == "format":
+        assert filter_value is not None
+        data = process_leaderboard_for_format(
+            session, viewer_discord_id=viewer_discord_id, format_label=filter_value,
+        )
+        return data, filter_value
+    if filter_type == "color":
+        assert filter_value is not None
+        data = process_leaderboard_for_archetype(
+            session, viewer_discord_id=viewer_discord_id, archetype=filter_value,
+        )
+        return data, CODE_TO_COLOR_LABEL.get(filter_value, filter_value)
+    data = process_leaderboard(session, viewer_discord_id=viewer_discord_id)
+    return data, None
+
+
+def _filter_clause(filter_type: str | None, filter_value: str | None):
+    """Postgres `IS NULL` vs `=` differ; build the right one for nullable filters."""
+    type_clause = (
+        LeaderboardMessage.filter_type.is_(None) if filter_type is None
+        else LeaderboardMessage.filter_type == filter_type
+    )
+    value_clause = (
+        LeaderboardMessage.filter_value.is_(None) if filter_value is None
+        else LeaderboardMessage.filter_value == filter_value
+    )
+    return type_clause, value_clause
+
+
 async def _replace_tracked_message(
     interaction: discord.Interaction,
     channel_id: str,
     set_id: str,
     embed: discord.Embed,
     view: discord.ui.View,
+    filter_type: str | None = None,
+    filter_value: str | None = None,
 ) -> None:
-    """Post a fresh leaderboard in the channel and replace any prior tracked one.
+    """Post a fresh leaderboard and reconcile prior tracked messages with the
+    same (channel, set, filter_type, filter_value).
 
-    Behavior:
-      1. Send the new message via interaction followup (deferred upstream).
-      2. Best-effort delete the previously tracked message — if the user buried
-         the old one, we want the new one at the bottom of the channel.
-      3. Upsert the tracking row to point at the new message id.
+    For each matching prior row:
+      - if the message is pinned, leave the message and keep the tracking row
+        so !refresh continues to edit it in place.
+      - otherwise delete the message and drop the tracking row.
 
-    A NotFound on delete is normal (mod or user wiped it); we just move on.
+    The freshly-posted message gets its own tracking row carrying the filter
+    so refresh can re-render it with the correct data later.
+
+    A NotFound on fetch is normal (mod or user wiped it); we drop the row.
     """
     from bot.database import SessionLocal
 
     sent = await interaction.followup.send(embed=embed, view=view, wait=True)
+    new_message_id = str(sent.id)
+
+    type_clause, value_clause = _filter_clause(filter_type, filter_value)
 
     with SessionLocal() as session:
-        prior = session.execute(
+        prior_rows = session.execute(
             select(LeaderboardMessage).where(
                 LeaderboardMessage.channel_id == channel_id,
                 LeaderboardMessage.set_id == set_id,
+                type_clause,
+                value_clause,
             )
-        ).scalar_one_or_none()
-        prior_message_id = prior.message_id if prior is not None else None
+        ).scalars().all()
+        prior_targets = [(row.id, row.message_id) for row in prior_rows]
 
-        if prior is None:
-            session.add(LeaderboardMessage(
-                channel_id=channel_id, set_id=set_id, message_id=str(sent.id),
-            ))
-        else:
-            prior.message_id = str(sent.id)
-            prior.last_rendered_at = datetime.now(timezone.utc)
+        session.add(LeaderboardMessage(
+            channel_id=channel_id, set_id=set_id, message_id=new_message_id,
+            filter_type=filter_type, filter_value=filter_value,
+        ))
         session.commit()
 
-    if prior_message_id is not None and prior_message_id != str(sent.id):
+    for row_id, prior_message_id in prior_targets:
+        if prior_message_id == new_message_id:
+            continue
+        keep_row = False
         try:
             old = await interaction.channel.fetch_message(int(prior_message_id))
-            await old.delete()
+            if old.pinned:
+                logger.info(
+                    "prior leaderboard message %s is pinned, leaving in place",
+                    prior_message_id,
+                )
+                keep_row = True
+            else:
+                await old.delete()
         except discord.NotFound:
             pass
         except discord.HTTPException as e:
             logger.warning("could not delete prior leaderboard message %s: %s",
                            prior_message_id, e)
+            keep_row = True
+
+        if not keep_row:
+            with SessionLocal() as session:
+                stale = session.get(LeaderboardMessage, row_id)
+                if stale is not None:
+                    session.delete(stale)
+                    session.commit()
 
 
 async def broadcast_current_set_update(bot: commands.Bot) -> dict:
@@ -539,19 +608,38 @@ async def edit_tracked_messages_for_set(bot: commands.Bot, magic_set: MagicSet) 
         rows = session.execute(
             select(LeaderboardMessage).where(LeaderboardMessage.set_id == magic_set.id)
         ).scalars().all()
-        targets = [(r.id, r.channel_id, r.message_id) for r in rows]
+        targets = [
+            (r.id, r.channel_id, r.message_id, r.filter_type, r.filter_value)
+            for r in rows
+        ]
 
     if not targets:
         return summary
 
-    with SessionLocal() as session:
-        data = process_leaderboard(session, viewer_discord_id=None)
-    if data is None:
-        return summary
-    embed = render_public_embed(data)
     view = render_view()
+    rendered_cache: dict[tuple[str | None, str | None], discord.Embed | None] = {}
 
-    for row_id, channel_id, message_id in targets:
+    def _render_for(filter_type: str | None, filter_value: str | None) -> discord.Embed | None:
+        key = (filter_type, filter_value)
+        if key in rendered_cache:
+            return rendered_cache[key]
+        with SessionLocal() as session:
+            data, suffix = render_filtered_data(
+                session, filter_type=filter_type, filter_value=filter_value, viewer_discord_id=None,
+            )
+        if data is None:
+            rendered_cache[key] = None
+            return None
+        embed = render_public_embed(data)
+        if suffix:
+            embed.title = f"{embed.title} · {suffix}"
+        rendered_cache[key] = embed
+        return embed
+
+    for row_id, channel_id, message_id, filter_type, filter_value in targets:
+        embed = _render_for(filter_type, filter_value)
+        if embed is None:
+            continue
         try:
             channel = bot.get_channel(int(channel_id)) or await bot.fetch_channel(int(channel_id))
             msg = await channel.fetch_message(int(message_id))
@@ -626,32 +714,19 @@ class Leaderboard(commands.Cog):
         in_guild = interaction.guild is not None
         ephemeral = in_guild
 
-        if format is not None or color is not None:
-            with SessionLocal() as session:
-                if format is not None:
-                    data = process_leaderboard_for_format(
-                        session, viewer_discord_id=user_id, format_label=format.value,
-                    )
-                    suffix = format.name
-                else:
-                    assert color is not None
-                    data = process_leaderboard_for_archetype(
-                        session, viewer_discord_id=user_id, archetype=color.value,
-                    )
-                    suffix = color.name
-            if data is None:
-                await interaction.response.send_message(
-                    "No active set is configured.",
-                    ephemeral=ephemeral,
-                )
-                return
-            embed = render_public_embed(data)
-            embed.title = f"{embed.title} · {suffix}"
-            await interaction.response.send_message(embed=embed, ephemeral=ephemeral)
-            return
+        if format is not None:
+            filter_type, filter_value = "format", format.value
+        elif color is not None:
+            filter_type, filter_value = "color", color.value
+        else:
+            filter_type, filter_value = None, None
 
         with SessionLocal() as session:
-            data = process_leaderboard(session, viewer_discord_id=user_id)
+            data, suffix = render_filtered_data(
+                session,
+                filter_type=filter_type, filter_value=filter_value,
+                viewer_discord_id=user_id,
+            )
             magic_set = _current_set(session)
 
         if data is None or magic_set is None:
@@ -661,30 +736,37 @@ class Leaderboard(commands.Cog):
             )
             return
 
-        # In a guild channel: replace any tracked leaderboard message in this channel
-        # so the new post lands at the bottom rather than spamming alongside the prior.
-        # In a DM: single ephemeral, fully personalized.
+        embed = render_public_embed(data)
+        if suffix:
+            embed.title = f"{embed.title} · {suffix}"
+
+        # In a guild channel: track the post (filter-aware) so !refresh keeps it
+        # current. In a DM: single response, fully personalized.
         if in_guild:
             await interaction.response.defer()
             await _replace_tracked_message(
                 interaction,
                 channel_id=str(interaction.channel_id),
                 set_id=magic_set.id,
-                embed=render_public_embed(data),
+                embed=embed,
                 view=render_view(),
+                filter_type=filter_type,
+                filter_value=filter_value,
             )
-            await _send_personal_followup(
-                interaction,
-                viewer_discord_id=user_id,
-                viewer_registered=data.viewer is not None,
-            )
+            if filter_type is None:
+                await _send_personal_followup(
+                    interaction,
+                    viewer_discord_id=user_id,
+                    viewer_registered=data.viewer is not None,
+                )
         else:
-            # In DM: send leaderboard as the interaction response, then the stats
-            # embed (or /join prompt) via dm.send so it doesn't visually thread as
-            # a reply under the leaderboard message.
-            await interaction.response.send_message(
-                embed=render_embed(data), view=render_view(),
-            )
+            # In DM: send the (already filter-aware) embed as the interaction response,
+            # then the stats embed (or /join prompt) via dm.send so it doesn't visually
+            # thread as a reply under the leaderboard message. Personal followup only
+            # makes sense for the unfiltered overall leaderboard.
+            await interaction.response.send_message(embed=embed, view=render_view())
+            if filter_type is not None:
+                return
             try:
                 dm = interaction.channel  # already a DM channel here
                 if data.viewer is not None:
