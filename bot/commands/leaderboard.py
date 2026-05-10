@@ -17,8 +17,9 @@ from bot.scoring import DEFAULT_QUEUE_GROUPS, compute_score
 from bot.sets import ACTIVE_SET_CODE
 
 
-# Two-color guild → WUBRG-sorted code. Used by /leaderboard color:<guild>.
-GUILD_TO_CODE: dict[str, str] = {
+# Color archetype label → PlayerArchetypeScore.archetype key
+COLOR_CHOICES: dict[str, str] = {
+    # 2-color guilds
     "Azorius":  "WU",
     "Orzhov":   "WB",
     "Boros":    "WR",
@@ -29,6 +30,19 @@ GUILD_TO_CODE: dict[str, str] = {
     "Rakdos":   "BR",
     "Golgari":  "BG",
     "Gruul":    "RG",
+    # 3-color shards/wedges
+    "Esper":    "WUB",
+    "Jeskai":   "WUR",
+    "Bant":     "WUG",
+    "Mardu":    "WBR",
+    "Abzan":    "WBG",
+    "Naya":     "WRG",
+    "Grixis":   "UBR",
+    "Sultai":   "UBG",
+    "Temur":    "URG",
+    "Jund":     "BRG",
+    # 4+ color soup
+    "Soup":     "MULTI",
 }
 
 logger = logging.getLogger(__name__)
@@ -308,7 +322,7 @@ def _format_leaderboard(top: list[LeaderboardEntry]) -> str:
         score = _center_right_bias(str(round(e.score)), score_width)
         trophy = f"{e.trophies:>{trophy_width}}"
         inner = f"{rank} {name}  {score}  {trophy}"
-        lines.append(f"`{inner}`")
+        lines.append(f"[`{inner}`](<{_player_url(e.slug)}>)")
     return "\n".join(lines)
 
 
@@ -346,18 +360,6 @@ def _apply_footer(embed: discord.Embed, data: LeaderboardData) -> None:
         embed.set_footer(text="\n".join(rows))
 
 
-def _format_profile_links(top: list[LeaderboardEntry], limit: int = 10) -> str:
-    """Compact "Profiles" line: linked names rendered as `[Name](url)` chips.
-
-    Discord doesn't render markdown inside the inline-code rows used for
-    table alignment, so the links live below the table instead.
-    """
-    chunks: list[str] = []
-    for e in top[:limit]:
-        chunks.append(f"[{e.display_name}](<{_player_url(e.slug)}>)")
-    return " · ".join(chunks)
-
-
 def render_embed(data: LeaderboardData) -> discord.Embed:
     """Single leaderboard embed used everywhere — channel posts, DM replies,
     and post-/join previews.
@@ -374,9 +376,7 @@ def render_embed(data: LeaderboardData) -> discord.Embed:
     if not data.top:
         embed.description = "_No players have scored yet for this set._"
     else:
-        table = _format_leaderboard(data.top)
-        links = _format_profile_links(data.top)
-        embed.description = f"{table}\n\n🔗 {links}"
+        embed.description = _format_leaderboard(data.top)
     _apply_footer(embed, data)
     return embed
 
@@ -584,7 +584,7 @@ class Leaderboard(commands.Cog):
     @app_commands.command(name="leaderboard", description="Show the current set leaderboard.")
     @app_commands.describe(
         format="Show only one queue (Premier, Quick, Sealed, Traditional)",
-        color="Show only one guild's archetype (Azorius, Boros, Dimir, ...)",
+        color="Filter by archetype: guilds, shards/wedges, or Soup (4+ colors)",
     )
     @app_commands.choices(
         format=[
@@ -594,8 +594,8 @@ class Leaderboard(commands.Cog):
             app_commands.Choice(name="Quick",       value="Quick"),
         ],
         color=[
-            app_commands.Choice(name=guild, value=code)
-            for guild, code in GUILD_TO_CODE.items()
+            app_commands.Choice(name=label, value=code)
+            for label, code in COLOR_CHOICES.items()
         ],
     )
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
