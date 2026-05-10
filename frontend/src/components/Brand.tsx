@@ -6,11 +6,10 @@ import { cn } from "../lib/utils";
 export function ALogo({ size = 32 }: { size?: number }) {
   return (
     <img
-      src="/leaderboard/llu-logo.png"
+      src="/leaderboard/llu-logo-transparent.png"
       alt="Limited Level-Ups"
-      width={size}
-      height={size}
-      className="block rounded"
+      style={{ height: size, width: "auto" }}
+      className="block"
     />
   );
 }
@@ -115,12 +114,18 @@ export function Trophy({ size = 12, color }: { size?: number; color?: string }) 
 export const fmtPts = (n: number) => Math.round(n).toLocaleString("en-US");
 
 // Set keyrune glyph wrapper (uses keyrune.css from index.html).
+// Reserves a square box of `size` so swapping codes doesn't reflow neighbours
 export function SetGlyph({ code, size = 18 }: { code: string; size?: number }) {
   return (
-    <i
-      className={`ss ss-${code.toLowerCase()} text-white shrink-0`}
-      style={{ fontSize: size, lineHeight: 1 }}
+    <span
+      className="inline-flex items-center justify-center shrink-0 overflow-visible"
+      style={{ width: size, height: size }}
       aria-hidden="true"
-    />
+    >
+      <i
+        className={`ss ss-${code.toLowerCase()} text-white`}
+        style={{ fontSize: size, lineHeight: 1 }}
+      />
+    </span>
   );
 }

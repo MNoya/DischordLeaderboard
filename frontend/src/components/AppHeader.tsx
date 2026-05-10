@@ -44,10 +44,15 @@ export function AppHeader({ subtitle = "LEADERBOARD" }: { subtitle?: string }) {
         to="/"
         className={cn(
           "flex items-center no-underline",
-          isMobile ? "gap-2.5" : "gap-3.5",
+          isMobile ? "gap-4" : "gap-6 pl-[13px]",
         )}
       >
-        <ALogo size={isMobile ? 34 : 64} />
+        <div
+          className="flex items-center justify-center shrink-0 overflow-visible"
+          style={{ height: isMobile ? 34 : 64 }}
+        >
+          <ALogo size={isMobile ? 30 : 55} />
+        </div>
         <AWordmark size={isMobile ? "sm" : "lg"} subtitle={subtitle} />
       </Link>
 
