@@ -279,16 +279,20 @@ def process_leaderboard_for_archetype(
 MEDAL_EMOJIS = {1: "🥇", 2: "🥈", 3: "🥉"}
 
 
-def _player_url(slug: str) -> str:
+def _player_url(slug: str, set_code: str | None = None) -> str:
     """Build the public-site URL for a player's profile.
 
-    The frontend routes profiles at ``/player/{slug}`` where slug is the
-    URL-safe handle frozen at /join.
+    Prefer set-scoped URLs (``/{SET}/player/{slug}``) so links stay correct
+    when the active set rolls over; fall back to ``/player/{slug}`` if no set
+    is supplied.
     """
-    return f"{settings.public_site_url.rstrip('/')}/player/{slug}"
+    base = settings.public_site_url.rstrip("/")
+    if set_code:
+        return f"{base}/{set_code}/player/{slug}"
+    return f"{base}/player/{slug}"
 
 
-def _format_leaderboard(top: list[LeaderboardEntry]) -> str:
+def _format_leaderboard(top: list[LeaderboardEntry], set_code: str | None = None) -> str:
     """Wrap each row in inline code (single backticks) — renders as monospace
     without the code-block brick, and spaces are preserved so columns align.
     Same trick scoreboards.dev uses to get tabular layout in an embed.
@@ -322,7 +326,7 @@ def _format_leaderboard(top: list[LeaderboardEntry]) -> str:
         score = _center_right_bias(str(round(e.score)), score_width)
         trophy = f"{e.trophies:>{trophy_width}}"
         inner = f"{rank} {name}  {score}  {trophy}"
-        lines.append(f"[`{inner}`](<{_player_url(e.slug)}>)")
+        lines.append(f"[`{inner}`](<{_player_url(e.slug, set_code)}>)")
     return "\n".join(lines)
 
 
@@ -376,7 +380,7 @@ def render_embed(data: LeaderboardData) -> discord.Embed:
     if not data.top:
         embed.description = "_No players have scored yet for this set._"
     else:
-        embed.description = _format_leaderboard(data.top)
+        embed.description = _format_leaderboard(data.top, data.set_code)
     _apply_footer(embed, data)
     return embed
 

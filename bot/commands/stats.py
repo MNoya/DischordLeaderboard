@@ -127,7 +127,7 @@ def _format_breakdown(breakdown: list[dict]) -> str:
 
 
 def render_embed(data: StatsData) -> discord.Embed:
-    profile_url = f"{settings.public_site_url.rstrip('/')}/player/{data.player_slug}"
+    profile_url = f"{settings.public_site_url.rstrip('/')}/{data.set_code}/player/{data.player_slug}"
     embed = discord.Embed(
         title=f"📊 Stats — {data.player_name}",
         url=profile_url,
