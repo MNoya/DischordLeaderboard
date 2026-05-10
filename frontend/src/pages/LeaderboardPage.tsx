@@ -320,15 +320,6 @@ function Mobile({
         <AppHeader subtitle="LEADERBOARD" />
 
         <div className="px-4 py-2 border-b border-border bg-surface flex items-stretch gap-2">
-          {sets && (
-            <div className="basis-[40%] min-w-0">
-              <SetSwitcherMobile
-                sets={sets}
-                activeCode={activeSet}
-                onChange={(code) => goToSet(navigate, code, sets)}
-              />
-            </div>
-          )}
           <div className="basis-[60%] min-w-0 flex">
             <FilterDropdown
               label="FORMAT"
@@ -340,6 +331,15 @@ function Mobile({
               renderOption={renderFormatOption}
             />
           </div>
+          {sets && (
+            <div className="basis-[40%] min-w-0">
+              <SetSwitcherMobile
+                sets={sets}
+                activeCode={activeSet}
+                onChange={(code) => goToSet(navigate, code, sets)}
+              />
+            </div>
+          )}
         </div>
         <div className="px-3 py-1.5 border-b border-border bg-bg">
           <ColorsSwitcher
