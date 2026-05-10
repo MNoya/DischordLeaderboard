@@ -5,18 +5,20 @@
 // keys, stale-time, and idle prefetch sit in one place.
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 
 import {
-  fetchArchetypeLeaderboard,
-  fetchArchetypeSummary,
+  fetchColorsLeaderboard,
+  fetchColorsSummary,
   fetchFormatLeaderboard,
   fetchLeaderboard,
+  fetchOtherColorsLeaderboard,
   fetchPlayerDraftEvents,
   fetchPlayerProfile,
   fetchRecentTrophies,
   fetchSets,
 } from "./api";
+import { MULTI, OTHER } from "./filters";
 const FIVE_MINUTES = 5 * 60 * 1000;
 
 export function useSets() {
@@ -51,14 +53,27 @@ export function useFormatLeaderboard(
   });
 }
 
-export function useArchetypeLeaderboard(
+export function useColorsLeaderboard(
   setCode: string | undefined,
-  archetype: string | undefined
+  colors: string | undefined
 ) {
   return useQuery({
-    queryKey: ["archetype-leaderboard", setCode, archetype],
-    queryFn: () => fetchArchetypeLeaderboard(setCode!, archetype!),
-    enabled: !!setCode && !!archetype,
+    queryKey: ["colors-leaderboard", setCode, colors],
+    queryFn: () => fetchColorsLeaderboard(setCode!, colors!),
+    enabled: !!setCode && !!colors,
+    staleTime: FIVE_MINUTES,
+  });
+}
+
+export function useOtherColorsLeaderboard(
+  setCode: string | undefined,
+  otherCombos: string[] | undefined
+) {
+  const key = otherCombos ? [...otherCombos].sort().join(",") : null;
+  return useQuery({
+    queryKey: ["other-colors-leaderboard", setCode, key],
+    queryFn: () => fetchOtherColorsLeaderboard(setCode!, otherCombos!),
+    enabled: !!setCode && !!otherCombos && otherCombos.length > 0,
     staleTime: FIVE_MINUTES,
   });
 }
@@ -81,11 +96,10 @@ export function useDraftEvents(slug: string | undefined, setCode: string) {
   });
 }
 
-// Set-wide top archetypes, aggregated from public_archetype_leaderboard.
-export function useArchetypeSummary(setCode: string | undefined) {
+export function useColorsSummary(setCode: string | undefined) {
   return useQuery({
-    queryKey: ["archetype-summary", setCode],
-    queryFn: () => fetchArchetypeSummary(setCode!),
+    queryKey: ["colors-summary", setCode],
+    queryFn: () => fetchColorsSummary(setCode!),
     enabled: !!setCode,
     staleTime: FIVE_MINUTES,
   });
@@ -124,5 +138,69 @@ export function useIdlePrefetchOtherSets(
       else window.cancelIdleCallback?.(handle as number);
     };
   }, [activeSetCode, allSets, qc]);
+}
+
+// Warm the cache for the top N players' profile + draft events. When a row is
+// later expanded (or its profile page is opened), it renders instantly.
+export function useIdlePrefetchTopPlayers(
+  rows: ReadonlyArray<{ slug: string; setCode: string }> | undefined,
+  limit = 25,
+) {
+  const qc = useQueryClient();
+  useEffect(() => {
+    if (!rows || rows.length === 0) return;
+    const top = rows.slice(0, limit);
+    const handle = (window.requestIdleCallback ?? window.setTimeout)(() => {
+      for (const r of top) {
+        qc.prefetchQuery({
+          queryKey: ["player-profile", r.slug, r.setCode],
+          queryFn: () => fetchPlayerProfile(r.slug, r.setCode),
+          staleTime: FIVE_MINUTES,
+        });
+        qc.prefetchQuery({
+          queryKey: ["draft-events", r.slug, r.setCode],
+          queryFn: () => fetchPlayerDraftEvents(r.slug, r.setCode),
+          staleTime: FIVE_MINUTES,
+        });
+      }
+    });
+    return () => {
+      if (typeof handle === "number") clearTimeout(handle);
+      else window.cancelIdleCallback?.(handle as number);
+    };
+  }, [rows, qc, limit]);
+}
+
+// Builds the dynamic chip list for the colors filter: 2-color guilds + popular
+// 3-color combos that pass the 1% threshold, then MULTI and OTHER catchalls.
+// Returns the named chip list and the set of sub-threshold combos that get
+// rolled into "OTHER".
+export function useColorChips(setCode: string): { chips: string[]; otherCombos: string[] } {
+  const { data } = useColorsSummary(setCode);
+  return useMemo(() => {
+    if (!data) return { chips: [], otherCombos: [] };
+    const total = data
+      .filter((r) => r.colors !== MULTI && r.colors !== "")
+      .reduce((s, r) => s + r.events, 0);
+    if (total === 0) return { chips: [], otherCombos: [] };
+    const threshold = total * 0.01;
+    const named: string[] = [];
+    const otherCombos: string[] = [];
+    for (const r of data) {
+      if (r.colors === "" || r.colors === MULTI) continue;
+      if (r.events >= threshold) named.push(r.colors);
+      else otherCombos.push(r.colors);
+    }
+    named.sort((a, b) => {
+      const ea = data.find((r) => r.colors === a)?.events ?? 0;
+      const eb = data.find((r) => r.colors === b)?.events ?? 0;
+      return eb - ea;
+    });
+    const chips: string[] = [...named];
+    const hasMulti = data.some((r) => r.colors === MULTI && r.events > 0);
+    if (hasMulti) chips.push(MULTI);
+    if (otherCombos.length > 0) chips.push(OTHER);
+    return { chips, otherCombos };
+  }, [data]);
 }
 

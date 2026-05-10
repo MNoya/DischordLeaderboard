@@ -11,7 +11,7 @@
 //   return data.map(adaptLeaderboardRow);
 
 import type {
-  ArchetypeLeaderboardRow,
+  ColorsLeaderboardRow,
   LeaderboardRow,
   PlayerDraftEvent,
   PlayerFormatBreakdown,
@@ -32,8 +32,14 @@ const camelify = <T,>(row: SnakeRow): T => {
 export const adaptSet = (row: SnakeRow): SetSummary => camelify(row);
 export const adaptLeaderboardRow = (row: SnakeRow): LeaderboardRow =>
   camelify(row);
-export const adaptArchetypeRow = (row: SnakeRow): ArchetypeLeaderboardRow =>
-  camelify(row);
+export const adaptColorsRow = (row: SnakeRow): ColorsLeaderboardRow => {
+  const camel = camelify<Record<string, unknown>>(row);
+  if ("archetype" in camel) {
+    camel.colors = camel.archetype;
+    delete camel.archetype;
+  }
+  return camel as unknown as ColorsLeaderboardRow;
+};
 export const adaptFormatBreakdown = (row: SnakeRow): PlayerFormatBreakdown =>
   camelify(row);
 export const adaptDraftEvent = (row: SnakeRow): PlayerDraftEvent =>

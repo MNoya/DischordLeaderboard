@@ -8,15 +8,15 @@
 
 import { supabase } from "./supabase";
 import {
-  adaptArchetypeRow,
+  adaptColorsRow,
   adaptDraftEvent,
   adaptFormatBreakdown,
   adaptLeaderboardRow,
   adaptSet,
 } from "./adapter";
 import type {
-  ArchetypeLeaderboardRow,
-  ArchetypeSummary,
+  ColorsLeaderboardRow,
+  ColorsSummary,
   LeaderboardRow,
   PlayerDraftEvent,
   PlayerFormatBreakdown,
@@ -114,12 +114,7 @@ export async function fetchFormatLeaderboard(
   return rows;
 }
 
-// ─── archetype summary (top archetypes by trophies, set-wide) ──────────────
-// Aggregates public_archetype_leaderboard rows across all players. Each row
-// in that view is one (player, set, archetype) cell, so summing trophies and
-// counting rows per archetype gives us totals + player counts for free.
-
-export async function fetchArchetypeSummary(setCode: string): Promise<ArchetypeSummary[]> {
+export async function fetchColorsSummary(setCode: string): Promise<ColorsSummary[]> {
   const { data, error } = await client()
     .from("public_archetype_leaderboard")
     .select("archetype, trophies, events")
@@ -128,33 +123,75 @@ export async function fetchArchetypeSummary(setCode: string): Promise<ArchetypeS
 
   const agg = new Map<string, { trophies: number; events: number; players: number }>();
   for (const r of (data ?? []) as Array<Record<string, unknown>>) {
-    const a = r.archetype as string;
-    const cur = agg.get(a) ?? { trophies: 0, events: 0, players: 0 };
+    const c = r.archetype as string;
+    const cur = agg.get(c) ?? { trophies: 0, events: 0, players: 0 };
     cur.trophies += (r.trophies as number) ?? 0;
     cur.events += (r.events as number) ?? 0;
-    cur.players += 1; // each row is a unique (player, archetype)
-    agg.set(a, cur);
+    cur.players += 1;
+    agg.set(c, cur);
   }
   return Array.from(agg.entries())
-    .map(([archetype, v]) => ({ setCode, archetype, ...v }))
+    .map(([colors, v]) => ({ setCode, colors, ...v }))
     .filter((r) => r.trophies > 0)
     .sort((a, b) => b.trophies - a.trophies);
 }
 
-// ─── public_archetype_leaderboard ──────────────────────────────────────────
-
-export async function fetchArchetypeLeaderboard(
+export async function fetchColorsLeaderboard(
   setCode: string,
-  archetype: string,
-): Promise<ArchetypeLeaderboardRow[]> {
+  colors: string,
+): Promise<ColorsLeaderboardRow[]> {
   const { data, error } = await client()
     .from("public_archetype_leaderboard")
     .select("*")
     .eq("set_code", setCode)
-    .eq("archetype", archetype)
-    .order("rank", { ascending: true });
+    .eq("archetype", colors);
   if (error) throw error;
-  return (data ?? []).map((r) => adaptArchetypeRow(r as Record<string, unknown>));
+  return (data ?? [])
+    .map((r) => adaptColorsRow(r as Record<string, unknown>))
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      const wpA = a.wins / Math.max(1, a.wins + a.losses);
+      const wpB = b.wins / Math.max(1, b.wins + b.losses);
+      if (wpB !== wpA) return wpB - wpA;
+      return a.slug.localeCompare(b.slug);
+    })
+    .map((r, i) => ({ ...r, rank: i + 1 }));
+}
+
+// score sums per-row; approximate since trophy_rate × shrinkage is non-linear
+export async function fetchOtherColorsLeaderboard(
+  setCode: string,
+  otherCombos: string[],
+): Promise<ColorsLeaderboardRow[]> {
+  if (otherCombos.length === 0) return [];
+  const { data, error } = await client()
+    .from("public_archetype_leaderboard")
+    .select("*")
+    .eq("set_code", setCode)
+    .in("archetype", otherCombos);
+  if (error) throw error;
+
+  const byPlayer = new Map<string, ColorsLeaderboardRow>();
+  for (const raw of data ?? []) {
+    const row = adaptColorsRow(raw as Record<string, unknown>);
+    const existing = byPlayer.get(row.slug);
+    if (!existing) {
+      byPlayer.set(row.slug, { ...row, colors: "OTHER", rank: 0 });
+      continue;
+    }
+    existing.score += row.score;
+    existing.trophies += row.trophies;
+    existing.events += row.events;
+    existing.wins += row.wins;
+    existing.losses += row.losses;
+    if (row.lastCalculatedAt > existing.lastCalculatedAt) {
+      existing.lastCalculatedAt = row.lastCalculatedAt;
+    }
+  }
+  return Array.from(byPlayer.values())
+    .filter((r) => r.events > 0)
+    .sort((a, b) => b.score - a.score)
+    .map((r, i) => ({ ...r, rank: i + 1 }));
 }
 
 // ─── public_player_format_breakdown + public_leaderboard composite ─────────

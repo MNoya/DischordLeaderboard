@@ -23,8 +23,8 @@ export interface LeaderboardTableRow {
   lastCalculatedAt: string;
 }
 
-const COLS_DESKTOP = "60px 1fr 110px 100px 110px 90px 130px";
-const COLS_MOBILE = "18px 1fr 44px 50px";
+const COLS_DESKTOP = "44px 1fr 110px 100px 110px 90px 130px";
+const COLS_MOBILE = "20px 1fr 44px 50px";
 
 export function LeaderboardTable<T extends LeaderboardTableRow>({
   rows,
@@ -33,6 +33,9 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
   error,
   emptyMessage,
   renderExpanded,
+  /** When false, the caller renders LeaderboardColumnHeader separately (e.g. inside a
+   *  page-level sticky chrome). Defaults to true so the table is self-contained. */
+  showHeader = true,
 }: {
   rows: T[] | undefined;
   variant: "desktop" | "mobile";
@@ -40,6 +43,7 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
   error?: Error | null;
   emptyMessage?: React.ReactNode;
   renderExpanded?: (row: T) => React.ReactNode;
+  showHeader?: boolean;
 }) {
   const [openSlug, setOpenSlug] = useState<string | null>(null);
   const isMobile = variant === "mobile";
@@ -50,7 +54,7 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
 
   return (
     <div>
-      <ColumnHeader variant={variant} />
+      {showHeader && <LeaderboardColumnHeader variant={variant} />}
       <div className={cn("flex flex-col", isMobile ? "gap-0" : "gap-0.5")}>
         {rows.map((r) => {
           const open = openSlug === r.slug;
@@ -79,15 +83,17 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
 }
 
 // ─── Column header ─────────────────────────────────────────────────────────
+// Exported so pages that want to put it inside their own sticky chrome (mobile
+// leaderboard) can render it themselves and pass `showHeader={false}` to the table.
 
-function ColumnHeader({ variant }: { variant: "desktop" | "mobile" }) {
+export function LeaderboardColumnHeader({ variant }: { variant: "desktop" | "mobile" }) {
   if (variant === "mobile") {
     return (
       <div
-        className="grid gap-2 py-1.5 pl-2.5 pr-3.5 font-display text-[10px] tracking-[0.2em] text-muted border-b border-border"
+        className="grid gap-3 py-1.5 pl-2 pr-3.5 font-display text-[10px] tracking-[0.2em] text-muted border-b border-border"
         style={{ gridTemplateColumns: COLS_MOBILE }}
       >
-        <span className="text-right">#</span>
+        <span className="text-center">#</span>
         <span>PLAYER</span>
         <span className="text-right">TR</span>
         <span className="text-right">PTS</span>
@@ -96,10 +102,10 @@ function ColumnHeader({ variant }: { variant: "desktop" | "mobile" }) {
   }
   return (
     <div
-      className="grid py-2.5 px-5 mb-1 font-display text-[11px] tracking-[0.2em] text-muted"
+      className="grid gap-x-3 py-2.5 pl-2 pr-5 mb-1 font-display text-[11px] tracking-[0.2em] text-muted"
       style={{ gridTemplateColumns: COLS_DESKTOP }}
     >
-      <span>RANK</span>
+      <span className="text-center">RANK</span>
       <span>PLAYER</span>
       <span className="text-right">TROPHIES</span>
       <span className="text-right">EVENTS</span>
@@ -116,11 +122,11 @@ function DesktopRow({ row, onToggle }: { row: LeaderboardTableRow; onToggle: () 
   return (
     <div
       onClick={onToggle}
-      className="grid items-center py-2.5 px-5 cursor-pointer"
+      className="grid items-center gap-x-3 py-2.5 pl-2 pr-5 cursor-pointer"
       style={{ gridTemplateColumns: COLS_DESKTOP }}
     >
-      <span className="mono text-[13px] text-muted">{row.rank}</span>
-      <PlayerCell row={row} avatarSize={30} nameSize={16} />
+      <span className="mono text-[13px] text-muted text-center">{row.rank}</span>
+      <PlayerCell row={row} avatarSize={30} nameSize={18} />
       <TrophyCell trophies={row.trophies} compact={false} />
       <span className="mono text-right text-[13px] text-muted">{row.events}</span>
       <Record className="mono text-right text-[13px]" wins={row.wins} losses={row.losses} />
@@ -134,11 +140,11 @@ function MobileRow({ row, onToggle }: { row: LeaderboardTableRow; onToggle: () =
   return (
     <div
       onClick={onToggle}
-      className="py-[9px] pl-2.5 pr-3.5 grid gap-2 items-center cursor-pointer"
+      className="py-[9px] pl-2 pr-3.5 grid gap-3 items-center cursor-pointer"
       style={{ gridTemplateColumns: COLS_MOBILE }}
     >
-      <span className="mono text-[12px] text-muted text-right">{row.rank}</span>
-      <PlayerCell row={row} avatarSize={26} nameSize={15} />
+      <span className="mono text-[12px] text-muted text-center">{row.rank}</span>
+      <PlayerCell row={row} avatarSize={26} nameSize={17} />
       <TrophyCell trophies={row.trophies} compact />
       <span className="mono text-right text-[15px] font-bold">{fmtPts(row.score)}</span>
     </div>
@@ -160,7 +166,7 @@ function PlayerCell({
     <div className="flex items-center gap-2.5 min-w-0">
       <AAvatar displayName={row.displayName} avatarUrl={row.avatarUrl} size={avatarSize} />
       <div
-        className="font-display tracking-[0.04em] whitespace-nowrap overflow-hidden text-ellipsis"
+        className="font-display leading-none tracking-[0.04em] whitespace-nowrap overflow-hidden text-ellipsis"
         style={{ fontSize: nameSize }}
       >
         {row.displayName.toUpperCase()}
@@ -224,7 +230,7 @@ function LoadingRows({ variant }: { variant: "desktop" | "mobile" }) {
 function EmptyState({ children }: { children?: React.ReactNode }) {
   return (
     <div className="p-10 text-center">
-      <div className="font-display text-[22px] tracking-[0.04em] text-text">NO RUNS YET</div>
+      <div className="font-display text-[22px] tracking-[0.04em] text-text">NO EVENTS YET</div>
       <div className="mono text-[11px] text-muted mt-2">
         {children ?? "NO PLAYER DATA FOR THIS SET / FILTER YET. CHECK BACK SOON."}
       </div>

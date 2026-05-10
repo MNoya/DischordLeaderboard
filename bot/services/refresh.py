@@ -215,16 +215,31 @@ def recompute_player_set_score(session: Session, player_id: str, set_id: str) ->
 
 _WUBRG = "WUBRG"
 
+# Heavy-multicolor bucket — effective colors (main + splash) ≥ 4
+MULTI = "MULTI"
+
 
 def _normalize_archetype(colors: str | None) -> str:
-    """WUBRG-sorted main colors only. Splashes (lowercase) are dropped.
-
-    `'WBg'` → `'WB'`. `'WUBR'` → `'WUBR'`. None / empty → ''.
-    """
+    """WUBRG-sorted main colors. Splashes dropped. None/empty → ''."""
     if not colors:
         return ""
     main = "".join(c for c in colors if c.isupper())
     return "".join(sorted(main, key=_WUBRG.index))
+
+
+def _effective_color_count(colors: str | None) -> int:
+    """Distinct colors played (main + splash deduped)."""
+    if not colors:
+        return 0
+    return len({c.upper() for c in colors if c.upper() in _WUBRG})
+
+
+def _archetype_keys(colors: str | None) -> list[str]:
+    """Buckets this event contributes to: main-color always, plus MULTI when effective ≥ 4."""
+    keys = [_normalize_archetype(colors)]
+    if _effective_color_count(colors) >= 4:
+        keys.append(MULTI)
+    return keys
 
 
 def recompute_player_archetype_scores(
@@ -247,27 +262,26 @@ def recompute_player_archetype_scores(
         )
     ).scalars().all()
 
-    # archetype → list of stats_rows (one per (format, expansion) bucket inside)
     grouped: dict[str, dict[tuple[str, str], dict]] = {}
     for ev in events:
-        arch = _normalize_archetype(ev.colors)
         bucket_key = (ev.format, ev.expansion)
-        bucket = grouped.setdefault(arch, {}).setdefault(
-            bucket_key,
-            {
-                "format": ev.format,
-                "expansion": ev.expansion,
-                "events": 0,
-                "wins": 0,
-                "losses": 0,
-                "trophies": 0,
-            },
-        )
-        bucket["events"] += 1
-        bucket["wins"] += ev.wins
-        bucket["losses"] += ev.losses
-        if ev.is_trophy:
-            bucket["trophies"] += 1
+        for arch in _archetype_keys(ev.colors):
+            bucket = grouped.setdefault(arch, {}).setdefault(
+                bucket_key,
+                {
+                    "format": ev.format,
+                    "expansion": ev.expansion,
+                    "events": 0,
+                    "wins": 0,
+                    "losses": 0,
+                    "trophies": 0,
+                },
+            )
+            bucket["events"] += 1
+            bucket["wins"] += ev.wins
+            bucket["losses"] += ev.losses
+            if ev.is_trophy:
+                bucket["trophies"] += 1
 
     now = datetime.now(timezone.utc)
     seen_archetypes: set[str] = set()

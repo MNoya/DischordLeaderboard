@@ -90,6 +90,8 @@ export function AAvatar({
   );
 }
 
+export { ArrowRight } from "lucide-react";
+
 // Trophy glyph — the marquee stat in this community (spec).
 export function Trophy({ size = 12, color }: { size?: number; color?: string }) {
   return (

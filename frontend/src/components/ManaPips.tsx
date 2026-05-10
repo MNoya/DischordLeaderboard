@@ -3,8 +3,8 @@
 // for any color via `<i class="ms ms-{c} ms-cost ms-shadow" />`. Sized via
 // font-size — `ms-cost` tracks it.
 //
-// Splash colors (lowercase in 17lands strings) render at ~70% size with a
-// dimmed opacity so they read visibly secondary.
+// Splash colors (lowercase in 17lands strings) render at ~70% size so they
+// read visibly secondary while keeping full color saturation.
 
 type Color = "W" | "U" | "B" | "R" | "G";
 
@@ -12,22 +12,22 @@ export function Pip({ c, size = 14 }: { c: Color; size?: number }) {
   return (
     <i
       className={`ms ms-${c.toLowerCase()} ms-cost ms-shadow shrink-0`}
-      style={{ fontSize: size, lineHeight: 1 }}
+      style={{ fontSize: size }}
       aria-label={c}
     />
   );
 }
 
 // Pips renders a horizontal stack from a 17lands-style colour string. Uppercase =
-// main colour (full-size), lowercase = splash (smaller, dimmed). Order is
-// preserved verbatim — no WUBRG sort here so the splash position reads true.
+// main colour (full-size), lowercase = splash (smaller). Order is preserved
+// verbatim — no WUBRG sort here so the splash position reads true.
 export function Pips({ colors, size = 12 }: { colors: string; size?: number }) {
   if (!colors) {
     // Colorless archetype — render as a single colorless mana symbol.
     return (
       <i
         className="ms ms-c ms-cost ms-shadow shrink-0"
-        style={{ fontSize: size, lineHeight: 1 }}
+        style={{ fontSize: size }}
         aria-label="C"
       />
     );
@@ -38,9 +38,11 @@ export function Pips({ colors, size = 12 }: { colors: string; size?: number }) {
         const isMain = ch === ch.toUpperCase();
         const upper = ch.toUpperCase() as Color;
         return (
-          <span key={`${ch}-${i}`} style={{ opacity: isMain ? 1 : 0.55 }}>
-            <Pip c={upper} size={isMain ? size : Math.round(size * 0.75)} />
-          </span>
+          <Pip
+            key={`${ch}-${i}`}
+            c={upper}
+            size={isMain ? size : Math.round(size * 0.75)}
+          />
         );
       })}
     </span>

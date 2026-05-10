@@ -44,6 +44,7 @@ button {
 
 .no-scrollbar::-webkit-scrollbar {
   width: 6px;
+  height: 6px;
 }
 .no-scrollbar::-webkit-scrollbar-thumb {
   background: #2a3142;

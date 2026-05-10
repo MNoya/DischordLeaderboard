@@ -12,6 +12,7 @@ export function Record({
   mono = false,
   color,
   separatorMargin = 0,
+  centered = false,
   className,
   style,
 }: {
@@ -20,9 +21,31 @@ export function Record({
   mono?: boolean;
   color?: string;
   separatorMargin?: number;
+  centered?: boolean;
   className?: string;
   style?: React.CSSProperties;
 }) {
+  if (centered) {
+    const gridStyle: React.CSSProperties = {
+      ...style,
+      display: "inline-grid",
+      gridTemplateColumns: "1fr auto 1fr",
+      alignItems: "center",
+      ...(color ? { color } : null),
+    };
+    return (
+      <span className={cn(mono && !color ? "text-text" : "", className)} style={gridStyle}>
+        <span className="text-right">{wins}</span>
+        <span
+          className="text-dim"
+          style={separatorMargin ? { margin: `0 ${separatorMargin}px` } : undefined}
+        >
+          –
+        </span>
+        <span className="text-left">{losses}</span>
+      </span>
+    );
+  }
   if (mono) {
     return (
       <span

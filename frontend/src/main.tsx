@@ -1,6 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { HashRouter } from "react-router-dom";
+import { BrowserRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { App } from "./App";
@@ -16,12 +16,15 @@ const queryClient = new QueryClient({
   },
 });
 
+// BrowserRouter with basename="/leaderboard" gives clean URLs like
+// /leaderboard/SOS/player/chonce. Cloudflare Pages serves the SPA index for
+// any /leaderboard/* path via the SPA-fallback rewrite in dist/_redirects.
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <HashRouter>
+      <BrowserRouter basename="/leaderboard">
         <App />
-      </HashRouter>
+      </BrowserRouter>
     </QueryClientProvider>
   </React.StrictMode>
 );

@@ -20,6 +20,7 @@ const config: Config = {
         border: "#2a3142",
         border2: "#3b4458",
         text: "#e6ecf5",
+        subtle: "#b8c0d0",
         muted: "#7a8395",
         dim: "#4a5163",
 

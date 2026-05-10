@@ -12,8 +12,8 @@
 // We hand-roll the latency so loading states render naturally during dev.
 
 import type {
-  ArchetypeLeaderboardRow,
-  ArchetypeSummary,
+  ColorsLeaderboardRow,
+  ColorsSummary,
   LeaderboardRow,
   PlayerDraftEvent,
   PlayerFormatBreakdown,
@@ -81,33 +81,33 @@ export const fetchLeaderboard = (setCode: string): Promise<LeaderboardRow[]> => 
   return wait([]);
 };
 
-// ─── archetype summary (fixture-side) ───────────────────────────────────────
-// Aggregates archetypes from the curated player draft events. Only the 5
+// ─── colors summary (fixture-side) ──────────────────────────────────────────
+// Aggregates color combos from the curated player draft events. Only the 5
 // fixture players contribute, but they cover the SOS top of the leaderboard so
 // the list is representative enough for dev.
-import { archetypeOf } from "./utils";
+import { colorsOf } from "./utils";
 
-export const fetchArchetypeSummary = (setCode: string): Promise<ArchetypeSummary[]> => {
+export const fetchColorsSummary = (setCode: string): Promise<ColorsSummary[]> => {
   if (setCode !== "SOS") return wait([]);
 
   const agg = new Map<string, { trophies: number; events: number; players: Set<string> }>();
   for (const events of Object.values(REAL_DRAFT_EVENTS)) {
     for (const e of events) {
-      const arch = archetypeOf(e.colors);
-      if (!arch) continue;
-      const cur = agg.get(arch) ?? { trophies: 0, events: 0, players: new Set() };
+      const c = colorsOf(e.colors);
+      if (!c) continue;
+      const cur = agg.get(c) ?? { trophies: 0, events: 0, players: new Set() };
       cur.events += 1;
       if (e.isTrophy) cur.trophies += 1;
       cur.players.add(e.slug);
-      agg.set(arch, cur);
+      agg.set(c, cur);
     }
   }
 
   return wait(
     Array.from(agg.entries())
-      .map(([archetype, v]) => ({
+      .map(([colors, v]) => ({
         setCode,
-        archetype,
+        colors,
         trophies: v.trophies,
         events: v.events,
         players: v.players.size,
@@ -154,23 +154,39 @@ export const fetchFormatLeaderboard = (
 };
 
 // ─── public_archetype_leaderboard ────────────────────────────────────────────
-// Switching archetype switches the data source (different scoring), per spec §7.
-export const fetchArchetypeLeaderboard = (
+// Switching color combo switches the data source (different scoring), per spec §7.
+export const fetchColorsLeaderboard = (
   setCode: string,
-  archetype: string
-): Promise<ArchetypeLeaderboardRow[]> => {
-  if (setCode === "SOS" && archetype === "WR") return wait(archetypeSosWrFixture);
-  // Any other (set, archetype) cell — synthesise a slice from the WR fixture so
+  colors: string
+): Promise<ColorsLeaderboardRow[]> => {
+  if (setCode === "SOS" && colors === "WR") return wait(archetypeSosWrFixture);
+  // Any other (set, colors) cell — synthesise a slice from the WR fixture so
   // the UI has data to render. Real backend returns the proper subset-replay rows.
   const slice = archetypeSosWrFixture
     .slice(0, 14)
     .map((row, i) => ({
       ...row,
-      archetype,
+      colors,
       rank: i + 1,
       score: Math.max(0, row.score * (0.4 + Math.random() * 0.4)),
       trophies: Math.max(0, Math.round(row.trophies * 0.6)),
     }));
+  return wait(slice);
+};
+
+// Mock-side OTHER — return a synthetic slice so the UI has rows to render.
+export const fetchOtherColorsLeaderboard = (
+  setCode: string,
+  _otherCombos: string[],
+): Promise<ColorsLeaderboardRow[]> => {
+  if (setCode !== "SOS") return wait([]);
+  const slice = archetypeSosWrFixture.slice(10, 18).map((row, i) => ({
+    ...row,
+    colors: "OTHER",
+    rank: i + 1,
+    score: Math.max(0, row.score * 0.5),
+    trophies: Math.max(0, Math.round(row.trophies * 0.4)),
+  }));
   return wait(slice);
 };
 

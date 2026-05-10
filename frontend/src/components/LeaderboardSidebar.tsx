@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { BsAsterisk, BsPaletteFill } from "react-icons/bs";
 
 import { Trophy } from "./Brand";
 import { Pips } from "./ManaPips";
@@ -7,40 +8,67 @@ import { SurfaceCard } from "./SurfaceCard";
 import { TrophyCount } from "./TrophyCount";
 import { Record } from "./Record";
 
-import { useArchetypeSummary, useRecentTrophies } from "../data/hooks";
-import { archetypeOf, relativeTime, shortFormatLabel } from "../data/utils";
-import { ARCHETYPE_NAMES } from "../data/filters";
+import { useColorsSummary, useRecentTrophies } from "../data/hooks";
+import { colorsOf, effectiveColorCount, relativeTime, shortFormatLabel } from "../data/utils";
+import { colorsDisplayName, MULTI, OTHER } from "../data/filters";
 
-// Sidebar — desktop right rail. Two cards: top archetypes by trophies, recent
-// trophies. Both feeds are now real:
-//   - top archetypes aggregates public_archetype_leaderboard server-side
-//   - recent trophies from public_recent_trophies
+export function LeaderboardSidebar({
+  setCode,
+  colors = "ALL",
+  otherCombos = [],
+}: {
+  setCode: string;
+  colors?: string;
+  otherCombos?: string[];
+}) {
+  const scoped = colors !== "ALL";
+  const { data: topColors } = useColorsSummary(setCode);
+  const { data: recent } = useRecentTrophies(setCode, scoped ? 100 : 5);
+  const recentScoped = !scoped
+    ? recent
+    : (recent ?? [])
+        .filter((t) => {
+          if (colors === MULTI) return effectiveColorCount(t.colors) >= 4;
+          if (colors === OTHER) return otherCombos.includes(colorsOf(t.colors));
+          return colorsOf(t.colors) === colors;
+        })
+        .slice(0, 5);
 
-export function LeaderboardSidebar({ setCode }: { setCode: string }) {
-  const { data: topArchetypes } = useArchetypeSummary(setCode);
-  const { data: recent } = useRecentTrophies(setCode, 5);
+  const scopeLabel = colorsDisplayName(colors);
+  const recentTitle = scoped ? `RECENT ${scopeLabel} TROPHIES` : "RECENT TROPHIES";
+  const recentEmpty = scoped ? `NO RECENT ${scopeLabel} TROPHIES` : "NO TROPHIES YET";
+  // Pips per row only when the scope mixes combos (unscoped, OTHER, SOUP).
+  // For a fixed named combo every row has the same colors — promote the pips
+  // to the section title and free up width for the player name.
+  const namedScope = scoped && colors !== MULTI && colors !== OTHER;
+  const showRowPips = !namedScope;
 
   return (
     <aside className="flex flex-col gap-4">
       <SurfaceCard>
-        <SectionLabel className="mb-2.5">TOP ARCHETYPES · BY TROPHIES</SectionLabel>
-        {!topArchetypes ? (
+        <SectionLabel size={13} className="mb-2.5 text-subtle">TOP COLORS · BY TROPHIES</SectionLabel>
+        {!topColors ? (
           <div className="mono text-[11px] text-muted py-2">LOADING…</div>
-        ) : topArchetypes.length === 0 ? (
+        ) : topColors.length === 0 ? (
           <div className="mono text-[11px] text-muted py-2">NO TROPHIES YET</div>
         ) : (
-          topArchetypes.slice(0, 5).map((row, i) => (
+          topColors.slice(0, 5).map((row, i) => (
             <div
-              key={row.archetype}
+              key={row.colors}
               className={
                 "grid grid-cols-[24px_auto_1fr_auto] gap-2 items-center py-2 " +
-                (i ? "border-t border-border" : "")
+                (i ? "border-t border-border" : "") +
+                (row.colors === colors ? " text-green" : "")
               }
             >
               <span className="mono text-[11px] text-muted">{i + 1}</span>
-              <Pips colors={row.archetype} size={12} />
+              {row.colors === MULTI ? (
+                <BsPaletteFill size={12} className="shrink-0" aria-hidden="true" />
+              ) : (
+                <Pips colors={row.colors} size={12} />
+              )}
               <span className="font-display text-[14px] tracking-[0.05em]">
-                {ARCHETYPE_NAMES[row.archetype] ?? row.archetype}
+                {colorsDisplayName(row.colors)}
               </span>
               <TrophyCount count={row.trophies} size="compact" className="text-muted" />
             </div>
@@ -49,33 +77,46 @@ export function LeaderboardSidebar({ setCode }: { setCode: string }) {
       </SurfaceCard>
 
       <SurfaceCard>
-        <SectionLabel className="mb-2.5">RECENT TROPHIES</SectionLabel>
-        {!recent ? (
+        <div className="mb-2.5 flex items-center gap-1.5">
+          <Trophy size={13} color="#ffc63a" />
+          <SectionLabel size={13} className="text-subtle">{recentTitle}</SectionLabel>
+          {namedScope && (
+            <span className="ml-auto inline-flex items-center">
+              <Pips colors={colors} size={13} />
+            </span>
+          )}
+          {colors === MULTI && <BsPaletteFill size={13} className="ml-auto" aria-hidden="true" />}
+          {colors === OTHER && <BsAsterisk size={12} className="ml-auto" aria-hidden="true" />}
+        </div>
+        {!recentScoped ? (
           <div className="mono text-[11px] text-muted py-2">LOADING…</div>
-        ) : recent.length === 0 ? (
-          <div className="mono text-[11px] text-muted py-2">NO TROPHIES YET</div>
+        ) : recentScoped.length === 0 ? (
+          <div className="mono text-[11px] text-muted py-2">{recentEmpty}</div>
         ) : (
-          recent.map((t, i) => (
+          recentScoped.map((t, i) => (
             <Link
               key={`${t.slug}-${t.finishedAt}`}
               to={`/${setCode}/player/${t.slug}`}
               className={
-                "grid grid-cols-[auto_1fr_auto_auto] gap-2 items-center py-[7px] no-underline transition-colors hover:bg-surface2 -mx-1 px-1 " +
+                "grid gap-2 items-center py-[7px] no-underline transition-colors hover:bg-surface2 -mx-1 px-1 " +
+                (showRowPips
+                  ? "grid-cols-[auto_1fr_36px_36px_28px] "
+                  : "grid-cols-[1fr_36px_36px_28px] ") +
                 (i ? "border-t border-border" : "")
               }
             >
-              <Trophy size={14} color="#ffc63a" />
-              <div className="flex items-center gap-1.5 min-w-0">
-                <Pips colors={archetypeOf(t.colors)} size={10} />
-                <span className="font-display text-[13px] tracking-[0.04em] whitespace-nowrap overflow-hidden text-ellipsis">
-                  {t.displayName.toUpperCase()}
-                </span>
-              </div>
-              <span className="mono text-[10px] text-muted">
-                <Record wins={t.wins} losses={t.losses} mono />
-                <span className="text-dim ml-1">{shortFormatLabel(t.format)}</span>
+              {showRowPips && <Pips colors={colorsOf(t.colors)} size={10} />}
+              <span className="font-display text-[15px] leading-none tracking-[0.04em] whitespace-nowrap overflow-hidden text-ellipsis min-w-0">
+                {t.displayName.toUpperCase()}
               </span>
-              <span className="mono text-[10px] text-dim">{relativeTime(t.finishedAt)}</span>
+              <Record
+                wins={t.wins}
+                losses={t.losses}
+                mono
+                className="mono text-[10px] text-subtle text-right"
+              />
+              <span className="mono text-[10px] text-dim">{shortFormatLabel(t.format)}</span>
+              <span className="mono text-[10px] text-dim text-right">{relativeTime(t.finishedAt)}</span>
             </Link>
           ))
         )}

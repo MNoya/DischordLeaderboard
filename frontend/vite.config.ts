@@ -1,14 +1,34 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
+import type { Connect } from "vite";
 
 // Spec §14: vite base is `/leaderboard/` so the future LLU subpath already matches.
 // Build output goes to `dist/leaderboard/` so the on-disk path mirrors the URL —
 // Cloudflare Workers Assets serves files relative to its assets directory, and
 // putting dist/leaderboard/index.html lets `/leaderboard` resolve directly.
+
+// Mirror production's no-trailing-slash routing in dev. With `base: "/leaderboard/"`,
+// Vite shows a "did you mean to visit /leaderboard/" warning when the URL has no
+// slash. We rewrite the request URL internally before Vite's HTML handler runs,
+// so the browser bar keeps `/leaderboard` and Vite still serves the SPA.
+const noTrailingSlashPlugin = {
+  name: "leaderboard-no-trailing-slash",
+  configureServer(server: { middlewares: Connect.Server }) {
+    server.middlewares.use((req, _res, next) => {
+      if (req.url === "/leaderboard" || req.url === "/leaderboard?") {
+        req.url = "/leaderboard/";
+      } else if (req.url?.startsWith("/leaderboard?")) {
+        req.url = "/leaderboard/" + req.url.slice("/leaderboard".length);
+      }
+      next();
+    });
+  },
+};
+
 export default defineConfig({
   base: "/leaderboard/",
-  plugins: [react()],
+  plugins: [react(), noTrailingSlashPlugin],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

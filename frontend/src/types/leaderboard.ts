@@ -49,9 +49,9 @@ export interface PlayerDraftEvent {
   finishedAt: string;
 }
 
-export interface ArchetypeLeaderboardRow {
+export interface ColorsLeaderboardRow {
   setCode: string;
-  archetype: string; // 'UW', 'WUBR', '' for colorless
+  colors: string; // 'WR', 'WUBR', 'MULTI', '' for colorless
   slug: string;
   displayName: string;
   avatarUrl: string | null;
@@ -64,12 +64,9 @@ export interface ArchetypeLeaderboardRow {
   lastCalculatedAt: string;
 }
 
-// Per-set archetype rollup — total trophies, total events, distinct players.
-// Aggregated client-side from public_archetype_leaderboard so no dedicated
-// view is needed.
-export interface ArchetypeSummary {
+export interface ColorsSummary {
   setCode: string;
-  archetype: string;
+  colors: string;
   trophies: number;
   events: number;
   players: number;

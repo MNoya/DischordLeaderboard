@@ -1,7 +1,18 @@
-// Filter dropdown — used twice on the leaderboard (FORMAT + ARCHETYPE) and on
-// the player profile draft log. Native <select> sits invisibly on top of a
-// styled wrapper so the visual tracks the design exactly while keeping a11y /
-// mobile native scrollers for free.
+import React, { useEffect, useRef, useState } from "react";
+import { cn } from "../lib/utils";
+
+// Custom click-to-open dropdown — same family as SetSwitcherMobile so styled
+// content (color swatches, mana pips, etc) renders cleanly in both the closed
+// trigger and the open option list. Replaces the previous native <select>
+// which couldn't host React content in its menu.
+//
+// Both `renderValue` and `renderOption` are optional and default to the option's
+// plain label.
+
+export interface FilterOption {
+  value: string;
+  label: string;
+}
 
 export function FilterDropdown({
   label,
@@ -9,45 +20,100 @@ export function FilterDropdown({
   options,
   onChange,
   variant = "desktop",
+  renderValue,
+  renderOption,
 }: {
   label: string;
   value: string;
-  options: Array<{ value: string; label: string }>;
+  options: FilterOption[];
   onChange: (next: string) => void;
   variant?: "desktop" | "mobile";
+  renderValue?: (option: FilterOption) => React.ReactNode;
+  renderOption?: (option: FilterOption) => React.ReactNode;
 }) {
   const isMobile = variant === "mobile";
+  const selected = options.find((o) => o.value === value) ?? options[0];
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onClickOutside = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onClickOutside);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onClickOutside);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
   return (
-    <label
-      className={
-        isMobile
-          ? "relative flex flex-1 items-center gap-2 px-2.5 py-1 min-w-0 bg-transparent border border-border2 text-text font-display text-[11px] tracking-[0.16em] cursor-pointer"
-          : "relative flex items-center gap-2 px-3.5 py-1.5 min-w-[220px] bg-transparent border border-border2 text-text font-display text-[13px] tracking-[0.14em] cursor-pointer"
-      }
-    >
-      <span
-        className={
+    <div ref={ref} className={cn("relative", isMobile ? "flex-1 min-w-0" : "")}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={cn(
+          "flex items-center gap-2 w-full bg-transparent border border-border2 font-display text-text cursor-pointer transition-colors hover:bg-surface",
           isMobile
-            ? "text-muted text-[9px] tracking-[0.22em]"
-            : "text-muted text-[11px] tracking-[0.22em]"
-        }
+            ? "px-2.5 py-1 text-[11px] tracking-[0.16em]"
+            : "px-3.5 py-1.5 min-w-[220px] text-[13px] tracking-[0.14em]",
+          open && "bg-surface",
+        )}
       >
-        {label}
-      </span>
-      <span>{(options.find((o) => o.value === value) ?? options[0]).label}</span>
-      <span className="flex-1" />
-      <span className={isMobile ? "text-muted text-[9px]" : "text-muted text-[10px]"}>▾</span>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer appearance-none"
-      >
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-    </label>
+        <span
+          className={cn(
+            "text-muted tracking-[0.22em]",
+            isMobile ? "text-[9px]" : "text-[11px]",
+          )}
+        >
+          {label}
+        </span>
+        <span className="flex items-center gap-1.5 min-w-0 truncate">
+          {renderValue ? renderValue(selected) : selected.label}
+        </span>
+        <span className="flex-1" />
+        <span className={cn("text-muted", isMobile ? "text-[9px]" : "text-[10px]")}>
+          {open ? "▴" : "▾"}
+        </span>
+      </button>
+
+      {open && (
+        <div
+          className="absolute left-0 right-0 top-[calc(100%+4px)] bg-surface border border-border2 z-20 shadow-lg"
+          role="listbox"
+        >
+          {options.map((o, i) => {
+            const isSelected = o.value === value;
+            return (
+              <button
+                key={o.value}
+                type="button"
+                onClick={() => {
+                  onChange(o.value);
+                  setOpen(false);
+                }}
+                role="option"
+                aria-selected={isSelected}
+                className={cn(
+                  "w-full text-left flex items-center gap-2 font-display cursor-pointer transition-colors",
+                  isMobile
+                    ? "px-2.5 py-2 text-[12px] tracking-[0.12em]"
+                    : "px-3.5 py-2 text-[13px] tracking-[0.08em]",
+                  i > 0 && "border-t border-border",
+                  isSelected ? "bg-surface2 text-text" : "bg-transparent text-text hover:bg-surface2",
+                )}
+              >
+                {renderOption ? renderOption(o) : o.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
