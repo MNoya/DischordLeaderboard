@@ -12,7 +12,7 @@ export function Pip({ c, size = 14 }: { c: Color; size?: number }) {
   return (
     <i
       className={`ms ms-${c.toLowerCase()} ms-cost ms-shadow shrink-0`}
-      style={{ fontSize: size }}
+      style={{ fontSize: size, letterSpacing: 0 }}
       aria-label={c}
     />
   );
@@ -27,7 +27,7 @@ export function Pips({ colors, size = 12 }: { colors: string; size?: number }) {
     return (
       <i
         className="ms ms-c ms-cost ms-shadow shrink-0"
-        style={{ fontSize: size }}
+        style={{ fontSize: size, letterSpacing: 0 }}
         aria-label="C"
       />
     );

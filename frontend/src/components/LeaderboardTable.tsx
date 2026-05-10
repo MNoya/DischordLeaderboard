@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { AAvatar, Trophy, fmtPts } from "./Brand";
 import { Record } from "./Record";
 import { ErrorState } from "./ErrorState";
@@ -46,6 +46,16 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
   showHeader?: boolean;
 }) {
   const [openSlug, setOpenSlug] = useState<string | null>(null);
+  const [renderedSlug, setRenderedSlug] = useState<string | null>(null);
+  useEffect(() => {
+    if (openSlug) {
+      setRenderedSlug(openSlug);
+      return;
+    }
+    if (renderedSlug == null) return;
+    const t = setTimeout(() => setRenderedSlug(null), 220);
+    return () => clearTimeout(t);
+  }, [openSlug, renderedSlug]);
   const isMobile = variant === "mobile";
 
   if (error) return <ErrorState error={error} compact={isMobile} />;
@@ -73,7 +83,19 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
               ) : (
                 <DesktopRow row={r} onToggle={() => setOpenSlug(open ? null : r.slug)} />
               )}
-              {open && renderExpanded && renderExpanded(r)}
+              {renderExpanded && (
+                <div
+                  className={cn(
+                    "grid transition-[grid-template-rows] duration-200 ease-out",
+                    open ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
+                  )}
+                  aria-hidden={!open}
+                >
+                  <div className="overflow-hidden">
+                    {renderedSlug === r.slug && renderExpanded(r)}
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}
@@ -184,7 +206,12 @@ function TrophyCell({ trophies, compact }: { trophies: number; compact: boolean 
       )}
     >
       <Trophy size={compact ? 10 : 14} color="#ffc63a" />
-      <span className={cn("mono font-semibold", compact ? "text-[12px]" : "text-[15px]")}>
+      <span
+        className={cn(
+          "font-display tracking-[0.02em] tabular-nums",
+          compact ? "text-[15px] leading-none" : "text-[18px] leading-none",
+        )}
+      >
         {trophies}
       </span>
     </div>
@@ -195,8 +222,8 @@ function ScoreCell({ score, large }: { score: number; large?: boolean }) {
   return (
     <div
       className={cn(
-        "mono text-right font-bold font-display tracking-[0.02em]",
-        large ? "text-[22px]" : "text-[15px]",
+        "text-right font-display tracking-[0.02em] tabular-nums",
+        large ? "text-[24px] leading-none" : "text-[18px] leading-none",
       )}
     >
       {fmtPts(score)}

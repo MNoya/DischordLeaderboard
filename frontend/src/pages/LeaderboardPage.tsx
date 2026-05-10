@@ -1,5 +1,6 @@
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import React, { Fragment, useEffect, useMemo, useState } from "react";
+import { ExternalLink } from "lucide-react";
 
 import { AppHeader } from "../components/AppHeader";
 import { useIsMobile } from "../lib/use-is-mobile";
@@ -29,9 +30,10 @@ import {
   usePlayerProfile,
   useSets,
 } from "../data/hooks";
-import { colorsOf, fmtRange, lastUpdated, prettyFormat, relativeTime, sumEvents, weekOfSet, winPct } from "../data/utils";
+import { colorsOf, effectiveColorCount, fmtRange, lastUpdated, prettyFormat, relativeTime, sumEvents, weekOfSet, winPct } from "../data/utils";
 import { colorsDisplayName, FORMAT_OPTIONS, MULTI, OTHER } from "../data/filters";
 import { FMT_COLORS, FMT_DEFAULT_COLOR, renderFormatOption, shortFormat } from "../data/format-display";
+import { cn } from "../lib/utils";
 import type { LeaderboardRow, PlayerDraftEvent, PlayerFormatBreakdown, SetSummary } from "../types/leaderboard";
 import type { LeaderboardTableRow } from "../components/LeaderboardTable";
 
@@ -40,14 +42,21 @@ import type { LeaderboardTableRow } from "../components/LeaderboardTable";
 export function LeaderboardPage() {
   const params = useParams<{ setCode?: string }>();
   const isMobile = useIsMobile();
+  const navigate = useNavigate();
   const { data: sets } = useSets();
   const activeSet = params.setCode ?? sets?.find((s) => s.isActive)?.code ?? "SOS";
   const setMeta = sets?.find((s) => s.code === activeSet);
 
+  const liveSetCode = sets?.find((s) => s.isActive)?.code;
   // Filters live in the URL as query params (?format=Premier or ?colors=WR).
   // Per spec they're mutually exclusive, so picking a non-ALL value in one
   // clears the other.
   const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    if (params.setCode && liveSetCode && params.setCode === liveSetCode) {
+      navigate({ pathname: "/", search: searchParams.toString() }, { replace: true });
+    }
+  }, [params.setCode, liveSetCode, navigate, searchParams]);
   const format = searchParams.get("format") ?? "ALL";
   const colors = searchParams.get("colors") ?? "ALL";
   const colorsMode = colors !== "ALL";
@@ -122,6 +131,8 @@ export function LeaderboardPage() {
       error={error}
       filters={filterProps}
       colorsMode={colorsMode}
+      otherCombos={otherCombos}
+      searchParams={searchParams}
     />
   ) : (
     <Desktop
@@ -134,6 +145,7 @@ export function LeaderboardPage() {
       filters={filterProps}
       colorsMode={colorsMode}
       otherCombos={otherCombos}
+      searchParams={searchParams}
     />
   );
 }
@@ -158,6 +170,7 @@ function Desktop({
   filters,
   colorsMode: _colorsMode,
   otherCombos,
+  searchParams,
 }: {
   activeSet: string;
   sets: SetSummary[] | undefined;
@@ -168,10 +181,11 @@ function Desktop({
   filters: FilterRowProps;
   colorsMode: boolean;
   otherCombos: string[];
+  searchParams: URLSearchParams;
 }) {
   const navigate = useNavigate();
   return (
-    <div className="bg-bg text-text min-h-screen flex flex-col">
+    <div className="bg-bg text-text min-h-screen flex flex-col animate-fadeIn">
       <AppHeader subtitle="LEADERBOARD" />
       <SetHero activeSet={activeSet} setMeta={setMeta} sets={sets} onSelectSet={(c) => goToSet(navigate, c, sets)} />
       <FilterRow {...filters} rows={rows} />
@@ -185,12 +199,24 @@ function Desktop({
           renderExpanded={(r) => (
             <DesktopExpandedRow
               row={r}
-              to={`/${activeSet}/player/${r.slug}`}
+              to={{
+                pathname: `/${activeSet}/player/${r.slug}`,
+                search: searchParams.toString(),
+              }}
+              activeFormat={filters.format}
+              activeColors={filters.colors}
+              otherCombos={otherCombos}
             />
           )}
         />
         <div className="pt-4">
-          <LeaderboardSidebar setCode={activeSet} colors={filters.colors} otherCombos={otherCombos} />
+          <LeaderboardSidebar
+            setCode={activeSet}
+            colors={filters.colors}
+            otherCombos={otherCombos}
+            onColorsSelect={filters.setColors}
+            searchParams={searchParams}
+          />
         </div>
       </div>
       <Footer className="mt-auto px-10 pt-5 pb-3" />
@@ -274,41 +300,46 @@ function Mobile({
   error,
   filters,
   colorsMode: _colorsMode,
+  otherCombos,
+  searchParams,
 }: {
   activeSet: string;
   sets: SetSummary[] | undefined;
   rows: LeaderboardTableRow[] | undefined;
   isLoading: boolean;
+  otherCombos: string[];
   error: Error | null;
   filters: FilterRowProps;
   colorsMode: boolean;
+  searchParams: URLSearchParams;
 }) {
   const navigate = useNavigate();
   return (
-    <div className="bg-bg text-text min-h-screen flex flex-col">
+    <div className="bg-bg text-text min-h-screen flex flex-col overflow-x-hidden animate-fadeIn">
       <div className="sticky top-0 z-10 bg-bg">
         <AppHeader subtitle="LEADERBOARD" />
 
-        <div className="px-4 py-2 border-b border-border bg-surface">
+        <div className="px-4 py-2 border-b border-border bg-surface flex items-stretch gap-2">
           {sets && (
-            <SetSwitcherMobile
-              sets={sets}
-              activeCode={activeSet}
-              onChange={(code) => goToSet(navigate, code, sets)}
-            />
+            <div className="basis-[40%] min-w-0">
+              <SetSwitcherMobile
+                sets={sets}
+                activeCode={activeSet}
+                onChange={(code) => goToSet(navigate, code, sets)}
+              />
+            </div>
           )}
-        </div>
-
-        <div className="px-4 py-1.5 border-b border-border bg-bg">
-          <FilterDropdown
-            label="FORMAT"
-            value={filters.format}
-            options={FORMAT_OPTIONS}
-            onChange={filters.setFormat}
-            variant="mobile"
-            renderValue={renderFormatOption}
-            renderOption={renderFormatOption}
-          />
+          <div className="basis-[60%] min-w-0 flex">
+            <FilterDropdown
+              label="FORMAT"
+              value={filters.format}
+              options={FORMAT_OPTIONS}
+              onChange={filters.setFormat}
+              variant="mobile"
+              renderValue={renderFormatOption}
+              renderOption={renderFormatOption}
+            />
+          </div>
         </div>
         <div className="px-3 py-1.5 border-b border-border bg-bg">
           <ColorsSwitcher
@@ -330,7 +361,16 @@ function Mobile({
         error={error}
         showHeader={false}
         renderExpanded={(r) => (
-          <MobileExpandedRow row={r} to={`/${activeSet}/player/${r.slug}`} />
+          <MobileExpandedRow
+            row={r}
+            to={{
+              pathname: `/${activeSet}/player/${r.slug}`,
+              search: searchParams.toString(),
+            }}
+            activeFormat={filters.format}
+            activeColors={filters.colors}
+            otherCombos={otherCombos}
+          />
         )}
       />
       <Footer className="mt-auto px-4 py-4" />
@@ -360,9 +400,29 @@ function useDelayedExpandedData(slug: string, setCode: string) {
   };
 }
 
-function DesktopExpandedRow({ row, to }: { row: LeaderboardTableRow; to: string }) {
+type PlayerLinkTo = string | { pathname: string; search: string };
+
+function DesktopExpandedRow({
+  row,
+  to,
+  activeFormat,
+  activeColors,
+  otherCombos,
+}: {
+  row: LeaderboardTableRow;
+  to: PlayerLinkTo;
+  activeFormat: string;
+  activeColors: string;
+  otherCombos: string[];
+}) {
   const { profile, events } = useDelayedExpandedData(row.slug, row.setCode);
   const { lastTrophies, biggestStreak } = useHighlights(events);
+  const filtersActive = activeFormat !== "ALL" || activeColors !== "ALL";
+  const filteredTrophies = useMemo(
+    () => filterTrophyEvents(events, activeFormat, activeColors, otherCombos).slice(0, 3),
+    [events, activeFormat, activeColors, otherCombos],
+  );
+  const trophiesToShow = filtersActive ? filteredTrophies : lastTrophies;
 
   return (
     <Link
@@ -370,10 +430,10 @@ function DesktopExpandedRow({ row, to }: { row: LeaderboardTableRow; to: string 
       aria-label={`View ${row.displayName}'s profile`}
       className="pt-3.5 pb-4 pr-4 pl-[76px] border-t border-dashed border-border2 flex items-center gap-6 cursor-pointer transition-colors hover:bg-green/5 no-underline text-inherit"
     >
-      <div className="flex-1 min-w-0"><FormatBreakdownPreview breakdown={profile?.formatBreakdown} /></div>
-      <div className="flex-1 min-w-0"><MostPlayedDecks events={events} /></div>
-      <div className="flex-1 min-w-0"><LastTrophyPanel data={lastTrophies} loading={!events} /></div>
-      <div className="flex-1 min-w-0"><BiggestStreakPanel data={biggestStreak} loading={!events} /></div>
+      <div className="flex-1 min-w-0 overflow-hidden"><FormatBreakdownPreview breakdown={profile?.formatBreakdown} /></div>
+      <div className="flex-1 min-w-0 overflow-hidden"><MostPlayedDecks events={events} /></div>
+      <div className="flex-1 min-w-0 overflow-hidden"><LastTrophyPanel data={trophiesToShow} loading={!events} activeFormat={activeFormat} activeColors={activeColors} /></div>
+      <div className="flex-[0.4] min-w-0 overflow-hidden flex items-center justify-center -ml-6"><BiggestStreakPanel data={biggestStreak} loading={!events} /></div>
       <ChamferedButton>
         <span className="inline-flex items-center gap-2">
           VIEW PROFILE
@@ -400,35 +460,41 @@ function FormatBreakdownPreview({
   );
   const ready = sorted.length > 0;
   const total = ready ? Math.max(1, sorted.reduce((s, f) => s + f.events, 0)) : 1;
+  const dense = sorted.length >= 4;
+  const labelCls = dense ? "text-[11px]" : "text-[13px]";
+  const swatchCls = dense ? "w-[11px] h-[11px]" : "w-[13px] h-[13px]";
+  const numCls = dense ? "text-[11px]" : "text-[12px]";
   return (
     <div style={{ minHeight: PANEL_MIN_HEIGHT }}>
-      <SectionLabel>FORMAT BREAKDOWN</SectionLabel>
-      <div className="flex items-center gap-3.5 mt-2">
-        <DonutChart
-          entries={sorted.map((f) => ({
-            key: f.formatLabel,
-            value: f.events / total,
-            color: FMT_COLORS[f.formatLabel] ?? FMT_DEFAULT_COLOR,
-          }))}
-          radius={28}
-          strokeWidth={10}
-          size={76}
-          pieHole={0.5}
-        />
+      <SectionLabel className="text-subtle">FORMAT BREAKDOWN</SectionLabel>
+      <div className="flex items-center gap-2.5 mt-2 min-w-0">
+        <div className="shrink-0">
+          <DonutChart
+            entries={sorted.map((f) => ({
+              key: f.formatLabel,
+              value: f.events / total,
+              color: FMT_COLORS[f.formatLabel] ?? FMT_DEFAULT_COLOR,
+            }))}
+            radius={28}
+            strokeWidth={10}
+            size={76}
+            pieHole={0.5}
+          />
+        </div>
         <div
-          className="grid items-center gap-x-3 gap-y-0.5"
-          style={{ gridTemplateColumns: "auto auto auto" }}
+          className="grid items-center gap-x-2 gap-y-0.5 min-w-0"
+          style={{ gridTemplateColumns: "auto minmax(0, 1fr) auto" }}
         >
           {ready
             ? sorted.map((f) => {
                 const color = FMT_COLORS[f.formatLabel] ?? FMT_DEFAULT_COLOR;
                 return (
                   <Fragment key={f.formatLabel}>
-                    <span className="w-2 h-2 shrink-0" style={{ background: color }} />
-                    <span className="font-display text-[11px] tracking-[0.1em]">
+                    <span className={cn(swatchCls, "shrink-0")} style={{ background: color }} />
+                    <span className={cn("font-display tracking-[0.08em] truncate", labelCls)}>
                       {f.formatLabel.toUpperCase()}
                     </span>
-                    <span className="mono text-[11px] text-muted tabular-nums justify-self-end">
+                    <span className={cn("mono text-muted tabular-nums justify-self-end", numCls)}>
                       {f.events}
                     </span>
                   </Fragment>
@@ -468,7 +534,7 @@ function MostPlayedDecks({ events }: { events: PlayerDraftEvent[] | undefined })
 
   return (
     <div style={{ minHeight: PANEL_MIN_HEIGHT }}>
-      <SectionLabel>MOST PLAYED DECKS</SectionLabel>
+      <SectionLabel className="text-subtle">MOST PLAYED DECKS</SectionLabel>
       <div
         className="grid items-center gap-x-3 gap-y-1 mt-2 w-fit"
         style={{ gridTemplateColumns: "auto 64px auto" }}
@@ -493,6 +559,30 @@ function MostPlayedDecks({ events }: { events: PlayerDraftEvent[] | undefined })
       </div>
     </div>
   );
+}
+
+function filterTrophyEvents(
+  events: PlayerDraftEvent[] | undefined,
+  activeFormat: string,
+  activeColors: string,
+  otherCombos: string[],
+): PlayerDraftEvent[] {
+  if (!events) return [];
+  const otherSet = new Set(otherCombos);
+  const matches = events.filter((e) => {
+    if (!e.isTrophy) return false;
+    if (activeFormat !== "ALL" && !e.format.toLowerCase().includes(activeFormat.toLowerCase())) return false;
+    if (activeColors !== "ALL") {
+      if (activeColors === MULTI) {
+        if (effectiveColorCount(e.colors) < 4) return false;
+      } else if (activeColors === OTHER) {
+        if (effectiveColorCount(e.colors) >= 4) return false;
+        if (!otherSet.has(colorsOf(e.colors))) return false;
+      } else if (colorsOf(e.colors) !== activeColors) return false;
+    }
+    return true;
+  });
+  return matches.sort((a, b) => (b.finishedAt ?? "").localeCompare(a.finishedAt ?? ""));
 }
 
 interface StreakData { count: number; format: string }
@@ -530,44 +620,83 @@ function useHighlights(events: PlayerDraftEvent[] | undefined): {
 function LastTrophyPanel({
   data,
   loading,
+  activeFormat,
+  activeColors,
 }: {
   data: PlayerDraftEvent[];
   loading: boolean;
+  activeFormat: string;
+  activeColors: string;
 }) {
+  const filterLabel =
+    activeColors !== "ALL"
+      ? colorsDisplayName(activeColors)
+      : activeFormat !== "ALL"
+        ? activeFormat.toUpperCase()
+        : null;
   return (
     <div style={{ minHeight: PANEL_MIN_HEIGHT }}>
-      <SectionLabel>LAST TROPHIES</SectionLabel>
-      <div
-        className="grid items-center gap-x-3 gap-y-1 mt-2.5 w-fit"
-        style={{ gridTemplateColumns: "auto 108px 50px auto" }}
-      >
+      <SectionLabel className="text-subtle">
+        LAST{filterLabel && <> <span className="text-green">{filterLabel}</span></>} TROPHIES
+      </SectionLabel>
+      <div className="flex flex-col gap-1 mt-2.5 min-w-0">
         {loading ? (
           [0, 1, 2].map((i) => (
-            <Fragment key={i}>
+            <div
+              key={i}
+              className="grid items-center gap-x-3 w-fit"
+              style={{ gridTemplateColumns: "auto auto auto auto 12px" }}
+            >
               <span className="w-[26px] h-3 bg-surface2 shrink-0" />
               <span className="h-3 bg-surface2" style={{ width: 50 }} />
               <span className="h-3 bg-surface2" style={{ width: 36 }} />
               <span className="h-3 bg-surface2" style={{ width: 24 }} />
-            </Fragment>
+              <span />
+            </div>
           ))
         ) : data.length > 0 ? (
-          data.map((e) => (
-            <Fragment key={e.eventId}>
-              <Pips colors={e.colors} size={11} />
-              <span className="font-display text-[13px] tracking-[0.06em] text-muted">
-                {shortFormat(e.format)}
-              </span>
-              <Record
-                wins={e.wins}
-                losses={e.losses}
-                mono
-                className="mono text-[12px] text-muted"
-              />
-              <span className="mono text-[12px] text-dim">{relativeTime(e.finishedAt)}</span>
-            </Fragment>
-          ))
+          data.map((e) => {
+            const href = e.seventeenlandsEventId
+              ? `https://www.17lands.com/deck/${e.seventeenlandsEventId}`
+              : null;
+            const onClick = href
+              ? (ev: React.MouseEvent) => {
+                  ev.preventDefault();
+                  ev.stopPropagation();
+                  window.open(href, "_blank", "noopener,noreferrer");
+                }
+              : undefined;
+            return (
+              <div
+                key={e.eventId}
+                onClick={onClick}
+                role={href ? "link" : undefined}
+                title={href ? "Open deck on 17lands" : undefined}
+                className={cn(
+                  "grid items-center gap-x-3 px-1.5 -mx-1.5 rounded transition-colors w-fit",
+                  href && "hover:bg-surface2 cursor-pointer",
+                )}
+                style={{ gridTemplateColumns: "auto auto auto auto 12px" }}
+              >
+                <Pips colors={e.colors} size={11} />
+                <span className="font-display text-[13px] tracking-[0.06em] text-muted truncate">
+                  {shortFormat(e.format)}
+                </span>
+                <Record
+                  wins={e.wins}
+                  losses={e.losses}
+                  mono
+                  className="mono text-[12px] text-muted text-right justify-self-end"
+                />
+                <span className="mono text-[12px] text-dim">{relativeTime(e.finishedAt)}</span>
+                <span className="flex justify-center text-subtle">
+                  {href && <ExternalLink size={10} aria-hidden="true" />}
+                </span>
+              </div>
+            );
+          })
         ) : (
-          <div className="mono text-[12px] text-muted col-span-4">NONE YET</div>
+          <div className="mono text-[12px] text-muted">NONE YET</div>
         )}
       </div>
     </div>
@@ -582,38 +711,53 @@ function BiggestStreakPanel({
   loading: boolean;
 }) {
   return (
-    <div style={{ minHeight: PANEL_MIN_HEIGHT }}>
-      <SectionLabel>BIGGEST TROPHY STREAK</SectionLabel>
-      <div className="mt-2.5">
-        {loading ? (
-          <span className="block h-5 w-24 bg-surface2" />
-        ) : data ? (
-          <div className="flex items-center gap-2">
+    <div className="flex flex-col items-center justify-center" style={{ minHeight: PANEL_MIN_HEIGHT }}>
+      <SectionLabel className="text-subtle text-center">MAX TROPHY</SectionLabel>
+      {loading ? (
+        <div className="mt-1 flex justify-center">
+          <span className="block h-5 w-12 bg-surface2" />
+        </div>
+      ) : data ? (
+        <>
+          <span className="flex items-center gap-1.5 my-0.5">
             <Trophy size={14} color="#ffc63a" />
             <span className="font-display text-[18px] leading-none tracking-[0.04em]">
               ×{data.count}
             </span>
-            <span className="text-dim text-[12px]">·</span>
-            <span className="font-display text-[13px] tracking-[0.06em] text-muted">
-              {prettyFormat(data.format).toUpperCase()}
-            </span>
-          </div>
-        ) : (
-          <div className="mono text-[12px] text-muted">—</div>
-        )}
-      </div>
+          </span>
+          <SectionLabel className="text-subtle text-center">STREAK</SectionLabel>
+        </>
+      ) : (
+        <div className="mono text-[12px] text-muted text-center mt-1">—</div>
+      )}
     </div>
   );
 }
 
-function MobileExpandedRow({ row, to }: { row: LeaderboardTableRow; to: string }) {
+function MobileExpandedRow({
+  row,
+  to,
+  activeFormat,
+  activeColors,
+  otherCombos,
+}: {
+  row: LeaderboardTableRow;
+  to: PlayerLinkTo;
+  activeFormat: string;
+  activeColors: string;
+  otherCombos: string[];
+}) {
   const { events } = useDelayedExpandedData(row.slug, row.setCode);
-  // events are DESC-sorted by finishedAt — first hit is the most recent trophy
+  // events are DESC-sorted by finishedAt — first matching trophy is the most recent
   const lastTrophy = useMemo(() => {
     if (!events) return null;
-    for (const e of events) if (e.isTrophy) return e;
-    return null;
-  }, [events]);
+    const filtersActive = activeFormat !== "ALL" || activeColors !== "ALL";
+    if (!filtersActive) {
+      for (const e of events) if (e.isTrophy) return e;
+      return null;
+    }
+    return filterTrophyEvents(events, activeFormat, activeColors, otherCombos)[0] ?? null;
+  }, [events, activeFormat, activeColors, otherCombos]);
 
   return (
     <Link
@@ -622,7 +766,7 @@ function MobileExpandedRow({ row, to }: { row: LeaderboardTableRow; to: string }
       className="pt-2 pb-3 pr-3.5 pl-9 flex items-center gap-3 border-t border-dashed border-border2 cursor-pointer transition-colors hover:bg-green/5 no-underline text-inherit"
     >
       <div className="flex-1 min-w-0 flex flex-col gap-1.5">
-        <span className="mono text-[10px] text-muted">
+        <span className="font-display text-[12px] tracking-[0.12em] text-muted tabular-nums">
           {row.events} EVENTS · <Record wins={row.wins} losses={row.losses} /> · {winPct(row.wins, row.losses)}%
         </span>
         <div className="flex items-center gap-1.5 min-h-[14px]">
@@ -638,7 +782,7 @@ function MobileExpandedRow({ row, to }: { row: LeaderboardTableRow; to: string }
                 {prettyFormat(lastTrophy.format).toUpperCase()}
               </span>
               <span className="text-dim text-[11px]">·</span>
-              <span className="mono text-[11px] text-dim">{relativeTime(lastTrophy.finishedAt)}</span>
+              <span className="font-display text-[11px] tracking-[0.08em] text-dim tabular-nums">{relativeTime(lastTrophy.finishedAt)}</span>
             </>
           ) : null}
         </div>
