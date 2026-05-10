@@ -64,7 +64,7 @@ export function LeaderboardSidebar({
           topColors.slice(0, 5).map((row, i) => {
             const isActive = row.colors === colors;
             const cls =
-              "grid grid-cols-[24px_28px_1fr_auto] gap-2 items-center py-2 -mx-1 px-1 rounded text-left transition-colors " +
+              "grid grid-cols-[24px_28px_1fr_auto] gap-2 items-center py-2 -mx-1 px-1 text-left transition-colors " +
               (i ? "border-t border-border" : "") +
               (isActive ? " text-green" : "") +
               (onColorsSelect ? " cursor-pointer hover:bg-surface2" : "");

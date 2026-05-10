@@ -10,7 +10,7 @@ export interface FilterOption {
 // Format groups recognized across pages. `value` matches the backend
 // `format_label` and the prefix-match used in PlayerPage's draft log filter.
 export const FORMAT_OPTIONS: FilterOption[] = [
-  { value: "ALL", label: "ALL" },
+  { value: "ALL", label: "ALL FORMATS" },
   { value: "Premier", label: "PREMIER DRAFT" },
   { value: "Trad", label: "TRADITIONAL DRAFT" },
   { value: "Quick", label: "QUICK DRAFT" },
@@ -18,11 +18,6 @@ export const FORMAT_OPTIONS: FilterOption[] = [
   { value: "LCQ", label: "CHAMPIONSHIP QUALIFIER" },
 ];
 
-// Same set with the long-form ALL label for the player profile draft log.
-export const FORMAT_OPTIONS_LONG: FilterOption[] = [
-  { value: "ALL", label: "ALL FORMATS" },
-  ...FORMAT_OPTIONS.slice(1),
-];
 
 // Cross-cutting bucket — any deck with ≥4 effective colors. Display label: "SOUP"
 export const MULTI = "MULTI";

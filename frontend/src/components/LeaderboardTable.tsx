@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { AAvatar, Trophy, fmtPts } from "./Brand";
 import { Record } from "./Record";
 import { ErrorState } from "./ErrorState";
@@ -23,7 +24,39 @@ export interface LeaderboardTableRow {
   lastCalculatedAt: string;
 }
 
-const COLS_DESKTOP = "44px 1fr 110px 100px 110px 90px 130px";
+export type SortKey = "score" | "trophies" | "events" | "record" | "winPct";
+export type SortDir = "asc" | "desc";
+export interface SortState {
+  key: SortKey;
+  dir: SortDir;
+}
+
+export const DEFAULT_SORT: SortState = { key: "score", dir: "desc" };
+
+const SORT_VALUE: Record<SortKey, (r: LeaderboardTableRow) => number> = {
+  score: (r) => r.score,
+  trophies: (r) => r.trophies,
+  events: (r) => r.events,
+  record: (r) => r.wins,
+  winPct: (r) => r.wins / Math.max(1, r.wins + r.losses),
+};
+
+export function sortRows<T extends LeaderboardTableRow>(
+  rows: T[],
+  { key, dir }: SortState,
+): T[] {
+  const get = SORT_VALUE[key];
+  const sign = dir === "desc" ? -1 : 1;
+  return [...rows].sort((a, b) => {
+    const av = get(a);
+    const bv = get(b);
+    if (av !== bv) return sign * (av < bv ? -1 : 1);
+    if (a.score !== b.score) return b.score - a.score;
+    return a.rank - b.rank;
+  });
+}
+
+const COLS_DESKTOP = "44px 1fr 70px 100px 110px 90px 130px";
 const COLS_MOBILE = "20px 1fr 44px 50px";
 
 export function LeaderboardTable<T extends LeaderboardTableRow>({
@@ -36,6 +69,8 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
   /** When false, the caller renders LeaderboardColumnHeader separately (e.g. inside a
    *  page-level sticky chrome). Defaults to true so the table is self-contained. */
   showHeader = true,
+  sort,
+  onSort,
 }: {
   rows: T[] | undefined;
   variant: "desktop" | "mobile";
@@ -44,6 +79,8 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
   emptyMessage?: React.ReactNode;
   renderExpanded?: (row: T) => React.ReactNode;
   showHeader?: boolean;
+  sort?: SortState;
+  onSort?: (key: SortKey) => void;
 }) {
   const [openSlug, setOpenSlug] = useState<string | null>(null);
   const [renderedSlug, setRenderedSlug] = useState<string | null>(null);
@@ -64,8 +101,8 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
 
   return (
     <div>
-      {showHeader && <LeaderboardColumnHeader variant={variant} />}
-      <div className={cn("flex flex-col", isMobile ? "gap-0" : "gap-0.5")}>
+      {showHeader && <LeaderboardColumnHeader variant={variant} sort={sort} onSort={onSort} />}
+      <div className={cn("flex flex-col", isMobile ? "gap-0" : "gap-[1.5px]")}>
         {rows.map((r) => {
           const open = openSlug === r.slug;
           return (
@@ -108,7 +145,15 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
 // Exported so pages that want to put it inside their own sticky chrome (mobile
 // leaderboard) can render it themselves and pass `showHeader={false}` to the table.
 
-export function LeaderboardColumnHeader({ variant }: { variant: "desktop" | "mobile" }) {
+export function LeaderboardColumnHeader({
+  variant,
+  sort,
+  onSort,
+}: {
+  variant: "desktop" | "mobile";
+  sort?: SortState;
+  onSort?: (key: SortKey) => void;
+}) {
   if (variant === "mobile") {
     return (
       <div
@@ -117,8 +162,8 @@ export function LeaderboardColumnHeader({ variant }: { variant: "desktop" | "mob
       >
         <span className="text-center">#</span>
         <span>PLAYER</span>
-        <span className="text-right">TR</span>
-        <span className="text-right">PTS</span>
+        <SortHeader label="TR" sortKey="trophies" sort={sort} onSort={onSort} />
+        <SortHeader label="PTS" sortKey="score" sort={sort} onSort={onSort} />
       </div>
     );
   }
@@ -129,12 +174,53 @@ export function LeaderboardColumnHeader({ variant }: { variant: "desktop" | "mob
     >
       <span className="text-center">RANK</span>
       <span>PLAYER</span>
-      <span className="text-right">TROPHIES</span>
-      <span className="text-right">EVENTS</span>
-      <span className="text-right">RECORD</span>
-      <span className="text-right">WIN %</span>
-      <span className="text-right">POINTS</span>
+      <SortHeader label="TROPHIES" sortKey="trophies" sort={sort} onSort={onSort} />
+      <SortHeader label="EVENTS" sortKey="events" sort={sort} onSort={onSort} />
+      <SortHeader label="RECORD" sortKey="record" sort={sort} onSort={onSort} />
+      <SortHeader label="WIN %" sortKey="winPct" sort={sort} onSort={onSort} />
+      <SortHeader label="POINTS" sortKey="score" sort={sort} onSort={onSort} />
     </div>
+  );
+}
+
+function SortHeader({
+  label,
+  sortKey,
+  sort,
+  onSort,
+}: {
+  label: string;
+  sortKey: SortKey;
+  sort?: SortState;
+  onSort?: (key: SortKey) => void;
+}) {
+  if (!onSort) {
+    return <span className="text-right">{label}</span>;
+  }
+  const active = sort?.key === sortKey;
+  const Icon = active && sort?.dir === "asc" ? ChevronUp : ChevronDown;
+  return (
+    <button
+      type="button"
+      onClick={() => onSort(sortKey)}
+      aria-label={`Sort by ${label}`}
+      aria-sort={active ? (sort?.dir === "asc" ? "ascending" : "descending") : "none"}
+      className={cn(
+        "relative block w-full text-right cursor-pointer transition-colors tracking-[inherit] text-[inherit] font-[inherit]",
+        active ? "text-text" : "hover:text-text",
+      )}
+    >
+      <span>{label}</span>
+      <Icon
+        size={11}
+        strokeWidth={2.5}
+        className={cn(
+          "absolute left-full top-1/2 -translate-y-1/2 ml-0.5 shrink-0",
+          active ? "opacity-100" : "opacity-30",
+        )}
+        aria-hidden="true"
+      />
+    </button>
   );
 }
 

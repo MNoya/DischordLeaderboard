@@ -11,7 +11,8 @@ import { SetSwitcherDesktop, SetSwitcherMobile } from "../components/SetSwitcher
 import { FilterDropdown } from "../components/FilterDropdown";
 import { ColorsSwitcher } from "../components/ColorsSwitcher";
 import { LeaderboardSidebar } from "../components/LeaderboardSidebar";
-import { LeaderboardColumnHeader, LeaderboardTable } from "../components/LeaderboardTable";
+import { DEFAULT_SORT, LeaderboardColumnHeader, LeaderboardTable, sortRows } from "../components/LeaderboardTable";
+import type { SortDir, SortKey, SortState } from "../components/LeaderboardTable";
 import { SectionLabel } from "../components/SectionLabel";
 import { ChamferedButton } from "../components/ChamferedButton";
 import { Record } from "../components/Record";
@@ -113,9 +114,34 @@ export function LeaderboardPage() {
       : formatMode
         ? fmtLb
         : lb;
-  const rows: LeaderboardTableRow[] | undefined = active.data;
+  const baseRows: LeaderboardTableRow[] | undefined = active.data;
   const isLoading = active.isLoading;
   const error = active.error as Error | null;
+
+  const sort = readSortFromParams(searchParams);
+  const rows = useMemo(
+    () => (baseRows ? sortRows(baseRows, sort) : baseRows),
+    [baseRows, sort.key, sort.dir],
+  );
+
+  const onSort = (key: SortKey) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      const curKey = (next.get("sort") as SortKey | null) ?? DEFAULT_SORT.key;
+      const curDir = (next.get("dir") as SortDir | null) ?? DEFAULT_SORT.dir;
+      const dir: SortDir =
+        curKey === key ? (curDir === "desc" ? "asc" : "desc") : "desc";
+      if (key === DEFAULT_SORT.key && dir === DEFAULT_SORT.dir) {
+        next.delete("sort");
+        next.delete("dir");
+      } else {
+        next.set("sort", key);
+        if (dir === "desc") next.delete("dir");
+        else next.set("dir", dir);
+      }
+      return next;
+    });
+  };
 
   useIdlePrefetchOtherSets(activeSet, sets);
   useIdlePrefetchTopPlayers(rows);
@@ -133,6 +159,8 @@ export function LeaderboardPage() {
       colorsMode={colorsMode}
       otherCombos={otherCombos}
       searchParams={searchParams}
+      sort={sort}
+      onSort={onSort}
     />
   ) : (
     <Desktop
@@ -146,8 +174,26 @@ export function LeaderboardPage() {
       colorsMode={colorsMode}
       otherCombos={otherCombos}
       searchParams={searchParams}
+      sort={sort}
+      onSort={onSort}
     />
   );
+}
+
+const SORT_KEYS: ReadonlySet<SortKey> = new Set([
+  "score",
+  "trophies",
+  "events",
+  "record",
+  "winPct",
+]);
+
+function readSortFromParams(searchParams: URLSearchParams): SortState {
+  const rawKey = searchParams.get("sort");
+  const rawDir = searchParams.get("dir");
+  const key: SortKey = rawKey && SORT_KEYS.has(rawKey as SortKey) ? (rawKey as SortKey) : DEFAULT_SORT.key;
+  const dir: SortDir = rawDir === "asc" ? "asc" : "desc";
+  return { key, dir };
 }
 
 interface FilterRowProps {
@@ -171,6 +217,8 @@ function Desktop({
   colorsMode: _colorsMode,
   otherCombos,
   searchParams,
+  sort,
+  onSort,
 }: {
   activeSet: string;
   sets: SetSummary[] | undefined;
@@ -182,6 +230,8 @@ function Desktop({
   colorsMode: boolean;
   otherCombos: string[];
   searchParams: URLSearchParams;
+  sort: SortState;
+  onSort: (key: SortKey) => void;
 }) {
   const navigate = useNavigate();
   return (
@@ -196,6 +246,8 @@ function Desktop({
           variant="desktop"
           loading={isLoading}
           error={error}
+          sort={sort}
+          onSort={onSort}
           renderExpanded={(r) => (
             <DesktopExpandedRow
               row={r}
@@ -302,6 +354,8 @@ function Mobile({
   colorsMode: _colorsMode,
   otherCombos,
   searchParams,
+  sort,
+  onSort,
 }: {
   activeSet: string;
   sets: SetSummary[] | undefined;
@@ -312,6 +366,8 @@ function Mobile({
   filters: FilterRowProps;
   colorsMode: boolean;
   searchParams: URLSearchParams;
+  sort: SortState;
+  onSort: (key: SortKey) => void;
 }) {
   const navigate = useNavigate();
   return (
@@ -319,7 +375,7 @@ function Mobile({
       <div className="sticky top-0 z-10 bg-bg">
         <AppHeader subtitle="LEADERBOARD" />
 
-        <div className="px-4 py-2 border-b border-border bg-surface flex items-stretch gap-2">
+        <div className="px-3 py-2 border-b border-border bg-surface flex items-stretch gap-2">
           <div className="basis-[60%] min-w-0 flex">
             <FilterDropdown
               label="FORMAT"
@@ -351,7 +407,7 @@ function Mobile({
         </div>
         {/* Column header is part of the sticky chrome so it stays pinned with the
             rest of the page chrome as rows scroll under it. */}
-        <LeaderboardColumnHeader variant="mobile" />
+        <LeaderboardColumnHeader variant="mobile" sort={sort} onSort={onSort} />
       </div>
 
       <LeaderboardTable

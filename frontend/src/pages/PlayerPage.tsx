@@ -21,7 +21,7 @@ import {
   colorsDisplayName,
   deckColorParts,
   formatDeckColors,
-  FORMAT_OPTIONS_LONG,
+  FORMAT_OPTIONS,
   MULTI,
   OTHER,
   type FilterOption,
@@ -814,7 +814,7 @@ function DraftLogDesktop({
             label="FORMAT"
             value={formatFilter}
             onChange={setFormatFilter}
-            options={FORMAT_OPTIONS_LONG}
+            options={FORMAT_OPTIONS}
             renderValue={renderFormatOption}
             renderOption={renderFormatOption}
           />
@@ -1083,7 +1083,7 @@ function Mobile({
               label="FORMAT"
               value={formatFilter}
               onChange={setFormatFilter}
-              options={FORMAT_OPTIONS_LONG}
+              options={FORMAT_OPTIONS}
               variant="mobile"
               renderValue={renderFormatOption}
               renderOption={renderFormatOption}
