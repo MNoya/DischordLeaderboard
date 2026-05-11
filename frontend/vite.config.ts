@@ -1,6 +1,5 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import fs from "node:fs";
 import path from "node:path";
 import type { Connect } from "vite";
 
@@ -27,21 +26,9 @@ const noTrailingSlashPlugin = {
   },
 };
 
-// CF Pages reads _redirects from the deployment root (dist/), not from
-// dist/leaderboard/ where Vite's public/ files land because of base "/leaderboard/".
-const emitRootRedirectsPlugin = {
-  name: "emit-root-redirects",
-  apply: "build" as const,
-  closeBundle() {
-    const dest = path.resolve(__dirname, "dist/_redirects");
-    fs.mkdirSync(path.dirname(dest), { recursive: true });
-    fs.writeFileSync(dest, "/leaderboard/* /leaderboard 200\n");
-  },
-};
-
 export default defineConfig({
   base: "/leaderboard/",
-  plugins: [react(), noTrailingSlashPlugin, emitRootRedirectsPlugin],
+  plugins: [react(), noTrailingSlashPlugin],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
