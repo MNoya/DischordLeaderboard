@@ -50,7 +50,7 @@ class MinIntervalLimiter:
 
     def __init__(
         self,
-        min_interval_s: float = 1.0,
+        min_interval_s: float = 3.0,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:

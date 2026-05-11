@@ -8,6 +8,7 @@ vary per set and is owned elsewhere.
 from __future__ import annotations
 
 import logging
+import time as _time
 from datetime import datetime, timezone
 from typing import Iterable, Protocol
 
@@ -385,12 +386,22 @@ def refresh_active_players(
         select(Player).where(Player.active.is_(True), Player.token_invalid.is_(False))
     ).scalars().all()
 
-    summary: dict = {"updated": 0, "invalidated": 0, "errors": 0, "invalidated_players": []}
+    summary: dict = {
+        "updated": 0,
+        "invalidated": 0,
+        "errors": 0,
+        "invalidated_players": [],
+        "per_player": [],
+        "elapsed_s": 0.0,
+    }
+    t_total = _time.monotonic()
     for player in players:
+        t0 = _time.monotonic()
         result = refresh_player(session, client, player, magic_set)
         # Commit per-player so a mid-run crash keeps already-fetched data and the token_invalid flag persists immediately
         session.commit()
-        status = result.get("status")
+        elapsed = _time.monotonic() - t0
+        status = result.get("status") or "error"
         if status == "updated":
             summary["updated"] += 1
         elif status == "invalidated":
@@ -398,4 +409,10 @@ def refresh_active_players(
             summary["invalidated_players"].append(player.id)
         else:
             summary["errors"] += 1
+        summary["per_player"].append({
+            "display_name": player.display_name,
+            "status": status,
+            "seconds": round(elapsed, 2),
+        })
+    summary["elapsed_s"] = round(_time.monotonic() - t_total, 2)
     return summary

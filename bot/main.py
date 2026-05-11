@@ -3,11 +3,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import traceback
+from datetime import time as dtime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 from sqlalchemy import select
 
 from bot.config import settings
@@ -22,6 +24,15 @@ from bot.sets import ACTIVE_SET_CODE
 log = logging.getLogger(__name__)
 
 LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
+
+# Cron-style refresh schedule: fires the auto-refresh at each listed wall-clock
+# time, in local timezone. Missed slots (e.g. bot down) are not caught up — the
+# next listed time will fire normally. Use !refresh to recover manually.
+AUTO_REFRESH_TZ = ZoneInfo("America/Montevideo")
+AUTO_REFRESH_TIMES = [
+    dtime(hour=8, minute=0, tzinfo=AUTO_REFRESH_TZ),
+    dtime(hour=20, minute=0, tzinfo=AUTO_REFRESH_TZ),
+]
 
 
 def configure_logging() -> None:
@@ -54,6 +65,13 @@ async def _notify_owner(bot: commands.Bot, header: str, body: str) -> None:
         await owner.send(f"{header}\n```\n{snippet}\n```")
     except discord.HTTPException:
         log.warning("could not DM owner about crash", exc_info=True)
+
+
+def _fmt_elapsed(seconds: float) -> str:
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes, sec = divmod(int(round(seconds)), 60)
+    return f"{minutes}m {sec}s"
 
 
 def build_bot(guild_id: int) -> commands.Bot:
@@ -168,13 +186,12 @@ def build_bot(guild_id: int) -> commands.Bot:
 
         await _reply_quietly(ctx, f"✅ Synced: {len(synced_guild)} guild, {len(synced_global)} global.")
 
-    @bot.command(name="refresh")
-    @commands.is_owner()
-    async def refresh_cmd(ctx: commands.Context, set_code: str | None = None) -> None:
-        """Owner-only. Re-pull stats from 17lands for all active players.
+    async def run_refresh(target_code: str, *, trigger: str) -> dict | None:
+        """Pull 17lands data, recompute scores, repaint live messages, DM the owner a report.
 
-        `!refresh`         — refresh the current set (ACTIVE_SET_CODE in bot/sets.py)
-        `!refresh CODE`    — refresh a specific set, e.g. `!refresh ECL`
+        Returns None if the set code is unknown; otherwise a dict with the
+        per-stage summaries and total elapsed time. ``trigger`` is "manual" or
+        "auto" — surfaced in the owner DM so the source is obvious.
         """
         msg_invalidated_dm = (
             "⚠️ Your 17lands token appears to be invalid (possibly regenerated). "
@@ -183,29 +200,24 @@ def build_bot(guild_id: int) -> commands.Bot:
 
         from bot.database import SessionLocal
 
-        target_code = set_code or ACTIVE_SET_CODE
-
-        await _reply_quietly(ctx, f"⏳ Refreshing `{target_code}`…")
-
-        # 17lands fetches and SQLAlchemy work are blocking; running them inline
-        # would freeze the gateway heartbeat. Push to a worker thread so the
-        # event loop stays free to dispatch other commands while this runs
-        def _run_refresh() -> tuple[dict | None, list[str]]:
+        def _do_db_work() -> dict | None:
             client = SeventeenLandsClient()
             with SessionLocal() as session:
                 magic_set = session.execute(
                     select(MagicSet).where(MagicSet.code == target_code)
                 ).scalar_one_or_none()
                 if magic_set is None:
-                    return None, []
-                summary = refresh_active_players(session, client, magic_set)
-                return summary, list(summary.get("invalidated_players", []))
+                    return None
+                return refresh_active_players(session, client, magic_set)
 
-        summary, invalidated_ids = await asyncio.to_thread(_run_refresh)
+        # 17lands fetches and SQLAlchemy work are blocking; running them inline
+        # would freeze the gateway heartbeat. Push to a worker thread so the
+        # event loop stays free to dispatch other commands while this runs
+        summary = await asyncio.to_thread(_do_db_work)
         if summary is None:
-            await _reply_quietly(ctx, f"❌ No set with code `{target_code}`.")
-            return
+            return None
 
+        invalidated_ids = list(summary.get("invalidated_players", []))
         invalidated_players: list[Player] = []
         if invalidated_ids:
             with SessionLocal() as session:
@@ -215,7 +227,6 @@ def build_bot(guild_id: int) -> commands.Bot:
                 for p in invalidated_players:
                     session.expunge(p)
 
-        # DM each invalidated player so they know to /relink
         for player in invalidated_players:
             if not player.discord_id:
                 continue
@@ -225,9 +236,6 @@ def build_bot(guild_id: int) -> commands.Bot:
             except discord.HTTPException as e:
                 log.warning("could not DM player %s: %s", player.id, e)
 
-        # Refresh Discord avatar hashes for every active player. Cheap (one
-        # cached HTTP call per player) and keeps the leaderboard view's
-        # avatar_url current without needing a manual /relink
         avatar_summary = {"checked": 0, "updated": 0, "skipped": 0, "errors": 0}
         try:
             with SessionLocal() as session:
@@ -240,9 +248,6 @@ def build_bot(guild_id: int) -> commands.Bot:
         except Exception:
             log.warning("avatar refresh sweep failed", exc_info=True)
 
-        # Re-render any leaderboard messages already posted in channels.
-        # Re-resolve the set inside a fresh session — the original magic_set is
-        # detached now that its session closed
         from bot.commands.leaderboard import edit_tracked_messages_for_set
         edit_summary = {"edited": 0, "pruned": 0, "errors": 0}
         with SessionLocal() as session:
@@ -252,16 +257,14 @@ def build_bot(guild_id: int) -> commands.Bot:
             if ms is not None:
                 edit_summary = await edit_tracked_messages_for_set(bot, ms)
 
-        await _reply_quietly(
-            ctx,
-            f"✅ Refresh complete for `{target_code}`: "
-            f"{summary['updated']} updated, "
-            f"{summary['invalidated']} invalidated, "
-            f"{summary['errors']} errors. "
-            f"Avatars: {avatar_summary['updated']}/{avatar_summary['checked']} updated. "
-            f"Live messages: {edit_summary['edited']} edited, "
-            f"{edit_summary['pruned']} pruned, {edit_summary['errors']} failed.",
-        )
+        result = {
+            "summary": summary,
+            "avatar_summary": avatar_summary,
+            "edit_summary": edit_summary,
+            "trigger": trigger,
+        }
+
+        await _dm_owner_refresh_report(target_code, result)
 
         from bot.commands.leaderboard import process_leaderboard, render_embed as render_leaderboard_embed
         with SessionLocal() as session:
@@ -273,9 +276,69 @@ def build_bot(guild_id: int) -> commands.Bot:
             except discord.HTTPException:
                 log.warning("could not DM owner the full leaderboard preview", exc_info=True)
 
+        return result
+
+    async def _dm_owner_refresh_report(target_code: str, result: dict) -> None:
+        if bot.owner_id is None:
+            return
+        summary = result["summary"]
+        per_player = summary.get("per_player", [])
+        n_players = len(per_player)
+        avg_line = (
+            f" · Avg {summary['elapsed_s'] / n_players:.1f}s/player"
+            if n_players else ""
+        )
+        trigger_tag = " (auto)" if result["trigger"] == "auto" else ""
+        body = (
+            f"🔄 Refresh complete for `{target_code}`{trigger_tag}\n"
+            f"Elapsed: {_fmt_elapsed(summary.get('elapsed_s', 0.0))} · "
+            f"Players: {n_players}{avg_line}\n"
+            f"Updated: {summary['updated']} · "
+            f"Invalidated: {summary['invalidated']} · "
+            f"Errors: {summary['errors']}\n"
+            f"Live messages: {result['edit_summary']['edited']} edited, "
+            f"{result['edit_summary']['pruned']} pruned, "
+            f"{result['edit_summary']['errors']} failed"
+        )
+        try:
+            owner = bot.get_user(bot.owner_id) or await bot.fetch_user(bot.owner_id)
+            await owner.send(content=body)
+        except discord.HTTPException:
+            log.warning("could not DM owner the refresh report", exc_info=True)
+
+    @bot.command(name="refresh")
+    @commands.is_owner()
+    async def refresh_cmd(ctx: commands.Context, set_code: str | None = None) -> None:
+        """Owner-only. Re-pull stats from 17lands for all active players.
+
+        `!refresh`         — refresh the current set (ACTIVE_SET_CODE in bot/sets.py)
+        `!refresh CODE`    — refresh a specific set, e.g. `!refresh ECL`
+        """
+        target_code = set_code or ACTIVE_SET_CODE
+        await _reply_quietly(ctx, f"⏳ Refreshing `{target_code}`…")
+        result = await run_refresh(target_code, trigger="manual")
+        if result is None:
+            await _reply_quietly(ctx, f"❌ No set with code `{target_code}`.")
+            return
+
+    @tasks.loop(time=AUTO_REFRESH_TIMES)
+    async def auto_refresh_tick() -> None:
+        try:
+            log.info("auto-refresh: scheduled tick firing for %s", ACTIVE_SET_CODE)
+            await run_refresh(ACTIVE_SET_CODE, trigger="auto")
+        except Exception:
+            log.exception("auto-refresh tick failed")
+            await _notify_owner(bot, "⚠️ auto-refresh tick crashed:", traceback.format_exc())
+
+    @auto_refresh_tick.before_loop
+    async def _before_auto_refresh() -> None:
+        await bot.wait_until_ready()
+
     @bot.event
     async def on_ready() -> None:
         log.info("logged in as %s (id=%s)", bot.user, bot.user.id if bot.user else "?")
+        if not auto_refresh_tick.is_running():
+            auto_refresh_tick.start()
 
     return bot
 
