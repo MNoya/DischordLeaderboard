@@ -72,7 +72,7 @@ export function LeaderboardSidebar({
 
   const topColors: ColorsSummary[] | undefined = formatScoped
     ? formatTrophies && topColorsFromTrophies(setCode, formatTrophies)
-    : topColorsAll;
+    : topColorsAll?.filter((r) => r.trophies > 0);
 
   const recentSource: RecentTrophy[] | undefined = formatScoped ? formatTrophies : recentAll;
   const recentScoped = !colorsScoped

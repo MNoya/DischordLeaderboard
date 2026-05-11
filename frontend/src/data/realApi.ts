@@ -142,7 +142,6 @@ export async function fetchColorsSummary(setCode: string): Promise<ColorsSummary
   }
   return Array.from(agg.entries())
     .map(([colors, v]) => ({ setCode, colors, ...v }))
-    .filter((r) => r.trophies > 0)
     .sort((a, b) => b.trophies - a.trophies);
 }
 

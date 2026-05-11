@@ -113,7 +113,6 @@ export const fetchColorsSummary = (setCode: string): Promise<ColorsSummary[]> =>
         events: v.events,
         players: v.players.size,
       }))
-      .filter((r) => r.trophies > 0)
       .sort((a, b) => b.trophies - a.trophies),
   );
 };
