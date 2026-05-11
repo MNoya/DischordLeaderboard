@@ -129,10 +129,3 @@ export function prettyFormat(format: string): string {
   return FORMAT_DISPLAY[format] ?? format;
 }
 
-// Compact label (e.g. "PREM", "TRAD") for tight rows where the full pretty
-// name would wrap. First four characters of the format with the "Draft"
-// suffix stripped.
-export function shortFormatLabel(format: string): string {
-  const stripped = format.replace("Draft", "");
-  return stripped.slice(0, 4).toUpperCase();
-}

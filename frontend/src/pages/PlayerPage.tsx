@@ -22,11 +22,12 @@ import {
   deckColorParts,
   formatDeckColors,
   FORMAT_OPTIONS,
+  matchesFormatFilter,
   MULTI,
   OTHER,
   type FilterOption,
 } from "../data/filters";
-import { FMT_COLORS, renderFormatOption } from "../data/format-display";
+import { FMT_COLORS, renderFormatOption, shortFormat } from "../data/format-display";
 import { cn } from "../lib/utils";
 import type {
   PlayerDraftEvent,
@@ -451,7 +452,7 @@ function Desktop({
   const filtered = useMemo(
     () =>
       events.filter((e) => {
-        if (formatFilter !== "ALL" && !e.format.toLowerCase().includes(formatFilter.toLowerCase())) return false;
+        if (formatFilter !== "ALL" && !matchesFormatFilter(e.format, formatFilter)) return false;
         if (colorsFilter !== "ALL") {
           if (colorsFilter === MULTI) {
             if (effectiveColorCount(e.colors) < 4) return false;
@@ -753,7 +754,7 @@ function FormatLegend({
               className="font-display text-[13px] tracking-[0.06em]"
               style={{ color: FMT_COLORS[f.formatLabel] ?? "#5c8aff" }}
             >
-              {f.formatLabel.toUpperCase()}
+              {shortFormat(f.formatLabel)}
             </span>
             <TrophyCount
               count={f.trophies}
@@ -1007,7 +1008,7 @@ function Mobile({
   const filtered = useMemo(
     () =>
       events.filter((e) => {
-        if (formatFilter !== "ALL" && !e.format.toLowerCase().includes(formatFilter.toLowerCase())) return false;
+        if (formatFilter !== "ALL" && !matchesFormatFilter(e.format, formatFilter)) return false;
         if (colorsFilter !== "ALL") {
           if (colorsFilter === MULTI) {
             if (effectiveColorCount(e.colors) < 4) return false;
@@ -1224,7 +1225,7 @@ function MobileFormatTab({ profile }: { profile: PlayerProfile }) {
               className="font-display text-[11px] tracking-[0.06em]"
               style={{ color: FMT_COLORS[f.formatLabel] ?? "#5c8aff" }}
             >
-              {f.formatLabel.toUpperCase()}
+              {shortFormat(f.formatLabel)}
             </span>
             <TrophyCount
               count={f.trophies}

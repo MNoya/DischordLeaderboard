@@ -16,6 +16,7 @@ import {
 } from "./adapter";
 import { computeScore, type ScoringStatRow } from "./scoring";
 import { colorsOf, effectiveColorCount } from "./utils";
+import { FORMAT_LABEL_GROUPS } from "./filters";
 import type {
   ColorsLeaderboardRow,
   ColorsSummary,
@@ -65,12 +66,13 @@ export async function fetchFormatLeaderboard(
   setCode: string,
   format: string,
 ): Promise<LeaderboardRow[]> {
+  const labels = FORMAT_LABEL_GROUPS[format] ?? [format];
   const [breakdown, leaderboard] = await Promise.all([
     client()
       .from("public_player_format_breakdown")
       .select("*")
       .eq("set_code", setCode)
-      .eq("format_label", format),
+      .in("format_label", labels),
     client()
       .from("public_leaderboard")
       .select("slug, display_name, avatar_url, last_calculated_at")
@@ -86,34 +88,40 @@ export async function fetchFormatLeaderboard(
     ]),
   );
 
-  const rows = (breakdown.data ?? [])
-    .map((raw) => raw as Record<string, unknown>)
-    .filter((r) => {
-      // Drop rows with zero events (the per-format breakdown view doesn't filter
-      // them server-side) and rows whose player isn't on the leaderboard
-      const events = (r.events as number) ?? 0;
-      return events > 0 && info.has(r.slug as string);
-    })
-    .map((r) => {
-      const inf = info.get(r.slug as string)!;
-      return {
+  const agg = new Map<string, LeaderboardRow>();
+  for (const raw of breakdown.data ?? []) {
+    const r = raw as Record<string, unknown>;
+    const slug = r.slug as string;
+    const events = (r.events as number) ?? 0;
+    if (events <= 0 || !info.has(slug)) continue;
+    const inf = info.get(slug)!;
+    const cur = agg.get(slug);
+    if (!cur) {
+      agg.set(slug, {
         setCode,
-        slug: r.slug as string,
+        slug,
         displayName: inf.display_name as string,
         avatarUrl: (inf.avatar_url ?? null) as string | null,
-        rank: 0, // assigned after sort
+        rank: 0,
         score: Number(r.score_contribution ?? 0),
-        trophies: r.trophies as number,
-        events: r.events as number,
-        wins: r.wins as number,
-        losses: r.losses as number,
+        trophies: (r.trophies as number) ?? 0,
+        events,
+        wins: (r.wins as number) ?? 0,
+        losses: (r.losses as number) ?? 0,
         lastCalculatedAt: inf.last_calculated_at as string,
-      } satisfies LeaderboardRow;
-    })
+      });
+    } else {
+      cur.score += Number(r.score_contribution ?? 0);
+      cur.trophies += (r.trophies as number) ?? 0;
+      cur.events += events;
+      cur.wins += (r.wins as number) ?? 0;
+      cur.losses += (r.losses as number) ?? 0;
+    }
+  }
+
+  return Array.from(agg.values())
     .sort((a, b) => b.score - a.score)
     .map((r, i) => ({ ...r, rank: i + 1 }));
-
-  return rows;
 }
 
 export async function fetchColorsSummary(setCode: string): Promise<ColorsSummary[]> {

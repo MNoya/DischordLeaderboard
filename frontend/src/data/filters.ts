@@ -18,6 +18,21 @@ export const FORMAT_OPTIONS: FilterOption[] = [
   { value: "LCQ", label: "CHAMPIONSHIP QUALIFIER" },
 ];
 
+export const FORMAT_LABEL_GROUPS: Record<string, string[]> = {
+  LCQ: ["LCQ Draft 1", "LCQ Draft 2"],
+};
+
+export const FORMAT_RAW_GROUPS: Record<string, string[]> = {
+  LCQ: ["LimitedChampionshipQualifier_Draft1", "LimitedChampionshipQualifier_Draft2"],
+};
+
+export function matchesFormatFilter(rawFormat: string, filter: string): boolean {
+  if (filter === "ALL") return true;
+  const group = FORMAT_RAW_GROUPS[filter];
+  if (group) return group.includes(rawFormat);
+  return rawFormat.toLowerCase().includes(filter.toLowerCase());
+}
+
 
 // Cross-cutting bucket — any deck with ≥4 effective colors. Display label: "SOUP"
 export const MULTI = "MULTI";
@@ -82,14 +97,6 @@ const WEDGE_NAMES: Record<string, string> = {
   BRG: "JUND",
 };
 
-const COLOR_FULL_NAMES: Record<string, string> = {
-  W: "WHITE",
-  U: "BLUE",
-  B: "BLACK",
-  R: "RED",
-  G: "GREEN",
-};
-
 function fourColorMissing(code: string): string | null {
   if (code.length !== 4) return null;
   for (const c of "WUBRG") {
@@ -106,7 +113,7 @@ export function colorsDisplayName(code: string): string {
   if (WEDGE_NAMES[code]) return WEDGE_NAMES[code];
   if (code === "WUBRG") return "5-COLOR";
   const missing = fourColorMissing(code);
-  if (missing) return `4 COLOR NO ${COLOR_FULL_NAMES[missing]}`;
+  if (missing) return `4C NO ${missing}`;
   return code;
 }
 

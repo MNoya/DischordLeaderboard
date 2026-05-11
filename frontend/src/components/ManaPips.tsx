@@ -32,9 +32,20 @@ export function Pips({ colors, size = 12 }: { colors: string; size?: number }) {
       />
     );
   }
+  const chars = [...colors];
+  const allMain = chars.every((c) => c === c.toUpperCase());
+  if (chars.length === 4 && allMain) {
+    return (
+      <span className="inline-grid grid-cols-2 gap-px shrink-0">
+        {chars.map((ch, i) => (
+          <Pip key={`${ch}-${i}`} c={ch.toUpperCase() as Color} size={size} />
+        ))}
+      </span>
+    );
+  }
   return (
     <span className="inline-flex gap-px items-center">
-      {[...colors].map((ch, i) => {
+      {chars.map((ch, i) => {
         const isMain = ch === ch.toUpperCase();
         const upper = ch.toUpperCase() as Color;
         return (

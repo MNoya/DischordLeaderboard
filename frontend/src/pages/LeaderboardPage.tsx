@@ -32,7 +32,7 @@ import {
   useSets,
 } from "../data/hooks";
 import { colorsOf, effectiveColorCount, fmtRange, lastUpdated, prettyFormat, relativeTime, sumEvents, weekOfSet, winPct } from "../data/utils";
-import { colorsDisplayName, FORMAT_OPTIONS, MULTI, OTHER } from "../data/filters";
+import { colorsDisplayName, FORMAT_OPTIONS, matchesFormatFilter, MULTI, OTHER } from "../data/filters";
 import { FMT_COLORS, FMT_DEFAULT_COLOR, renderFormatOption, shortFormat } from "../data/format-display";
 import { cn } from "../lib/utils";
 import type { LeaderboardRow, PlayerDraftEvent, PlayerFormatBreakdown, SetSummary } from "../types/leaderboard";
@@ -240,7 +240,7 @@ function Desktop({
       <SetHero activeSet={activeSet} setMeta={setMeta} sets={sets} onSelectSet={(c) => goToSet(navigate, c, sets)} />
       <FilterRow {...filters} rows={rows} />
 
-      <div className="px-10 grid gap-6" style={{ gridTemplateColumns: "1fr 280px" }}>
+      <div className="px-5 grid gap-6" style={{ gridTemplateColumns: "1fr 320px" }}>
         <LeaderboardTable
           rows={rows}
           variant="desktop"
@@ -548,7 +548,7 @@ function FormatBreakdownPreview({
                   <Fragment key={f.formatLabel}>
                     <span className={cn(swatchCls, "shrink-0")} style={{ background: color }} />
                     <span className={cn("font-display tracking-[0.08em] truncate", labelCls)}>
-                      {f.formatLabel.toUpperCase()}
+                      {shortFormat(f.formatLabel)}
                     </span>
                     <span className={cn("mono text-muted tabular-nums justify-self-end", numCls)}>
                       {f.events}
@@ -627,7 +627,7 @@ function filterTrophyEvents(
   const otherSet = new Set(otherCombos);
   const matches = events.filter((e) => {
     if (!e.isTrophy) return false;
-    if (activeFormat !== "ALL" && !e.format.toLowerCase().includes(activeFormat.toLowerCase())) return false;
+    if (!matchesFormatFilter(e.format, activeFormat)) return false;
     if (activeColors !== "ALL") {
       if (activeColors === MULTI) {
         if (effectiveColorCount(e.colors) < 4) return false;

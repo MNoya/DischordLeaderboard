@@ -10,7 +10,8 @@ import { TrophyCount } from "./TrophyCount";
 import { Record } from "./Record";
 
 import { useColorsSummary, useRecentTrophies } from "../data/hooks";
-import { colorsOf, effectiveColorCount, relativeTime, shortFormatLabel } from "../data/utils";
+import { colorsOf, effectiveColorCount, relativeTime } from "../data/utils";
+import { shortFormat } from "../data/format-display";
 import { colorsDisplayName, MULTI, OTHER } from "../data/filters";
 
 export function LeaderboardSidebar({
@@ -125,8 +126,8 @@ export function LeaderboardSidebar({
             const cls =
               "grid gap-2 items-center py-[7px] no-underline text-inherit transition-colors hover:bg-surface2 -mx-1 px-1 " +
               (showRowPips
-                ? "grid-cols-[auto_1fr_30px_28px_24px_12px] "
-                : "grid-cols-[1fr_30px_28px_24px_12px] ") +
+                ? "grid-cols-[auto_1fr_30px_66px_12px] "
+                : "grid-cols-[1fr_30px_66px_12px] ") +
               (i ? "border-t border-border" : "");
             const inner = (
               <>
@@ -140,8 +141,10 @@ export function LeaderboardSidebar({
                   mono
                   className="mono text-[10px] text-subtle text-right"
                 />
-                <span className="mono text-[10px] text-dim">{shortFormatLabel(t.format)}</span>
-                <span className="mono text-[10px] text-dim text-right">{relativeTime(t.finishedAt)}</span>
+                <span className="flex items-baseline justify-between gap-1 mono text-dim">
+                  <span className="text-[10px] truncate">{shortFormat(t.format)}</span>
+                  <span className="text-[9px] tabular-nums">{relativeTime(t.finishedAt)}</span>
+                </span>
                 <span className="flex justify-center text-dim">
                   {isExternal && <ExternalLink size={10} aria-hidden="true" />}
                 </span>

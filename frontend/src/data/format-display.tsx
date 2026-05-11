@@ -9,6 +9,8 @@ export const FMT_COLORS: Record<string, string> = {
   Quick: "#ffc63a",
   Sealed: "#ff5d8c",
   LCQ: "#ff7700",
+  "LCQ Draft 1": "#ff7700",
+  "LCQ Draft 2": "#ff7700",
 };
 
 export const FMT_DEFAULT_COLOR = "#5c8aff";
@@ -19,12 +21,14 @@ const FORMAT_SHORT: Record<string, string> = {
   QuickDraft: "QUICK",
   Sealed: "SEALED",
   TradSealed: "TRAD SEALED",
-  ArenaDirect_Sealed: "ARENA DIR",
-  QualifierPlayInSealed: "QUAL PLAY-IN",
+  ArenaDirect_Sealed: "DIRECT",
+  QualifierPlayInSealed: "PLAY-IN",
   PickTwoDraft: "PICK 2",
   Emblem_QuickDraft: "QUICK",
-  LimitedChampionshipQualifier_Draft1: "LCQ 1",
-  LimitedChampionshipQualifier_Draft2: "LCQ 2",
+  LimitedChampionshipQualifier_Draft1: "LCQ D1",
+  LimitedChampionshipQualifier_Draft2: "LCQ D2",
+  "LCQ Draft 1": "LCQ D1",
+  "LCQ Draft 2": "LCQ D2",
   Premier: "PREMIER",
   Trad: "TRAD",
   Quick: "QUICK",
