@@ -9,31 +9,75 @@ import { SurfaceCard } from "./SurfaceCard";
 import { TrophyCount } from "./TrophyCount";
 import { Record } from "./Record";
 
-import { useColorsSummary, useRecentTrophies } from "../data/hooks";
+import { useColorsSummary, useFormatScopedTrophies, useRecentTrophies } from "../data/hooks";
 import { colorsOf, effectiveColorCount, relativeTime } from "../data/utils";
-import { shortFormat } from "../data/format-display";
+import { FMT_COLORS, FMT_DEFAULT_COLOR, shortFormat } from "../data/format-display";
 import { colorsDisplayName, MULTI, OTHER } from "../data/filters";
+import type { ColorsSummary, RecentTrophy } from "../types/leaderboard";
+
+// Derive a Top Colors summary from a list of trophy events. Each trophy is
+// bucketed into MULTI (≥4 effective colors) or its main archetype (splash
+// stripped). Used for the format-scoped sidebar where no precomputed per-format
+// summary view exists.
+function topColorsFromTrophies(setCode: string, trophies: RecentTrophy[]): ColorsSummary[] {
+  const counts = new Map<string, { trophies: number; players: Set<string> }>();
+  for (const t of trophies) {
+    const key = effectiveColorCount(t.colors) >= 4 ? MULTI : colorsOf(t.colors);
+    if (!key) continue;
+    const cur = counts.get(key) ?? { trophies: 0, players: new Set<string>() };
+    cur.trophies += 1;
+    cur.players.add(t.slug);
+    counts.set(key, cur);
+  }
+  return [...counts.entries()]
+    .map(([colors, v]) => ({
+      setCode,
+      colors,
+      trophies: v.trophies,
+      events: v.trophies,
+      players: v.players.size,
+    }))
+    .filter((r) => r.trophies > 0)
+    .sort((a, b) => b.trophies - a.trophies);
+}
 
 export function LeaderboardSidebar({
   setCode,
   colors = "ALL",
+  format = "ALL",
   otherCombos = [],
   onColorsSelect,
   searchParams,
 }: {
   setCode: string;
   colors?: string;
+  format?: string;
   otherCombos?: string[];
   onColorsSelect?: (code: string) => void;
   searchParams?: URLSearchParams;
 }) {
   const qs = searchParams?.toString() ?? "";
-  const scoped = colors !== "ALL";
-  const { data: topColors } = useColorsSummary(setCode);
-  const { data: recent } = useRecentTrophies(setCode, scoped ? 100 : 5);
-  const recentScoped = !scoped
-    ? recent
-    : (recent ?? [])
+  const colorsScoped = colors !== "ALL";
+  const formatScoped = !colorsScoped && format !== "ALL";
+
+  const { data: topColorsAll } = useColorsSummary(formatScoped ? undefined : setCode);
+  const { data: formatTrophies } = useFormatScopedTrophies(
+    formatScoped ? setCode : undefined,
+    formatScoped ? format : undefined,
+  );
+  const { data: recentAll } = useRecentTrophies(
+    formatScoped ? undefined : setCode,
+    colorsScoped ? 100 : 5,
+  );
+
+  const topColors: ColorsSummary[] | undefined = formatScoped
+    ? formatTrophies && topColorsFromTrophies(setCode, formatTrophies)
+    : topColorsAll;
+
+  const recentSource: RecentTrophy[] | undefined = formatScoped ? formatTrophies : recentAll;
+  const recentScoped = !colorsScoped
+    ? (recentSource ? recentSource.slice(0, 5) : undefined)
+    : (recentSource ?? [])
         .filter((t) => {
           if (colors === MULTI) return effectiveColorCount(t.colors) >= 4;
           if (colors === OTHER) {
@@ -44,19 +88,33 @@ export function LeaderboardSidebar({
         })
         .slice(0, 5);
 
-  const scopeLabel = colorsDisplayName(colors);
-  const recentTitle = scoped ? `RECENT ${scopeLabel} TROPHIES` : "RECENT TROPHIES";
+  const scopeLabel = colorsScoped
+    ? colorsDisplayName(colors)
+    : formatScoped
+      ? shortFormat(format)
+      : "";
+  const scoped = colorsScoped || formatScoped;
+  const formatColor = formatScoped ? (FMT_COLORS[format] ?? FMT_DEFAULT_COLOR) : null;
+  const scopeChip = colorsScoped ? (
+    <span className="text-green">{scopeLabel}</span>
+  ) : formatScoped ? (
+    <span style={{ color: formatColor! }}>{scopeLabel}</span>
+  ) : null;
+  const recentTitle = scoped ? <>RECENT {scopeChip} TROPHIES</> : "RECENT TROPHIES";
   const recentEmpty = scoped ? `NO RECENT ${scopeLabel} TROPHIES` : "NO TROPHIES YET";
-  // Pips per row only when the scope mixes combos (unscoped, OTHER, SOUP).
+  const topColorsTitle = formatScoped
+    ? <>TOP COLORS · BY {scopeChip} TROPHIES</>
+    : "TOP COLORS · BY TROPHIES";
+  // Pips per row only when the scope mixes combos (unscoped, format-only, OTHER, SOUP).
   // For a fixed named combo every row has the same colors — promote the pips
   // to the section title and free up width for the player name.
-  const namedScope = scoped && colors !== MULTI && colors !== OTHER;
+  const namedScope = colorsScoped && colors !== MULTI && colors !== OTHER;
   const showRowPips = !namedScope;
 
   return (
     <aside className="flex flex-col gap-4">
       <SurfaceCard>
-        <SectionLabel size={13} className="mb-2.5 text-subtle">TOP COLORS · BY TROPHIES</SectionLabel>
+        <SectionLabel size={13} className="mb-2.5 text-subtle">{topColorsTitle}</SectionLabel>
         {!topColors ? (
           <div className="mono text-[11px] text-muted py-2">LOADING…</div>
         ) : topColors.length === 0 ? (

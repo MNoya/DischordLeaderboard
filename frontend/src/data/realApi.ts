@@ -16,7 +16,7 @@ import {
 } from "./adapter";
 import { computeScore, type ScoringStatRow } from "./scoring";
 import { colorsOf, effectiveColorCount } from "./utils";
-import { FORMAT_LABEL_GROUPS } from "./filters";
+import { FORMAT_LABEL_GROUPS, FORMAT_RAW_GROUPS } from "./filters";
 import type {
   ColorsLeaderboardRow,
   ColorsSummary,
@@ -345,20 +345,48 @@ export async function fetchRecentTrophies(
     .order("finished_at", { ascending: false, nullsFirst: false })
     .limit(limit);
   if (error) throw error;
-  // RecentTrophy is camelCase already in our spec; reuse the camelify pattern.
-  return (data ?? []).map((r) => {
-    const row = r as Record<string, unknown>;
-    return {
-      setCode: row.set_code as string,
-      slug: row.slug as string,
-      displayName: row.display_name as string,
-      avatarUrl: (row.avatar_url ?? null) as string | null,
-      seventeenlandsEventId: (row.seventeenlands_event_id ?? null) as string | null,
-      format: row.format as string,
-      colors: row.colors as string,
-      wins: row.wins as number,
-      losses: row.losses as number,
-      finishedAt: row.finished_at as string,
-    };
-  });
+  return (data ?? []).map((r) => adaptRecentTrophy(r as Record<string, unknown>));
+}
+
+// Server-side format filter so the sidebar can rebuild Top Colors and Recent
+// Trophies from a single dataset when the user picks a format. LCQ has compound
+// raw labels; other formats substring-match (mirrors matchesFormatFilter).
+export async function fetchFormatRecentTrophies(
+  setCode: string,
+  format: string,
+): Promise<RecentTrophy[]> {
+  const group = FORMAT_RAW_GROUPS[format];
+
+  const all: RecentTrophy[] = [];
+  const pageSize = 1000;
+  for (let from = 0; ; from += pageSize) {
+    let q = client()
+      .from("public_recent_trophies")
+      .select("*")
+      .eq("set_code", setCode)
+      .order("finished_at", { ascending: false, nullsFirst: false })
+      .range(from, from + pageSize - 1);
+    q = group ? q.in("format", group) : q.ilike("format", `%${format}%`);
+    const { data, error } = await q;
+    if (error) throw error;
+    const batch = (data ?? []) as Array<Record<string, unknown>>;
+    for (const row of batch) all.push(adaptRecentTrophy(row));
+    if (batch.length < pageSize) break;
+  }
+  return all;
+}
+
+function adaptRecentTrophy(row: Record<string, unknown>): RecentTrophy {
+  return {
+    setCode: row.set_code as string,
+    slug: row.slug as string,
+    displayName: row.display_name as string,
+    avatarUrl: (row.avatar_url ?? null) as string | null,
+    seventeenlandsEventId: (row.seventeenlands_event_id ?? null) as string | null,
+    format: row.format as string,
+    colors: row.colors as string,
+    wins: row.wins as number,
+    losses: row.losses as number,
+    finishedAt: row.finished_at as string,
+  };
 }

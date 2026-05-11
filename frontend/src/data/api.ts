@@ -19,3 +19,4 @@ export const fetchColorsSummary = impl.fetchColorsSummary;
 export const fetchPlayerProfile = impl.fetchPlayerProfile;
 export const fetchPlayerDraftEvents = impl.fetchPlayerDraftEvents;
 export const fetchRecentTrophies = impl.fetchRecentTrophies;
+export const fetchFormatRecentTrophies = impl.fetchFormatRecentTrophies;

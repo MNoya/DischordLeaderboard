@@ -265,6 +265,7 @@ function Desktop({
           <LeaderboardSidebar
             setCode={activeSet}
             colors={filters.colors}
+            format={filters.format}
             otherCombos={otherCombos}
             onColorsSelect={filters.setColors}
             searchParams={searchParams}
@@ -684,16 +685,27 @@ function LastTrophyPanel({
   activeFormat: string;
   activeColors: string;
 }) {
-  const filterLabel =
-    activeColors !== "ALL"
-      ? colorsDisplayName(activeColors)
-      : activeFormat !== "ALL"
-        ? activeFormat.toUpperCase()
-        : null;
+  const colorsActive = activeColors !== "ALL";
+  const formatActive = !colorsActive && activeFormat !== "ALL";
+  const filterLabel = colorsActive
+    ? colorsDisplayName(activeColors)
+    : formatActive
+      ? activeFormat.toUpperCase()
+      : null;
+  const filterStyle = formatActive
+    ? { color: FMT_COLORS[activeFormat] ?? FMT_DEFAULT_COLOR }
+    : undefined;
   return (
     <div style={{ minHeight: PANEL_MIN_HEIGHT }}>
       <SectionLabel className="text-subtle">
-        LAST{filterLabel && <> <span className="text-green">{filterLabel}</span></>} TROPHIES
+        LAST{filterLabel && (
+          <>
+            {" "}
+            <span className={colorsActive ? "text-green" : ""} style={filterStyle}>
+              {filterLabel}
+            </span>
+          </>
+        )} TROPHIES
       </SectionLabel>
       <div className="flex flex-col gap-1 mt-2.5 min-w-0">
         {loading ? (

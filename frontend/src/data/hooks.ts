@@ -11,6 +11,7 @@ import {
   fetchColorsLeaderboard,
   fetchColorsSummary,
   fetchFormatLeaderboard,
+  fetchFormatRecentTrophies,
   fetchLeaderboard,
   fetchOtherColorsLeaderboard,
   fetchPlayerDraftEvents,
@@ -111,6 +112,20 @@ export function useRecentTrophies(setCode: string | undefined, limit = 8) {
     queryKey: ["recent-trophies", setCode, limit],
     queryFn: () => fetchRecentTrophies(setCode!, limit),
     enabled: !!setCode,
+    staleTime: FIVE_MINUTES,
+  });
+}
+
+// All trophies for the set filtered to a specific format. Backs both Top Colors
+// and Recent Trophies in the sidebar when the user picks a format.
+export function useFormatScopedTrophies(
+  setCode: string | undefined,
+  format: string | undefined,
+) {
+  return useQuery({
+    queryKey: ["format-trophies", setCode, format],
+    queryFn: () => fetchFormatRecentTrophies(setCode!, format!),
+    enabled: !!setCode && !!format,
     staleTime: FIVE_MINUTES,
   });
 }

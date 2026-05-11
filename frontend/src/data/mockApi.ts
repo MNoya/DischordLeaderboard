@@ -86,6 +86,7 @@ export const fetchLeaderboard = (setCode: string): Promise<LeaderboardRow[]> => 
 // fixture players contribute, but they cover the SOS top of the leaderboard so
 // the list is representative enough for dev.
 import { colorsOf } from "./utils";
+import { matchesFormatFilter } from "./filters";
 
 export const fetchColorsSummary = (setCode: string): Promise<ColorsSummary[]> => {
   if (setCode !== "SOS") return wait([]);
@@ -237,7 +238,18 @@ export const fetchRecentTrophies = (
   setCode: string,
   limit = 8,
 ): Promise<RecentTrophy[]> => {
-  if (setCode !== "SOS") return wait([]);
+  return wait(_allTrophiesFor(setCode).slice(0, limit));
+};
+
+export const fetchFormatRecentTrophies = (
+  setCode: string,
+  format: string,
+): Promise<RecentTrophy[]> => {
+  return wait(_allTrophiesFor(setCode).filter((t) => matchesFormatFilter(t.format, format)));
+};
+
+function _allTrophiesFor(setCode: string): RecentTrophy[] {
+  if (setCode !== "SOS") return [];
   const out: RecentTrophy[] = [];
   for (const events of Object.values(REAL_DRAFT_EVENTS)) {
     for (const e of events) {
@@ -257,9 +269,8 @@ export const fetchRecentTrophies = (
       });
     }
   }
-  out.sort((a, b) => (a.finishedAt < b.finishedAt ? 1 : -1));
-  return wait(out.slice(0, limit));
-};
+  return out.sort((a, b) => (a.finishedAt < b.finishedAt ? 1 : -1));
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Synth helpers — produce plausible per-player breakdowns and event logs for any
