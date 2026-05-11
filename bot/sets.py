@@ -23,11 +23,12 @@ class SetSeed:
 
 
 ALL_SETS: tuple[SetSeed, ...] = (
-    SetSeed("FIN", "Final Fantasy",              date(2025,  6, 10), date(2025,  7, 31)),
-    SetSeed("EOE", "Edge of Eternities",         date(2025,  8,  1), date(2025, 11, 17)),
-    SetSeed("TLA", "Avatar: The Last Airbender", date(2025, 11, 18), date(2026,  1, 19)),
-    SetSeed("ECL", "Lorwyn Eclipsed",            date(2026,  1, 20), date(2026,  4, 20)),
-    SetSeed("SOS", "Secrets of Strixhaven",      date(2026,  4, 21), date(2026,  6, 22)),
+    SetSeed("FIN", "Final Fantasy",                date(2025,  6,  9), date(2025,  7, 28)),
+    SetSeed("EOE", "Edge of Eternities",           date(2025,  7, 29), date(2025,  9, 23)),
+    SetSeed("TLA", "Avatar: The Last Airbender",   date(2025, 11, 16), date(2026,  1, 19)),
+    SetSeed("ECL", "Lorwyn Eclipsed",              date(2026,  1, 20), date(2026,  3,  2)),
+    SetSeed("TMT", "Teenage Mutant Ninja Turtles", date(2026,  3,  3), date(2026,  4, 20)),
+    SetSeed("SOS", "Secrets of Strixhaven",        date(2026,  4, 21), date(2026,  6, 22)),
 )
 
 ACTIVE_SET_CODE = "SOS"
