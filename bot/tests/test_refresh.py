@@ -9,7 +9,7 @@ from bot.services.refresh import (
     aggregate_by_format_and_expansion,
     recompute_player_set_score,
     refresh_active_players,
-    refresh_one_player_for_current_set,
+    refresh_one_player_for_all_sets,
     refresh_player,
     upsert_draft_events,
 )
@@ -96,15 +96,15 @@ class FakeClient:
         self.raise_ = raise_
         self.calls: list[tuple[str, object]] = []
 
-    def fetch_drafts(self, token, start_date=None):
-        self.calls.append((token, start_date))
+    def fetch_drafts(self, token, start_date=None, end_date=None):
+        self.calls.append((token, start_date, end_date))
         if self.raise_ is not None:
             raise self.raise_
         return list(self.drafts)
 
 
 class ExplodingClient:
-    def fetch_drafts(self, token, start_date=None):  # pragma: no cover - shouldn't be called
+    def fetch_drafts(self, token, start_date=None, end_date=None):  # pragma: no cover - shouldn't be called
         raise AssertionError("client should not be called for skipped player")
 
 
@@ -160,7 +160,7 @@ def test_refresh_player_inserts_rows(session):
     session.flush()
 
     assert result == {"status": "updated", "rows": 2}
-    assert client.calls == [(p.seventeenlands_token, s.start_date)]
+    assert client.calls == [(p.seventeenlands_token, s.start_date, s.end_date)]
     rows = session.execute(
         select(PlayerStats).where(PlayerStats.player_id == p.id)
     ).scalars().all()
@@ -320,7 +320,7 @@ def test_refresh_active_players_summary_counts(session):
         def __init__(self):
             self.calls = []
 
-        def fetch_drafts(self, token, start_date=None):
+        def fetch_drafts(self, token, start_date=None, end_date=None):
             self.calls.append(token)
             if token == p_404.seventeenlands_token:
                 raise error_404
@@ -341,40 +341,42 @@ def test_refresh_active_players_summary_counts(session):
 
 
 # ---------------------------------------------------------------------------
-# refresh_one_player_for_current_set
+# refresh_one_player_for_all_sets
 # ---------------------------------------------------------------------------
 
 
-def test_refresh_one_player_no_current_set(session):
+def test_refresh_one_player_no_sets(session):
     p = _seed_player(session)
     session.commit()
-    result = refresh_one_player_for_current_set(session, FakeClient(), p.id)
-    assert result == {"status": "no_current_set"}
+    result = refresh_one_player_for_all_sets(session, FakeClient(), p.id)
+    assert result == {"status": "no_sets"}
 
 
 def test_refresh_one_player_unknown_player_id(session):
-    # Seed SOS to match ACTIVE_SET_CODE default in bot/sets.py
     _seed_set(session, code="SOS")
-    result = refresh_one_player_for_current_set(session, FakeClient(), "nonexistent-id")
+    result = refresh_one_player_for_all_sets(session, FakeClient(), "nonexistent-id")
     assert result == {"status": "no_player"}
 
 
-def test_refresh_one_player_for_current_set_writes_rows(session):
-    s = _seed_set(session, code="SOS")
+def test_refresh_one_player_for_all_sets_writes_rows_per_set(session):
+    sos = _seed_set(session, code="SOS")
+    ecl = _seed_set(session, code="ECL")
     p = _seed_player(session)
     session.commit()
     client = FakeClient(drafts=[
         {"format": "PremierDraft", "expansion": "SOS", "wins": 5, "losses": 2, "event_wins": 7},
+        {"format": "PremierDraft", "expansion": "ECL", "wins": 7, "losses": 0, "event_wins": 7},
     ])
 
-    result = refresh_one_player_for_current_set(session, client, p.id)
+    result = refresh_one_player_for_all_sets(session, client, p.id)
     session.commit()
 
-    assert result["status"] == "updated"
+    assert result["status"] == "ok"
+    assert len(result["per_set"]) == 2
     rows = session.execute(
         select(PlayerStats).where(PlayerStats.player_id == p.id)
     ).scalars().all()
-    assert len(rows) == 1
+    assert len(rows) == 2
 
 
 # ---------------------------------------------------------------------------

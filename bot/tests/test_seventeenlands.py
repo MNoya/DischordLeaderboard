@@ -156,6 +156,28 @@ def test_fetch_drafts_passes_start_date():
 
 
 @responses.activate
+def test_fetch_drafts_passes_end_date():
+    responses.add(
+        responses.GET,
+        f"{DEFAULT_BASE_URL}/user/data/{VALID_TOKEN}",
+        json={"drafts": []},
+        status=200,
+        match=[responses.matchers.query_param_matcher({
+            "start_date": "2026-01-20",
+            "end_date": "2026-04-20",
+        })],
+    )
+
+    result = _client().fetch_drafts(
+        VALID_TOKEN,
+        start_date=date(2026, 1, 20),
+        end_date=date(2026, 4, 20),
+    )
+
+    assert result == []
+
+
+@responses.activate
 def test_fetch_drafts_raises_on_http_error():
     responses.add(
         responses.GET,

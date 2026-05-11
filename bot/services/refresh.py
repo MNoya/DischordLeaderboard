@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 class _DraftClient(Protocol):
-    def fetch_drafts(self, token: str, start_date=...) -> list[dict]: ...
+    def fetch_drafts(self, token: str, start_date=..., end_date=...) -> list[dict]: ...
 
 
 def aggregate_by_format_and_expansion(
@@ -79,24 +79,28 @@ def refresh_player(
     client: _DraftClient,
     player: Player,
     magic_set: MagicSet,
+    drafts: list[dict] | None = None,
 ) -> dict:
-    try:
-        drafts = client.fetch_drafts(
-            player.seventeenlands_token, start_date=magic_set.start_date
-        )
-    except requests.HTTPError as e:
-        if e.response is not None and e.response.status_code == 404:
-            player.token_invalid = True
-            return {"status": "invalidated"}
-        logger.warning("refresh: HTTP error for player %s: %s", player.id, e)
-        return {"status": "error", "error": str(e)}
-    except ValueError as e:
-        # Signup verifies tokens, so a malformed 200 is a 17lands-side issue, not a bad token
-        logger.warning("refresh: malformed response for player %s: %s", player.id, e)
-        return {"status": "error", "error": str(e)}
-    except requests.RequestException as e:
-        logger.warning("refresh: network error for player %s: %s", player.id, e)
-        return {"status": "error", "error": str(e)}
+    if drafts is None:
+        try:
+            drafts = client.fetch_drafts(
+                player.seventeenlands_token,
+                start_date=magic_set.start_date,
+                end_date=magic_set.end_date,
+            )
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 404:
+                player.token_invalid = True
+                return {"status": "invalidated"}
+            logger.warning("refresh: HTTP error for player %s: %s", player.id, e)
+            return {"status": "error", "error": str(e)}
+        except ValueError as e:
+            # Signup verifies tokens, so a malformed 200 is a 17lands-side issue, not a bad token
+            logger.warning("refresh: malformed response for player %s: %s", player.id, e)
+            return {"status": "error", "error": str(e)}
+        except requests.RequestException as e:
+            logger.warning("refresh: network error for player %s: %s", player.id, e)
+            return {"status": "error", "error": str(e)}
 
     rows = aggregate_by_format_and_expansion(drafts, magic_set.code)
     now = datetime.now(timezone.utc)
@@ -337,26 +341,41 @@ def recompute_player_archetype_scores(
         session.delete(row)
 
 
-def refresh_one_player_for_current_set(
+def refresh_one_player_for_all_sets(
     session: Session, client: _DraftClient, player_id: str
 ) -> dict:
-    """Refresh a single player's stats for whatever set is currently active.
-
-    "Current" is resolved from ACTIVE_SET_CODE in bot/sets.py.
-    """
-    from bot.sets import ACTIVE_SET_CODE
-
-    magic_set = session.execute(
-        select(MagicSet).where(MagicSet.code == ACTIVE_SET_CODE)
-    ).scalar_one_or_none()
-    if magic_set is None:
-        return {"status": "no_current_set"}
+    """Refresh a single player's stats across every registered set."""
     player = session.execute(
         select(Player).where(Player.id == player_id)
     ).scalar_one_or_none()
     if player is None:
         return {"status": "no_player"}
-    return refresh_player(session, client, player, magic_set)
+    sets = session.execute(
+        select(MagicSet).order_by(MagicSet.start_date.asc())
+    ).scalars().all()
+    if not sets:
+        return {"status": "no_sets"}
+
+    try:
+        drafts = client.fetch_drafts(
+            player.seventeenlands_token,
+            start_date=sets[0].start_date,
+        )
+    except requests.HTTPError as e:
+        if e.response is not None and e.response.status_code == 404:
+            player.token_invalid = True
+            return {"status": "invalidated"}
+        logger.warning("refresh: HTTP error for player %s: %s", player.id, e)
+        return {"status": "error", "error": str(e)}
+    except (ValueError, requests.RequestException) as e:
+        logger.warning("refresh: fetch failed for player %s: %s", player.id, e)
+        return {"status": "error", "error": str(e)}
+
+    per_set: list[dict] = []
+    for magic_set in sets:
+        result = refresh_player(session, client, player, magic_set, drafts=drafts)
+        per_set.append({"set_code": magic_set.code, **result})
+    return {"status": "ok", "per_set": per_set}
 
 
 def refresh_active_players(

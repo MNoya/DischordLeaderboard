@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from bot import audit
 from bot.discord_helpers import extract_avatar_hash
 from bot.models import Player
-from bot.services.refresh import refresh_one_player_for_current_set
+from bot.services.refresh import refresh_one_player_for_all_sets
 from bot.services.seventeenlands import SeventeenLandsClient, extract_token
 from bot.slug import disambiguate_slug, slugify
 
@@ -267,7 +267,7 @@ class Signup(commands.Cog):
             # Defer because the refresh may take a second or two on a cold rate limiter
             await interaction.response.defer(ephemeral=(interaction.guild is not None), thinking=True)
             with SessionLocal() as session:
-                refresh_one_player_for_current_set(session, self.client, check.player_id)
+                refresh_one_player_for_all_sets(session, self.client, check.player_id)
                 session.commit()
             await _broadcast_current_set_safely(self.bot)
             # Welcome-back text uses the followup so the deferred interaction resolves;
@@ -353,7 +353,7 @@ class Signup(commands.Cog):
 
         # created or linked — pull fresh stats so they show up immediately
         with SessionLocal() as session:
-            refresh_one_player_for_current_set(session, self.client, result.player_id)
+            refresh_one_player_for_all_sets(session, self.client, result.player_id)
             session.commit()
         await _broadcast_current_set_safely(self.bot)
         await dm.send(MSG_SUCCESS)

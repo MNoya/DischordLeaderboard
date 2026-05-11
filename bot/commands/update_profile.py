@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from bot import audit
 from bot.discord_helpers import extract_avatar_hash
 from bot.models import Player
-from bot.services.refresh import refresh_one_player_for_current_set
+from bot.services.refresh import refresh_one_player_for_all_sets
 from bot.services.seventeenlands import SeventeenLandsClient, extract_token
 
 logger = logging.getLogger(__name__)
@@ -170,7 +170,7 @@ class UpdateProfile(commands.Cog):
 
         # updated — pull fresh stats with the new token
         with SessionLocal() as session:
-            refresh_one_player_for_current_set(session, self.client, result.player_id)
+            refresh_one_player_for_all_sets(session, self.client, result.player_id)
             session.commit()
         await dm.send(MSG_SUCCESS)
 

@@ -95,19 +95,38 @@ class SeventeenLandsClient:
     def _data_url(self, token: str) -> str:
         return f"{self.base_url}/user/data/{token}"
 
-    def _cache_path(self, token: str, start_date: date | None) -> Path | None:
+    def _cache_path(
+        self,
+        token: str,
+        start_date: date | None,
+        end_date: date | None,
+    ) -> Path | None:
         if self.cache_dir is None:
             return None
-        suffix = start_date.isoformat() if start_date else "all"
-        return self.cache_dir / f"{token}__{suffix}.json"
+        parts = [
+            start_date.isoformat() if start_date else "all",
+        ]
+        if end_date is not None:
+            parts.append(end_date.isoformat())
+        return self.cache_dir / f"{token}__{'__'.join(parts)}.json"
 
-    def fetch_drafts(self, token: str, start_date: date | None = None) -> list[dict]:
+    def fetch_drafts(
+        self,
+        token: str,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> list[dict]:
         """Return the list of draft events for a token.
+
+        Pass ``start_date`` and ``end_date`` to scope the upstream request to a
+        set's active window. Alchemy variants (e.g. YECL26) drafted in the same
+        window come along — caller handles substring matching against the base
+        set code.
 
         Raises ``requests.HTTPError`` on non-2xx and ``ValueError`` on a
         malformed response body.
         """
-        cache_path = self._cache_path(token, start_date)
+        cache_path = self._cache_path(token, start_date, end_date)
         if cache_path is not None and cache_path.exists():
             with cache_path.open("r", encoding="utf-8") as f:
                 cached = json.load(f)
@@ -116,6 +135,8 @@ class SeventeenLandsClient:
         params: dict[str, str] = {}
         if start_date is not None:
             params["start_date"] = start_date.isoformat()
+        if end_date is not None:
+            params["end_date"] = end_date.isoformat()
 
         self.limiter.wait()
         resp = self.session.get(self._data_url(token), params=params, timeout=self.timeout_s)
