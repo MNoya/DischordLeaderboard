@@ -356,7 +356,7 @@ def _apply_footer(embed: discord.Embed, data: LeaderboardData) -> None:
     rows: list[str] = []
     if data.drafter_count > 0:
         label = "player" if data.drafter_count == 1 else "players"
-        rows.append(f"{data.drafter_count} {label} sharing their stats · /join to add yours")
+        rows.append(f"{data.drafter_count} {label} sharing their drafts · /join to add yours")
     if data.last_updated is not None:
         embed.timestamp = data.last_updated
         rows.append("Last updated")

@@ -159,9 +159,9 @@ def test_public_embed_footer_has_drafter_count_and_last_updated():
         last_updated=datetime(2026, 5, 3, 12, 0, 0),
         drafter_count=8,
     ))
-    # footer is two lines: '<N> players sharing their stats · /join to add yours'
+    # footer is two lines: '<N> players sharing their drafts · /join to add yours'
     # then 'Last updated'. URL stays on embed.url, not in footer text.
-    assert "8 players sharing their stats" in embed.footer.text
+    assert "8 players sharing their drafts" in embed.footer.text
     assert "/join to add yours" in embed.footer.text
     assert "Last updated" in embed.footer.text
     assert "\n" in embed.footer.text
@@ -173,7 +173,7 @@ def test_public_embed_footer_singular_for_one_drafter():
         last_updated=datetime(2026, 5, 3, 12, 0, 0),
         drafter_count=1,
     ))
-    assert "1 player sharing their stats" in embed.footer.text
+    assert "1 player sharing their drafts" in embed.footer.text
     # plural must not appear when there's just one drafter
     import re
     assert re.search(r"\bplayers\b", embed.footer.text) is None
