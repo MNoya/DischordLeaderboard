@@ -278,6 +278,8 @@ def process_leaderboard_for_archetype(
 
 MEDAL_EMOJIS = {1: "🥇", 2: "🥈", 3: "🥉"}
 
+DISCORD_EMBED_DESC_LIMIT = 4096
+
 
 def _player_url(slug: str, set_code: str | None = None) -> str:
     """Build the public-site URL for a player's profile.
@@ -810,11 +812,23 @@ class Leaderboard(commands.Cog):
             )
             return
 
+        embed = render_embed(data)
+        site_link = f"Check the full leaderboard at {settings.public_site_url} 🚀"
+        if data.top and embed.description and len(embed.description) > DISCORD_EMBED_DESC_LIMIT:
+            trimmed = list(data.top)
+            while trimmed:
+                body = _format_leaderboard(trimmed, data.set_code)
+                if len(body) + 2 + len(site_link) <= DISCORD_EMBED_DESC_LIMIT:
+                    break
+                trimmed.pop()
+            body = _format_leaderboard(trimmed, data.set_code) if trimmed else ""
+            embed.description = f"{body}\n\n{site_link}" if body else site_link
+
         # Always deliver via DM, regardless of where the slash was invoked.
         # `allowed_contexts` only governs visibility, not response routing
         try:
             dm = await interaction.user.create_dm()
-            await dm.send(embed=render_embed(data), view=render_view())
+            await dm.send(embed=embed, view=render_view())
         except discord.Forbidden:
             await interaction.response.send_message(
                 "Couldn't deliver the full leaderboard — open DMs from this server and try again.",
