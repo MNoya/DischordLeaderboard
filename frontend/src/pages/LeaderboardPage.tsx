@@ -622,6 +622,12 @@ function DesktopExpandedRow({
     [events, activeFormat, activeColors, otherCombos],
   );
   const trophiesToShow = filtersActive ? filteredTrophies : lastTrophies;
+  const scopedDecks = useMemo(
+    () => trophiesToShow.length === 0 && events
+      ? filterScopedEvents(events, activeFormat, activeColors, otherCombos).slice(0, 3)
+      : [],
+    [trophiesToShow.length, events, activeFormat, activeColors, otherCombos],
+  );
 
   return (
     <Link
@@ -631,7 +637,7 @@ function DesktopExpandedRow({
     >
       <div className="flex-1 min-w-0 overflow-hidden"><FormatBreakdownPreview breakdown={profile?.formatBreakdown} /></div>
       <div className="flex-1 min-w-0 overflow-hidden"><MostPlayedDecks events={events} /></div>
-      <div className="flex-1 min-w-0 overflow-hidden"><LastTrophyPanel data={trophiesToShow} loading={!events} activeFormat={activeFormat} activeColors={activeColors} /></div>
+      <div className="flex-1 min-w-0 overflow-hidden"><LastTrophyPanel data={trophiesToShow} decks={scopedDecks} loading={!events} activeFormat={activeFormat} activeColors={activeColors} /></div>
       <div className="flex-[0.4] min-w-0 overflow-hidden flex items-center justify-center -ml-6"><BiggestStreakPanel data={biggestStreak} loading={!events} /></div>
       <ChamferedButton>
         <span className="inline-flex items-center gap-2">
@@ -784,6 +790,29 @@ function filterTrophyEvents(
   return matches.sort((a, b) => (b.finishedAt ?? "").localeCompare(a.finishedAt ?? ""));
 }
 
+function filterScopedEvents(
+  events: PlayerDraftEvent[] | undefined,
+  activeFormat: string,
+  activeColors: string,
+  otherCombos: string[],
+): PlayerDraftEvent[] {
+  if (!events) return [];
+  const otherSet = new Set(otherCombos);
+  const matches = events.filter((e) => {
+    if (!matchesFormatFilter(e.format, activeFormat)) return false;
+    if (activeColors !== "ALL") {
+      if (activeColors === MULTI) {
+        if (effectiveColorCount(e.colors) < 4) return false;
+      } else if (activeColors === OTHER) {
+        if (effectiveColorCount(e.colors) >= 4) return false;
+        if (!otherSet.has(colorsOf(e.colors))) return false;
+      } else if (colorsOf(e.colors) !== activeColors) return false;
+    }
+    return true;
+  });
+  return matches.sort((a, b) => (b.finishedAt ?? "").localeCompare(a.finishedAt ?? ""));
+}
+
 interface StreakData { count: number; format: string }
 
 function useHighlights(events: PlayerDraftEvent[] | undefined): {
@@ -818,11 +847,13 @@ function useHighlights(events: PlayerDraftEvent[] | undefined): {
 
 function LastTrophyPanel({
   data,
+  decks = [],
   loading,
   activeFormat,
   activeColors,
 }: {
   data: PlayerDraftEvent[];
+  decks?: PlayerDraftEvent[];
   loading: boolean;
   activeFormat: string;
   activeColors: string;
@@ -837,6 +868,9 @@ function LastTrophyPanel({
   const filterStyle = formatActive
     ? { color: FMT_COLORS[activeFormat] ?? FMT_DEFAULT_COLOR }
     : undefined;
+  const showDecks = !loading && data.length === 0 && decks.length > 0;
+  const rows = showDecks ? decks : data;
+  const headerNoun = showDecks ? "DECKS" : "TROPHIES";
   return (
     <div style={{ minHeight: PANEL_MIN_HEIGHT }}>
       <SectionLabel className="text-subtle">
@@ -847,7 +881,7 @@ function LastTrophyPanel({
               {filterLabel}
             </span>
           </>
-        )} TROPHIES
+        )} {headerNoun}
       </SectionLabel>
       <div className="flex flex-col gap-1 mt-2.5 min-w-0">
         {loading ? (
@@ -864,8 +898,8 @@ function LastTrophyPanel({
               <span />
             </div>
           ))
-        ) : data.length > 0 ? (
-          data.map((e) => {
+        ) : rows.length > 0 ? (
+          rows.map((e) => {
             const href = e.seventeenlandsEventId
               ? `https://www.17lands.com/deck/${e.seventeenlandsEventId}`
               : null;
@@ -968,6 +1002,10 @@ function MobileExpandedRow({
     }
     return filterTrophyEvents(events, activeFormat, activeColors, otherCombos)[0] ?? null;
   }, [events, activeFormat, activeColors, otherCombos]);
+  const lastDeck = useMemo(() => {
+    if (!events || lastTrophy) return null;
+    return filterScopedEvents(events, activeFormat, activeColors, otherCombos)[0] ?? null;
+  }, [events, lastTrophy, activeFormat, activeColors, otherCombos]);
 
   return (
     <Link
@@ -993,6 +1031,17 @@ function MobileExpandedRow({
               </span>
               <span className="text-dim text-[11px]">·</span>
               <span className="font-display text-[11px] tracking-[0.08em] text-dim tabular-nums">{relativeTime(lastTrophy.finishedAt)}</span>
+            </>
+          ) : lastDeck ? (
+            <>
+              <SectionLabel size={11} letterSpacing="0.18em">LAST DECK</SectionLabel>
+              <Pips colors={lastDeck.colors} size={12} />
+              <span className="text-dim text-[11px]">·</span>
+              <span className="font-display text-[11px] tracking-[0.08em] text-muted">
+                {prettyFormat(lastDeck.format).toUpperCase()}
+              </span>
+              <span className="text-dim text-[11px]">·</span>
+              <span className="font-display text-[11px] tracking-[0.08em] text-dim tabular-nums">{relativeTime(lastDeck.finishedAt)}</span>
             </>
           ) : null}
         </div>
