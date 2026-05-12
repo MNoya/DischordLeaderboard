@@ -16,12 +16,13 @@ import { ErrorState } from "../components/ErrorState";
 import { TrophyCount } from "../components/TrophyCount";
 import { SetCodeDropdown } from "../components/SetCodeDropdown";
 
-import { useColorChips, useDraftEvents, useLeaderboard, usePlayerProfile, useSets } from "../data/hooks";
+import { useAvailableFormats, useColorChips, useDraftEvents, useLeaderboard, usePlayerProfile, useSets } from "../data/hooks";
 import { colorsOf, effectiveColorCount, fmtShortDate, mainColors, prettyFormat, winPct } from "../data/utils";
 import {
   colorsDisplayName,
   deckColorParts,
   formatDeckColors,
+  FORMAT_LABEL_GROUPS,
   FORMAT_OPTIONS,
   matchesFormatFilter,
   MULTI,
@@ -457,6 +458,16 @@ function Desktop({
     }
     return opts;
   }, [colorChips]);
+  const { data: availableFormatLabels } = useAvailableFormats(profile.setCode);
+  const formatOptions = useMemo(() => {
+    if (!availableFormatLabels) return FORMAT_OPTIONS;
+    const available = new Set(availableFormatLabels);
+    return FORMAT_OPTIONS.filter((opt) => {
+      if (opt.value === "ALL") return true;
+      const labels = FORMAT_LABEL_GROUPS[opt.value] ?? [opt.value];
+      return labels.some((l) => available.has(l));
+    });
+  }, [availableFormatLabels]);
   const otherSet = useMemo(() => new Set(otherCombos), [otherCombos]);
 
   const filtered = useMemo(
@@ -538,6 +549,7 @@ function Desktop({
           colorsFilter={colorsFilter}
           setColorsFilter={setColorsFilter}
           colorOptions={colorOptions}
+          formatOptions={formatOptions}
         />
       </div>
     </div>
@@ -818,6 +830,7 @@ function DraftLogDesktop({
   colorsFilter,
   setColorsFilter,
   colorOptions,
+  formatOptions,
 }: {
   events: PlayerDraftEvent[];
   filtered: PlayerDraftEvent[];
@@ -826,6 +839,7 @@ function DraftLogDesktop({
   colorsFilter: string;
   setColorsFilter: (v: string) => void;
   colorOptions: FilterOption[];
+  formatOptions: FilterOption[];
 }) {
   const sectionRef = useRef<HTMLElement>(null);
   const scrollToTop = () =>
@@ -842,7 +856,7 @@ function DraftLogDesktop({
             label="FORMAT"
             value={formatFilter}
             onChange={setFormatFilter}
-            options={FORMAT_OPTIONS}
+            options={formatOptions}
             renderValue={renderFormatOption}
             renderOption={renderFormatOption}
           />
@@ -1034,6 +1048,16 @@ function Mobile({
     }
     return opts;
   }, [colorChips]);
+  const { data: availableFormatLabels } = useAvailableFormats(profile.setCode);
+  const formatOptions = useMemo(() => {
+    if (!availableFormatLabels) return FORMAT_OPTIONS;
+    const available = new Set(availableFormatLabels);
+    return FORMAT_OPTIONS.filter((opt) => {
+      if (opt.value === "ALL") return true;
+      const labels = FORMAT_LABEL_GROUPS[opt.value] ?? [opt.value];
+      return labels.some((l) => available.has(l));
+    });
+  }, [availableFormatLabels]);
   const otherSet = useMemo(() => new Set(otherCombos), [otherCombos]);
 
   const filtered = useMemo(
@@ -1141,7 +1165,7 @@ function Mobile({
               label="FORMAT"
               value={formatFilter}
               onChange={setFormatFilter}
-              options={FORMAT_OPTIONS}
+              options={formatOptions}
               variant="mobile"
               renderValue={renderFormatOption}
               renderOption={renderFormatOption}

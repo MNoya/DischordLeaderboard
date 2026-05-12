@@ -3,14 +3,17 @@ import { cn } from "../lib/utils";
 
 const GITHUB_URL = "https://github.com/mnoya/DischordLeaderboard";
 
-export function Footer({ className }: { className?: string }) {
+export function Footer({ className, updated }: { className?: string; updated?: string }) {
   return (
     <footer
       className={cn(
-        "flex items-center justify-end text-[11px] md:text-[12px] text-muted",
+        "flex items-center justify-between gap-3 text-[11px] md:text-[12px] text-muted",
         className,
       )}
     >
+      <span className="mono">
+        {updated ? <>UPDATED {updated}</> : null}
+      </span>
       <a
         href={GITHUB_URL}
         target="_blank"

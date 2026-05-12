@@ -55,10 +55,12 @@ function parseLocalDate(iso: string): Date {
 }
 
 export function fmtRange(start: string, end: string | null | undefined, today: Date = new Date()): string {
-  if (!end) return "";
+  if (!start) return "";
   const s = parseLocalDate(start);
+  const startStr = `${MONTHS[s.getMonth()]} ${s.getDate()}`;
+  if (!end) return `${startStr} — CURRENT SEASON`;
   const e = parseLocalDate(end);
-  const base = `${MONTHS[s.getMonth()]} ${s.getDate()} — ${MONTHS[e.getMonth()]} ${e.getDate()}`;
+  const base = `${startStr} — ${MONTHS[e.getMonth()]} ${e.getDate()}`;
   return e.getFullYear() !== today.getFullYear() ? `${base}, ${e.getFullYear()}` : base;
 }
 

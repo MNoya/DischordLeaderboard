@@ -44,6 +44,15 @@ export async function fetchSets(): Promise<SetSummary[]> {
   return (data ?? []).map((r) => adaptSet(r as Record<string, unknown>));
 }
 
+export async function fetchAvailableFormats(setCode: string): Promise<string[]> {
+  const { data, error } = await client()
+    .from("public_player_format_breakdown")
+    .select("format_label")
+    .eq("set_code", setCode);
+  if (error) throw error;
+  return Array.from(new Set((data ?? []).map((r) => (r as { format_label: string }).format_label)));
+}
+
 // ─── public_leaderboard ────────────────────────────────────────────────────
 
 export async function fetchLeaderboard(setCode: string): Promise<LeaderboardRow[]> {

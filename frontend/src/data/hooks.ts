@@ -8,6 +8,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo } from "react";
 
 import {
+  fetchAvailableFormats,
   fetchColorsLeaderboard,
   fetchColorsSummary,
   fetchFormatLeaderboard,
@@ -26,6 +27,15 @@ export function useSets() {
   return useQuery({
     queryKey: ["sets"],
     queryFn: fetchSets,
+    staleTime: FIVE_MINUTES,
+  });
+}
+
+export function useAvailableFormats(setCode: string | undefined) {
+  return useQuery({
+    queryKey: ["available-formats", setCode],
+    queryFn: () => fetchAvailableFormats(setCode!),
+    enabled: !!setCode,
     staleTime: FIVE_MINUTES,
   });
 }

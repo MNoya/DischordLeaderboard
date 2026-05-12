@@ -49,6 +49,7 @@ export function LeaderboardSidebar({
   otherCombos = [],
   onColorsSelect,
   searchParams,
+  stats,
 }: {
   setCode: string;
   colors?: string;
@@ -56,6 +57,7 @@ export function LeaderboardSidebar({
   otherCombos?: string[];
   onColorsSelect?: (code: string) => void;
   searchParams?: URLSearchParams;
+  stats?: { players: number; events: string; updated: string };
 }) {
   const qs = searchParams?.toString() ?? "";
   const colorsScoped = colors !== "ALL";
@@ -138,7 +140,7 @@ export function LeaderboardSidebar({
                     <Pips colors={row.colors} size={12} />
                   )}
                 </span>
-                <span className="font-display text-[14px] tracking-[0.05em]">
+                <span className="font-display text-[14px] tracking-[0.05em] pl-1.5">
                   {colorsDisplayName(row.colors)}
                 </span>
                 <TrophyCount count={row.trophies} size="compact" className="text-muted" />
@@ -169,17 +171,7 @@ export function LeaderboardSidebar({
           <SectionLabel size={16} className="text-subtle">{recentTitle}</SectionLabel>
           {namedScope && (
             <span className="ml-auto inline-flex items-center">
-              {guildSvgUrl(colors) ? (
-                <img
-                  src={guildSvgUrl(colors)!}
-                  alt=""
-                  aria-hidden="true"
-                  className="block"
-                  style={{ width: 38, height: 38, transform: guildLogoTransform(colors) }}
-                />
-              ) : (
-                <Pips colors={colors} size={13} />
-              )}
+              <Pips colors={colors} size={12} />
             </span>
           )}
           {colors === MULTI && <BsPaletteFill size={13} className="ml-auto" aria-hidden="true" />}
@@ -242,6 +234,11 @@ export function LeaderboardSidebar({
           })
         )}
       </SurfaceCard>
+      {stats && (
+        <div className="mono text-[11px] text-muted text-right -mt-2">
+          {stats.players} PLAYERS · {stats.events} EVENTS · UPDATED {stats.updated}
+        </div>
+      )}
     </aside>
   );
 }

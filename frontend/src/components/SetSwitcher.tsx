@@ -1,28 +1,38 @@
 import React from "react";
-import { SetGlyph } from "./Brand";
+import { keyruneClass, SetGlyph } from "./Brand";
 import { cn } from "../lib/utils";
 import { useSetVisibleCap } from "../lib/use-is-mobile";
 import type { SetSummary } from "../types/leaderboard";
 
+const RIGHTMOST_PIN = "CUBE";
+
 function partitionSets(sets: SetSummary[], selectedCode: string, cap: number) {
-  const sorted = [...sets].sort((a, b) => b.startDate.localeCompare(a.startDate));
-  if (sorted.length <= cap) return { visible: sorted, overflow: [] };
+  const pinRight = sets.find((s) => s.code === RIGHTMOST_PIN);
+  const others = sets.filter((s) => s.code !== RIGHTMOST_PIN);
+  const sorted = [...others].sort((a, b) => b.startDate.localeCompare(a.startDate));
+  const totalWithPin = sorted.length + (pinRight ? 1 : 0);
+  if (totalWithPin <= cap) {
+    const visible = pinRight ? [...sorted, pinRight] : sorted;
+    return { visible, overflow: [] };
+  }
 
   const liveCode = sorted.find((s) => s.isActive)?.code;
   const pinned = new Set<string>();
   if (liveCode) pinned.add(liveCode);
   pinned.add(selectedCode);
 
+  const effectiveCap = pinRight ? cap - 1 : cap;
   const visible: SetSummary[] = [];
   for (const s of sorted) if (pinned.has(s.code)) visible.push(s);
   for (const s of sorted) {
-    if (visible.length >= cap) break;
+    if (visible.length >= effectiveCap) break;
     if (!pinned.has(s.code)) visible.push(s);
   }
   visible.sort((a, b) => b.startDate.localeCompare(a.startDate));
+  if (pinRight) visible.push(pinRight);
 
   const visibleCodes = new Set(visible.map((s) => s.code));
-  const overflow = sorted.filter((s) => !visibleCodes.has(s.code));
+  const overflow = [...others, ...(pinRight ? [] : [])].filter((s) => !visibleCodes.has(s.code));
   return { visible, overflow };
 }
 
@@ -79,7 +89,7 @@ function SetChip({
         style={{ clipPath: CHAMFER, minHeight: 40 }}
       >
         <i
-          className={`ss ss-${set.code.toLowerCase()}`}
+          className={`ss ss-${keyruneClass(set.code)}`}
           style={{ fontSize: 22, color: active ? "#0a0c10" : "#e6ecf5", lineHeight: 1 }}
           aria-hidden="true"
         />

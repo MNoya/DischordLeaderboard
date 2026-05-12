@@ -21,6 +21,7 @@ import { DonutChart } from "../components/DonutChart";
 import { TrophyCount } from "../components/TrophyCount";
 
 import {
+  useAvailableFormats,
   useColorChips,
   useColorsLeaderboard,
   useDraftEvents,
@@ -33,7 +34,7 @@ import {
   useSets,
 } from "../data/hooks";
 import { colorsOf, effectiveColorCount, fmtRange, lastUpdated, prettyFormat, relativeTime, sumEvents, weekOfSet, winPct } from "../data/utils";
-import { colorsDisplayName, FORMAT_OPTIONS, matchesFormatFilter, MULTI, OTHER } from "../data/filters";
+import { colorsDisplayName, FORMAT_LABEL_GROUPS, FORMAT_OPTIONS, matchesFormatFilter, MULTI, OTHER } from "../data/filters";
 import { FMT_COLORS, FMT_DEFAULT_COLOR, renderFormatOption, shortFormat } from "../data/format-display";
 import { guildLogoTransform, guildSvgUrl } from "../data/guild-art";
 import { cn } from "../lib/utils";
@@ -91,6 +92,16 @@ export function LeaderboardPage() {
   };
 
   const { chips: colorChips, otherCombos } = useColorChips(activeSet);
+  const { data: availableFormatLabels } = useAvailableFormats(activeSet);
+  const formatOptions = useMemo(() => {
+    if (!availableFormatLabels) return FORMAT_OPTIONS;
+    const available = new Set(availableFormatLabels);
+    return FORMAT_OPTIONS.filter((opt) => {
+      if (opt.value === "ALL") return true;
+      const labels = FORMAT_LABEL_GROUPS[opt.value] ?? [opt.value];
+      return labels.some((l) => available.has(l));
+    });
+  }, [availableFormatLabels]);
 
   const otherMode = colorsMode && colors === OTHER;
   const namedColorsMode = colorsMode && colors !== OTHER;
@@ -148,7 +159,7 @@ export function LeaderboardPage() {
   useIdlePrefetchOtherSets(activeSet, sets);
   useIdlePrefetchTopPlayers(rows);
 
-  const filterProps: FilterRowProps = { format, setFormat, colors, setColors, colorChips };
+  const filterProps: FilterRowProps = { format, setFormat, colors, setColors, colorChips, formatOptions };
 
   return isMobile ? (
     <Mobile
@@ -204,6 +215,7 @@ interface FilterRowProps {
   colors: string;
   setColors: (v: string) => void;
   colorChips: string[];
+  formatOptions: typeof FORMAT_OPTIONS;
 }
 
 // ─── Desktop ───────────────────────────────────────────────────────────────
@@ -247,7 +259,7 @@ function Desktop({
         format={filters.format}
         colors={filters.colors}
       />
-      <FilterRow {...filters} rows={rows} />
+      <FilterRow {...filters} />
 
       <div className="px-5 grid gap-6" style={{ gridTemplateColumns: "1fr 320px" }}>
         <LeaderboardTable
@@ -278,10 +290,15 @@ function Desktop({
             otherCombos={otherCombos}
             onColorsSelect={filters.setColors}
             searchParams={searchParams}
+            stats={{
+              players: rows?.length ?? 0,
+              events: sumEvents(rows),
+              updated: lastUpdated(rows),
+            }}
           />
         </div>
       </div>
-      <Footer className="mt-auto px-10 pt-5 pb-3" />
+      <Footer className="mt-auto px-10 pt-5 pb-3" updated={lastUpdated(rows)} />
     </div>
   );
 }
@@ -419,24 +436,20 @@ function FilterRow({
   colors,
   setColors,
   colorChips,
-  rows,
-}: FilterRowProps & { rows: LeaderboardTableRow[] | undefined }) {
+  formatOptions,
+}: FilterRowProps) {
   return (
     <div className="px-10 py-3.5 border-b border-border flex items-center gap-4 flex-wrap">
       <FilterDropdown
         label="FORMAT"
         value={format}
-        options={FORMAT_OPTIONS}
+        options={formatOptions}
         onChange={setFormat}
         renderValue={renderFormatOption}
         renderOption={renderFormatOption}
       />
       <SectionLabel size={11}>COLORS</SectionLabel>
       <ColorsSwitcher activeCode={colors} onChange={setColors} chips={colorChips} />
-      <span className="flex-1" />
-      <div className="mono text-[12px] text-muted">
-        {rows?.length ?? 0} PLAYERS · {sumEvents(rows)} EVENTS · UPDATED {lastUpdated(rows)}
-      </div>
     </div>
   );
 }
@@ -479,7 +492,7 @@ function Mobile({
             <FilterDropdown
               label="FORMAT"
               value={filters.format}
-              options={FORMAT_OPTIONS}
+              options={filters.formatOptions}
               onChange={filters.setFormat}
               variant="mobile"
               renderValue={renderFormatOption}
@@ -528,7 +541,7 @@ function Mobile({
           />
         )}
       />
-      <Footer className="mt-auto px-4 py-4" />
+      <Footer className="mt-auto px-4 py-4" updated={lastUpdated(rows)} />
     </div>
   );
 }

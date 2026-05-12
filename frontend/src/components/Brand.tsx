@@ -115,6 +115,14 @@ export const fmtPts = (n: number) => Math.round(n).toLocaleString("en-US");
 
 // Set keyrune glyph wrapper (uses keyrune.css from index.html).
 // Reserves a square box of `size` so swapping codes doesn't reflow neighbours
+const KEYRUNE_OVERRIDES: Record<string, string> = {
+  CUBE: "pz1",
+};
+
+export function keyruneClass(code: string): string {
+  return KEYRUNE_OVERRIDES[code] ?? code.toLowerCase();
+}
+
 export function SetGlyph({ code, size = 18 }: { code: string; size?: number }) {
   return (
     <span
@@ -123,7 +131,7 @@ export function SetGlyph({ code, size = 18 }: { code: string; size?: number }) {
       aria-hidden="true"
     >
       <i
-        className={`ss ss-${code.toLowerCase()} text-white`}
+        className={`ss ss-${keyruneClass(code)} text-white`}
         style={{ fontSize: size, lineHeight: 1 }}
       />
     </span>

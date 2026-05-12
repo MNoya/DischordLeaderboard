@@ -72,6 +72,9 @@ const wait = <T,>(value: T): Promise<T> =>
 // ─── public_sets ─────────────────────────────────────────────────────────────
 export const fetchSets = (): Promise<SetSummary[]> => wait(setsFixture);
 
+export const fetchAvailableFormats = (_setCode: string): Promise<string[]> =>
+  wait(["Premier", "Trad", "Sealed", "Quick", "LCQ Draft 1", "LCQ Draft 2"]);
+
 // ─── public_leaderboard ──────────────────────────────────────────────────────
 // Format filter is applied client-side over the cached rows in the hook layer
 // (per spec §7), so this fetcher returns the full set unfiltered.
