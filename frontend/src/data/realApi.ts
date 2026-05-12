@@ -47,14 +47,16 @@ export async function fetchSets(): Promise<SetSummary[]> {
 export async function fetchFormatColorsLeaderboard(
   setCode: string,
   format: string,
-  colors: string,
+  archetypes: string | string[],
 ): Promise<ColorsLeaderboardRow[]> {
   const labels = FORMAT_LABEL_GROUPS[format] ?? [format];
+  const archs = Array.isArray(archetypes) ? archetypes : [archetypes];
+  if (archs.length === 0) return [];
   const { data, error } = await client()
     .from("public_player_format_archetype_leaderboard")
     .select("*")
     .eq("set_code", setCode)
-    .eq("archetype", colors)
+    .in("archetype", archs)
     .in("format_label", labels);
   if (error) throw error;
   // Aggregate per player (LCQ splits into two labels)
@@ -224,9 +226,14 @@ export async function fetchColorsLeaderboard(
 export async function fetchOtherColorsLeaderboard(
   setCode: string,
   otherCombos: string[],
+  formatFilter?: string,
 ): Promise<ColorsLeaderboardRow[]> {
   if (otherCombos.length === 0) return [];
   const otherSet = new Set(otherCombos);
+  const formatGroup = formatFilter
+    ? (FORMAT_RAW_GROUPS[formatFilter] ?? [formatFilter])
+    : null;
+  const formatAllowed = formatGroup ? new Set(formatGroup) : null;
 
   // Supabase caps each request at db-max-rows (default 1000). Page until done.
   const allEvents: Array<Record<string, unknown>> = [];
@@ -271,6 +278,7 @@ export async function fetchOtherColorsLeaderboard(
 
     const slug = raw.slug as string;
     const fmt = (raw.format as string) ?? "";
+    if (formatAllowed && !formatAllowed.has(fmt)) continue;
     const wins = (raw.wins as number) ?? 0;
     const losses = (raw.losses as number) ?? 0;
     const isTrophy = Boolean(raw.is_trophy);

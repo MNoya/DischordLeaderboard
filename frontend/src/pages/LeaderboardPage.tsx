@@ -101,6 +101,7 @@ export function LeaderboardPage() {
 
   const otherMode = colorsOnlyMode && colors === OTHER;
   const namedColorsOnlyMode = colorsOnlyMode && colors !== OTHER;
+  const bothOtherMode = bothMode && colors === OTHER;
   const bothNamedMode = bothMode && colors !== OTHER;
 
   const lb = useLeaderboard(colorsMode || formatMode ? undefined : activeSet);
@@ -113,8 +114,9 @@ export function LeaderboardPage() {
     namedColorsOnlyMode ? colors : undefined,
   );
   const otherLb = useOtherColorsLeaderboard(
-    otherMode ? activeSet : undefined,
-    otherMode ? otherCombos : undefined,
+    otherMode || bothOtherMode ? activeSet : undefined,
+    otherMode || bothOtherMode ? otherCombos : undefined,
+    bothOtherMode ? format : undefined,
   );
   const bothLb = useFormatColorsLeaderboard(
     bothNamedMode ? activeSet : undefined,
@@ -124,7 +126,7 @@ export function LeaderboardPage() {
 
   const active = bothNamedMode
     ? bothLb
-    : otherMode
+    : otherMode || bothOtherMode
       ? otherLb
       : namedColorsOnlyMode
         ? colorsLb

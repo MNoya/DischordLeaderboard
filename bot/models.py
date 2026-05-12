@@ -7,6 +7,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     UniqueConstraint,
@@ -154,6 +155,7 @@ class PlayerFormatArchetypeScore(Base):
             "player_id", "set_id", "format_label", "archetype",
             name="uq_player_set_format_label_archetype_score",
         ),
+        Index("ix_pfas_set_format_archetype", "set_id", "format_label", "archetype"),
     )
 
 

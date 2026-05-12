@@ -80,24 +80,28 @@ export function useColorsLeaderboard(
 export function useFormatColorsLeaderboard(
   setCode: string | undefined,
   format: string | undefined,
-  colors: string | undefined,
+  archetypes: string | string[] | undefined,
 ) {
+  const key = Array.isArray(archetypes) ? [...archetypes].sort().join(",") : archetypes;
+  const enabled = !!setCode && !!format && !!archetypes
+    && (Array.isArray(archetypes) ? archetypes.length > 0 : true);
   return useQuery({
-    queryKey: ["format-colors-leaderboard", setCode, format, colors],
-    queryFn: () => fetchFormatColorsLeaderboard(setCode!, format!, colors!),
-    enabled: !!setCode && !!format && !!colors,
+    queryKey: ["format-colors-leaderboard", setCode, format, key],
+    queryFn: () => fetchFormatColorsLeaderboard(setCode!, format!, archetypes!),
+    enabled,
     staleTime: FIVE_MINUTES,
   });
 }
 
 export function useOtherColorsLeaderboard(
   setCode: string | undefined,
-  otherCombos: string[] | undefined
+  otherCombos: string[] | undefined,
+  formatFilter?: string,
 ) {
   const key = otherCombos ? [...otherCombos].sort().join(",") : null;
   return useQuery({
-    queryKey: ["other-colors-leaderboard", setCode, key],
-    queryFn: () => fetchOtherColorsLeaderboard(setCode!, otherCombos!),
+    queryKey: ["other-colors-leaderboard", setCode, key, formatFilter ?? null],
+    queryFn: () => fetchOtherColorsLeaderboard(setCode!, otherCombos!, formatFilter),
     enabled: !!setCode && !!otherCombos && otherCombos.length > 0,
     staleTime: FIVE_MINUTES,
   });

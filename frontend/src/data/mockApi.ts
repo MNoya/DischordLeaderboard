@@ -75,8 +75,11 @@ export const fetchSets = (): Promise<SetSummary[]> => wait(setsFixture);
 export const fetchAvailableFormats = (_setCode: string): Promise<string[]> =>
   wait(["Premier", "Trad", "Sealed", "Quick", "LCQ Draft 1", "LCQ Draft 2"]);
 
-export const fetchFormatColorsLeaderboard = (_setCode: string, _format: string, _colors: string) =>
-  wait([] as never[]);
+export const fetchFormatColorsLeaderboard = (
+  _setCode: string,
+  _format: string,
+  _archetypes: string | string[],
+) => wait([] as never[]);
 
 // ─── public_leaderboard ──────────────────────────────────────────────────────
 // Format filter is applied client-side over the cached rows in the hook layer
@@ -184,6 +187,7 @@ export const fetchColorsLeaderboard = (
 export const fetchOtherColorsLeaderboard = (
   setCode: string,
   _otherCombos: string[],
+  _formatFilter?: string,
 ): Promise<ColorsLeaderboardRow[]> => {
   if (setCode !== "SOS") return wait([]);
   const slice = archetypeSosWrFixture.slice(10, 18).map((row, i) => ({
