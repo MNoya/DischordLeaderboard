@@ -33,11 +33,15 @@ def upsert_set(session: Session, seed: SetSeed) -> None:
         select(MagicSet).where(MagicSet.code == seed.code)
     ).scalar_one_or_none()
     if existing is not None:
-        # update mutable metadata in case end_date / name shifted between releases
-        if existing.end_date != seed.end_date or existing.name != seed.name:
+        if (
+            existing.end_date != seed.end_date
+            or existing.start_date != seed.start_date
+            or existing.name != seed.name
+        ):
             existing.end_date = seed.end_date
+            existing.start_date = seed.start_date
             existing.name = seed.name
-            log.info("updating set %s (name/end_date refreshed)", seed.code)
+            log.info("updating set %s (metadata refreshed)", seed.code)
         else:
             log.info("set %s exists, leaving as-is", seed.code)
         return

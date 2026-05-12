@@ -14,6 +14,7 @@ import { Record } from "../components/Record";
 import { DonutChart } from "../components/DonutChart";
 import { ErrorState } from "../components/ErrorState";
 import { TrophyCount } from "../components/TrophyCount";
+import { SetCodeDropdown } from "../components/SetCodeDropdown";
 
 import { useColorChips, useDraftEvents, useLeaderboard, usePlayerProfile, useSets } from "../data/hooks";
 import { colorsOf, effectiveColorCount, fmtShortDate, mainColors, prettyFormat, winPct } from "../data/utils";
@@ -33,6 +34,7 @@ import type {
   PlayerDraftEvent,
   PlayerFormatBreakdown,
   PlayerProfile,
+  SetSummary,
 } from "../types/leaderboard";
 
 // ─── Color palettes ────────────────────────────────────────────────────────
@@ -181,10 +183,14 @@ export function PlayerPage() {
     );
   }
 
+  const onChangeSet = (newCode: string) => {
+    navigate({ pathname: `/${newCode}/player/${slug}`, search: topQs });
+  };
+
   return isMobile ? (
-    <Mobile profile={profile} events={events ?? []} sibling={sibling} />
+    <Mobile profile={profile} events={events ?? []} sibling={sibling} sets={sets} onChangeSet={onChangeSet} />
   ) : (
-    <Desktop profile={profile} events={events ?? []} sibling={sibling} />
+    <Desktop profile={profile} events={events ?? []} sibling={sibling} sets={sets} onChangeSet={onChangeSet} />
   );
 }
 
@@ -426,10 +432,14 @@ function Desktop({
   profile,
   events,
   sibling,
+  sets,
+  onChangeSet,
 }: {
   profile: PlayerProfile;
   events: PlayerDraftEvent[];
   sibling: SiblingNav;
+  sets: SetSummary[] | undefined;
+  onChangeSet: (code: string) => void;
 }) {
   const navigate = useNavigate();
   const wp = winPct(profile.wins, profile.losses);
@@ -466,9 +476,6 @@ function Desktop({
     [events, formatFilter, colorsFilter, otherSet]
   );
 
-  const nameLen = profile.displayName.length;
-  const nameFs = nameLen <= 8 ? 64 : nameLen <= 12 ? 52 : nameLen <= 18 ? 40 : 32;
-
   return (
     <div className="bg-bg text-text min-h-screen animate-fadeIn">
       <AppHeader subtitle="PLAYER PROFILE" />
@@ -481,20 +488,40 @@ function Desktop({
           <BackButton onClick={() => navigate({ pathname: `/${profile.setCode}`, search: qs })} inline />
           <SiblingNavButtons sibling={sibling} qs={qs} />
         </div>
-        <div className="flex items-center gap-7">
+        <div className="flex items-end gap-7">
           <AAvatar displayName={profile.displayName} avatarUrl={profile.avatarUrl} size={120} green />
           <div className="shrink-0">
             <h1
-              className="font-display tracking-[0.03em] m-0 whitespace-nowrap"
-              style={{ fontSize: nameFs, lineHeight: 0.95 }}
+              className="font-display tracking-[0.03em] m-0 whitespace-nowrap pl-[5px]"
+              style={{ fontSize: 64, lineHeight: 0.95 }}
             >
               {profile.displayName.toUpperCase()}
             </h1>
-            <div className="mt-2 flex items-center gap-2.5 font-display tracking-[0.18em]">
-              <SetGlyph code={profile.setCode} size={22} />
-              <span className="text-[18px]">{profile.setCode}</span>
-              <span className="text-[12px] text-dim">·</span>
-              <span className="text-[16px]">#{profile.rank}</span>
+            <div className="mt-2 flex items-center gap-3 font-display tracking-[0.18em]">
+              {sets ? (
+                <SetCodeDropdown sets={sets} activeCode={profile.setCode} onChange={onChangeSet} />
+              ) : (
+                <span className="text-[22px]">{profile.setCode}</span>
+              )}
+              <span
+                className="inline-block"
+                style={{
+                  clipPath: "polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%)",
+                  background: "#2ee85c",
+                  padding: 1,
+                  minHeight: 46,
+                }}
+              >
+                <span
+                  className="flex items-center bg-surface text-green font-display tracking-[0.06em] leading-none text-[26px] px-[18px] h-full"
+                  style={{
+                    clipPath: "polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%)",
+                    minHeight: 44,
+                  }}
+                >
+                  #{profile.rank}
+                </span>
+              </span>
             </div>
           </div>
           <StatStrip profile={profile} wp={wp} />
@@ -982,10 +1009,14 @@ function Mobile({
   profile,
   events,
   sibling,
+  sets,
+  onChangeSet,
 }: {
   profile: PlayerProfile;
   events: PlayerDraftEvent[];
   sibling: SiblingNav;
+  sets: SetSummary[] | undefined;
+  onChangeSet: (code: string) => void;
 }) {
   const navigate = useNavigate();
   const wp = winPct(profile.wins, profile.losses);
@@ -1034,21 +1065,47 @@ function Mobile({
         className="px-[18px] pt-5 pb-4 border-b border-border"
         style={{ background: "linear-gradient(180deg, #14181f 0%, #0a0c10 100%)" }}
       >
-        <div className="flex items-center gap-4">
+        <div className="flex items-center">
           <AAvatar displayName={profile.displayName} avatarUrl={profile.avatarUrl} size={84} green />
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 min-w-0 overflow-hidden ml-3">
             <h1
-              className="font-display text-[36px] tracking-[0.03em] m-0 break-words"
-              style={{ lineHeight: 0.95 }}
+              className="font-display tracking-[0.03em] m-0 pl-[5px]"
+              style={{
+                fontSize: "clamp(20px, 7vw, 44px)",
+                lineHeight: 0.95,
+                wordBreak: "normal",
+                overflowWrap: "normal",
+              }}
             >
               {profile.displayName.toUpperCase()}
             </h1>
-            <div className="mt-1.5 flex items-center gap-2 font-display tracking-[0.18em]">
-              <SetGlyph code={profile.setCode} size={18} />
-              <span className="text-[14px]">{profile.setCode}</span>
-              <span className="text-[11px] text-dim">·</span>
-              <span className="text-[14px]">#{profile.rank}</span>
-            </div>
+          </div>
+          <div className="flex flex-col items-end gap-1.5 font-display tracking-[0.18em] shrink-0">
+            <span
+              className="inline-block"
+              style={{
+                clipPath: "polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%)",
+                background: "#2ee85c",
+                padding: 1,
+                minHeight: 38,
+                marginRight: -8,
+              }}
+            >
+              <span
+                className="flex items-center bg-surface text-green font-display tracking-[0.06em] leading-none text-[22px] px-[14px] h-full"
+                style={{
+                  clipPath: "polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%)",
+                  minHeight: 36,
+                }}
+              >
+                #{profile.rank}
+              </span>
+            </span>
+            {sets ? (
+              <SetCodeDropdown sets={sets} activeCode={profile.setCode} onChange={onChangeSet} size="sm" />
+            ) : (
+              <span className="text-[18px]">{profile.setCode}</span>
+            )}
           </div>
         </div>
 

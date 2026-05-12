@@ -13,6 +13,7 @@ import { useColorsSummary, useFormatScopedTrophies, useRecentTrophies } from "..
 import { colorsOf, effectiveColorCount, relativeTime } from "../data/utils";
 import { FMT_COLORS, FMT_DEFAULT_COLOR, shortFormat } from "../data/format-display";
 import { colorsDisplayName, MULTI, OTHER } from "../data/filters";
+import { guildSvgUrl } from "../data/guild-art";
 import type { ColorsSummary, RecentTrophy } from "../types/leaderboard";
 
 // Derive a Top Colors summary from a list of trophy events. Each trophy is
@@ -168,7 +169,17 @@ export function LeaderboardSidebar({
           <SectionLabel size={13} className="text-subtle">{recentTitle}</SectionLabel>
           {namedScope && (
             <span className="ml-auto inline-flex items-center">
-              <Pips colors={colors} size={13} />
+              {guildSvgUrl(colors) ? (
+                <img
+                  src={guildSvgUrl(colors)!}
+                  alt=""
+                  aria-hidden="true"
+                  className="block"
+                  style={{ width: 22, height: 22 }}
+                />
+              ) : (
+                <Pips colors={colors} size={13} />
+              )}
             </span>
           )}
           {colors === MULTI && <BsPaletteFill size={13} className="ml-auto" aria-hidden="true" />}
@@ -184,8 +195,8 @@ export function LeaderboardSidebar({
             const cls =
               "grid gap-2 items-center py-[7px] no-underline text-inherit transition-colors hover:bg-surface2 -mx-1 px-1 " +
               (showRowPips
-                ? "grid-cols-[auto_1fr_30px_66px_12px] "
-                : "grid-cols-[1fr_30px_66px_12px] ") +
+                ? "grid-cols-[auto_1fr_38px_78px_16px] "
+                : "grid-cols-[1fr_38px_78px_16px] ") +
               (i ? "border-t border-border" : "");
             const inner = (
               <>
@@ -197,14 +208,14 @@ export function LeaderboardSidebar({
                   wins={t.wins}
                   losses={t.losses}
                   mono
-                  className="mono text-[10px] text-subtle text-right"
+                  className="mono text-[13px] text-subtle text-right"
                 />
-                <span className="flex items-baseline justify-between gap-1 mono text-dim">
-                  <span className="text-[10px] truncate">{shortFormat(t.format)}</span>
-                  <span className="text-[9px] tabular-nums">{relativeTime(t.finishedAt)}</span>
+                <span className="flex items-baseline justify-end gap-2 mono text-dim">
+                  <span className="text-[11px]">{shortFormat(t.format)}</span>
+                  <span className="text-[11px] tabular-nums">{relativeTime(t.finishedAt)}</span>
                 </span>
                 <span className="flex justify-center text-dim">
-                  {isExternal && <ExternalLink size={10} aria-hidden="true" />}
+                  {isExternal && <ExternalLink size={13} aria-hidden="true" />}
                 </span>
               </>
             );

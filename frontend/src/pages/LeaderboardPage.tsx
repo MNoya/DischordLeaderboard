@@ -1,12 +1,13 @@
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import React, { Fragment, useEffect, useMemo, useState } from "react";
 import { ExternalLink } from "lucide-react";
+import { BsAsterisk, BsPaletteFill } from "react-icons/bs";
 
 import { AppHeader } from "../components/AppHeader";
 import { useIsMobile } from "../lib/use-is-mobile";
 import { ArrowRight, SetGlyph, Trophy } from "../components/Brand";
 import { Footer } from "../components/Footer";
-import { Pips } from "../components/ManaPips";
+import { Pip, Pips } from "../components/ManaPips";
 import { SetSwitcherDesktop, SetSwitcherMobile } from "../components/SetSwitcher";
 import { FilterDropdown } from "../components/FilterDropdown";
 import { ColorsSwitcher } from "../components/ColorsSwitcher";
@@ -34,6 +35,7 @@ import {
 import { colorsOf, effectiveColorCount, fmtRange, lastUpdated, prettyFormat, relativeTime, sumEvents, weekOfSet, winPct } from "../data/utils";
 import { colorsDisplayName, FORMAT_OPTIONS, matchesFormatFilter, MULTI, OTHER } from "../data/filters";
 import { FMT_COLORS, FMT_DEFAULT_COLOR, renderFormatOption, shortFormat } from "../data/format-display";
+import { guildSvgUrl } from "../data/guild-art";
 import { cn } from "../lib/utils";
 import type { LeaderboardRow, PlayerDraftEvent, PlayerFormatBreakdown, SetSummary } from "../types/leaderboard";
 import type { LeaderboardTableRow } from "../components/LeaderboardTable";
@@ -237,7 +239,14 @@ function Desktop({
   return (
     <div className="bg-bg text-text min-h-screen flex flex-col animate-fadeIn">
       <AppHeader subtitle="LEADERBOARD" />
-      <SetHero activeSet={activeSet} setMeta={setMeta} sets={sets} onSelectSet={(c) => goToSet(navigate, c, sets)} />
+      <SetHero
+        activeSet={activeSet}
+        setMeta={setMeta}
+        sets={sets}
+        onSelectSet={(c) => goToSet(navigate, c, sets, searchParams)}
+        format={filters.format}
+        colors={filters.colors}
+      />
       <FilterRow {...filters} rows={rows} />
 
       <div className="px-5 grid gap-6" style={{ gridTemplateColumns: "1fr 320px" }}>
@@ -282,18 +291,24 @@ function SetHero({
   setMeta,
   sets,
   onSelectSet,
+  format,
+  colors,
 }: {
   activeSet: string;
   setMeta: SetSummary | undefined;
   sets: SetSummary[] | undefined;
   onSelectSet: (code: string) => void;
+  format: string;
+  colors: string;
 }) {
   const week = weekOfSet(setMeta);
+  const isActive = setMeta?.isActive ?? false;
+  const filterActive = format !== "ALL" || colors !== "ALL";
   return (
-    <div className="px-10 py-5 border-b border-border bg-surface flex items-center gap-6">
+    <div className="relative px-10 py-5 border-b border-border bg-surface flex items-center gap-6">
       <SetGlyph code={activeSet} size={84} />
       <div>
-        <SectionLabel size={13}>CURRENT SET</SectionLabel>
+        <SectionLabel size={13} className={isActive ? "" : "invisible"}>CURRENT SET</SectionLabel>
         <div className="flex items-baseline gap-3.5 mt-0.5">
           <span className="font-display tracking-[0.04em]" style={{ fontSize: 56, lineHeight: 0.9 }}>
             {activeSet}
@@ -311,6 +326,89 @@ function SetHero({
       {sets && (
         <SetSwitcherDesktop sets={sets} activeCode={activeSet} onChange={onSelectSet} />
       )}
+      {filterActive && <FilterHero format={format} colors={colors} />}
+    </div>
+  );
+}
+
+function ColorsHeroGlyph({ code }: { code: string }) {
+  return (
+    <span
+      className="shrink-0 inline-flex items-center justify-center"
+      style={{ width: 48, height: 48 }}
+    >
+      <ColorsHeroGlyphInner code={code} />
+    </span>
+  );
+}
+
+function ColorsHeroGlyphInner({ code }: { code: string }) {
+  if (code === MULTI) {
+    return <BsPaletteFill size={36} aria-hidden="true" />;
+  }
+  if (code === OTHER) {
+    return <BsAsterisk size={32} aria-hidden="true" />;
+  }
+  const url = guildSvgUrl(code);
+  if (url) {
+    return (
+      <img
+        src={url}
+        alt=""
+        aria-hidden="true"
+        className="block"
+        style={{ height: 44, width: 44 }}
+      />
+    );
+  }
+  if (code.length === 1 && "WUBRG".includes(code)) {
+    return <Pip c={code as "W" | "U" | "B" | "R" | "G"} size={32} />;
+  }
+  const isTri = code.length === 3 && [...code].every((c) => "WUBRG".includes(c));
+  if (isTri) {
+    const [top, left, right] = [...code] as Array<"W" | "U" | "B" | "R" | "G">;
+    return (
+      <span className="inline-flex flex-col items-center" style={{ gap: 2 }}>
+        <Pip c={top} size={20} />
+        <span className="inline-flex" style={{ gap: 2 }}>
+          <Pip c={left} size={20} />
+          <Pip c={right} size={20} />
+        </span>
+      </span>
+    );
+  }
+  return <Pips colors={code} size={22} />;
+}
+
+function FilterHero({ format, colors }: { format: string; colors: string }) {
+  const colorsActive = colors !== "ALL";
+  if (colorsActive) {
+    const name = colorsDisplayName(colors);
+    return (
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div className="flex items-center gap-4 whitespace-nowrap">
+          <ColorsHeroGlyph code={colors} />
+          <span
+            className="font-display tracking-[0.06em]"
+            style={{ fontSize: 36, lineHeight: 1 }}
+          >
+            {name}
+          </span>
+        </div>
+      </div>
+    );
+  }
+  const opt = FORMAT_OPTIONS.find((o) => o.value === format);
+  const label = opt?.label ?? format.toUpperCase();
+  const color = FMT_COLORS[format] ?? FMT_DEFAULT_COLOR;
+  return (
+    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+      <span
+        className="font-display tracking-[0.06em] whitespace-nowrap"
+        style={{ fontSize: 36, lineHeight: 1, color }}
+      >
+        {label}
+      </span>
     </div>
   );
 }
@@ -393,7 +491,7 @@ function Mobile({
               <SetSwitcherMobile
                 sets={sets}
                 activeCode={activeSet}
-                onChange={(code) => goToSet(navigate, code, sets)}
+                onChange={(code) => goToSet(navigate, code, sets, searchParams)}
               />
             </div>
           )}
@@ -865,7 +963,15 @@ function MobileExpandedRow({
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
-function goToSet(navigate: ReturnType<typeof useNavigate>, code: string, sets: SetSummary[] | undefined) {
+function goToSet(
+  navigate: ReturnType<typeof useNavigate>,
+  code: string,
+  sets: SetSummary[] | undefined,
+  searchParams: URLSearchParams,
+) {
   const activeCode = sets?.find((s) => s.isActive)?.code;
-  navigate(code === activeCode ? "/" : `/${code}`);
+  navigate({
+    pathname: code === activeCode ? "/" : `/${code}`,
+    search: searchParams.toString(),
+  });
 }

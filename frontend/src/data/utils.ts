@@ -49,21 +49,25 @@ export function effectiveColorCount(colors: string | null | undefined): number {
   return seen.size;
 }
 
-// Pretty date range used in set hero (e.g. "APR 21 — JUN 22").
-export function fmtRange(start: string, end: string | null | undefined): string {
-  if (!end) return "";
-  const s = new Date(start);
-  const e = new Date(end);
-  return `${MONTHS[s.getMonth()]} ${s.getDate()} — ${MONTHS[e.getMonth()]} ${e.getDate()}`;
+function parseLocalDate(iso: string): Date {
+  const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
+  return new Date(y, m - 1, d);
 }
 
-// "WEEK N OF M" for a set, derived from the date range. Returns null when the set
-// is closed-ended but today is outside the window (returns "WEEK M OF M" instead).
+export function fmtRange(start: string, end: string | null | undefined, today: Date = new Date()): string {
+  if (!end) return "";
+  const s = parseLocalDate(start);
+  const e = parseLocalDate(end);
+  const base = `${MONTHS[s.getMonth()]} ${s.getDate()} — ${MONTHS[e.getMonth()]} ${e.getDate()}`;
+  return e.getFullYear() !== today.getFullYear() ? `${base}, ${e.getFullYear()}` : base;
+}
+
 export function weekOfSet(set: SetSummary | undefined, today: Date = new Date()): string | null {
   if (!set?.startDate || !set.endDate) return null;
-  const start = new Date(set.startDate).getTime();
-  const end = new Date(set.endDate).getTime();
+  const start = parseLocalDate(set.startDate).getTime();
+  const end = parseLocalDate(set.endDate).getTime();
   const now = today.getTime();
+  if (now > end) return null;
   const totalWeeks = Math.max(1, Math.ceil((end - start) / (7 * 24 * 60 * 60 * 1000)));
   const elapsedWeeks = Math.max(1, Math.min(totalWeeks, Math.ceil((now - start) / (7 * 24 * 60 * 60 * 1000))));
   return `WEEK ${elapsedWeeks} OF ${totalWeeks}`;

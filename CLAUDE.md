@@ -151,7 +151,7 @@ On push/PR to `master`: spin up Postgres service container → `alembic upgrade 
 - **Tests target logic, not framework behavior.** No tests for "does Postgres work" or "does Alembic apply migrations" — focus on aggregator / scoring / signup branches / interaction handling.
 - **Bot user-facing strings avoid first-person.** Use "Check your DMs" not "I sent you a DM". No "sign up" in user copy — use "join" / "joined" / "on the leaderboard" (internal Python identifiers like `process_signup`, `SignupKind` stay as-is).
 - **Use the short set code (`SOS`) in user-visible strings**, not the full name ("Secrets of Strixhaven") — too long for embed slots.
-- **No periods at end of code comments.** Comments are labels, not sentences. Never multi-line comment blocks explaining trade-offs/history — one short line max when truly needed.
+- **Code comments: default to none.** If a comment runs longer than one line, delete the whole block — don't shrink it, delete it. The code is already self-explanatory if names are right. No periods at end of single-line comments (they're labels, not sentences). No parenthetical asides. Don't paraphrase library / decorator behavior at the declaration site — that belongs in upstream docs, not your file.
 - **Commit style**: subjects start with uppercase; no manual line wrapping in description paragraphs; no `Co-Authored-By: Claude` or any AI trailer; plain senior-engineer prose, no AI/ML jargon. Use `- ` bullets when a commit has 2+ distinct changes.
 - **Ask before saving memory** and **ask before architectural decisions** — surface structural questions rather than auto-deciding.
 

@@ -17,7 +17,7 @@ from bot.database import run_migrations
 from bot.discord_helpers import refresh_player_avatars
 from bot.models import MagicSet, Player
 from bot.services.refresh import refresh_active_players
-from bot.services.seventeenlands import SeventeenLandsClient
+from bot.services.seventeenlands import MinIntervalLimiter, SeventeenLandsClient
 from bot.sets import ACTIVE_SET_CODE
 
 
@@ -25,14 +25,12 @@ log = logging.getLogger(__name__)
 
 LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
 
-# Cron-style refresh schedule: fires the auto-refresh at each listed wall-clock
-# time, in local timezone. Missed slots (e.g. bot down) are not caught up — the
-# next listed time will fire normally. Use !refresh to recover manually.
 AUTO_REFRESH_TZ = ZoneInfo("America/Montevideo")
 AUTO_REFRESH_TIMES = [
     dtime(hour=8, minute=0, tzinfo=AUTO_REFRESH_TZ),
     dtime(hour=20, minute=0, tzinfo=AUTO_REFRESH_TZ),
 ]
+AUTO_REFRESH_17L_INTERVAL_S = 3.0
 
 
 def configure_logging() -> None:
@@ -201,7 +199,11 @@ def build_bot(guild_id: int) -> commands.Bot:
         from bot.database import SessionLocal
 
         def _do_db_work() -> dict | None:
-            client = SeventeenLandsClient()
+            limiter = (
+                MinIntervalLimiter(min_interval_s=AUTO_REFRESH_17L_INTERVAL_S)
+                if trigger == "auto" else None
+            )
+            client = SeventeenLandsClient(limiter=limiter)
             with SessionLocal() as session:
                 magic_set = session.execute(
                     select(MagicSet).where(MagicSet.code == target_code)

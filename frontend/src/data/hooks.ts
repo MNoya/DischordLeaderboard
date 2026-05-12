@@ -207,7 +207,11 @@ export function useColorChips(setCode: string): { chips: string[]; otherCombos: 
       if (r.events >= threshold) named.push(r.colors);
       else otherCombos.push(r.colors);
     }
+    const groupRank = (s: string) => (s.length === 2 ? 0 : s.length === 1 ? 1 : 2);
     named.sort((a, b) => {
+      const ra = groupRank(a);
+      const rb = groupRank(b);
+      if (ra !== rb) return ra - rb;
       const ea = data.find((r) => r.colors === a)?.events ?? 0;
       const eb = data.find((r) => r.colors === b)?.events ?? 0;
       return eb - ea;

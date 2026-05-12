@@ -16,8 +16,8 @@ export function TrophyCount({
   fixedDigits?: number;
   className?: string;
 }) {
-  const trophySize = size === "compact" ? 10 : size === "sm" ? 12 : 14;
-  const fontSize = size === "compact" ? "text-[10px]" : size === "sm" ? "text-[11px]" : "text-[15px]";
+  const trophySize = size === "compact" ? 12 : size === "sm" ? 12 : 14;
+  const fontSize = size === "compact" ? "text-[12px]" : size === "sm" ? "text-[11px]" : "text-[15px]";
   const fontWeight = size === "md" ? "font-semibold" : "";
   const countStyle = fixedDigits
     ? { display: "inline-block", minWidth: `${fixedDigits}ch`, textAlign: "right" as const }
