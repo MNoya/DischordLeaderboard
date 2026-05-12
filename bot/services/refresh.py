@@ -26,6 +26,7 @@ from bot.models import (
 )
 from bot.scoring import compute_score
 from bot.services.seventeenlands import SUPPORTED_FORMATS, extract_events_for_set
+from bot.sets import normalize_expansion
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ def aggregate_by_format_and_expansion(
         fmt = d.get("format")
         if fmt not in SUPPORTED_FORMATS:
             continue
-        expansion = d.get("expansion") or ""
+        expansion = normalize_expansion(d.get("expansion") or "")
         if set_code not in expansion:
             continue
         key = (fmt, expansion)

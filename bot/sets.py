@@ -20,11 +20,13 @@ class SetSeed:
     name: str
     start_date: date
     end_date: date | None
+    expansion_match: str | None = None
 
 
 ALL_SETS: tuple[SetSeed, ...] = (
     SetSeed("FIN", "Final Fantasy",                date(2025,  6,  9), date(2025,  7, 28)),
     SetSeed("EOE", "Edge of Eternities",           date(2025,  7, 29), date(2025,  9, 23)),
+    SetSeed("CUBE", "Arena Powered Cube",          date(2025, 10, 28), None, expansion_match="Cube - Powered"),
     SetSeed("TLA", "Avatar: The Last Airbender",   date(2025, 11, 16), date(2026,  1, 19)),
     SetSeed("ECL", "Lorwyn Eclipsed",              date(2026,  1, 20), date(2026,  3,  2)),
     SetSeed("TMT", "Teenage Mutant Ninja Turtles", date(2026,  3,  3), date(2026,  4, 20)),
@@ -32,3 +34,12 @@ ALL_SETS: tuple[SetSeed, ...] = (
 )
 
 ACTIVE_SET_CODE = "SOS"
+
+
+EXPANSION_ALIASES: dict[str, str] = {
+    s.expansion_match: s.code for s in ALL_SETS if s.expansion_match
+}
+
+
+def normalize_expansion(expansion: str) -> str:
+    return EXPANSION_ALIASES.get(expansion, expansion)

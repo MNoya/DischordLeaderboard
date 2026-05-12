@@ -35,7 +35,7 @@ import {
 import { colorsOf, effectiveColorCount, fmtRange, lastUpdated, prettyFormat, relativeTime, sumEvents, weekOfSet, winPct } from "../data/utils";
 import { colorsDisplayName, FORMAT_OPTIONS, matchesFormatFilter, MULTI, OTHER } from "../data/filters";
 import { FMT_COLORS, FMT_DEFAULT_COLOR, renderFormatOption, shortFormat } from "../data/format-display";
-import { guildSvgUrl } from "../data/guild-art";
+import { guildLogoTransform, guildSvgUrl } from "../data/guild-art";
 import { cn } from "../lib/utils";
 import type { LeaderboardRow, PlayerDraftEvent, PlayerFormatBreakdown, SetSummary } from "../types/leaderboard";
 import type { LeaderboardTableRow } from "../components/LeaderboardTable";
@@ -357,7 +357,7 @@ function ColorsHeroGlyphInner({ code }: { code: string }) {
         alt=""
         aria-hidden="true"
         className="block"
-        style={{ height: 44, width: 44 }}
+        style={{ height: 44, width: 44, transform: guildLogoTransform(code) }}
       />
     );
   }

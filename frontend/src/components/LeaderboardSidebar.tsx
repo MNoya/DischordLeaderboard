@@ -13,7 +13,7 @@ import { useColorsSummary, useFormatScopedTrophies, useRecentTrophies } from "..
 import { colorsOf, effectiveColorCount, relativeTime } from "../data/utils";
 import { FMT_COLORS, FMT_DEFAULT_COLOR, shortFormat } from "../data/format-display";
 import { colorsDisplayName, MULTI, OTHER } from "../data/filters";
-import { guildSvgUrl } from "../data/guild-art";
+import { guildLogoTransform, guildSvgUrl } from "../data/guild-art";
 import type { ColorsSummary, RecentTrophy } from "../types/leaderboard";
 
 // Derive a Top Colors summary from a list of trophy events. Each trophy is
@@ -115,7 +115,7 @@ export function LeaderboardSidebar({
   return (
     <aside className="flex flex-col gap-4">
       <SurfaceCard>
-        <SectionLabel size={13} className="mb-2.5 text-subtle">{topColorsTitle}</SectionLabel>
+        <SectionLabel size={16} className="mb-1 text-subtle">{topColorsTitle}</SectionLabel>
         {!topColors ? (
           <div className="mono text-[11px] text-muted py-2">LOADING…</div>
         ) : topColors.length === 0 ? (
@@ -164,9 +164,9 @@ export function LeaderboardSidebar({
       </SurfaceCard>
 
       <SurfaceCard>
-        <div className="mb-2.5 flex items-center gap-1.5">
-          <Trophy size={13} color="#ffc63a" />
-          <SectionLabel size={13} className="text-subtle">{recentTitle}</SectionLabel>
+        <div className="mb-1 flex items-center gap-1.5">
+          <Trophy size={16} color="#ffc63a" />
+          <SectionLabel size={16} className="text-subtle">{recentTitle}</SectionLabel>
           {namedScope && (
             <span className="ml-auto inline-flex items-center">
               {guildSvgUrl(colors) ? (
@@ -175,7 +175,7 @@ export function LeaderboardSidebar({
                   alt=""
                   aria-hidden="true"
                   className="block"
-                  style={{ width: 22, height: 22 }}
+                  style={{ width: 38, height: 38, transform: guildLogoTransform(colors) }}
                 />
               ) : (
                 <Pips colors={colors} size={13} />

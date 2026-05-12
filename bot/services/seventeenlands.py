@@ -18,6 +18,7 @@ from typing import Callable, Iterable
 import requests
 
 from bot.scoring import supported_formats
+from bot.sets import normalize_expansion
 
 logger = logging.getLogger(__name__)
 
@@ -197,7 +198,7 @@ def aggregate_for_set(drafts: Iterable[dict], set_code: str) -> dict[str, dict]:
         fmt = d.get("format")
         if fmt not in result:
             continue
-        expansion = d.get("expansion") or ""
+        expansion = normalize_expansion(d.get("expansion") or "")
         if set_code not in expansion:
             continue
         wins = int(d.get("wins") or 0)
@@ -244,7 +245,7 @@ def extract_events_for_set(drafts: Iterable[dict], set_code: str) -> list[dict]:
         fmt = d.get("format")
         if fmt not in SUPPORTED_FORMATS:
             continue
-        expansion = d.get("expansion") or ""
+        expansion = normalize_expansion(d.get("expansion") or "")
         if set_code not in expansion:
             continue
         event_id = d.get("id")
