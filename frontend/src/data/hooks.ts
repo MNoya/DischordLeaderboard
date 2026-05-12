@@ -11,6 +11,7 @@ import {
   fetchAvailableFormats,
   fetchColorsLeaderboard,
   fetchColorsSummary,
+  fetchFormatColorsLeaderboard,
   fetchFormatLeaderboard,
   fetchFormatRecentTrophies,
   fetchLeaderboard,
@@ -72,6 +73,19 @@ export function useColorsLeaderboard(
     queryKey: ["colors-leaderboard", setCode, colors],
     queryFn: () => fetchColorsLeaderboard(setCode!, colors!),
     enabled: !!setCode && !!colors,
+    staleTime: FIVE_MINUTES,
+  });
+}
+
+export function useFormatColorsLeaderboard(
+  setCode: string | undefined,
+  format: string | undefined,
+  colors: string | undefined,
+) {
+  return useQuery({
+    queryKey: ["format-colors-leaderboard", setCode, format, colors],
+    queryFn: () => fetchFormatColorsLeaderboard(setCode!, format!, colors!),
+    enabled: !!setCode && !!format && !!colors,
     staleTime: FIVE_MINUTES,
   });
 }

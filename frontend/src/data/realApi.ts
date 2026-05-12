@@ -44,6 +44,46 @@ export async function fetchSets(): Promise<SetSummary[]> {
   return (data ?? []).map((r) => adaptSet(r as Record<string, unknown>));
 }
 
+export async function fetchFormatColorsLeaderboard(
+  setCode: string,
+  format: string,
+  colors: string,
+): Promise<ColorsLeaderboardRow[]> {
+  const labels = FORMAT_LABEL_GROUPS[format] ?? [format];
+  const { data, error } = await client()
+    .from("public_player_format_archetype_leaderboard")
+    .select("*")
+    .eq("set_code", setCode)
+    .eq("archetype", colors)
+    .in("format_label", labels);
+  if (error) throw error;
+  // Aggregate per player (LCQ splits into two labels)
+  const agg = new Map<string, ColorsLeaderboardRow>();
+  for (const r of (data ?? [])) {
+    const row = adaptColorsRow(r as Record<string, unknown>);
+    const prev = agg.get(row.slug);
+    if (!prev) {
+      agg.set(row.slug, row);
+    } else {
+      prev.score += row.score;
+      prev.trophies += row.trophies;
+      prev.events += row.events;
+      prev.wins += row.wins;
+      prev.losses += row.losses;
+    }
+  }
+  return Array.from(agg.values())
+    .filter((r) => r.events > 0)
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      const wpA = a.wins / Math.max(1, a.wins + a.losses);
+      const wpB = b.wins / Math.max(1, b.wins + b.losses);
+      if (wpB !== wpA) return wpB - wpA;
+      return a.slug.localeCompare(b.slug);
+    })
+    .map((r, i) => ({ ...r, rank: i + 1 }));
+}
+
 export async function fetchAvailableFormats(setCode: string): Promise<string[]> {
   const { data, error } = await client()
     .from("public_player_format_breakdown")

@@ -21,12 +21,23 @@ from bot.models import (
     MagicSet,
     Player,
     PlayerArchetypeScore,
+    PlayerFormatArchetypeScore,
     PlayerSetScore,
     PlayerStats,
 )
-from bot.scoring import compute_score
+from bot.scoring import DEFAULT_QUEUE_GROUPS, compute_score
 from bot.services.seventeenlands import SUPPORTED_FORMATS, extract_events_for_set
 from bot.sets import normalize_expansion
+
+
+_TRAD_LABEL = "Trad"
+
+# Mirror the SQL _FORMAT_LABEL_CASE in public_player_format_breakdown
+_RAW_FORMAT_TO_LABEL: dict[str, str] = {
+    fmt: (_TRAD_LABEL if g.label == "Traditional" else g.label)
+    for g in DEFAULT_QUEUE_GROUPS
+    for fmt in g.formats
+}
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +156,7 @@ def refresh_player(
     session.flush()
     recompute_player_set_score(session, player.id, magic_set.id)
     recompute_player_archetype_scores(session, player.id, magic_set.id)
+    recompute_player_format_archetype_scores(session, player.id, magic_set.id)
     return {"status": "updated", "rows": len(rows)}
 
 
@@ -341,6 +353,100 @@ def recompute_player_archetype_scores(
     ).scalars().all()
     for row in stale:
         session.delete(row)
+
+
+def recompute_player_format_archetype_scores(
+    session: Session, player_id: str, set_id: str
+) -> None:
+    """Recompute per-(player, set, format_label, archetype) scores from draft_events.
+
+    Backs the combined format+colors leaderboard. format_label uses the same
+    bucketing as public_player_format_breakdown (Premier, Trad, Sealed, Quick,
+    LCQ Draft 1, LCQ Draft 2).
+    """
+    events = session.execute(
+        select(DraftEvent).where(
+            DraftEvent.player_id == player_id,
+            DraftEvent.set_id == set_id,
+        )
+    ).scalars().all()
+
+    grouped: dict[tuple[str, str], dict[tuple[str, str], dict]] = {}
+    for ev in events:
+        label = _RAW_FORMAT_TO_LABEL.get(ev.format)
+        if label is None:
+            continue
+        bucket_key = (ev.format, ev.expansion)
+        for arch in _archetype_keys(ev.colors):
+            bucket = grouped.setdefault((label, arch), {}).setdefault(
+                bucket_key,
+                {
+                    "format": ev.format,
+                    "expansion": ev.expansion,
+                    "events": 0,
+                    "wins": 0,
+                    "losses": 0,
+                    "trophies": 0,
+                },
+            )
+            bucket["events"] += 1
+            bucket["wins"] += ev.wins
+            bucket["losses"] += ev.losses
+            if ev.is_trophy:
+                bucket["trophies"] += 1
+
+    now = datetime.now(timezone.utc)
+    seen: set[tuple[str, str]] = set()
+
+    for (label, arch), buckets in grouped.items():
+        rows = list(buckets.values())
+        score = compute_score(rows)
+        events_count = sum(r["events"] for r in rows)
+        wins = sum(r["wins"] for r in rows)
+        losses = sum(r["losses"] for r in rows)
+        trophies = sum(r["trophies"] for r in rows)
+        seen.add((label, arch))
+
+        existing = session.execute(
+            select(PlayerFormatArchetypeScore).where(
+                PlayerFormatArchetypeScore.player_id == player_id,
+                PlayerFormatArchetypeScore.set_id == set_id,
+                PlayerFormatArchetypeScore.format_label == label,
+                PlayerFormatArchetypeScore.archetype == arch,
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            session.add(
+                PlayerFormatArchetypeScore(
+                    player_id=player_id,
+                    set_id=set_id,
+                    format_label=label,
+                    archetype=arch,
+                    score=score,
+                    trophies=trophies,
+                    events=events_count,
+                    wins=wins,
+                    losses=losses,
+                    last_calculated_at=now,
+                )
+            )
+        else:
+            existing.score = score
+            existing.trophies = trophies
+            existing.events = events_count
+            existing.wins = wins
+            existing.losses = losses
+            existing.last_calculated_at = now
+
+    existing_rows = session.execute(
+        select(PlayerFormatArchetypeScore).where(
+            PlayerFormatArchetypeScore.player_id == player_id,
+            PlayerFormatArchetypeScore.set_id == set_id,
+        )
+    ).scalars().all()
+    for row in existing_rows:
+        if (row.format_label, row.archetype) not in seen:
+            session.delete(row)
 
 
 def refresh_one_player_for_all_sets(

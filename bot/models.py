@@ -134,6 +134,29 @@ class PlayerArchetypeScore(Base):
     )
 
 
+class PlayerFormatArchetypeScore(Base):
+    __tablename__ = "player_format_archetype_scores"
+
+    id                 = Column(String, primary_key=True, default=lambda: str(uuid4()))
+    player_id          = Column(String, ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    set_id             = Column(String, ForeignKey("sets.id"), nullable=False)
+    format_label       = Column(String, nullable=False)
+    archetype          = Column(String, nullable=False)
+    score              = Column(Float, nullable=False, default=0)
+    trophies           = Column(Integer, nullable=False, default=0)
+    events             = Column(Integer, nullable=False, default=0)
+    wins               = Column(Integer, nullable=False, default=0)
+    losses             = Column(Integer, nullable=False, default=0)
+    last_calculated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint(
+            "player_id", "set_id", "format_label", "archetype",
+            name="uq_player_set_format_label_archetype_score",
+        ),
+    )
+
+
 class LeaderboardMessage(Base):
     """Tracks every bot-posted leaderboard embed per (channel, set).
 

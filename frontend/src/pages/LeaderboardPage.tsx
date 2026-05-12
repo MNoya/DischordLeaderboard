@@ -25,6 +25,7 @@ import {
   useColorChips,
   useColorsLeaderboard,
   useDraftEvents,
+  useFormatColorsLeaderboard,
   useFormatLeaderboard,
   useIdlePrefetchOtherSets,
   useIdlePrefetchTopPlayers,
@@ -64,29 +65,24 @@ export function LeaderboardPage() {
   const format = searchParams.get("format") ?? "ALL";
   const colors = searchParams.get("colors") ?? "ALL";
   const colorsMode = colors !== "ALL";
-  const formatMode = !colorsMode && format !== "ALL";
+  const formatMode = format !== "ALL";
+  const bothMode = colorsMode && formatMode;
+  const formatOnlyMode = formatMode && !colorsMode;
+  const colorsOnlyMode = colorsMode && !formatMode;
 
   const setFormat = (v: string) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
-      if (v === "ALL") {
-        next.delete("format");
-      } else {
-        next.set("format", v);
-        next.delete("colors");
-      }
+      if (v === "ALL") next.delete("format");
+      else next.set("format", v);
       return next;
     });
   };
   const setColors = (v: string) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
-      if (v === "ALL") {
-        next.delete("colors");
-      } else {
-        next.set("colors", v);
-        next.delete("format");
-      }
+      if (v === "ALL") next.delete("colors");
+      else next.set("colors", v);
       return next;
     });
   };
@@ -103,30 +99,38 @@ export function LeaderboardPage() {
     });
   }, [availableFormatLabels]);
 
-  const otherMode = colorsMode && colors === OTHER;
-  const namedColorsMode = colorsMode && colors !== OTHER;
+  const otherMode = colorsOnlyMode && colors === OTHER;
+  const namedColorsOnlyMode = colorsOnlyMode && colors !== OTHER;
+  const bothNamedMode = bothMode && colors !== OTHER;
 
   const lb = useLeaderboard(colorsMode || formatMode ? undefined : activeSet);
   const fmtLb = useFormatLeaderboard(
-    formatMode ? activeSet : undefined,
-    formatMode ? format : undefined,
+    formatOnlyMode ? activeSet : undefined,
+    formatOnlyMode ? format : undefined,
   );
   const colorsLb = useColorsLeaderboard(
-    namedColorsMode ? activeSet : undefined,
-    namedColorsMode ? colors : undefined,
+    namedColorsOnlyMode ? activeSet : undefined,
+    namedColorsOnlyMode ? colors : undefined,
   );
   const otherLb = useOtherColorsLeaderboard(
     otherMode ? activeSet : undefined,
     otherMode ? otherCombos : undefined,
   );
+  const bothLb = useFormatColorsLeaderboard(
+    bothNamedMode ? activeSet : undefined,
+    bothNamedMode ? format : undefined,
+    bothNamedMode ? colors : undefined,
+  );
 
-  const active = otherMode
-    ? otherLb
-    : namedColorsMode
-      ? colorsLb
-      : formatMode
-        ? fmtLb
-        : lb;
+  const active = bothNamedMode
+    ? bothLb
+    : otherMode
+      ? otherLb
+      : namedColorsOnlyMode
+        ? colorsLb
+        : formatOnlyMode
+          ? fmtLb
+          : lb;
   const baseRows: LeaderboardTableRow[] | undefined = active.data;
   const isLoading = active.isLoading;
   const error = active.error as Error | null;
@@ -400,8 +404,35 @@ function ColorsHeroGlyphInner({ code }: { code: string }) {
 
 function FilterHero({ format, colors }: { format: string; colors: string }) {
   const colorsActive = colors !== "ALL";
+  const formatActive = format !== "ALL";
+  const opt = FORMAT_OPTIONS.find((o) => o.value === format);
+  const formatLabel = opt?.label ?? format.toUpperCase();
+  const formatColor = FMT_COLORS[format] ?? FMT_DEFAULT_COLOR;
+  const colorsName = colorsActive ? colorsDisplayName(colors) : "";
+
+  if (colorsActive && formatActive) {
+    return (
+      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none gap-2.5">
+        <span
+          className="font-display tracking-[0.06em] whitespace-nowrap"
+          style={{ fontSize: 26, lineHeight: 1, color: formatColor }}
+        >
+          {formatLabel}
+        </span>
+        <span
+          className="relative whitespace-nowrap font-display tracking-[0.06em]"
+          style={{ fontSize: 32, lineHeight: 1 }}
+        >
+          <span className="absolute right-full top-1/2 -translate-y-1/2 pr-3 flex items-center">
+            <ColorsHeroGlyph code={colors} />
+          </span>
+          {colorsName}
+        </span>
+      </div>
+    );
+  }
+
   if (colorsActive) {
-    const name = colorsDisplayName(colors);
     return (
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
         <span
@@ -411,21 +442,18 @@ function FilterHero({ format, colors }: { format: string; colors: string }) {
           <span className="absolute right-full top-1/2 -translate-y-1/2 pr-3 flex items-center">
             <ColorsHeroGlyph code={colors} />
           </span>
-          {name}
+          {colorsName}
         </span>
       </div>
     );
   }
-  const opt = FORMAT_OPTIONS.find((o) => o.value === format);
-  const label = opt?.label ?? format.toUpperCase();
-  const color = FMT_COLORS[format] ?? FMT_DEFAULT_COLOR;
   return (
     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
       <span
         className="font-display tracking-[0.06em] whitespace-nowrap"
-        style={{ fontSize: 36, lineHeight: 1, color }}
+        style={{ fontSize: 36, lineHeight: 1, color: formatColor }}
       >
-        {label}
+        {formatLabel}
       </span>
     </div>
   );
