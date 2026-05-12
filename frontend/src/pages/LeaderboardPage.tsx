@@ -370,6 +370,7 @@ function ColorsHeroGlyphInner({ code }: { code: string }) {
   if (url) {
     return (
       <img
+        key={url}
         src={url}
         alt=""
         aria-hidden="true"
@@ -403,15 +404,15 @@ function FilterHero({ format, colors }: { format: string; colors: string }) {
     const name = colorsDisplayName(colors);
     return (
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <div className="flex items-center gap-4 whitespace-nowrap">
-          <ColorsHeroGlyph code={colors} />
-          <span
-            className="font-display tracking-[0.06em]"
-            style={{ fontSize: 36, lineHeight: 1 }}
-          >
-            {name}
+        <span
+          className="relative whitespace-nowrap font-display tracking-[0.06em]"
+          style={{ fontSize: 36, lineHeight: 1 }}
+        >
+          <span className="absolute right-full top-1/2 -translate-y-1/2 pr-3 flex items-center">
+            <ColorsHeroGlyph code={colors} />
           </span>
-        </div>
+          {name}
+        </span>
       </div>
     );
   }

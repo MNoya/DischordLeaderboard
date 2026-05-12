@@ -1,7 +1,9 @@
+import { useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { LeaderboardPage } from "./pages/LeaderboardPage";
 import { PlayerPage } from "./pages/PlayerPage";
 import { AboutPage } from "./pages/AboutPage";
+import { preloadGuildLogos } from "./data/guild-art";
 
 // Browser routes per spec, basename "/leaderboard" applied at the BrowserRouter.
 //
@@ -14,6 +16,9 @@ import { AboutPage } from "./pages/AboutPage";
 // not as a separate route. Set codes are 2–4 uppercase letters.
 
 export function App() {
+  useEffect(() => {
+    preloadGuildLogos();
+  }, []);
   return (
     <Routes>
       <Route path="/" element={<LeaderboardPage />} />
