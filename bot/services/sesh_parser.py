@@ -27,9 +27,8 @@ log = logging.getLogger(__name__)
 # Discord native timestamp: <t:UNIX[:FORMAT]>. Captures the unix-seconds value.
 TIMESTAMP_RE = re.compile(r"<t:(\d+)(?::[A-Za-z])?>")
 
-# Title regexes: set code is any 2-5 uppercase letters; event number is the #N marker.
+# Title regex: set code is any 2-5 uppercase letters.
 SET_RE = re.compile(r"\b([A-Z]{2,5})\b")
-NUM_RE = re.compile(r"#(\d+)")
 
 # Discord shortcode emoji form, e.g. :calendar_spiral:
 SHORTCODE_RE = re.compile(r":[a-z0-9_+-]+:")
@@ -37,8 +36,7 @@ SHORTCODE_RE = re.compile(r":[a-z0-9_+-]+:")
 
 @dataclass(frozen=True)
 class ParsedSeshFields:
-    """Parser output. set_code/event_number are None when absent from the title — caller defaults them."""
-    event_number: int | None
+    """Parser output. set_code is None when no 2-5-letter cap token is in the title — caller defaults it."""
     event_date: date            # in POD_DRAFT_FALLBACK_TZ
     event_time: datetime        # tz-aware UTC
     set_code: str | None
@@ -57,9 +55,7 @@ def parse_sesh_embed(embed: discord.Embed) -> ParsedSeshFields | None:
     clean_title = _strip_markdown(embed.title or "").strip()
 
     set_match = SET_RE.search(clean_title)
-    num_match = NUM_RE.search(clean_title)
     set_code = set_match.group(1) if set_match else None
-    event_number = int(num_match.group(1)) if num_match else None
 
     event_time = _parse_event_time(time_field.value or "")
     if event_time is None:
@@ -78,7 +74,6 @@ def parse_sesh_embed(embed: discord.Embed) -> ParsedSeshFields | None:
     attendees = _parse_attendees(attendees_field.value or "")
 
     return ParsedSeshFields(
-        event_number=event_number,
         event_date=event_date,
         event_time=event_time,
         set_code=set_code,

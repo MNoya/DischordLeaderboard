@@ -1,7 +1,6 @@
 from datetime import date, datetime, timezone
 
 import discord
-import pytest
 
 from bot.config import settings
 from bot.services.sesh_parser import parse_sesh_embed
@@ -35,7 +34,6 @@ def test_parses_real_sesh_embed():
     result = parse_sesh_embed(embed)
 
     assert result is not None
-    assert result.event_number == 1
     assert result.set_code == "SOS"
     assert result.event_time == SAMPLE_UTC
     assert result.format_label is None
@@ -48,15 +46,6 @@ def test_parses_classic_title_shape():
     result = parse_sesh_embed(embed)
     assert result is not None
     assert result.set_code == "SOS"
-    assert result.event_number == 3
-
-
-def test_title_with_no_extras_parses():
-    embed = _make_embed("SOS Pod Draft #4")
-    result = parse_sesh_embed(embed)
-    assert result is not None
-    assert result.set_code == "SOS"
-    assert result.event_number == 4
 
 
 def test_starting_now_reminder_returns_none():
@@ -65,20 +54,11 @@ def test_starting_now_reminder_returns_none():
     assert parse_sesh_embed(embed) is None
 
 
-def test_title_without_event_number_leaves_it_none():
-    embed = _make_embed("SOS Pod Draft")
-    result = parse_sesh_embed(embed)
-    assert result is not None
-    assert result.set_code == "SOS"
-    assert result.event_number is None
-
-
 def test_title_without_set_code_leaves_it_none():
     embed = _make_embed("pod draft #1 - May 13")
     result = parse_sesh_embed(embed)
     assert result is not None
     assert result.set_code is None
-    assert result.event_number == 1
 
 
 def test_minimal_title_still_parses():
@@ -86,7 +66,6 @@ def test_minimal_title_still_parses():
     result = parse_sesh_embed(embed)
     assert result is not None
     assert result.set_code is None
-    assert result.event_number is None
     assert result.name == "test4"
 
 
@@ -165,7 +144,6 @@ def test_title_markdown_stripped_for_name_and_regex():
     result = parse_sesh_embed(embed)
     assert result is not None
     assert result.set_code == "TLA"
-    assert result.event_number == 7
     assert result.name == "TLA Pod Draft Test #7"
 
 

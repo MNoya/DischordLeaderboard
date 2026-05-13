@@ -220,24 +220,10 @@ class DraftEvent(Base):
     )
 
 
-class PodDraftConfig(Base):
-    """Single-row table holding the auto-increment counter for pod draft events.
-
-    Loaded with id=1 by migration. record_event() does a SELECT FOR UPDATE
-    on this row so concurrent sesh-embed detections cannot mint duplicate
-    event numbers.
-    """
-    __tablename__ = "pod_draft_config"
-
-    id            = Column(Integer, primary_key=True)
-    event_counter = Column(Integer, nullable=False)
-
-
 class PodDraftEvent(Base):
     __tablename__ = "pod_draft_events"
 
     id                  = Column(String, primary_key=True, default=lambda: str(uuid4()))
-    event_number        = Column(Integer, nullable=False)
     event_date          = Column(Date, nullable=False)
     event_time          = Column(DateTime(timezone=True), nullable=False)
     set_id              = Column(String, ForeignKey("sets.id"), nullable=True)

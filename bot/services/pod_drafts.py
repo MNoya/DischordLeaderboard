@@ -12,7 +12,6 @@ from bot.config import settings
 from bot.models import (
     MagicSet,
     Player,
-    PodDraftConfig,
     PodDraftEvent,
     PodDraftMatch,
     PodDraftParticipant,
@@ -21,8 +20,7 @@ from bot.models import (
 
 @dataclass(frozen=True)
 class ParsedSeshEvent:
-    """Input to record_event. event_number=None means "mint the next counter value at insert time"."""
-    event_number: int | None
+    """Input to record_event."""
     event_date: date
     event_time: datetime
     set_code: str
@@ -43,31 +41,24 @@ class FinalStanding:
     draft_log_url: str | None
 
 
-def _bump_counter(session: Session, parsed_number: int | None) -> int:
-    """Resolve the event_number to use and advance the global counter monotonically.
-
-    parsed_number=None → next value (counter+1). Otherwise the parsed value is used as-is and the
-    counter jumps to it if higher, so future inserts stay above the highest event_number ever seen.
-    """
-    config = session.execute(
-        select(PodDraftConfig).where(PodDraftConfig.id == 1).with_for_update()
-    ).scalar_one_or_none()
-    if config is None:
-        # Production seeds id=1 via migration; tests use Base.metadata.create_all and need a bootstrap.
-        config = PodDraftConfig(id=1, event_counter=0)
-        session.add(config)
-        session.flush()
-    resolved = parsed_number if parsed_number is not None else config.event_counter + 1
-    if resolved > config.event_counter:
-        config.event_counter = resolved
-    session.flush()
-    return resolved
-
-
 def _lookup_set_id(session: Session, set_code: str) -> str | None:
     return session.execute(
         select(MagicSet.id).where(func.upper(MagicSet.code) == set_code.upper())
     ).scalar_one_or_none()
+
+
+def _build_draftmancer_session(session: Session, parsed: ParsedSeshEvent) -> str:
+    """Compose a stable session id from prefix, set code, and date; suffix on same-day collisions."""
+    base = f"{settings.pod_draft_session_prefix}-{parsed.set_code}-{parsed.event_date:%Y%m%d}"
+    taken = set(session.execute(
+        select(PodDraftEvent.draftmancer_session).where(PodDraftEvent.draftmancer_session.like(f"{base}%"))
+    ).scalars().all())
+    if base not in taken:
+        return base
+    n = 2
+    while f"{base}-{n}" in taken:
+        n += 1
+    return f"{base}-{n}"
 
 
 def _player_for_name(session: Session, name: str) -> Player | None:
@@ -85,14 +76,12 @@ def _player_for_name(session: Session, name: str) -> Player | None:
 
 
 def record_event(session: Session, parsed: ParsedSeshEvent) -> PodDraftEvent:
-    """Insert a pod_draft_event row plus one participant per sesh attendee; counter bump is atomic."""
-    event_number = _bump_counter(session, parsed.event_number)
+    """Insert a pod_draft_event row plus one participant per sesh attendee."""
     set_id = _lookup_set_id(session, parsed.set_code) if parsed.set_code else None
-    session_id = f"{settings.pod_draft_session_prefix}-{parsed.set_code}-{event_number}"
+    session_id = _build_draftmancer_session(session, parsed)
     url = f"https://draftmancer.com/?session={session_id}"
 
     event = PodDraftEvent(
-        event_number=event_number,
         event_date=parsed.event_date,
         event_time=parsed.event_time,
         set_id=set_id,
@@ -277,7 +266,7 @@ def list_champions(session: Session, set_code: str | None = None) -> list[dict]:
         .join(PodDraftParticipant, PodDraftParticipant.event_id == PodDraftEvent.id)
         .outerjoin(Player, Player.id == PodDraftParticipant.player_id)
         .where(PodDraftParticipant.placement == 1)
-        .order_by(PodDraftEvent.event_number)
+        .order_by(PodDraftEvent.event_date)
     )
     if set_code:
         query = query.where(func.upper(PodDraftEvent.set_code) == set_code.upper())
@@ -285,7 +274,7 @@ def list_champions(session: Session, set_code: str | None = None) -> list[dict]:
     rows = session.execute(query).all()
     return [
         {
-            "event_number": event.event_number,
+            "event_name": event.name,
             "event_date": event.event_date,
             "set_code": event.set_code,
             "format_label": event.format_label,

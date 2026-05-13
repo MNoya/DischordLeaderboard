@@ -3,7 +3,7 @@ from datetime import date, datetime, timezone
 from sqlalchemy import select
 
 from bot.config import settings
-from bot.models import MagicSet, Player, PodDraftConfig, PodDraftEvent, PodDraftParticipant
+from bot.models import MagicSet, Player, PodDraftEvent, PodDraftParticipant
 from bot.services.pod_drafts import (
     FinalStanding,
     ParsedSeshEvent,
@@ -40,31 +40,29 @@ def _seed_player(session, discord_id="111", username="alice", display_name="Alic
     return p
 
 
-def _parsed_event(set_code="SOS", number=4, attendees=("Alice", "Bob", "Carl")):
+def _parsed_event(set_code="SOS", event_date=date(2026, 5, 13), attendees=("Alice", "Bob", "Carl")):
     return ParsedSeshEvent(
-        event_number=number,
-        event_date=date(2026, 5, 13),
-        event_time=datetime(2026, 5, 14, 0, 0, tzinfo=timezone.utc),
+        event_date=event_date,
+        event_time=datetime(event_date.year, event_date.month, event_date.day, 0, 0, tzinfo=timezone.utc),
         set_code=set_code,
         format_label=None,
-        name=f"{set_code} Pod Draft #{number} - May 13",
+        name=f"{set_code} Pod Draft — {event_date:%b %d}",
         attendees=list(attendees),
-        sesh_message_id="msg-1",
-        discord_thread_id="thread-1",
+        sesh_message_id=f"msg-{event_date.isoformat()}",
+        discord_thread_id=f"thread-{event_date.isoformat()}",
     )
 
 
-def test_record_event_bumps_counter_and_links_known_attendees(session, monkeypatch):
+def test_record_event_persists_and_links_known_attendees(session, monkeypatch):
     monkeypatch.setattr(settings, "pod_draft_session_prefix", "LLU")
     _seed_set(session, "SOS")
     _seed_player(session, discord_id="111", username="alice", display_name="Alice")
 
-    event = record_event(session, _parsed_event(number=4, attendees=("Alice", "Stranger")))
+    event = record_event(session, _parsed_event(attendees=("Alice", "Stranger")))
 
-    assert event.event_number == 4
     assert event.socket_status == "pending"
-    assert event.draftmancer_session == "LLU-SOS-4"
-    assert event.draftmancer_url == "https://draftmancer.com/?session=LLU-SOS-4"
+    assert event.draftmancer_session == "LLU-SOS-20260513"
+    assert event.draftmancer_url == "https://draftmancer.com/?session=LLU-SOS-20260513"
     assert event.set_id is not None
 
     participants = session.execute(
@@ -74,21 +72,18 @@ def test_record_event_bumps_counter_and_links_known_attendees(session, monkeypat
     assert by_name["Alice"].player_id is not None
     assert by_name["Stranger"].player_id is None
 
-    counter = session.execute(select(PodDraftConfig.event_counter)).scalar_one()
-    assert counter == 4
 
-
-def test_record_event_jumps_counter_when_parsed_skips_ahead(session):
+def test_record_event_same_day_collision_appends_suffix(session, monkeypatch):
+    monkeypatch.setattr(settings, "pod_draft_session_prefix", "LLU")
     _seed_set(session)
-    record_event(session, _parsed_event(number=4, attendees=()))
-    record_event(session, _parsed_event(number=9, attendees=()))
-
-    counter = session.execute(select(PodDraftConfig.event_counter)).scalar_one()
-    assert counter == 9
+    e1 = record_event(session, _parsed_event(attendees=()))
+    e2 = record_event(session, _parsed_event(attendees=()))
+    assert e1.draftmancer_session == "LLU-SOS-20260513"
+    assert e2.draftmancer_session == "LLU-SOS-20260513-2"
 
 
 def test_record_event_with_no_matching_set_leaves_set_id_null(session):
-    event = record_event(session, _parsed_event(set_code="CUBE", number=1))
+    event = record_event(session, _parsed_event(set_code="CUBE"))
     assert event.set_id is None
     assert event.set_code == "CUBE"
 
@@ -181,8 +176,8 @@ def test_finalize_champion_writes_standings_and_marks_complete(session):
 
 def test_link_guest_on_join_updates_matching_unlinked_rows(session):
     _seed_set(session)
-    record_event(session, _parsed_event(attendees=("Stranger",)))
-    record_event(session, _parsed_event(set_code="SOS", number=5, attendees=("STRANGER",)))
+    record_event(session, _parsed_event(event_date=date(2026, 5, 13), attendees=("Stranger",)))
+    record_event(session, _parsed_event(event_date=date(2026, 5, 20), attendees=("STRANGER",)))
     new_player = _seed_player(session, discord_id="333", username="stranger", display_name="Stranger")
 
     updated = link_guest_on_join(session, "stranger", new_player.id)
@@ -228,19 +223,19 @@ def test_link_guest_on_arena_name_no_match_returns_zero(session):
     assert updated == 0
 
 
-def test_list_champions_returns_filtered_and_ordered(session):
+def test_list_champions_returns_filtered_and_ordered_by_date(session):
     _seed_set(session, "SOS")
     _seed_set(session, "ECL")
-    for set_code, num in [("SOS", 4), ("SOS", 5), ("ECL", 1)]:
-        event = record_event(session, _parsed_event(set_code=set_code, number=num, attendees=()))
+    for set_code, ed in [("SOS", date(2026, 5, 6)), ("SOS", date(2026, 5, 13)), ("ECL", date(2026, 4, 1))]:
+        event = record_event(session, _parsed_event(set_code=set_code, event_date=ed, attendees=()))
         standing = FinalStanding(
-            draftmancer_name=f"Champ-{set_code}-{num}", placement=1, record="3-0",
+            draftmancer_name=f"Champ-{set_code}-{ed.isoformat()}", placement=1, record="3-0",
             eliminated_round=None, draft_log_url=None,
         )
         finalize_champion(session, event.id, [standing])
 
     all_rows = list_champions(session)
-    assert [r["event_number"] for r in all_rows] == [1, 4, 5]
+    assert [r["event_date"] for r in all_rows] == [date(2026, 4, 1), date(2026, 5, 6), date(2026, 5, 13)]
 
     sos_only = list_champions(session, set_code="sos")
     assert {r["set_code"] for r in sos_only} == {"SOS"}
@@ -252,11 +247,11 @@ def test_player_pod_stats_aggregates_correctly(session):
     _seed_set(session, "ECL")
     player = _seed_player(session, discord_id="777", username="champ", display_name="Champ")
 
-    e1 = record_event(session, _parsed_event(set_code="SOS", number=4, attendees=("Champ",)))
+    e1 = record_event(session, _parsed_event(set_code="SOS", event_date=date(2026, 5, 6), attendees=("Champ",)))
     finalize_champion(session, e1.id, [
         FinalStanding("Champ", placement=1, record="3-0", eliminated_round=None, draft_log_url=None),
     ])
-    e2 = record_event(session, _parsed_event(set_code="ECL", number=1, attendees=("Champ",)))
+    e2 = record_event(session, _parsed_event(set_code="ECL", event_date=date(2026, 4, 1), attendees=("Champ",)))
     finalize_champion(session, e2.id, [
         FinalStanding("Champ", placement=2, record="2-1", eliminated_round=3, draft_log_url=None),
     ])
