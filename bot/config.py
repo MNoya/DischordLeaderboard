@@ -22,5 +22,12 @@ class Settings(BaseSettings):
     discord_botlog_channel_id: int | None = None
     public_site_url: str = "https://dischord.pages.dev/leaderboard"
 
+    pod_draft_channel_id: int | None = None
+    pod_draft_session_prefix: str = "LLU"
+    pod_draft_max_players: int = 8
+    pod_draft_pick_timer: int = 60
+    sesh_bot_id: int | None = None
+    draftmancer_ws_url: str = "wss://draftmancer.com"
+
 
 settings = Settings()

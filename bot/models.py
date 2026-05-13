@@ -13,7 +13,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, text
 
 
 class Base(DeclarativeBase):
@@ -218,3 +218,91 @@ class DraftEvent(Base):
         UniqueConstraint("player_id", "seventeenlands_event_id",
                          name="uq_draft_event_per_player"),
     )
+
+
+class PodDraftConfig(Base):
+    """Single-row table holding the auto-increment counter for pod draft events.
+
+    Loaded with id=1 by migration. record_event() does a SELECT FOR UPDATE
+    on this row so concurrent sesh-embed detections cannot mint duplicate
+    event numbers.
+    """
+    __tablename__ = "pod_draft_config"
+
+    id            = Column(Integer, primary_key=True)
+    event_counter = Column(Integer, nullable=False)
+
+
+class PodDraftEvent(Base):
+    __tablename__ = "pod_draft_events"
+
+    id                  = Column(String, primary_key=True, default=lambda: str(uuid4()))
+    event_number        = Column(Integer, nullable=False)
+    event_date          = Column(Date, nullable=False)
+    event_time          = Column(DateTime(timezone=True), nullable=False)
+    set_id              = Column(String, ForeignKey("sets.id"), nullable=True)
+    set_code            = Column(String, nullable=False)
+    format_label        = Column(String, nullable=True)
+    name                = Column(String, nullable=False)
+    draftmancer_session = Column(String, nullable=False)
+    draftmancer_url     = Column(String, nullable=False)
+    discord_thread_id   = Column(String, nullable=False)
+    sesh_message_id     = Column(String, nullable=False)
+    socket_status       = Column(String, nullable=False)
+    current_round       = Column(Integer, nullable=True)
+    created_at          = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    participants = relationship(
+        "PodDraftParticipant",
+        back_populates="event",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    matches = relationship(
+        "PodDraftMatch",
+        back_populates="event",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+
+class PodDraftParticipant(Base):
+    __tablename__ = "pod_draft_participants"
+
+    id               = Column(String, primary_key=True, default=lambda: str(uuid4()))
+    event_id         = Column(String, ForeignKey("pod_draft_events.id", ondelete="CASCADE"), nullable=False)
+    # Null for guests not yet registered; populated retroactively by /join or /pod-link-arena
+    player_id        = Column(String, ForeignKey("players.id"), nullable=True)
+    display_name     = Column(String, nullable=False)
+    draftmancer_name = Column(String, nullable=True)
+    placement        = Column(Integer, nullable=True)
+    record           = Column(String, nullable=True)
+    eliminated_round = Column(Integer, nullable=True)
+    draft_log_url    = Column(String, nullable=True)
+
+    event  = relationship("PodDraftEvent", back_populates="participants")
+    player = relationship("Player")
+
+    __table_args__ = (
+        Index(
+            "uq_pod_participant_event_player",
+            "event_id", "player_id",
+            unique=True,
+            postgresql_where=text("player_id IS NOT NULL"),
+        ),
+    )
+
+
+class PodDraftMatch(Base):
+    __tablename__ = "pod_draft_matches"
+
+    id            = Column(String, primary_key=True, default=lambda: str(uuid4()))
+    event_id      = Column(String, ForeignKey("pod_draft_events.id", ondelete="CASCADE"), nullable=False)
+    round         = Column(Integer, nullable=False)
+    player_a_name = Column(String, nullable=False)
+    player_b_name = Column(String, nullable=False)
+    winner_name   = Column(String, nullable=True)
+    score         = Column(String, nullable=True)
+    reported_at   = Column(DateTime(timezone=True), nullable=True)
+
+    event = relationship("PodDraftEvent", back_populates="matches")
