@@ -6,20 +6,18 @@ from __future__ import annotations
 
 import argparse
 import logging
-import sys
 from pathlib import Path
 
 from sqlalchemy import select
 
+from bot.database import SessionLocal
+from bot.models import MagicSet
+from bot.services.refresh import refresh_active_players
+from bot.services.seventeenlands import SeventeenLandsClient
+from bot.sets import ACTIVE_SET_CODE
+
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO_ROOT))
-
-from bot.database import SessionLocal  # noqa: E402
-from bot.models import MagicSet  # noqa: E402
-from bot.services.refresh import refresh_active_players  # noqa: E402
-from bot.services.seventeenlands import SeventeenLandsClient  # noqa: E402
-from bot.sets import ACTIVE_SET_CODE  # noqa: E402
-
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("refresh")

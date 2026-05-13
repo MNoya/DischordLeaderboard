@@ -10,18 +10,13 @@ Set metadata lives in ``bot/sets.py`` — edit there, not here.
 from __future__ import annotations
 
 import logging
-import sys
-from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO_ROOT))
-
-from bot.database import SessionLocal  # noqa: E402
-from bot.models import MagicSet  # noqa: E402
-from bot.sets import ALL_SETS, SetSeed  # noqa: E402
+from bot.database import SessionLocal
+from bot.models import MagicSet
+from bot.sets import ALL_SETS, SetSeed
 
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
