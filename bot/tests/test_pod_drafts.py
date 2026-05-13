@@ -1,0 +1,272 @@
+from datetime import date, datetime, timezone
+
+from sqlalchemy import select
+
+from bot.models import MagicSet, Player, PodDraftConfig, PodDraftEvent, PodDraftParticipant
+from bot.services.pod_drafts import (
+    FinalStanding,
+    ParsedSeshEvent,
+    finalize_champion,
+    link_guest_on_arena_name,
+    link_guest_on_join,
+    list_champions,
+    player_pod_stats,
+    record_event,
+    record_match,
+    upsert_participant,
+)
+
+
+def _seed_set(session, code="SOS"):
+    s = MagicSet(code=code, name=f"{code} long name", start_date=date(2026, 4, 1))
+    session.add(s)
+    session.flush()
+    return s
+
+
+def _seed_player(session, discord_id="111", username="alice", display_name="Alice"):
+    p = Player(
+        slug=f"{username}-{discord_id}",
+        discord_id=discord_id,
+        discord_username=username,
+        display_name=display_name,
+        seventeenlands_token="t" * 32,
+        seventeenlands_url="https://www.17lands.com/user_history/" + "t" * 32,
+        active=True,
+    )
+    session.add(p)
+    session.flush()
+    return p
+
+
+def _parsed_event(set_code="SOS", number=4, attendees=("Alice", "Bob", "Carl")):
+    return ParsedSeshEvent(
+        event_number=number,
+        event_date=date(2026, 5, 13),
+        event_time=datetime(2026, 5, 14, 0, 0, tzinfo=timezone.utc),
+        set_code=set_code,
+        format_label=None,
+        name=f"{set_code} Pod Draft #{number} - May 13",
+        attendees=list(attendees),
+        sesh_message_id="msg-1",
+        discord_thread_id="thread-1",
+    )
+
+
+def test_record_event_bumps_counter_and_links_known_attendees(session):
+    _seed_set(session, "SOS")
+    _seed_player(session, discord_id="111", username="alice", display_name="Alice")
+
+    event = record_event(session, _parsed_event(number=4, attendees=("Alice", "Stranger")))
+
+    assert event.event_number == 4
+    assert event.socket_status == "pending"
+    assert event.draftmancer_session == "LLU-SOS-4"
+    assert event.draftmancer_url == "https://draftmancer.com/?session=LLU-SOS-4"
+    assert event.set_id is not None
+
+    participants = session.execute(
+        select(PodDraftParticipant).where(PodDraftParticipant.event_id == event.id)
+    ).scalars().all()
+    by_name = {p.display_name: p for p in participants}
+    assert by_name["Alice"].player_id is not None
+    assert by_name["Stranger"].player_id is None
+
+    counter = session.execute(select(PodDraftConfig.event_counter)).scalar_one()
+    assert counter == 4
+
+
+def test_record_event_jumps_counter_when_parsed_skips_ahead(session):
+    _seed_set(session)
+    record_event(session, _parsed_event(number=4, attendees=()))
+    record_event(session, _parsed_event(number=9, attendees=()))
+
+    counter = session.execute(select(PodDraftConfig.event_counter)).scalar_one()
+    assert counter == 9
+
+
+def test_record_event_with_no_matching_set_leaves_set_id_null(session):
+    event = record_event(session, _parsed_event(set_code="CUBE", number=1))
+    assert event.set_id is None
+    assert event.set_code == "CUBE"
+
+
+def test_upsert_participant_matches_existing_by_display_name(session):
+    _seed_set(session)
+    event = record_event(session, _parsed_event(attendees=("Alice",)))
+
+    p = upsert_participant(session, event.id, display_name="alice", draftmancer_name="Alice#1234")
+
+    rows = session.execute(
+        select(PodDraftParticipant).where(PodDraftParticipant.event_id == event.id)
+    ).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].id == p.id
+    assert rows[0].draftmancer_name == "Alice#1234"
+
+
+def test_upsert_participant_matches_existing_by_draftmancer_name(session):
+    _seed_set(session)
+    event = record_event(session, _parsed_event(attendees=("Alice",)))
+    upsert_participant(session, event.id, display_name="Alice", draftmancer_name="A#1")
+
+    again = upsert_participant(session, event.id, display_name="Different", draftmancer_name="a#1")
+
+    rows = session.execute(
+        select(PodDraftParticipant).where(PodDraftParticipant.event_id == event.id)
+    ).scalars().all()
+    assert len(rows) == 1
+    assert again.id == rows[0].id
+
+
+def test_upsert_participant_creates_new_row_when_no_match(session):
+    _seed_set(session)
+    event = record_event(session, _parsed_event(attendees=("Alice",)))
+    upsert_participant(session, event.id, display_name="Brand New", draftmancer_name="New#9999")
+
+    rows = session.execute(
+        select(PodDraftParticipant).where(PodDraftParticipant.event_id == event.id)
+    ).scalars().all()
+    assert len(rows) == 2
+
+
+def test_upsert_participant_backfills_player_id(session):
+    _seed_set(session)
+    event = record_event(session, _parsed_event(attendees=("Stranger",)))
+    _seed_player(session, discord_id="222", username="stranger", display_name="Stranger")
+
+    upsert_participant(session, event.id, display_name="Stranger")
+
+    row = session.execute(
+        select(PodDraftParticipant).where(PodDraftParticipant.event_id == event.id)
+    ).scalar_one()
+    assert row.player_id is not None
+
+
+def test_record_match_is_idempotent(session):
+    _seed_set(session)
+    event = record_event(session, _parsed_event())
+
+    first = record_match(session, event.id, 1, "Alice", "Bob", winner_name="Alice", score="2-1")
+    again = record_match(session, event.id, 1, "Alice", "Bob", winner_name="Alice", score="2-0")
+
+    assert first.id == again.id
+    assert again.score == "2-0"
+
+
+def test_finalize_champion_writes_standings_and_marks_complete(session):
+    _seed_set(session)
+    event = record_event(session, _parsed_event(attendees=("Alice", "Bob", "Carl")))
+
+    standings = [
+        FinalStanding(draftmancer_name="Alice", placement=1, record="3-0", eliminated_round=None, draft_log_url="u1"),
+        FinalStanding(draftmancer_name="Bob",   placement=2, record="2-1", eliminated_round=3,    draft_log_url="u2"),
+        FinalStanding(draftmancer_name="Carl",  placement=3, record="1-2", eliminated_round=3,    draft_log_url="u3"),
+    ]
+    updated = finalize_champion(session, event.id, standings)
+
+    assert updated.socket_status == "complete"
+    rows = session.execute(
+        select(PodDraftParticipant).where(PodDraftParticipant.event_id == event.id)
+    ).scalars().all()
+    by_name = {p.display_name: p for p in rows}
+    assert by_name["Alice"].placement == 1
+    assert by_name["Alice"].draft_log_url == "u1"
+    assert by_name["Alice"].eliminated_round is None
+    assert by_name["Bob"].placement == 2
+    assert by_name["Bob"].eliminated_round == 3
+
+
+def test_link_guest_on_join_updates_matching_unlinked_rows(session):
+    _seed_set(session)
+    record_event(session, _parsed_event(attendees=("Stranger",)))
+    record_event(session, _parsed_event(set_code="SOS", number=5, attendees=("STRANGER",)))
+    new_player = _seed_player(session, discord_id="333", username="stranger", display_name="Stranger")
+
+    updated = link_guest_on_join(session, "stranger", new_player.id)
+
+    assert updated == 2
+    linked = session.execute(
+        select(PodDraftParticipant).where(PodDraftParticipant.player_id == new_player.id)
+    ).scalars().all()
+    assert len(linked) == 2
+
+
+def test_link_guest_on_join_skips_already_linked_rows(session):
+    _seed_set(session)
+    existing = _seed_player(session, discord_id="333", username="stranger", display_name="Stranger")
+    record_event(session, _parsed_event(attendees=("Stranger",)))
+    other = _seed_player(session, discord_id="444", username="stranger2", display_name="Stranger2")
+
+    updated = link_guest_on_join(session, "stranger", other.id)
+    assert updated == 0
+    linked = session.execute(
+        select(PodDraftParticipant).where(PodDraftParticipant.player_id == existing.id)
+    ).scalar_one()
+    assert linked.player_id == existing.id
+
+
+def test_link_guest_on_arena_name_matches_case_insensitively(session):
+    _seed_set(session)
+    event = record_event(session, _parsed_event(attendees=("Carl",)))
+    upsert_participant(session, event.id, display_name="Carl", draftmancer_name="Carl#7777")
+    player = _seed_player(session, discord_id="555", username="carl_disc", display_name="Carl On Discord")
+
+    updated = link_guest_on_arena_name(session, player.id, "carl#7777")
+    assert updated == 1
+
+
+def test_link_guest_on_arena_name_no_match_returns_zero(session):
+    _seed_set(session)
+    event = record_event(session, _parsed_event(attendees=("Carl",)))
+    upsert_participant(session, event.id, display_name="Carl", draftmancer_name="Carl#7777")
+    player = _seed_player(session, discord_id="666", username="zed", display_name="Zed")
+
+    updated = link_guest_on_arena_name(session, player.id, "nothing#0000")
+    assert updated == 0
+
+
+def test_list_champions_returns_filtered_and_ordered(session):
+    _seed_set(session, "SOS")
+    _seed_set(session, "ECL")
+    for set_code, num in [("SOS", 4), ("SOS", 5), ("ECL", 1)]:
+        event = record_event(session, _parsed_event(set_code=set_code, number=num, attendees=()))
+        standing = FinalStanding(
+            draftmancer_name=f"Champ-{set_code}-{num}", placement=1, record="3-0",
+            eliminated_round=None, draft_log_url=None,
+        )
+        finalize_champion(session, event.id, [standing])
+
+    all_rows = list_champions(session)
+    assert [r["event_number"] for r in all_rows] == [1, 4, 5]
+
+    sos_only = list_champions(session, set_code="sos")
+    assert {r["set_code"] for r in sos_only} == {"SOS"}
+    assert len(sos_only) == 2
+
+
+def test_player_pod_stats_aggregates_correctly(session):
+    _seed_set(session, "SOS")
+    _seed_set(session, "ECL")
+    player = _seed_player(session, discord_id="777", username="champ", display_name="Champ")
+
+    e1 = record_event(session, _parsed_event(set_code="SOS", number=4, attendees=("Champ",)))
+    finalize_champion(session, e1.id, [
+        FinalStanding("Champ", placement=1, record="3-0", eliminated_round=None, draft_log_url=None),
+    ])
+    e2 = record_event(session, _parsed_event(set_code="ECL", number=1, attendees=("Champ",)))
+    finalize_champion(session, e2.id, [
+        FinalStanding("Champ", placement=2, record="2-1", eliminated_round=3, draft_log_url=None),
+    ])
+
+    stats = player_pod_stats(session, "777")
+    assert stats is not None
+    assert stats["lifetime_trophies"] == 1
+    assert stats["trophies_by_set"] == {"SOS": 1}
+    assert stats["events_played"] == 2
+    assert stats["wins"] == 5
+    assert stats["losses"] == 1
+
+
+def test_player_pod_stats_returns_none_for_unknown_discord_id(session):
+    assert player_pod_stats(session, "ghost") is None
