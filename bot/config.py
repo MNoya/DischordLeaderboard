@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     pod_draft_session_prefix: str = "LLU"
     pod_draft_max_players: int = 8
     pod_draft_pick_timer: int = 60
+    # IANA timezone name applied to sesh's Time field when the embed lacks a
+    # Timezone Conversions UTC line. sesh appears to default Time to UTC, but
+    # guild-specific configurations may diverge.
+    pod_draft_fallback_tz: str = "UTC"
     sesh_bot_id: int | None = None
     draftmancer_ws_url: str = "wss://draftmancer.com"
 

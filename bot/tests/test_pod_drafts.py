@@ -2,6 +2,7 @@ from datetime import date, datetime, timezone
 
 from sqlalchemy import select
 
+from bot.config import settings
 from bot.models import MagicSet, Player, PodDraftConfig, PodDraftEvent, PodDraftParticipant
 from bot.services.pod_drafts import (
     FinalStanding,
@@ -53,7 +54,8 @@ def _parsed_event(set_code="SOS", number=4, attendees=("Alice", "Bob", "Carl")):
     )
 
 
-def test_record_event_bumps_counter_and_links_known_attendees(session):
+def test_record_event_bumps_counter_and_links_known_attendees(session, monkeypatch):
+    monkeypatch.setattr(settings, "pod_draft_session_prefix", "LLU")
     _seed_set(session, "SOS")
     _seed_player(session, discord_id="111", username="alice", display_name="Alice")
 

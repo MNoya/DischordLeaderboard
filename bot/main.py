@@ -81,6 +81,8 @@ def build_bot(guild_id: int) -> commands.Bot:
 
     @bot.event
     async def setup_hook() -> None:
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
         from bot.commands.signup import setup as setup_signup
         from bot.commands.signout import setup as setup_signout
         from bot.commands.update_profile import setup as setup_update_profile
@@ -88,10 +90,16 @@ def build_bot(guild_id: int) -> commands.Bot:
         from bot.commands.leaderboard import setup as setup_leaderboard
         from bot.commands.stats import setup as setup_stats
         from bot.commands.help import setup as setup_help
+        from bot.listeners.sesh_listener import setup as setup_sesh_listener
 
         # Discord doesn't auto-populate owner_id; fetch it so /command crashes can DM the right person
         app_info = await bot.application_info()
         bot.owner_id = app_info.owner.id
+
+        # Pod-draft scheduler — in-memory; on_ready() runs a sweep that re-arms any
+        # pending T-5 reminders so restarts don't lose work
+        bot.pod_scheduler = AsyncIOScheduler()
+        bot.pod_scheduler.start()
 
         # Load cogs into memory and mirror to the guild tree so dispatch works.
         # Discord-side sync is handled by the owner-only `!sync` text command, not on startup.
@@ -102,6 +110,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_leaderboard(bot)
         await setup_stats(bot)
         await setup_help(bot)
+        await setup_sesh_listener(bot)
         bot.tree.copy_global_to(guild=guild)
 
         # Register the persistent leaderboard view so Join buttons on previously-posted

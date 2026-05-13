@@ -33,6 +33,7 @@ POD_DRAFT_CHANNEL_ID=<#pod-draft-coordination ID in LLU Test>
 POD_DRAFT_SESSION_PREFIX=LLUT       # different from prod's LLU so Draftmancer sessions don't collide
 POD_DRAFT_MAX_PLAYERS=8
 POD_DRAFT_PICK_TIMER=60
+POD_DRAFT_FALLBACK_TZ=UTC           # IANA tz used to render event_date when sesh's embed has only the unix timestamp; leave UTC unless the LLU server moves to a fixed local zone
 SESH_BOT_ID=<sesh.fyi user ID>
 DRAFTMANCER_WS_URL=wss://draftmancer.com
 ```
