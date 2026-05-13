@@ -1,9 +1,4 @@
-"""Pod draft persistence and matching logic.
-
-All DB work for the pod draft feature lives here. No Discord, no websocket —
-pure SQLAlchemy so it's straightforward to unit-test against the testcontainers
-fixture. The listener, manager, and command modules call into this layer.
-"""
+"""Pod draft persistence and matching logic — pure SQLAlchemy, no Discord or websocket deps."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -26,14 +21,8 @@ from bot.models import (
 
 @dataclass(frozen=True)
 class ParsedSeshEvent:
-    """Output of the sesh embed parser.
-
-    event_time is the tz-aware UTC timestamp parsed from the Timezone
-    Conversions block. set_code may be a real Magic set or a placeholder
-    like CUBE; format_label captures the non-set flavour ("cube",
-    "throwback", free text) and is null for plain set drafts.
-    """
-    event_number: int
+    """Input to record_event. event_number=None means "mint the next counter value at insert time"."""
+    event_number: int | None
     event_date: date
     event_time: datetime
     set_code: str
@@ -54,26 +43,25 @@ class FinalStanding:
     draft_log_url: str | None
 
 
-def _bump_counter(session: Session, parsed_number: int) -> int:
-    """Adopt the parsed event_number; advance the global counter to track the max ever seen.
+def _bump_counter(session: Session, parsed_number: int | None) -> int:
+    """Resolve the event_number to use and advance the global counter monotonically.
 
-    The DB stores event_number as parsed from the sesh title so cube/throwback
-    events can keep their own visible sequence ("Cube #1" alongside "SOS #4").
-    Phase 2 will mint event numbers from this counter when the bot owns event
-    creation directly.
+    parsed_number=None → next value (counter+1). Otherwise the parsed value is used as-is and the
+    counter jumps to it if higher, so future inserts stay above the highest event_number ever seen.
     """
     config = session.execute(
         select(PodDraftConfig).where(PodDraftConfig.id == 1).with_for_update()
     ).scalar_one_or_none()
     if config is None:
-        # Production seeds id=1 via migration; tests use create_all and need a bootstrap.
+        # Production seeds id=1 via migration; tests use Base.metadata.create_all and need a bootstrap.
         config = PodDraftConfig(id=1, event_counter=0)
         session.add(config)
         session.flush()
-    if parsed_number > config.event_counter:
-        config.event_counter = parsed_number
+    resolved = parsed_number if parsed_number is not None else config.event_counter + 1
+    if resolved > config.event_counter:
+        config.event_counter = resolved
     session.flush()
-    return parsed_number
+    return resolved
 
 
 def _lookup_set_id(session: Session, set_code: str) -> str | None:
@@ -83,11 +71,7 @@ def _lookup_set_id(session: Session, set_code: str) -> str | None:
 
 
 def _player_for_name(session: Session, name: str) -> Player | None:
-    """Case-insensitive match on Player.display_name or Player.discord_username.
-
-    Returns one row at most. Inactive (retired) players are excluded so /retire
-    pauses retroactive linking too.
-    """
+    """Case-insensitive lookup against display_name or discord_username; active players only."""
     target = name.lower()
     return session.execute(
         select(Player)
@@ -101,12 +85,7 @@ def _player_for_name(session: Session, name: str) -> Player | None:
 
 
 def record_event(session: Session, parsed: ParsedSeshEvent) -> PodDraftEvent:
-    """Insert a new pod_draft_event plus one participant row per sesh attendee.
-
-    Atomically bumps pod_draft_config.event_counter. If the parsed event_number
-    skips ahead (sesh user typed `#7` when we expected `#4`), the counter is
-    advanced to the parsed value rather than staying behind.
-    """
+    """Insert a pod_draft_event row plus one participant per sesh attendee; counter bump is atomic."""
     event_number = _bump_counter(session, parsed.event_number)
     set_id = _lookup_set_id(session, parsed.set_code) if parsed.set_code else None
     session_id = f"{settings.pod_draft_session_prefix}-{parsed.set_code}-{event_number}"
@@ -152,17 +131,11 @@ def upsert_participant(
     display_name: str,
     draftmancer_name: str | None = None,
 ) -> PodDraftParticipant:
-    """Find-or-create a participant row.
+    """Find-or-create a participant for this event.
 
-    Matching priority — all case-insensitive:
-      1. existing draftmancer_name equals the supplied draftmancer_name
-      2. existing display_name equals the supplied draftmancer_name
-      3. existing display_name equals the supplied display_name
-
-    Backfills draftmancer_name when previously null. Auto-links player_id by
-    matching either name against Player.display_name / Player.discord_username.
-    Imperfect Arena-name matches that fall through here are handled by
-    /pod-link-arena post-hoc.
+    Match priority (all case-insensitive): existing draftmancer_name, then existing display_name vs
+    supplied draftmancer_name, then existing vs supplied display_name. Backfills draftmancer_name
+    and player_id when previously null. Arena-name mismatches fall through to /pod-link-arena.
     """
     rows = session.execute(
         select(PodDraftParticipant).where(PodDraftParticipant.event_id == event_id)
@@ -215,9 +188,7 @@ def record_match(
     winner_name: str,
     score: str,
 ) -> PodDraftMatch:
-    """Persist a completed bracket match. Idempotent on (event_id, round, names) so
-    debounce-driven re-commits collapse to one row.
-    """
+    """Idempotent on (event_id, round, names) so debounce re-commits collapse to one row."""
     existing = session.execute(
         select(PodDraftMatch).where(
             PodDraftMatch.event_id == event_id,
@@ -251,7 +222,7 @@ def finalize_champion(
     event_id: str,
     standings: Sequence[FinalStanding],
 ) -> PodDraftEvent:
-    """Apply placements, records, and draft-log URLs to participants; mark complete."""
+    """Apply placements/records/draft-log URLs to participants and mark socket_status='complete'."""
     event = session.get(PodDraftEvent, event_id)
     if event is None:
         raise ValueError(f"pod_draft_event {event_id} not found")
@@ -274,10 +245,7 @@ def finalize_champion(
 
 
 def link_guest_on_join(session: Session, discord_username: str, new_player_id: str) -> int:
-    """Backfill player_id on unlinked rows whose display_name matches the new account.
-
-    Best-effort. Returns row count for logging.
-    """
+    """Backfill player_id on unlinked rows whose display_name matches the new account; returns row count."""
     result = session.execute(
         update(PodDraftParticipant)
         .where(
@@ -290,11 +258,7 @@ def link_guest_on_join(session: Session, discord_username: str, new_player_id: s
 
 
 def link_guest_on_arena_name(session: Session, player_id: str, arena_name: str) -> int:
-    """Backfill player_id on unlinked rows whose draftmancer_name matches.
-
-    Called by /pod-link-arena. Returns row count; the command reports it back to
-    the invoker.
-    """
+    """Backfill player_id on unlinked rows whose draftmancer_name matches; returns row count."""
     result = session.execute(
         update(PodDraftParticipant)
         .where(
@@ -307,10 +271,7 @@ def link_guest_on_arena_name(session: Session, player_id: str, arena_name: str) 
 
 
 def list_champions(session: Session, set_code: str | None = None) -> list[dict]:
-    """Champions across all completed events, ordered by event_number.
-
-    Caller partitions by set_code / format_label for the rendered sections.
-    """
+    """Champions across all finalized events, ordered by event_number; caller partitions by set/format."""
     query = (
         select(PodDraftEvent, PodDraftParticipant, Player)
         .join(PodDraftParticipant, PodDraftParticipant.event_id == PodDraftEvent.id)
@@ -339,12 +300,7 @@ def list_champions(session: Session, set_code: str | None = None) -> list[dict]:
 
 
 def player_pod_stats(session: Session, discord_id: str) -> dict | None:
-    """Lifetime + per-set pod stats for a registered player.
-
-    Returns None when the discord_id doesn't map to a player row (caller should
-    suggest /join). Returns zero-counts when the player exists but has no
-    pod-draft history yet.
-    """
+    """Lifetime + per-set pod stats for a registered player; None if the discord_id isn't registered."""
     player = session.execute(
         select(Player).where(Player.discord_id == discord_id)
     ).scalar_one_or_none()

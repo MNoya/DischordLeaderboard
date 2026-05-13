@@ -1,23 +1,11 @@
-"""Parse sesh.fyi RSVP embeds into pod-draft fields.
+"""Parse sesh.fyi RSVP embeds into pod-draft fields. Pure parsing — no Discord client, no DB.
 
-Pure parsing — no Discord client, no DB. Takes a ``discord.Embed`` and returns
-ParsedSeshFields if the embed is recognisably a pod-draft RSVP, else None.
-The listener combines the result with sesh_message_id and discord_thread_id
-before calling pod_drafts.record_event.
+Ground-truth shape from a captured sesh embed:
+    title:                  ":calendar_spiral:  **SOS Pod Draft Test #1**"   (Discord markdown)
+    field "Time":           "<t:1778720421:F> (<t:1778720421:R>) [[+]](url)"  (unix seconds UTC)
+    field "Attendees (N)":  names one per line, "> -" placeholder when empty
 
-Ground-truth embed shape (from a real sesh embed JSON dump):
-
-    title:        ":calendar_spiral:  **SOS Pod Draft Test #1**"
-                  (Discord markdown — emoji shortcodes + bold)
-    fields:
-      "Time"                  -> "<t:1778720421:F> (<t:1778720421:R>) [[+]](url)"
-                                 (Discord native timestamps — unix seconds UTC)
-      "✅ Attendees (N)"      -> attendees, one per line, may be "> -" when empty
-      "🤷 Maybe (N)"          -> ignored
-      "❌ No (N)"             -> ignored
-
-sesh's "is starting now!" reminder messages have a different title shape with
-no Time field — naturally rejected here.
+"is starting now!" reminders have no Time field and are naturally rejected.
 """
 from __future__ import annotations
 
@@ -39,8 +27,7 @@ log = logging.getLogger(__name__)
 # Discord native timestamp: <t:UNIX[:FORMAT]>. Captures the unix-seconds value.
 TIMESTAMP_RE = re.compile(r"<t:(\d+)(?::[A-Za-z])?>")
 
-# Set code (2-5 uppercase letters) and event number from the title after
-# stripping Discord markdown. Extra words like "Test" between them are allowed.
+# Title regexes: set code is any 2-5 uppercase letters; event number is the #N marker.
 SET_RE = re.compile(r"\b([A-Z]{2,5})\b")
 NUM_RE = re.compile(r"#(\d+)")
 
@@ -50,41 +37,29 @@ SHORTCODE_RE = re.compile(r":[a-z0-9_+-]+:")
 
 @dataclass(frozen=True)
 class ParsedSeshFields:
-    """Output of the parser before the listener attaches sesh_message_id and
-    discord_thread_id."""
-    event_number: int
-    event_date: date            # date in POD_DRAFT_FALLBACK_TZ
-    event_time: datetime        # tz-aware UTC moment
-    set_code: str
+    """Parser output. set_code/event_number are None when absent from the title — caller defaults them."""
+    event_number: int | None
+    event_date: date            # in POD_DRAFT_FALLBACK_TZ
+    event_time: datetime        # tz-aware UTC
+    set_code: str | None
     format_label: str | None    # always None in Phase 1
-    name: str                   # cleaned title text, used for pod_draft_events.name
+    name: str                   # cleaned title, becomes pod_draft_events.name
     attendees: Sequence[str]
 
 
 def parse_sesh_embed(embed: discord.Embed) -> ParsedSeshFields | None:
-    """Return parsed fields if this embed is a pod-draft RSVP, else None."""
-    if not embed.title:
-        return None
-
-    clean_title = _strip_markdown(embed.title).strip()
-
-    set_match = SET_RE.search(clean_title)
-    num_match = NUM_RE.search(clean_title)
-    if set_match is None or num_match is None:
-        return None
-
-    set_code = set_match.group(1)
-    event_number = int(num_match.group(1))
-
+    """Return parsed fields if the embed has a Time field (with <t:UNIX>) and an Attendees field, else None."""
     time_field = _find_field(embed, "Time", exact=True)
     attendees_field = _find_field(embed, "Attendees")
     if time_field is None or attendees_field is None:
-        log.warning(
-            "sesh embed %r matched title but is missing required fields "
-            "(time=%s attendees=%s)",
-            embed.title, time_field is not None, attendees_field is not None,
-        )
         return None
+
+    clean_title = _strip_markdown(embed.title or "").strip()
+
+    set_match = SET_RE.search(clean_title)
+    num_match = NUM_RE.search(clean_title)
+    set_code = set_match.group(1) if set_match else None
+    event_number = int(num_match.group(1)) if num_match else None
 
     event_time = _parse_event_time(time_field.value or "")
     if event_time is None:
@@ -114,21 +89,14 @@ def parse_sesh_embed(embed: discord.Embed) -> ParsedSeshFields | None:
 
 
 def _strip_markdown(title: str) -> str:
-    """Remove Discord shortcode emojis (:foo:) and bold/italic asterisks.
-
-    Unicode emojis pass through unchanged — they don't interfere with regex
-    matches on ASCII letters and digits.
-    """
+    """Strip Discord shortcode emojis (:foo:) and bold/italic markers; Unicode emojis pass through."""
     t = SHORTCODE_RE.sub("", title)
     t = t.replace("**", "").replace("__", "")
     return t
 
 
 def _find_field(embed: discord.Embed, name: str, *, exact: bool = False) -> discord.embeds.EmbedProxy | None:
-    """Look up an embed field by name. The Attendees field name carries an emoji
-    prefix in sesh's output (e.g. "✅ Attendees (7)"), so name-substring matching
-    is the default; exact=True for the Time field.
-    """
+    """Find a field by name. Default is substring match (so "Attendees" hits "✅ Attendees (7)")."""
     target = name.lower()
     for field in embed.fields:
         fname = (field.name or "").lower()
@@ -140,7 +108,6 @@ def _find_field(embed: discord.Embed, name: str, *, exact: bool = False) -> disc
 
 
 def _parse_event_time(field_value: str) -> datetime | None:
-    """Extract the unix-seconds timestamp from a `<t:UNIX:F>` token."""
     m = TIMESTAMP_RE.search(field_value)
     if m is None:
         return None
@@ -148,12 +115,7 @@ def _parse_event_time(field_value: str) -> datetime | None:
 
 
 def _parse_attendees(field_value: str) -> list[str]:
-    """Split the Attendees field into clean display names.
-
-    sesh prefixes lines with Discord block-quote markdown (``> ``) and uses
-    a bare dash as the "no entries" placeholder. Both get stripped so the
-    placeholder doesn't become a participant named "-".
-    """
+    """Names, one per line. Strips Discord block-quote prefixes ("> ") and the bare-dash empty placeholder."""
     result: list[str] = []
     for raw in field_value.splitlines():
         line = raw.strip()

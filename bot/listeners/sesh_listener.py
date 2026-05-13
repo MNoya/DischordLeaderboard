@@ -1,15 +1,8 @@
-"""Listen for sesh.fyi pod-draft RSVP embeds in #pod-draft-coordination.
+"""Detect sesh.fyi RSVP embeds in #pod-draft-coordination → persist event + schedule T-5 reminder.
 
-Detection pipeline:
-  1. on_message filtered by SESH_BOT_ID + POD_DRAFT_CHANNEL_ID
-  2. Parse the embed via bot.services.sesh_parser
-  3. Poll for the sesh-created thread on the same message (5s interval, 2 min cap)
-  4. Persist pod_draft_events + attendee participants
-  5. Schedule the T-5 reminder via APScheduler
-  6. Post a quiet confirmation in the thread
-
-The startup sweep ``reschedule_pending_events`` re-arms any pending reminders
-after a bot restart so an in-memory APScheduler doesn't lose work across deploys.
+Pipeline: on_message (SESH_BOT_ID + POD_DRAFT_CHANNEL_ID filter) → parse_sesh_embed → poll for sesh's
+thread (5s × 2min) → record_event → APScheduler date job → quiet confirmation in the thread.
+reschedule_pending_events() re-arms reminders on startup so the in-memory scheduler survives restarts.
 """
 from __future__ import annotations
 
@@ -25,6 +18,7 @@ from bot.config import settings
 from bot.models import PodDraftEvent
 from bot.services.pod_drafts import ParsedSeshEvent, record_event
 from bot.services.sesh_parser import ParsedSeshFields, parse_sesh_embed
+from bot.sets import ACTIVE_SET_CODE
 from bot.tasks.pod_draft_reminder import fire_reminder
 
 
@@ -66,17 +60,15 @@ class SeshListener(commands.Cog):
         log.info("sesh pod-draft embed detected: %s", fields.name)
         thread = await self._wait_for_thread(message)
         if thread is None:
-            log.warning(
-                "sesh embed %s never spawned a thread within %ss; skipping registration",
-                message.id, THREAD_POLL_TIMEOUT_S,
-            )
+            log.warning("sesh embed %s never spawned a thread within %ss; skipping registration",
+                        message.id, THREAD_POLL_TIMEOUT_S)
             return
 
         parsed_event = ParsedSeshEvent(
             event_number=fields.event_number,
             event_date=fields.event_date,
             event_time=fields.event_time,
-            set_code=fields.set_code,
+            set_code=fields.set_code or ACTIVE_SET_CODE,
             format_label=fields.format_label,
             name=fields.name,
             attendees=fields.attendees,
@@ -101,11 +93,7 @@ class SeshListener(commands.Cog):
             log.warning("could not post confirmation in pod draft thread %s", thread.id, exc_info=True)
 
     async def _wait_for_thread(self, message: discord.Message) -> discord.Thread | None:
-        """Poll for the sesh-created thread on this message.
-
-        Discord assigns the thread the same ID as its parent message, so we
-        try fetch_channel(message_id). Returns None on timeout.
-        """
+        """Poll for the sesh-created thread (Discord assigns thread_id = message_id); None on timeout."""
         loop = asyncio.get_event_loop()
         deadline = loop.time() + THREAD_POLL_TIMEOUT_S
         while True:
@@ -147,7 +135,7 @@ class SeshListener(commands.Cog):
 
 
 def _persist_event(parsed_event: ParsedSeshEvent) -> PodDraftEvent:
-    """Run record_event in a worker thread (sync SQLAlchemy)."""
+    """record_event in a worker thread — sync SQLAlchemy off the gateway loop."""
     from bot.database import SessionLocal
     with SessionLocal() as session:
         event = record_event(session, parsed_event)
@@ -158,10 +146,7 @@ def _persist_event(parsed_event: ParsedSeshEvent) -> PodDraftEvent:
 
 
 def reschedule_pending_events(bot: commands.Bot) -> None:
-    """Sweep on bot startup: re-arm reminders for any sesh-detected events whose
-    T-5 hasn't fired yet. Compensates for the in-memory APScheduler losing jobs
-    on restart.
-    """
+    """Startup sweep: re-arm T-5 reminders for pending events so a restart doesn't lose work."""
     scheduler = getattr(bot, "pod_scheduler", None)
     if scheduler is None:
         return

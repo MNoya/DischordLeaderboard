@@ -65,14 +65,29 @@ def test_starting_now_reminder_returns_none():
     assert parse_sesh_embed(embed) is None
 
 
-def test_title_without_event_number_returns_none():
+def test_title_without_event_number_leaves_it_none():
     embed = _make_embed("SOS Pod Draft")
-    assert parse_sesh_embed(embed) is None
+    result = parse_sesh_embed(embed)
+    assert result is not None
+    assert result.set_code == "SOS"
+    assert result.event_number is None
 
 
-def test_title_without_set_code_returns_none():
+def test_title_without_set_code_leaves_it_none():
     embed = _make_embed("pod draft #1 - May 13")
-    assert parse_sesh_embed(embed) is None
+    result = parse_sesh_embed(embed)
+    assert result is not None
+    assert result.set_code is None
+    assert result.event_number == 1
+
+
+def test_minimal_title_still_parses():
+    embed = _make_embed("test4")
+    result = parse_sesh_embed(embed)
+    assert result is not None
+    assert result.set_code is None
+    assert result.event_number is None
+    assert result.name == "test4"
 
 
 def test_missing_time_field_returns_none():
