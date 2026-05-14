@@ -14,8 +14,20 @@ from typing import TYPE_CHECKING
 
 import discord
 from discord import ui
+from sqlalchemy import delete, func, select
 
+from bot.database import SessionLocal
+from bot.models import Player as DbPlayer, PodDraftMatch, PodDraftParticipant
 from bot.services import pod_swiss
+from bot.services.pod_active import ACTIVE_POD_MANAGERS
+from bot.services.pod_drafts import (
+    FinalStanding,
+    _normalize_player_name,
+    _normalized_column,
+    add_pairing,
+    finalize_champion as finalize_db,
+    set_match_result,
+)
 from bot.services.pod_swiss import MatchOutcome, Player
 
 
@@ -112,9 +124,6 @@ def _round_embed(round_num: int, match_states: list[dict]) -> discord.Embed:
 
 def _load_matches(event_id: str) -> list[MatchOutcome]:
     """Loads played matches only — skipped/no-match-played rows are excluded from standings."""
-    from bot.database import SessionLocal
-    from bot.models import PodDraftMatch
-    from sqlalchemy import select
     with SessionLocal() as session:
         rows = session.execute(
             select(PodDraftMatch)
@@ -138,8 +147,6 @@ def _load_matches(event_id: str) -> list[MatchOutcome]:
 
 
 def _insert_pending_matches(event_id: str, round_num: int, pairings: list[tuple[str, str]]) -> list[tuple[str, str, str]]:
-    from bot.database import SessionLocal
-    from bot.services.pod_drafts import add_pairing
     out: list[tuple[str, str, str]] = []
     with SessionLocal() as session:
         for a_name, b_name in pairings:
@@ -235,9 +242,6 @@ async def _handle_result_submission(interaction: discord.Interaction, value: str
 
 def _load_round_states(event_id: str, round_num: int) -> list[dict]:
     """Re-read all matches for a round + each player's standings-to-date so the embed reflects live state."""
-    from bot.database import SessionLocal
-    from bot.models import PodDraftMatch
-    from sqlalchemy import select
     with SessionLocal() as session:
         rows = session.execute(
             select(PodDraftMatch)
@@ -267,9 +271,6 @@ def _load_round_states(event_id: str, round_num: int) -> list[dict]:
 
 
 def _commit_result(match_id: str, winner_name: str, score: str):
-    from bot.database import SessionLocal
-    from bot.models import PodDraftMatch
-    from bot.services.pod_drafts import set_match_result
     with SessionLocal() as session:
         match = session.get(PodDraftMatch, match_id)
         if match is None:
@@ -289,8 +290,6 @@ def _commit_result(match_id: str, winner_name: str, score: str):
 
 async def _maybe_advance(bot_client, event_id: str, round_num: int) -> None:
     """If all matches in round_num have been reported, advance to next round or finalize."""
-    from bot.services.pod_draft_manager import ACTIVE_POD_MANAGERS
-
     pending_remaining = await asyncio.to_thread(_count_pending_in_round, event_id, round_num)
     if pending_remaining > 0:
         return
@@ -311,9 +310,6 @@ async def _maybe_advance(bot_client, event_id: str, round_num: int) -> None:
 
 
 def _count_pending_in_round(event_id: str, round_num: int) -> int:
-    from bot.database import SessionLocal
-    from bot.models import PodDraftMatch
-    from sqlalchemy import func, select
     with SessionLocal() as session:
         return session.execute(
             select(func.count(PodDraftMatch.id))
@@ -326,9 +322,6 @@ def _count_pending_in_round(event_id: str, round_num: int) -> int:
 
 
 def _round_has_rows(event_id: str, round_num: int) -> bool:
-    from bot.database import SessionLocal
-    from bot.models import PodDraftMatch
-    from sqlalchemy import func, select
     with SessionLocal() as session:
         count = session.execute(
             select(func.count(PodDraftMatch.id))
@@ -345,8 +338,6 @@ async def finalize_tournament(manager: "PodDraftManager") -> None:
     players = manager.tournament_players
     standings = pod_swiss.compute_standings(players, prior)
 
-    from bot.services.pod_drafts import FinalStanding, finalize_champion as finalize_db
-
     final_standings = [
         FinalStanding(
             draftmancer_name=s.player_name,
@@ -359,7 +350,6 @@ async def finalize_tournament(manager: "PodDraftManager") -> None:
     ]
 
     def _do_write() -> None:
-        from bot.database import SessionLocal
         with SessionLocal() as session:
             finalize_db(session, manager.event_id, final_standings)
             session.commit()
@@ -397,19 +387,16 @@ async def finalize_tournament(manager: "PodDraftManager") -> None:
 
 async def _resolve_discord_mention(event_id: str, draftmancer_name: str) -> str | None:
     def _query() -> str | None:
-        from bot.database import SessionLocal
-        from bot.models import Player, PodDraftParticipant
-        from sqlalchemy import func, select
         with SessionLocal() as session:
             participant = session.execute(
                 select(PodDraftParticipant).where(
                     PodDraftParticipant.event_id == event_id,
-                    func.lower(PodDraftParticipant.draftmancer_name) == draftmancer_name.lower(),
+                    _normalized_column(PodDraftParticipant.draftmancer_name) == _normalize_player_name(draftmancer_name),
                 )
             ).scalar_one_or_none()
             if participant is None or participant.player_id is None:
                 return None
-            player = session.get(Player, participant.player_id)
+            player = session.get(DbPlayer, participant.player_id)
             if player is None or not player.discord_id:
                 return None
             return f"<@{player.discord_id}>"
@@ -441,16 +428,12 @@ class HollowManager:
             return None
 
     async def disconnect_safely(self) -> None:
-        from bot.services.pod_draft_manager import ACTIVE_POD_MANAGERS
         ACTIVE_POD_MANAGERS.pop(self.event_id, None)
 
 
 async def reset_event_matches(event_id: str) -> int:
     """Delete all pod_draft_matches rows for an event. Returns number deleted."""
     def _do() -> int:
-        from bot.database import SessionLocal
-        from bot.models import PodDraftMatch
-        from sqlalchemy import delete
         with SessionLocal() as session:
             result = session.execute(
                 delete(PodDraftMatch).where(PodDraftMatch.event_id == event_id)

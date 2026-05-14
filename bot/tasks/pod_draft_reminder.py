@@ -11,6 +11,9 @@ import discord
 from discord.ext import commands
 
 from bot.config import settings
+from bot.database import SessionLocal
+from bot.models import PodDraftEvent
+from bot.services.pod_draft_manager import start_manager
 from bot.services.sesh_parser import parse_sesh_embed
 
 
@@ -30,9 +33,6 @@ async def fire_reminder(event_id: str) -> None:
     if _bot is None:
         log.error("fire_reminder for %s: bot reference is not initialised", event_id)
         return
-
-    from bot.database import SessionLocal
-    from bot.models import PodDraftEvent
 
     with SessionLocal() as session:
         event = session.get(PodDraftEvent, event_id)
@@ -74,7 +74,6 @@ async def fire_reminder(event_id: str) -> None:
             event.socket_status = "reminded"
             session.commit()
 
-    from bot.services.pod_draft_manager import start_manager
     await start_manager(_bot, event_id, draftmancer_session, thread_id, set_code, expected_attendee_count)
 
 

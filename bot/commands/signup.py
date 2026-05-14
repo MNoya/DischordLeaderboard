@@ -13,6 +13,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from bot import audit
+from bot.commands.leaderboard import (
+    broadcast_current_set_update,
+    process_leaderboard,
+    render_embed as render_lb,
+    render_view as render_lb_view,
+)
+from bot.commands.stats import process_stats, render_embed as render_stats_embed
+from bot.database import SessionLocal
 from bot.discord_helpers import extract_avatar_hash
 from bot.models import Player
 from bot.services.refresh import refresh_one_player_for_all_sets
@@ -65,7 +73,6 @@ async def _broadcast_current_set_safely(bot) -> None:
     sink the signup flow itself — the join already succeeded by this point.
     """
     try:
-        from bot.commands.leaderboard import broadcast_current_set_update
         await broadcast_current_set_update(bot)
     except Exception:
         logger.warning("post-signup leaderboard broadcast failed", exc_info=True)
@@ -77,14 +84,6 @@ async def _build_join_preview(user_id: str):
     Returns (leaderboard_embed, leaderboard_view, stats_embed). Any element may
     be None if there's nothing to show (no current set, no stats yet).
     """
-    from bot.commands.leaderboard import (
-        process_leaderboard,
-        render_embed as render_lb,
-        render_view as render_lb_view,
-    )
-    from bot.commands.stats import process_stats, render_embed as render_stats_embed
-    from bot.database import SessionLocal
-
     with SessionLocal() as session:
         lb_data = process_leaderboard(session, viewer_discord_id=user_id)
     lb_embed = render_lb(lb_data) if lb_data is not None else None
@@ -98,7 +97,6 @@ async def _build_join_preview(user_id: str):
 
 SignupKind = Literal[
     "created",
-    "linked",
     "already_signed_up",
     "invalid_format",
     "rejected_by_17lands",
@@ -118,10 +116,6 @@ class SignupResult:
 class SignupCheck:
     kind: SignupCheckKind
     player_id: str | None = None
-
-
-def _seventeenlands_url(token: str) -> str:
-    return f"https://www.17lands.com/user_history/{token}"
 
 
 def _next_available_slug(session: Session, display_name: str) -> str:
@@ -199,26 +193,11 @@ def process_signup(
             display_name=display_name,
             avatar_hash=avatar_hash,
             seventeenlands_token=token,
-            seventeenlands_url=_seventeenlands_url(token),
             active=True,
         )
         session.add(player)
         session.commit()
         return SignupResult(kind="created", player_id=player.id)
-
-    if by_token.discord_id is None:
-        by_token.discord_id = discord_id
-        by_token.discord_username = discord_username
-        by_token.avatar_hash = avatar_hash
-        by_token.seventeenlands_url = _seventeenlands_url(token)
-        by_token.token_invalid = False
-        by_token.active = True
-        session.commit()
-        return SignupResult(kind="linked", player_id=by_token.id)
-
-    if by_token.discord_id == discord_id:
-        # Defensive — should have been caught by the first lookup
-        return SignupResult(kind="already_signed_up", player_id=by_token.id)
 
     return SignupResult(kind="token_in_use", player_id=by_token.id)
 
@@ -237,8 +216,6 @@ class Signup(commands.Cog):
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
     async def signup(self, interaction: discord.Interaction) -> None:
-        from bot.database import SessionLocal
-
         user_id = str(interaction.user.id)
         username = str(interaction.user)
         audit.event("signup_invoked", user_id=user_id, username=username)
@@ -256,8 +233,6 @@ class Signup(commands.Cog):
     async def _run_signup_flow(
         self, interaction: discord.Interaction, user_id: str, username: str,
     ) -> None:
-        from bot.database import SessionLocal
-
         avatar_hash = extract_avatar_hash(interaction.user)
 
         with SessionLocal() as session:
@@ -351,7 +326,7 @@ class Signup(commands.Cog):
             await dm.send(MSG_ALREADY_SIGNED_UP)
             return
 
-        # created or linked — pull fresh stats so they show up immediately
+        # created — pull fresh stats so they show up immediately
         with SessionLocal() as session:
             refresh_one_player_for_all_sets(session, self.client, result.player_id)
             session.commit()

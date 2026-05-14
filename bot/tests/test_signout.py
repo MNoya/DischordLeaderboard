@@ -11,7 +11,6 @@ def _seed_player(session, discord_id="111", active=True):
         discord_username="alice",
         display_name="Alice",
         seventeenlands_token=("a" * 32),
-        seventeenlands_url="https://www.17lands.com/user_history/" + ("a" * 32),
         active=active,
     )
     session.add(p)

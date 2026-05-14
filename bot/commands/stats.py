@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from bot import audit
 from bot.config import settings
+from bot.database import SessionLocal
 from bot.models import MagicSet, Player, PlayerSetScore, PlayerStats
 from bot.scoring import compute_score_breakdown
 from bot.sets import ACTIVE_SET_CODE
@@ -159,8 +160,6 @@ class Stats(commands.Cog):
     async def stats(
         self, interaction: discord.Interaction, player: str | None = None
     ) -> None:
-        from bot.database import SessionLocal
-
         user_id = str(interaction.user.id)
         audit.event("stats_invoked", user_id=user_id, player=player)
 

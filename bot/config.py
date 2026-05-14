@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     pod_draft_test_roster: str = ""
     sesh_bot_id: int | None = None
     draftmancer_ws_url: str = "wss://draftmancer.com"
+    mtga_emoji: str = "<:mtga:1504607896317722834>"
 
 
 settings = Settings()

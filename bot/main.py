@@ -9,17 +9,41 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import discord
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from discord import app_commands
 from discord.ext import commands, tasks
 from sqlalchemy import select
 
+from bot.commands.delete_account import setup as setup_delete_account
+from bot.commands.help import setup as setup_help
+from bot.commands.leaderboard import (
+    LeaderboardView,
+    edit_tracked_messages_for_set,
+    process_leaderboard,
+    render_embed as render_leaderboard_embed,
+    setup as setup_leaderboard,
+)
+from bot.commands.pod_draft import setup as setup_pod_draft
+from bot.commands.signout import setup as setup_signout
+from bot.commands.signup import setup as setup_signup
+from bot.commands.stats import setup as setup_stats
+from bot.commands.update_profile import setup as setup_update_profile
 from bot.config import settings
-from bot.database import run_migrations
+from bot.database import SessionLocal, run_migrations
 from bot.discord_helpers import refresh_player_avatars
-from bot.models import MagicSet, Player
+from bot.listeners.sesh_listener import reschedule_pending_events, setup as setup_sesh_listener
+from bot.models import MagicSet, Player, PodDraftEvent
+from bot.services.pod_active import ACTIVE_POD_MANAGERS
+from bot.services.pod_tournament import (
+    HollowManager,
+    register_persistent_views as register_pod_views,
+    reset_event_matches,
+    start_tournament,
+)
 from bot.services.refresh import refresh_active_players
 from bot.services.seventeenlands import MinIntervalLimiter, SeventeenLandsClient
 from bot.sets import ACTIVE_SET_CODE
+from bot.tasks.pod_draft_reminder import init_reminder
 
 
 log = logging.getLogger(__name__)
@@ -83,20 +107,6 @@ def build_bot(guild_id: int) -> commands.Bot:
 
     @bot.event
     async def setup_hook() -> None:
-        from apscheduler.schedulers.asyncio import AsyncIOScheduler
-
-        from bot.commands.signup import setup as setup_signup
-        from bot.commands.signout import setup as setup_signout
-        from bot.commands.update_profile import setup as setup_update_profile
-        from bot.commands.delete_account import setup as setup_delete_account
-        from bot.commands.leaderboard import setup as setup_leaderboard
-        from bot.commands.stats import setup as setup_stats
-        from bot.commands.help import setup as setup_help
-        from bot.commands.pod_draft import setup as setup_pod_draft
-        from bot.listeners.sesh_listener import reschedule_pending_events, setup as setup_sesh_listener
-        from bot.services.pod_tournament import register_persistent_views as register_pod_views
-        from bot.tasks.pod_draft_reminder import init_reminder
-
         # Discord doesn't auto-populate owner_id; fetch it so /command crashes can DM the right person
         app_info = await bot.application_info()
         bot.owner_id = app_info.owner.id
@@ -124,7 +134,6 @@ def build_bot(guild_id: int) -> commands.Bot:
 
         # Register the persistent leaderboard view so Join buttons on previously-posted
         # messages keep dispatching after a bot restart
-        from bot.commands.leaderboard import LeaderboardView
         bot.add_view(LeaderboardView())
 
         log.info("setup_hook: cogs loaded; run `!sync` to publish slash commands to Discord")
@@ -214,8 +223,6 @@ def build_bot(guild_id: int) -> commands.Bot:
             "Please use `/relink` to provide your new token."
         )
 
-        from bot.database import SessionLocal
-
         def _do_db_work() -> dict | None:
             limiter = (
                 MinIntervalLimiter(min_interval_s=AUTO_REFRESH_17L_INTERVAL_S)
@@ -268,7 +275,6 @@ def build_bot(guild_id: int) -> commands.Bot:
         except Exception:
             log.warning("avatar refresh sweep failed", exc_info=True)
 
-        from bot.commands.leaderboard import edit_tracked_messages_for_set
         edit_summary = {"edited": 0, "pruned": 0, "errors": 0}
         with SessionLocal() as session:
             ms = session.execute(
@@ -286,7 +292,6 @@ def build_bot(guild_id: int) -> commands.Bot:
 
         await _dm_owner_refresh_report(target_code, result)
 
-        from bot.commands.leaderboard import process_leaderboard, render_embed as render_leaderboard_embed
         with SessionLocal() as session:
             full_data = process_leaderboard(session, viewer_discord_id=None, top_n=10**6)
         if full_data is not None and full_data.top and bot.owner_id is not None:
@@ -338,14 +343,9 @@ def build_bot(guild_id: int) -> commands.Bot:
             await ctx.send(f"POD_DRAFT_TEST_ROSTER needs an even count (got {len(roster)}).")
             return
 
-        from bot.models import PodDraftEvent
-        from bot.database import SessionLocal as Sess
-        from bot.services.pod_draft_manager import ACTIVE_POD_MANAGERS as MANAGERS
-        from bot.services.pod_tournament import HollowManager, reset_event_matches, start_tournament
-
         thread_id = str(ctx.channel.id)
         def _find_event():
-            with Sess() as session:
+            with SessionLocal() as session:
                 event = session.execute(
                     select(PodDraftEvent).where(PodDraftEvent.discord_thread_id == thread_id)
                 ).scalar_one_or_none()
@@ -360,7 +360,7 @@ def build_bot(guild_id: int) -> commands.Bot:
 
         await reset_event_matches(event_id)
         manager = HollowManager(bot, event_id, ctx.channel.id, roster)
-        MANAGERS[event_id] = manager
+        ACTIVE_POD_MANAGERS[event_id] = manager
         await start_tournament(manager)
 
     @bot.command(name="refresh")

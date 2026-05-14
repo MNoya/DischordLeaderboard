@@ -8,8 +8,6 @@ from bot.services.pod_drafts import (
     FinalStanding,
     ParsedSeshEvent,
     finalize_champion,
-    link_guest_on_arena_name,
-    link_guest_on_join,
     list_champions,
     player_pod_stats,
     record_event,
@@ -32,7 +30,6 @@ def _seed_player(session, discord_id="111", username="alice", display_name="Alic
         discord_username=username,
         display_name=display_name,
         seventeenlands_token="t" * 32,
-        seventeenlands_url="https://www.17lands.com/user_history/" + "t" * 32,
         active=True,
     )
     session.add(p)
@@ -184,55 +181,6 @@ def test_finalize_champion_writes_standings_and_marks_complete(session):
     assert by_name["Alice"].eliminated_round is None
     assert by_name["Bob"].placement == 2
     assert by_name["Bob"].eliminated_round == 3
-
-
-def test_link_guest_on_join_updates_matching_unlinked_rows(session):
-    _seed_set(session)
-    record_event(session, _parsed_event(event_date=date(2026, 5, 13), attendees=("Stranger",)))
-    record_event(session, _parsed_event(event_date=date(2026, 5, 20), attendees=("STRANGER",)))
-    new_player = _seed_player(session, discord_id="333", username="stranger", display_name="Stranger")
-
-    updated = link_guest_on_join(session, "stranger", new_player.id)
-
-    assert updated == 2
-    linked = session.execute(
-        select(PodDraftParticipant).where(PodDraftParticipant.player_id == new_player.id)
-    ).scalars().all()
-    assert len(linked) == 2
-
-
-def test_link_guest_on_join_skips_already_linked_rows(session):
-    _seed_set(session)
-    existing = _seed_player(session, discord_id="333", username="stranger", display_name="Stranger")
-    record_event(session, _parsed_event(attendees=("Stranger",)))
-    other = _seed_player(session, discord_id="444", username="stranger2", display_name="Stranger2")
-
-    updated = link_guest_on_join(session, "stranger", other.id)
-    assert updated == 0
-    linked = session.execute(
-        select(PodDraftParticipant).where(PodDraftParticipant.player_id == existing.id)
-    ).scalar_one()
-    assert linked.player_id == existing.id
-
-
-def test_link_guest_on_arena_name_matches_case_insensitively(session):
-    _seed_set(session)
-    event = record_event(session, _parsed_event(attendees=("Carl",)))
-    upsert_participant(session, event.id, display_name="Carl", draftmancer_name="Carl#7777")
-    player = _seed_player(session, discord_id="555", username="carl_disc", display_name="Carl On Discord")
-
-    updated = link_guest_on_arena_name(session, player.id, "carl#7777")
-    assert updated == 1
-
-
-def test_link_guest_on_arena_name_no_match_returns_zero(session):
-    _seed_set(session)
-    event = record_event(session, _parsed_event(attendees=("Carl",)))
-    upsert_participant(session, event.id, display_name="Carl", draftmancer_name="Carl#7777")
-    player = _seed_player(session, discord_id="666", username="zed", display_name="Zed")
-
-    updated = link_guest_on_arena_name(session, player.id, "nothing#0000")
-    assert updated == 0
 
 
 def test_list_champions_returns_filtered_and_ordered_by_date(session):

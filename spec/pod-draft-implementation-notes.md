@@ -32,12 +32,13 @@ Result submission is **trust-based**: anyone can pick any result; results are ed
 
 ### Identity matching — `Player.arena_name` (planned, milestone 7)
 
-Same sesh URL is shared across all attendees (intentional — Yes/Maybe isn't a hard roster). Draftmancer userNames are user-chosen and rarely match Discord names cleanly. Plan:
+Same sesh URL is shared across all attendees (intentional — Yes/Maybe isn't a hard roster). Users are expected to type their full MTGA handle (`Name#12345`) in Draftmancer so others can send friend invites — matching has to handle the `#NNNN` suffix.
 
-- Add `arena_name` column to `players`.
-- `/pod-link-arena <arena_name>` sets the invoker's `Player.arena_name` and backfills past unlinked participations.
-- `/join` flow prompts for arena_name as a final step.
-- Bot matches `sessionUsers.userName → Player.arena_name` first, then `discord_username`, then `display_name`. Misses become guests (player_id=NULL) and resolve later via `/pod-link-arena`.
+- Add `arena_name` column to `players` (stores full handle, `Name#12345`).
+- Normalize for comparison: strip `#\d+` suffix and lowercase both sides before equality check. `"Noya#12345"` → `"noya"` matches `Player.display_name = "Noya"`.
+- Match priority: exact `lower(arena_name)` → normalized `display_name` → normalized `discord_username`. Only the arena_name leg requires the user to have set it explicitly.
+- `/pod-link-arena <Name#12345>` — opt-in fallback for users whose Draftmancer name diverges from any Discord name (e.g. `MartinTheGreat#123456`). Sets `Player.arena_name` and backfills past unlinked participations.
+- Live lobby verification: on every `sessionUsers` update, refresh the pod-draft thread embed showing which Draftmancer names are linked vs unlinked. Ready check is gated on full verification — bot prompts unlinked users to run `/pod-link-arena` before the draft can start.
 - Standings post renders each linked participant as `[Name](dischord.pages.dev/leaderboard/<slug>)` markdown.
 
 ### `/pod-takeover` (mutiny, not in original spec)
@@ -75,24 +76,32 @@ When sessionUsers fills to `max(1, expected_attendee_count)`, the bot fires the 
 
 ## Pending work (milestone 7 + 8)
 
-### M7 — Read + admin commands + linking
+### M7 — Identity matching, read commands, admin commands
 
-1. Migration: add `players.arena_name` (nullable string).
-2. `/pod-link-arena <arena_name>` — sets invoker's `Player.arena_name` (always-overwrite) and backfills past unlinked `pod_draft_participants` by `draftmancer_name`. Reply: "Linked N past events to your account."
-3. `/join` flow update — add a final DM prompt asking for Arena name. Skip-able. Stores `arena_name` on the new Player row.
-4. `pod_draft_participants` insert logic — prefer `Player.arena_name` match, then `discord_username`, then `display_name`. The auto-link in `_add_attendee` + `upsert_participant` both need updating.
-5. `/pod-leaderboard [set:]` — champion history per set, plus a Cube/Special section by `format_label`.
-6. `/pod-stats [player:]` — per-player career view (lifetime trophies, in-set trophies, events played, total record).
-7. `/stats` augmentation — append "Pod trophies: 2 lifetime · 1 in SOS" line when the invoker has any pod-draft trophies.
-8. `/pod-result-edit <event_id> <player_name> <field> <value>` — admin, fix placement/record/winner/score/eliminated_round.
-9. `/pod-result-delete <event_id>` — admin, cascade-deletes the event row. Ephemeral confirmation prompt.
-10. Standings post: render each linked participant as `[Name](dischord.pages.dev/leaderboard/<slug>)` markdown.
+1. Migration: add `players.arena_name` (nullable string, stores full `Name#12345`).
+2. Name-normalization helper — strip `#\d+` suffix + lowercase. Applied to both sides of every comparison except the explicit `arena_name` leg.
+3. Update `_player_for_name` (and the auto-link paths in `_add_attendee` + `upsert_participant`): exact `lower(arena_name)` → normalized `display_name` → normalized `discord_username`.
+4. `/pod-link-arena <Name#12345>` — opt-in command; always-overwrites `Player.arena_name`, backfills past unlinked `pod_draft_participants` by `draftmancer_name`. Validates input contains `#\d+`.
+5. Live lobby verification: on every `sessionUsers` update, edit the pod-draft thread's pinned/embedded roster message to show ✅ linked vs ❓ unlinked Draftmancer names. Block the ready check until all are linked (or admin overrides via `/ready` — TBD).
+6. Unmatched-user prompt: when any name in the lobby is unlinked, post (or update) a thread message listing them with `/pod-link-arena Name#12345` instructions.
+7. `/pod-leaderboard [set:]` — champion history per set, plus a Cube/Special section by `format_label`.
+8. `/pod-stats [player:]` — per-player career view (lifetime trophies, in-set trophies, events played, total record).
+9. `/stats` augmentation — append "Pod trophies: 2 lifetime · 1 in SOS" line when the invoker has any pod-draft trophies.
+10. `/pod-result-edit <event_id> <player_name> <field> <value>` — admin, fix placement/record/winner/score/eliminated_round.
+11. `/pod-result-delete <event_id>` — admin, cascade-deletes the event row. Ephemeral confirmation prompt.
+12. Standings post: render each linked participant as `[Name](dischord.pages.dev/leaderboard/<slug>)` markdown.
+
+### Deferred (handle later)
+
+- `/join` flow Arena-name prompt — doubles as a chance to pitch the pod-drafter role. Skip-able; stores `arena_name` on the new Player row. Not blocking for M7 since `/pod-link-arena` covers the same ground post-hoc.
 
 ### M8 — Tests for remaining surfaces
 
-- `/pod-link-arena` behaviors (sets arena_name, backfills, overwrites)
-- `/join` arena_name capture
-- Champion finalization writes correct standings (already covered indirectly via pod_swiss tests)
+- Name-normalization helper (suffix stripping, case folding, edge cases like `Name#` with no digits)
+- `_player_for_name` match priority (arena_name > display_name > discord_username; normalized comparisons)
+- `/pod-link-arena` behaviors (sets arena_name, backfills, overwrites, rejects bad input)
+- Live lobby embed updates on sessionUsers changes
+- Ready-check gating on full verification
 - Admin command validation paths
 
 ## Quick reference — test runbook

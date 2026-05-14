@@ -15,6 +15,7 @@ from discord.ext import commands
 from sqlalchemy import select
 
 from bot.config import settings
+from bot.database import SessionLocal
 from bot.models import PodDraftEvent
 from bot.services.pod_drafts import ParsedSeshEvent, record_event
 from bot.services.sesh_parser import ParsedSeshFields, parse_sesh_embed
@@ -142,7 +143,6 @@ async def _fire_after_delay(event_id: str, delay_s: float) -> None:
 
 def _persist_event(parsed_event: ParsedSeshEvent) -> PodDraftEvent:
     """record_event in a worker thread — sync SQLAlchemy off the gateway loop."""
-    from bot.database import SessionLocal
     with SessionLocal() as session:
         event = record_event(session, parsed_event)
         session.commit()
@@ -157,7 +157,6 @@ def reschedule_pending_events(bot: commands.Bot) -> None:
     if scheduler is None:
         return
 
-    from bot.database import SessionLocal
     now = datetime.now(timezone.utc)
     rearmed = 0
     with SessionLocal() as session:

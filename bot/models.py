@@ -27,14 +27,14 @@ class Player(Base):
     # URL-safe handle derived from display_name at /join, frozen post-creation.
     # Used by the frontend for /player/{slug} routing
     slug                 = Column(String, unique=True, nullable=False)
-    discord_id           = Column(String, unique=True, nullable=True)
+    discord_id           = Column(String, unique=True, nullable=False)
     discord_username     = Column(String, nullable=True)
     display_name         = Column(String, nullable=False)
+    arena_name           = Column(String, nullable=True)
     # Discord avatar hash (the asset key, not the full URL). The leaderboard
     # view computes the CDN URL server-side so discord_id never leaves the DB
     avatar_hash          = Column(String, nullable=True)
-    seventeenlands_token = Column(String, nullable=False)
-    seventeenlands_url   = Column(String, nullable=False)
+    seventeenlands_token = Column(String, nullable=True)
     active               = Column(Boolean, nullable=False, default=True)
     joined_at            = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at           = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())

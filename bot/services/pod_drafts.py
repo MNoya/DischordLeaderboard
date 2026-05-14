@@ -1,11 +1,12 @@
 """Pod draft persistence and matching logic — pure SQLAlchemy, no Discord or websocket deps."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Sequence
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from bot.config import settings
@@ -73,15 +74,47 @@ def _build_draftmancer_session(session: Session, parsed: ParsedSeshEvent) -> str
     return f"{base}-{n}"
 
 
+_ARENA_ID_RE = re.compile(r"#\d+$")
+_ARENA_ID_SQL = r"#\d+$"
+
+
+def _normalize_player_name(name: str) -> str:
+    """Strip trailing MTG Arena suffix (`#NNNN`) and lowercase for matching."""
+    return _ARENA_ID_RE.sub("", name).lower()
+
+
+def _normalized_column(col):
+    """SQL expression: lowercase a column and strip the trailing `#NNNN` MTG Arena suffix."""
+    return func.regexp_replace(func.lower(col), _ARENA_ID_SQL, "")
+
+
+def classify_lobby_names(session: Session, names: Sequence[str]) -> list[tuple[str, bool]]:
+    """For each Draftmancer userName, return (name, True if it resolved to an active Player)."""
+    return [(n, _player_for_name(session, n) is not None) for n in names]
+
+
 def _player_for_name(session: Session, name: str) -> Player | None:
-    """Case-insensitive lookup against display_name or discord_username; active players only."""
-    target = name.lower()
+    """Resolve a Draftmancer/Discord name to a Player.
+
+    Priority: exact lower(arena_name), then normalized display_name, then normalized discord_username.
+    Normalization strips a trailing `#NNNN` MTG Arena suffix from both sides so `Noya#12345` matches `Noya`.
+    """
+    raw = name.lower()
+    found = session.execute(
+        select(Player)
+        .where(Player.active.is_(True), func.lower(Player.arena_name) == raw)
+        .limit(1)
+    ).scalar_one_or_none()
+    if found is not None:
+        return found
+
+    norm = _normalize_player_name(name)
     return session.execute(
         select(Player)
         .where(
             Player.active.is_(True),
-            (func.lower(Player.display_name) == target)
-            | (func.lower(Player.discord_username) == target),
+            (_normalized_column(Player.display_name) == norm)
+            | (_normalized_column(Player.discord_username) == norm),
         )
         .limit(1)
     ).scalar_one_or_none()
@@ -134,31 +167,32 @@ def upsert_participant(
 ) -> PodDraftParticipant:
     """Find-or-create a participant for this event.
 
-    Match priority (all case-insensitive): existing draftmancer_name, then existing display_name vs
-    supplied draftmancer_name, then existing vs supplied display_name. Backfills draftmancer_name
-    and player_id when previously null. Arena-name mismatches fall through to /pod-link-arena.
+    Match priority: existing draftmancer_name (normalized), existing display_name vs supplied draftmancer_name 
+    (normalized), existing display_name vs supplied display_name (normalized).
+    Backfills draftmancer_name and player_id when previously null.
+    Arena-name mismatches fall through to /pod-link-arena.
     """
     rows = session.execute(
         select(PodDraftParticipant).where(PodDraftParticipant.event_id == event_id)
     ).scalars().all()
 
-    target_dn = display_name.lower()
-    target_dm = draftmancer_name.lower() if draftmancer_name else None
+    target_dn = _normalize_player_name(display_name)
+    target_dm = _normalize_player_name(draftmancer_name) if draftmancer_name else None
 
     found: PodDraftParticipant | None = None
     if target_dm:
         for row in rows:
-            if row.draftmancer_name and row.draftmancer_name.lower() == target_dm:
+            if row.draftmancer_name and _normalize_player_name(row.draftmancer_name) == target_dm:
                 found = row
                 break
         if found is None:
             for row in rows:
-                if row.display_name.lower() == target_dm:
+                if _normalize_player_name(row.display_name) == target_dm:
                     found = row
                     break
     if found is None:
         for row in rows:
-            if row.display_name.lower() == target_dn:
+            if _normalize_player_name(row.display_name) == target_dn:
                 found = row
                 break
 
@@ -279,32 +313,6 @@ def finalize_champion(
     event.socket_status = "complete"
     session.flush()
     return event
-
-
-def link_guest_on_join(session: Session, discord_username: str, new_player_id: str) -> int:
-    """Backfill player_id on unlinked rows whose display_name matches the new account; returns row count."""
-    result = session.execute(
-        update(PodDraftParticipant)
-        .where(
-            PodDraftParticipant.player_id.is_(None),
-            func.lower(PodDraftParticipant.display_name) == discord_username.lower(),
-        )
-        .values(player_id=new_player_id)
-    )
-    return result.rowcount or 0
-
-
-def link_guest_on_arena_name(session: Session, player_id: str, arena_name: str) -> int:
-    """Backfill player_id on unlinked rows whose draftmancer_name matches; returns row count."""
-    result = session.execute(
-        update(PodDraftParticipant)
-        .where(
-            PodDraftParticipant.player_id.is_(None),
-            func.lower(PodDraftParticipant.draftmancer_name) == arena_name.lower(),
-        )
-        .values(player_id=player_id)
-    )
-    return result.rowcount or 0
 
 
 def list_champions(session: Session, set_code: str | None = None) -> list[dict]:

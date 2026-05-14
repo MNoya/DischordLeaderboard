@@ -105,7 +105,6 @@ def player_and_set(session):
         discord_id="1",
         display_name="TestP",
         seventeenlands_token="t" * 32,
-        seventeenlands_url="https://www.17lands.com/user_history/" + ("t" * 32),
         active=True,
     )
     s = MagicSet(code="SOS", name="Strixhaven", start_date=date(2026, 4, 21))

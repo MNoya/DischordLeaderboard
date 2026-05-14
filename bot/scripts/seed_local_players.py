@@ -34,7 +34,10 @@ def main() -> None:
     skipped = 0
     with SessionLocal() as session:
         taken_slugs = set(session.execute(select(Player.slug)).scalars().all())
-        for display_name, token in PLAYERS:
+        for entry in PLAYERS:
+            display_name = entry[0]
+            token = entry[1]
+            real_discord_id = entry[2] if len(entry) >= 3 else None
             existing = session.execute(
                 select(Player).where(Player.seventeenlands_token == token)
             ).scalar_one_or_none()
@@ -45,9 +48,9 @@ def main() -> None:
             taken_slugs.add(slug)
             session.add(Player(
                 slug=slug,
+                discord_id=real_discord_id or f"seed-{slug}",
                 display_name=display_name,
                 seventeenlands_token=token,
-                seventeenlands_url=f"https://www.17lands.com/user_history/{token}",
                 active=True,
             ))
             added += 1

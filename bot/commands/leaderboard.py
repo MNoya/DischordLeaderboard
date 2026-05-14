@@ -11,7 +11,9 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from bot import audit
+from bot.commands.stats import process_stats, render_embed as render_stats_embed
 from bot.config import settings
+from bot.database import SessionLocal
 from bot.models import LeaderboardMessage, MagicSet, Player, PlayerArchetypeScore, PlayerSetScore, PlayerStats
 from bot.scoring import DEFAULT_QUEUE_GROUPS, compute_score
 from bot.sets import ACTIVE_SET_CODE
@@ -398,9 +400,6 @@ async def _send_personal_followup(
     """Ephemeral follow-up to the invoker — rich stats breakdown if signed up,
     /join prompt otherwise. Re-uses the /stats embed so the two commands stay
     visually consistent."""
-    from bot.database import SessionLocal
-    from bot.commands.stats import process_stats, render_embed as render_stats_embed
-
     if not viewer_registered:
         await interaction.followup.send(
             content="You're not on the leaderboard — run `/join` to join.",
@@ -433,8 +432,6 @@ class LeaderboardView(discord.ui.View):
     async def join_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         # Already signed-up users clicking Join are usually misclicks or curious
         # — show their personal stats instead of starting the signup flow
-        from bot.database import SessionLocal
-
         user_id = str(interaction.user.id)
         with SessionLocal() as session:
             existing = session.execute(
@@ -529,8 +526,6 @@ async def _replace_tracked_message(
 
     A NotFound on fetch is normal (mod or user wiped it); we drop the row.
     """
-    from bot.database import SessionLocal
-
     sent = await interaction.followup.send(embed=embed, view=view, wait=True)
     new_message_id = str(sent.id)
 
@@ -588,9 +583,6 @@ async def broadcast_current_set_update(bot: commands.Bot) -> dict:
     Wrapper used by callers (signup flow, !refresh) that just want 'reflect the
     latest data everywhere' without resolving the set themselves.
     """
-    from bot.database import SessionLocal
-    from bot.sets import ACTIVE_SET_CODE
-
     with SessionLocal() as session:
         ms = session.execute(
             select(MagicSet).where(MagicSet.code == ACTIVE_SET_CODE)
@@ -607,8 +599,6 @@ async def edit_tracked_messages_for_set(bot: commands.Bot, magic_set: MagicSet) 
     live without requiring users to re-invoke ``/leaderboard``. Stale tracking
     rows (message deleted in Discord) get pruned automatically.
     """
-    from bot.database import SessionLocal
-
     summary = {"edited": 0, "pruned": 0, "errors": 0}
     with SessionLocal() as session:
         rows = session.execute(
@@ -700,8 +690,6 @@ class Leaderboard(commands.Cog):
         format: app_commands.Choice[str] | None = None,
         color: app_commands.Choice[str] | None = None,
     ) -> None:
-        from bot.database import SessionLocal
-
         user_id = str(interaction.user.id)
         audit.event(
             "leaderboard_invoked",
@@ -776,9 +764,7 @@ class Leaderboard(commands.Cog):
             try:
                 dm = interaction.channel  # already a DM channel here
                 if data.viewer is not None:
-                    from bot.commands.stats import process_stats, render_embed as render_stats_embed
-                    from bot.database import SessionLocal as _SessionLocal
-                    with _SessionLocal() as session:
+                    with SessionLocal() as session:
                         stats_data = process_stats(session, player_name=None, viewer_discord_id=user_id)
                     if stats_data is not None:
                         await dm.send(embed=render_stats_embed(stats_data))
@@ -794,8 +780,6 @@ class Leaderboard(commands.Cog):
     @app_commands.allowed_contexts(guilds=False, dms=True, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
     async def leaderboard_full(self, interaction: discord.Interaction) -> None:
-        from bot.database import SessionLocal
-
         user_id = str(interaction.user.id)
         audit.event("leaderboard_full_invoked", user_id=user_id)
 

@@ -16,11 +16,21 @@ import socketio
 from discord.ext import commands
 
 from bot.config import settings
+from bot.database import SessionLocal
+from bot.discord_helpers import MTGA_EMOJI
+from bot.models import PodDraftEvent
+from bot.services.pod_active import ACTIVE_POD_MANAGERS
+from bot.services.pod_drafts import classify_lobby_names
+from bot.services.pod_tournament import start_tournament
 
 
 log = logging.getLogger(__name__)
 
-ACTIVE_POD_MANAGERS: dict[str, "PodDraftManager"] = {}
+
+def _classify_names_sync(names: list[str]) -> list[tuple[str, bool]]:
+    with SessionLocal() as session:
+        return classify_lobby_names(session, names)
+
 
 _BACKOFF_BASE_S = 1.0
 _BACKOFF_MAX_S = 30.0
@@ -47,6 +57,7 @@ class PodDraftManager:
         self.ready_users: set[str] = set()
         self.expected_user_ids: set[str] = set()
         self.ready_status_message: object | None = None
+        self.lobby_status_message: object | None = None
         self._ready_timeout_task: asyncio.Task | None = None
         self.auto_ready_attempted = False
         self.auto_ready_disabled = False
@@ -126,13 +137,19 @@ class PodDraftManager:
                     if not self.owner_claimed:
                         asyncio.create_task(self._claim_ownership_and_apply_settings())
                     break
+
+        non_bot_names = [u.get("userName") for u in self.session_users
+                         if u.get("userName") and u.get("userName") != _BOT_USER_NAME]
+        classified = await asyncio.to_thread(_classify_names_sync, non_bot_names) if non_bot_names else []
+        await self._refresh_lobby_status(classified)
+
         if self.ready_check_active:
             current = {u.get("userID") for u in self.session_users if u.get("userName") != _BOT_USER_NAME}
             if current != self.expected_user_ids:
                 asyncio.create_task(self._invalidate_ready_check("player list changed"))
         elif not self.auto_ready_attempted and not self.auto_ready_disabled:
-            non_bot_count = sum(1 for u in self.session_users if u.get("userName") != _BOT_USER_NAME)
-            if non_bot_count >= max(1, self.expected_attendee_count):
+            all_linked = all(ok for _, ok in classified)
+            if len(non_bot_names) >= max(1, self.expected_attendee_count) and all_linked:
                 asyncio.create_task(self._auto_initiate_ready_check())
 
     async def _claim_ownership_and_apply_settings(self) -> None:
@@ -160,8 +177,6 @@ class PodDraftManager:
                  self.session_id, self.set_code, settings.pod_draft_bots)
 
     async def _mark_socket_status(self, status: str) -> None:
-        from bot.database import SessionLocal
-        from bot.models import PodDraftEvent
         with SessionLocal() as session:
             event = session.get(PodDraftEvent, self.event_id)
             if event is not None:
@@ -193,6 +208,51 @@ class PodDraftManager:
         self._ready_timeout_task = asyncio.create_task(self._ready_timeout())
         return None
 
+    async def _refresh_lobby_status(self, classified: list[tuple[str, bool]]) -> None:
+        text = self._format_lobby_status(classified)
+        thread = await self._fetch_thread()
+        if thread is None:
+            return
+        if self.lobby_status_message is None:
+            try:
+                self.lobby_status_message = await thread.send(text)
+            except Exception:
+                log.warning("could not post lobby status for %s", self.session_id, exc_info=True)
+        else:
+            try:
+                await self.lobby_status_message.edit(content=text)
+            except Exception:
+                log.warning("could not edit lobby status for %s", self.session_id, exc_info=True)
+
+    def _format_lobby_status(self, classified: list[tuple[str, bool]]) -> str:
+        total_expected = max(1, self.expected_attendee_count)
+        linked = [n for n, ok in classified if ok]
+        unlinked = [n for n, ok in classified if not ok]
+        lines = [
+            f"{MTGA_EMOJI} **Pod-draft lobby** — {self.set_code}",
+            f"Players: {len(classified)}/{total_expected}",
+        ]
+        if linked:
+            lines.append("")
+            lines.append("**✅ Linked**")
+            for n in linked:
+                lines.append(f"• {n}")
+        if unlinked:
+            lines.append("")
+            lines.append("**❓ Unlinked** — run `/pod-link-arena <ArenaID#1234>` to link:")
+            for n in unlinked:
+                lines.append(f"• `{n}`")
+        lines.append("")
+        if not classified:
+            lines.append("⏳ Waiting for players to join the Draftmancer lobby.")
+        elif unlinked:
+            lines.append("⏳ Ready check blocked until all players are linked.")
+        elif len(classified) < total_expected:
+            lines.append("⏳ Waiting for remaining players to join.")
+        else:
+            lines.append("🟢 All players linked — auto-ready check incoming.")
+        return "\n".join(lines)
+
     def _format_ready_status(self) -> str:
         ready = len(self.ready_users)
         total = len(self.expected_user_ids)
@@ -222,7 +282,6 @@ class PodDraftManager:
                 u.get("userName") for u in self.session_users
                 if u.get("userName") and u.get("userName") != _BOT_USER_NAME
             ]
-        from bot.services.pod_tournament import start_tournament
         asyncio.create_task(start_tournament(self))
 
     async def _on_draft_log(self, log_payload) -> None:
