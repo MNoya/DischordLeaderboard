@@ -40,16 +40,17 @@ def _seed_player(session, discord_id="111", username="alice", display_name="Alic
     return p
 
 
-def _parsed_event(set_code="SOS", event_date=date(2026, 5, 13), attendees=("Alice", "Bob", "Carl")):
+def _parsed_event(set_code="SOS", event_date=date(2026, 5, 13), attendees=("Alice", "Bob", "Carl"), event_number=None):
     return ParsedSeshEvent(
         event_date=event_date,
         event_time=datetime(event_date.year, event_date.month, event_date.day, 0, 0, tzinfo=timezone.utc),
         set_code=set_code,
+        event_number=event_number,
         format_label=None,
         name=f"{set_code} Pod Draft — {event_date:%b %d}",
         attendees=list(attendees),
-        sesh_message_id=f"msg-{event_date.isoformat()}",
-        discord_thread_id=f"thread-{event_date.isoformat()}",
+        sesh_message_id=f"msg-{event_date.isoformat()}-{event_number}",
+        discord_thread_id=f"thread-{event_date.isoformat()}-{event_number}",
     )
 
 
@@ -61,8 +62,8 @@ def test_record_event_persists_and_links_known_attendees(session, monkeypatch):
     event = record_event(session, _parsed_event(attendees=("Alice", "Stranger")))
 
     assert event.socket_status == "pending"
-    assert event.draftmancer_session == "LLU-SOS-20260513"
-    assert event.draftmancer_url == "https://draftmancer.com/?session=LLU-SOS-20260513"
+    assert event.draftmancer_session == "LLU-SOS-May-13"
+    assert event.draftmancer_url == "https://draftmancer.com/?session=LLU-SOS-May-13"
     assert event.set_id is not None
 
     participants = session.execute(
@@ -73,13 +74,24 @@ def test_record_event_persists_and_links_known_attendees(session, monkeypatch):
     assert by_name["Stranger"].player_id is None
 
 
-def test_record_event_same_day_collision_appends_suffix(session, monkeypatch):
+def test_record_event_same_day_collision_appends_letter_suffix(session, monkeypatch):
     monkeypatch.setattr(settings, "pod_draft_session_prefix", "LLU")
     _seed_set(session)
     e1 = record_event(session, _parsed_event(attendees=()))
     e2 = record_event(session, _parsed_event(attendees=()))
-    assert e1.draftmancer_session == "LLU-SOS-20260513"
-    assert e2.draftmancer_session == "LLU-SOS-20260513-2"
+    e3 = record_event(session, _parsed_event(attendees=()))
+    assert e1.draftmancer_session == "LLU-SOS-May-13"
+    assert e2.draftmancer_session == "LLU-SOS-May-13-A"
+    assert e3.draftmancer_session == "LLU-SOS-May-13-B"
+
+
+def test_record_event_with_event_number_uses_n_in_session(session, monkeypatch):
+    monkeypatch.setattr(settings, "pod_draft_session_prefix", "LLU")
+    _seed_set(session)
+    e1 = record_event(session, _parsed_event(attendees=(), event_number=10))
+    e2 = record_event(session, _parsed_event(attendees=(), event_number=10))
+    assert e1.draftmancer_session == "LLU-SOS-10"
+    assert e2.draftmancer_session == "LLU-SOS-10-A"
 
 
 def test_record_event_with_no_matching_set_leaves_set_id_null(session):

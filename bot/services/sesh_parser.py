@@ -24,11 +24,12 @@ from bot.config import settings
 log = logging.getLogger(__name__)
 
 
-# Discord native timestamp: <t:UNIX[:FORMAT]>. Captures the unix-seconds value.
+# Discord native timestamp: <t:UNIX[:FORMAT]>, captures the unix-seconds value
 TIMESTAMP_RE = re.compile(r"<t:(\d+)(?::[A-Za-z])?>")
 
-# Title regex: set code is any 2-5 uppercase letters.
+# Title regex: set code is any 2-5 uppercase letters; event number is "#N"
 SET_RE = re.compile(r"\b([A-Z]{2,5})\b")
+NUM_RE = re.compile(r"#(\d+)")
 
 # Discord shortcode emoji form, e.g. :calendar_spiral:
 SHORTCODE_RE = re.compile(r":[a-z0-9_+-]+:")
@@ -36,10 +37,11 @@ SHORTCODE_RE = re.compile(r":[a-z0-9_+-]+:")
 
 @dataclass(frozen=True)
 class ParsedSeshFields:
-    """Parser output. set_code is None when no 2-5-letter cap token is in the title — caller defaults it."""
+    """Parser output. set_code and event_number are None when missing — caller defaults or skips them."""
     event_date: date            # in POD_DRAFT_FALLBACK_TZ
     event_time: datetime        # tz-aware UTC
     set_code: str | None
+    event_number: int | None    # from "#N" in title, used by draftmancer_session naming only
     format_label: str | None    # always None in Phase 1
     name: str                   # cleaned title, becomes pod_draft_events.name
     attendees: Sequence[str]
@@ -56,6 +58,8 @@ def parse_sesh_embed(embed: discord.Embed) -> ParsedSeshFields | None:
 
     set_match = SET_RE.search(clean_title)
     set_code = set_match.group(1) if set_match else None
+    num_match = NUM_RE.search(clean_title)
+    event_number = int(num_match.group(1)) if num_match else None
 
     event_time = _parse_event_time(time_field.value or "")
     if event_time is None:
@@ -77,6 +81,7 @@ def parse_sesh_embed(embed: discord.Embed) -> ParsedSeshFields | None:
         event_date=event_date,
         event_time=event_time,
         set_code=set_code,
+        event_number=event_number,
         format_label=None,
         name=clean_title,
         attendees=attendees,
@@ -110,14 +115,10 @@ def _parse_event_time(field_value: str) -> datetime | None:
 
 
 def _parse_attendees(field_value: str) -> list[str]:
-    """Names, one per line. Strips Discord block-quote prefixes ("> ") and the bare-dash empty placeholder."""
+    """Names, one per line; strips Discord block-quote prefixes (> / >> / >>>) and dash placeholders."""
     result: list[str] = []
     for raw in field_value.splitlines():
-        line = raw.strip()
-        if line.startswith("> "):
-            line = line[2:].strip()
-        elif line.startswith(">"):
-            line = line[1:].strip()
+        line = raw.lstrip(">").strip()
         if not line or line in {"-", "—"}:
             continue
         result.append(line)

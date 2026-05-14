@@ -35,10 +35,19 @@ def test_parses_real_sesh_embed():
 
     assert result is not None
     assert result.set_code == "SOS"
+    assert result.event_number == 1
     assert result.event_time == SAMPLE_UTC
     assert result.format_label is None
     assert result.name == "SOS Pod Draft Test #1"
     assert list(result.attendees) == ["Arcyl", "WaveofShadow", "Chonce"]
+
+
+def test_title_without_hash_leaves_event_number_none():
+    embed = _make_embed("SOS test")
+    result = parse_sesh_embed(embed)
+    assert result is not None
+    assert result.set_code == "SOS"
+    assert result.event_number is None
 
 
 def test_parses_classic_title_shape():

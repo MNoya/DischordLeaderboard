@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import signal
 import traceback
 from datetime import time as dtime
 from pathlib import Path
@@ -76,6 +77,7 @@ def build_bot(guild_id: int) -> commands.Bot:
     intents = discord.Intents.default()
     intents.message_content = True
     intents.dm_messages = True
+    intents.members = True
     bot = commands.Bot(command_prefix="!", intents=intents)
     guild = discord.Object(id=guild_id)
 
@@ -90,7 +92,9 @@ def build_bot(guild_id: int) -> commands.Bot:
         from bot.commands.leaderboard import setup as setup_leaderboard
         from bot.commands.stats import setup as setup_stats
         from bot.commands.help import setup as setup_help
-        from bot.listeners.sesh_listener import setup as setup_sesh_listener
+        from bot.commands.pod_draft import setup as setup_pod_draft
+        from bot.listeners.sesh_listener import reschedule_pending_events, setup as setup_sesh_listener
+        from bot.tasks.pod_draft_reminder import init_reminder
 
         # Discord doesn't auto-populate owner_id; fetch it so /command crashes can DM the right person
         app_info = await bot.application_info()
@@ -100,6 +104,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         # pending T-5 reminders so restarts don't lose work
         bot.pod_scheduler = AsyncIOScheduler()
         bot.pod_scheduler.start()
+        init_reminder(bot)
 
         # Load cogs into memory and mirror to the guild tree so dispatch works.
         # Discord-side sync is handled by the owner-only `!sync` text command, not on startup.
@@ -110,7 +115,9 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_leaderboard(bot)
         await setup_stats(bot)
         await setup_help(bot)
+        await setup_pod_draft(bot)
         await setup_sesh_listener(bot)
+        reschedule_pending_events(bot)
         bot.tree.copy_global_to(guild=guild)
 
         # Register the persistent leaderboard view so Join buttons on previously-posted
@@ -348,6 +355,9 @@ def build_bot(guild_id: int) -> commands.Bot:
     @bot.event
     async def on_ready() -> None:
         log.info("logged in as %s (id=%s)", bot.user, bot.user.id if bot.user else "?")
+        if not settings.auto_refresh_enabled:
+            log.info("AUTO_REFRESH_ENABLED=false; skipping the scheduled 17lands refresh tick")
+            return
         if not auto_refresh_tick.is_running():
             auto_refresh_tick.start()
 
@@ -360,6 +370,8 @@ def main() -> None:
 
     configure_logging()
     run_migrations()
+
+    signal.signal(signal.SIGTERM, lambda *_: signal.raise_signal(signal.SIGINT))
 
     bot = build_bot(settings.discord_guild_id)
     bot.run(settings.discord_bot_token.get_secret_value(), log_handler=None)

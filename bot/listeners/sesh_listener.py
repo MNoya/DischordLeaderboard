@@ -68,6 +68,7 @@ class SeshListener(commands.Cog):
             event_date=fields.event_date,
             event_time=fields.event_time,
             set_code=fields.set_code or ACTIVE_SET_CODE,
+            event_number=fields.event_number,
             format_label=fields.format_label,
             name=fields.name,
             attendees=fields.attendees,
@@ -84,7 +85,7 @@ class SeshListener(commands.Cog):
         self._schedule_reminder(event_row.id, event_row.event_time)
 
         try:
-            await thread.send(f"Pod Draft registered!\nDraftmancer link will be posted {REMINDER_LEAD_MIN} minutes before the event starts.")
+            await thread.send(f"🤖 Pod Draft registered!\nDraftmancer link will be posted {REMINDER_LEAD_MIN} minutes before the event starts.")
         except discord.HTTPException:
             log.warning("could not post confirmation in pod draft thread %s", thread.id, exc_info=True)
 
@@ -109,6 +110,10 @@ class SeshListener(commands.Cog):
             await asyncio.sleep(THREAD_POLL_INTERVAL_S)
 
     def _schedule_reminder(self, event_id: str, event_time: datetime) -> None:
+        if settings.pod_draft_skip_reminder_wait:
+            log.info("POD_DRAFT_SKIP_REMINDER_WAIT=true; firing reminder for %s in 10s", event_id)
+            asyncio.create_task(_fire_after_delay(event_id, 10))
+            return
         scheduler = getattr(self.bot, "pod_scheduler", None)
         if scheduler is None:
             log.error("pod_scheduler not attached to bot; reminder for %s lost", event_id)
@@ -128,6 +133,11 @@ class SeshListener(commands.Cog):
             replace_existing=True,
         )
         log.info("scheduled pod-draft reminder for event %s at %s", event_id, run_at.isoformat())
+
+
+async def _fire_after_delay(event_id: str, delay_s: float) -> None:
+    await asyncio.sleep(delay_s)
+    await fire_reminder(event_id)
 
 
 def _persist_event(parsed_event: ParsedSeshEvent) -> PodDraftEvent:

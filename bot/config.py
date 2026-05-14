@@ -21,15 +21,15 @@ class Settings(BaseSettings):
     discord_admin_role_id: int | None = None
     discord_botlog_channel_id: int | None = None
     public_site_url: str = "https://dischord.pages.dev/leaderboard"
+    auto_refresh_enabled: bool = True
 
     pod_draft_channel_id: int | None = None
     pod_draft_session_prefix: str = "LLU"
     pod_draft_max_players: int = 8
     pod_draft_pick_timer: int = 60
-    # IANA timezone name applied to sesh's Time field when the embed lacks a
-    # Timezone Conversions UTC line. sesh appears to default Time to UTC, but
-    # guild-specific configurations may diverge.
-    pod_draft_fallback_tz: str = "UTC"
+    pod_draft_bots: int = 0
+    pod_draft_fallback_tz: str = "America/New_York"
+    pod_draft_skip_reminder_wait: bool = False
     sesh_bot_id: int | None = None
     draftmancer_ws_url: str = "wss://draftmancer.com"
 

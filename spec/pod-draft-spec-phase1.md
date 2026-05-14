@@ -279,7 +279,7 @@ exponential backoff + jitter on disconnect (same pattern as `Amelas22/DraftBot`)
 ```python
 await sio.emit('joinSession', {
     'sessionID': 'LLU-SOS-3',
-    'userName': 'DischordBot',
+    'userName': 'DisChordBot',
     'useCollection': False,
 })
 await sio.emit('setOwnerIsPlayer', False)   # session owner but not a drafter

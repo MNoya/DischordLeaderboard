@@ -20,10 +20,11 @@ from bot.models import (
 
 @dataclass(frozen=True)
 class ParsedSeshEvent:
-    """Input to record_event."""
+    """Input to record_event. event_number is used only for draftmancer_session naming, not stored."""
     event_date: date
     event_time: datetime
     set_code: str
+    event_number: int | None
     format_label: str | None
     name: str
     attendees: Sequence[str]
@@ -48,14 +49,25 @@ def _lookup_set_id(session: Session, set_code: str) -> str | None:
 
 
 def _build_draftmancer_session(session: Session, parsed: ParsedSeshEvent) -> str:
-    """Compose a stable session id from prefix, set code, and date; suffix on same-day collisions."""
-    base = f"{settings.pod_draft_session_prefix}-{parsed.set_code}-{parsed.event_date:%Y%m%d}"
+    """Compose a stable session id; prefer #N from the title, fall back to Month-Day; suffix collisions A/B/C."""
+    prefix = settings.pod_draft_session_prefix
+    if parsed.event_number is not None:
+        base = f"{prefix}-{parsed.set_code}-{parsed.event_number}"
+    else:
+        month = parsed.event_date.strftime("%b")
+        base = f"{prefix}-{parsed.set_code}-{month}-{parsed.event_date.day}"
+
     taken = set(session.execute(
         select(PodDraftEvent.draftmancer_session).where(PodDraftEvent.draftmancer_session.like(f"{base}%"))
     ).scalars().all())
     if base not in taken:
         return base
-    n = 2
+    for i in range(26):
+        candidate = f"{base}-{chr(ord('A') + i)}"
+        if candidate not in taken:
+            return candidate
+    # >26 collisions is implausible; fall back to a numeric suffix beyond Z
+    n = 27
     while f"{base}-{n}" in taken:
         n += 1
     return f"{base}-{n}"
@@ -260,7 +272,7 @@ def link_guest_on_arena_name(session: Session, player_id: str, arena_name: str) 
 
 
 def list_champions(session: Session, set_code: str | None = None) -> list[dict]:
-    """Champions across all finalized events, ordered by event_number; caller partitions by set/format."""
+    """Champions across all finalized events, ordered by event_date; caller partitions by set/format."""
     query = (
         select(PodDraftEvent, PodDraftParticipant, Player)
         .join(PodDraftParticipant, PodDraftParticipant.event_id == PodDraftEvent.id)
