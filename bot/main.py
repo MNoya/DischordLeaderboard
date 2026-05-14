@@ -94,6 +94,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         from bot.commands.help import setup as setup_help
         from bot.commands.pod_draft import setup as setup_pod_draft
         from bot.listeners.sesh_listener import reschedule_pending_events, setup as setup_sesh_listener
+        from bot.services.pod_tournament import register_persistent_views as register_pod_views
         from bot.tasks.pod_draft_reminder import init_reminder
 
         # Discord doesn't auto-populate owner_id; fetch it so /command crashes can DM the right person
@@ -118,6 +119,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_pod_draft(bot)
         await setup_sesh_listener(bot)
         reschedule_pending_events(bot)
+        register_pod_views(bot)
         bot.tree.copy_global_to(guild=guild)
 
         # Register the persistent leaderboard view so Join buttons on previously-posted
@@ -323,6 +325,43 @@ def build_bot(guild_id: int) -> commands.Bot:
             await owner.send(content=body)
         except discord.HTTPException:
             log.warning("could not DM owner the refresh report", exc_info=True)
+
+    @bot.command(name="testbracket")
+    @commands.is_owner()
+    async def test_bracket_cmd(ctx: commands.Context) -> None:
+        """Owner-only. Inside a pod-draft thread, wipe its matches and re-run the post-draft Python-Swiss flow with POD_DRAFT_TEST_ROSTER."""
+        if not isinstance(ctx.channel, discord.Thread):
+            await ctx.send("Run this inside a pod-draft thread.")
+            return
+        roster = [n.strip() for n in settings.pod_draft_test_roster.split(",") if n.strip()]
+        if len(roster) < 2 or len(roster) % 2 != 0:
+            await ctx.send(f"POD_DRAFT_TEST_ROSTER needs an even count (got {len(roster)}).")
+            return
+
+        from bot.models import PodDraftEvent
+        from bot.database import SessionLocal as Sess
+        from bot.services.pod_draft_manager import ACTIVE_POD_MANAGERS as MANAGERS
+        from bot.services.pod_tournament import HollowManager, reset_event_matches, start_tournament
+
+        thread_id = str(ctx.channel.id)
+        def _find_event():
+            with Sess() as session:
+                event = session.execute(
+                    select(PodDraftEvent).where(PodDraftEvent.discord_thread_id == thread_id)
+                ).scalar_one_or_none()
+                if event is None:
+                    return None
+                return event.id
+
+        event_id = await asyncio.to_thread(_find_event)
+        if event_id is None:
+            await ctx.send("No pod_draft_event tied to this thread.")
+            return
+
+        await reset_event_matches(event_id)
+        manager = HollowManager(bot, event_id, ctx.channel.id, roster)
+        MANAGERS[event_id] = manager
+        await start_tournament(manager)
 
     @bot.command(name="refresh")
     @commands.is_owner()

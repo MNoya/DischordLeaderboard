@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     pod_draft_bots: int = 0
     pod_draft_fallback_tz: str = "America/New_York"
     pod_draft_skip_reminder_wait: bool = False
+    pod_draft_test_roster: str = ""
     sesh_bot_id: int | None = None
     draftmancer_ws_url: str = "wss://draftmancer.com"
 

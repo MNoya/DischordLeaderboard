@@ -180,6 +180,42 @@ def upsert_participant(
     return found
 
 
+def add_pairing(
+    session: Session,
+    event_id: str,
+    round_num: int,
+    player_a_name: str,
+    player_b_name: str,
+) -> PodDraftMatch:
+    """Insert a pending match (no winner yet); returns the row with its generated id."""
+    match = PodDraftMatch(
+        event_id=event_id,
+        round=round_num,
+        player_a_name=player_a_name,
+        player_b_name=player_b_name,
+    )
+    session.add(match)
+    session.flush()
+    return match
+
+
+def set_match_result(
+    session: Session,
+    match_id: str,
+    winner_name: str,
+    score: str,
+) -> PodDraftMatch:
+    """Fill winner + score on a pending match. Raises if no row matches."""
+    match = session.get(PodDraftMatch, match_id)
+    if match is None:
+        raise ValueError(f"pod_draft_match {match_id} not found")
+    match.winner_name = winner_name
+    match.score = score
+    match.reported_at = datetime.now(timezone.utc)
+    session.flush()
+    return match
+
+
 def record_match(
     session: Session,
     event_id: str,

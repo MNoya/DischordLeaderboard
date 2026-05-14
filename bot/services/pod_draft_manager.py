@@ -11,6 +11,7 @@ import asyncio
 import logging
 import random
 
+import discord
 import socketio
 from discord.ext import commands
 
@@ -51,12 +52,18 @@ class PodDraftManager:
         self.auto_ready_disabled = False
         self._ready_check_is_auto = False
         self.drafting = False
+        self.draft_logs: dict[str, dict] = {}
+        self.current_round = 0
+        self.finalized = False
+        self.tournament_roster: list[str] = []  # draftmancer userNames, set on endDraft
+        self.tournament_players: list = []       # pod_swiss.Player list, set by pod_tournament.start_tournament
         self.sio = socketio.AsyncClient(reconnection=False, logger=False, engineio_logger=False)
         self.sio.on("connect", self._on_connect)
         self.sio.on("disconnect", self._on_disconnect)
         self.sio.on("sessionUsers", self._on_session_users)
         self.sio.on("setReady", self._on_set_ready)
         self.sio.on("endDraft", self._on_end_draft)
+        self.sio.on("draftLog", self._on_draft_log)
 
     @property
     def _connect_user_id(self) -> str:
@@ -200,6 +207,42 @@ class PodDraftManager:
         log.info("endDraft received for %s", self.session_id)
         self.drafting = False
         await self._mark_socket_status("draft_done")
+        thread = await self._fetch_thread()
+        if thread is not None:
+            try:
+                await thread.send("🎴 Draft complete! Export your deck to Arena.")
+            except Exception:
+                log.warning("could not post draft-complete message", exc_info=True)
+        # Snapshot roster and hand off to the Python-Swiss bracket flow
+        if settings.pod_draft_test_roster.strip():
+            self.tournament_roster = [n.strip() for n in settings.pod_draft_test_roster.split(",") if n.strip()]
+            log.info("using POD_DRAFT_TEST_ROSTER for %s: %s", self.session_id, self.tournament_roster)
+        else:
+            self.tournament_roster = [
+                u.get("userName") for u in self.session_users
+                if u.get("userName") and u.get("userName") != _BOT_USER_NAME
+            ]
+        from bot.services.pod_tournament import start_tournament
+        asyncio.create_task(start_tournament(self))
+
+    async def _on_draft_log(self, log_payload) -> None:
+        if not isinstance(log_payload, dict):
+            return
+        users = log_payload.get("users") or {}
+        if isinstance(users, dict):
+            for user in users.values():
+                name = user.get("userName") if isinstance(user, dict) else None
+                if name:
+                    self.draft_logs[name] = log_payload
+                    break
+        log.info("draftLog stored for %s (%d total)", self.session_id, len(self.draft_logs))
+
+    async def _fetch_thread(self):
+        try:
+            return await self.bot.fetch_channel(self.thread_id)
+        except Exception:
+            log.warning("could not fetch thread %s", self.thread_id, exc_info=True)
+            return None
 
     async def _on_set_ready(self, user_id, ready_state) -> None:
         if not self.ready_check_active:
@@ -270,6 +313,23 @@ class PodDraftManager:
         except Exception:
             log.exception("%s emit failed for %s", event, self.session_id)
             return None
+
+    async def share_draft_log(self) -> bool:
+        """Owner-only emit that flips the session's delayed/personal logs to fully public."""
+        if not self.sio.connected:
+            log.warning("share_draft_log skipped for %s — socket not connected", self.session_id)
+            return False
+        if not self.draft_logs:
+            log.warning("share_draft_log skipped for %s — no draftLog payload stored", self.session_id)
+            return False
+        payload = next(iter(self.draft_logs.values()))
+        try:
+            await self.sio.emit("shareDraftLog", payload)
+            log.info("shared draftLog for %s", self.session_id)
+            return True
+        except Exception:
+            log.exception("shareDraftLog emit failed for %s", self.session_id)
+            return False
 
     async def takeover(self, target_user_id: str) -> tuple[bool, str]:
         """Hand session ownership to target_user_id and disconnect the bot.
