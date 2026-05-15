@@ -358,7 +358,7 @@ def player_pod_stats(session: Session, discord_id: str) -> dict | None:
         .where(PodDraftParticipant.player_id == player.id)
     ).all()
 
-    trophies_by_set: dict[str, int] = {}
+    by_set: dict[str, dict] = {}
     lifetime_trophies = 0
     events_played = 0
     wins = 0
@@ -367,21 +367,27 @@ def player_pod_stats(session: Session, discord_id: str) -> dict | None:
         if participant.placement is None:
             continue
         events_played += 1
+        bucket = by_set.setdefault(event.set_code, {"events": 0, "wins": 0, "losses": 0, "trophies": 0})
+        bucket["events"] += 1
         if participant.placement == 1:
             lifetime_trophies += 1
-            trophies_by_set[event.set_code] = trophies_by_set.get(event.set_code, 0) + 1
+            bucket["trophies"] += 1
         if participant.record and "-" in participant.record:
             try:
                 w_str, l_str = participant.record.split("-", 1)
-                wins += int(w_str)
-                losses += int(l_str)
+                w, l = int(w_str), int(l_str)
+                wins += w
+                losses += l
+                bucket["wins"] += w
+                bucket["losses"] += l
             except ValueError:
                 pass
 
     return {
         "player": player,
         "lifetime_trophies": lifetime_trophies,
-        "trophies_by_set": trophies_by_set,
+        "trophies_by_set": {code: b["trophies"] for code, b in by_set.items() if b["trophies"]},
+        "by_set": by_set,
         "events_played": events_played,
         "wins": wins,
         "losses": losses,

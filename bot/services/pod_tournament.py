@@ -16,6 +16,7 @@ import discord
 from discord import ui
 from sqlalchemy import delete, func, select
 
+from bot.config import settings
 from bot.database import SessionLocal
 from bot.models import Player as DbPlayer, PodDraftMatch, PodDraftParticipant
 from bot.services import pod_swiss
@@ -358,11 +359,15 @@ async def finalize_tournament(manager: "PodDraftManager") -> None:
     champion = standings[0]
     champion_mention = await _resolve_discord_mention(manager.event_id, champion.player_name)
     champ_display = champion_mention or f"**{champion.player_name}**"
+    slugs = await asyncio.to_thread(_load_participant_slugs, manager.event_id)
+    site_root = settings.public_site_url.rstrip("/")
     medals = ["🥇", "🥈", "🥉"]
     standings_lines = []
     for s in standings:
         prefix = medals[s.rank - 1] if s.rank - 1 < len(medals) else "   "
-        standings_lines.append(f"{prefix} {s.player_name}  {s.wins}-{s.losses}")
+        slug = slugs.get(_normalize_player_name(s.player_name))
+        display = f"[{s.player_name}]({site_root}/player/{slug})" if slug else s.player_name
+        standings_lines.append(f"{prefix} {display}  {s.wins}-{s.losses}")
     embed = discord.Embed(
         title=f"🏆 Pod Draft Champion: {champion.player_name}",
         description=(
@@ -383,6 +388,17 @@ async def finalize_tournament(manager: "PodDraftManager") -> None:
         except Exception:
             log.warning("could not post standings", exc_info=True)
     await manager.disconnect_safely()
+
+
+def _load_participant_slugs(event_id: str) -> dict[str, str]:
+    """Map normalized draftmancer_name → Player.slug for participants linked to a Player."""
+    with SessionLocal() as session:
+        rows = session.execute(
+            select(PodDraftParticipant.draftmancer_name, DbPlayer.slug)
+            .join(DbPlayer, DbPlayer.id == PodDraftParticipant.player_id)
+            .where(PodDraftParticipant.event_id == event_id)
+        ).all()
+    return {_normalize_player_name(name): slug for name, slug in rows if name}
 
 
 async def _resolve_discord_mention(event_id: str, draftmancer_name: str) -> str | None:

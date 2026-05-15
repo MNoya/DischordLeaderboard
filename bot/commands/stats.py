@@ -15,6 +15,7 @@ from bot.config import settings
 from bot.database import SessionLocal
 from bot.models import MagicSet, Player, PlayerSetScore, PlayerStats
 from bot.scoring import compute_score_breakdown
+from bot.services.pod_drafts import player_pod_stats
 from bot.sets import ACTIVE_SET_CODE
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ class StatsData:
     total_trophies: int
     breakdown: list[dict] = field(default_factory=list)
     last_updated: datetime | None = None
+    pod_in_set: dict | None = None
 
 
 def _resolve_player(session: Session, player_name: str | None, viewer_discord_id: str) -> Player | None:
@@ -97,6 +99,9 @@ def process_stats(
         ).scalar()
         rank = (higher_count or 0) + 1
 
+    pod = player_pod_stats(session, player.discord_id)
+    pod_in_set = pod["by_set"].get(magic_set.code) if pod else None
+
     return StatsData(
         set_code=magic_set.code,
         set_name=magic_set.name,
@@ -107,6 +112,7 @@ def process_stats(
         total_trophies=total_trophies,
         breakdown=breakdown,
         last_updated=last_updated,
+        pod_in_set=pod_in_set,
     )
 
 
@@ -140,6 +146,19 @@ def render_embed(data: StatsData) -> discord.Embed:
         summary = "_Not yet on the leaderboard for this set._"
 
     embed.description = f"{summary}\n\n{_format_breakdown(data.breakdown)}"
+
+    if data.pod_in_set and data.pod_in_set["events"]:
+        p = data.pod_in_set
+        games = p["wins"] + p["losses"]
+        winrate = p["wins"] / games if games else 0.0
+        events_word = "event" if p["events"] == 1 else "events"
+        trophy_word = "trophy" if p["trophies"] == 1 else "trophies"
+        pod_line = (
+            f"**Pod** — {p['events']} {events_word}, "
+            f"{p['wins']}-{p['losses']} ({winrate:.0%}), "
+            f"{p['trophies']} {trophy_word}"
+        )
+        embed.description = f"{embed.description}\n{pod_line}"
 
     if data.last_updated is not None:
         embed.timestamp = data.last_updated
