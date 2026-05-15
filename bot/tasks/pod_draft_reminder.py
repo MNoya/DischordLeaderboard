@@ -88,8 +88,6 @@ async def _fetch_thread(thread_id: int) -> discord.Thread | None:
 
 async def _refetch_attendees(sesh_message_id: int) -> list[str]:
     """Re-fetch the sesh embed to pick up RSVPs that landed between event creation and T-5."""
-    if settings.pod_draft_channel_id is None:
-        return []
     try:
         channel = await _bot.fetch_channel(settings.pod_draft_channel_id)
         message = await channel.fetch_message(sesh_message_id)

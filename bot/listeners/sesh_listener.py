@@ -49,8 +49,6 @@ class SeshListener(commands.Cog):
             return
 
     def _is_target_message(self, message: discord.Message) -> bool:
-        if settings.sesh_bot_id is None or settings.pod_draft_channel_id is None:
-            return False
         if message.author.id != settings.sesh_bot_id:
             return False
         if message.channel.id != settings.pod_draft_channel_id:
