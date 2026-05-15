@@ -25,7 +25,7 @@ class Settings(BaseSettings):
 
     pod_draft_channel_id: int = 1028072146645295125
     pod_draft_session_prefix: str = "LLU"
-    pod_draft_max_players: int = 8
+    pod_draft_max_players: int = 10
     pod_draft_pick_timer: int = 60
     pod_draft_bots: int = 0
     pod_draft_fallback_tz: str = "America/New_York"
