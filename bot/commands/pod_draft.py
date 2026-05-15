@@ -7,23 +7,19 @@ import re
 import discord
 from discord import app_commands
 from discord.ext import commands
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from bot import audit
 from bot.database import SessionLocal
 from bot.discord_helpers import MTGA_EMOJI, extract_avatar_hash
-from bot.models import MagicSet, Player
+from bot.models import Player
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
-from bot.services.pod_drafts import list_champions, player_pod_stats
-from bot.sets import ACTIVE_SET_CODE
 from bot.slug import disambiguate_slug, slugify
 
 
 log = logging.getLogger(__name__)
 
 _ARENA_INPUT_RE = re.compile(r"^.+#\d+$")
-
-_LAST_POD_LEADERBOARD_MESSAGES: dict[tuple[str, str], int] = {}
 
 
 
@@ -100,132 +96,6 @@ class PodDraft(commands.Cog):
             f"{MTGA_EMOJI} {mention} is **{arena_name}** on Arena.",
             allowed_mentions=no_pings,
         )
-
-    @app_commands.command(
-        name="pod-leaderboard",
-        description="Pod-draft champion history for a set.",
-    )
-    @app_commands.describe(set="Set code (defaults to the current active set)")
-    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
-    @app_commands.allowed_installs(guilds=True, users=False)
-    async def pod_leaderboard(self, interaction: discord.Interaction, set: str | None = None) -> None:
-        set_code = (set or ACTIVE_SET_CODE).upper()
-        audit.event("pod_leaderboard_invoked", user_id=str(interaction.user.id), set_code=set_code)
-        with SessionLocal() as session:
-            champions = list_champions(session, set_code=set_code)
-            magic_set = session.execute(
-                select(MagicSet).where(func.upper(MagicSet.code) == set_code)
-            ).scalar_one_or_none()
-
-        if magic_set is None:
-            await interaction.response.send_message(
-                f"Unknown set code `{set_code}`.", ephemeral=True,
-            )
-            return
-        if not champions:
-            await interaction.response.send_message(
-                f"No pod-draft history yet for `{set_code}`.", ephemeral=True,
-            )
-            return
-
-        standard = [c for c in champions if not c["format_label"]]
-        special = [c for c in champions if c["format_label"]]
-        lines: list[str] = []
-        for c in standard:
-            who = f"<@{c['discord_id']}>" if c["discord_id"] else f"**{c['champion_display_name']}**"
-            lines.append(f"🥇 {c['event_date'].strftime('%b %d')} · {c['event_name']} — {who}")
-        if special:
-            lines.append("")
-            lines.append("**Cube / Special**")
-            for c in special:
-                who = f"<@{c['discord_id']}>" if c["discord_id"] else f"**{c['champion_display_name']}**"
-                lines.append(
-                    f"{c['event_date'].strftime('%b %d')} · {c['event_name']} "
-                    f"({c['format_label']}) — {who}"
-                )
-
-        embed = discord.Embed(
-            title=f"{MTGA_EMOJI} Pod-draft champions — {set_code}",
-            description="\n".join(lines),
-            color=discord.Color.gold(),
-        )
-        embed.set_footer(text=magic_set.name)
-        no_pings = discord.AllowedMentions(users=False, everyone=False, roles=False)
-
-        if interaction.guild is None:
-            await interaction.response.send_message(embed=embed, allowed_mentions=no_pings)
-            return
-
-        channel_id = str(interaction.channel_id)
-        key = (channel_id, magic_set.id)
-        prior = _LAST_POD_LEADERBOARD_MESSAGES.get(key)
-        await interaction.response.defer()
-        sent = await interaction.followup.send(embed=embed, allowed_mentions=no_pings, wait=True)
-        _LAST_POD_LEADERBOARD_MESSAGES[key] = sent.id
-        if prior and prior != sent.id:
-            try:
-                old = await interaction.channel.fetch_message(prior)
-                await old.delete()
-            except discord.HTTPException:
-                pass
-
-    @app_commands.command(
-        name="pod-stats",
-        description="Pod-draft career stats for a player.",
-    )
-    @app_commands.describe(player="Player display name (defaults to you)")
-    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
-    @app_commands.allowed_installs(guilds=True, users=False)
-    async def pod_stats(self, interaction: discord.Interaction, player: str | None = None) -> None:
-        user_id = str(interaction.user.id)
-        audit.event("pod_stats_invoked", user_id=user_id, player=player)
-        ephemeral = interaction.guild is not None
-
-        with SessionLocal() as session:
-            if player:
-                target = session.execute(
-                    select(Player).where(
-                        func.lower(Player.display_name) == player.lower(),
-                        Player.active.is_(True),
-                    )
-                ).scalar_one_or_none()
-            else:
-                target = session.execute(
-                    select(Player).where(Player.discord_id == user_id)
-                ).scalar_one_or_none()
-            if target is None:
-                msg = (
-                    f"No active player named `{player}`." if player
-                    else "You're not on the leaderboard. Run `/join` or `/pod-link-arena` first."
-                )
-                await interaction.response.send_message(msg, ephemeral=ephemeral)
-                return
-            stats = player_pod_stats(session, target.discord_id)
-
-        if stats is None or stats["events_played"] == 0:
-            await interaction.response.send_message(
-                f"No pod-draft history yet for **{target.display_name}**.", ephemeral=ephemeral,
-            )
-            return
-
-        total_games = stats["wins"] + stats["losses"]
-        winrate = f"{stats['wins'] / total_games:.0%}" if total_games else "—"
-        by_set = sorted(stats["trophies_by_set"].items())
-        description_lines = [
-            f"🏆 **{stats['lifetime_trophies']}** lifetime trophies",
-            f"**{stats['events_played']}** events · {stats['wins']}-{stats['losses']} ({winrate})",
-        ]
-        if by_set:
-            description_lines.append("")
-            description_lines.append("**Trophies by set**")
-            description_lines.extend(f"• **{code}**: {n} 🏆" for code, n in by_set)
-
-        embed = discord.Embed(
-            title=f"{MTGA_EMOJI} Pod-draft stats — {target.display_name}",
-            description="\n".join(description_lines),
-            color=discord.Color.gold(),
-        )
-        await interaction.response.send_message(embed=embed, ephemeral=ephemeral)
 
     @app_commands.command(name="pod-takeover", description="Take control of the Draftmancer session and disconnect the bot.")
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
