@@ -87,12 +87,23 @@ export async function fetchFormatColorsLeaderboard(
 }
 
 export async function fetchAvailableFormats(setCode: string): Promise<string[]> {
-  const { data, error } = await client()
-    .from("public_player_format_breakdown")
-    .select("format_label")
-    .eq("set_code", setCode);
-  if (error) throw error;
-  return Array.from(new Set((data ?? []).map((r) => (r as { format_label: string }).format_label)));
+  const [breakdown, pod] = await Promise.all([
+    client()
+      .from("public_player_format_breakdown")
+      .select("format_label")
+      .eq("set_code", setCode),
+    client()
+      .from("public_player_pod_stats")
+      .select("set_code", { count: "exact", head: true })
+      .eq("set_code", setCode),
+  ]);
+  if (breakdown.error) throw breakdown.error;
+  if (pod.error) throw pod.error;
+  const labels = new Set(
+    (breakdown.data ?? []).map((r) => (r as { format_label: string }).format_label),
+  );
+  if ((pod.count ?? 0) > 0) labels.add("Pod");
+  return Array.from(labels);
 }
 
 // ─── public_leaderboard ────────────────────────────────────────────────────
@@ -117,6 +128,7 @@ export async function fetchFormatLeaderboard(
   setCode: string,
   format: string,
 ): Promise<LeaderboardRow[]> {
+  if (format === "Pod") return fetchPodLeaderboard(setCode);
   const labels = FORMAT_LABEL_GROUPS[format] ?? [format];
   const [breakdown, leaderboard] = await Promise.all([
     client()
@@ -430,6 +442,41 @@ export async function fetchFormatRecentTrophies(
     if (batch.length < pageSize) break;
   }
   return all;
+}
+
+async function fetchPodLeaderboard(setCode: string): Promise<LeaderboardRow[]> {
+  const { data, error } = await client()
+    .from("public_player_pod_stats")
+    .select("*")
+    .eq("set_code", setCode);
+  if (error) throw error;
+  const rows = (data ?? []).map((raw) => {
+    const r = raw as Record<string, unknown>;
+    return {
+      setCode,
+      slug: r.slug as string,
+      displayName: r.display_name as string,
+      avatarUrl: (r.avatar_url ?? null) as string | null,
+      rank: 0,
+      score: 0,
+      trophies: (r.trophies as number) ?? 0,
+      events: (r.events as number) ?? 0,
+      wins: (r.wins as number) ?? 0,
+      losses: (r.losses as number) ?? 0,
+      lastCalculatedAt:
+        (r.last_finished_at as string | null) ?? new Date(0).toISOString(),
+    } satisfies LeaderboardRow;
+  });
+  return rows
+    .sort((a, b) => {
+      if (b.trophies !== a.trophies) return b.trophies - a.trophies;
+      if (b.events !== a.events) return b.events - a.events;
+      const wpA = a.wins / Math.max(1, a.wins + a.losses);
+      const wpB = b.wins / Math.max(1, b.wins + b.losses);
+      if (wpB !== wpA) return wpB - wpA;
+      return a.slug.localeCompare(b.slug);
+    })
+    .map((r, i) => ({ ...r, rank: i + 1 }));
 }
 
 function adaptRecentTrophy(row: Record<string, unknown>): RecentTrophy {

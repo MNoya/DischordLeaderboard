@@ -11,6 +11,7 @@ export const FMT_COLORS: Record<string, string> = {
   LCQ: "#ff7700",
   "LCQ Draft 1": "#ff7700",
   "LCQ Draft 2": "#ff7700",
+  Pod: "#a86bff",
 };
 
 export const FMT_DEFAULT_COLOR = "#5c8aff";
@@ -33,6 +34,8 @@ const FORMAT_SHORT: Record<string, string> = {
   Trad: "TRAD",
   Quick: "QUICK",
   LCQ: "LCQ",
+  Pod: "POD",
+  PodDraft: "POD",
   "Trad Sealed": "TRAD SEALED",
   "Arena Direct": "ARENA DIR",
 };

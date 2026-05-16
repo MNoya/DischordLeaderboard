@@ -16,6 +16,7 @@ export const FORMAT_OPTIONS: FilterOption[] = [
   { value: "Quick", label: "QUICK DRAFT" },
   { value: "Sealed", label: "SEALED" },
   { value: "LCQ", label: "CHAMPIONSHIP QUALIFIER" },
+  { value: "Pod", label: "POD DRAFT" },
 ];
 
 export const FORMAT_LABEL_GROUPS: Record<string, string[]> = {
@@ -28,6 +29,7 @@ export const FORMAT_RAW_GROUPS: Record<string, string[]> = {
   Sealed: ["Sealed", "TradSealed", "ArenaDirect_Sealed", "QualifierPlayInSealed"],
   Quick: ["QuickDraft", "PickTwoDraft", "Emblem_QuickDraft"],
   LCQ: ["LimitedChampionshipQualifier_Draft1", "LimitedChampionshipQualifier_Draft2"],
+  Pod: ["PodDraft"],
 };
 
 export function matchesFormatFilter(rawFormat: string, filter: string): boolean {
