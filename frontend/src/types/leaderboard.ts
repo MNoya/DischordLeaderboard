@@ -48,6 +48,8 @@ export interface PlayerDraftEvent {
   colors: string; // 17lands convention: uppercase = main, lowercase = splash
   startedAt: string;
   finishedAt: string;
+  // 17lands deck URL for 17L events, Draftmancer draft log for pod drafts, null if no link
+  externalUrl?: string | null;
 }
 
 export interface ColorsLeaderboardRow {

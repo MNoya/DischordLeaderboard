@@ -920,8 +920,9 @@ function GoToTopButton({
 }
 
 function EventLogRow({ event: e, variant }: { event: PlayerDraftEvent; variant: "desktop" | "mobile" }) {
-  const href = e.seventeenlandsEventId ? `https://www.17lands.com/deck/${e.seventeenlandsEventId}` : null;
+  const href = e.externalUrl ?? null;
   const linkClass = href ? "cursor-pointer transition-colors hover:bg-surface2 no-underline text-inherit" : "";
+  const isPod = e.format === "PodDraft";
 
   if (variant === "desktop") {
     const inner = (
@@ -933,7 +934,9 @@ function EventLogRow({ event: e, variant }: { event: PlayerDraftEvent; variant: 
         <span className="font-display text-[14px] tracking-[0.08em]">
           {prettyFormat(e.format).toUpperCase()}
         </span>
-        {(() => {
+        {isPod ? (
+          <span />
+        ) : (() => {
           const { name, splash } = deckColorParts(e.colors);
           return (
             <span className="grid items-center" style={{ gridTemplateColumns: "100px 60px 1fr" }}>
@@ -982,13 +985,13 @@ function EventLogRow({ event: e, variant }: { event: PlayerDraftEvent; variant: 
       </span>
       <div>
         <div className="flex items-center gap-1.5">
-          <Pips colors={e.colors} size={11} />
+          {!isPod && <Pips colors={e.colors} size={11} />}
           <span className="font-display text-[13px] tracking-[0.08em]">
             {prettyFormat(e.format).toUpperCase()}
           </span>
         </div>
         <div className="text-[11px] text-muted mt-0.5">
-          {formatDeckColors(e.colors)} · {fmtShortDate(e.finishedAt)}
+          {isPod ? fmtShortDate(e.finishedAt) : `${formatDeckColors(e.colors)} · ${fmtShortDate(e.finishedAt)}`}
         </div>
       </div>
       <span className="inline-flex items-center gap-1.5">

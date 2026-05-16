@@ -129,6 +129,7 @@ const FORMAT_DISPLAY: Record<string, string> = {
   Emblem_QuickDraft: "Quick Draft",
   LimitedChampionshipQualifier_Draft1: "LCQ Draft 1",
   LimitedChampionshipQualifier_Draft2: "LCQ Draft 2",
+  PodDraft: "Pod Draft",
 };
 
 export function prettyFormat(format: string): string {
