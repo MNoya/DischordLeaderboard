@@ -18,11 +18,11 @@ from discord.ext import commands
 
 from sqlalchemy import select
 
-from bot import emojis
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.discord_helpers import extract_avatar_hash
 from bot.models import Player, PodDraftEvent
+from bot.services.lobby_embed import LobbyReadyButtonView, render as render_lobby_embed
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_drafts import classify_lobby_names
 from bot.services.pod_tournament import start_tournament
@@ -43,13 +43,21 @@ _ARENA_SUFFIX_RE = re.compile(r"#\d+$")
 
 class PodDraftManager:
     def __init__(self, bot: commands.Bot, event_id: str, session_id: str, thread_id: int,
-                 set_code: str, expected_attendee_count: int) -> None:
+                 set_code: str, expected_attendee_count: int, *,
+                 event_name: str = "Pod Draft",
+                 draftmancer_url: str = "",
+                 rsvps_yes: list[str] | None = None,
+                 rsvps_maybe: list[str] | None = None) -> None:
         self.bot = bot
         self.event_id = event_id
         self.session_id = session_id
         self.thread_id = thread_id
         self.set_code = set_code
         self.expected_attendee_count = expected_attendee_count
+        self.event_name = event_name
+        self.draftmancer_url = draftmancer_url
+        self.rsvps_yes: list[str] = list(rsvps_yes or [])
+        self.rsvps_maybe: list[str] = list(rsvps_maybe or [])
         self.session_users: list[dict] = []
         self.bot_user_id: str | None = None
         self.owner_claimed = False
@@ -57,13 +65,11 @@ class PodDraftManager:
         self.ready_check_active = False
         self.ready_users: set[str] = set()
         self.expected_user_ids: set[str] = set()
-        self.ready_status_message: object | None = None
         self.lobby_status_message: object | None = None
         self._ready_timeout_task: asyncio.Task | None = None
-        self.auto_ready_attempted = False
-        self.auto_ready_disabled = False
-        self._ready_check_is_auto = False
         self.drafting = False
+        self.draft_complete = False
+        self.last_decliner: str | None = None
         self.draft_logs: dict[str, dict] = {}
         self.current_round = 0
         self.finalized = False
@@ -130,6 +136,8 @@ class PodDraftManager:
         self.session_users = list(users) if isinstance(users, list) else []
         names = [u.get("userName") for u in self.session_users]
         log.info("draftmancer sessionUsers for %s: %s", self.session_id, names)
+        # Any session change clears the notready banner; lobby reverts to its normal state
+        self.last_decliner = None
         if self.bot_user_id is None:
             for u in self.session_users:
                 if u.get("userName") == _BOT_USER_NAME:
@@ -148,10 +156,6 @@ class PodDraftManager:
             current = {u.get("userID") for u in self.session_users if u.get("userName") != _BOT_USER_NAME}
             if current != self.expected_user_ids:
                 asyncio.create_task(self._invalidate_ready_check("player list changed"))
-        elif not self.auto_ready_attempted and not self.auto_ready_disabled:
-            all_linked = all(display_name is not None for _, display_name in classified)
-            if len(non_bot_names) >= max(1, self.expected_attendee_count) and all_linked:
-                asyncio.create_task(self._auto_initiate_ready_check())
 
     async def _claim_ownership_and_apply_settings(self) -> None:
         if self.bot_user_id is None or self.owner_claimed:
@@ -196,17 +200,15 @@ class PodDraftManager:
         self.expected_user_ids = {u.get("userID") for u in non_bot}
         self.ready_users = set()
         self.ready_check_active = True
+        self.last_decliner = None
         try:
             await self.sio.emit("readyCheck")
         except Exception:
             self.ready_check_active = False
             log.exception("readyCheck emit failed for %s", self.session_id)
             return "Could not start ready check — see logs."
-        try:
-            self.ready_status_message = await thread.send(self._format_ready_status())
-        except Exception:
-            log.warning("could not post ready status message", exc_info=True)
         self._ready_timeout_task = asyncio.create_task(self._ready_timeout())
+        await self.refresh_lobby_now()
         return None
 
     async def _classify_users(self, names: list[str]) -> list[tuple[str, str | None]]:
@@ -245,71 +247,61 @@ class PodDraftManager:
         classified = await self._classify_users(non_bot_names) if non_bot_names else []
         await self._refresh_lobby_status(classified)
 
-    async def _refresh_lobby_status(self, classified: list[tuple[str, bool]]) -> None:
-        text = self._format_lobby_status(classified)
+    async def _refresh_lobby_status(self, classified: list[tuple[str, str | None]]) -> None:
         thread = await self._fetch_thread()
         if thread is None:
             return
+        state = self._compute_state(classified)
+        ready_now = len(self.ready_users) if state == "ready" else None
+        embed = render_lobby_embed(
+            title=self.event_name,
+            rsvps_yes=self.rsvps_yes,
+            rsvps_maybe=self.rsvps_maybe,
+            in_session=classified,
+            state=state,
+            draftmancer_url=self.draftmancer_url,
+            ready_count=ready_now,
+        )
+        has_unrecognized = any(dn is None for _, dn in classified)
+        view = (
+            None if state in ("drafting", "complete")
+            else LobbyReadyButtonView(
+                draftmancer_url=self.draftmancer_url,
+                ready_disabled=(state == "ready" or has_unrecognized),
+            )
+        )
         if self.lobby_status_message is None:
             try:
-                self.lobby_status_message = await thread.send(text)
+                self.lobby_status_message = await thread.send(embed=embed, view=view)
             except Exception:
                 log.warning("could not post lobby status for %s", self.session_id, exc_info=True)
         else:
             try:
-                await self.lobby_status_message.edit(content=text)
+                await self.lobby_status_message.edit(embed=embed, view=view)
             except Exception:
                 log.warning("could not edit lobby status for %s", self.session_id, exc_info=True)
 
-    def _format_lobby_status(self, classified: list[tuple[str, str | None]]) -> str:
-        total_expected = max(1, self.expected_attendee_count)
-        linked = [(arena, dn) for arena, dn in classified if dn is not None]
-        unlinked = [arena for arena, dn in classified if dn is None]
-        lines = [
-            f"### Pod-draft Lobby · {self.set_code}",
-            f"**{len(classified)}/{total_expected}** players in the Draftmancer session.",
-        ]
-        if linked:
-            lines.append("")
-            lines.append("**✅ Linked**")
-            for arena, dn in linked:
-                lines.append(f"• `{arena}` — {dn}")
-        if unlinked:
-            lines.append("")
-            lines.append("**❓ Unlinked** — run `/pod-link-arena <ArenaID#1234>` to link:")
-            for arena in unlinked:
-                lines.append(f"• `{arena}`")
-        lines.append("")
+    def _compute_state(self, classified: list[tuple[str, str | None]]) -> str:
+        if self.draft_complete:
+            return "complete"
+        if self.drafting:
+            return "drafting"
+        if self.last_decliner:
+            return "notready"
+        if self.ready_check_active:
+            return "ready"
         if not classified:
-            lines.append("⏳ Waiting for players to join the Draftmancer lobby.")
-        elif unlinked:
-            lines.append("⏳ Ready check on hold until all players are linked.")
-        elif len(classified) < total_expected:
-            lines.append("⏳ Waiting for remaining players to join.")
-        else:
-            lines.append("🟢 All players linked — auto-ready check incoming.")
-        return "\n".join(lines)
-
-    def _format_ready_status(self) -> str:
-        ready = len(self.ready_users)
-        total = len(self.expected_user_ids)
-        waiting_names = [u.get("userName") for u in self.session_users
-                         if u.get("userID") in self.expected_user_ids
-                         and u.get("userID") not in self.ready_users]
-        if waiting_names:
-            return f"🔔 Ready check: **{ready}/{total}** — waiting on: {', '.join(waiting_names)}"
-        return f"🔔 Ready check: **{ready}/{total}**"
+            return "empty"
+        if any(dn is None for _, dn in classified):
+            return "unlinked"
+        return "linked"
 
     async def _on_end_draft(self, *_) -> None:
         log.info("endDraft received for %s", self.session_id)
         self.drafting = False
+        self.draft_complete = True
         await self._mark_socket_status("draft_done")
-        thread = await self._fetch_thread()
-        if thread is not None:
-            try:
-                await thread.send(f"{emojis.get('cardback')} Draft complete! Export your deck to Arena.")
-            except Exception:
-                log.warning("could not post draft-complete message", exc_info=True)
+        await self.refresh_lobby_now()
         # Snapshot roster and hand off to the Python-Swiss bracket flow
         if settings.pod_draft_test_roster.strip():
             self.tournament_roster = [n.strip() for n in settings.pod_draft_test_roster.split(",") if n.strip()]
@@ -348,15 +340,14 @@ class PodDraftManager:
             self.ready_users.add(user_id)
         else:
             self.ready_users.discard(user_id)
-            if self._ready_check_is_auto:
-                # Auto-mode treats an explicit Not Ready as a decline — fall back to manual /ready
-                await self._invalidate_ready_check("someone clicked Not Ready")
-                return
-        if self.ready_status_message is not None:
-            try:
-                await self.ready_status_message.edit(content=self._format_ready_status())
-            except Exception:
-                log.warning("ready status edit failed", exc_info=True)
+            # Explicit Not Ready: cancel the check immediately
+            decliner_name = next(
+                (u.get("userName") for u in self.session_users if u.get("userID") == user_id),
+                None,
+            )
+            await self._invalidate_ready_check("declined", decliner_name=decliner_name)
+            return
+        await self.refresh_lobby_now()
         if self.ready_users >= self.expected_user_ids:
             await self._complete_ready_check()
 
@@ -364,21 +355,20 @@ class PodDraftManager:
         if not self.ready_check_active:
             return
         self.ready_check_active = False
-        self._ready_check_is_auto = False
         if self._ready_timeout_task is not None:
             self._ready_timeout_task.cancel()
-        channel = self.ready_status_message.channel if self.ready_status_message else None
         await asyncio.sleep(_START_DRAFT_DELAY_S)
-        await self._start_draft(channel)
+        await self._start_draft()
 
-    async def _start_draft(self, channel) -> None:
+    async def _start_draft(self) -> None:
         result = await self._emit_with_ack("startDraft")
         log.info("startDraft ack for %s: %r", self.session_id, result)
         error_text = _ack_error_text(result)
         if error_text is not None:
-            if channel is not None:
+            thread = await self._fetch_thread()
+            if thread is not None:
                 try:
-                    await channel.send(
+                    await thread.send(
                         f"⚠️ Could not start the draft: {error_text}\n"
                         f"Use `/pod-takeover` to take control of the Draftmancer session manually."
                     )
@@ -386,11 +376,7 @@ class PodDraftManager:
                     log.warning("could not post startDraft error", exc_info=True)
             return
         self.drafting = True
-        if channel is not None:
-            try:
-                await channel.send("🎉 All players ready — draft started!")
-            except Exception:
-                log.warning("could not post draft-started message", exc_info=True)
+        await self.refresh_lobby_now()
 
     async def _emit_with_ack(self, event: str, *args, timeout_s: float = 5.0):
         """Emit a socket.io event and wait for the server's ack callback."""
@@ -460,40 +446,24 @@ class PodDraftManager:
             return
         await self._invalidate_ready_check("timed out")
 
-    async def _invalidate_ready_check(self, reason: str) -> None:
+    async def _invalidate_ready_check(self, reason: str, *, decliner_name: str | None = None) -> None:
         if not self.ready_check_active:
             return
         self.ready_check_active = False
         self.ready_users = set()
-        self._ready_check_is_auto = False
         if self._ready_timeout_task is not None:
             self._ready_timeout_task.cancel()
-        # If the failed check was the auto one, never auto-trigger again — fall back to manual /ready
-        if self.auto_ready_attempted:
-            self.auto_ready_disabled = True
-        if self.ready_status_message is not None:
-            try:
-                await self.ready_status_message.channel.send(
-                    f"⚠️ Ready check cancelled — {reason}. Run `/ready` to retry."
-                )
-            except Exception:
-                log.warning("could not post invalidation message", exc_info=True)
-
-    async def _auto_initiate_ready_check(self) -> None:
-        if self.ready_check_active or self.auto_ready_attempted or self.auto_ready_disabled:
-            return
-        self.auto_ready_attempted = True
-        thread = await self.bot.fetch_channel(self.thread_id)
-        log.info("auto-initiating ready check for %s (expected=%d, joined=%d)",
-                 self.session_id, self.expected_attendee_count,
-                 sum(1 for u in self.session_users if u.get("userName") != _BOT_USER_NAME))
-        err = await self.initiate_ready_check(thread)
-        if err is not None:
-            log.warning("auto-ready failed for %s: %s", self.session_id, err)
-            self.auto_ready_disabled = True
-        else:
-            self._ready_check_is_auto = True
-
+        self.last_decliner = decliner_name
+        # Non-decline invalidations (timeout, player list changed) get a separate notice;
+        # the embed itself only banners the explicit-decline case
+        if decliner_name is None:
+            thread = await self._fetch_thread()
+            if thread is not None:
+                try:
+                    await thread.send(f"⚠️ Ready check cancelled — {reason}.")
+                except Exception:
+                    log.warning("could not post invalidation message", exc_info=True)
+        await self.refresh_lobby_now()
 
 def _is_ready_state(state) -> bool:
     """Draftmancer sends setReady(userID, state) where state can be 0/1 or 'Ready'/'NotReady'."""
@@ -522,13 +492,21 @@ def _ack_error_text(ack) -> str | None:
 
 async def start_manager(
     bot: commands.Bot, event_id: str, session_id: str, thread_id: int,
-    set_code: str, expected_attendee_count: int,
+    set_code: str, expected_attendee_count: int, *,
+    event_name: str = "Pod Draft",
+    draftmancer_url: str = "",
+    rsvps_yes: list[str] | None = None,
+    rsvps_maybe: list[str] | None = None,
 ) -> PodDraftManager | None:
     existing = ACTIVE_POD_MANAGERS.get(event_id)
     if existing is not None:
         log.info("manager already active for event %s", event_id)
         return existing
-    manager = PodDraftManager(bot, event_id, session_id, thread_id, set_code, expected_attendee_count)
+    manager = PodDraftManager(
+        bot, event_id, session_id, thread_id, set_code, expected_attendee_count,
+        event_name=event_name, draftmancer_url=draftmancer_url,
+        rsvps_yes=rsvps_yes, rsvps_maybe=rsvps_maybe,
+    )
     ACTIVE_POD_MANAGERS[event_id] = manager
     ok = await manager.connect()
     if not ok:
@@ -536,6 +514,8 @@ async def start_manager(
         await manager._mark_socket_status("error")
         return None
     return manager
+
+
 
 
 def _classify_names_sync(names: list[str]) -> list[tuple[str, bool]]:

@@ -18,6 +18,9 @@ from bot.services.pod_draft_manager import start_manager
 from bot.services.sesh_parser import parse_sesh_embed
 
 
+REMINDER_LEAD_MIN = 5
+
+
 log = logging.getLogger(__name__)
 
 _bot: commands.Bot | None = None
@@ -45,18 +48,19 @@ async def fire_reminder(event_id: str) -> None:
         draftmancer_url = event.draftmancer_url
         draftmancer_session = event.draftmancer_session
         set_code = event.set_code
+        event_name = event.name
 
     thread = await _fetch_thread(thread_id)
     if thread is None:
         log.warning("fire_reminder: could not fetch thread %s", thread_id)
         return
 
-    attendees = await _refetch_attendees(sesh_message_id)
+    attendees, maybe_attendees = await _refetch_attendees(sesh_message_id)
     mention_block = await _resolve_mentions(thread.guild, attendees) if attendees else ""
     expected_attendee_count = len(attendees)
 
     body = (
-        f"{emojis.get('cardback')} Pod Draft starts in 5 minutes!\n"
+        f"{emojis.get('cardback')} Pod Draft starts in {REMINDER_LEAD_MIN} minutes!\n"
         + f"Join the Draftmancer session: {draftmancer_url}\n"
         + "Set your user name to your Arena handle (e.g. `ArenaID#1234`) so pairings work smoothly."
         + (f"\n\n{mention_block}" if mention_block else "")
@@ -75,7 +79,13 @@ async def fire_reminder(event_id: str) -> None:
             event.socket_status = "reminded"
             session.commit()
 
-    await start_manager(_bot, event_id, draftmancer_session, thread_id, set_code, expected_attendee_count)
+    await start_manager(
+        _bot, event_id, draftmancer_session, thread_id, set_code, expected_attendee_count,
+        event_name=event_name,
+        draftmancer_url=draftmancer_url,
+        rsvps_yes=list(attendees),
+        rsvps_maybe=list(maybe_attendees),
+    )
 
 
 async def _fetch_thread(thread_id: int) -> discord.Thread | None:
@@ -87,19 +97,19 @@ async def _fetch_thread(thread_id: int) -> discord.Thread | None:
     return channel if isinstance(channel, discord.Thread) else None
 
 
-async def _refetch_attendees(sesh_message_id: int) -> list[str]:
-    """Re-fetch the sesh embed to pick up RSVPs that landed between event creation and T-5."""
+async def _refetch_attendees(sesh_message_id: int) -> tuple[list[str], list[str]]:
+    """Re-fetch the sesh embed for the latest Yes / Maybe RSVPs. Returns (yes, maybe)."""
     try:
         channel = await _bot.fetch_channel(settings.pod_draft_channel_id)
         message = await channel.fetch_message(sesh_message_id)
     except discord.HTTPException as e:
         log.warning("could not re-fetch sesh message %s: %s", sesh_message_id, e)
-        return []
+        return [], []
     for embed in message.embeds:
         parsed = parse_sesh_embed(embed)
         if parsed is not None:
-            return list(parsed.attendees)
-    return []
+            return list(parsed.attendees), list(parsed.maybe_attendees)
+    return [], []
 
 
 async def _resolve_mentions(guild: discord.Guild | None, attendees: list[str]) -> str:

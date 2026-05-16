@@ -36,6 +36,25 @@ ALL_SETS: tuple[SetSeed, ...] = (
 ACTIVE_SET_CODE = "SOS"
 
 
+@dataclass(frozen=True)
+class CollectorBoosterWindow:
+    set_code: str
+    start_date: date
+    end_date: date
+
+
+COLLECTOR_BOOSTER_WINDOWS: tuple[CollectorBoosterWindow, ...] = (
+    CollectorBoosterWindow("SOS", date(2026, 4, 30), date(2026, 5, 4)),
+)
+
+
+def is_collector_booster_window(set_code: str, when: date) -> bool:
+    for w in COLLECTOR_BOOSTER_WINDOWS:
+        if w.set_code == set_code and w.start_date <= when <= w.end_date:
+            return True
+    return False
+
+
 EXPANSION_ALIASES: dict[str, str] = {
     s.expansion_match: s.code for s in ALL_SETS if s.expansion_match
 }

@@ -44,6 +44,17 @@ SELECT_CUSTOM_PREFIX = "podmatchresult"
 MAX_MATCHES_PER_ROUND = 5  # Discord caps ActionRows at 5; supports pods up to 10 players
 SKIPPED_SENTINEL = "(skipped)"  # winner_name value for "Not played" matches
 
+# Test-only result handler hook (set by bot/commands/testlobby.py). Always None in prod.
+_test_result_handler = None
+_test_handler_prefix: str | None = None
+
+
+def register_test_result_handler(prefix: str, handler) -> None:
+    """Plug a test handler into the result-submission dispatch (testlobby preview only)."""
+    global _test_result_handler, _test_handler_prefix
+    _test_handler_prefix = prefix
+    _test_result_handler = handler
+
 
 async def start_tournament(manager: "PodDraftManager") -> None:
     """Snapshot the Draftmancer roster, post Round 1 pairings + result dropdowns in the thread."""
@@ -153,9 +164,17 @@ async def _handle_result_submission(interaction: discord.Interaction, value: str
         await interaction.response.send_message("Malformed result option.", ephemeral=True)
         return
 
+    if (_test_result_handler is not None and _test_handler_prefix
+            and match_id.startswith(_test_handler_prefix)):
+        await _test_result_handler(interaction, match_id, winner_name, score)
+        return
+
     result = await asyncio.to_thread(_commit_result, match_id, winner_name, score)
     if result == "not_found":
-        await interaction.response.send_message("Could not find this match in the database.", ephemeral=True)
+        try:
+            await interaction.response.defer()
+        except discord.HTTPException:
+            pass
         return
 
     round_num = result["round"]

@@ -343,7 +343,7 @@ _CYCLE: list[tuple[str | None, str | None]] = [
     ("format", "Traditional"),
     ("format", "Pod"),
 ]
-_CYCLE_DISPLAY = ["Overall", "Premier", "Traditional", "Pod"]
+_CYCLE_DISPLAY = ["All", "Premier", "Trad", "Pod"]
 _CYCLE_LABELS = [f"{_CYCLE_DISPLAY[(i + 1) % len(_CYCLE_DISPLAY)]} ▶️" for i in range(len(_CYCLE_DISPLAY))]
 
 

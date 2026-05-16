@@ -45,6 +45,7 @@ class ParsedSeshFields:
     format_label: str | None    # always None in Phase 1
     name: str                   # cleaned title, becomes pod_draft_events.name
     attendees: Sequence[str]
+    maybe_attendees: Sequence[str]
 
 
 def parse_sesh_embed(embed: discord.Embed) -> ParsedSeshFields | None:
@@ -76,6 +77,8 @@ def parse_sesh_embed(embed: discord.Embed) -> ParsedSeshFields | None:
     event_date = event_time.astimezone(tz).date()
 
     attendees = _parse_attendees(attendees_field.value or "")
+    maybe_field = _find_field(embed, "Maybe")
+    maybe_attendees = _parse_attendees(maybe_field.value or "") if maybe_field else []
 
     return ParsedSeshFields(
         event_date=event_date,
@@ -85,6 +88,7 @@ def parse_sesh_embed(embed: discord.Embed) -> ParsedSeshFields | None:
         format_label=None,
         name=clean_title,
         attendees=attendees,
+        maybe_attendees=maybe_attendees,
     )
 
 

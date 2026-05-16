@@ -20,14 +20,13 @@ from bot.models import PodDraftEvent
 from bot.services.pod_drafts import ParsedSeshEvent, record_event
 from bot.services.sesh_parser import ParsedSeshFields, parse_sesh_embed
 from bot.sets import ACTIVE_SET_CODE
-from bot.tasks.pod_draft_reminder import fire_reminder
+from bot.tasks.pod_draft_reminder import REMINDER_LEAD_MIN, fire_reminder
 
 
 log = logging.getLogger(__name__)
 
 THREAD_POLL_INTERVAL_S = 5
 THREAD_POLL_TIMEOUT_S = 120
-REMINDER_LEAD_MIN = 5
 
 
 class SeshListener(commands.Cog):
