@@ -21,7 +21,6 @@ def _seed(session, discord_id="111", token=VALID, token_invalid=False):
         discord_username="alice",
         display_name="Alice",
         seventeenlands_token=token,
-        seventeenlands_url=f"https://www.17lands.com/user_history/{token}",
         active=True,
         token_invalid=token_invalid,
     )
@@ -65,5 +64,4 @@ def test_update_profile_updates_token_and_clears_invalid_flag(session):
     assert result.kind == "updated"
     session.refresh(p)
     assert p.seventeenlands_token == OTHER
-    assert p.seventeenlands_url.endswith(OTHER)
     assert p.token_invalid is False

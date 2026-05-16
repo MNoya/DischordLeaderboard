@@ -15,7 +15,10 @@ groups sit dormant until WOTC actually runs LCQ events for the season.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Iterable, Sequence
+
+from bot.sets import is_collector_booster_window
 
 
 @dataclass(frozen=True)
@@ -122,3 +125,20 @@ def compute_score(
         total += trophies * g.points * trophy_rate * shrinkage
 
     return round(total, 2)
+
+
+ARENA_DIRECT_SEALED_FORMAT = "ArenaDirect_Sealed"
+
+
+def boxes_for_event(set_code: str, wins: int, finished_at: datetime | None) -> int:
+    """Boxes awarded for a single Arena Direct Sealed event.
+
+    Standard reward is 6 wins → 1 box, 7 wins → 2 boxes. Collector-booster
+    weekends pay a single premium box at 7 wins only — no consolation at 6.
+    Events with no finished_at fall through to the standard rule.
+    """
+    if wins < 6:
+        return 0
+    if finished_at is not None and is_collector_booster_window(set_code, finished_at.date()):
+        return 1 if wins == 7 else 0
+    return 2 if wins == 7 else 1

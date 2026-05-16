@@ -2,26 +2,55 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import logging.handlers
+import signal
 import traceback
 from datetime import time as dtime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import discord
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from discord import app_commands
 from discord.ext import commands, tasks
 from sqlalchemy import select
 
+from bot.commands.delete_account import setup as setup_delete_account
+from bot.commands.help import setup as setup_help
+from bot.commands.leaderboard import (
+    LeaderboardView,
+    edit_tracked_messages_for_set,
+    process_leaderboard,
+    render_embed as render_leaderboard_embed,
+    setup as setup_leaderboard,
+)
+from bot.commands.pod_draft import setup as setup_pod_draft
+from bot.commands.signout import setup as setup_signout
+from bot.commands.signup import setup as setup_signup
+from bot.commands.stats import setup as setup_stats
+from bot.commands.update_profile import setup as setup_update_profile
 from bot.config import settings
-from bot.database import run_migrations
+from bot.database import SessionLocal, run_migrations
 from bot.discord_helpers import refresh_player_avatars
-from bot.models import MagicSet, Player
+from bot import emojis
+from bot.commands.testlobby import setup as setup_testlobby
+from bot.listeners.sesh_listener import reschedule_pending_events, setup as setup_sesh_listener
+from bot.models import MagicSet, Player, PodDraftEvent
+from bot.services.lobby_embed import LobbyReadyButtonView
+from bot.services.pod_active import ACTIVE_POD_MANAGERS
+from bot.services.pod_tournament import (
+    HollowManager,
+    register_persistent_views as register_pod_views,
+    reset_event_matches,
+    start_tournament,
+)
 from bot.services.refresh import refresh_active_players
 from bot.services.seventeenlands import MinIntervalLimiter, SeventeenLandsClient
 from bot.sets import ACTIVE_SET_CODE
+from bot.tasks.pod_draft_reminder import init_reminder
 
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("bot.main")
 
 LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
 
@@ -35,17 +64,24 @@ AUTO_REFRESH_17L_INTERVAL_S = 3.0
 
 def configure_logging() -> None:
     LOG_DIR.mkdir(exist_ok=True)
-    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    formatter = logging.Formatter(
+        fmt="{asctime} {levelname} [{process:d}][{module}.{funcName}:{lineno:d}] {message}",
+        style="{",
+    )
 
-    file_handler = logging.FileHandler(LOG_DIR / "bot.log", encoding="utf-8")
+    file_handler = logging.handlers.RotatingFileHandler(
+        LOG_DIR / "bot.log", maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8",
+    )
     file_handler.setFormatter(formatter)
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(formatter)
 
     root = logging.getLogger()
     root.setLevel(logging.INFO)
-    # Replace any pre-existing handlers (e.g. from imports that called basicConfig)
     root.handlers = [file_handler, console_handler]
+
+    for noisy in ("discord.http", "engineio.client", "socketio.client"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
 MSG_GENERIC_ERROR = "⚠️ Something went wrong handling that command. The bot owner has been notified."
@@ -76,22 +112,23 @@ def build_bot(guild_id: int) -> commands.Bot:
     intents = discord.Intents.default()
     intents.message_content = True
     intents.dm_messages = True
+    intents.members = True
     bot = commands.Bot(command_prefix="!", intents=intents)
     guild = discord.Object(id=guild_id)
 
     @bot.event
     async def setup_hook() -> None:
-        from bot.commands.signup import setup as setup_signup
-        from bot.commands.signout import setup as setup_signout
-        from bot.commands.update_profile import setup as setup_update_profile
-        from bot.commands.delete_account import setup as setup_delete_account
-        from bot.commands.leaderboard import setup as setup_leaderboard
-        from bot.commands.stats import setup as setup_stats
-        from bot.commands.help import setup as setup_help
-
         # Discord doesn't auto-populate owner_id; fetch it so /command crashes can DM the right person
         app_info = await bot.application_info()
         bot.owner_id = app_info.owner.id
+
+        await emojis.load(bot)
+
+        # Pod-draft scheduler — in-memory; on_ready() runs a sweep that re-arms any
+        # pending T-5 reminders so restarts don't lose work
+        bot.pod_scheduler = AsyncIOScheduler()
+        bot.pod_scheduler.start()
+        init_reminder(bot)
 
         # Load cogs into memory and mirror to the guild tree so dispatch works.
         # Discord-side sync is handled by the owner-only `!sync` text command, not on startup.
@@ -102,12 +139,17 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_leaderboard(bot)
         await setup_stats(bot)
         await setup_help(bot)
+        await setup_pod_draft(bot)
+        await setup_sesh_listener(bot)
+        await setup_testlobby(bot)
+        reschedule_pending_events(bot)
+        register_pod_views(bot)
         bot.tree.copy_global_to(guild=guild)
 
         # Register the persistent leaderboard view so Join buttons on previously-posted
         # messages keep dispatching after a bot restart
-        from bot.commands.leaderboard import LeaderboardView
         bot.add_view(LeaderboardView())
+        bot.add_view(LobbyReadyButtonView())
 
         log.info("setup_hook: cogs loaded; run `!sync` to publish slash commands to Discord")
 
@@ -196,8 +238,6 @@ def build_bot(guild_id: int) -> commands.Bot:
             "Please use `/relink` to provide your new token."
         )
 
-        from bot.database import SessionLocal
-
         def _do_db_work() -> dict | None:
             limiter = (
                 MinIntervalLimiter(min_interval_s=AUTO_REFRESH_17L_INTERVAL_S)
@@ -250,7 +290,6 @@ def build_bot(guild_id: int) -> commands.Bot:
         except Exception:
             log.warning("avatar refresh sweep failed", exc_info=True)
 
-        from bot.commands.leaderboard import edit_tracked_messages_for_set
         edit_summary = {"edited": 0, "pruned": 0, "errors": 0}
         with SessionLocal() as session:
             ms = session.execute(
@@ -268,7 +307,6 @@ def build_bot(guild_id: int) -> commands.Bot:
 
         await _dm_owner_refresh_report(target_code, result)
 
-        from bot.commands.leaderboard import process_leaderboard, render_embed as render_leaderboard_embed
         with SessionLocal() as session:
             full_data = process_leaderboard(session, viewer_discord_id=None, top_n=10**6)
         if full_data is not None and full_data.top and bot.owner_id is not None:
@@ -308,6 +346,38 @@ def build_bot(guild_id: int) -> commands.Bot:
         except discord.HTTPException:
             log.warning("could not DM owner the refresh report", exc_info=True)
 
+    @bot.command(name="testbracket")
+    @commands.is_owner()
+    async def test_bracket_cmd(ctx: commands.Context) -> None:
+        """Owner-only. Inside a pod-draft thread, wipe its matches and re-run the post-draft Python-Swiss flow with POD_DRAFT_TEST_ROSTER."""
+        if not isinstance(ctx.channel, discord.Thread):
+            await ctx.send("Run this inside a pod-draft thread.")
+            return
+        roster = [n.strip() for n in settings.pod_draft_test_roster.split(",") if n.strip()]
+        if len(roster) < 2 or len(roster) % 2 != 0:
+            await ctx.send(f"POD_DRAFT_TEST_ROSTER needs an even count (got {len(roster)}).")
+            return
+
+        thread_id = str(ctx.channel.id)
+        def _find_event():
+            with SessionLocal() as session:
+                event = session.execute(
+                    select(PodDraftEvent).where(PodDraftEvent.discord_thread_id == thread_id)
+                ).scalar_one_or_none()
+                if event is None:
+                    return None
+                return event.id
+
+        event_id = await asyncio.to_thread(_find_event)
+        if event_id is None:
+            await ctx.send("No pod_draft_event tied to this thread.")
+            return
+
+        await reset_event_matches(event_id)
+        manager = HollowManager(bot, event_id, ctx.channel.id, roster)
+        ACTIVE_POD_MANAGERS[event_id] = manager
+        await start_tournament(manager)
+
     @bot.command(name="refresh")
     @commands.is_owner()
     async def refresh_cmd(ctx: commands.Context, set_code: str | None = None) -> None:
@@ -339,6 +409,10 @@ def build_bot(guild_id: int) -> commands.Bot:
     @bot.event
     async def on_ready() -> None:
         log.info("logged in as %s (id=%s)", bot.user, bot.user.id if bot.user else "?")
+        await bot.change_presence(activity=discord.CustomActivity(name="dischord.pages.dev | /join"))
+        if not settings.auto_refresh_enabled:
+            log.info("AUTO_REFRESH_ENABLED=false; skipping the scheduled 17lands refresh tick")
+            return
         if not auto_refresh_tick.is_running():
             auto_refresh_tick.start()
 
@@ -351,6 +425,8 @@ def main() -> None:
 
     configure_logging()
     run_migrations()
+
+    signal.signal(signal.SIGTERM, lambda *_: signal.raise_signal(signal.SIGINT))
 
     bot = build_bot(settings.discord_guild_id)
     bot.run(settings.discord_bot_token.get_secret_value(), log_handler=None)

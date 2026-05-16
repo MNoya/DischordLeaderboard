@@ -131,9 +131,9 @@ def _seed_player(session, name="P", token_suffix="a", active=True, token_invalid
     token = (token_suffix * 32)[:32]
     p = Player(
         slug=f"{name.lower()}-{token_suffix}",
+        discord_id=f"refresh-{name.lower()}-{token_suffix}",
         display_name=name,
         seventeenlands_token=token,
-        seventeenlands_url=f"https://www.17lands.com/user_history/{token}",
         active=active,
         token_invalid=token_invalid,
     )

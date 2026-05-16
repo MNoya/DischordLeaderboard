@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Iterable
 
+
 if TYPE_CHECKING:
     import discord
     from sqlalchemy.orm import Session
@@ -16,7 +17,6 @@ if TYPE_CHECKING:
     from bot.models import Player
 
 logger = logging.getLogger(__name__)
-
 
 def extract_avatar_hash(user: "discord.abc.User | discord.User | discord.Member | None") -> str | None:
     """Return the Discord avatar hash for a user, or None if they use the default avatar.

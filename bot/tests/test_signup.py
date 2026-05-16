@@ -40,42 +40,8 @@ def test_creates_new_player_when_token_unknown(session):
     assert p.discord_username == "alice#0001"
     assert p.display_name == "Alice"
     assert p.seventeenlands_token == VALID_TOKEN
-    assert p.seventeenlands_url == f"https://www.17lands.com/user_history/{VALID_TOKEN}"
     assert p.active is True
     assert client.calls == [VALID_TOKEN]
-
-
-def test_links_seeded_player_with_null_discord_fields(session):
-    seeded = Player(
-        slug="legacyalice",
-        display_name="LegacyAlice",
-        seventeenlands_token=VALID_TOKEN,
-        seventeenlands_url=f"https://www.17lands.com/user_history/{VALID_TOKEN}",
-        active=True,
-    )
-    session.add(seeded)
-    session.commit()
-
-    result = process_signup(
-        session=session,
-        client=FakeClient(ok=True),
-        discord_id="222",
-        discord_username="alice#0001",
-        display_name="Alice",
-        token_input=VALID_TOKEN,
-    )
-
-    assert result.kind == "linked"
-    rows = session.execute(select(Player)).scalars().all()
-    assert len(rows) == 1
-    p = rows[0]
-    assert p.id == seeded.id
-    assert p.discord_id == "222"
-    assert p.discord_username == "alice#0001"
-    # display_name is preserved from the seed — we don't overwrite it on link
-    assert p.display_name == "LegacyAlice"
-    assert p.token_invalid is False
-    assert p.active is True
 
 
 def test_invalid_token_format_returns_kind_and_writes_nothing(session):
@@ -119,7 +85,6 @@ def test_token_already_linked_to_another_discord_user(session):
         discord_username="someone#0009",
         display_name="Someone",
         seventeenlands_token=VALID_TOKEN,
-        seventeenlands_url=f"https://www.17lands.com/user_history/{VALID_TOKEN}",
         active=True,
     )
     session.add(other)
@@ -148,7 +113,6 @@ def test_already_signed_up_short_circuits(session):
         discord_username="eve#0005",
         display_name="Eve",
         seventeenlands_token=OTHER_TOKEN,
-        seventeenlands_url=f"https://www.17lands.com/user_history/{OTHER_TOKEN}",
         active=True,
     )
     session.add(me)
@@ -179,7 +143,6 @@ def _seed(session, discord_id, token, active=True):
         discord_username="x",
         display_name="X",
         seventeenlands_token=token,
-        seventeenlands_url=f"https://www.17lands.com/user_history/{token}",
         active=active,
     )
     session.add(p)

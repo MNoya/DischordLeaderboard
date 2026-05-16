@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from bot import audit
+from bot.database import SessionLocal
 from bot.models import Player
 
 logger = logging.getLogger(__name__)
@@ -58,8 +59,6 @@ class DeleteAccount(commands.Cog):
     @app_commands.allowed_contexts(guilds=False, dms=True, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
     async def delete_account(self, interaction: discord.Interaction) -> None:
-        from bot.database import SessionLocal
-
         user_id = str(interaction.user.id)
         audit.event("delete_account_invoked", user_id=user_id, username=str(interaction.user))
 

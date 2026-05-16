@@ -12,8 +12,10 @@ from sqlalchemy.orm import Session
 
 from bot import audit
 from bot.config import settings
-from bot.models import MagicSet, Player, PlayerSetScore, PlayerStats
-from bot.scoring import compute_score_breakdown
+from bot.database import SessionLocal
+from bot.models import DraftEvent, MagicSet, Player, PlayerSetScore, PlayerStats
+from bot.scoring import boxes_for_event, compute_score_breakdown
+from bot.services.pod_drafts import player_pod_stats
 from bot.sets import ACTIVE_SET_CODE
 
 logger = logging.getLogger(__name__)
@@ -30,6 +32,8 @@ class StatsData:
     total_trophies: int
     breakdown: list[dict] = field(default_factory=list)
     last_updated: datetime | None = None
+    pod_stats: dict | None = None
+    direct_stats: dict | None = None
 
 
 def _resolve_player(session: Session, player_name: str | None, viewer_discord_id: str) -> Player | None:
@@ -96,6 +100,23 @@ def process_stats(
         ).scalar()
         rank = (higher_count or 0) + 1
 
+    pod = player_pod_stats(session, player.discord_id)
+    pod_stats = pod if pod and pod["events_played"] > 0 else None
+
+    direct_rows = session.execute(
+        select(DraftEvent.wins, DraftEvent.losses, DraftEvent.finished_at).where(
+            DraftEvent.player_id == player.id,
+            DraftEvent.set_id == magic_set.id,
+            DraftEvent.format == "ArenaDirect_Sealed",
+        )
+    ).all()
+    direct_stats: dict | None = None
+    if direct_rows:
+        wins = sum(int(r.wins or 0) for r in direct_rows)
+        losses = sum(int(r.losses or 0) for r in direct_rows)
+        boxes = sum(boxes_for_event(magic_set.code, int(r.wins or 0), r.finished_at) for r in direct_rows)
+        direct_stats = {"events": len(direct_rows), "wins": wins, "losses": losses, "boxes": boxes}
+
     return StatsData(
         set_code=magic_set.code,
         set_name=magic_set.name,
@@ -106,10 +127,12 @@ def process_stats(
         total_trophies=total_trophies,
         breakdown=breakdown,
         last_updated=last_updated,
+        pod_stats=pod_stats,
+        direct_stats=direct_stats,
     )
 
 
-def _format_breakdown(breakdown: list[dict]) -> str:
+def _format_breakdown(breakdown: list[dict], direct_stats: dict | None = None) -> str:
     if not breakdown:
         return "_No drafts logged yet for this set._"
     lines: list[str] = []
@@ -123,6 +146,20 @@ def _format_breakdown(breakdown: list[dict]) -> str:
             f"{b['wins']}-{b['losses']} ({winrate:.0%}), "
             f"{b['trophies']} {trophy_word} → {b['score']:.1f} pts"
         )
+        if b["label"] == "Sealed" and direct_stats is not None:
+            d_events = direct_stats["events"]
+            d_wins = direct_stats["wins"]
+            d_losses = direct_stats["losses"]
+            d_boxes = direct_stats["boxes"]
+            d_games = d_wins + d_losses
+            d_winrate = d_wins / d_games if d_games > 0 else 0.0
+            events_word = "event" if d_events == 1 else "events"
+            box_word = "box" if d_boxes == 1 else "boxes"
+            lines.append(
+                f"↳ **Direct** — {d_events} {events_word}, "
+                f"{d_wins}-{d_losses} ({d_winrate:.0%}), "
+                f"{d_boxes} {box_word}"
+            )
     return "\n".join(lines)
 
 
@@ -138,7 +175,24 @@ def render_embed(data: StatsData) -> discord.Embed:
     else:
         summary = "_Not yet on the leaderboard for this set._"
 
-    embed.description = f"{summary}\n\n{_format_breakdown(data.breakdown)}"
+    embed.description = f"{summary}\n\n{_format_breakdown(data.breakdown, data.direct_stats)}"
+
+    if data.pod_stats:
+        sets_with_events = [(code, b) for code, b in sorted(data.pod_stats["by_set"].items()) if b["events"]]
+        pod_lines = []
+        for code, b in sets_with_events:
+            games = b["wins"] + b["losses"]
+            wr = b["wins"] / games if games else 0.0
+            events_word = "event" if b["events"] == 1 else "events"
+            trophy_word = "trophy" if b["trophies"] == 1 else "trophies"
+            label = "Pod" if len(sets_with_events) == 1 else f"Pod {code}"
+            pod_lines.append(
+                f"**{label}** — {b['events']} {events_word}, "
+                f"{b['wins']}-{b['losses']} ({wr:.0%}), "
+                f"{b['trophies']} {trophy_word}"
+            )
+        if pod_lines:
+            embed.description = f"{embed.description}\n" + "\n".join(pod_lines)
 
     if data.last_updated is not None:
         embed.timestamp = data.last_updated
@@ -159,8 +213,6 @@ class Stats(commands.Cog):
     async def stats(
         self, interaction: discord.Interaction, player: str | None = None
     ) -> None:
-        from bot.database import SessionLocal
-
         user_id = str(interaction.user.id)
         audit.event("stats_invoked", user_id=user_id, player=player)
 

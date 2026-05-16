@@ -7,13 +7,15 @@ from datetime import datetime, timezone
 import discord
 from discord import app_commands
 from discord.ext import commands
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
-from bot import audit
+from bot import audit, emojis
+from bot.commands.stats import process_stats, render_embed as render_stats_embed
 from bot.config import settings
-from bot.models import LeaderboardMessage, MagicSet, Player, PlayerArchetypeScore, PlayerSetScore, PlayerStats
-from bot.scoring import DEFAULT_QUEUE_GROUPS, compute_score
+from bot.database import SessionLocal
+from bot.models import DraftEvent, LeaderboardMessage, MagicSet, Player, PlayerArchetypeScore, PlayerSetScore, PlayerStats, PodDraftEvent, PodDraftParticipant
+from bot.scoring import DEFAULT_QUEUE_GROUPS, boxes_for_event, compute_score
 from bot.sets import ACTIVE_SET_CODE
 
 
@@ -56,6 +58,7 @@ class LeaderboardEntry:
     display_name: str
     score: float
     trophies: int
+    events: int = 0
 
 
 @dataclass
@@ -65,13 +68,10 @@ class LeaderboardData:
     top: list[LeaderboardEntry]
     viewer: LeaderboardEntry | None
     last_updated: datetime | None = None
-    drafter_count: int = 0  # active players with at least one event in this set
-
-
-def _current_set(session: Session) -> MagicSet | None:
-    return session.execute(
-        select(MagicSet).where(MagicSet.code == ACTIVE_SET_CODE)
-    ).scalar_one_or_none()
+    drafter_count: int = 0
+    show_score: bool = True
+    filter_type: str | None = None
+    filter_value: str | None = None
 
 
 def process_leaderboard(
@@ -276,25 +276,215 @@ def process_leaderboard_for_archetype(
     )
 
 
+def process_leaderboard_for_direct(
+    session: Session, viewer_discord_id: str | None, top_n: int = 10,
+) -> LeaderboardData | None:
+    """Arena Direct Sealed leaderboard: ranks players by boxes won.
+
+    Box rules live in scoring.boxes_for_event — standard 6/7-win payouts plus
+    collector-booster-weekend overrides. Per-event rather than aggregate so the
+    date-windowed rule can fire.
+    """
+    magic_set = _current_set(session)
+    if magic_set is None:
+        return None
+
+    rows = session.execute(
+        select(
+            Player.id, Player.slug, Player.display_name, Player.discord_id,
+            DraftEvent.wins, DraftEvent.finished_at,
+        )
+        .join(DraftEvent, DraftEvent.player_id == Player.id)
+        .where(
+            Player.active.is_(True),
+            DraftEvent.set_id == magic_set.id,
+            DraftEvent.format == "ArenaDirect_Sealed",
+        )
+    ).all()
+
+    bucket: dict[str, dict] = {}
+    for r in rows:
+        b = bucket.setdefault(r.id, {
+            "slug": r.slug, "display_name": r.display_name, "discord_id": r.discord_id,
+            "boxes": 0, "trophies": 0,
+        })
+        wins = int(r.wins or 0)
+        b["boxes"] += boxes_for_event(magic_set.code, wins, r.finished_at)
+        if wins == 7:
+            b["trophies"] += 1
+
+    scored = [
+        (b["boxes"], b["trophies"], pid, b["slug"], b["display_name"], b["discord_id"])
+        for pid, b in bucket.items()
+        if b["boxes"] > 0
+    ]
+    scored.sort(key=lambda x: (-x[0], -x[1], x[4].lower()))
+
+    ranked = [
+        (idx + 1, pid, slug, name, did, boxes, trophies)
+        for idx, (boxes, trophies, pid, slug, name, did) in enumerate(scored)
+    ]
+    top = [
+        LeaderboardEntry(rank=rank, player_id=pid, slug=slug, display_name=name, score=float(boxes), trophies=trophies, events=boxes)
+        for rank, pid, slug, name, _did, boxes, trophies in ranked[:top_n]
+    ]
+    viewer_entry: LeaderboardEntry | None = None
+    if viewer_discord_id is not None:
+        for rank, pid, slug, name, did, boxes, trophies in ranked:
+            if did == viewer_discord_id:
+                viewer_entry = LeaderboardEntry(
+                    rank=rank, player_id=pid, slug=slug, display_name=name,
+                    score=float(boxes), trophies=trophies, events=boxes,
+                )
+                break
+
+    last_updated = session.execute(
+        select(func.max(DraftEvent.fetched_at))
+        .where(DraftEvent.set_id == magic_set.id, DraftEvent.format == "ArenaDirect_Sealed")
+    ).scalar()
+
+    return LeaderboardData(
+        set_code=magic_set.code,
+        set_name=magic_set.name,
+        top=top,
+        viewer=viewer_entry,
+        last_updated=last_updated,
+        drafter_count=len(scored),
+        show_score=False,
+    )
+
+
+def process_leaderboard_for_pod(
+    session: Session, viewer_discord_id: str | None, top_n: int = 10,
+) -> LeaderboardData | None:
+    """Pod-draft leaderboard for the active set: ranked by trophies, no score column."""
+    magic_set = _current_set(session)
+    if magic_set is None:
+        return None
+
+    trophy_expr = func.coalesce(func.sum(case((PodDraftParticipant.placement == 1, 1), else_=0)), 0)
+    events_expr = func.count(PodDraftParticipant.id)
+
+    rows = session.execute(
+        select(
+            Player.id, Player.slug, Player.display_name, Player.discord_id,
+            trophy_expr.label("trophies"),
+            events_expr.label("events"),
+        )
+        .join(PodDraftParticipant, PodDraftParticipant.player_id == Player.id)
+        .join(PodDraftEvent, PodDraftEvent.id == PodDraftParticipant.event_id)
+        .where(
+            Player.active.is_(True),
+            PodDraftParticipant.placement.is_not(None),
+            func.upper(PodDraftEvent.set_code) == magic_set.code.upper(),
+        )
+        .group_by(Player.id, Player.slug, Player.display_name, Player.discord_id)
+        .order_by(trophy_expr.desc(), events_expr.desc(), Player.display_name.asc())
+    ).all()
+
+    ranked = [
+        (idx + 1, r.id, r.slug, r.display_name, r.discord_id, int(r.trophies), int(r.events))
+        for idx, r in enumerate(rows)
+    ]
+    top = [
+        LeaderboardEntry(rank=rank, player_id=pid, slug=slug, display_name=name, score=float(trophies), trophies=trophies, events=events)
+        for rank, pid, slug, name, _did, trophies, events in ranked[:top_n]
+    ]
+    viewer_entry: LeaderboardEntry | None = None
+    if viewer_discord_id is not None:
+        for rank, pid, slug, name, did, trophies, events in ranked:
+            if did == viewer_discord_id:
+                viewer_entry = LeaderboardEntry(rank=rank, player_id=pid, slug=slug, display_name=name, score=float(trophies), trophies=trophies, events=events)
+                break
+
+    last_updated = session.execute(
+        select(func.max(PodDraftEvent.event_time))
+        .where(func.upper(PodDraftEvent.set_code) == magic_set.code.upper())
+    ).scalar()
+
+    return LeaderboardData(
+        set_code=magic_set.code,
+        set_name=magic_set.name,
+        top=top,
+        viewer=viewer_entry,
+        last_updated=last_updated,
+        drafter_count=0,
+        show_score=False,
+    )
+
+
 MEDAL_EMOJIS = {1: "🥇", 2: "🥈", 3: "🥉"}
+
+_CYCLE: list[tuple[str | None, str | None]] = [
+    (None, None),
+    ("format", "Premier"),
+    ("format", "Traditional"),
+    ("format", "Pod"),
+    ("format", "Direct"),
+]
+_CYCLE_DISPLAY = ["All", "Premier", "Trad", "Pod", "Direct"]
+_CYCLE_LABELS = [f"{_CYCLE_DISPLAY[(i + 1) % len(_CYCLE_DISPLAY)]} ▶️" for i in range(len(_CYCLE_DISPLAY))]
+
+
+def _cycle_label_for(filter_type: str | None, filter_value: str | None) -> str:
+    key = (filter_type, filter_value)
+    for i, c in enumerate(_CYCLE):
+        if c == key:
+            return _CYCLE_LABELS[i]
+    return _CYCLE_LABELS[0]
+
+
+class _CycleButton(discord.ui.Button):
+    def __init__(self, label: str) -> None:
+        super().__init__(label=label, style=discord.ButtonStyle.primary, custom_id="leaderboard:cycle")
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        msg_id = str(interaction.message.id)
+        with SessionLocal() as session:
+            tracked = session.execute(
+                select(LeaderboardMessage).where(LeaderboardMessage.message_id == msg_id)
+            ).scalar_one_or_none()
+            if tracked is None:
+                await interaction.response.send_message(
+                    "Post a fresh leaderboard with /leaderboard to enable cycling.",
+                    ephemeral=True,
+                )
+                return
+            key = (tracked.filter_type, tracked.filter_value)
+            try:
+                idx = next(i for i, c in enumerate(_CYCLE) if c == key)
+            except StopIteration:
+                idx = 0
+            next_idx = (idx + 1) % len(_CYCLE)
+            next_ft, next_fv = _CYCLE[next_idx]
+            next_label = _CYCLE_LABELS[next_idx]
+            data, suffix = render_filtered_data(
+                session, filter_type=next_ft, filter_value=next_fv, viewer_discord_id=None,
+            )
+            tracked.filter_type = next_ft
+            tracked.filter_value = next_fv
+            session.commit()
+
+        if data is None:
+            await interaction.response.send_message("Could not render leaderboard.", ephemeral=True)
+            return
+        embed = render_public_embed(data)
+        if suffix:
+            embed.title = f"{embed.title} · {suffix}"
+        await interaction.response.edit_message(embed=embed, view=render_view(cycle_label=next_label))
 
 DISCORD_EMBED_DESC_LIMIT = 4096
 
 
-def _player_url(slug: str, set_code: str | None = None) -> str:
-    """Build the public-site URL for a player's profile.
-
-    Prefer set-scoped URLs (``/{SET}/player/{slug}``) so links stay correct
-    when the active set rolls over; fall back to ``/player/{slug}`` if no set
-    is supplied.
-    """
+def _player_url(slug: str, set_code: str | None = None, filter_type: str | None = None, filter_value: str | None = None) -> str:
     base = settings.public_site_url.rstrip("/")
-    if set_code:
-        return f"{base}/{set_code}/player/{slug}"
-    return f"{base}/player/{slug}"
+    url = f"{base}/{set_code}/player/{slug}" if set_code else f"{base}/player/{slug}"
+    if filter_type == "format" and filter_value:
+        url += f"?format={filter_value}"
+    return url
 
 
-def _format_leaderboard(top: list[LeaderboardEntry], set_code: str | None = None) -> str:
+def _format_leaderboard(top: list[LeaderboardEntry], set_code: str | None = None, show_score: bool = True, filter_type: str | None = None, filter_value: str | None = None) -> str:
     """Wrap each row in inline code (single backticks) — renders as monospace
     without the code-block brick, and spaces are preserved so columns align.
     Same trick scoreboards.dev uses to get tabular layout in an embed.
@@ -304,16 +494,30 @@ def _format_leaderboard(top: list[LeaderboardEntry], set_code: str | None = None
     float value, not this rendered string.
     """
     name_width = max(max(len(e.display_name) for e in top), len("Name"))
-    score_width = max(max(len(f"{round(e.score)}") for e in top), len("Points"))
-    trophy_width = max(max(len(str(e.trophies)) for e in top), 1)
     rank_col_width = max(max(len(f"{e.rank}.") for e in top), len("#"))
-    # Trophy header emoji renders ~1 col wider than a digit, so pad header trophy field one less
-    header_trophy_width = max(trophy_width - 1, 1)
 
-    header_inner = (
-        f"{'#':<{rank_col_width}} {'Name':<{name_width}}  "
-        f"{'Points':>{score_width}}  {'🏆':>{header_trophy_width}}"
-    )
+    if show_score:
+        score_width = max(max(len(f"{round(e.score)}") for e in top), len("Points"))
+        trophy_width = max(max(len(str(e.trophies)) for e in top), 1)
+        # Trophy header emoji renders ~1 col wider than a digit, so pad header trophy field one less
+        header_trophy_width = max(trophy_width - 1, 1)
+        header_inner = (
+            f"{'#':<{rank_col_width}} {'Name':<{name_width}}  "
+            f"{'Points':>{score_width}}  {'🏆':>{header_trophy_width}}"
+        )
+    else:
+        is_direct = filter_type == "format" and filter_value == "Direct"
+        left_label = "📦" if is_direct else "Drafts"
+        drafts_width = max(max(len(str(e.events)) for e in top), 2 if is_direct else len(left_label))
+        # min 2 so single-digit trophies align under the emoji header
+        trophy_width = max(max(len(str(e.trophies)) for e in top), 2)
+        header_trophy_width = trophy_width - 1
+        header_left_width = drafts_width - 1 if is_direct else drafts_width
+        header_inner = (
+            f"{'#':<{rank_col_width}} {'Name':<{name_width}}   "
+            f"{left_label:>{header_left_width}}  {'🏆':>{header_trophy_width}}"
+        )
+
     lines = [f"`{header_inner}`"]
     for e in top:
         medal = MEDAL_EMOJIS.get(e.rank)
@@ -323,12 +527,16 @@ def _format_leaderboard(top: list[LeaderboardEntry], set_code: str | None = None
         else:
             rank = f"{e.rank}.".ljust(rank_col_width)
         name = e.display_name.ljust(name_width)
-        # Center the integer under the wider 'Points' header — right-bias so
-        # single-digit values shift one space rightward and look more centered
-        score = _center_right_bias(str(round(e.score)), score_width)
         trophy = f"{e.trophies:>{trophy_width}}"
-        inner = f"{rank} {name}  {score}  {trophy}"
-        lines.append(f"[`{inner}`](<{_player_url(e.slug, set_code)}>)")
+        if show_score:
+            # Center the integer under the wider 'Points' header — right-bias so
+            # single-digit values shift one space rightward and look more centered
+            score = _center_right_bias(str(round(e.score)), score_width)
+            inner = f"{rank} {name}  {score}  {trophy}"
+        else:
+            drafts_col = _center_right_bias(str(e.events), drafts_width)
+            inner = f"{rank} {name}   {drafts_col}  {trophy}"
+        lines.append(f"[`{inner}`](<{_player_url(e.slug, set_code, filter_type, filter_value)}>)")
     return "\n".join(lines)
 
 
@@ -367,22 +575,23 @@ def _apply_footer(embed: discord.Embed, data: LeaderboardData) -> None:
 
 
 def render_embed(data: LeaderboardData) -> discord.Embed:
-    """Single leaderboard embed used everywhere — channel posts, DM replies,
-    and post-/join previews.
-
-    Personal context (rank, breakdown, /join prompt) lives in a separate
-    stats embed sent alongside; collapsing the personalized variant removes
-    the two-render-path maintenance cost.
-    """
+    base_url = settings.public_site_url.rstrip("/")
+    if data.filter_type == "format" and data.filter_value:
+        site_url = f"{base_url}?format={data.filter_value}"
+    else:
+        site_url = base_url
     embed = discord.Embed(
         title=f"🏆 Leaderboard — {data.set_code}",
-        url=settings.public_site_url,
+        url=site_url,
         color=discord.Color.gold(),
     )
     if not data.top:
         embed.description = "_No players have scored yet for this set._"
     else:
-        embed.description = _format_leaderboard(data.top, data.set_code)
+        embed.description = _format_leaderboard(
+            data.top, data.set_code, show_score=data.show_score,
+            filter_type=data.filter_type, filter_value=data.filter_value,
+        )
     _apply_footer(embed, data)
     return embed
 
@@ -398,9 +607,6 @@ async def _send_personal_followup(
     """Ephemeral follow-up to the invoker — rich stats breakdown if signed up,
     /join prompt otherwise. Re-uses the /stats embed so the two commands stay
     visually consistent."""
-    from bot.database import SessionLocal
-    from bot.commands.stats import process_stats, render_embed as render_stats_embed
-
     if not viewer_registered:
         await interaction.followup.send(
             content="You're not on the leaderboard — run `/join` to join.",
@@ -421,20 +627,20 @@ class LeaderboardView(discord.ui.View):
     The Stats button is a URL link handled client-side by Discord.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, cycle_label: str = _CYCLE_LABELS[0]) -> None:
         super().__init__(timeout=None)
+        self.add_item(_CycleButton(label=cycle_label))
         # URL buttons are exempt from the persistent-view custom_id requirement
         self.add_item(discord.ui.Button(
             label="Stats", url=settings.public_site_url,
             style=discord.ButtonStyle.link,
+            emoji=emojis.get_emoji("llu"),
         ))
 
-    @discord.ui.button(label="Join", style=discord.ButtonStyle.primary, custom_id="leaderboard:join")
+    @discord.ui.button(label="Join", style=discord.ButtonStyle.success, custom_id="leaderboard:join")
     async def join_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         # Already signed-up users clicking Join are usually misclicks or curious
         # — show their personal stats instead of starting the signup flow
-        from bot.database import SessionLocal
-
         user_id = str(interaction.user.id)
         with SessionLocal() as session:
             existing = session.execute(
@@ -458,12 +664,22 @@ class LeaderboardView(discord.ui.View):
         await signup_cog.signup.callback(signup_cog, interaction)
 
 
-def render_view() -> discord.ui.View:
-    """Per-message instance of the leaderboard view (Join + Stats buttons)."""
-    return LeaderboardView()
+def render_view(cycle_label: str = _CYCLE_LABELS[0]) -> discord.ui.View:
+    return LeaderboardView(cycle_label=cycle_label)
 
 
 CODE_TO_COLOR_LABEL: dict[str, str] = {code: label for label, code in COLOR_CHOICES.items()}
+
+
+def _drafter_count(session: Session) -> int:
+    magic_set = _current_set(session)
+    if magic_set is None:
+        return 0
+    return session.execute(
+        select(func.count(func.distinct(PlayerStats.player_id)))
+        .join(Player, Player.id == PlayerStats.player_id)
+        .where(PlayerStats.set_id == magic_set.id, PlayerStats.events > 0, Player.active.is_(True))
+    ).scalar() or 0
 
 
 def render_filtered_data(
@@ -478,20 +694,34 @@ def render_filtered_data(
     Returns (data, suffix). suffix is the human label appended to the embed
     title (e.g. "Premier", "Boros"). Both are None when no active set exists.
     """
-    if filter_type == "format":
+    if filter_type == "format" and filter_value == "Pod":
+        data = process_leaderboard_for_pod(session, viewer_discord_id=viewer_discord_id)
+        suffix = "Pod"
+    elif filter_type == "format" and filter_value == "Direct":
+        data = process_leaderboard_for_direct(session, viewer_discord_id=viewer_discord_id)
+        suffix = "Direct"
+    elif filter_type == "format":
         assert filter_value is not None
         data = process_leaderboard_for_format(
             session, viewer_discord_id=viewer_discord_id, format_label=filter_value,
         )
-        return data, filter_value
-    if filter_type == "color":
+        suffix = filter_value
+    elif filter_type == "color":
         assert filter_value is not None
         data = process_leaderboard_for_archetype(
             session, viewer_discord_id=viewer_discord_id, archetype=filter_value,
         )
-        return data, CODE_TO_COLOR_LABEL.get(filter_value, filter_value)
-    data = process_leaderboard(session, viewer_discord_id=viewer_discord_id)
-    return data, None
+        suffix = CODE_TO_COLOR_LABEL.get(filter_value, filter_value)
+    else:
+        data = process_leaderboard(session, viewer_discord_id=viewer_discord_id)
+        suffix = None
+
+    if data is not None:
+        data.drafter_count = _drafter_count(session)
+        data.filter_type = filter_type
+        data.filter_value = filter_value
+
+    return data, suffix
 
 
 def _filter_clause(filter_type: str | None, filter_value: str | None):
@@ -529,8 +759,6 @@ async def _replace_tracked_message(
 
     A NotFound on fetch is normal (mod or user wiped it); we drop the row.
     """
-    from bot.database import SessionLocal
-
     sent = await interaction.followup.send(embed=embed, view=view, wait=True)
     new_message_id = str(sent.id)
 
@@ -588,9 +816,6 @@ async def broadcast_current_set_update(bot: commands.Bot) -> dict:
     Wrapper used by callers (signup flow, !refresh) that just want 'reflect the
     latest data everywhere' without resolving the set themselves.
     """
-    from bot.database import SessionLocal
-    from bot.sets import ACTIVE_SET_CODE
-
     with SessionLocal() as session:
         ms = session.execute(
             select(MagicSet).where(MagicSet.code == ACTIVE_SET_CODE)
@@ -607,8 +832,6 @@ async def edit_tracked_messages_for_set(bot: commands.Bot, magic_set: MagicSet) 
     live without requiring users to re-invoke ``/leaderboard``. Stale tracking
     rows (message deleted in Discord) get pruned automatically.
     """
-    from bot.database import SessionLocal
-
     summary = {"edited": 0, "pruned": 0, "errors": 0}
     with SessionLocal() as session:
         rows = session.execute(
@@ -622,7 +845,6 @@ async def edit_tracked_messages_for_set(bot: commands.Bot, magic_set: MagicSet) 
     if not targets:
         return summary
 
-    view = render_view()
     rendered_cache: dict[tuple[str | None, str | None], discord.Embed | None] = {}
 
     def _render_for(filter_type: str | None, filter_value: str | None) -> discord.Embed | None:
@@ -650,7 +872,7 @@ async def edit_tracked_messages_for_set(bot: commands.Bot, magic_set: MagicSet) 
             channel = bot.get_channel(int(channel_id)) or await bot.fetch_channel(int(channel_id))
             msg = await channel.fetch_message(int(message_id))
             # Pass content=None to strip any prior message-content variant (transient format)
-            await msg.edit(content=None, embed=embed, view=view)
+            await msg.edit(content=None, embed=embed, view=render_view(cycle_label=_cycle_label_for(filter_type, filter_value)))
             with SessionLocal() as session:
                 tracked = session.get(LeaderboardMessage, row_id)
                 if tracked is not None:
@@ -686,6 +908,8 @@ class Leaderboard(commands.Cog):
             app_commands.Choice(name="Traditional", value="Traditional"),
             app_commands.Choice(name="Sealed",      value="Sealed"),
             app_commands.Choice(name="Quick",       value="Quick"),
+            app_commands.Choice(name="Pod",         value="Pod"),
+            app_commands.Choice(name="Direct",      value="Direct"),
         ],
         color=[
             app_commands.Choice(name=label, value=code)
@@ -700,8 +924,6 @@ class Leaderboard(commands.Cog):
         format: app_commands.Choice[str] | None = None,
         color: app_commands.Choice[str] | None = None,
     ) -> None:
-        from bot.database import SessionLocal
-
         user_id = str(interaction.user.id)
         audit.event(
             "leaderboard_invoked",
@@ -755,7 +977,7 @@ class Leaderboard(commands.Cog):
                 channel_id=str(interaction.channel_id),
                 set_id=magic_set.id,
                 embed=embed,
-                view=render_view(),
+                view=render_view(cycle_label=_cycle_label_for(filter_type, filter_value)),
                 filter_type=filter_type,
                 filter_value=filter_value,
             )
@@ -776,9 +998,7 @@ class Leaderboard(commands.Cog):
             try:
                 dm = interaction.channel  # already a DM channel here
                 if data.viewer is not None:
-                    from bot.commands.stats import process_stats, render_embed as render_stats_embed
-                    from bot.database import SessionLocal as _SessionLocal
-                    with _SessionLocal() as session:
+                    with SessionLocal() as session:
                         stats_data = process_stats(session, player_name=None, viewer_discord_id=user_id)
                     if stats_data is not None:
                         await dm.send(embed=render_stats_embed(stats_data))
@@ -794,8 +1014,6 @@ class Leaderboard(commands.Cog):
     @app_commands.allowed_contexts(guilds=False, dms=True, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
     async def leaderboard_full(self, interaction: discord.Interaction) -> None:
-        from bot.database import SessionLocal
-
         user_id = str(interaction.user.id)
         audit.event("leaderboard_full_invoked", user_id=user_id)
 
@@ -817,11 +1035,11 @@ class Leaderboard(commands.Cog):
         if data.top and embed.description and len(embed.description) > DISCORD_EMBED_DESC_LIMIT:
             trimmed = list(data.top)
             while trimmed:
-                body = _format_leaderboard(trimmed, data.set_code)
+                body = _format_leaderboard(trimmed, data.set_code, filter_type=data.filter_type, filter_value=data.filter_value)
                 if len(body) + 2 + len(site_link) <= DISCORD_EMBED_DESC_LIMIT:
                     break
                 trimmed.pop()
-            body = _format_leaderboard(trimmed, data.set_code) if trimmed else ""
+            body = _format_leaderboard(trimmed, data.set_code, filter_type=data.filter_type, filter_value=data.filter_value) if trimmed else ""
             embed.description = f"{body}\n\n{site_link}" if body else site_link
 
         # Always deliver via DM, regardless of where the slash was invoked.
@@ -844,3 +1062,9 @@ class Leaderboard(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Leaderboard(bot))
+
+
+def _current_set(session: Session) -> MagicSet | None:
+    return session.execute(
+        select(MagicSet).where(MagicSet.code == ACTIVE_SET_CODE)
+    ).scalar_one_or_none()

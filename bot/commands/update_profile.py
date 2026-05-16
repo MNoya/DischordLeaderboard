@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from bot import audit
+from bot.database import SessionLocal
 from bot.discord_helpers import extract_avatar_hash
 from bot.models import Player
 from bot.services.refresh import refresh_one_player_for_all_sets
@@ -54,10 +55,6 @@ class UpdateProfileResult:
     player_id: str | None = None
 
 
-def _seventeenlands_url(token: str) -> str:
-    return f"https://www.17lands.com/user_history/{token}"
-
-
 def process_update_profile(
     session: Session,
     client: SeventeenLandsClient,
@@ -89,7 +86,6 @@ def process_update_profile(
         return UpdateProfileResult(kind="token_in_use", player_id=player.id)
 
     player.seventeenlands_token = token
-    player.seventeenlands_url = _seventeenlands_url(token)
     player.token_invalid = False
     if avatar_hash is not None and player.avatar_hash != avatar_hash:
         player.avatar_hash = avatar_hash
@@ -106,8 +102,6 @@ class UpdateProfile(commands.Cog):
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
     async def update_profile(self, interaction: discord.Interaction) -> None:
-        from bot.database import SessionLocal
-
         user_id = str(interaction.user.id)
         audit.event("update_profile_invoked", user_id=user_id, username=str(interaction.user))
 

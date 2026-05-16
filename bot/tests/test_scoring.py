@@ -1,4 +1,4 @@
-from bot.scoring import QueueGroup, compute_score, supported_formats
+from bot.scoring import QueueGroup, compute_score, compute_score_breakdown, supported_formats
 
 
 def test_supported_formats_includes_all_bucket_formats():
@@ -91,7 +91,6 @@ def test_compute_score_custom_groups_override():
 
 
 def test_compute_score_breakdown_returns_per_group():
-    from bot.scoring import compute_score_breakdown
     rows = [
         {"format": "PremierDraft", "events": 10, "wins": 50, "losses": 30, "trophies": 4},
         {"format": "Sealed", "events": 4, "wins": 10, "losses": 8, "trophies": 1},
@@ -118,12 +117,10 @@ def test_compute_score_breakdown_returns_per_group():
 
 
 def test_compute_score_breakdown_empty():
-    from bot.scoring import compute_score_breakdown
     assert compute_score_breakdown([]) == []
 
 
 def test_compute_score_breakdown_skips_unknown_formats():
-    from bot.scoring import compute_score_breakdown
     rows = [
         {"format": "MidWeekSealed", "events": 5, "wins": 20, "losses": 10, "trophies": 2},
     ]

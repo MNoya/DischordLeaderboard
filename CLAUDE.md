@@ -111,7 +111,7 @@ The formula may diverge per set in the future — `DEFAULT_QUEUE_GROUPS` is glob
 ### Data model — key invariants
 
 - **All `DateTime` columns are `DateTime(timezone=True)` (TIMESTAMPTZ).** Naive UTC was misinterpreted as local time by `discord.py`, shifting embed timestamps. Don't reintroduce naive datetimes.
-- `players.discord_id` is **nullable** so seeded legacy players exist before linking via `/join`.
+- `players.seventeenlands_token` is nullable so `/pod-link-arena` can create lightweight pod-draft-only players without a 17lands profile.
 - `player_stats` is unique per `(player, set, format, expansion)`. Alchemy variants like `Y26ECL` get their own row but bucket under `ECL` for scoring.
 - `player_set_scores.last_calculated_at` is force-bumped every refresh (not just on score change) so the "Last updated" footer reflects refresh time.
 - `draft_events` captures one row per individual draft (color archetypes, trophy streaks, etc.). 17lands' case-encoded color string (`WBg` = WB main + green splash) is preserved verbatim in `colors`.
