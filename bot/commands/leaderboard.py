@@ -14,8 +14,8 @@ from bot import audit, emojis
 from bot.commands.stats import process_stats, render_embed as render_stats_embed
 from bot.config import settings
 from bot.database import SessionLocal
-from bot.models import LeaderboardMessage, MagicSet, Player, PlayerArchetypeScore, PlayerSetScore, PlayerStats, PodDraftEvent, PodDraftParticipant
-from bot.scoring import DEFAULT_QUEUE_GROUPS, compute_score
+from bot.models import DraftEvent, LeaderboardMessage, MagicSet, Player, PlayerArchetypeScore, PlayerSetScore, PlayerStats, PodDraftEvent, PodDraftParticipant
+from bot.scoring import DEFAULT_QUEUE_GROUPS, boxes_for_event, compute_score
 from bot.sets import ACTIVE_SET_CODE
 
 
@@ -276,6 +276,84 @@ def process_leaderboard_for_archetype(
     )
 
 
+def process_leaderboard_for_direct(
+    session: Session, viewer_discord_id: str | None, top_n: int = 10,
+) -> LeaderboardData | None:
+    """Arena Direct Sealed leaderboard: ranks players by boxes won.
+
+    Box rules live in scoring.boxes_for_event — standard 6/7-win payouts plus
+    collector-booster-weekend overrides. Per-event rather than aggregate so the
+    date-windowed rule can fire.
+    """
+    magic_set = _current_set(session)
+    if magic_set is None:
+        return None
+
+    rows = session.execute(
+        select(
+            Player.id, Player.slug, Player.display_name, Player.discord_id,
+            DraftEvent.wins, DraftEvent.finished_at,
+        )
+        .join(DraftEvent, DraftEvent.player_id == Player.id)
+        .where(
+            Player.active.is_(True),
+            DraftEvent.set_id == magic_set.id,
+            DraftEvent.format == "ArenaDirect_Sealed",
+        )
+    ).all()
+
+    bucket: dict[str, dict] = {}
+    for r in rows:
+        b = bucket.setdefault(r.id, {
+            "slug": r.slug, "display_name": r.display_name, "discord_id": r.discord_id,
+            "boxes": 0, "trophies": 0,
+        })
+        wins = int(r.wins or 0)
+        b["boxes"] += boxes_for_event(magic_set.code, wins, r.finished_at)
+        if wins == 7:
+            b["trophies"] += 1
+
+    scored = [
+        (b["boxes"], b["trophies"], pid, b["slug"], b["display_name"], b["discord_id"])
+        for pid, b in bucket.items()
+        if b["boxes"] > 0
+    ]
+    scored.sort(key=lambda x: (-x[0], -x[1], x[4].lower()))
+
+    ranked = [
+        (idx + 1, pid, slug, name, did, boxes, trophies)
+        for idx, (boxes, trophies, pid, slug, name, did) in enumerate(scored)
+    ]
+    top = [
+        LeaderboardEntry(rank=rank, player_id=pid, slug=slug, display_name=name, score=float(boxes), trophies=trophies, events=boxes)
+        for rank, pid, slug, name, _did, boxes, trophies in ranked[:top_n]
+    ]
+    viewer_entry: LeaderboardEntry | None = None
+    if viewer_discord_id is not None:
+        for rank, pid, slug, name, did, boxes, trophies in ranked:
+            if did == viewer_discord_id:
+                viewer_entry = LeaderboardEntry(
+                    rank=rank, player_id=pid, slug=slug, display_name=name,
+                    score=float(boxes), trophies=trophies, events=boxes,
+                )
+                break
+
+    last_updated = session.execute(
+        select(func.max(DraftEvent.fetched_at))
+        .where(DraftEvent.set_id == magic_set.id, DraftEvent.format == "ArenaDirect_Sealed")
+    ).scalar()
+
+    return LeaderboardData(
+        set_code=magic_set.code,
+        set_name=magic_set.name,
+        top=top,
+        viewer=viewer_entry,
+        last_updated=last_updated,
+        drafter_count=len(scored),
+        show_score=False,
+    )
+
+
 def process_leaderboard_for_pod(
     session: Session, viewer_discord_id: str | None, top_n: int = 10,
 ) -> LeaderboardData | None:
@@ -342,8 +420,9 @@ _CYCLE: list[tuple[str | None, str | None]] = [
     ("format", "Premier"),
     ("format", "Traditional"),
     ("format", "Pod"),
+    ("format", "Direct"),
 ]
-_CYCLE_DISPLAY = ["All", "Premier", "Trad", "Pod"]
+_CYCLE_DISPLAY = ["All", "Premier", "Trad", "Pod", "Direct"]
 _CYCLE_LABELS = [f"{_CYCLE_DISPLAY[(i + 1) % len(_CYCLE_DISPLAY)]} ▶️" for i in range(len(_CYCLE_DISPLAY))]
 
 
@@ -427,13 +506,16 @@ def _format_leaderboard(top: list[LeaderboardEntry], set_code: str | None = None
             f"{'Points':>{score_width}}  {'🏆':>{header_trophy_width}}"
         )
     else:
-        drafts_width = max(max(len(str(e.events)) for e in top), len("Drafts"))
+        is_direct = filter_type == "format" and filter_value == "Direct"
+        left_label = "📦" if is_direct else "Drafts"
+        drafts_width = max(max(len(str(e.events)) for e in top), 2 if is_direct else len(left_label))
         # min 2 so single-digit trophies align under the emoji header
         trophy_width = max(max(len(str(e.trophies)) for e in top), 2)
         header_trophy_width = trophy_width - 1
+        header_left_width = drafts_width - 1 if is_direct else drafts_width
         header_inner = (
             f"{'#':<{rank_col_width}} {'Name':<{name_width}}   "
-            f"{'Drafts':>{drafts_width}}  {'🏆':>{header_trophy_width}}"
+            f"{left_label:>{header_left_width}}  {'🏆':>{header_trophy_width}}"
         )
 
     lines = [f"`{header_inner}`"]
@@ -615,6 +697,9 @@ def render_filtered_data(
     if filter_type == "format" and filter_value == "Pod":
         data = process_leaderboard_for_pod(session, viewer_discord_id=viewer_discord_id)
         suffix = "Pod"
+    elif filter_type == "format" and filter_value == "Direct":
+        data = process_leaderboard_for_direct(session, viewer_discord_id=viewer_discord_id)
+        suffix = "Direct"
     elif filter_type == "format":
         assert filter_value is not None
         data = process_leaderboard_for_format(
@@ -824,6 +909,7 @@ class Leaderboard(commands.Cog):
             app_commands.Choice(name="Sealed",      value="Sealed"),
             app_commands.Choice(name="Quick",       value="Quick"),
             app_commands.Choice(name="Pod",         value="Pod"),
+            app_commands.Choice(name="Direct",      value="Direct"),
         ],
         color=[
             app_commands.Choice(name=label, value=code)
