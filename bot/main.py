@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import logging.handlers
 import signal
 import traceback
 from datetime import time as dtime
@@ -31,11 +32,13 @@ from bot.commands.update_profile import setup as setup_update_profile
 from bot.config import settings
 from bot.database import SessionLocal, run_migrations
 from bot.discord_helpers import refresh_player_avatars
+from bot import emojis
 from bot.listeners.sesh_listener import reschedule_pending_events, setup as setup_sesh_listener
 from bot.models import MagicSet, Player, PodDraftEvent
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_tournament import (
     HollowManager,
+    RoundResultsView,
     register_persistent_views as register_pod_views,
     reset_event_matches,
     start_tournament,
@@ -46,7 +49,7 @@ from bot.sets import ACTIVE_SET_CODE
 from bot.tasks.pod_draft_reminder import init_reminder
 
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("bot.main")
 
 LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
 
@@ -60,17 +63,24 @@ AUTO_REFRESH_17L_INTERVAL_S = 3.0
 
 def configure_logging() -> None:
     LOG_DIR.mkdir(exist_ok=True)
-    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    formatter = logging.Formatter(
+        fmt="{asctime} {levelname} [{process:d}][{module}.{funcName}:{lineno:d}] {message}",
+        style="{",
+    )
 
-    file_handler = logging.FileHandler(LOG_DIR / "bot.log", encoding="utf-8")
+    file_handler = logging.handlers.RotatingFileHandler(
+        LOG_DIR / "bot.log", maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8",
+    )
     file_handler.setFormatter(formatter)
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(formatter)
 
     root = logging.getLogger()
     root.setLevel(logging.INFO)
-    # Replace any pre-existing handlers (e.g. from imports that called basicConfig)
     root.handlers = [file_handler, console_handler]
+
+    for noisy in ("discord.http", "engineio.client", "socketio.client"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
 MSG_GENERIC_ERROR = "⚠️ Something went wrong handling that command. The bot owner has been notified."
@@ -110,6 +120,8 @@ def build_bot(guild_id: int) -> commands.Bot:
         # Discord doesn't auto-populate owner_id; fetch it so /command crashes can DM the right person
         app_info = await bot.application_info()
         bot.owner_id = app_info.owner.id
+
+        await emojis.load(bot)
 
         # Pod-draft scheduler — in-memory; on_ready() runs a sweep that re-arms any
         # pending T-5 reminders so restarts don't lose work
@@ -210,6 +222,104 @@ def build_bot(guild_id: int) -> commands.Bot:
                 bot.tree.add_command(c)
 
         await _reply_quietly(ctx, f"✅ Synced: {len(synced_guild)} guild, {len(synced_global)} global.")
+
+    @bot.command(name="testlobby")
+    @commands.is_owner()
+    async def test_lobby(ctx: commands.Context, state: str = "") -> None:
+        """Owner-only. Render the pod-draft lobby embed in this channel.
+
+        `state` is one of: empty | partial | linked | unlinked | ready | notready | drafting | complete.
+        With no arg, posts every state in sequence (one message per state). With a specific state,
+        first call posts a new embed; subsequent calls edit the last one in place."""
+        valid = (
+            "empty", "partial", "linked", "unlinked", "ready", "notready",
+            "drafting", "complete", "round1",
+        )
+        if state and state not in valid:
+            await ctx.send(f"unknown state `{state}`; pick one of: {', '.join(valid)}")
+            return
+
+        thread_name = "SOS Pod Draft #3 - May 15"
+        draftmancer_url = "https://draftmancer.com/?session=LLUT-SOS-May-15-D"
+        rsvps_yes = ["Noya", "MNG", "Foo", "Bar", "Baz", "Qux", "Quux", "Corge", "Grault", "Garply"]
+        rsvps_maybe = ["Waldo", "Plugh", "Xyzzy"]
+
+        linked_eight = [
+            ("Noya#08011", "Noya"),
+            ("MNG#61656", "MNG"),
+            ("FooArena#1001", "Foo"),
+            ("BarArena#1002", "Bar"),
+            ("BazArena#1003", "Baz"),
+            ("QuxArena#1004", "Qux"),
+            ("QuuxArena#1005", "Quux"),
+            ("CorgeArena#1006", "Corge"),
+        ]
+
+        def _build(s: str) -> tuple[discord.Embed, discord.ui.View | None]:
+            if s == "round1":
+                pairings = [("Noya", "MNG"), ("Foo", "Bar"), ("Baz", "Qux"), ("Quux", "Corge")]
+                match_states = [
+                    {
+                        "match_id": f"testlobby-m{i}",
+                        "a_name": a,
+                        "b_name": b,
+                        "a_record": "0-0",
+                        "b_record": "0-0",
+                        "winner_name": None,
+                        "score": None,
+                    }
+                    for i, (a, b) in enumerate(pairings, start=1)
+                ]
+                description = (
+                    f"{emojis.get('mtga')} Get your decks ready, then challenge your opponent below\n\n"
+                    + "\n".join(f"⚔️ {a}  vs  {b}" for a, b in pairings)
+                )
+                embed = discord.Embed(
+                    title="━━━ Round 1 Pairings ━━━",
+                    description=description,
+                    color=discord.Color.green(),
+                )
+                return embed, RoundResultsView(match_states)
+
+            if s == "empty":
+                in_session = []
+            elif s == "partial":
+                in_session = linked_eight[:2]
+            elif s == "unlinked":
+                in_session = linked_eight[:7] + [("Stranger#12345", None)]
+            else:
+                in_session = linked_eight
+            ready_count = 3 if s in ("ready", "notready") else None
+            embed = _render_lobby_embed_v2(
+                thread_name, rsvps_yes, rsvps_maybe, in_session,
+                state=s, draftmancer_url=draftmancer_url, ready_count=ready_count,
+            )
+            has_unrecognized = any(dn is None for _, dn in in_session)
+            view: discord.ui.View | None = (
+                None if s in ("drafting", "complete")
+                else _LobbyReadyButtonView(
+                    draftmancer_url=draftmancer_url,
+                    ready_disabled=(s == "ready" or has_unrecognized),
+                )
+            )
+            return embed, view
+
+        if state == "":
+            for s in valid:
+                embed, view = _build(s)
+                await ctx.send(embed=embed, view=view)
+            return
+
+        embed, view = _build(state)
+        last = _LAST_TESTLOBBY_MESSAGE.get(ctx.channel.id)
+        if last is not None:
+            try:
+                await last.edit(embed=embed, view=view, attachments=[])
+                return
+            except discord.HTTPException:
+                _LAST_TESTLOBBY_MESSAGE.pop(ctx.channel.id, None)
+        msg = await ctx.send(embed=embed, view=view)
+        _LAST_TESTLOBBY_MESSAGE[ctx.channel.id] = msg
 
     async def run_refresh(target_code: str, *, trigger: str) -> dict | None:
         """Pull 17lands data, recompute scores, repaint live messages, DM the owner a report.
@@ -394,6 +504,7 @@ def build_bot(guild_id: int) -> commands.Bot:
     @bot.event
     async def on_ready() -> None:
         log.info("logged in as %s (id=%s)", bot.user, bot.user.id if bot.user else "?")
+        await bot.change_presence(activity=discord.CustomActivity(name="dischord.pages.dev | /join"))
         if not settings.auto_refresh_enabled:
             log.info("AUTO_REFRESH_ENABLED=false; skipping the scheduled 17lands refresh tick")
             return
@@ -401,6 +512,158 @@ def build_bot(guild_id: int) -> commands.Bot:
             auto_refresh_tick.start()
 
     return bot
+
+
+_LAST_TESTLOBBY_MESSAGE: dict[int, discord.Message] = {}
+
+
+class _LobbyReadyButtonView(discord.ui.View):
+    def __init__(
+        self, draftmancer_url: str | None = None, ready_disabled: bool = False,
+    ) -> None:
+        super().__init__(timeout=None)
+        if ready_disabled:
+            self.ready_check.disabled = True
+        if draftmancer_url:
+            self.add_item(discord.ui.Button(
+                label="Join Draftmancer",
+                style=discord.ButtonStyle.link,
+                url=draftmancer_url,
+                emoji=emojis.get_emoji("draftmancer"),
+                disabled=ready_disabled,
+            ))
+
+    @discord.ui.button(
+        label="Ready Check", style=discord.ButtonStyle.success, custom_id="testlobby:ready",
+    )
+    async def ready_check(
+        self, interaction: discord.Interaction, button: discord.ui.Button,
+    ) -> None:
+        await interaction.response.send_message("Ready Check triggered (test).", ephemeral=True)
+
+
+def _render_lobby_embed_v2(
+    title: str,
+    rsvps_yes: list[str],
+    rsvps_maybe: list[str],
+    in_session: list[tuple[str, str | None]],
+    *,
+    state: str,
+    draftmancer_url: str | None = None,
+    ready_count: int | None = None,
+) -> discord.Embed:
+    """Lobby embed. `title` is the thread/event name; `rsvps_yes` / `rsvps_maybe` are sesh display
+    names by RSVP type; `in_session` is Draftmancer sessionUsers as (arena_name,
+    linked_display_name_or_None). `draftmancer_url` appears under the header; `ready_count`
+    (ready state only) is how many of in_draftmancer have responded.
+
+    Buckets: In Draftmancer (linked + in session), Unrecognized name (in session, no Player row),
+    Waiting on (Yes RSVP not in session), Maybe (Maybe RSVP not in session). Waiting + Maybe are
+    hidden once ready check fires."""
+    in_draftmancer = [(arena, dn) for arena, dn in in_session if dn is not None]
+    unrecognized = [arena for arena, dn in in_session if dn is None]
+    in_session_display_names = {dn for _, dn in in_draftmancer}
+    waiting_yes = [name for name in rsvps_yes if name not in in_session_display_names]
+    waiting_maybe = [name for name in rsvps_maybe if name not in in_session_display_names]
+    show_pending = state not in ("ready", "drafting", "complete")
+
+    ready_total = len(in_draftmancer)
+    ready_now = ready_count if ready_count is not None else max(ready_total - 1, 0)
+    if state == "ready":
+        status = "### 🔔 Draftmancer Ready Check in progress!"
+        color = discord.Color.gold()
+    elif state == "notready":
+        decliner = in_draftmancer[ready_now][0] if ready_now < len(in_draftmancer) else "(unknown)"
+        status = f"### ❌ `{decliner}` is not ready, click Ready Check to retry"
+        color = discord.Color.red()
+    elif state == "drafting":
+        status = "### 🎉 All players ready! Draft started"
+        color = discord.Color.green()
+    elif state == "complete":
+        status = f"### {emojis.get('draftmancer')} Draft complete!"
+        color = discord.Color.green()
+    elif unrecognized:
+        status = "### ⏳ Ready Check on hold until everyone is linked"
+        color = discord.Color.orange()
+    else:
+        status = ""
+        color = discord.Color.blurple()
+
+    header_lines: list[str] = []
+    if draftmancer_url:
+        header_lines.append(f"### {draftmancer_url}")
+    if status:
+        header_lines.append(status)
+    description = "\n".join(header_lines) if header_lines else None
+
+    embed = discord.Embed(title=title, description=description, color=color)
+
+    if state == "ready":
+        ready_players = in_draftmancer[:ready_now]
+        pending_players = in_draftmancer[ready_now:]
+        ready_trailing = "\n​" if len(ready_players) > len(pending_players) else ""
+        embed.add_field(
+            name=f"✅ Ready ({len(ready_players)})",
+            value=("\n".join(f"{dn} | {arena}" for arena, dn in ready_players) or "​") + ready_trailing,
+            inline=True,
+        )
+        embed.add_field(
+            name=f"⏳ Pending ({len(pending_players)})",
+            value=("\n".join(f"{dn} | {arena}" for arena, dn in pending_players) or "​"),
+            inline=True,
+        )
+    elif in_draftmancer:
+        trailing = "\n​" if show_pending else ""
+        in_drft_label = "Players" if state == "complete" else "In Draftmancer"
+        embed.add_field(
+            name=f"✅ {in_drft_label} ({len(in_draftmancer)})",
+            value="\n".join(dn for _, dn in in_draftmancer) + trailing,
+            inline=True,
+        )
+        embed.add_field(
+            name="​",
+            value="\n".join(f"`{arena}`" for arena, _ in in_draftmancer) + trailing,
+            inline=True,
+        )
+        if show_pending:
+            embed.add_field(name="​", value="​", inline=True)
+
+    if show_pending:
+        if unrecognized:
+            embed.add_field(
+                name=f"⚠️ Unrecognized ({len(unrecognized)})",
+                value="\n".join(f"`{arena}`" for arena in unrecognized) + "\n​",
+                inline=True,
+            )
+            embed.add_field(
+                name="👉 How to fix",
+                value="Run `/pod-link-arena` from inside this thread\n​",
+                inline=True,
+            )
+            embed.add_field(name="​", value="​", inline=True)
+        waiting_trailing = "\n​" if len(waiting_yes) > len(waiting_maybe) else ""
+        embed.add_field(
+            name=f"⌛ Waiting on ({len(waiting_yes)})",
+            value=("\n".join(waiting_yes) or "​") + waiting_trailing,
+            inline=True,
+        )
+        embed.add_field(
+            name=f"🤷 Maybe ({len(waiting_maybe)})",
+            value="\n".join(waiting_maybe) or "​",
+            inline=True,
+        )
+        embed.add_field(name="​", value="​", inline=True)
+
+    if state != "complete":
+        embed.add_field(
+            name="🤖 Commands",
+            value=(
+                "`/pod-takeover` — take ownership of the Draftmancer session if required\n"
+                "`/pod-link-arena` — link your MTG Arena handle"
+            ),
+            inline=False,
+        )
+    return embed
 
 
 def main() -> None:

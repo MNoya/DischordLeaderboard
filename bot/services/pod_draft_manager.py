@@ -10,26 +10,26 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import re
 
 import discord
 import socketio
 from discord.ext import commands
 
+from sqlalchemy import select
+
+from bot import emojis
 from bot.config import settings
 from bot.database import SessionLocal
-from bot.discord_helpers import MTGA_EMOJI
-from bot.models import PodDraftEvent
+from bot.discord_helpers import extract_avatar_hash
+from bot.models import Player, PodDraftEvent
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_drafts import classify_lobby_names
 from bot.services.pod_tournament import start_tournament
+from bot.slug import disambiguate_slug, slugify
 
 
 log = logging.getLogger(__name__)
-
-
-def _classify_names_sync(names: list[str]) -> list[tuple[str, bool]]:
-    with SessionLocal() as session:
-        return classify_lobby_names(session, names)
 
 
 _BACKOFF_BASE_S = 1.0
@@ -38,6 +38,7 @@ _BACKOFF_MAX_RETRIES = 8
 _BOT_USER_NAME = "DisChordBot"
 _READY_TIMEOUT_S = 90
 _START_DRAFT_DELAY_S = 1
+_ARENA_SUFFIX_RE = re.compile(r"#\d+$")
 
 
 class PodDraftManager:
@@ -140,7 +141,7 @@ class PodDraftManager:
 
         non_bot_names = [u.get("userName") for u in self.session_users
                          if u.get("userName") and u.get("userName") != _BOT_USER_NAME]
-        classified = await asyncio.to_thread(_classify_names_sync, non_bot_names) if non_bot_names else []
+        classified = await self._classify_users(non_bot_names) if non_bot_names else []
         await self._refresh_lobby_status(classified)
 
         if self.ready_check_active:
@@ -148,7 +149,7 @@ class PodDraftManager:
             if current != self.expected_user_ids:
                 asyncio.create_task(self._invalidate_ready_check("player list changed"))
         elif not self.auto_ready_attempted and not self.auto_ready_disabled:
-            all_linked = all(ok for _, ok in classified)
+            all_linked = all(display_name is not None for _, display_name in classified)
             if len(non_bot_names) >= max(1, self.expected_attendee_count) and all_linked:
                 asyncio.create_task(self._auto_initiate_ready_check())
 
@@ -208,6 +209,42 @@ class PodDraftManager:
         self._ready_timeout_task = asyncio.create_task(self._ready_timeout())
         return None
 
+    async def _classify_users(self, names: list[str]) -> list[tuple[str, str | None]]:
+        """Classify Draftmancer usernames against linked players, falling back to guild members
+        whose Discord display_name (or username) matches the Draftmancer name's prefix.
+        For guild-member matches without a Player row, lazily create one so the participant is
+        recorded toward the pod leaderboard at draft completion."""
+        classified = await asyncio.to_thread(_classify_names_sync, names)
+        if not any(dn is None for _, dn in classified):
+            return classified
+        thread = await self._fetch_thread()
+        guild = thread.guild if thread is not None else None
+        if guild is None:
+            return classified
+        unresolved: list[tuple[str, discord.Member]] = []
+        out: list[tuple[str, str | None]] = []
+        for arena, dn in classified:
+            if dn is not None:
+                out.append((arena, dn))
+                continue
+            member = _find_guild_member_for_arena(guild, arena)
+            if member is None:
+                out.append((arena, None))
+                continue
+            unresolved.append((arena, member))
+            out.append((arena, member.display_name))
+        if unresolved:
+            await asyncio.to_thread(_ensure_players_for_members_sync, unresolved)
+        return out
+
+    async def refresh_lobby_now(self) -> None:
+        """Re-run classification with current sessionUsers and edit the lobby card.
+        External hook for /pod-link-arena so the lobby reflects the new link immediately."""
+        non_bot_names = [u.get("userName") for u in self.session_users
+                         if u.get("userName") and u.get("userName") != _BOT_USER_NAME]
+        classified = await self._classify_users(non_bot_names) if non_bot_names else []
+        await self._refresh_lobby_status(classified)
+
     async def _refresh_lobby_status(self, classified: list[tuple[str, bool]]) -> None:
         text = self._format_lobby_status(classified)
         thread = await self._fetch_thread()
@@ -224,29 +261,29 @@ class PodDraftManager:
             except Exception:
                 log.warning("could not edit lobby status for %s", self.session_id, exc_info=True)
 
-    def _format_lobby_status(self, classified: list[tuple[str, bool]]) -> str:
+    def _format_lobby_status(self, classified: list[tuple[str, str | None]]) -> str:
         total_expected = max(1, self.expected_attendee_count)
-        linked = [n for n, ok in classified if ok]
-        unlinked = [n for n, ok in classified if not ok]
+        linked = [(arena, dn) for arena, dn in classified if dn is not None]
+        unlinked = [arena for arena, dn in classified if dn is None]
         lines = [
-            f"{MTGA_EMOJI} **Pod-draft lobby** — {self.set_code}",
-            f"Players: {len(classified)}/{total_expected}",
+            f"### Pod-draft Lobby · {self.set_code}",
+            f"**{len(classified)}/{total_expected}** players in the Draftmancer session.",
         ]
         if linked:
             lines.append("")
             lines.append("**✅ Linked**")
-            for n in linked:
-                lines.append(f"• {n}")
+            for arena, dn in linked:
+                lines.append(f"• `{arena}` — {dn}")
         if unlinked:
             lines.append("")
             lines.append("**❓ Unlinked** — run `/pod-link-arena <ArenaID#1234>` to link:")
-            for n in unlinked:
-                lines.append(f"• `{n}`")
+            for arena in unlinked:
+                lines.append(f"• `{arena}`")
         lines.append("")
         if not classified:
             lines.append("⏳ Waiting for players to join the Draftmancer lobby.")
         elif unlinked:
-            lines.append("⏳ Ready check blocked until all players are linked.")
+            lines.append("⏳ Ready check on hold until all players are linked.")
         elif len(classified) < total_expected:
             lines.append("⏳ Waiting for remaining players to join.")
         else:
@@ -270,7 +307,7 @@ class PodDraftManager:
         thread = await self._fetch_thread()
         if thread is not None:
             try:
-                await thread.send("🎴 Draft complete! Export your deck to Arena.")
+                await thread.send(f"{emojis.get('cardback')} Draft complete! Export your deck to Arena.")
             except Exception:
                 log.warning("could not post draft-complete message", exc_info=True)
         # Snapshot roster and hand off to the Python-Swiss bracket flow
@@ -499,3 +536,47 @@ async def start_manager(
         await manager._mark_socket_status("error")
         return None
     return manager
+
+
+def _classify_names_sync(names: list[str]) -> list[tuple[str, bool]]:
+    with SessionLocal() as session:
+        return classify_lobby_names(session, names)
+
+
+def _find_guild_member_for_arena(guild: discord.Guild, arena_name: str) -> discord.Member | None:
+    """Match a Draftmancer username to a guild member by display_name or username.
+    Strips the trailing `#NNNN` Arena suffix so `MNG#61656` matches a member whose display name is `MNG`."""
+    norm = _ARENA_SUFFIX_RE.sub("", arena_name).lower()
+    for member in guild.members:
+        if member.display_name.lower() == norm or member.name.lower() == norm:
+            return member
+    return None
+
+
+def _ensure_players_for_members_sync(pairs: list[tuple[str, discord.Member]]) -> None:
+    """For each (arena_name, member) pair, find or lazily create a Player row keyed by discord_id.
+    Existing rows are left untouched (we never overwrite a manually-set arena_name)."""
+    if not pairs:
+        return
+    with SessionLocal() as session:
+        taken_slugs = set(session.execute(select(Player.slug)).scalars().all())
+        for arena_name, member in pairs:
+            discord_id = str(member.id)
+            existing = session.execute(
+                select(Player).where(Player.discord_id == discord_id)
+            ).scalar_one_or_none()
+            if existing is not None:
+                continue
+            slug = disambiguate_slug(slugify(member.display_name), taken_slugs)
+            taken_slugs.add(slug)
+            session.add(Player(
+                slug=slug,
+                discord_id=discord_id,
+                discord_username=member.name,
+                display_name=member.display_name,
+                avatar_hash=extract_avatar_hash(member),
+                arena_name=arena_name,
+                active=True,
+            ))
+            log.info("auto-created Player row for guild member %s (arena=%s)", member.display_name, arena_name)
+        session.commit()

@@ -10,7 +10,7 @@ from discord.ext import commands
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
-from bot import audit
+from bot import audit, emojis
 from bot.commands.stats import process_stats, render_embed as render_stats_embed
 from bot.config import settings
 from bot.database import SessionLocal
@@ -72,12 +72,6 @@ class LeaderboardData:
     show_score: bool = True
     filter_type: str | None = None
     filter_value: str | None = None
-
-
-def _current_set(session: Session) -> MagicSet | None:
-    return session.execute(
-        select(MagicSet).where(MagicSet.code == ACTIVE_SET_CODE)
-    ).scalar_one_or_none()
 
 
 def process_leaderboard(
@@ -555,11 +549,10 @@ class LeaderboardView(discord.ui.View):
         super().__init__(timeout=None)
         self.add_item(_CycleButton(label=cycle_label))
         # URL buttons are exempt from the persistent-view custom_id requirement
-        llu = discord.PartialEmoji.from_str(settings.llu_emoji) if settings.llu_emoji else None
         self.add_item(discord.ui.Button(
             label="Stats", url=settings.public_site_url,
             style=discord.ButtonStyle.link,
-            emoji=llu,
+            emoji=emojis.get_emoji("llu"),
         ))
 
     @discord.ui.button(label="Join", style=discord.ButtonStyle.success, custom_id="leaderboard:join")
@@ -983,3 +976,9 @@ class Leaderboard(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Leaderboard(bot))
+
+
+def _current_set(session: Session) -> MagicSet | None:
+    return session.execute(
+        select(MagicSet).where(MagicSet.code == ACTIVE_SET_CODE)
+    ).scalar_one_or_none()

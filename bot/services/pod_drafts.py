@@ -88,9 +88,13 @@ def _normalized_column(col):
     return func.regexp_replace(func.lower(col), _ARENA_ID_SQL, "")
 
 
-def classify_lobby_names(session: Session, names: Sequence[str]) -> list[tuple[str, bool]]:
-    """For each Draftmancer userName, return (name, True if it resolved to an active Player)."""
-    return [(n, _player_for_name(session, n) is not None) for n in names]
+def classify_lobby_names(session: Session, names: Sequence[str]) -> list[tuple[str, str | None]]:
+    """For each Draftmancer userName, return (arena_name, display_name) if linked else (arena_name, None)."""
+    result = []
+    for n in names:
+        player = _player_for_name(session, n)
+        result.append((n, player.display_name if player else None))
+    return result
 
 
 def _player_for_name(session: Session, name: str) -> Player | None:
@@ -220,11 +224,13 @@ def add_pairing(
     round_num: int,
     player_a_name: str,
     player_b_name: str,
+    pairing_index: int = 0,
 ) -> PodDraftMatch:
     """Insert a pending match (no winner yet); returns the row with its generated id."""
     match = PodDraftMatch(
         event_id=event_id,
         round=round_num,
+        pairing_index=pairing_index,
         player_a_name=player_a_name,
         player_b_name=player_b_name,
     )

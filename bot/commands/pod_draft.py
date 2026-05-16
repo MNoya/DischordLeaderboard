@@ -1,6 +1,7 @@
 """Pod-draft slash commands."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 
@@ -9,9 +10,9 @@ from discord import app_commands
 from discord.ext import commands
 from sqlalchemy import select
 
-from bot import audit
+from bot import audit, emojis
 from bot.database import SessionLocal
-from bot.discord_helpers import MTGA_EMOJI, extract_avatar_hash
+from bot.discord_helpers import extract_avatar_hash
 from bot.models import Player
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.slug import disambiguate_slug, slugify
@@ -93,9 +94,12 @@ class PodDraft(commands.Cog):
 
         audit.event("pod_link_arena_success", user_id=user_id, player_id=player_id)
         await interaction.response.send_message(
-            f"{MTGA_EMOJI} {mention} is **{arena_name}** on Arena.",
+            f"{emojis.get('mtga')} {mention} is **{arena_name}** on Arena.",
             allowed_mentions=no_pings,
         )
+
+        for manager in list(ACTIVE_POD_MANAGERS.values()):
+            asyncio.create_task(manager.refresh_lobby_now())
 
     @app_commands.command(name="pod-takeover", description="Take control of the Draftmancer session and disconnect the bot.")
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)

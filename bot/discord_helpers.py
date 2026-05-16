@@ -8,7 +8,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Iterable
 
-from bot.config import settings
 
 if TYPE_CHECKING:
     import discord
@@ -18,9 +17,6 @@ if TYPE_CHECKING:
     from bot.models import Player
 
 logger = logging.getLogger(__name__)
-
-MTGA_EMOJI = settings.mtga_emoji
-
 
 def extract_avatar_hash(user: "discord.abc.User | discord.User | discord.Member | None") -> str | None:
     """Return the Discord avatar hash for a user, or None if they use the default avatar.

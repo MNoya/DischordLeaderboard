@@ -10,6 +10,7 @@ import logging
 import discord
 from discord.ext import commands
 
+from bot import emojis
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.models import PodDraftEvent
@@ -55,9 +56,9 @@ async def fire_reminder(event_id: str) -> None:
     expected_attendee_count = len(attendees)
 
     body = (
-        "🎴 Pod Draft starts in 5 minutes!\n"
+        f"{emojis.get('cardback')} Pod Draft starts in 5 minutes!\n"
         + f"Join the Draftmancer session: {draftmancer_url}\n"
-        + "Set your Draftmancer name to your Arena name (e.g. `YourName#1234`) so pairings work smoothly."
+        + "Set your user name to your Arena handle (e.g. `ArenaID#1234`) so pairings work smoothly."
         + (f"\n\n{mention_block}" if mention_block else "")
     )
     log.info("fire_reminder body repr for %s: %r", event_id, body)

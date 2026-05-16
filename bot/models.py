@@ -282,13 +282,14 @@ class PodDraftParticipant(Base):
 class PodDraftMatch(Base):
     __tablename__ = "pod_draft_matches"
 
-    id            = Column(String, primary_key=True, default=lambda: str(uuid4()))
-    event_id      = Column(String, ForeignKey("pod_draft_events.id", ondelete="CASCADE"), nullable=False)
-    round         = Column(Integer, nullable=False)
-    player_a_name = Column(String, nullable=False)
-    player_b_name = Column(String, nullable=False)
-    winner_name   = Column(String, nullable=True)
-    score         = Column(String, nullable=True)
-    reported_at   = Column(DateTime(timezone=True), nullable=True)
+    id             = Column(String, primary_key=True, default=lambda: str(uuid4()))
+    event_id       = Column(String, ForeignKey("pod_draft_events.id", ondelete="CASCADE"), nullable=False)
+    round          = Column(Integer, nullable=False)
+    pairing_index  = Column(Integer, nullable=False, default=0)
+    player_a_name  = Column(String, nullable=False)
+    player_b_name  = Column(String, nullable=False)
+    winner_name    = Column(String, nullable=True)
+    score          = Column(String, nullable=True)
+    reported_at    = Column(DateTime(timezone=True), nullable=True)
 
     event = relationship("PodDraftEvent", back_populates="matches")

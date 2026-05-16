@@ -66,35 +66,6 @@ MSG_SUCCESS = "✅ Joined! Your latest stats are now on the leaderboard."
 MSG_TOKEN_IN_USE = "That 17lands token is already linked to another Discord account."
 
 
-async def _broadcast_current_set_safely(bot) -> None:
-    """Trigger a live edit of every tracked leaderboard message for the current set.
-
-    Wrapped in a broad except so a Discord-side hiccup during the broadcast can't
-    sink the signup flow itself — the join already succeeded by this point.
-    """
-    try:
-        await broadcast_current_set_update(bot)
-    except Exception:
-        logger.warning("post-signup leaderboard broadcast failed", exc_info=True)
-
-
-async def _build_join_preview(user_id: str):
-    """Fetch the leaderboard + stats data for a freshly-joined or reactivated user.
-
-    Returns (leaderboard_embed, leaderboard_view, stats_embed). Any element may
-    be None if there's nothing to show (no current set, no stats yet).
-    """
-    with SessionLocal() as session:
-        lb_data = process_leaderboard(session, viewer_discord_id=user_id)
-    lb_embed = render_lb(lb_data) if lb_data is not None else None
-
-    with SessionLocal() as session:
-        stats_data = process_stats(session, player_name=None, viewer_discord_id=user_id)
-    stats_embed = render_stats_embed(stats_data) if stats_data is not None else None
-
-    return lb_embed, render_lb_view(), stats_embed
-
-
 SignupKind = Literal[
     "created",
     "already_signed_up",
@@ -116,19 +87,6 @@ class SignupResult:
 class SignupCheck:
     kind: SignupCheckKind
     player_id: str | None = None
-
-
-def _next_available_slug(session: Session, display_name: str) -> str:
-    """Return a unique slug for `display_name`, suffixed -2/-3/... if taken.
-
-    Race-prone in theory (no advisory lock), but signups are rare and the unique
-    constraint will fail-loud if two slugs collide at insert time.
-    """
-    base = slugify(display_name)
-    taken = set(session.execute(
-        select(Player.slug).where(Player.slug.like(f"{base}%"))
-    ).scalars().all())
-    return disambiguate_slug(base, taken)
 
 
 def check_signup_eligibility(
@@ -347,3 +305,45 @@ class Signup(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Signup(bot))
+
+
+async def _broadcast_current_set_safely(bot) -> None:
+    """Trigger a live edit of every tracked leaderboard message for the current set.
+
+    Wrapped in a broad except so a Discord-side hiccup during the broadcast can't
+    sink the signup flow itself — the join already succeeded by this point.
+    """
+    try:
+        await broadcast_current_set_update(bot)
+    except Exception:
+        logger.warning("post-signup leaderboard broadcast failed", exc_info=True)
+
+
+async def _build_join_preview(user_id: str):
+    """Fetch the leaderboard + stats data for a freshly-joined or reactivated user.
+
+    Returns (leaderboard_embed, leaderboard_view, stats_embed). Any element may
+    be None if there's nothing to show (no current set, no stats yet).
+    """
+    with SessionLocal() as session:
+        lb_data = process_leaderboard(session, viewer_discord_id=user_id)
+    lb_embed = render_lb(lb_data) if lb_data is not None else None
+
+    with SessionLocal() as session:
+        stats_data = process_stats(session, player_name=None, viewer_discord_id=user_id)
+    stats_embed = render_stats_embed(stats_data) if stats_data is not None else None
+
+    return lb_embed, render_lb_view(), stats_embed
+
+
+def _next_available_slug(session: Session, display_name: str) -> str:
+    """Return a unique slug for `display_name`, suffixed -2/-3/... if taken.
+
+    Race-prone in theory (no advisory lock), but signups are rare and the unique
+    constraint will fail-loud if two slugs collide at insert time.
+    """
+    base = slugify(display_name)
+    taken = set(session.execute(
+        select(Player.slug).where(Player.slug.like(f"{base}%"))
+    ).scalars().all())
+    return disambiguate_slug(base, taken)

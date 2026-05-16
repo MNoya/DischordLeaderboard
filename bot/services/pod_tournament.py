@@ -16,6 +16,7 @@ import discord
 from discord import ui
 from sqlalchemy import delete, func, select
 
+from bot import emojis
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.models import Player as DbPlayer, PodDraftMatch, PodDraftParticipant
@@ -83,78 +84,6 @@ async def advance_to_round(manager: "PodDraftManager", round_num: int) -> None:
         await thread.send(embed=embed, view=view)
     except Exception:
         log.warning("could not post round %d message", round_num, exc_info=True)
-
-
-def _state_for_pending(match_id: str, a_name: str, b_name: str, standings_by_id) -> dict:
-    a_s = standings_by_id.get(a_name)
-    b_s = standings_by_id.get(b_name)
-    return {
-        "match_id": match_id,
-        "a_name": a_name,
-        "b_name": b_name,
-        "a_record": f"{a_s.wins}-{a_s.losses}" if a_s else "0-0",
-        "b_record": f"{b_s.wins}-{b_s.losses}" if b_s else "0-0",
-        "winner_name": None,
-        "score": None,
-    }
-
-
-def _round_embed(round_num: int, match_states: list[dict]) -> discord.Embed:
-    all_done = all(m["winner_name"] for m in match_states)
-    title = (
-        f"✅ Round {round_num} complete!" if all_done else f"━━━ Round {round_num} Pairings ━━━"
-    )
-    lines: list[str] = []
-    for m in match_states:
-        winner = m["winner_name"]
-        if winner == SKIPPED_SENTINEL:
-            lines.append(f"🚫 No match played: {m['a_name']} vs {m['b_name']}")
-        elif winner:
-            loser = m["b_name"] if winner.lower() == m["a_name"].lower() else m["a_name"]
-            lines.append(f"🎮 {winner} wins {m['score']} vs {loser}")
-        elif round_num > 1:
-            lines.append(f"⚔️ {m['a_name']} ({m['a_record']})  vs  {m['b_name']} ({m['b_record']})")
-        else:
-            lines.append(f"⚔️ {m['a_name']}  vs  {m['b_name']}")
-    return discord.Embed(
-        title=title,
-        description="\n".join(lines),
-        color=discord.Color.green(),
-    )
-
-
-def _load_matches(event_id: str) -> list[MatchOutcome]:
-    """Loads played matches only — skipped/no-match-played rows are excluded from standings."""
-    with SessionLocal() as session:
-        rows = session.execute(
-            select(PodDraftMatch)
-            .where(
-                PodDraftMatch.event_id == event_id,
-                PodDraftMatch.winner_name.is_not(None),
-                PodDraftMatch.winner_name != SKIPPED_SENTINEL,
-            )
-            .order_by(PodDraftMatch.round, PodDraftMatch.reported_at)
-        ).scalars().all()
-        return [
-            MatchOutcome(
-                round_num=r.round,
-                player_a_id=r.player_a_name,
-                player_b_id=r.player_b_name,
-                winner_id=r.winner_name,
-                score=r.score or "2-0",
-            )
-            for r in rows
-        ]
-
-
-def _insert_pending_matches(event_id: str, round_num: int, pairings: list[tuple[str, str]]) -> list[tuple[str, str, str]]:
-    out: list[tuple[str, str, str]] = []
-    with SessionLocal() as session:
-        for a_name, b_name in pairings:
-            row = add_pairing(session, event_id, round_num, a_name, b_name)
-            out.append((row.id, a_name, b_name))
-        session.commit()
-    return out
 
 
 class MatchResultSelect(ui.Select):
@@ -247,7 +176,7 @@ def _load_round_states(event_id: str, round_num: int) -> list[dict]:
         rows = session.execute(
             select(PodDraftMatch)
             .where(PodDraftMatch.event_id == event_id, PodDraftMatch.round == round_num)
-            .order_by(PodDraftMatch.id)
+            .order_by(PodDraftMatch.pairing_index)
         ).scalars().all()
     prior = _load_matches(event_id)
     # Build standings as of the start of this round (use only earlier-round results)
@@ -373,7 +302,7 @@ async def finalize_tournament(manager: "PodDraftManager") -> None:
         description=(
             f"{champ_display} wins {champion.wins}-{champion.losses}!\n\n"
             f"**Final standings:**\n" + "\n".join(standings_lines)
-            + "\n\nPost your final decklist screenshot in this thread! 🎴"
+            + f"\n\nPost your final decklist screenshot in this thread! {emojis.get('cardback')}"
         ),
         color=discord.Color.green(),
     )
@@ -457,3 +386,75 @@ async def reset_event_matches(event_id: str) -> int:
             session.commit()
             return result.rowcount or 0
     return await asyncio.to_thread(_do)
+
+
+def _state_for_pending(match_id: str, a_name: str, b_name: str, standings_by_id) -> dict:
+    a_s = standings_by_id.get(a_name)
+    b_s = standings_by_id.get(b_name)
+    return {
+        "match_id": match_id,
+        "a_name": a_name,
+        "b_name": b_name,
+        "a_record": f"{a_s.wins}-{a_s.losses}" if a_s else "0-0",
+        "b_record": f"{b_s.wins}-{b_s.losses}" if b_s else "0-0",
+        "winner_name": None,
+        "score": None,
+    }
+
+
+def _round_embed(round_num: int, match_states: list[dict]) -> discord.Embed:
+    all_done = all(m["winner_name"] for m in match_states)
+    title = (
+        f"✅ Round {round_num} complete!" if all_done else f"━━━ Round {round_num} Pairings ━━━"
+    )
+    lines: list[str] = []
+    for m in match_states:
+        winner = m["winner_name"]
+        if winner == SKIPPED_SENTINEL:
+            lines.append(f"🚫 No match played: {m['a_name']} vs {m['b_name']}")
+        elif winner:
+            loser = m["b_name"] if winner.lower() == m["a_name"].lower() else m["a_name"]
+            lines.append(f"🎮 {winner} wins {m['score']} vs {loser}")
+        elif round_num > 1:
+            lines.append(f"⚔️ {m['a_name']} ({m['a_record']})  vs  {m['b_name']} ({m['b_record']})")
+        else:
+            lines.append(f"⚔️ {m['a_name']}  vs  {m['b_name']}")
+    return discord.Embed(
+        title=title,
+        description="\n".join(lines),
+        color=discord.Color.green(),
+    )
+
+
+def _load_matches(event_id: str) -> list[MatchOutcome]:
+    """Loads played matches only — skipped/no-match-played rows are excluded from standings."""
+    with SessionLocal() as session:
+        rows = session.execute(
+            select(PodDraftMatch)
+            .where(
+                PodDraftMatch.event_id == event_id,
+                PodDraftMatch.winner_name.is_not(None),
+                PodDraftMatch.winner_name != SKIPPED_SENTINEL,
+            )
+            .order_by(PodDraftMatch.round, PodDraftMatch.reported_at)
+        ).scalars().all()
+        return [
+            MatchOutcome(
+                round_num=r.round,
+                player_a_id=r.player_a_name,
+                player_b_id=r.player_b_name,
+                winner_id=r.winner_name,
+                score=r.score or "2-0",
+            )
+            for r in rows
+        ]
+
+
+def _insert_pending_matches(event_id: str, round_num: int, pairings: list[tuple[str, str]]) -> list[tuple[str, str, str]]:
+    out: list[tuple[str, str, str]] = []
+    with SessionLocal() as session:
+        for idx, (a_name, b_name) in enumerate(pairings):
+            row = add_pairing(session, event_id, round_num, a_name, b_name, pairing_index=idx)
+            out.append((row.id, a_name, b_name))
+        session.commit()
+    return out

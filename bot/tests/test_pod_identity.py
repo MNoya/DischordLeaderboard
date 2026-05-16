@@ -118,19 +118,19 @@ def test_display_name_wins_over_discord_username_when_both_match(session):
 
 # --- classify_lobby_names ---
 
-def test_classify_returns_true_for_recognized_names(session):
+def test_classify_returns_display_name_for_recognized_names(session):
     _seed_player(session, discord_id="10", username="known", display_name="Known")
 
     result = dict(classify_lobby_names(session, ["Known", "Unknown#9999"]))
-    assert result["Known"] is True
-    assert result["Unknown#9999"] is False
+    assert result["Known"] == "Known"
+    assert result["Unknown#9999"] is None
 
 
 def test_classify_resolves_name_with_arena_suffix_via_display_name(session):
     _seed_player(session, discord_id="11", username="noya", display_name="Noya")
 
     result = dict(classify_lobby_names(session, ["Noya#12345"]))
-    assert result["Noya#12345"] is True
+    assert result["Noya#12345"] == "Noya"
 
 
 def test_classify_resolves_via_stored_arena_name(session):
@@ -140,9 +140,8 @@ def test_classify_resolves_via_stored_arena_name(session):
     )
 
     result = dict(classify_lobby_names(session, ["MartinTheGreat#5432", "Noya#0001"]))
-    # Both resolve: arena_name for the first, display_name for the second
-    assert result["MartinTheGreat#5432"] is True
-    assert result["Noya#0001"] is True
+    assert result["MartinTheGreat#5432"] == "Noya"
+    assert result["Noya#0001"] == "Noya"
 
 
 def test_classify_empty_list(session):
@@ -156,7 +155,7 @@ def test_classify_preserves_order(session):
     names = ["One", "Two#0", "Three", "Four#0"]
     result = classify_lobby_names(session, names)
     assert [n for n, _ in result] == names
-    assert [ok for _, ok in result] == [True, False, True, False]
+    assert [dn for _, dn in result] == ["One", None, "Three", None]
 
 
 # --- /pod-link-arena input format (regex) ---

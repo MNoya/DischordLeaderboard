@@ -78,6 +78,7 @@ def upgrade() -> None:
         sa.Column("id", sa.String(), nullable=False),
         sa.Column("event_id", sa.String(), nullable=False),
         sa.Column("round", sa.Integer(), nullable=False),
+        sa.Column("pairing_index", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("player_a_name", sa.String(), nullable=False),
         sa.Column("player_b_name", sa.String(), nullable=False),
         sa.Column("winner_name", sa.String(), nullable=True),
