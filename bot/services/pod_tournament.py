@@ -88,7 +88,8 @@ async def advance_to_round(manager: "PodDraftManager", round_num: int) -> None:
         return
 
     standings_by_id = {s.player_id: s for s in pod_swiss.compute_standings(players, prior)}
-    match_states = [_state_for_pending(match_id, a, b, standings_by_id) for match_id, a, b in pending_rows]
+    displays = await asyncio.to_thread(_load_participant_displays, manager.event_id)
+    match_states = [_state_for_pending(match_id, a, b, standings_by_id, displays) for match_id, a, b in pending_rows]
     embed = _round_embed(round_num, match_states)
     view = RoundResultsView(match_states)
     try:
@@ -98,17 +99,21 @@ async def advance_to_round(manager: "PodDraftManager", round_num: int) -> None:
 
 
 class MatchResultSelect(ui.Select):
-    """Per-match dropdown; placeholder reads 'Report A vs B'. Match_id is encoded in option values."""
+    """Per-match dropdown; placeholder + labels use Discord display names. Option values still encode
+    the draftmancer_name (DB primary key) so result commits resolve correctly."""
 
     def __init__(self, slot: int, match_id: str = "", a_name: str = "", b_name: str = "",
+                 a_display: str = "", b_display: str = "",
                  selected_value: str | None = None, winner_name: str | None = None):
         if match_id and a_name and b_name:
-            placeholder = f"{a_name} vs {b_name}"
+            a_disp = a_display or a_name
+            b_disp = b_display or b_name
+            placeholder = f"{a_disp} vs {b_disp}"
             values = [
-                (f"{a_name} wins: 2-0", f"{match_id}|{a_name}|2-0"),
-                (f"{a_name} wins: 2-1", f"{match_id}|{a_name}|2-1"),
-                (f"{b_name} wins: 2-1", f"{match_id}|{b_name}|2-1"),
-                (f"{b_name} wins: 2-0", f"{match_id}|{b_name}|2-0"),
+                (f"{a_disp} wins: 2-0", f"{match_id}|{a_name}|2-0"),
+                (f"{a_disp} wins: 2-1", f"{match_id}|{a_name}|2-1"),
+                (f"{b_disp} wins: 2-1", f"{match_id}|{b_name}|2-1"),
+                (f"{b_disp} wins: 2-0", f"{match_id}|{b_name}|2-0"),
                 ("No Match Played", f"{match_id}|{SKIPPED_SENTINEL}|0-0"),
             ]
             options = [
@@ -146,6 +151,8 @@ class RoundResultsView(ui.View):
                     match_id=m["match_id"],
                     a_name=m["a_name"],
                     b_name=m["b_name"],
+                    a_display=m.get("a_display") or m["a_name"],
+                    b_display=m.get("b_display") or m["b_name"],
                     selected_value=selected,
                 ))
         else:
@@ -203,14 +210,19 @@ def _load_round_states(event_id: str, round_num: int) -> list[dict]:
     distinct_names = {n for r in rows for n in (r.player_a_name, r.player_b_name)}
     players = [Player(id=n, name=n) for n in sorted(distinct_names)]
     standings_by_id = {s.player_id: s for s in pod_swiss.compute_standings(players, pre_round)}
+    displays = _load_participant_displays(event_id)
     states = []
     for r in rows:
         a_s = standings_by_id.get(r.player_a_name)
         b_s = standings_by_id.get(r.player_b_name)
+        a_info = displays.get(_normalize_player_name(r.player_a_name), {})
+        b_info = displays.get(_normalize_player_name(r.player_b_name), {})
         states.append({
             "match_id": r.id,
             "a_name": r.player_a_name,
             "b_name": r.player_b_name,
+            "a_display": a_info.get("display_name") or r.player_a_name,
+            "b_display": b_info.get("display_name") or r.player_b_name,
             "a_record": f"{a_s.wins}-{a_s.losses}" if a_s else "0-0",
             "b_record": f"{b_s.wins}-{b_s.losses}" if b_s else "0-0",
             "winner_name": r.winner_name,
@@ -306,22 +318,26 @@ async def finalize_tournament(manager: "PodDraftManager") -> None:
 
     champion = standings[0]
     champion_mention = await _resolve_discord_mention(manager.event_id, champion.player_name)
-    champ_display = champion_mention or f"**{champion.player_name}**"
-    slugs = await asyncio.to_thread(_load_participant_slugs, manager.event_id)
+    displays = await asyncio.to_thread(_load_participant_displays, manager.event_id)
+    champ_info = displays.get(_normalize_player_name(champion.player_name), {})
+    champ_name = champ_info.get("display_name") or champion.player_name
+    champ_display = champion_mention or f"**{champ_name}**"
     site_root = settings.public_site_url.rstrip("/")
     medals = ["🥇", "🥈", "🥉"]
     standings_lines = []
     for s in standings:
-        prefix = medals[s.rank - 1] if s.rank - 1 < len(medals) else "   "
-        slug = slugs.get(_normalize_player_name(s.player_name))
-        display = f"[{s.player_name}]({site_root}/player/{slug})" if slug else s.player_name
-        standings_lines.append(f"{prefix} {display}  {s.wins}-{s.losses}")
+        info = displays.get(_normalize_player_name(s.player_name), {})
+        name = info.get("display_name") or s.player_name
+        slug = info.get("slug")
+        prefix = f"{medals[s.rank - 1]} " if s.rank - 1 < len(medals) else f"{s.rank}. "
+        rendered = f"[{name}]({site_root}/player/{slug})" if slug else name
+        standings_lines.append(f"{s.rank}. {prefix}{rendered}  {s.wins}-{s.losses}")
     embed = discord.Embed(
-        title=f"🏆 Pod Draft Champion: {champion.player_name}",
+        title=f"🏆 Pod Draft Champion: {champ_name}",
         description=(
             f"{champ_display} wins {champion.wins}-{champion.losses}!\n\n"
             f"**Final standings:**\n" + "\n".join(standings_lines)
-            + f"\n\nPost your final decklist screenshot in this thread! {emojis.get('cardback')}"
+            + f"\n\nPost your final decklist screenshot in this thread!\nThank you for playing! {emojis.get('chordo_love')}"
         ),
         color=discord.Color.green(),
     )
@@ -347,6 +363,25 @@ def _load_participant_slugs(event_id: str) -> dict[str, str]:
             .where(PodDraftParticipant.event_id == event_id)
         ).all()
     return {_normalize_player_name(name): slug for name, slug in rows if name}
+
+
+def _load_participant_displays(event_id: str) -> dict[str, dict]:
+    """Map normalized draftmancer_name → {'display_name', 'slug'}. Slug None when unlinked."""
+    with SessionLocal() as session:
+        rows = session.execute(
+            select(
+                PodDraftParticipant.draftmancer_name,
+                PodDraftParticipant.display_name,
+                DbPlayer.slug,
+            )
+            .outerjoin(DbPlayer, DbPlayer.id == PodDraftParticipant.player_id)
+            .where(PodDraftParticipant.event_id == event_id)
+        ).all()
+    return {
+        _normalize_player_name(dm): {"display_name": dn, "slug": slug}
+        for dm, dn, slug in rows
+        if dm
+    }
 
 
 async def _resolve_discord_mention(event_id: str, draftmancer_name: str) -> str | None:
@@ -407,13 +442,19 @@ async def reset_event_matches(event_id: str) -> int:
     return await asyncio.to_thread(_do)
 
 
-def _state_for_pending(match_id: str, a_name: str, b_name: str, standings_by_id) -> dict:
+def _state_for_pending(match_id: str, a_name: str, b_name: str, standings_by_id,
+                       displays: dict[str, dict] | None = None) -> dict:
     a_s = standings_by_id.get(a_name)
     b_s = standings_by_id.get(b_name)
+    displays = displays or {}
+    a_info = displays.get(_normalize_player_name(a_name), {})
+    b_info = displays.get(_normalize_player_name(b_name), {})
     return {
         "match_id": match_id,
         "a_name": a_name,
         "b_name": b_name,
+        "a_display": a_info.get("display_name") or a_name,
+        "b_display": b_info.get("display_name") or b_name,
         "a_record": f"{a_s.wins}-{a_s.losses}" if a_s else "0-0",
         "b_record": f"{b_s.wins}-{b_s.losses}" if b_s else "0-0",
         "winner_name": None,
@@ -428,12 +469,17 @@ def _round_embed(round_num: int, match_states: list[dict]) -> discord.Embed:
     )
     lines: list[str] = []
     for m in match_states:
+        a_disp = m.get("a_display") or m["a_name"]
+        b_disp = m.get("b_display") or m["b_name"]
         winner = m["winner_name"]
         if winner == SKIPPED_SENTINEL:
-            lines.append(f"🚫 No match played: {m['a_name']} vs {m['b_name']}")
+            lines.append(f"🚫 No match played: {a_disp} vs {b_disp}")
         elif winner:
-            loser = m["b_name"] if winner.lower() == m["a_name"].lower() else m["a_name"]
-            lines.append(f"🎮 {winner} wins {m['score']} vs {loser}")
+            if winner.lower() == m["a_name"].lower():
+                winner_disp, loser_disp = a_disp, b_disp
+            else:
+                winner_disp, loser_disp = b_disp, a_disp
+            lines.append(f"🎮 {winner_disp} wins {m['score']} vs {loser_disp}")
         elif round_num > 1:
             lines.append(f"⚔️ {m['a_name']} ({m['a_record']})  vs  {m['b_name']} ({m['b_record']})")
         else:

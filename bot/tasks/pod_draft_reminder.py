@@ -60,8 +60,8 @@ async def fire_reminder(event_id: str) -> None:
     expected_attendee_count = len(attendees)
 
     body = (
-        f"{emojis.get('cardback')} Pod Draft starts in {REMINDER_LEAD_MIN} minutes!\n"
-        + f"Join the Draftmancer session: {draftmancer_url}\n"
+        f"{emojis.get('draftmancer')} Pod Draft starts in {REMINDER_LEAD_MIN} minutes!\n"
+        + f"**Join the Draftmancer session:** {draftmancer_url}\n"
         + "Set your user name to your Arena handle (e.g. `ArenaID#1234`) so pairings work smoothly."
         + (f"\n\n{mention_block}" if mention_block else "")
     )

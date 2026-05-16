@@ -70,6 +70,8 @@ def render(
     state: str,
     draftmancer_url: str | None = None,
     ready_count: int | None = None,
+    decliner_name: str | None = None,
+    cancel_reason: str | None = None,
 ) -> discord.Embed:
     """Lobby embed. `title` is the thread/event name; `rsvps_yes` / `rsvps_maybe` are sesh display
     names by RSVP type; `in_session` is Draftmancer sessionUsers as (arena_name,
@@ -92,8 +94,15 @@ def render(
         status = "### 🔔 Draftmancer Ready Check in progress!"
         color = discord.Color.gold()
     elif state == "notready":
-        decliner = in_draftmancer[ready_now][0] if ready_now < len(in_draftmancer) else "(unknown)"
-        status = f"### ❌ `{decliner}` is not ready, click Ready Check to retry"
+        if decliner_name is None and cancel_reason is None:
+            # testlobby fallback: pick the trailing in-Draftmancer entry as the decliner
+            decliner_name = (
+                in_draftmancer[ready_now][0] if ready_now < len(in_draftmancer) else "(unknown)"
+            )
+        if decliner_name:
+            status = f"### ❌ `{decliner_name}` is not ready, click Ready Check to retry"
+        else:
+            status = f"### ❌ {cancel_reason}, click Ready Check to retry"
         color = discord.Color.red()
     elif state == "drafting":
         status = "### 🎉 All players ready! Draft started"

@@ -69,7 +69,8 @@ class PodDraftManager:
         self._ready_timeout_task: asyncio.Task | None = None
         self.drafting = False
         self.draft_complete = False
-        self.last_decliner: str | None = None
+        self.last_decliner_name: str | None = None
+        self.last_cancel_reason: str | None = None
         self.draft_logs: dict[str, dict] = {}
         self.current_round = 0
         self.finalized = False
@@ -137,7 +138,8 @@ class PodDraftManager:
         names = [u.get("userName") for u in self.session_users]
         log.info("draftmancer sessionUsers for %s: %s", self.session_id, names)
         # Any session change clears the notready banner; lobby reverts to its normal state
-        self.last_decliner = None
+        self.last_decliner_name = None
+        self.last_cancel_reason = None
         if self.bot_user_id is None:
             for u in self.session_users:
                 if u.get("userName") == _BOT_USER_NAME:
@@ -155,7 +157,7 @@ class PodDraftManager:
         if self.ready_check_active:
             current = {u.get("userID") for u in self.session_users if u.get("userName") != _BOT_USER_NAME}
             if current != self.expected_user_ids:
-                asyncio.create_task(self._invalidate_ready_check("player list changed"))
+                asyncio.create_task(self._invalidate_ready_check("Player list changed"))
 
     async def _claim_ownership_and_apply_settings(self) -> None:
         if self.bot_user_id is None or self.owner_claimed:
@@ -200,7 +202,8 @@ class PodDraftManager:
         self.expected_user_ids = {u.get("userID") for u in non_bot}
         self.ready_users = set()
         self.ready_check_active = True
-        self.last_decliner = None
+        self.last_decliner_name = None
+        self.last_cancel_reason = None
         try:
             await self.sio.emit("readyCheck")
         except Exception:
@@ -261,6 +264,8 @@ class PodDraftManager:
             state=state,
             draftmancer_url=self.draftmancer_url,
             ready_count=ready_now,
+            decliner_name=self.last_decliner_name,
+            cancel_reason=self.last_cancel_reason,
         )
         has_unrecognized = any(dn is None for _, dn in classified)
         view = (
@@ -286,7 +291,7 @@ class PodDraftManager:
             return "complete"
         if self.drafting:
             return "drafting"
-        if self.last_decliner:
+        if self.last_decliner_name or self.last_cancel_reason:
             return "notready"
         if self.ready_check_active:
             return "ready"
@@ -453,16 +458,8 @@ class PodDraftManager:
         self.ready_users = set()
         if self._ready_timeout_task is not None:
             self._ready_timeout_task.cancel()
-        self.last_decliner = decliner_name
-        # Non-decline invalidations (timeout, player list changed) get a separate notice;
-        # the embed itself only banners the explicit-decline case
-        if decliner_name is None:
-            thread = await self._fetch_thread()
-            if thread is not None:
-                try:
-                    await thread.send(f"⚠️ Ready check cancelled — {reason}.")
-                except Exception:
-                    log.warning("could not post invalidation message", exc_info=True)
+        self.last_decliner_name = decliner_name
+        self.last_cancel_reason = None if decliner_name is not None else reason
         await self.refresh_lobby_now()
 
 def _is_ready_state(state) -> bool:

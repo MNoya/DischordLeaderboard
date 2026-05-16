@@ -47,7 +47,7 @@ _LINKED_EIGHT: list[tuple[str, str]] = [
     ("whalematron#89523", "whalematron"),
 ]
 _VALID_STATES = (
-    "empty", "partial", "linked", "unlinked", "ready", "notready",
+    "empty", "partial", "linked", "unlinked", "ready", "notready", "cancelled",
     "drafting", "complete", "round1",
 )
 
@@ -112,9 +112,12 @@ def _build(state: str) -> tuple[discord.Embed, discord.ui.View | None, dict | No
         in_session = list(_LINKED_EIGHT)
 
     ready_count = 3 if state in ("ready", "notready") else None
+    render_state = "notready" if state == "cancelled" else state
+    cancel_reason = "Player list changed" if state == "cancelled" else None
     embed = render_lobby_embed(
         _THREAD_NAME, _RSVPS_YES, _RSVPS_MAYBE, in_session,
-        state=state, draftmancer_url=_DRAFTMANCER_URL, ready_count=ready_count,
+        state=render_state, draftmancer_url=_DRAFTMANCER_URL,
+        ready_count=ready_count, cancel_reason=cancel_reason,
     )
     has_unrecognized = any(dn is None for _, dn in in_session)
     view: discord.ui.View | None = (
