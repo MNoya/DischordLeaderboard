@@ -53,6 +53,7 @@ _INVOKER_SEAT = "Noya"
 
 # Module-level scratch store for the SubmitDeck POC; cleared on bot restart.
 _TEST_DECK_COLORS: dict[int, str] = {}
+_TEST_REVIEW_CHOICES: dict[int, bool] = {}
 
 
 def _test_arena_for(seat: str) -> str | None:
@@ -93,11 +94,16 @@ async def _dm_invoker_pairing(user: discord.User | discord.Member, round_num: in
 
 async def _test_submit_deck_color(interaction: discord.Interaction, color: str) -> None:
     _TEST_DECK_COLORS[interaction.user.id] = color
-    log.info("testlobby deck color saved: user=%s color=%s", interaction.user.id, color)
+    log.info(f"testlobby deck color saved: user={interaction.user.id} color={color}")
 
 
-async def _test_lookup_deck_color(interaction: discord.Interaction) -> str | None:
-    return _TEST_DECK_COLORS.get(interaction.user.id)
+async def _test_lookup_deck_state(interaction: discord.Interaction) -> tuple[str | None, bool | None]:
+    return _TEST_DECK_COLORS.get(interaction.user.id), _TEST_REVIEW_CHOICES.get(interaction.user.id)
+
+
+async def _test_review_toggle(interaction: discord.Interaction, wants_review: bool) -> None:
+    _TEST_REVIEW_CHOICES[interaction.user.id] = wants_review
+    log.info(f"testlobby review choice saved: user={interaction.user.id} wants={wants_review}")
 
 
 def _submit_deck_view(state: dict | None = None) -> SubmitDeckView:
@@ -105,7 +111,7 @@ def _submit_deck_view(state: dict | None = None) -> SubmitDeckView:
     the invoker's seat in the bracket and re-evaluates the champion announcement.
     """
     if state is None:
-        return SubmitDeckView(_test_submit_deck_color, _test_lookup_deck_color)
+        return SubmitDeckView(_test_submit_deck_color, _test_lookup_deck_state, _test_review_toggle)
 
     async def submit(interaction: discord.Interaction, color: str) -> None:
         _TEST_DECK_COLORS[interaction.user.id] = color
@@ -116,7 +122,12 @@ def _submit_deck_view(state: dict | None = None) -> SubmitDeckView:
         if state.get("champion_announced"):
             await _maybe_announce_or_update_test_champion(state, interaction.channel)
 
-    return SubmitDeckView(submit, _test_lookup_deck_color)
+    async def toggle(interaction: discord.Interaction, wants_review: bool) -> None:
+        _TEST_REVIEW_CHOICES[interaction.user.id] = wants_review
+        state.setdefault("review_choices", {})[_norm(_INVOKER_SEAT)] = wants_review
+        await _maybe_post_or_update_test_standings(state, interaction.channel)
+
+    return SubmitDeckView(submit, _test_lookup_deck_state, toggle)
 
 _THREAD_NAME = "SOS Pod Draft #3 - May 15"
 _DRAFTMANCER_URL = "https://draftmancer.com/?session=LLUT-SOS-May-15-D"
@@ -138,7 +149,7 @@ _LINKED_EIGHT: list[tuple[str, str]] = [
 ]
 _VALID_STATES = (
     "empty", "partial", "linked", "unlinked", "ready", "notready", "cancelled",
-    "drafting", "complete", "round1", "round3", "champion",
+    "drafting", "complete", "round1", "round3", "champion", "submit",
 )
 
 # Per-seat fake deck colors for the `champion` state. WUBRG-style codes.
@@ -231,6 +242,11 @@ def _build_champion_state(invoker) -> dict:
     player_colors = {
         _norm(seat): color for seat, color in _CHAMPION_COLORS_BY_SEAT.items()
     }
+    review_choices = {
+        _norm("Noya"): True,
+        _norm("NiamhIsTired"): True,
+        _norm("fullerene60"): True,
+    }
 
     event_started_at = datetime.now(timezone.utc) - timedelta(hours=2, minutes=30)
     return {
@@ -246,6 +262,7 @@ def _build_champion_state(invoker) -> dict:
         "screenshots": screenshots,
         "screenshot_captions": captions,
         "draft_log_urls": log_urls,
+        "review_choices": review_choices,
         "event_started_at": event_started_at,
         "champion_announced": False,
         "champion_announcement_message": None,
@@ -359,12 +376,14 @@ async def _maybe_post_or_update_test_standings(state: dict, channel) -> None:
     screenshots = state.get("screenshots", {})
     captions = state.get("screenshot_captions", {})
     log_urls = state.get("draft_log_urls", {})
+    review_choices = state.get("review_choices", {})
     deck_data = {
         _norm(p.name): ParticipantDeckData(
             colors=player_colors.get(_norm(p.name)),
             screenshot_url=screenshots.get(_norm(p.name)),
             screenshot_caption=captions.get(_norm(p.name)),
             draft_log_url=log_urls.get(_norm(p.name)),
+            wants_draft_review=review_choices.get(_norm(p.name)),
         )
         for p in state["players"]
     }
@@ -427,12 +446,14 @@ async def _maybe_announce_or_update_test_champion(state: dict, channel) -> None:
     pending_count = sum(1 for m in matches if not m.get("winner_name"))
     standings_msg = state.get("standings_message")
     log_urls = state.get("draft_log_urls", {})
+    review_choices = state.get("review_choices", {})
     deck_data = {
         _norm(p.name): ParticipantDeckData(
             colors=player_colors.get(_norm(p.name)),
             screenshot_url=screenshots.get(_norm(p.name)),
             screenshot_caption=captions.get(_norm(p.name)),
             draft_log_url=log_urls.get(_norm(p.name)),
+            wants_draft_review=review_choices.get(_norm(p.name)),
         )
         for p in state["players"]
     }
@@ -777,6 +798,7 @@ async def setup(bot: commands.Bot) -> None:
                 "player_colors": {},
                 "screenshots": {},
                 "screenshot_captions": {},
+                "review_choices": {},
                 "champion_announced": False,
                 "champion_announcement_message": None,
             }
@@ -797,10 +819,14 @@ async def setup(bot: commands.Bot) -> None:
                 _BRACKETS[standings_msg.id] = bracket
             return
 
+        if state == "submit":
+            await ctx.send(view=_submit_deck_view(state=None))
+            return
+
         if state == "":
             for s in _VALID_STATES:
-                if s == "champion":
-                    continue  # champion state posts 2 messages, handled separately above
+                if s in ("champion", "submit"):
+                    continue  # both post bespoke messages handled separately above
                 embed, view, bracket = _build(s)
                 msg = await ctx.send(embed=embed, view=view)
                 if bracket is not None:

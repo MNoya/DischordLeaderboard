@@ -270,6 +270,7 @@ class PodDraftParticipant(Base):
     deck_colors             = Column(String, nullable=True)
     deck_screenshot_url     = Column(String, nullable=True)
     deck_screenshot_caption = Column(String, nullable=True)
+    wants_draft_review      = Column(Boolean, nullable=True)
 
     event  = relationship("PodDraftEvent", back_populates="participants")
     player = relationship("Player")

@@ -31,11 +31,12 @@ from bot.services.pod_drafts import (
     _normalized_column,
     add_pairing,
     finalize_champion as finalize_db,
-    get_participant_deck_colors,
+    get_participant_deck_state,
     participant_dm_info,
     seed_event_participants,
     set_match_result,
     set_participant_deck_colors,
+    set_participant_review_choice,
 )
 from bot.services.pod_swiss import MatchOutcome, Player
 
@@ -84,10 +85,11 @@ class ParticipantDeckData(NamedTuple):
     screenshot_url: str | None
     screenshot_caption: str | None
     draft_log_url: str | None
+    wants_draft_review: bool | None = None
 
 
 def _load_event_deck_data_sync(event_id: str) -> dict[str, ParticipantDeckData]:
-    """Return normalized_name → deck colors + screenshot URL + caption + MPT URL for every participant."""
+    """Return normalized_name → deck colors + screenshot URL + caption + MPT URL + review opt-in for every participant."""
     with SessionLocal() as session:
         rows = session.execute(
             select(
@@ -97,13 +99,15 @@ def _load_event_deck_data_sync(event_id: str) -> dict[str, ParticipantDeckData]:
                 PodDraftParticipant.deck_screenshot_url,
                 PodDraftParticipant.deck_screenshot_caption,
                 PodDraftParticipant.draft_log_url,
+                PodDraftParticipant.wants_draft_review,
             )
             .where(PodDraftParticipant.event_id == event_id)
         ).all()
     out: dict[str, ParticipantDeckData] = {}
-    for dm, dn, dc, ds, dcap, dlog in rows:
+    for dm, dn, dc, ds, dcap, dlog, dreview in rows:
         data = ParticipantDeckData(
             colors=dc, screenshot_url=ds, screenshot_caption=dcap, draft_log_url=dlog,
+            wants_draft_review=dreview,
         )
         for src in (dm, dn):
             if src:
@@ -146,9 +150,11 @@ def _build_standings_row(
     player_colors: dict[str, str | None],
     deck_data: dict[str, ParticipantDeckData],
     site_root: str | None,
+    show_review_flag: bool = False,
 ) -> str:
     """One standings row used by both the V2 announcement and the thread-side classic embed:
-    `{rank}. {medal} {name}  {wins}-{losses}  {colors}  [Draft Log]({url}) 📜`."""
+    `{rank}. {medal} {name}  {wins}-{losses}  {colors}  [Draft Log]({url}) 📜`.
+    Set show_review_flag for the in-thread variant to append 🙋 for review opt-ins."""
     key = _normalize_player_name(s.player_name)
     info = displays.get(key, {})
     name = info.get("display_name") or s.player_name
@@ -165,7 +171,8 @@ def _build_standings_row(
         f"  [Draft Log]({data.draft_log_url}) 📜"
         if data is not None and data.draft_log_url else ""
     )
-    return f"{prefix}{rendered}  {s.wins}-{s.losses}{color_suffix}{log_suffix}"
+    review_suffix = " 🙋" if show_review_flag and data is not None and data.wants_draft_review else ""
+    return f"{prefix}{rendered}  {s.wins}-{s.losses}{color_suffix}{log_suffix}{review_suffix}"
 
 
 def build_pairing_dm_embed(
@@ -238,19 +245,20 @@ async def _send_pairing_dm(
         log.warning("pairing DM failed", exc_info=True)
 
 
-async def live_deck_color_lookup(interaction: discord.Interaction) -> str | None:
-    """Resolve the participant by (thread, user); raise NotInPodError if the user isn't in this pod."""
+async def live_deck_state_lookup(interaction: discord.Interaction) -> tuple[str | None, bool | None]:
+    """Resolve the participant by (thread, user); raise NotInPodError if the user isn't in this pod.
+    Returns (deck_colors, wants_draft_review)."""
     thread_id = str(interaction.channel_id)
     discord_id = str(interaction.user.id)
 
-    def _do() -> tuple[bool, str | None]:
+    def _do() -> tuple[bool, str | None, bool | None]:
         with SessionLocal() as session:
-            return get_participant_deck_colors(session, thread_id, discord_id)
+            return get_participant_deck_state(session, thread_id, discord_id)
 
-    in_pod, color = await asyncio.to_thread(_do)
+    in_pod, color, wants_review = await asyncio.to_thread(_do)
     if not in_pod:
         raise NotInPodError()
-    return color or None
+    return color or None, wants_review
 
 
 async def live_deck_color_submit(interaction: discord.Interaction, color: str) -> None:
@@ -283,8 +291,34 @@ async def live_deck_color_submit(interaction: discord.Interaction, color: str) -
             await _announce_or_update_champion(manager)
 
 
+async def live_review_choice_submit(interaction: discord.Interaction, wants_review: bool) -> None:
+    thread_id = str(interaction.channel_id)
+    discord_id = str(interaction.user.id)
+
+    def _do() -> tuple[bool, str | None]:
+        with SessionLocal() as session:
+            ok = set_participant_review_choice(session, thread_id, discord_id, wants_review)
+            if not ok:
+                return False, None
+            event_id = session.execute(
+                select(PodDraftEvent.id).where(PodDraftEvent.discord_thread_id == thread_id)
+            ).scalar_one_or_none()
+            session.commit()
+            return True, event_id
+
+    ok, event_id = await asyncio.to_thread(_do)
+    if not ok:
+        raise NotInPodError()
+
+    if event_id is None:
+        return
+    manager = ACTIVE_POD_MANAGERS.get(event_id)
+    if manager is not None:
+        await _post_or_update_live_standings(manager)
+
+
 def build_live_submit_deck_view() -> SubmitDeckView:
-    return SubmitDeckView(live_deck_color_submit, live_deck_color_lookup)
+    return SubmitDeckView(live_deck_color_submit, live_deck_state_lookup, live_review_choice_submit)
 
 
 def register_test_result_handler(prefix: str, handler) -> None:
@@ -970,6 +1004,7 @@ def build_champion_embed(
         _build_standings_row(
             s, displays=displays, player_colors=player_colors,
             deck_data=deck_data, site_root=site_root,
+            show_review_flag=True,
         )
         for s in standings
     ]
