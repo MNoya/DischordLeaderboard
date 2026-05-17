@@ -20,6 +20,12 @@ def get_emoji(name: str) -> discord.Emoji | None:
     return _EMOJIS.get(name)
 
 
+def mana_number(n: int) -> str:
+    """`5` → `:mana5:` glyph if loaded, else `'5'` fallback. Mana font ships 0–20."""
+    e = _EMOJIS.get(f"mana{n}")
+    return str(e) if e else str(n)
+
+
 async def load(bot: commands.Bot) -> None:
     try:
         fetched = await bot.fetch_application_emojis()

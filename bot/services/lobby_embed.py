@@ -126,18 +126,24 @@ def render(
 
     embed = discord.Embed(title=title, description=description, color=color)
 
+    def _block(lines: list[str], *, trailing: str = "") -> str:
+        """`> name`-prefix each line so Discord renders the blockquote vertical bar."""
+        if not lines:
+            return "​"
+        return "\n".join(f"> {line}" for line in lines) + trailing
+
     if state == "ready":
         ready_players = in_draftmancer[:ready_now]
         pending_players = in_draftmancer[ready_now:]
         ready_trailing = "\n​" if len(ready_players) > len(pending_players) else ""
         embed.add_field(
             name=f"✅ Ready ({len(ready_players)})",
-            value=("\n".join(f"{dn} | {arena}" for arena, dn in ready_players) or "​") + ready_trailing,
+            value=_block([f"{dn} | {arena}" for arena, dn in ready_players], trailing=ready_trailing),
             inline=True,
         )
         embed.add_field(
             name=f"⏳ Pending ({len(pending_players)})",
-            value=("\n".join(f"{dn} | {arena}" for arena, dn in pending_players) or "​"),
+            value=_block([f"{dn} | {arena}" for arena, dn in pending_players]),
             inline=True,
         )
     elif in_draftmancer:
@@ -145,7 +151,7 @@ def render(
         in_drft_label = "Players" if state == "complete" else "In Draftmancer"
         embed.add_field(
             name=f"✅ {in_drft_label} ({len(in_draftmancer)})",
-            value="\n".join(dn for _, dn in in_draftmancer) + trailing,
+            value=_block([dn for _, dn in in_draftmancer], trailing=trailing),
             inline=True,
         )
         embed.add_field(
@@ -172,12 +178,12 @@ def render(
         waiting_trailing = "\n​" if len(waiting_yes) > len(waiting_maybe) else ""
         embed.add_field(
             name=f"⌛ Waiting on ({len(waiting_yes)})",
-            value=("\n".join(waiting_yes) or "​") + waiting_trailing,
+            value=_block(waiting_yes, trailing=waiting_trailing),
             inline=True,
         )
         embed.add_field(
             name=f"🤷 Maybe ({len(waiting_maybe)})",
-            value="\n".join(waiting_maybe) or "​",
+            value=_block(waiting_maybe),
             inline=True,
         )
         embed.add_field(name="​", value="​", inline=True)

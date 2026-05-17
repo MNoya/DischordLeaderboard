@@ -76,6 +76,13 @@ class PodDraftManager:
         self.finalized = False
         self.tournament_roster: list[str] = []  # draftmancer userNames, set on endDraft
         self.tournament_players: list = []       # pod_swiss.Player list, set by pod_tournament.start_tournament
+        self.standings_message = None
+        self.round_messages: dict[int, "discord.Message"] = {}
+        self.grace_task = None
+        self.grace_round: int | None = None
+        self.champion_announced = False
+        self.champion_announcement_message = None
+        self.champion_discord_ids: set[str] = set()
         self.sio = socketio.AsyncClient(reconnection=False, logger=False, engineio_logger=False)
         self.sio.on("connect", self._on_connect)
         self.sio.on("disconnect", self._on_disconnect)

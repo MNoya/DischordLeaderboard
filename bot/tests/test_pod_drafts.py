@@ -8,10 +8,13 @@ from bot.services.pod_drafts import (
     FinalStanding,
     ParsedSeshEvent,
     finalize_champion,
+    get_participant_deck_colors,
     list_champions,
+    participant_dm_info,
     player_pod_stats,
     record_event,
     record_match,
+    set_participant_deck_colors,
     upsert_participant,
 )
 
@@ -227,3 +230,64 @@ def test_player_pod_stats_aggregates_correctly(session):
 
 def test_player_pod_stats_returns_none_for_unknown_discord_id(session):
     assert player_pod_stats(session, "ghost") is None
+
+
+def _seed_pod_for_deck_color_tests(session, thread_id: str = "thread-42") -> tuple[str, str]:
+    _seed_set(session, "SOS")
+    player = _seed_player(session, discord_id="42", username="alice", display_name="Alice")
+    parsed = ParsedSeshEvent(
+        event_date=date(2026, 5, 13),
+        event_time=datetime(2026, 5, 13, 0, 0, tzinfo=timezone.utc),
+        set_code="SOS", event_number=None, format_label=None,
+        name="Pod Draft #1",
+        attendees=["Alice", "Bob"],
+        sesh_message_id="msg-deck-color",
+        discord_thread_id=thread_id,
+    )
+    event = record_event(session, parsed)
+    return event.id, player.discord_id
+
+
+def test_set_participant_deck_colors_saves(session):
+    _seed_pod_for_deck_color_tests(session)
+    ok = set_participant_deck_colors(session, "thread-42", "42", "WU")
+    assert ok is True
+    in_pod, color = get_participant_deck_colors(session, "thread-42", "42")
+    assert in_pod is True
+    assert color == "WU"
+
+
+def test_set_participant_deck_colors_rejects_non_participant(session):
+    _seed_pod_for_deck_color_tests(session)
+    # discord_id "99" is not on the participant list
+    assert set_participant_deck_colors(session, "thread-42", "99", "WB") is False
+
+
+def test_get_participant_deck_colors_signals_not_in_pod(session):
+    _seed_pod_for_deck_color_tests(session)
+    in_pod, color = get_participant_deck_colors(session, "thread-42", "99")
+    assert in_pod is False
+    assert color is None
+
+
+def test_participant_dm_info_returns_linked_player_data(session):
+    event_id, _ = _seed_pod_for_deck_color_tests(session)
+    # Set arena_name on the linked player so we cover the populated branch
+    player = session.execute(select(Player).where(Player.discord_id == "42")).scalar_one()
+    player.arena_name = "Alice#1234"
+    session.flush()
+
+    info = participant_dm_info(session, event_id)
+    assert "alice" in info
+    alice = info["alice"]
+    assert alice.discord_id == "42"
+    assert alice.display_name == "Alice"
+    assert alice.arena_name == "Alice#1234"
+
+
+def test_set_participant_deck_colors_overwrites_on_resubmit(session):
+    _seed_pod_for_deck_color_tests(session)
+    set_participant_deck_colors(session, "thread-42", "42", "WU")
+    set_participant_deck_colors(session, "thread-42", "42", "URg")
+    _, color = get_participant_deck_colors(session, "thread-42", "42")
+    assert color == "URg"

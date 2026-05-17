@@ -59,20 +59,18 @@ When sessionUsers fills to `max(1, expected_attendee_count)`, the bot fires the 
 - `POD_DRAFT_SKIP_REMINDER_WAIT=true` — fire T-5 reminder 10s after detection instead of at event_time - 5min.
 - `POD_DRAFT_BOTS=7` — pad seats so a solo human can `startDraft`.
 - `POD_DRAFT_PICK_TIMER=1` — 1-second pick timer so the draft auto-resolves quickly.
-- `POD_DRAFT_TEST_ROSTER=name1,name2,...` — override the post-`endDraft` roster used by `start_tournament` (and `!testbracket`). Accept any even count 2–10.
+- `POD_DRAFT_TEST_ROSTER=name1,name2,...` — override the post-`endDraft` roster used by `start_tournament` for in-memory bracket previews via `!testlobby round1`/`round3`. Accept any even count 2–10.
 - `AUTO_REFRESH_ENABLED=false` — silences the 17lands auto-refresh tick on the test bot.
 
 ### Owner-only debug commands
 
-- `!testbracket` (inside a pod-draft thread) — wipes that event's `pod_draft_matches` rows and re-runs the Python-Swiss flow using `POD_DRAFT_TEST_ROSTER`. Builds a `HollowManager` so `ACTIVE_POD_MANAGERS` lookups in `_maybe_advance` succeed.
+- `!testlobby [state]` — sandbox preview of the lobby + bracket UI in any channel. No DB writes. States include `round1`, `round3`, `complete`, etc.
 - `!sync` — publish slash commands to the test guild.
-- Currently no `!testsesh` (would mock a sesh embed pipeline); could add if needed.
 
 ## Architectural notes worth remembering
 
-- **`ACTIVE_POD_MANAGERS` is in-memory only.** After a bot restart mid-bracket, dropdown clicks still commit to DB (persistent View dispatches), but `_maybe_advance` bails because no manager exists. We accept this and tell the user to re-run `!testbracket`. Could add reconstruction later if it bites in prod.
+- **`ACTIVE_POD_MANAGERS` is in-memory only.** After a bot restart mid-bracket, dropdown clicks still commit to DB (persistent View dispatches), but `_maybe_advance` bails because no manager exists. Real-pod recovery is manual today.
 - **`RoundResultsView` is persistent.** `bot.add_view(RoundResultsView())` is called at startup, registering 5 generic Select slots with custom_ids `podmatchresult:0..4`. The match_id is encoded in each option value, so per-message state isn't tied to the registered View instance.
-- **`HollowManager`** in `pod_tournament` is a manager-shaped stand-in used by `!testbracket` — no Draftmancer socket, just enough state (`bot`, `event_id`, `thread_id`, `tournament_players`, `current_round`, `finalized`) for the bracket flow to drive itself.
 
 ## Pending work (milestone 7 + 8)
 
@@ -111,10 +109,9 @@ When sessionUsers fills to `max(1, expected_attendee_count)`, the bot fires the 
 docker start dischord-pg
 .venv/bin/python -u -m bot.main
 
-# Drive a fake bracket on an existing pod-draft thread:
-# 1. Create or pick a sesh-detected thread in #pod-draft-coordination
-# 2. Inside the thread, run:  !testbracket
-# 3. Pick from each dropdown to advance through R1 → R2 → R3 → champion
+# Preview the bracket UI in-memory (no DB writes, any channel):
+# 1. In any channel, run:  !testlobby round1   (or round3 to jump to final round)
+# 2. Pick from each dropdown to advance through R1 → R2 → R3 → champion
 
 # Full draft flow (real sesh + real Draftmancer):
 # 1. Run sesh /create in #pod-draft-coordination

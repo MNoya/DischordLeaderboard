@@ -20,6 +20,14 @@ from bot.models import (
 
 
 @dataclass(frozen=True)
+class ParticipantDmInfo:
+    """Per-participant info for round-start DMs. Keyed by normalized draftmancer_name."""
+    discord_id: str | None
+    display_name: str
+    arena_name: str | None
+
+
+@dataclass(frozen=True)
 class ParsedSeshEvent:
     """Input to record_event. event_number is used only for draftmancer_session naming, not stored."""
     event_date: date
@@ -348,6 +356,104 @@ def list_champions(session: Session, set_code: str | None = None) -> list[dict]:
         }
         for event, participant, player in rows
     ]
+
+
+def participant_dm_info(session: Session, event_id: str) -> dict[str, ParticipantDmInfo]:
+    """Map normalized draftmancer_name → ParticipantDmInfo for every participant in the event."""
+    rows = session.execute(
+        select(
+            PodDraftParticipant.draftmancer_name,
+            PodDraftParticipant.display_name,
+            Player.discord_id,
+            Player.arena_name,
+        )
+        .outerjoin(Player, Player.id == PodDraftParticipant.player_id)
+        .where(PodDraftParticipant.event_id == event_id)
+    ).all()
+    info: dict[str, ParticipantDmInfo] = {}
+    for dm_name, display_name, discord_id, arena_name in rows:
+        key = _normalize_player_name(dm_name) if dm_name else _normalize_player_name(display_name)
+        info[key] = ParticipantDmInfo(
+            discord_id=discord_id,
+            display_name=display_name,
+            arena_name=arena_name,
+        )
+    return info
+
+
+def set_participant_deck_colors(
+    session: Session,
+    discord_thread_id: str,
+    discord_id: str,
+    deck_colors: str,
+) -> bool:
+    """Save deck_colors on the (event, player) participant row. Returns False if the user isn't in this pod."""
+    participant = session.execute(
+        select(PodDraftParticipant)
+        .join(Player, Player.id == PodDraftParticipant.player_id)
+        .join(PodDraftEvent, PodDraftEvent.id == PodDraftParticipant.event_id)
+        .where(
+            PodDraftEvent.discord_thread_id == discord_thread_id,
+            Player.discord_id == discord_id,
+        )
+    ).scalar_one_or_none()
+    if participant is None:
+        return False
+    participant.deck_colors = deck_colors
+    session.flush()
+    return True
+
+
+def capture_first_deck_screenshot(
+    session: Session,
+    discord_thread_id: str,
+    discord_id: str,
+    image_url: str,
+    caption: str | None = None,
+) -> str | None:
+    """First-image-per-participant. Returns event_id on capture, None otherwise.
+
+    No-op when the participant already has a deck_screenshot_url set, or the thread/user pair
+    doesn't map to a registered participant.
+    """
+    row = session.execute(
+        select(PodDraftParticipant, PodDraftEvent.id)
+        .join(Player, Player.id == PodDraftParticipant.player_id)
+        .join(PodDraftEvent, PodDraftEvent.id == PodDraftParticipant.event_id)
+        .where(
+            PodDraftEvent.discord_thread_id == discord_thread_id,
+            Player.discord_id == discord_id,
+        )
+    ).first()
+    if row is None:
+        return None
+    participant, event_id = row
+    if participant.deck_screenshot_url:
+        return None
+    participant.deck_screenshot_url = image_url
+    participant.deck_screenshot_caption = caption or None
+    session.flush()
+    return event_id
+
+
+def get_participant_deck_colors(
+    session: Session,
+    discord_thread_id: str,
+    discord_id: str,
+) -> tuple[bool, str | None]:
+    """Return (is_participant, deck_colors). is_participant=False short-circuits the gate."""
+    row = session.execute(
+        select(PodDraftParticipant.deck_colors)
+        .join(Player, Player.id == PodDraftParticipant.player_id)
+        .join(PodDraftEvent, PodDraftEvent.id == PodDraftParticipant.event_id)
+        .where(
+            PodDraftEvent.discord_thread_id == discord_thread_id,
+            Player.discord_id == discord_id,
+        )
+    ).first()
+    if row is None:
+        return False, None
+    return True, row[0]
 
 
 def player_pod_stats(session: Session, discord_id: str) -> dict | None:

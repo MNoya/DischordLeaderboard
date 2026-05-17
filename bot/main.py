@@ -33,7 +33,9 @@ from bot.config import settings
 from bot.database import SessionLocal, run_migrations
 from bot.discord_helpers import refresh_player_avatars
 from bot import emojis
+from bot.commands.testcomponent import setup as setup_testcomponent
 from bot.commands.testlobby import setup as setup_testlobby
+from bot.listeners.pod_screenshots import setup as setup_pod_screenshots
 from bot.listeners.sesh_listener import reschedule_pending_events, setup as setup_sesh_listener
 from bot.models import MagicSet, Player
 from bot.services.lobby_embed import LobbyReadyButtonView
@@ -137,7 +139,9 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_help(bot)
         await setup_pod_draft(bot)
         await setup_sesh_listener(bot)
+        await setup_pod_screenshots(bot)
         await setup_testlobby(bot)
+        await setup_testcomponent(bot)
         reschedule_pending_events(bot)
         register_pod_views(bot)
         bot.tree.copy_global_to(guild=guild)
