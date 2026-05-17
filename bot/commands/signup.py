@@ -170,7 +170,7 @@ class Signup(commands.Cog):
         # 'signed up' messages on the same paste
         self._active_signups: set[str] = set()
 
-    @app_commands.command(name="join", description="Join the LLU Community Leaderboard.")
+    @app_commands.command(name="join", description="Join the LLU Community Leaderboard")
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
     async def signup(self, interaction: discord.Interaction) -> None:

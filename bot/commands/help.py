@@ -42,7 +42,7 @@ class Help(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    @app_commands.command(name="help", description="List the bot's commands.")
+    @app_commands.command(name="help", description="List the bot's commands")
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
     async def help(self, interaction: discord.Interaction) -> None:

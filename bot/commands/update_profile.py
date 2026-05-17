@@ -98,7 +98,7 @@ class UpdateProfile(commands.Cog):
         self.bot = bot
         self.client = client or SeventeenLandsClient()
 
-    @app_commands.command(name="relink", description="Update your 17lands token.")
+    @app_commands.command(name="relink", description="Update your 17lands token")
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
     async def update_profile(self, interaction: discord.Interaction) -> None:

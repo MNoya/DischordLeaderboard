@@ -55,7 +55,7 @@ class DeleteAccount(commands.Cog):
         self.bot = bot
 
     # DM-only — registered globally with allowed_contexts so it doesn't appear in any guild slash menu
-    @app_commands.command(name="exile", description="Permanently remove yourself from the leaderboard.")
+    @app_commands.command(name="exile", description="Permanently remove yourself from the leaderboard")
     @app_commands.allowed_contexts(guilds=False, dms=True, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
     async def delete_account(self, interaction: discord.Interaction) -> None:

@@ -897,7 +897,7 @@ class Leaderboard(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    @app_commands.command(name="leaderboard", description="Show the current set leaderboard.")
+    @app_commands.command(name="leaderboard", description="Show the current set leaderboard")
     @app_commands.describe(
         format="Show only one queue (Premier, Quick, Sealed, Traditional)",
         color="Filter by archetype: guilds, shards/wedges, or Soup (4+ colors)",
@@ -1009,7 +1009,7 @@ class Leaderboard(commands.Cog):
 
     @app_commands.command(
         name="leaderboard-full",
-        description="DM you the entire leaderboard.",
+        description="DM you the entire leaderboard",
     )
     @app_commands.allowed_contexts(guilds=False, dms=True, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)

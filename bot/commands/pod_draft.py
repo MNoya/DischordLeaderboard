@@ -28,7 +28,7 @@ class PodDraft(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    @app_commands.command(name="ready", description="Run a Draftmancer ready check for this pod draft.")
+    @app_commands.command(name="ready", description="Run a Draftmancer ready check for this pod draft")
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
     async def pod_ready(self, interaction: discord.Interaction) -> None:
@@ -49,7 +49,7 @@ class PodDraft(commands.Cog):
 
     @app_commands.command(
         name="pod-link-arena",
-        description="Link your MTG Arena handle so pod-draft results recognize you.",
+        description="Link your MTG Arena handle so pod-draft results recognize you",
     )
     @app_commands.describe(name="Your full MTG Arena handle: ArenaID#1234")
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
@@ -101,7 +101,7 @@ class PodDraft(commands.Cog):
         for manager in list(ACTIVE_POD_MANAGERS.values()):
             asyncio.create_task(manager.refresh_lobby_now())
 
-    @app_commands.command(name="pod-takeover", description="Take control of the Draftmancer session and disconnect the bot.")
+    @app_commands.command(name="pod-takeover", description="Take control of the Draftmancer session and disconnect the bot")
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
     async def pod_takeover(self, interaction: discord.Interaction) -> None:

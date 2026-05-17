@@ -51,7 +51,7 @@ class Signout(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    @app_commands.command(name="retire", description="Pause your participation on the leaderboard.")
+    @app_commands.command(name="retire", description="Pause your participation on the leaderboard")
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
     async def signout(self, interaction: discord.Interaction) -> None:

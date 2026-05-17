@@ -206,7 +206,7 @@ class Stats(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    @app_commands.command(name="stats", description="See your stats breakdown for the current set.")
+    @app_commands.command(name="stats", description="See your stats breakdown for the current set")
     @app_commands.describe(player="Player display name to look up (defaults to you)")
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
