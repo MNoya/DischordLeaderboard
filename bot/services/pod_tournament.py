@@ -81,10 +81,11 @@ class ParticipantDeckData(NamedTuple):
     colors: str | None
     screenshot_url: str | None
     screenshot_caption: str | None
+    draft_log_url: str | None
 
 
 def _load_event_deck_data_sync(event_id: str) -> dict[str, ParticipantDeckData]:
-    """Return normalized_name → deck colors + screenshot URL + caption for every participant in the event."""
+    """Return normalized_name → deck colors + screenshot URL + caption + MPT URL for every participant."""
     with SessionLocal() as session:
         rows = session.execute(
             select(
@@ -93,12 +94,15 @@ def _load_event_deck_data_sync(event_id: str) -> dict[str, ParticipantDeckData]:
                 PodDraftParticipant.deck_colors,
                 PodDraftParticipant.deck_screenshot_url,
                 PodDraftParticipant.deck_screenshot_caption,
+                PodDraftParticipant.draft_log_url,
             )
             .where(PodDraftParticipant.event_id == event_id)
         ).all()
     out: dict[str, ParticipantDeckData] = {}
-    for dm, dn, dc, ds, dcap in rows:
-        data = ParticipantDeckData(colors=dc, screenshot_url=ds, screenshot_caption=dcap)
+    for dm, dn, dc, ds, dcap, dlog in rows:
+        data = ParticipantDeckData(
+            colors=dc, screenshot_url=ds, screenshot_caption=dcap, draft_log_url=dlog,
+        )
         for src in (dm, dn):
             if src:
                 out[_normalize_player_name(src)] = data
@@ -823,6 +827,9 @@ def build_champion_announcement_view(
 
     view.add_item(container)
 
+    for row in _build_mpt_button_rows(standings, displays, deck_data):
+        view.add_item(row)
+
     if guild_id and thread_id:
         actions = ui.ActionRow()
         actions.add_item(ui.Button(
@@ -834,6 +841,37 @@ def build_champion_announcement_view(
         view.add_item(actions)
 
     return view
+
+
+def _build_mpt_button_rows(
+    standings: list[pod_swiss.Standing],
+    displays: dict[str, dict],
+    deck_data: dict[str, "ParticipantDeckData"],
+) -> list[ui.ActionRow]:
+    """One link button per participant with a draft_log_url. Champion(s) get a 🏆 prefix.
+    Packed into ActionRows of 5 buttons each, in standings order."""
+    buttons: list[ui.Button] = []
+    for s in standings:
+        key = _normalize_player_name(s.player_name)
+        data = deck_data.get(key)
+        if data is None or not data.draft_log_url:
+            continue
+        info = displays.get(key, {})
+        name = info.get("display_name") or s.player_name
+        label = f"🏆 {name}" if s.losses == 0 else name
+        buttons.append(ui.Button(
+            label=label[:80],
+            style=discord.ButtonStyle.link,
+            url=data.draft_log_url,
+        ))
+
+    rows: list[ui.ActionRow] = []
+    for i in range(0, len(buttons), 5):
+        row = ui.ActionRow()
+        for btn in buttons[i:i + 5]:
+            row.add_item(btn)
+        rows.append(row)
+    return rows
 
 
 def _collect_podium(

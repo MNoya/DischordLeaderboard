@@ -8,6 +8,8 @@ sessionUsers updates so later commands can act on who is in the lobby
 from __future__ import annotations
 
 import asyncio
+import gzip
+import json
 import logging
 import random
 import re
@@ -21,8 +23,10 @@ from sqlalchemy import select
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.discord_helpers import extract_avatar_hash
-from bot.models import Player, PodDraftEvent
+from bot.models import Player, PodDraftEvent, PodDraftParticipant
+from bot.scripts.draftmancer_log import build_compact
 from bot.services.lobby_embed import LobbyReadyButtonView, render as render_lobby_embed
+from bot.services.magicprotools import submit_to_api as submit_to_magicprotools
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_drafts import classify_lobby_names
 from bot.services.pod_tournament import start_tournament
@@ -336,6 +340,65 @@ class PodDraftManager:
                     self.draft_logs[name] = log_payload
                     break
         log.info("draftLog stored for %s (%d total)", self.session_id, len(self.draft_logs))
+        await asyncio.to_thread(self._persist_draft_log_gz, log_payload)
+        asyncio.create_task(self._submit_logs_to_magicprotools(log_payload))
+
+    async def _submit_logs_to_magicprotools(self, log_payload: dict) -> None:
+        """For each Draftmancer seat in the log, submit to MagicProTools and stash the URL on the
+        matching pod_draft_participants row. Fire-and-forget; per-seat failures are silent."""
+        if settings.mpt_api_key is None:
+            return
+        users = log_payload.get("users") or {}
+        if not isinstance(users, dict):
+            return
+        for user_id, user_data in users.items():
+            user_name = user_data.get("userName") if isinstance(user_data, dict) else None
+            if not user_name or user_name == _BOT_USER_NAME:
+                continue
+            url = await submit_to_magicprotools(user_id, log_payload)
+            if not url:
+                continue
+            await asyncio.to_thread(self._store_draft_log_url, user_name, url)
+
+    def _store_draft_log_url(self, draftmancer_name: str, url: str) -> None:
+        try:
+            with SessionLocal() as session:
+                rows = session.execute(
+                    select(PodDraftParticipant)
+                    .where(
+                        PodDraftParticipant.event_id == self.event_id,
+                        PodDraftParticipant.draftmancer_name == draftmancer_name,
+                    )
+                ).scalars().all()
+                if not rows:
+                    log.info("magicprotools: no participant row matching %s in %s", draftmancer_name, self.event_id)
+                    return
+                for row in rows:
+                    row.draft_log_url = url
+                session.commit()
+        except Exception:
+            log.warning("magicprotools: store url failed for %s", draftmancer_name, exc_info=True)
+
+    def _persist_draft_log_gz(self, log_payload: dict) -> None:
+        try:
+            compact = build_compact(log_payload)
+            blob = gzip.compress(json.dumps(compact, separators=(",", ":")).encode("utf-8"))
+        except Exception:
+            log.warning("draft_log_gz compact/gzip failed for %s", self.session_id, exc_info=True)
+            return
+        try:
+            with SessionLocal() as session:
+                event = session.execute(
+                    select(PodDraftEvent).where(PodDraftEvent.id == self.event_id)
+                ).scalar_one_or_none()
+                if event is None:
+                    log.warning("draft_log_gz: event %s not found, skipping persist", self.event_id)
+                    return
+                event.draft_log_gz = blob
+                session.commit()
+                log.info("draft_log_gz persisted for %s (%d bytes)", self.event_id, len(blob))
+        except Exception:
+            log.warning("draft_log_gz persist failed for %s", self.event_id, exc_info=True)
 
     async def _fetch_thread(self):
         try:

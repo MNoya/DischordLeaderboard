@@ -1,6 +1,19 @@
 # Pod Draft — MagicProTools draft log integration
 
-Working spec. **Not started**. Locked design choices captured below so the next session can implement without re-discovery.
+Working spec. **Shipped on branch `pod-draft-magicprotools`.** Status notes appended below.
+
+## What shipped
+
+- `bot/services/magicprotools.py` — `convert_to_magicprotools_format` (pure) + `submit_to_api` (async; aiohttp; 10s timeout; degrades to `None` on any failure)
+- `bot/config.py` — `mpt_api_key: SecretStr | None`. `.env` holds the value locally (gitignored)
+- `alembic/versions/r9j0k1l2m3n4_pod_event_draft_log_gz.py` — adds `pod_draft_events.draft_log_gz BYTEA`. Applied locally; **not yet applied to prod**
+- `bot/models.py` (`PodDraftEvent`) — `draft_log_gz` (LargeBinary)
+- `bot/models.py` (`PodDraftParticipant`) — `draft_log_url` was already present
+- `bot/services/pod_draft_manager.py` (`_on_draft_log`) — gzipped compact form persisted to `pod_draft_events.draft_log_gz` via `bot.scripts.draftmancer_log.build_compact + gzip.compress`. Then fires-and-forgets `_submit_logs_to_magicprotools` which iterates seats and stashes per-seat URLs on `pod_draft_participants.draft_log_url`. Skips when `MPT_API_KEY` is not set.
+- `bot/services/pod_tournament.py` (`ParticipantDeckData`) — extended with `draft_log_url`. `_load_event_deck_data_sync` carries it through.
+- `bot/services/pod_tournament.py` (`build_champion_announcement_view`) — emits MPT link buttons via `_build_mpt_button_rows`. One button per participant whose row has `draft_log_url`. Champion(s) get a 🏆 prefix on the label. Packed into ActionRows of 5 buttons in standings order. Thread button stays as its own row at the bottom.
+- `bot/commands/testlobby.py` — stubs fake MPT URLs per seat so the testlobby announcement renders the full button row layout
+- `bot/tests/test_magicprotools.py` — 6 tests covering self-seat marker, pick marker, set vs cube header, double-faced cards, event-header session id. Live API submit not exercised (tests don't hit MPT)
 
 ## What it does
 

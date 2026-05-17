@@ -9,6 +9,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     UniqueConstraint,
 )
@@ -236,6 +237,7 @@ class PodDraftEvent(Base):
     sesh_message_id     = Column(String, nullable=False)
     socket_status       = Column(String, nullable=False)
     current_round       = Column(Integer, nullable=True)
+    draft_log_gz        = Column(LargeBinary, nullable=True)
     created_at          = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     participants = relationship(

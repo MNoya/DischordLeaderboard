@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     pod_draft_test_roster: str = ""
     sesh_bot_id: int = 616754792965865495
     draftmancer_ws_url: str = "wss://draftmancer.com"
+    mpt_api_key: SecretStr | None = None
 
 
 settings = Settings()

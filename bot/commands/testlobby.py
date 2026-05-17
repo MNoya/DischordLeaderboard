@@ -299,11 +299,14 @@ async def _maybe_announce_or_update_test_champion(state: dict, channel) -> None:
 
     pending_count = sum(1 for m in matches if not m.get("winner_name"))
     standings_msg = state.get("standings_message")
+    # Stub MPT URLs so the button row renders in testlobby — no real API call happens for the
+    # placeholder seats. Use magicprotools.com root so the buttons are at least clickable.
     deck_data = {
         _norm(p.name): ParticipantDeckData(
             colors=player_colors.get(_norm(p.name)),
             screenshot_url=screenshots.get(_norm(p.name)),
             screenshot_caption=captions.get(_norm(p.name)),
+            draft_log_url=f"https://magicprotools.com/?seat={p.name}",
         )
         for p in state["players"]
     }
