@@ -35,14 +35,10 @@ from bot.discord_helpers import refresh_player_avatars
 from bot import emojis
 from bot.commands.testlobby import setup as setup_testlobby
 from bot.listeners.sesh_listener import reschedule_pending_events, setup as setup_sesh_listener
-from bot.models import MagicSet, Player, PodDraftEvent
+from bot.models import MagicSet, Player
 from bot.services.lobby_embed import LobbyReadyButtonView
-from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_tournament import (
-    HollowManager,
     register_persistent_views as register_pod_views,
-    reset_event_matches,
-    start_tournament,
 )
 from bot.services.refresh import refresh_active_players
 from bot.services.seventeenlands import MinIntervalLimiter, SeventeenLandsClient
@@ -346,38 +342,6 @@ def build_bot(guild_id: int) -> commands.Bot:
         except discord.HTTPException:
             log.warning("could not DM owner the refresh report", exc_info=True)
 
-    @bot.command(name="testbracket")
-    @commands.is_owner()
-    async def test_bracket_cmd(ctx: commands.Context) -> None:
-        """Owner-only. Inside a pod-draft thread, wipe its matches and re-run the post-draft Python-Swiss flow with POD_DRAFT_TEST_ROSTER."""
-        if not isinstance(ctx.channel, discord.Thread):
-            await ctx.send("Run this inside a pod-draft thread.")
-            return
-        roster = [n.strip() for n in settings.pod_draft_test_roster.split(",") if n.strip()]
-        if len(roster) < 2 or len(roster) % 2 != 0:
-            await ctx.send(f"POD_DRAFT_TEST_ROSTER needs an even count (got {len(roster)}).")
-            return
-
-        thread_id = str(ctx.channel.id)
-        def _find_event():
-            with SessionLocal() as session:
-                event = session.execute(
-                    select(PodDraftEvent).where(PodDraftEvent.discord_thread_id == thread_id)
-                ).scalar_one_or_none()
-                if event is None:
-                    return None
-                return event.id
-
-        event_id = await asyncio.to_thread(_find_event)
-        if event_id is None:
-            await ctx.send("No pod_draft_event tied to this thread.")
-            return
-
-        await reset_event_matches(event_id)
-        manager = HollowManager(bot, event_id, ctx.channel.id, roster)
-        ACTIVE_POD_MANAGERS[event_id] = manager
-        await start_tournament(manager)
-
     @bot.command(name="refresh")
     @commands.is_owner()
     async def refresh_cmd(ctx: commands.Context, set_code: str | None = None) -> None:
@@ -409,7 +373,10 @@ def build_bot(guild_id: int) -> commands.Bot:
     @bot.event
     async def on_ready() -> None:
         log.info("logged in as %s (id=%s)", bot.user, bot.user.id if bot.user else "?")
-        await bot.change_presence(activity=discord.CustomActivity(name="dischord.pages.dev | /join"))
+        await bot.change_presence(activity=discord.Activity(
+            type=discord.ActivityType.competing,
+            name="dischord.pages.dev | /join",
+        ))
         if not settings.auto_refresh_enabled:
             log.info("AUTO_REFRESH_ENABLED=false; skipping the scheduled 17lands refresh tick")
             return
@@ -419,10 +386,19 @@ def build_bot(guild_id: int) -> commands.Bot:
     return bot
 
 
+def _restart_banner() -> None:
+    """Bright ANSI banner on stderr to delimit restarts in the dev terminal."""
+    import sys
+    from datetime import datetime
+    line = f"═══════════ BOT RESTART @ {datetime.now():%Y-%m-%d %H:%M:%S} ═══════════"
+    print(f"\033[1;33m{line}\033[0m", file=sys.stderr, flush=True)
+
+
 def main() -> None:
     if settings.discord_bot_token is None or settings.discord_guild_id is None:
         raise SystemExit("DISCORD_BOT_TOKEN and DISCORD_GUILD_ID must be set to run the bot")
 
+    _restart_banner()
     configure_logging()
     run_migrations()
 
