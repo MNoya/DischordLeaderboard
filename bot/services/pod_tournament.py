@@ -25,6 +25,8 @@ from bot.models import Player as DbPlayer, PodDraftEvent, PodDraftMatch, PodDraf
 from bot.services import pod_swiss
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_deck_color import PAIR_EMOJI_NAME, NotInPodError, SubmitDeckView
+from bot.services.pod_replays import fetch_and_persist_replays_for_player
+from bot.services.seventeenlands import SeventeenLandsClient
 from bot.services.pod_drafts import (
     FinalStanding,
     _normalize_player_name,
@@ -489,6 +491,10 @@ async def _handle_result_submission(interaction: discord.Interaction, value: str
     except Exception:
         log.warning("could not edit round message", exc_info=True)
     await _maybe_advance(interaction.client, event_id, round_num)
+    if round_num >= TOTAL_ROUNDS:
+        asyncio.create_task(_fetch_replays_for_match_players(
+            event_id, result["a_name"], result["b_name"],
+        ))
 
 
 def _load_round_states(event_id: str, round_num: int) -> list[dict]:
@@ -542,6 +548,38 @@ def _commit_result(match_id: str, winner_name: str, score: str):
             "round": match.round,
             "event_id": match.event_id,
         }
+
+
+async def _fetch_replays_for_match_players(event_id: str, a_name: str, b_name: str) -> None:
+    pairs = await asyncio.to_thread(_resolve_match_player_tokens_sync, event_id, a_name, b_name)
+    if not pairs:
+        return
+    client = SeventeenLandsClient()
+    for player_id, seat_name, token in pairs:
+        await fetch_and_persist_replays_for_player(client, event_id, player_id, seat_name, token)
+
+
+def _resolve_match_player_tokens_sync(
+    event_id: str, a_name: str, b_name: str,
+) -> list[tuple[str, str, str]]:
+    out: list[tuple[str, str, str]] = []
+    with SessionLocal() as session:
+        for seat_name in (a_name, b_name):
+            row = session.execute(
+                select(PodDraftParticipant.player_id, DbPlayer.seventeenlands_token)
+                .join(DbPlayer, DbPlayer.id == PodDraftParticipant.player_id)
+                .where(
+                    PodDraftParticipant.event_id == event_id,
+                    PodDraftParticipant.draftmancer_name == seat_name,
+                )
+            ).first()
+            if row is None:
+                continue
+            player_id, token = row
+            if not token:
+                continue
+            out.append((player_id, seat_name, token))
+    return out
 
 
 async def _maybe_advance(bot_client, event_id: str, round_num: int) -> None:
@@ -918,7 +956,7 @@ def build_champion_announcement_view(
     actions.add_item(ui.Button(
         label="Replays",
         style=discord.ButtonStyle.link,
-        url=f"https://dischord.pages.dev/pod/{slugify(event_name)}",
+        url=f"{settings.public_site_url.rstrip('/')}/pod/{slugify(event_name)}",
         emoji="🎬",
     ))
     view.add_item(actions)

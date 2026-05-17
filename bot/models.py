@@ -299,3 +299,24 @@ class PodDraftMatch(Base):
     reported_at    = Column(DateTime(timezone=True), nullable=True)
 
     event = relationship("PodDraftEvent", back_populates="matches")
+
+
+class PodDraftReplay(Base):
+    __tablename__ = "pod_draft_replays"
+
+    id             = Column(String, primary_key=True, default=lambda: str(uuid4()))
+    event_id       = Column(String, ForeignKey("pod_draft_events.id", ondelete="CASCADE"), nullable=False)
+    player_id      = Column(String, ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    game_id        = Column(String, nullable=False)
+    link           = Column(String, nullable=False)
+    game_time      = Column(DateTime(timezone=True), nullable=False)
+    won            = Column(Boolean, nullable=False)
+    turns          = Column(Integer, nullable=True)
+    on_play        = Column(Boolean, nullable=True)
+    inferred_round = Column(Integer, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("event_id", "player_id", "game_id", name="uq_pod_draft_replay_event_player_game"),
+        Index("ix_pod_draft_replays_event_player", "event_id", "player_id"),
+        Index("ix_pod_draft_replays_event_time", "event_id", "game_time"),
+    )

@@ -1,6 +1,64 @@
 # Pod Draft — 17lands replay links
 
-Working spec. **Not started.**
+Working spec. Branch `pod-draft-replays` (stacked on `pod-draft-magicprotools`).
+
+## Local dev setup
+
+```bash
+# 1. Local docker postgres (one-time)
+docker start dischord-pg
+
+# 2. Seed real Pod #3 into local docker (needs prod URL once to pull WaveofShadow's token)
+SUPABASE_DB_URL=$(grep '^SUPABASE_DB_URL=' .env.supabase | cut -d= -f2-) \
+DATABASE_URL=postgresql://postgres:devpw@localhost:5433/dischord \
+.venv/bin/python -m bot.scripts.seed_pod3_for_replays
+# 14 replay rows: Noya R1✓ R3✓ (R2 skipped from 17lands sync gap), Wave R3✓ (R1/R2 sparse).
+
+# 3. Dev-only PostgREST-shaped proxy in front of docker postgres
+DATABASE_URL=postgresql://postgres:devpw@localhost:5433/dischord \
+.venv/bin/python -m bot.scripts.local_supabase_proxy
+
+# 4. Frontend (frontend/.env.local already points to http://localhost:3001)
+cd frontend && npm run dev
+# http://localhost:5173/leaderboard/pod/sos-pod-draft-3
+```
+
+The proxy echoes `Access-Control-Request-Headers` back as `Access-Control-Allow-Headers` so `supabase-js` headers like `accept-profile` and `x-retry-count` clear the CORS preflight.
+
+## What's shipped on this branch
+
+- `pod_draft_replays` table (migration `u2n3o4p5q6r7`) — one row per player per 17lands game record. `(event_id, player_id, game_id)` unique. Indexes on `(event_id, player_id)` and `(event_id, game_time)`.
+- `seventeenlands.fetch_user_games(token)` — calls `https://www.17lands.com/data/user_game_list/<token>`. Returns the `games` list (or empty on failure).
+- `pod_replays.attribute_games_to_rounds(...)` — score-pattern + time-window attribution. Per-round eligibility bounded by `(prev_match.reported_at, this_match.reported_at]`. Requires exact game count + W/L pattern match; otherwise leaves the round unattributed.
+- `pod_replays.fetch_and_persist_replays_for_player(...)` — orchestrator. Fire-and-forget safe.
+- Auto-trigger: in `_handle_result_submission`, after an R3 result lands, fires fetch+persist for both players in that match (per the "Only fetch player game history once their last match is reported" decision).
+- Public views (migration `v3o4p5q6r7s8`): `public_pod_draft_replays` + `public_pod_draft_event_matches`, granted to `anon`.
+- Frontend `/leaderboard/pod/:slug` route → `PodPage.tsx` — raw validation page. Per-player game tables + head-to-head pairings detected via timestamp (±2 min) + turn-count + opposite-result join.
+- Replays button on the announcement now uses `settings.public_site_url` so the URL is `dischord.pages.dev/leaderboard/pod/<slug>` (was a bare `/pod/<slug>` that would have 404'd).
+
+## Empirical findings — May 14 Pod #3 trial
+
+- **17lands `game_id` is PER-USER, not per-game.** Confirmed by pulling WaveofShadow's token from prod and comparing her game IDs against Noya's — zero overlap despite playing each other in R3. The cross-player join MUST be by timestamp + turn-count, not game_id.
+- **17lands ingestion drops games.** Noya had 8 of 9 expected games; WaveofShadow had 6 of 8 expected. The algorithm degrades gracefully — unmatched rounds stay `inferred_round = NULL`, but the rest still attribute.
+- **Misload restarts**: rare but real; filter games with `turns < 3`.
+
+## Decisions locked in this iteration
+
+- Replaced the original `pod_draft_matches.replay_url_a/b` design — that migration never shipped (cleanly removed from the branch history). The per-match approach was too narrow: 17lands lossiness + missing opponent identity make per-side URL attribution unreliable. The flat per-player table is the right shape.
+- Skipping the "Find Replays" manual button for now. Auto-trigger fires after R3 results, which lag the games themselves by ~minutes-to-hours of round play, giving 17lands ingestion time to catch up. Revisit if observed lag is too high.
+- testlobby champion-state stub for `pod_draft_replays` rows — deferred. Validation seed script (`bot/scripts/seed_pod3_for_replays.py`) populates the real Pod #3 from prod tokens, which is sufficient for now.
+
+## Next design pass — pod-draft layout for the frontend
+
+The current `PodPage.tsx` is raw HTML for data validation. Future design work (separate task):
+
+- **Table-seating order**: render the 8 (or N) players around a virtual round table in actual draft seat order (left → pass-direction), not alphabetical.
+- **Deck-color glyphs above player names**: small mana-emoji pips per player, sourced from `pod_draft_participants.deck_colors`.
+- **Match cards**: per round, show each pairing as a card with both players' avatars, final score, and the replay links in their natural pair grouping (G1/G2/G3 of the bo3).
+- **Head-to-head linking**: when both sides of a game are available, show a single "View this game" link surfacing both perspectives (Noya's POV / Wave's POV) on the 17lands viewer.
+- **Trophy/podium decoration** for ranks 1/2/3.
+
+## Original spec below ↓
 
 ## What it does
 

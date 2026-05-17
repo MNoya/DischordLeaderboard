@@ -96,6 +96,9 @@ class SeventeenLandsClient:
     def _data_url(self, token: str) -> str:
         return f"{self.base_url}/user/data/{token}"
 
+    def _games_url(self, token: str) -> str:
+        return f"{self.base_url}/data/user_game_list/{token}"
+
     def _cache_path(
         self,
         token: str,
@@ -155,6 +158,29 @@ class SeventeenLandsClient:
                 json.dump(body, f)
 
         return body["drafts"] or []
+
+    def fetch_user_games(self, token: str) -> list[dict]:
+        self.limiter.wait()
+        try:
+            resp = self.session.get(self._games_url(token), timeout=self.timeout_s)
+        except requests.RequestException:
+            logger.warning(f"17lands user_game_list network error for token tail …{token[-4:]}", exc_info=True)
+            return []
+        if resp.status_code != 200:
+            logger.warning(f"17lands user_game_list non-200 ({resp.status_code}) for token tail …{token[-4:]}")
+            return []
+        try:
+            body = resp.json()
+        except ValueError:
+            logger.warning(f"17lands user_game_list malformed JSON for token tail …{token[-4:]}")
+            return []
+        if isinstance(body, list):
+            return body
+        if isinstance(body, dict):
+            games = body.get("games")
+            if isinstance(games, list):
+                return games
+        return []
 
     def verify_token(self, token: str) -> bool:
         """Return True if 17lands recognizes the token.
