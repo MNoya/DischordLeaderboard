@@ -28,7 +28,7 @@ from bot.scripts.draftmancer_log import build_compact
 from bot.services.lobby_embed import LobbyReadyButtonView, render as render_lobby_embed
 from bot.services.magicprotools import submit_to_api as submit_to_magicprotools
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
-from bot.services.pod_drafts import classify_lobby_names
+from bot.services.pod_drafts import classify_lobby_names, seed_event_participants
 from bot.services.pod_tournament import start_tournament
 from bot.slug import disambiguate_slug, slugify
 
@@ -261,6 +261,28 @@ class PodDraftManager:
         classified = await self._classify_users(non_bot_names) if non_bot_names else []
         await self._refresh_lobby_status(classified)
 
+    async def _resolve_rsvp_mentions(self, guild: discord.Guild | None) -> dict[int, str]:
+        """Resolve `<@id>` mentions in rsvps_yes/rsvps_maybe to guild member display names.
+        Used by render_lobby_embed for dedup against in-session display names. Plain-text
+        rsvps (when sesh's `Display Usernames as Plain Text` is on) don't need resolution."""
+        if guild is None:
+            return {}
+        ids: set[int] = set()
+        for rsvp in (*self.rsvps_yes, *self.rsvps_maybe):
+            m = re.match(r"^<@!?(\d+)>$", rsvp.strip())
+            if m:
+                ids.add(int(m.group(1)))
+        out: dict[int, str] = {}
+        for mid in ids:
+            member = guild.get_member(mid)
+            if member is None:
+                try:
+                    member = await guild.fetch_member(mid)
+                except discord.HTTPException:
+                    continue
+            out[mid] = member.display_name
+        return out
+
     async def _refresh_lobby_status(self, classified: list[tuple[str, str | None]]) -> None:
         thread = await self._fetch_thread()
         if thread is None:
@@ -277,6 +299,7 @@ class PodDraftManager:
             ready_count=ready_now,
             decliner_name=self.last_decliner_name,
             cancel_reason=self.last_cancel_reason,
+            display_name_by_mention_id=await self._resolve_rsvp_mentions(thread.guild),
         )
         has_unrecognized = any(dn is None for _, dn in classified)
         view = (
@@ -352,8 +375,14 @@ class PodDraftManager:
         if not isinstance(users, dict):
             return
         for user_id, user_data in users.items():
-            user_name = user_data.get("userName") if isinstance(user_data, dict) else None
+            if not isinstance(user_data, dict):
+                continue
+            user_name = user_data.get("userName")
             if not user_name or user_name == _BOT_USER_NAME:
+                continue
+            # Skip Draftmancer AI bots — they have no participant row, the URL would be discarded
+            # downstream, and we'd waste an MPT API call per bot seat.
+            if user_data.get("isBot"):
                 continue
             url = await submit_to_magicprotools(user_id, log_payload)
             if not url:
@@ -451,7 +480,26 @@ class PodDraftManager:
                     log.warning("could not post startDraft error", exc_info=True)
             return
         self.drafting = True
+        await asyncio.to_thread(self._seed_participants_at_draft_start)
         await self.refresh_lobby_now()
+
+    def _seed_participants_at_draft_start(self) -> None:
+        """Insert pod_draft_participants for every non-bot Draftmancer userName now that the draft
+        has begun (lobby locked). Idempotent — start_tournament will re-call with the same roster
+        as a safety net after endDraft."""
+        roster = [
+            u.get("userName") for u in self.session_users
+            if u.get("userName") and u.get("userName") != _BOT_USER_NAME
+        ]
+        if not roster:
+            return
+        try:
+            with SessionLocal() as session:
+                seed_event_participants(session, self.event_id, roster)
+                session.commit()
+            log.info(f"seeded {len(roster)} participants at draft start for {self.event_id}")
+        except Exception:
+            log.warning(f"could not seed participants at draft start for {self.event_id}", exc_info=True)
 
     async def _emit_with_ack(self, event: str, *args, timeout_s: float = 5.0):
         """Emit a socket.io event and wait for the server's ack callback."""

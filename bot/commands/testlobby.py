@@ -10,13 +10,23 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
+from itertools import cycle, islice
 
 import discord
 from discord.ext import commands
 
+from bot.commands.testcomponent import (
+    _DECK_SCREENSHOT_URL_A,
+    _DECK_SCREENSHOT_URL_B,
+    _DECK_SCREENSHOT_URL_C,
+    _DECK_SCREENSHOT_URL_D,
+)
+
 from bot.services import pod_swiss
 from bot.services.lobby_embed import LobbyReadyButtonView, render as render_lobby_embed
 from bot.services.pod_deck_color import SubmitDeckView
+from bot.services.pod_drafts import _normalize_player_name as _norm
 from bot.services.pod_tournament import (
     GRACE_SECONDS,
     ParticipantDeckData,
@@ -24,6 +34,7 @@ from bot.services.pod_tournament import (
     TOTAL_ROUNDS,
     SKIPPED_SENTINEL,
     _mark_trophy_match,
+    _pin_only_this_bot_message,
     _round_embed,
     build_champion_announcement_view,
     build_champion_embed,
@@ -96,8 +107,6 @@ def _submit_deck_view(state: dict | None = None) -> SubmitDeckView:
     if state is None:
         return SubmitDeckView(_test_submit_deck_color, _test_lookup_deck_color)
 
-    from bot.services.pod_drafts import _normalize_player_name as _norm
-
     async def submit(interaction: discord.Interaction, color: str) -> None:
         _TEST_DECK_COLORS[interaction.user.id] = color
         state.setdefault("player_colors", {})[_norm(_INVOKER_SEAT)] = color
@@ -112,24 +121,49 @@ def _submit_deck_view(state: dict | None = None) -> SubmitDeckView:
 _THREAD_NAME = "SOS Pod Draft #3 - May 15"
 _DRAFTMANCER_URL = "https://draftmancer.com/?session=LLUT-SOS-May-15-D"
 _RSVPS_YES = [
-    "Noya", "Arcyl", "Doctormagi", "Oophies", "Chonce", "Elfandor",
-    "flutterdev", "whalematron", "springbok7", "jonnietang",
+    "Noya", "Bacchus", "NiamhIsTired", "maimslap", "Waveofshadow", "Elfandor",
+    "fullerene60", "whalematron", "springbok7", "jonnietang",
 ]
-_RSVPS_MAYBE = ["Bacchus", "NiamhIsTired", "Waveofshadow"]
+_RSVPS_MAYBE = ["Aristeo", "DongSlinger420", "Oophies"]
+# Seats match the real Pod Draft #3 Draftmancer log (DraftLog_LLUSOS31). Arena tag = log userName.
 _LINKED_EIGHT: list[tuple[str, str]] = [
-    ("Noya#1234", "Noya"),
-    ("Aristeo#15552", "Arcyl"),
-    ("Doctormagi#47646", "Doctormagi"),
-    ("Oophies#11360", "Oophies"),
-    ("DongSlinger420#4573", "Chonce"),
+    ("Noya#08011", "Noya"),
+    ("Bacchus#23673", "Bacchus"),
+    ("NiamhIsTired#12791", "NiamhIsTired"),
+    ("maimslap#64991", "maimslap"),
+    ("Waveofshadow#17843", "Waveofshadow"),
     ("Elfandor#43425", "Elfandor"),
-    ("fullerene60#49190", "flutterdev"),
+    ("fullerene60#49190", "fullerene60"),
     ("whalematron#89523", "whalematron"),
 ]
 _VALID_STATES = (
     "empty", "partial", "linked", "unlinked", "ready", "notready", "cancelled",
-    "drafting", "complete", "round1", "round3",
+    "drafting", "complete", "round1", "round3", "champion",
 )
+
+# Per-seat fake deck colors for the `champion` state. WUBRG-style codes.
+_CHAMPION_COLORS_BY_SEAT: dict[str, str] = {
+    "Noya": "UR",
+    "Bacchus": "WG",
+    "NiamhIsTired": "WB",
+    "maimslap": "BG",
+    "Waveofshadow": "WR",
+    "Elfandor": "WUBRG",
+    "fullerene60": "GR",
+    "whalematron": "BR",
+}
+
+# Real MagicProTools URLs from the Pod Draft #3 log (submitted via convert + submit_to_api).
+_CHAMPION_LOG_URLS_BY_SEAT: dict[str, str] = {
+    "Noya": "https://magicprotools.com/draft/show?id=7aPoPDgZQE6a6QdMNALnuzkJ5VA",
+    "Bacchus": "https://magicprotools.com/draft/show?id=YGuadyBqUTjEBOOJOsyCAjHOeqg",
+    "NiamhIsTired": "https://magicprotools.com/draft/show?id=SzG7eNkfQW33BujWTzAJh-jyCAM",
+    "maimslap": "https://magicprotools.com/draft/show?id=F-17YHvjuArO5cvPwxVxTY9XjN4",
+    "Waveofshadow": "https://magicprotools.com/draft/show?id=UsOlwo173SpQqRa6MYi-4Erbihg",
+    "Elfandor": "https://magicprotools.com/draft/show?id=jQ8myVhdHtEoREvlBbT12YOgWDc",
+    "fullerene60": "https://magicprotools.com/draft/show?id=eZ08ezLrbA6BJBFFmJ0Aoa8Rubs",
+    "whalematron": "https://magicprotools.com/draft/show?id=XN5NfpUtmAPPdV_BsUWuDkhQ58M",
+}
 
 _LAST_MESSAGE: dict[int, discord.Message] = {}
 _BRACKETS: dict[int, dict] = {}
@@ -139,12 +173,91 @@ def _make_match_id(round_num: int, idx: int) -> str:
     return f"{TESTLOBBY_MATCH_PREFIX}r{round_num}-m{idx}"
 
 
+def _build_champion_state(invoker) -> dict:
+    """Fully-resolved bracket state for `!testlobby champion`: R1+R2+R3 outcomes with the bot
+    owner winning, plus fake colors / screenshots / captions / draft-log URLs across every seat.
+    The rank-1 + 2 podium gets URL_A / URL_B; the last gallery rank gets URL_D; ranks in between
+    cycle through URL_C / A / B."""
+    players = [pod_swiss.Player(id=dn, name=dn) for _, dn in _LINKED_EIGHT]
+
+    def _seed(round_num: int, a: str, b: str) -> pod_swiss.MatchOutcome:
+        winner = _INVOKER_SEAT if _INVOKER_SEAT in (a, b) else a
+        return pod_swiss.MatchOutcome(
+            round_num=round_num, player_a_id=a, player_b_id=b,
+            winner_id=winner, score="2-1",
+        )
+
+    r1_pairings = pod_swiss.pair_round(players, [], 1)
+    r1 = [_seed(1, a, b) for a, b in r1_pairings]
+    r2_pairings = pod_swiss.pair_round(players, r1, 2)
+    r2 = [_seed(2, a, b) for a, b in r2_pairings]
+    pre_r3 = r1 + r2
+    r3_pairings = pod_swiss.pair_round(players, pre_r3, 3)
+    r3 = [_seed(3, a, b) for a, b in r3_pairings]
+    outcomes = pre_r3 + r3
+
+    r3_states = _next_round_match_states(3, r3_pairings, pre_r3, players)
+    _mark_trophy_match(r3_states, 3)
+    for st in r3_states:
+        winner = _INVOKER_SEAT if _INVOKER_SEAT in (st["a_name"], st["b_name"]) else st["a_name"]
+        st["winner_name"] = winner
+        st["score"] = "2-1"
+
+    standings = pod_swiss.compute_standings(players, outcomes)
+
+    # Rank → screenshot. Rank-1/2 are podium decks; the last gallery slot is URL_D; the rest
+    # cycle through C / A / B.
+    cycled = list(islice(
+        cycle((_DECK_SCREENSHOT_URL_C, _DECK_SCREENSHOT_URL_A, _DECK_SCREENSHOT_URL_B)),
+        max(len(standings) - 3, 0),
+    ))
+    rank_to_url: dict[int, str] = {
+        standings[0].rank: _DECK_SCREENSHOT_URL_A,
+        standings[1].rank: _DECK_SCREENSHOT_URL_B,
+    }
+    middle = standings[2:-1]
+    for s, url in zip(middle, cycled):
+        rank_to_url[s.rank] = url
+    rank_to_url[standings[-1].rank] = _DECK_SCREENSHOT_URL_D
+
+    screenshots = {_norm(s.player_name): rank_to_url[s.rank] for s in standings}
+    captions = {
+        _norm(standings[0].player_name): "Iz it Izzet? Always.",
+        _norm(standings[1].player_name): "Got farmed by the bot owner — gg",
+    }
+    log_urls = {
+        _norm(seat): url for seat, url in _CHAMPION_LOG_URLS_BY_SEAT.items()
+    }
+    player_colors = {
+        _norm(seat): color for seat, color in _CHAMPION_COLORS_BY_SEAT.items()
+    }
+
+    event_started_at = datetime.now(timezone.utc) - timedelta(hours=2, minutes=30)
+    return {
+        "players": players,
+        "round": 3,
+        "matches_by_round": {3: r3_states},
+        "outcomes": outcomes,
+        "invoker": invoker,
+        "round_messages": {},
+        "grace_task": None,
+        "grace_round": None,
+        "player_colors": player_colors,
+        "screenshots": screenshots,
+        "screenshot_captions": captions,
+        "draft_log_urls": log_urls,
+        "event_started_at": event_started_at,
+        "champion_announced": False,
+        "champion_announcement_message": None,
+    }
+
+
 def _round1_match_states() -> list[dict]:
     pairings = [
-        ("Noya", "Arcyl"),
-        ("Doctormagi", "Oophies"),
-        ("Chonce", "Elfandor"),
-        ("flutterdev", "whalematron"),
+        ("Noya", "Bacchus"),
+        ("NiamhIsTired", "maimslap"),
+        ("Waveofshadow", "Elfandor"),
+        ("fullerene60", "whalematron"),
     ]
     return [
         {
@@ -242,12 +355,26 @@ async def _maybe_post_or_update_test_standings(state: dict, channel) -> None:
     champion_locked = bool(trophy) and all(m.get("winner_name") for m in trophy)
     pending_count = sum(1 for m in matches if not m.get("winner_name"))
 
+    player_colors = state.get("player_colors", {})
+    screenshots = state.get("screenshots", {})
+    captions = state.get("screenshot_captions", {})
+    log_urls = state.get("draft_log_urls", {})
+    deck_data = {
+        _norm(p.name): ParticipantDeckData(
+            colors=player_colors.get(_norm(p.name)),
+            screenshot_url=screenshots.get(_norm(p.name)),
+            screenshot_caption=captions.get(_norm(p.name)),
+            draft_log_url=log_urls.get(_norm(p.name)),
+        )
+        for p in state["players"]
+    }
     embed = build_champion_embed(
         pod_swiss.compute_standings(state["players"], state["outcomes"]),
         event_name=_THREAD_NAME,
-        player_colors=state.get("player_colors", {}),
+        player_colors=player_colors,
         champion_locked=champion_locked,
         pending_count=pending_count,
+        deck_data=deck_data,
     )
     existing = state.get("standings_message")
     if existing is None:
@@ -255,6 +382,8 @@ async def _maybe_post_or_update_test_standings(state: dict, channel) -> None:
             state["standings_message"] = await channel.send(embed=embed, view=_submit_deck_view(state))
         except discord.HTTPException:
             log.warning("could not post testlobby standings", exc_info=True)
+            return
+        await _pin_only_this_bot_message(state["standings_message"])
     else:
         try:
             await existing.edit(embed=embed)
@@ -271,8 +400,6 @@ async def _maybe_announce_or_update_test_champion(state: dict, channel) -> None:
     Trigger: champion locked AND (all champion colors submitted OR grace expired).
     Fallback: post without colors if grace expires without submissions.
     """
-    from bot.services.pod_drafts import _normalize_player_name as _norm
-
     matches = state["matches_by_round"].get(TOTAL_ROUNDS, [])
     if not matches:
         return
@@ -299,14 +426,13 @@ async def _maybe_announce_or_update_test_champion(state: dict, channel) -> None:
 
     pending_count = sum(1 for m in matches if not m.get("winner_name"))
     standings_msg = state.get("standings_message")
-    # Stub MPT URLs so the button row renders in testlobby — no real API call happens for the
-    # placeholder seats. Use magicprotools.com root so the buttons are at least clickable.
+    log_urls = state.get("draft_log_urls", {})
     deck_data = {
         _norm(p.name): ParticipantDeckData(
             colors=player_colors.get(_norm(p.name)),
             screenshot_url=screenshots.get(_norm(p.name)),
             screenshot_caption=captions.get(_norm(p.name)),
-            draft_log_url=f"https://magicprotools.com/?seat={p.name}",
+            draft_log_url=log_urls.get(_norm(p.name)),
         )
         for p in state["players"]
     }
@@ -332,6 +458,8 @@ async def _maybe_announce_or_update_test_champion(state: dict, channel) -> None:
         deck_data=deck_data,
         guild_id=guild_id,
         thread_id=thread_id,
+        event_started_at=state.get("event_started_at"),
+        subtitle_override=state.get("subtitle_override"),
     )
 
     existing = state.get("champion_announcement_message")
@@ -571,7 +699,6 @@ class _TestlobbyScreenshotListener(commands.Cog):
         )
         if image_url is None:
             return
-        from bot.services.pod_drafts import _normalize_player_name as _norm
 
         for state in _BRACKETS.values():
             invoker = state.get("invoker")
@@ -661,8 +788,19 @@ async def setup(bot: commands.Bot) -> None:
                     pairings_url=msg.jump_url,
                 )
 
+        if state == "champion":
+            bracket = _build_champion_state(ctx.author)
+            await _maybe_post_or_update_test_standings(bracket, ctx.channel)
+            await _maybe_announce_or_update_test_champion(bracket, ctx.channel)
+            standings_msg = bracket.get("standings_message")
+            if standings_msg is not None:
+                _BRACKETS[standings_msg.id] = bracket
+            return
+
         if state == "":
             for s in _VALID_STATES:
+                if s == "champion":
+                    continue  # champion state posts 2 messages, handled separately above
                 embed, view, bracket = _build(s)
                 msg = await ctx.send(embed=embed, view=view)
                 if bracket is not None:

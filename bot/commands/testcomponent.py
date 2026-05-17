@@ -35,6 +35,11 @@ _DECK_SCREENSHOT_URL_C = (
     "https://cdn.discordapp.com/attachments/1505053484976836720/1505402147389444106/image.png"
     "?ex=6a0a7e80&is=6a092d00&hm=20bd0c76e2c65dfac412a33ccc975847cce70b07ccbcd9d8c6690176ab2684cd&"
 )
+_DECK_SCREENSHOT_URL_D = (
+    "https://cdn.discordapp.com/attachments/1503568130297823273/1504303344582131882/"
+    "Screenshot_2026-05-13_220355.png"
+    "?ex=6a0a73a9&is=6a092229&hm=b14d1cdbe551ce651354086237038d71b604f85d991099184b41823d9019bd9b&"
+)
 
 _THREAD_DEEP_LINK = "https://discord.com/channels/1465844083107827745/1505053484976836720"
 
@@ -97,10 +102,15 @@ def _build_champion_view() -> ui.LayoutView:
 
     container.add_item(ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small))
 
-    pool = cycle((_DECK_SCREENSHOT_URL_A, _DECK_SCREENSHOT_URL_B, _DECK_SCREENSHOT_URL_C))
+    # Cycle ABC for all but the last seat, then drop D in the last slot specifically.
+    rotated = list(islice(
+        cycle((_DECK_SCREENSHOT_URL_A, _DECK_SCREENSHOT_URL_B, _DECK_SCREENSHOT_URL_C)),
+        max(len(_ALSO_RANS) - 1, 0),
+    ))
+    rest_urls = rotated + [_DECK_SCREENSHOT_URL_D]
     rest_items = [
         discord.MediaGalleryItem(media=url, description=f"{name}'s deck")
-        for name, url in zip(_ALSO_RANS, islice(pool, len(_ALSO_RANS)))
+        for name, url in zip(_ALSO_RANS, rest_urls)
     ]
     container.add_item(ui.MediaGallery(*rest_items))
 

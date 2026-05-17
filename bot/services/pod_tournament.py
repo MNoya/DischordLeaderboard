@@ -19,6 +19,7 @@ from sqlalchemy import delete, func, select
 
 from bot import emojis
 from bot.config import settings
+from bot.slug import slugify
 from bot.database import SessionLocal
 from bot.models import Player as DbPlayer, PodDraftEvent, PodDraftMatch, PodDraftParticipant
 from bot.services import pod_swiss
@@ -32,6 +33,7 @@ from bot.services.pod_drafts import (
     finalize_champion as finalize_db,
     get_participant_deck_colors,
     participant_dm_info,
+    seed_event_participants,
     set_match_result,
     set_participant_deck_colors,
 )
@@ -120,11 +122,50 @@ def _load_event_name_sync(event_id: str) -> str:
         ).scalar_one_or_none() or "Pod Draft"
 
 
+def _load_event_started_at_sync(event_id: str) -> datetime | None:
+    with SessionLocal() as session:
+        return session.execute(
+            select(PodDraftEvent.event_time).where(PodDraftEvent.id == event_id)
+        ).scalar_one_or_none()
+
+
 def _short_event_name(event_name: str | None) -> str | None:
     """Drops anything after the first ' - '."""
     if not event_name:
         return None
     return event_name.split(" - ", 1)[0].strip()
+
+
+_RANK_MEDALS: dict[int, str] = {1: "🥇", 2: "🥈", 3: "🥉"}
+
+
+def _build_standings_row(
+    s: pod_swiss.Standing,
+    *,
+    displays: dict[str, dict],
+    player_colors: dict[str, str | None],
+    deck_data: dict[str, ParticipantDeckData],
+    site_root: str | None,
+) -> str:
+    """One standings row used by both the V2 announcement and the thread-side classic embed:
+    `{rank}. {medal} {name}  {wins}-{losses}  {colors}  [Draft Log]({url}) 📜`."""
+    key = _normalize_player_name(s.player_name)
+    info = displays.get(key, {})
+    name = info.get("display_name") or s.player_name
+    slug = info.get("slug")
+    data = deck_data.get(key)
+    prefix = f"{s.rank}. {_RANK_MEDALS[s.rank]} " if s.rank in _RANK_MEDALS else f"{s.rank}. "
+    rendered = (
+        f"[{name}]({site_root}/player/{slug})"
+        if slug and site_root else name
+    )
+    color_glyph = _format_deck_color_emojis(player_colors.get(key))
+    color_suffix = f"  {color_glyph}" if color_glyph else ""
+    log_suffix = (
+        f"  [Draft Log]({data.draft_log_url}) 📜"
+        if data is not None and data.draft_log_url else ""
+    )
+    return f"{prefix}{rendered}  {s.wins}-{s.losses}{color_suffix}{log_suffix}"
 
 
 def build_pairing_dm_embed(
@@ -264,7 +305,16 @@ async def start_tournament(manager: "PodDraftManager") -> None:
         return
 
     manager.tournament_players = [Player(id=name, name=name) for name in roster]
+    # Idempotent re-seed — _start_draft already seeded at draft-start time. Kept as a safety net
+    # in case that call didn't fire cleanly (bot restart mid-draft, etc).
+    await asyncio.to_thread(_seed_participants_sync, manager.event_id, roster)
     await advance_to_round(manager, 1)
+
+
+def _seed_participants_sync(event_id: str, roster: list[str]) -> None:
+    with SessionLocal() as session:
+        seed_event_participants(session, event_id, roster)
+        session.commit()
 
 
 async def advance_to_round(manager: "PodDraftManager", round_num: int) -> None:
@@ -752,6 +802,8 @@ def build_champion_announcement_view(
     deck_data: dict[str, "ParticipantDeckData"] | None = None,
     guild_id: int | None = None,
     thread_id: int | None = None,
+    event_started_at: datetime | None = None,
+    subtitle_override: str | None = None,
 ) -> ui.LayoutView:
     """One-shot 'champion crowned' Components V2 layout for the pod-draft channel (not the thread).
 
@@ -763,7 +815,6 @@ def build_champion_announcement_view(
     displays = displays or {}
     player_colors = player_colors or {}
     deck_data = deck_data or {}
-    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
 
     champs_named: list[tuple[str, str | None]] = []
     for s in standings:
@@ -777,26 +828,21 @@ def build_champion_announcement_view(
     short = _short_event_name(event_name) or event_name
     title = _format_champion_title(champs_named, short)
 
-    standings_lines: list[str] = []
-    for s in standings:
-        key = _normalize_player_name(s.player_name)
-        info = displays.get(key, {})
-        name = info.get("display_name") or s.player_name
-        slug = info.get("slug")
-        prefix = f"{s.rank}. {medals[s.rank]} " if s.rank in medals else f"{s.rank}. "
-        rendered = (
-            f"[{name}]({site_root}/player/{slug})"
-            if slug and site_root else name
+    standings_lines = [
+        _build_standings_row(
+            s, displays=displays, player_colors=player_colors,
+            deck_data=deck_data, site_root=site_root,
         )
-        color_glyph = _format_deck_color_emojis(player_colors.get(key))
-        color_suffix = f"  {color_glyph}" if color_glyph else ""
-        standings_lines.append(f"{prefix}{rendered}  {s.wins}-{s.losses}{color_suffix}")
+        for s in standings
+    ]
 
     view = ui.LayoutView()
     container = ui.Container(accent_colour=discord.Color.green())
 
-    ts = int(datetime.now(timezone.utc).timestamp())
-    container.add_item(ui.TextDisplay(f"## {title}\n-# Crowned <t:{ts}:F>"))
+    started_at = event_started_at or datetime.now(timezone.utc)
+    ts = int(started_at.timestamp())
+    subtitle = subtitle_override or f"**Drafted on** <t:{ts}:F>"
+    container.add_item(ui.TextDisplay(f"## {title}\n{subtitle}"))
     container.add_item(ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small))
     container.add_item(ui.TextDisplay(
         f"**{_standings_header_text(pending_count)}**\n" + "\n".join(standings_lines)
@@ -806,7 +852,7 @@ def build_champion_announcement_view(
     rest_items = _collect_rest_gallery_items(standings, displays, deck_data, skip=len(podium))
 
     if podium or rest_items:
-        container.add_item(ui.Separator(visible=True, spacing=discord.SeparatorSpacing.large))
+        container.add_item(ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small))
 
     for i, (medal, name, caption, screenshot_url) in enumerate(podium):
         suffix = f"  ~{name}"
@@ -827,51 +873,23 @@ def build_champion_announcement_view(
 
     view.add_item(container)
 
-    for row in _build_mpt_button_rows(standings, displays, deck_data):
-        view.add_item(row)
-
+    actions = ui.ActionRow()
     if guild_id and thread_id:
-        actions = ui.ActionRow()
         actions.add_item(ui.Button(
             label="Thread",
             style=discord.ButtonStyle.link,
             url=f"https://discord.com/channels/{guild_id}/{thread_id}",
             emoji=emojis.get_emoji("manat"),
         ))
-        view.add_item(actions)
+    actions.add_item(ui.Button(
+        label="Replays",
+        style=discord.ButtonStyle.link,
+        url=f"https://dischord.pages.dev/pod/{slugify(event_name)}",
+        emoji="🎬",
+    ))
+    view.add_item(actions)
 
     return view
-
-
-def _build_mpt_button_rows(
-    standings: list[pod_swiss.Standing],
-    displays: dict[str, dict],
-    deck_data: dict[str, "ParticipantDeckData"],
-) -> list[ui.ActionRow]:
-    """One link button per participant with a draft_log_url. Champion(s) get a 🏆 prefix.
-    Packed into ActionRows of 5 buttons each, in standings order."""
-    buttons: list[ui.Button] = []
-    for s in standings:
-        key = _normalize_player_name(s.player_name)
-        data = deck_data.get(key)
-        if data is None or not data.draft_log_url:
-            continue
-        info = displays.get(key, {})
-        name = info.get("display_name") or s.player_name
-        label = f"🏆 {name}" if s.losses == 0 else name
-        buttons.append(ui.Button(
-            label=label[:80],
-            style=discord.ButtonStyle.link,
-            url=data.draft_log_url,
-        ))
-
-    rows: list[ui.ActionRow] = []
-    for i in range(0, len(buttons), 5):
-        row = ui.ActionRow()
-        for btn in buttons[i:i + 5]:
-            row.add_item(btn)
-        rows.append(row)
-    return rows
 
 
 def _collect_podium(
@@ -941,25 +959,20 @@ def build_champion_embed(
     site_root: str | None = None,
     champion_locked: bool = True,
     pending_count: int = 0,
+    deck_data: dict[str, "ParticipantDeckData"] | None = None,
 ) -> discord.Embed:
-    """Thread-side standings embed. `player_colors` adds a mana-emoji glyph after each player's record."""
+    """Thread-side standings embed. `player_colors` adds a mana-emoji glyph after each player's record.
+    `deck_data` appends an inline Draft Log link per row when the participant has a MPT URL."""
     displays = displays or {}
     player_colors = player_colors or {}
-    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
-    lines: list[str] = []
-    for s in standings:
-        key = _normalize_player_name(s.player_name)
-        info = displays.get(key, {})
-        name = info.get("display_name") or s.player_name
-        slug = info.get("slug")
-        prefix = f"{s.rank}. {medals[s.rank]} " if s.rank in medals else f"{s.rank}. "
-        rendered = (
-            f"[{name}]({site_root}/player/{slug})"
-            if slug and site_root else name
+    deck_data = deck_data or {}
+    lines = [
+        _build_standings_row(
+            s, displays=displays, player_colors=player_colors,
+            deck_data=deck_data, site_root=site_root,
         )
-        color_glyph = _format_deck_color_emojis(player_colors.get(key))
-        color_suffix = f"  {color_glyph}" if color_glyph else ""
-        lines.append(f"{prefix}{rendered}  {s.wins}-{s.losses}{color_suffix}")
+        for s in standings
+    ]
 
     title = f"🏆 {event_name}" if champion_locked else f"🟢 {event_name}"
 
@@ -1205,6 +1218,7 @@ async def _announce_or_update_champion(manager) -> None:
         site_root=settings.public_site_url.rstrip("/"),
         pending_count=pending_count,
         deck_data=deck_data,
+        event_started_at=await asyncio.to_thread(_load_event_started_at_sync, event_id),
         guild_id=guild_id,
         thread_id=thread_id,
     )
@@ -1254,6 +1268,7 @@ async def _post_or_update_live_standings(manager) -> None:
         site_root=settings.public_site_url.rstrip("/"),
         champion_locked=champion_locked,
         pending_count=pending_count,
+        deck_data=deck_data,
     )
 
     if manager.standings_message is None:
@@ -1267,6 +1282,8 @@ async def _post_or_update_live_standings(manager) -> None:
             )
         except Exception:
             log.warning("could not post live standings", exc_info=True)
+            return
+        await _pin_only_this_bot_message(manager.standings_message)
     else:
         try:
             await manager.standings_message.edit(embed=embed)
@@ -1275,6 +1292,28 @@ async def _post_or_update_live_standings(manager) -> None:
 
     if manager.champion_announced:
         await _announce_or_update_champion(manager)
+
+
+async def _pin_only_this_bot_message(message: discord.Message) -> None:
+    """Pin `message`, first unpinning any prior pins authored by the same bot in this channel.
+    Keeps only one bot pin live so subsequent standings posts (or testlobby reruns) replace the
+    prior one cleanly. Silent on Forbidden / HTTPException."""
+    bot_user_id = message.author.id
+    try:
+        pins = await message.channel.pins()
+    except discord.HTTPException:
+        log.warning("could not fetch pins for %s", message.channel.id, exc_info=True)
+        return
+    for pin in pins:
+        if pin.author.id == bot_user_id and pin.id != message.id:
+            try:
+                await pin.unpin(reason="rotating pod-draft standings pin")
+            except discord.HTTPException:
+                log.info("could not unpin %s", pin.id, exc_info=True)
+    try:
+        await message.pin(reason="latest pod-draft standings")
+    except discord.HTTPException:
+        log.warning("could not pin standings message %s", message.id, exc_info=True)
 
 
 def _mark_trophy_match(match_states: list[dict], round_num: int) -> None:

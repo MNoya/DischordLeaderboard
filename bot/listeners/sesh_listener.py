@@ -83,7 +83,11 @@ class SeshListener(commands.Cog):
         self._schedule_reminder(event_row.id, event_row.event_time)
 
         try:
-            await thread.send(f"🤖 Pod Draft registered!\nDraftmancer link will be posted {REMINDER_LEAD_MIN} minutes before the event starts.")
+            await thread.send(embed=discord.Embed(
+                title="🤖 Pod Draft registered!",
+                description=f"Draftmancer link will be posted {REMINDER_LEAD_MIN} minutes before the event starts.",
+                color=discord.Color.green(),
+            ))
         except discord.HTTPException:
             log.warning("could not post confirmation in pod draft thread %s", thread.id, exc_info=True)
 

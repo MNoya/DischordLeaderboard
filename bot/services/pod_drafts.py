@@ -160,6 +160,14 @@ def record_event(session: Session, parsed: ParsedSeshEvent) -> PodDraftEvent:
     return event
 
 
+def seed_event_participants(session: Session, event_id: str, roster: list[str]) -> None:
+    """Upsert one pod_draft_participants row per Draftmancer userName in `roster`. Idempotent —
+    safe to call multiple times on the same event; existing rows get backfilled instead of
+    duplicated."""
+    for name in roster:
+        upsert_participant(session, event_id, display_name=name, draftmancer_name=name)
+
+
 def _add_attendee(session: Session, event_id: str, display_name: str) -> PodDraftParticipant:
     player = _player_for_name(session, display_name)
     participant = PodDraftParticipant(

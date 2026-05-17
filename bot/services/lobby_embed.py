@@ -7,6 +7,7 @@ startup; clicks dispatch to the active manager for the thread.
 from __future__ import annotations
 
 import logging
+import re
 
 import discord
 
@@ -72,6 +73,7 @@ def render(
     ready_count: int | None = None,
     decliner_name: str | None = None,
     cancel_reason: str | None = None,
+    display_name_by_mention_id: dict[int, str] | None = None,
 ) -> discord.Embed:
     """Lobby embed. `title` is the thread/event name; `rsvps_yes` / `rsvps_maybe` are sesh display
     names by RSVP type; `in_session` is Draftmancer sessionUsers as (arena_name,
@@ -83,9 +85,16 @@ def render(
     hidden once ready check fires."""
     in_draftmancer = [(arena, dn) for arena, dn in in_session if dn is not None]
     unrecognized = [arena for arena, dn in in_session if dn is None]
-    in_session_display_names = {dn for _, dn in in_draftmancer}
-    waiting_yes = [name for name in rsvps_yes if name not in in_session_display_names]
-    waiting_maybe = [name for name in rsvps_maybe if name not in in_session_display_names]
+    mention_map = display_name_by_mention_id or {}
+    in_session_keys = {dn.lower() for _, dn in in_draftmancer if dn}
+    waiting_yes = [
+        name for name in rsvps_yes
+        if _rsvp_dedup_key(name, mention_map) not in in_session_keys
+    ]
+    waiting_maybe = [
+        name for name in rsvps_maybe
+        if _rsvp_dedup_key(name, mention_map) not in in_session_keys
+    ]
     show_pending = state not in ("ready", "drafting", "complete")
 
     ready_total = len(in_draftmancer)
@@ -198,3 +207,17 @@ def render(
             inline=False,
         )
     return embed
+
+
+def _rsvp_dedup_key(rsvp: str, display_name_by_mention_id: dict[int, str]) -> str:
+    """Normalize an rsvp line to a lowercase comparison key. Handles both sesh formats:
+    when sesh's `Display Usernames as Plain Text` is on, lines are bare display names;
+    when off, lines are `<@id>` mention strings — we resolve those via the guild map."""
+    text = rsvp.strip()
+    mention_regex = re.compile(r"^<@!?(\d+)>$")
+    m = mention_regex.match(text)
+    if m:
+        resolved = display_name_by_mention_id.get(int(m.group(1)))
+        if resolved:
+            return resolved.lower()
+    return text.lower()
