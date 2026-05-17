@@ -136,7 +136,8 @@ _RSVPS_YES = [
     "fullerene60", "whalematron", "springbok7", "jonnietang",
 ]
 _RSVPS_MAYBE = ["Aristeo", "DongSlinger420", "Oophies"]
-# Seats match the real Pod Draft #3 Draftmancer log (DraftLog_LLUSOS31). Arena tag = log userName.
+# Seats match the real Pod Draft #3 Draftmancer log (DraftLog_LLUSOS31). Arena tag = log userName;
+# discord display name (second element) is what we show in the announcement.
 _LINKED_EIGHT: list[tuple[str, str]] = [
     ("Noya#08011", "Noya"),
     ("Bacchus#23673", "Bacchus"),
@@ -144,7 +145,7 @@ _LINKED_EIGHT: list[tuple[str, str]] = [
     ("maimslap#64991", "maimslap"),
     ("Waveofshadow#17843", "Waveofshadow"),
     ("Elfandor#43425", "Elfandor"),
-    ("fullerene60#49190", "fullerene60"),
+    ("fullerene60#49190", "flutterdev"),
     ("whalematron#89523", "whalematron"),
 ]
 _VALID_STATES = (
@@ -152,16 +153,17 @@ _VALID_STATES = (
     "drafting", "complete", "round1", "round3", "champion", "submit",
 )
 
-# Per-seat fake deck colors for the `champion` state. WUBRG-style codes.
+# Real deck colors from Pod Draft #3 for the top 4; bottom 4 are fake fill so the in-thread
+# embed still has a glyph per row.
 _CHAMPION_COLORS_BY_SEAT: dict[str, str] = {
+    "Elfandor": "UR",
+    "flutterdev": "WR",
+    "whalematron": "WB",
+    "Waveofshadow": "WB",
     "Noya": "UR",
     "Bacchus": "WG",
     "NiamhIsTired": "WB",
     "maimslap": "BG",
-    "Waveofshadow": "WR",
-    "Elfandor": "WUBRG",
-    "fullerene60": "GR",
-    "whalematron": "BR",
 }
 
 # Real MagicProTools URLs from the Pod Draft #3 log (submitted via convert + submit_to_api).
@@ -172,8 +174,24 @@ _CHAMPION_LOG_URLS_BY_SEAT: dict[str, str] = {
     "maimslap": "https://magicprotools.com/draft/show?id=F-17YHvjuArO5cvPwxVxTY9XjN4",
     "Waveofshadow": "https://magicprotools.com/draft/show?id=UsOlwo173SpQqRa6MYi-4Erbihg",
     "Elfandor": "https://magicprotools.com/draft/show?id=jQ8myVhdHtEoREvlBbT12YOgWDc",
-    "fullerene60": "https://magicprotools.com/draft/show?id=eZ08ezLrbA6BJBFFmJ0Aoa8Rubs",
+    "flutterdev": "https://magicprotools.com/draft/show?id=eZ08ezLrbA6BJBFFmJ0Aoa8Rubs",
     "whalematron": "https://magicprotools.com/draft/show?id=XN5NfpUtmAPPdV_BsUWuDkhQ58M",
+}
+
+# Real submitted deck screenshots from Pod Draft #3 (Discord CDN; signed URLs eventually expire).
+_CHAMPION_SCREENSHOTS_BY_SEAT: dict[str, str] = {
+    "Elfandor": "https://media.discordapp.net/attachments/1503568130297823273/1504301703317553262/image.png?ex=6a0b1ae2&is=6a09c962&hm=00e0455f945dc4567c751dcf06fc32be604b7cf8f8209224f4b74f6a00a849c8&=&format=webp&quality=lossless&width=1807&height=783",
+    "flutterdev": "https://media.discordapp.net/attachments/1503568130297823273/1504301930678059108/image.png?ex=6a0b1b18&is=6a09c998&hm=7cf567a39c0f285634ba24dc2d9d917e236afd2ca314738c71001588e4d164e9&=&format=webp&quality=lossless",
+    "whalematron": "https://media.discordapp.net/attachments/1503568130297823273/1504300108529799198/image.png?ex=6a0b1966&is=6a09c7e6&hm=0ca3c626b0a04ccce19a8bde1aa6eba9f28174e3079db01977ecd486af99bdaa&=&format=webp&quality=lossless&width=1872&height=745",
+    "Waveofshadow": "https://media.discordapp.net/attachments/1503568130297823273/1504303344582131882/Screenshot_2026-05-13_220355.png?ex=6a0b1c69&is=6a09cae9&hm=2a928247a7ed487e57d3091092683a9b670ab214be9798769326a9b67ba8eb94&=&format=webp&quality=lossless&width=1538&height=783",
+}
+
+# Captions submitted alongside Pod 3 screenshots, with the record prefix the players typed stripped off.
+_CHAMPION_CAPTIONS_BY_SEAT: dict[str, str] = {
+    "Elfandor": "nutty deck",
+    "flutterdev": "got farmed by elfandor",
+    "whalematron": "elfandor farming machine",
+    "Waveofshadow": "aggroooo",
 }
 
 _LAST_MESSAGE: dict[int, discord.Message] = {}
@@ -184,57 +202,68 @@ def _make_match_id(round_num: int, idx: int) -> str:
     return f"{TESTLOBBY_MATCH_PREFIX}r{round_num}-m{idx}"
 
 
+_POD3_OUTCOMES: list[tuple[int, str, str, str]] = [
+    # (round, player_a, player_b, winner) — engineered to land at Elfandor 3-0, flutterdev /
+    # whalematron / Waveofshadow at 2-1 in that tiebreaker order via OMW%.
+    (1, "Elfandor", "Noya", "Elfandor"),
+    (1, "flutterdev", "Bacchus", "flutterdev"),
+    (1, "whalematron", "NiamhIsTired", "whalematron"),
+    (1, "Waveofshadow", "maimslap", "Waveofshadow"),
+    (2, "Elfandor", "whalematron", "Elfandor"),
+    (2, "flutterdev", "Waveofshadow", "flutterdev"),
+    (2, "Noya", "Bacchus", "Noya"),
+    (2, "NiamhIsTired", "maimslap", "NiamhIsTired"),
+    (3, "Elfandor", "flutterdev", "Elfandor"),
+    (3, "whalematron", "Noya", "whalematron"),
+    (3, "Waveofshadow", "NiamhIsTired", "Waveofshadow"),
+    (3, "Bacchus", "maimslap", "Bacchus"),
+]
+
+
 def _build_champion_state(invoker) -> dict:
-    """Fully-resolved bracket state for `!testlobby champion`: R1+R2+R3 outcomes with the bot
-    owner winning, plus fake colors / screenshots / captions / draft-log URLs across every seat.
-    The rank-1 + 2 podium gets URL_A / URL_B; the last gallery rank gets URL_D; ranks in between
-    cycle through URL_C / A / B."""
+    """Fully-resolved bracket state for `!testlobby champion` using real Pod Draft #3 data:
+    hardcoded outcomes that produce Elfandor 3-0 (champion) with flutterdev / whalematron /
+    Waveofshadow rounding out the top 4 at 2-1. Bottom-4 seats keep filler decks so the in-thread
+    standings embed still has something to render per row.
+    """
     players = [pod_swiss.Player(id=dn, name=dn) for _, dn in _LINKED_EIGHT]
 
-    def _seed(round_num: int, a: str, b: str) -> pod_swiss.MatchOutcome:
-        winner = _INVOKER_SEAT if _INVOKER_SEAT in (a, b) else a
-        return pod_swiss.MatchOutcome(
-            round_num=round_num, player_a_id=a, player_b_id=b,
-            winner_id=winner, score="2-1",
+    outcomes = [
+        pod_swiss.MatchOutcome(
+            round_num=r, player_a_id=a, player_b_id=b, winner_id=w, score="2-1",
         )
-
-    r1_pairings = pod_swiss.pair_round(players, [], 1)
-    r1 = [_seed(1, a, b) for a, b in r1_pairings]
-    r2_pairings = pod_swiss.pair_round(players, r1, 2)
-    r2 = [_seed(2, a, b) for a, b in r2_pairings]
-    pre_r3 = r1 + r2
-    r3_pairings = pod_swiss.pair_round(players, pre_r3, 3)
-    r3 = [_seed(3, a, b) for a, b in r3_pairings]
-    outcomes = pre_r3 + r3
-
+        for r, a, b, w in _POD3_OUTCOMES
+    ]
+    r3_pairings = [(a, b) for r, a, b, _ in _POD3_OUTCOMES if r == 3]
+    pre_r3 = [o for o in outcomes if o.round_num < 3]
     r3_states = _next_round_match_states(3, r3_pairings, pre_r3, players)
     _mark_trophy_match(r3_states, 3)
+    r3_winners = {(a, b): w for r, a, b, w in _POD3_OUTCOMES if r == 3}
     for st in r3_states:
-        winner = _INVOKER_SEAT if _INVOKER_SEAT in (st["a_name"], st["b_name"]) else st["a_name"]
-        st["winner_name"] = winner
+        st["winner_name"] = r3_winners.get((st["a_name"], st["b_name"]), st["a_name"])
         st["score"] = "2-1"
 
     standings = pod_swiss.compute_standings(players, outcomes)
 
-    # Rank → screenshot. Rank-1/2 are podium decks; the last gallery slot is URL_D; the rest
-    # cycle through C / A / B.
+    # Real Pod-3 screenshots map to the top 4 by seat. Bottom 4 cycle through the test fixtures
+    # so they still render in the in-thread gallery (the channel announcement only shows top 4).
     cycled = list(islice(
         cycle((_DECK_SCREENSHOT_URL_C, _DECK_SCREENSHOT_URL_A, _DECK_SCREENSHOT_URL_B)),
-        max(len(standings) - 3, 0),
+        max(len(standings) - len(_CHAMPION_SCREENSHOTS_BY_SEAT) - 1, 0),
     ))
-    rank_to_url: dict[int, str] = {
-        standings[0].rank: _DECK_SCREENSHOT_URL_A,
-        standings[1].rank: _DECK_SCREENSHOT_URL_B,
-    }
-    middle = standings[2:-1]
-    for s, url in zip(middle, cycled):
-        rank_to_url[s.rank] = url
-    rank_to_url[standings[-1].rank] = _DECK_SCREENSHOT_URL_D
+    screenshots: dict[str, str] = {}
+    filler_iter = iter(cycled)
+    for s in standings:
+        real = _CHAMPION_SCREENSHOTS_BY_SEAT.get(s.player_name)
+        if real is not None:
+            screenshots[_norm(s.player_name)] = real
+        elif s.rank == len(standings):
+            screenshots[_norm(s.player_name)] = _DECK_SCREENSHOT_URL_D
+        else:
+            screenshots[_norm(s.player_name)] = next(filler_iter, _DECK_SCREENSHOT_URL_A)
 
-    screenshots = {_norm(s.player_name): rank_to_url[s.rank] for s in standings}
     captions = {
-        _norm(standings[0].player_name): "Iz it Izzet? Always.",
-        _norm(standings[1].player_name): "Got farmed by the bot owner — gg",
+        _norm(seat): caption for seat, caption in _CHAMPION_CAPTIONS_BY_SEAT.items()
     }
     log_urls = {
         _norm(seat): url for seat, url in _CHAMPION_LOG_URLS_BY_SEAT.items()
@@ -245,7 +274,7 @@ def _build_champion_state(invoker) -> dict:
     review_choices = {
         _norm("Noya"): True,
         _norm("NiamhIsTired"): True,
-        _norm("fullerene60"): True,
+        _norm("flutterdev"): True,
     }
 
     event_started_at = datetime.now(timezone.utc) - timedelta(hours=2, minutes=30)

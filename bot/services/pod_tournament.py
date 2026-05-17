@@ -54,6 +54,7 @@ SELECT_CUSTOM_PREFIX = "podmatchresult"
 MAX_MATCHES_PER_ROUND = 5  # Discord caps ActionRows at 5; supports pods up to 10 players
 SKIPPED_SENTINEL = "(skipped)"  # winner_name value for "Not played" matches
 GRACE_SECONDS = 60  # window after round completion during which edits regenerate the next round
+ANNOUNCEMENT_TOP_N = 4  # channel-level announcement shows top performers only; thread keeps full standings
 
 # Test-only result handler hook (set by bot/commands/testlobby.py). Always None in prod.
 _test_result_handler = None
@@ -153,10 +154,12 @@ def _build_standings_row(
     deck_data: dict[str, ParticipantDeckData],
     site_root: str | None,
     show_review_flag: bool = False,
+    inline_caption: bool = False,
 ) -> str:
     """One standings row used by both the V2 announcement and the thread-side classic embed:
     `{rank}. {medal} {name}  {wins}-{losses}  {colors}  [Draft Log]({url}) 📜`.
-    Set show_review_flag for the in-thread variant to append 🙋 for review opt-ins."""
+    Set show_review_flag for the in-thread variant to append 🙋 for review opt-ins. Set
+    inline_caption to splice an italicized caption between the W-L record and the color glyph."""
     key = _normalize_player_name(s.player_name)
     info = displays.get(key, {})
     name = info.get("display_name") or s.player_name
@@ -174,7 +177,14 @@ def _build_standings_row(
         if data is not None and data.draft_log_url else ""
     )
     review_suffix = " 🙋" if show_review_flag and data is not None and data.wants_draft_review else ""
-    return f"{prefix}{rendered}  {s.wins}-{s.losses}{color_suffix}{log_suffix}{review_suffix}"
+    caption_inline = (
+        f"  _{_escape_italics(data.screenshot_caption.strip())}_"
+        if inline_caption and data is not None and data.screenshot_caption else ""
+    )
+    return (
+        f"{prefix}{rendered}  {s.wins}-{s.losses}"
+        f"{caption_inline}{color_suffix}{log_suffix}{review_suffix}"
+    )
 
 
 def build_pairing_dm_embed(
@@ -879,10 +889,12 @@ def build_champion_announcement_view(
 ) -> ui.LayoutView:
     """One-shot 'champion crowned' Components V2 layout for the pod-draft channel (not the thread).
 
-    Layout: Container (green accent) holds the headline, localized timestamp, full standings, and
-    per-rank-1/2 podium decks (caption + image). Rest-of-pod decks stack into a single MediaGallery
-    if any participant beyond rank 2 submitted a screenshot. Thread link button sits OUTSIDE the
-    container at LayoutView top level, mirroring the embed-plus-button visual of the classic embed.
+    Layout: Container (green accent) holds the headline + localized timestamp, then the top
+    ANNOUNCEMENT_TOP_N standings rows. Every player who finished with zero losses (champion) is
+    rendered with an optional italicized caption line and a full-size deck shot. Everyone else in
+    the top-N collapses into a single compact text block, with their deck screenshots batched
+    into one MediaGallery beneath. Full standings stay in the thread embed. Thread-link button
+    sits OUTSIDE the container at LayoutView top level.
     """
     displays = displays or {}
     player_colors = player_colors or {}
@@ -900,14 +912,6 @@ def build_champion_announcement_view(
     short = _short_event_name(event_name) or event_name
     title = _format_champion_title(champs_named, short)
 
-    standings_lines = [
-        _build_standings_row(
-            s, displays=displays, player_colors=player_colors,
-            deck_data=deck_data, site_root=site_root,
-        )
-        for s in standings
-    ]
-
     view = ui.LayoutView()
     container = ui.Container(accent_colour=discord.Color.green())
 
@@ -916,32 +920,49 @@ def build_champion_announcement_view(
     subtitle = subtitle_override or f"**Drafted on** <t:{ts}:F>"
     container.add_item(ui.TextDisplay(f"## {title}\n{subtitle}"))
     container.add_item(ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small))
-    container.add_item(ui.TextDisplay(
-        f"**{_standings_header_text(pending_count)}**\n" + "\n".join(standings_lines)
-    ))
 
-    podium = _collect_podium(standings, displays, deck_data, limit=2)
-    rest_items = _collect_rest_gallery_items(standings, displays, deck_data, skip=len(podium))
+    # Hide rows whose record isn't yet final; the announcement re-edits when later R3 results land
+    top_standings = [
+        s for s in standings[:ANNOUNCEMENT_TOP_N]
+        if s.wins + s.losses >= TOTAL_ROUNDS
+    ]
+    pending_lines: list[str] = []
+    runners_up_items: list[discord.MediaGalleryItem] = []
 
-    if podium or rest_items:
-        container.add_item(ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small))
+    for s in top_standings:
+        row_text = _build_standings_row(
+            s, displays=displays, player_colors=player_colors,
+            deck_data=deck_data, site_root=site_root,
+            inline_caption=True,
+        )
+        key = _normalize_player_name(s.player_name)
+        data = deck_data.get(key)
+        info = displays.get(key, {})
+        name = info.get("display_name") or s.player_name
+        is_champion = s.rank == 1 and s.losses == 0
+        has_screenshot = data is not None and data.screenshot_url
 
-    for i, (medal, name, caption, screenshot_url) in enumerate(podium):
-        suffix = f"  ~{name}"
-        if caption:
-            italicized = "\n".join(f"_{_escape_italics(line)}_" for line in caption.splitlines() if line.strip())
-            container.add_item(ui.TextDisplay(f"{medal} {italicized}{suffix}"))
+        if is_champion and has_screenshot:
+            # Champion gets its own TextDisplay so the full image is visually anchored to it.
+            # Flush anything we've accumulated so far (e.g. a co-champion without a screenshot).
+            if pending_lines:
+                container.add_item(ui.TextDisplay("\n".join(pending_lines)))
+                pending_lines = []
+            container.add_item(ui.TextDisplay(row_text))
+            container.add_item(ui.MediaGallery(
+                discord.MediaGalleryItem(media=data.screenshot_url, description=f"{name}'s deck"),
+            ))
         else:
-            container.add_item(ui.TextDisplay(f"{medal}{suffix}"))
-        container.add_item(ui.MediaGallery(
-            discord.MediaGalleryItem(media=screenshot_url, description=f"{name}'s deck"),
-        ))
-        if i < len(podium) - 1:
-            container.add_item(ui.Separator(visible=False, spacing=discord.SeparatorSpacing.small))
+            pending_lines.append(row_text)
+            if has_screenshot:
+                runners_up_items.append(
+                    discord.MediaGalleryItem(media=data.screenshot_url, description=f"{name}'s deck"),
+                )
 
-    if rest_items:
-        container.add_item(ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small))
-        container.add_item(ui.MediaGallery(*rest_items))
+    if pending_lines:
+        container.add_item(ui.TextDisplay("\n".join(pending_lines)))
+    if runners_up_items:
+        container.add_item(ui.MediaGallery(*runners_up_items))
 
     view.add_item(container)
 
@@ -962,54 +983,6 @@ def build_champion_announcement_view(
     view.add_item(actions)
 
     return view
-
-
-def _collect_podium(
-    standings: list[pod_swiss.Standing],
-    displays: dict[str, dict],
-    deck_data: dict[str, "ParticipantDeckData"],
-    *,
-    limit: int,
-) -> list[tuple[str, str, str | None, str]]:
-    """Pick (medal, display_name, caption, screenshot_url) for ranks 1..limit, skipping ranks
-    whose participant didn't submit a screenshot."""
-    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
-    out: list[tuple[str, str, str | None, str]] = []
-    for s in standings:
-        if s.rank > limit:
-            break
-        key = _normalize_player_name(s.player_name)
-        data = deck_data.get(key)
-        if data is None or not data.screenshot_url:
-            continue
-        info = displays.get(key, {})
-        name = info.get("display_name") or s.player_name
-        out.append((medals.get(s.rank, ""), name, data.screenshot_caption, data.screenshot_url))
-    return out
-
-
-def _collect_rest_gallery_items(
-    standings: list[pod_swiss.Standing],
-    displays: dict[str, dict],
-    deck_data: dict[str, "ParticipantDeckData"],
-    *,
-    skip: int,
-) -> list[discord.MediaGalleryItem]:
-    """MediaGallery items for ranks beyond the podium that submitted a screenshot. Caps at 10."""
-    items: list[discord.MediaGalleryItem] = []
-    for s in standings:
-        if s.rank <= skip:
-            continue
-        key = _normalize_player_name(s.player_name)
-        data = deck_data.get(key)
-        if data is None or not data.screenshot_url:
-            continue
-        info = displays.get(key, {})
-        name = info.get("display_name") or s.player_name
-        items.append(discord.MediaGalleryItem(media=data.screenshot_url, description=f"{name}'s deck"))
-        if len(items) >= 10:
-            break
-    return items
 
 
 def _round_header(round_num: int, complete: bool) -> str:

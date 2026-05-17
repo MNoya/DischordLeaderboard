@@ -18,7 +18,7 @@ from bot.services.pod_draft_manager import start_manager
 from bot.services.sesh_parser import parse_sesh_embed
 
 
-REMINDER_LEAD_MIN = 5
+REMINDER_LEAD_MIN = 10
 
 
 log = logging.getLogger(__name__)
@@ -32,16 +32,20 @@ def init_reminder(bot: commands.Bot) -> None:
     _bot = bot
 
 
-async def fire_reminder(event_id: str) -> None:
-    """T-5 callback. Re-fetches sesh attendees, pings them with the Draftmancer link."""
+async def fire_reminder(event_id: str, *, early: bool = False) -> None:
+    """T-5 callback. Re-fetches sesh attendees, pings them with the Draftmancer link.
+
+    `early=True` is the owner-triggered "open the lobby now" path: swaps the body copy and
+    cancels the still-pending APScheduler job so we don't double-post at T-5.
+    """
     if _bot is None:
-        log.error("fire_reminder for %s: bot reference is not initialised", event_id)
+        log.error(f"fire_reminder for {event_id}: bot reference is not initialised")
         return
 
     with SessionLocal() as session:
         event = session.get(PodDraftEvent, event_id)
         if event is None:
-            log.warning("fire_reminder: pod_draft_event %s not found", event_id)
+            log.warning(f"fire_reminder: pod_draft_event {event_id} not found")
             return
         thread_id = int(event.discord_thread_id)
         sesh_message_id = int(event.sesh_message_id)
@@ -52,24 +56,32 @@ async def fire_reminder(event_id: str) -> None:
 
     thread = await _fetch_thread(thread_id)
     if thread is None:
-        log.warning("fire_reminder: could not fetch thread %s", thread_id)
+        log.warning(f"fire_reminder: could not fetch thread {thread_id}")
         return
 
     attendees, maybe_attendees = await _refetch_attendees(sesh_message_id)
     mention_block = await _resolve_mentions(thread.guild, attendees) if attendees else ""
     expected_attendee_count = len(attendees)
 
-    body = (
-        f"{emojis.get('draftmancer')} Pod Draft starts in {REMINDER_LEAD_MIN} minutes!\n"
-        + f"**Join the Draftmancer session:** {draftmancer_url}\n"
-        + "Set your user name to your Arena handle (e.g. `ArenaID#1234`) so pairings work smoothly."
-        + (f"\n\n{mention_block}" if mention_block else "")
-    )
-    log.info("fire_reminder body repr for %s: %r", event_id, body)
+    if early:
+        body = (
+            f"{emojis.get('draftmancer')} Lobby opening now! Starting early by mutual agreement.\n"
+            + f"**Join the Draftmancer session:** {draftmancer_url}\n"
+            + "Set your user name to your Arena handle (e.g. `ArenaID#1234`) so pairings work smoothly."
+            + (f"\n\n{mention_block}" if mention_block else "")
+        )
+    else:
+        body = (
+            f"{emojis.get('draftmancer')} Pod Draft starts in {REMINDER_LEAD_MIN} minutes!\n"
+            + f"**Join the Draftmancer session:** {draftmancer_url}\n"
+            + "Set your user name to your Arena handle (e.g. `ArenaID#1234`) so pairings work smoothly."
+            + (f"\n\n{mention_block}" if mention_block else "")
+        )
+    log.info(f"fire_reminder body repr for {event_id} (early={early}): {body!r}")
     try:
         await thread.send(body, allowed_mentions=discord.AllowedMentions(users=True))
     except discord.HTTPException:
-        log.warning("fire_reminder: could not post in thread %s", thread_id, exc_info=True)
+        log.warning(f"fire_reminder: could not post in thread {thread_id}", exc_info=True)
         return
 
     # Transition out of 'pending' so the startup sweep doesn't re-fire on a restart
@@ -78,6 +90,15 @@ async def fire_reminder(event_id: str) -> None:
         if event is not None and event.socket_status == "pending":
             event.socket_status = "reminded"
             session.commit()
+
+    if early:
+        scheduler = getattr(_bot, "pod_scheduler", None)
+        if scheduler is not None:
+            try:
+                scheduler.remove_job(f"pod-reminder-{event_id}")
+                log.info(f"early-open cancelled pending reminder job for {event_id}")
+            except Exception:
+                log.info(f"no pending reminder job to cancel for {event_id}", exc_info=True)
 
     await start_manager(
         _bot, event_id, draftmancer_session, thread_id, set_code, expected_attendee_count,

@@ -41,7 +41,6 @@ _BACKOFF_MAX_S = 30.0
 _BACKOFF_MAX_RETRIES = 8
 _BOT_USER_NAME = "DisChordBot"
 _READY_TIMEOUT_S = 90
-_START_DRAFT_DELAY_S = 1
 _ARENA_SUFFIX_RE = re.compile(r"#\d+$")
 
 
@@ -461,7 +460,6 @@ class PodDraftManager:
         self.ready_check_active = False
         if self._ready_timeout_task is not None:
             self._ready_timeout_task.cancel()
-        await asyncio.sleep(_START_DRAFT_DELAY_S)
         await self._start_draft()
 
     async def _start_draft(self) -> None:
