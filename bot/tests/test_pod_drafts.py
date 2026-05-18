@@ -274,9 +274,16 @@ def test_get_participant_deck_state_signals_not_in_pod(session):
 
 def test_participant_dm_info_returns_linked_player_data(session):
     event_id, _ = _seed_pod_for_deck_color_tests(session)
-    # Set arena_name on the linked player so we cover the populated branch
+    # Simulate Alice joining Draftmancer under a specific handle (the session-specific name)
+    participant = session.execute(
+        select(PodDraftParticipant)
+        .where(PodDraftParticipant.event_id == event_id, PodDraftParticipant.display_name == "Alice")
+    ).scalar_one()
+    participant.draftmancer_name = "Alice#1234"
+    # Also set a different Player.arena_name to confirm the DM info uses the Draftmancer handle,
+    # not the player's primary alias
     player = session.execute(select(Player).where(Player.discord_id == "42")).scalar_one()
-    player.arena_name = "Alice#1234"
+    player.arena_name = "AliceMain#9999"
     session.flush()
 
     info = participant_dm_info(session, event_id)

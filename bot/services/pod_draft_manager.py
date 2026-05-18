@@ -28,7 +28,7 @@ from bot.scripts.draftmancer_log import build_compact
 from bot.services.lobby_embed import LobbyReadyButtonView, render as render_lobby_embed
 from bot.services.magicprotools import submit_to_api as submit_to_magicprotools
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
-from bot.services.pod_drafts import classify_lobby_names, seed_event_participants
+from bot.services.pod_drafts import _normalize_player_name, classify_lobby_names, seed_event_participants
 from bot.services.pod_tournament import start_tournament
 from bot.slug import disambiguate_slug, slugify
 
@@ -674,6 +674,7 @@ def _ensure_players_for_members_sync(pairs: list[tuple[str, discord.Member]]) ->
         taken_slugs = set(session.execute(select(Player.slug)).scalars().all())
         for arena_name, member in pairs:
             discord_id = str(member.id)
+            normalized = _normalize_player_name(arena_name)
             existing = session.execute(
                 select(Player).where(Player.discord_id == discord_id)
             ).scalar_one_or_none()
@@ -681,6 +682,8 @@ def _ensure_players_for_members_sync(pairs: list[tuple[str, discord.Member]]) ->
                 if existing.arena_name is None:
                     existing.arena_name = arena_name
                     log.info(f"backfilled arena_name for {member.display_name} → {arena_name}")
+                if normalized and normalized not in existing.arena_aliases:
+                    existing.arena_aliases = [*existing.arena_aliases, normalized]
                 continue
             slug = disambiguate_slug(slugify(member.display_name), taken_slugs)
             taken_slugs.add(slug)
@@ -691,6 +694,7 @@ def _ensure_players_for_members_sync(pairs: list[tuple[str, discord.Member]]) ->
                 display_name=member.display_name,
                 avatar_hash=extract_avatar_hash(member),
                 arena_name=arena_name,
+                arena_aliases=[normalized] if normalized else [],
                 active=True,
             ))
             log.info(f"auto-created Player row for guild member {member.display_name} (arena={arena_name})")

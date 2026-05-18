@@ -13,6 +13,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
 )
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import DeclarativeBase, relationship
 from sqlalchemy.sql import func, text
 
@@ -32,6 +33,7 @@ class Player(Base):
     discord_username     = Column(String, nullable=True)
     display_name         = Column(String, nullable=False)
     arena_name           = Column(String, nullable=True)
+    arena_aliases        = Column(ARRAY(String), nullable=False, server_default="{}")
     # Discord avatar hash (the asset key, not the full URL). The leaderboard
     # view computes the CDN URL server-side so discord_id never leaves the DB
     avatar_hash          = Column(String, nullable=True)

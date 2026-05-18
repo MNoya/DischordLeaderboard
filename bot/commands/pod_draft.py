@@ -8,13 +8,14 @@ import re
 import discord
 from discord import app_commands
 from discord.ext import commands
-from sqlalchemy import select
+from sqlalchemy import any_, select
 
 from bot import audit, emojis
 from bot.database import SessionLocal
 from bot.discord_helpers import extract_avatar_hash
 from bot.models import Player
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
+from bot.services.pod_drafts import _normalize_player_name
 from bot.slug import disambiguate_slug, slugify
 
 
@@ -69,7 +70,28 @@ class PodDraft(commands.Cog):
             )
             return
 
+        normalized = _normalize_player_name(arena_name)
+
         with SessionLocal() as session:
+            collision = session.execute(
+                select(Player)
+                .where(
+                    Player.active.is_(True),
+                    Player.discord_id != user_id,
+                    normalized == any_(Player.arena_aliases),
+                )
+                .limit(1)
+            ).scalar_one_or_none()
+            if collision is not None:
+                audit.event("pod_link_arena_collision", user_id=user_id, arena_name=arena_name,
+                            collides_with=collision.id)
+                await interaction.response.send_message(
+                    f"❌ `{arena_name}` is already linked to another player. "
+                    "If this is your account, ask an admin for help.",
+                    ephemeral=True,
+                )
+                return
+
             player = session.execute(
                 select(Player).where(Player.discord_id == user_id)
             ).scalar_one_or_none()
@@ -83,11 +105,15 @@ class PodDraft(commands.Cog):
                     display_name=interaction.user.display_name,
                     avatar_hash=extract_avatar_hash(interaction.user),
                     arena_name=arena_name,
+                    arena_aliases=[normalized],
                     active=True,
                 )
                 session.add(player)
             else:
-                player.arena_name = arena_name
+                if not (player.arena_name or "").strip():
+                    player.arena_name = arena_name
+                if normalized not in player.arena_aliases:
+                    player.arena_aliases = [*player.arena_aliases, normalized]
             session.flush()
             player_id = player.id
             session.commit()

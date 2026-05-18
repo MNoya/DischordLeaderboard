@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Sequence
 
-from sqlalchemy import func, select
+from sqlalchemy import any_, func, select
 from sqlalchemy.orm import Session
 
 from bot.config import settings
@@ -108,19 +108,35 @@ def classify_lobby_names(session: Session, names: Sequence[str]) -> list[tuple[s
 def _player_for_name(session: Session, name: str) -> Player | None:
     """Resolve a Draftmancer/Discord name to a Player.
 
-    Priority: exact lower(arena_name), then normalized display_name, then normalized discord_username.
-    Normalization strips a trailing `#NNNN` MTG Arena suffix from both sides so `Noya#12345` matches `Noya`.
+    Priority: exact match against any arena_aliases entry, longest-prefix match against
+    arena_aliases, then normalized display_name / discord_username. Aliases are stored already
+    normalized (lower + trailing `#NNNN` stripped); the input is normalized the same way before
+    matching.
     """
-    raw = name.lower()
+    norm = _normalize_player_name(name)
+    if not norm:
+        return None
+
     found = session.execute(
         select(Player)
-        .where(Player.active.is_(True), func.lower(Player.arena_name) == raw)
+        .where(Player.active.is_(True), norm == any_(Player.arena_aliases))
         .limit(1)
     ).scalar_one_or_none()
     if found is not None:
         return found
 
-    norm = _normalize_player_name(name)
+    candidates = session.execute(
+        select(Player).where(Player.active.is_(True))
+    ).scalars().all()
+    best: tuple[Player, str] | None = None
+    for p in candidates:
+        for alias in (p.arena_aliases or []):
+            if alias and norm.startswith(alias):
+                if best is None or len(alias) > len(best[1]):
+                    best = (p, alias)
+    if best is not None:
+        return best[0]
+
     return session.execute(
         select(Player)
         .where(
@@ -381,24 +397,29 @@ def list_champions(session: Session, set_code: str | None = None) -> list[dict]:
 
 
 def participant_dm_info(session: Session, event_id: str) -> dict[str, ParticipantDmInfo]:
-    """Map normalized draftmancer_name → ParticipantDmInfo for every participant in the event."""
+    """Map normalized draftmancer_name → ParticipantDmInfo for every participant in the event.
+
+    arena_name sources from PodDraftParticipant.draftmancer_name — the handle the player actually
+    set in the Draftmancer client for THIS session. For multi-account users this can differ from
+    Player.arena_name (their stored display primary); the opponent DM should report the session-
+    specific name so they look for the right Arena handle.
+    """
     rows = session.execute(
         select(
             PodDraftParticipant.draftmancer_name,
             PodDraftParticipant.display_name,
             Player.discord_id,
-            Player.arena_name,
         )
         .outerjoin(Player, Player.id == PodDraftParticipant.player_id)
         .where(PodDraftParticipant.event_id == event_id)
     ).all()
     info: dict[str, ParticipantDmInfo] = {}
-    for dm_name, display_name, discord_id, arena_name in rows:
+    for dm_name, display_name, discord_id in rows:
         key = _normalize_player_name(dm_name) if dm_name else _normalize_player_name(display_name)
         info[key] = ParticipantDmInfo(
             discord_id=discord_id,
             display_name=display_name,
-            arena_name=arena_name,
+            arena_name=dm_name,
         )
     return info
 

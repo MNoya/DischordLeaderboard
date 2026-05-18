@@ -21,14 +21,18 @@ def _seed_player(
     username,
     display_name,
     arena_name=None,
+    arena_aliases=None,
     active=True,
 ):
+    if arena_aliases is None:
+        arena_aliases = [_normalize_player_name(arena_name)] if arena_name else []
     p = Player(
         slug=f"{username}-{discord_id}",
         discord_id=discord_id,
         discord_username=username,
         display_name=display_name,
         arena_name=arena_name,
+        arena_aliases=arena_aliases,
         active=active,
     )
     session.add(p)
@@ -180,3 +184,45 @@ def test_hash_with_non_digit_suffix_rejected():
 
 def test_empty_string_rejected():
     assert not _ARENA_INPUT_RE.match("")
+
+
+# --- multi-account alias matching ---
+
+def test_alias_exact_match_resolves_to_owner(session):
+    _seed_player(
+        session, discord_id="10", username="flutterdev", display_name="flutterdev",
+        arena_name="fullerene60#49190",
+        arena_aliases=["fullerene60", "edvor"],
+    )
+    assert _player_for_name(session, "fullerene60#49190").discord_id == "10"
+    assert _player_for_name(session, "edvor#11111").discord_id == "10"
+
+
+def test_alias_match_independent_of_primary_arena_name(session):
+    _seed_player(
+        session, discord_id="11", username="dev2", display_name="Dev Two",
+        arena_name="primaryhandle#10000",
+        arena_aliases=["primaryhandle", "secondhandle"],
+    )
+    assert _player_for_name(session, "secondhandle#22222").discord_id == "11"
+
+
+def test_longest_alias_prefix_wins(session):
+    _seed_player(
+        session, discord_id="12", username="a", display_name="A",
+        arena_aliases=["drag"],
+    )
+    _seed_player(
+        session, discord_id="13", username="b", display_name="B",
+        arena_aliases=["dragonslayer"],
+    )
+    assert _player_for_name(session, "dragonslayer99#1234").discord_id == "13"
+    assert _player_for_name(session, "dragfoo#9999").discord_id == "12"
+
+
+def test_alias_no_match_falls_back_to_display_name(session):
+    _seed_player(
+        session, discord_id="14", username="zoinks", display_name="zoinks",
+        arena_name=None,
+    )
+    assert _player_for_name(session, "zoinks#42").discord_id == "14"
