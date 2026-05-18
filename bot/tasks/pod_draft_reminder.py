@@ -63,20 +63,17 @@ async def fire_reminder(event_id: str, *, early: bool = False) -> None:
     mention_block = await _resolve_mentions(thread.guild, attendees) if attendees else ""
     expected_attendee_count = len(attendees)
 
-    if early:
-        body = (
-            f"{emojis.get('draftmancer')} Lobby opening now! Starting early by mutual agreement.\n"
-            + f"**Join the Draftmancer session:** {draftmancer_url}\n"
-            + "Set your user name to your Arena handle (e.g. `ArenaID#1234`) so pairings work smoothly."
-            + (f"\n\n{mention_block}" if mention_block else "")
-        )
-    else:
-        body = (
-            f"{emojis.get('draftmancer')} Pod Draft starts in {REMINDER_LEAD_MIN} minutes!\n"
-            + f"**Join the Draftmancer session:** {draftmancer_url}\n"
-            + "Set your user name to your Arena handle (e.g. `ArenaID#1234`) so pairings work smoothly."
-            + (f"\n\n{mention_block}" if mention_block else "")
-        )
+    headline = (
+        "Lobby opening now!"
+        if early
+        else f"Pod Draft starts in {REMINDER_LEAD_MIN} minutes!"
+    )
+    body = (
+        f"{emojis.get('draftmancer')} {headline}\n"
+        f"**Join the Draftmancer session:** {draftmancer_url}\n"
+        "Set your Arena Name (e.g., `ArenaID#12345`) as your name in Draftmancer so pairings work smoothly."
+        + (f"\n\n{mention_block}" if mention_block else "")
+    )
     log.info(f"fire_reminder body repr for {event_id} (early={early}): {body!r}")
     try:
         await thread.send(body, allowed_mentions=discord.AllowedMentions(users=True))
@@ -113,7 +110,7 @@ async def _fetch_thread(thread_id: int) -> discord.Thread | None:
     try:
         channel = await _bot.fetch_channel(thread_id)
     except discord.HTTPException as e:
-        log.warning("fetch_channel(%s) failed: %s", thread_id, e)
+        log.warning(f"fetch_channel({thread_id}) failed: {e}")
         return None
     return channel if isinstance(channel, discord.Thread) else None
 
@@ -124,7 +121,7 @@ async def _refetch_attendees(sesh_message_id: int) -> tuple[list[str], list[str]
         channel = await _bot.fetch_channel(settings.pod_draft_channel_id)
         message = await channel.fetch_message(sesh_message_id)
     except discord.HTTPException as e:
-        log.warning("could not re-fetch sesh message %s: %s", sesh_message_id, e)
+        log.warning(f"could not re-fetch sesh message {sesh_message_id}: {e}")
         return [], []
     for embed in message.embeds:
         parsed = parse_sesh_embed(embed)
