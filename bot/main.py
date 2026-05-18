@@ -198,7 +198,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         with the traceback for diagnosis.
         """
         original = getattr(error, "original", error)
-        log.exception("app command crashed: %s", original, exc_info=original)
+        log.exception(f"app command crashed: {original}", exc_info=original)
         try:
             if interaction.response.is_done():
                 await interaction.followup.send(MSG_GENERIC_ERROR, ephemeral=True)
@@ -311,7 +311,7 @@ def build_bot(guild_id: int) -> commands.Bot:
                 user = await bot.fetch_user(int(player.discord_id))
                 await user.send(msg_invalidated_dm)
             except discord.HTTPException as e:
-                log.warning("could not DM player %s: %s", player.id, e)
+                log.warning(f"could not DM player {player.id}: {e}")
 
         avatar_summary = {"checked": 0, "updated": 0, "skipped": 0, "errors": 0}
         try:
@@ -415,7 +415,7 @@ def build_bot(guild_id: int) -> commands.Bot:
     @tasks.loop(time=AUTO_REFRESH_TIMES)
     async def auto_refresh_tick() -> None:
         try:
-            log.info("auto-refresh: scheduled tick firing for %s", ACTIVE_SET_CODE)
+            log.info(f"auto-refresh: scheduled tick firing for {ACTIVE_SET_CODE}")
             await run_refresh(ACTIVE_SET_CODE, trigger="auto")
         except Exception:
             log.exception("auto-refresh tick failed")
@@ -427,7 +427,7 @@ def build_bot(guild_id: int) -> commands.Bot:
 
     @bot.event
     async def on_ready() -> None:
-        log.info("logged in as %s (id=%s)", bot.user, bot.user.id if bot.user else "?")
+        log.info(f"logged in as {bot.user} (id={bot.user.id if bot.user else '?'})")
         await bot.change_presence(activity=discord.Activity(
             type=discord.ActivityType.competing,
             name="dischord.pages.dev | /join",

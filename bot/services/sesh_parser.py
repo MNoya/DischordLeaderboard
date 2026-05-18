@@ -64,15 +64,13 @@ def parse_sesh_embed(embed: discord.Embed) -> ParsedSeshFields | None:
 
     event_time = _parse_event_time(time_field.value or "")
     if event_time is None:
-        log.warning("sesh embed %r Time field has no <t:UNIX> timestamp: %r",
-                    embed.title, time_field.value)
+        log.warning(f"sesh embed {embed.title!r} Time field has no <t:UNIX> timestamp: {time_field.value!r}")
         return None
 
     try:
         tz = ZoneInfo(settings.pod_draft_fallback_tz)
     except ZoneInfoNotFoundError:
-        log.warning("POD_DRAFT_FALLBACK_TZ=%r is not a known IANA zone; falling back to UTC",
-                    settings.pod_draft_fallback_tz)
+        log.warning(f"POD_DRAFT_FALLBACK_TZ={settings.pod_draft_fallback_tz!r} is not a known IANA zone; falling back to UTC")
         tz = ZoneInfo("UTC")
     event_date = event_time.astimezone(tz).date()
 

@@ -65,13 +65,10 @@ def main() -> None:
                 if do_arch:
                     recompute_player_archetype_scores(session, player_id, magic_set.id)
                 total += 1
-            log.info(
-                "set %s: %d players recomputed (scope=%s)",
-                magic_set.code, len(player_ids), args.scope,
-            )
+            log.info(f"set {magic_set.code}: {len(player_ids)} players recomputed (scope={args.scope})")
         session.commit()
 
-    log.info("done. %d (player, set) iterations completed", total)
+    log.info(f"done. {total} (player, set) iterations completed")
 
 
 if __name__ == "__main__":

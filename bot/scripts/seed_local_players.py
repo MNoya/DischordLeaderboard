@@ -55,7 +55,7 @@ def main() -> None:
             ))
             added += 1
         session.commit()
-    log.info("done. added=%d skipped=%d", added, skipped)
+    log.info(f"done. added={added} skipped={skipped}")
 
 
 if __name__ == "__main__":

@@ -44,7 +44,7 @@ class SeshListener(commands.Cog):
             try:
                 await self._handle_pod_draft(message, fields)
             except Exception:
-                log.exception("pod draft detection failed for message %s", message.id)
+                log.exception(f"pod draft detection failed for message {message.id}")
             return
 
     def _is_target_message(self, message: discord.Message) -> bool:
@@ -55,11 +55,10 @@ class SeshListener(commands.Cog):
         return bool(message.embeds)
 
     async def _handle_pod_draft(self, message: discord.Message, fields: ParsedSeshFields) -> None:
-        log.info("sesh pod-draft embed detected: %s", fields.name)
+        log.info(f"sesh pod-draft embed detected: {fields.name}")
         thread = await self._wait_for_thread(message)
         if thread is None:
-            log.warning("sesh embed %s never spawned a thread within %ss; skipping registration",
-                        message.id, THREAD_POLL_TIMEOUT_S)
+            log.warning(f"sesh embed {message.id} never spawned a thread within {THREAD_POLL_TIMEOUT_S}s; skipping registration")
             return
 
         parsed_event = ParsedSeshEvent(
@@ -78,7 +77,7 @@ class SeshListener(commands.Cog):
         try:
             await thread.join()
         except discord.HTTPException:
-            log.warning("could not join thread %s", thread.id, exc_info=True)
+            log.warning(f"could not join thread {thread.id}", exc_info=True)
 
         self._schedule_reminder(event_row.id, event_row.event_time)
 
@@ -89,7 +88,7 @@ class SeshListener(commands.Cog):
                 color=discord.Color.green(),
             ))
         except discord.HTTPException:
-            log.warning("could not post confirmation in pod draft thread %s", thread.id, exc_info=True)
+            log.warning(f"could not post confirmation in pod draft thread {thread.id}", exc_info=True)
 
     async def _wait_for_thread(self, message: discord.Message) -> discord.Thread | None:
         """Poll for the sesh-created thread (Discord assigns thread_id = message_id); None on timeout."""
@@ -103,7 +102,7 @@ class SeshListener(commands.Cog):
             except discord.NotFound:
                 ch = None
             except discord.HTTPException as e:
-                log.warning("fetch_channel(%s) failed: %s", message.id, e)
+                log.warning(f"fetch_channel({message.id}) failed: {e}")
                 ch = None
             if isinstance(ch, discord.Thread):
                 return ch
@@ -113,18 +112,17 @@ class SeshListener(commands.Cog):
 
     def _schedule_reminder(self, event_id: str, event_time: datetime) -> None:
         if settings.pod_draft_skip_reminder_wait:
-            log.info("POD_DRAFT_SKIP_REMINDER_WAIT=true; firing reminder for %s in 10s", event_id)
+            log.info(f"POD_DRAFT_SKIP_REMINDER_WAIT=true; firing reminder for {event_id} in 10s")
             asyncio.create_task(_fire_after_delay(event_id, 10))
             return
         scheduler = getattr(self.bot, "pod_scheduler", None)
         if scheduler is None:
-            log.error("pod_scheduler not attached to bot; reminder for %s lost", event_id)
+            log.error(f"pod_scheduler not attached to bot; reminder for {event_id} lost")
             return
         run_at = event_time - timedelta(minutes=REMINDER_LEAD_MIN)
         now = datetime.now(timezone.utc)
         if run_at < now:
-            log.warning("reminder for %s is in the past (run_at=%s now=%s); firing in 2s",
-                        event_id, run_at, now)
+            log.warning(f"reminder for {event_id} is in the past (run_at={run_at} now={now}); firing in 2s")
             run_at = now + timedelta(seconds=2)
         scheduler.add_job(
             fire_reminder,
@@ -134,7 +132,7 @@ class SeshListener(commands.Cog):
             id=f"pod-reminder-{event_id}",
             replace_existing=True,
         )
-        log.info("scheduled pod-draft reminder for event %s at %s", event_id, run_at.isoformat())
+        log.info(f"scheduled pod-draft reminder for event {event_id} at {run_at.isoformat()}")
 
 
 async def _fire_after_delay(event_id: str, delay_s: float) -> None:
@@ -180,7 +178,7 @@ def reschedule_pending_events(bot: commands.Bot) -> None:
             )
             rearmed += 1
     if rearmed:
-        log.info("startup sweep re-armed %d pending pod-draft reminder(s)", rearmed)
+        log.info(f"startup sweep re-armed {rearmed} pending pod-draft reminder(s)")
 
 
 async def setup(bot: commands.Bot) -> None:

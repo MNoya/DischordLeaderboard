@@ -29,4 +29,4 @@ def event(type: str, **fields: Any) -> None:
         with EVENTS_FILE.open("a", encoding="utf-8") as f:
             f.write(json.dumps(record, default=str) + "\n")
     except OSError as e:
-        logger.warning("failed to write audit event %r: %s", type, e)
+        logger.warning(f"failed to write audit event {type!r}: {e}")

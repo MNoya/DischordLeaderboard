@@ -87,7 +87,7 @@ async def _dm_invoker_pairing(user: discord.User | discord.Member, round_num: in
     try:
         await user.send(embed=embed)
     except discord.Forbidden:
-        log.info("testlobby DM blocked for user %s", user.id)
+        log.info(f"testlobby DM blocked for user {user.id}")
     except discord.HTTPException:
         log.warning("testlobby DM failed", exc_info=True)
 
@@ -664,7 +664,7 @@ async def _test_grace_expire(state: dict, round_num: int) -> None:
         try:
             await msg.edit(view=None)
         except discord.HTTPException:
-            log.warning("could not lock testlobby round %d view", round_num, exc_info=True)
+            log.warning(f"could not lock testlobby round {round_num} view", exc_info=True)
     state["grace_round"] = None
     state["grace_task"] = None
 
@@ -680,7 +680,7 @@ async def _regenerate_test_next_round(state: dict, next_round: int, channel) -> 
     try:
         pairings = pod_swiss.pair_round(state["players"], state["outcomes"], next_round)
     except ValueError:
-        log.warning("testlobby regenerate failed for round %d", next_round)
+        log.warning(f"testlobby regenerate failed for round {next_round}")
         return
     next_matches = _next_round_match_states(next_round, pairings,
                                               state["outcomes"], state["players"])
@@ -693,7 +693,7 @@ async def _regenerate_test_next_round(state: dict, next_round: int, channel) -> 
             await msg.edit(embed=_round_embed(next_round, next_matches),
                             view=RoundResultsView(next_matches))
         except discord.HTTPException:
-            log.warning("could not edit testlobby round %d during regenerate", next_round, exc_info=True)
+            log.warning(f"could not edit testlobby round {next_round} during regenerate", exc_info=True)
 
     invoker = state.get("invoker")
     if invoker is None or msg is None:
@@ -728,7 +728,7 @@ async def _dm_invoker_changed_opponent(user: discord.User | discord.Member, roun
     try:
         await user.send(embed=embed)
     except discord.Forbidden:
-        log.info("testlobby re-pair DM blocked for user %s", user.id)
+        log.info(f"testlobby re-pair DM blocked for user {user.id}")
     except discord.HTTPException:
         log.warning("testlobby re-pair DM failed", exc_info=True)
 

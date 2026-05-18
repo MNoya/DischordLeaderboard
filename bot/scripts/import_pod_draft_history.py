@@ -110,8 +110,7 @@ def _resolve_or_create_player(session, taken_slugs, display_name, arena_name):
         )
         session.add(player)
         session.flush()
-        log.info("created identified player: %s (slug=%s, arena_name=%s, discord_id=%s)",
-                 new_display, new_slug, arena_name, entry["discord_id"])
+        log.info(f"created identified player: {new_display} (slug={new_slug}, arena_name={arena_name}, discord_id={entry['discord_id']})")
         return player
 
     player = _player_for_name(session, display_name)
@@ -131,7 +130,7 @@ def _resolve_or_create_player(session, taken_slugs, display_name, arena_name):
     )
     session.add(player)
     session.flush()
-    log.info("created lightweight player: %s (slug=%s, arena_name=%s)", display_name, slug, arena_name)
+    log.info(f"created lightweight player: {display_name} (slug={slug}, arena_name={arena_name})")
     return player
 
 
@@ -148,14 +147,14 @@ def main() -> None:
                 )
             ).scalar_one_or_none()
             if existing is not None:
-                log.info("skipping %s (%s) — already exists", ev["name"], ev["event_date"])
+                log.info(f"skipping {ev['name']} ({ev['event_date']}) — already exists")
                 skipped_events += 1
                 continue
             set_id = session.execute(
                 select(MagicSet.id).where(MagicSet.code == ev["set_code"])
             ).scalar_one_or_none()
             if set_id is None:
-                log.error("no MagicSet row for code=%s; skipping %s", ev["set_code"], ev["name"])
+                log.error(f"no MagicSet row for code={ev['set_code']}; skipping {ev['name']}")
                 continue
             event_time = datetime.combine(ev["event_date"], time(hour=20), tzinfo=timezone.utc)
             event = PodDraftEvent(
@@ -188,10 +187,10 @@ def main() -> None:
                     draft_log_url=None,
                 )
                 session.add(participant)
-            log.info("imported %s: %d participants", ev["name"], len(ev["participants"]))
+            log.info(f"imported {ev['name']}: {len(ev['participants'])} participants")
             added_events += 1
         session.commit()
-    log.info("done. added=%d skipped=%d", added_events, skipped_events)
+    log.info(f"done. added={added_events} skipped={skipped_events}")
 
 
 if __name__ == "__main__":

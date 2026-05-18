@@ -20,5 +20,5 @@ def run_migrations() -> None:
         command.upgrade(alembic_cfg, "head")
         logging.info("Migrations applied successfully.")
     except Exception as e:
-        logging.critical("Migration failed: %s", e)
+        logging.critical(f"Migration failed: {e}")
         raise SystemExit(1)

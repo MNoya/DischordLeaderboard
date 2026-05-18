@@ -47,16 +47,13 @@ def main() -> None:
 
     client = SeventeenLandsClient(cache_dir=args.cache)
     if args.cache:
-        log.info("17lands cache: %s", args.cache)
+        log.info(f"17lands cache: {args.cache}")
     with SessionLocal() as session:
         magic_set = _resolve_set(session, args.set_code)
-        log.info("refreshing set %s (%s)", magic_set.code, magic_set.name)
+        log.info(f"refreshing set {magic_set.code} ({magic_set.name})")
         summary = refresh_active_players(session, client, magic_set)
 
-    log.info(
-        "done. updated=%d invalidated=%d errors=%d",
-        summary["updated"], summary["invalidated"], summary["errors"],
-    )
+    log.info(f"done. updated={summary['updated']} invalidated={summary['invalidated']} errors={summary['errors']}")
 
 
 if __name__ == "__main__":

@@ -36,9 +36,9 @@ def upsert_set(session: Session, seed: SetSeed) -> None:
             existing.end_date = seed.end_date
             existing.start_date = seed.start_date
             existing.name = seed.name
-            log.info("updating set %s (metadata refreshed)", seed.code)
+            log.info(f"updating set {seed.code} (metadata refreshed)")
         else:
-            log.info("set %s exists, leaving as-is", seed.code)
+            log.info(f"set {seed.code} exists, leaving as-is")
         return
     session.add(MagicSet(
         code=seed.code,
@@ -46,7 +46,7 @@ def upsert_set(session: Session, seed: SetSeed) -> None:
         start_date=seed.start_date,
         end_date=seed.end_date,
     ))
-    log.info("seeding set %s (%s)", seed.code, seed.name)
+    log.info(f"seeding set {seed.code} ({seed.name})")
 
 
 def main() -> None:

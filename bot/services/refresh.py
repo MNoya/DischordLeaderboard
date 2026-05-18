@@ -105,14 +105,14 @@ def refresh_player(
             if e.response is not None and e.response.status_code == 404:
                 player.token_invalid = True
                 return {"status": "invalidated"}
-            logger.warning("refresh: HTTP error for player %s: %s", player.id, e)
+            logger.warning(f"refresh: HTTP error for player {player.id}: {e}")
             return {"status": "error", "error": str(e)}
         except ValueError as e:
             # Signup verifies tokens, so a malformed 200 is a 17lands-side issue, not a bad token
-            logger.warning("refresh: malformed response for player %s: %s", player.id, e)
+            logger.warning(f"refresh: malformed response for player {player.id}: {e}")
             return {"status": "error", "error": str(e)}
         except requests.RequestException as e:
-            logger.warning("refresh: network error for player %s: %s", player.id, e)
+            logger.warning(f"refresh: network error for player {player.id}: {e}")
             return {"status": "error", "error": str(e)}
 
     rows = aggregate_by_format_and_expansion(drafts, magic_set.code)
@@ -473,10 +473,10 @@ def refresh_one_player_for_all_sets(
         if e.response is not None and e.response.status_code == 404:
             player.token_invalid = True
             return {"status": "invalidated"}
-        logger.warning("refresh: HTTP error for player %s: %s", player.id, e)
+        logger.warning(f"refresh: HTTP error for player {player.id}: {e}")
         return {"status": "error", "error": str(e)}
     except (ValueError, requests.RequestException) as e:
-        logger.warning("refresh: fetch failed for player %s: %s", player.id, e)
+        logger.warning(f"refresh: fetch failed for player {player.id}: {e}")
         return {"status": "error", "error": str(e)}
 
     per_set: list[dict] = []

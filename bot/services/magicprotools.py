@@ -101,7 +101,7 @@ async def submit_to_api(user_id: str, draft_log: dict[str, Any]) -> str | None:
     try:
         body = convert_to_magicprotools_format(draft_log, user_id)
     except (KeyError, TypeError):
-        log.warning("magicprotools convert failed for %s / %s", session_id, user_name, exc_info=True)
+        log.warning(f"magicprotools convert failed for {session_id} / {user_name}", exc_info=True)
         return None
 
     payload = {
@@ -119,23 +119,17 @@ async def submit_to_api(user_id: str, draft_log: dict[str, Any]) -> str | None:
         async with aiohttp.ClientSession(timeout=_REQUEST_TIMEOUT) as session:
             async with session.post(_MPT_ENDPOINT, headers=headers, data=payload) as response:
                 if response.status != 200:
-                    log.warning(
-                        "magicprotools non-200 for %s / %s: status=%s",
-                        session_id, user_name, response.status,
-                    )
+                    log.warning(f"magicprotools non-200 for {session_id} / {user_name}: status={response.status}")
                     return None
                 body_json = await response.json()
                 if body_json.get("error"):
-                    log.warning(
-                        "magicprotools error for %s / %s: %s",
-                        session_id, user_name, body_json["error"],
-                    )
+                    log.warning(f"magicprotools error for {session_id} / {user_name}: {body_json['error']}")
                     return None
                 url = body_json.get("url")
                 if not url:
-                    log.warning("magicprotools response missing url for %s / %s", session_id, user_name)
+                    log.warning(f"magicprotools response missing url for {session_id} / {user_name}")
                     return None
                 return url
     except (aiohttp.ClientError, TimeoutError):
-        log.warning("magicprotools HTTP error for %s / %s", session_id, user_name, exc_info=True)
+        log.warning(f"magicprotools HTTP error for {session_id} / {user_name}", exc_info=True)
         return None

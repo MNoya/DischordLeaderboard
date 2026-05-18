@@ -56,7 +56,7 @@ async def refresh_player_avatars(
         try:
             user = await bot.fetch_user(int(player.discord_id))
         except Exception:  # noqa: BLE001 - Discord can throw a wide variety
-            logger.warning("avatar refresh: could not fetch user %s", player.discord_id, exc_info=True)
+            logger.warning(f"avatar refresh: could not fetch user {player.discord_id}", exc_info=True)
             summary["errors"] += 1
             continue
         new_hash = extract_avatar_hash(user)

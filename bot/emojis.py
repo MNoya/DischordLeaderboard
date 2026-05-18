@@ -35,8 +35,4 @@ async def load(bot: commands.Bot) -> None:
     _EMOJIS.clear()
     for e in fetched:
         _EMOJIS[e.name] = e
-    log.info(
-        "loaded %d application emojis: %s",
-        len(_EMOJIS),
-        ", ".join(sorted(_EMOJIS)) or "(none)",
-    )
+    log.info(f"loaded {len(_EMOJIS)} application emojis: {', '.join(sorted(_EMOJIS)) or '(none)'}")

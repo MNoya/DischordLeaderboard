@@ -788,18 +788,14 @@ async def _replace_tracked_message(
         try:
             old = await interaction.channel.fetch_message(int(prior_message_id))
             if old.pinned:
-                logger.info(
-                    "prior leaderboard message %s is pinned, leaving in place",
-                    prior_message_id,
-                )
+                logger.info(f"prior leaderboard message {prior_message_id} is pinned, leaving in place")
                 keep_row = True
             else:
                 await old.delete()
         except discord.NotFound:
             pass
         except discord.HTTPException as e:
-            logger.warning("could not delete prior leaderboard message %s: %s",
-                           prior_message_id, e)
+            logger.warning(f"could not delete prior leaderboard message {prior_message_id}: {e}")
             keep_row = True
 
         if not keep_row:
@@ -887,8 +883,7 @@ async def edit_tracked_messages_for_set(bot: commands.Bot, magic_set: MagicSet) 
                     session.commit()
             summary["pruned"] += 1
         except discord.HTTPException as e:
-            logger.warning("could not edit leaderboard message %s in channel %s: %s",
-                           message_id, channel_id, e)
+            logger.warning(f"could not edit leaderboard message {message_id} in channel {channel_id}: {e}")
             summary["errors"] += 1
     return summary
 
