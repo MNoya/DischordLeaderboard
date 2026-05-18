@@ -17,7 +17,7 @@ from bot.services.seventeenlands import SeventeenLandsClient
 log = logging.getLogger(__name__)
 
 _REPLAY_BASE_URL = "https://www.17lands.com"
-_POD_EVENT_NAME = "DirectGameTournamentLimited"
+_POD_EVENT_NAMES = frozenset({"DirectGameTournamentLimited", "DirectGameLimited"})
 _MIN_TURNS = 3
 _EVENT_WINDOW_HOURS = 6
 
@@ -110,7 +110,7 @@ def _persist_replays_sync(
 
         count = 0
         for g in in_window:
-            if g.get("event_name") != _POD_EVENT_NAME:
+            if g.get("event_name") not in _POD_EVENT_NAMES:
                 continue
             gid = _extract_game_id(g)
             if not gid:
@@ -153,7 +153,7 @@ def _persist_replays_sync(
 def _filter_and_sort_games(games: Sequence[dict]) -> list[dict]:
     out: list[tuple[datetime, dict]] = []
     for g in games:
-        if g.get("event_name") != _POD_EVENT_NAME:
+        if g.get("event_name") not in _POD_EVENT_NAMES:
             continue
         turns = g.get("turns")
         if not isinstance(turns, int) or turns < _MIN_TURNS:

@@ -3,7 +3,9 @@ seat to MagicProTools, stashing URLs on pod_draft_participants.
 
 Use this once to backfill the May 18 pod that completed before MPT_API_KEY was set in prod.
 
-    DATABASE_URL=... MPT_API_KEY=... python -m bot.scripts.backfill_mpt_logs <event_id>
+    DATABASE_URL=... MPT_API_KEY=... python -m bot.scripts.backfill_mpt_logs <event_id> [--force]
+
+`--force` resubmits and overwrites existing draft_log_url values.
 """
 from __future__ import annotations
 
@@ -26,7 +28,7 @@ def reconstruct_log(compact: dict) -> dict:
     cards_list = compact["cards"]
     id_by_idx = [c["id"] for c in cards_list]
     n_seats = len(compact["seats"])
-    carddata = {c["id"]: {"name": c["n"]} for c in cards_list}
+    carddata = {c["id"]: {"name": c["n"], "set": c.get("s")} for c in cards_list}
 
     users: dict[str, dict] = {}
     for i, name in enumerate(compact["seats"]):
@@ -63,7 +65,7 @@ def reconstruct_log(compact: dict) -> dict:
     }
 
 
-async def main(event_id: str) -> int:
+async def main(event_id: str, force: bool = False) -> int:
     with SessionLocal() as session:
         event = session.get(PodDraftEvent, event_id)
         if event is None or event.draft_log_gz is None:
@@ -88,7 +90,7 @@ async def main(event_id: str) -> int:
             print(f"  {name}: no matching participant row, skipping")
             skipped += 1
             continue
-        if participant.draft_log_url:
+        if participant.draft_log_url and not force:
             print(f"  {name}: already has draft_log_url, skipping")
             skipped += 1
             continue
@@ -109,7 +111,10 @@ async def main(event_id: str) -> int:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("usage: python -m bot.scripts.backfill_mpt_logs <event_id>", file=sys.stderr)
+    args = sys.argv[1:]
+    force = "--force" in args
+    args = [a for a in args if a != "--force"]
+    if len(args) != 1:
+        print("usage: python -m bot.scripts.backfill_mpt_logs <event_id> [--force]", file=sys.stderr)
         sys.exit(64)
-    sys.exit(asyncio.run(main(sys.argv[1])))
+    sys.exit(asyncio.run(main(args[0], force=force)))
