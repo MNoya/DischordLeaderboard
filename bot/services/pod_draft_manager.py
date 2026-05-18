@@ -648,7 +648,7 @@ def _find_guild_member_for_arena(guild: discord.Guild, arena_name: str) -> disco
 
 def _ensure_players_for_members_sync(pairs: list[tuple[str, discord.Member]]) -> None:
     """For each (arena_name, member) pair, find or lazily create a Player row keyed by discord_id.
-    Existing rows are left untouched (we never overwrite a manually-set arena_name)."""
+    Backfills `arena_name` on existing rows when null, never overwrites a value set by /pod-link-arena."""
     if not pairs:
         return
     with SessionLocal() as session:
@@ -659,6 +659,9 @@ def _ensure_players_for_members_sync(pairs: list[tuple[str, discord.Member]]) ->
                 select(Player).where(Player.discord_id == discord_id)
             ).scalar_one_or_none()
             if existing is not None:
+                if existing.arena_name is None:
+                    existing.arena_name = arena_name
+                    log.info(f"backfilled arena_name for {member.display_name} → {arena_name}")
                 continue
             slug = disambiguate_slug(slugify(member.display_name), taken_slugs)
             taken_slugs.add(slug)
@@ -671,5 +674,5 @@ def _ensure_players_for_members_sync(pairs: list[tuple[str, discord.Member]]) ->
                 arena_name=arena_name,
                 active=True,
             ))
-            log.info("auto-created Player row for guild member %s (arena=%s)", member.display_name, arena_name)
+            log.info(f"auto-created Player row for guild member {member.display_name} (arena={arena_name})")
         session.commit()
