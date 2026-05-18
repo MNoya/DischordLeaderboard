@@ -1450,6 +1450,9 @@ def _round_embed(round_num: int, match_states: list[dict]) -> discord.Embed:
             lines.append(f"⚔️ {a_disp} ({m['a_record']})  vs  {b_disp} ({m['b_record']})")
         else:
             lines.append(f"⚔️ {a_disp}  vs  {b_disp}")
+    if round_num == 1:
+        lines.append("")
+        lines.append("🎯 Opponent DM'd. Report your match result using the dropdowns below")
     return discord.Embed(
         title=title,
         description="\n".join(lines),
