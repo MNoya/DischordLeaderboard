@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -177,10 +178,11 @@ def _build_standings_row(
         if data is not None and data.draft_log_url else ""
     )
     review_suffix = " 🙋" if show_review_flag and data is not None and data.wants_draft_review else ""
-    caption_inline = (
-        f"  _{_escape_italics(data.screenshot_caption.strip())}_"
+    caption_cleaned = (
+        _clean_caption(data.screenshot_caption)
         if inline_caption and data is not None and data.screenshot_caption else ""
     )
+    caption_inline = f"  _{_escape_italics(caption_cleaned)}_" if caption_cleaned else ""
     return (
         f"{prefix}{rendered}  {s.wins}-{s.losses}"
         f"{caption_inline}{color_suffix}{log_suffix}{review_suffix}"
@@ -994,6 +996,14 @@ def _round_header(round_num: int, complete: bool) -> str:
 
 def _escape_italics(text: str) -> str:
     return text.replace("_", "\\_").replace("*", "\\*")
+
+
+_LEADING_RECORD_RE = re.compile(r"^\s*\d{1,2}\s*[-:\s]\s*\d{1,2}(?:\s*[-:\s]\s*\d{1,2})?\s*[,;:.\-]?\s*")
+
+
+def _clean_caption(raw: str) -> str:
+    """Strip a leading W-L like '2-1' / '3:0' / '3 0' — the standings row already shows the record."""
+    return _LEADING_RECORD_RE.sub("", raw).strip()
 
 
 def build_champion_embed(
