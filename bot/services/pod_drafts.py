@@ -337,6 +337,20 @@ def finalize_champion(
     return event
 
 
+def is_pod_thread_champion(session: Session, thread_id: str, discord_id: str) -> bool:
+    """True if (thread_id, discord_id) maps to a participant with placement=1."""
+    row = session.execute(
+        select(PodDraftParticipant.placement)
+        .join(Player, Player.id == PodDraftParticipant.player_id)
+        .join(PodDraftEvent, PodDraftEvent.id == PodDraftParticipant.event_id)
+        .where(
+            PodDraftEvent.discord_thread_id == thread_id,
+            Player.discord_id == discord_id,
+        )
+    ).first()
+    return bool(row and row[0] == 1)
+
+
 def list_champions(session: Session, set_code: str | None = None) -> list[dict]:
     """Champions across all finalized events, ordered by event_date; caller partitions by set/format."""
     query = (
