@@ -394,6 +394,7 @@ async def advance_to_round(manager: "PodDraftManager", round_num: int) -> None:
 
     if posted is not None:
         manager.round_messages[round_num] = posted
+        await _pin_round_message(posted, round_num)
         await _dm_round_pairings(manager.bot, manager.event_id, round_num, pending_rows, posted.jump_url)
 
 
@@ -1338,6 +1339,16 @@ async def _post_or_update_live_standings(manager) -> None:
 
     if manager.champion_announced:
         await _announce_or_update_champion(manager)
+
+
+async def _pin_round_message(message: discord.Message, round_num: int) -> None:
+    """Pin a round-pairings message to the thread; silent on Forbidden / HTTPException.
+    Standings-post at tournament end runs _pin_only_this_bot_message which intentionally clears
+    these round pins, leaving a clean thread with the final standings as the sole pin."""
+    try:
+        await message.pin(reason=f"pod-draft round {round_num} pairings")
+    except discord.HTTPException:
+        log.warning(f"could not pin round {round_num} message {message.id}", exc_info=True)
 
 
 async def _pin_only_this_bot_message(message: discord.Message) -> None:
