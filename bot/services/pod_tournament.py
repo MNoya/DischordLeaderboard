@@ -137,6 +137,45 @@ def _load_event_started_at_sync(event_id: str) -> datetime | None:
         ).scalar_one_or_none()
 
 
+def _load_event_id_by_thread_sync(thread_id: str) -> str | None:
+    with SessionLocal() as session:
+        return session.execute(
+            select(PodDraftEvent.id).where(PodDraftEvent.discord_thread_id == thread_id)
+        ).scalar_one_or_none()
+
+
+def _load_event_id_by_name_sync(name: str) -> str | None:
+    with SessionLocal() as session:
+        return session.execute(
+            select(PodDraftEvent.id).where(PodDraftEvent.name == name)
+        ).scalar_one_or_none()
+
+
+def _search_event_names_sync(query: str, limit: int = 25) -> list[str]:
+    """Most-recent-first event names matching a case-insensitive substring of `query`. Empty
+    `query` returns the most recent events. Used by the /pod-draft-standings autocomplete."""
+    with SessionLocal() as session:
+        stmt = select(PodDraftEvent.name).order_by(PodDraftEvent.event_date.desc().nulls_last())
+        if query:
+            stmt = stmt.where(PodDraftEvent.name.ilike(f"%{query}%"))
+        return [n for n in session.execute(stmt.limit(limit)).scalars().all() if n]
+
+
+def _load_tournament_players_sync(event_id: str) -> list[pod_swiss.Player]:
+    """Rebuild pod_swiss.Player list from participants — used when the in-memory manager isn't
+    around (e.g. after a bot restart, or for the standalone /pod-draft-standings command)."""
+    with SessionLocal() as session:
+        rows = session.execute(
+            select(PodDraftParticipant.draftmancer_name, PodDraftParticipant.display_name)
+            .where(PodDraftParticipant.event_id == event_id)
+        ).all()
+    return [
+        pod_swiss.Player(id=dm or dn, name=dn or dm)
+        for dm, dn in rows
+        if (dm or dn)
+    ]
+
+
 def _short_event_name(event_name: str | None) -> str | None:
     """Drops anything after the first ' - '."""
     if not event_name:
@@ -1016,9 +1055,12 @@ def build_champion_embed(
     champion_locked: bool = True,
     pending_count: int = 0,
     deck_data: dict[str, "ParticipantDeckData"] | None = None,
+    include_submit_cta: bool = True,
 ) -> discord.Embed:
     """Thread-side standings embed. `player_colors` adds a mana-emoji glyph after each player's record.
-    `deck_data` appends an inline Draft Log link per row when the participant has a MPT URL."""
+    `deck_data` appends an inline Draft Log link per row when the participant has a MPT URL.
+    `include_submit_cta` controls the trailing Submit-Deck CTA; the /pod-draft-standings command
+    sets it to False since it posts a snapshot, not a call to action."""
     displays = displays or {}
     player_colors = player_colors or {}
     deck_data = deck_data or {}
@@ -1035,17 +1077,49 @@ def build_champion_embed(
 
     header = f"**{_standings_header_text(pending_count)}**"
 
-    chordo_love = emojis.get("chordo_love")
-    description = (
-        f"{header}\n"
-        + "\n".join(lines)
-        + f"\n\n**🎨 Submit Deck** and share a screenshot below!\nThank you for playing! {chordo_love}"
-    )
+    description = f"{header}\n" + "\n".join(lines)
+    if include_submit_cta:
+        chordo_love = emojis.get("chordo_love")
+        description += f"\n\n**🎨 Submit Deck** and share a screenshot below!\nThank you for playing! {chordo_love}"
 
     return discord.Embed(
         title=title,
         description=description,
         color=discord.Color.green(),
+    )
+
+
+async def build_standings_embed_for_event(event_id: str) -> discord.Embed | None:
+    """Snapshot variant of the live standings: same shape as `_post_or_update_live_standings`'s
+    embed but loads tournament_players from the DB (no in-memory manager required) and omits the
+    Submit-Deck CTA. Returns None when the event has no pairings yet."""
+    players = await asyncio.to_thread(_load_tournament_players_sync, event_id)
+    if not players:
+        return None
+    match_states = await asyncio.to_thread(_load_round_states, event_id, TOTAL_ROUNDS)
+    if not match_states:
+        return None
+    _mark_trophy_match(match_states, TOTAL_ROUNDS)
+    trophy = [m for m in match_states if m.get("is_trophy_match")]
+    champion_locked = bool(trophy) and all(m.get("winner_name") for m in trophy)
+    pending_count = sum(1 for m in match_states if not m.get("winner_name"))
+
+    prior = await asyncio.to_thread(_load_matches, event_id)
+    standings = pod_swiss.compute_standings(players, prior)
+    displays = await asyncio.to_thread(_load_participant_displays, event_id)
+    event_name = await asyncio.to_thread(_load_event_name_sync, event_id)
+    deck_data = await asyncio.to_thread(_load_event_deck_data_sync, event_id)
+    player_colors = _colors_only(deck_data)
+    return build_champion_embed(
+        standings,
+        event_name=event_name,
+        displays=displays,
+        player_colors=player_colors,
+        site_root=settings.public_site_url.rstrip("/"),
+        champion_locked=champion_locked,
+        pending_count=pending_count,
+        deck_data=deck_data,
+        include_submit_cta=False,
     )
 
 

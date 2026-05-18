@@ -16,6 +16,12 @@ from bot.discord_helpers import extract_avatar_hash
 from bot.models import Player
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_drafts import _normalize_player_name
+from bot.services.pod_tournament import (
+    _load_event_id_by_name_sync,
+    _load_event_id_by_thread_sync,
+    _search_event_names_sync,
+    build_standings_embed_for_event,
+)
 from bot.slug import disambiguate_slug, slugify
 
 
@@ -52,7 +58,7 @@ class PodDraft(commands.Cog):
         name="pod-link-arena",
         description="Link your MTG Arena handle so pod-draft results recognize you",
     )
-    @app_commands.describe(name="Your full MTG Arena handle: ArenaID#1234")
+    @app_commands.describe(name="Your full MTG Arena handle: ArenaID#12345")
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
     async def pod_link_arena(self, interaction: discord.Interaction, name: str) -> None:
@@ -65,7 +71,7 @@ class PodDraft(commands.Cog):
         if not _ARENA_INPUT_RE.match(arena_name):
             audit.event("pod_link_arena_bad_format", user_id=user_id, arena_name=arena_name)
             await interaction.response.send_message(
-                "❌ Use the full MTG Arena handle: `ArenaID#1234`.",
+                "❌ Use the full MTG Arena handle: `ArenaID#12345`",
                 ephemeral=True,
             )
             return
@@ -126,6 +132,46 @@ class PodDraft(commands.Cog):
 
         for manager in list(ACTIVE_POD_MANAGERS.values()):
             asyncio.create_task(manager.refresh_lobby_now())
+
+    @app_commands.command(
+        name="pod-draft-standings",
+        description="Post the standings embed for a pod-draft event",
+    )
+    @app_commands.describe(event="Pick an event to publish standings for; defaults to the current thread")
+    @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def pod_draft_standings(self, interaction: discord.Interaction, event: str | None = None) -> None:
+        await interaction.response.defer(thinking=False)
+
+        if event:
+            event_id = await asyncio.to_thread(_load_event_id_by_name_sync, event)
+            if event_id is None:
+                await interaction.followup.send(f"No pod-draft event named `{event}`.", ephemeral=True)
+                return
+        else:
+            channel = interaction.channel
+            thread_id = str(channel.id) if channel is not None else None
+            event_id = await asyncio.to_thread(_load_event_id_by_thread_sync, thread_id) if thread_id else None
+            if event_id is None:
+                await interaction.followup.send(
+                    "Run this inside a pod-draft thread, or pass an `event` to publish standings for a specific pod.",
+                    ephemeral=True,
+                )
+                return
+
+        embed = await build_standings_embed_for_event(event_id)
+        if embed is None:
+            await interaction.followup.send("No standings yet — this pod hasn't started pairings.", ephemeral=True)
+            return
+
+        await interaction.followup.send(embed=embed)
+
+    @pod_draft_standings.autocomplete("event")
+    async def _pod_draft_standings_event_autocomplete(
+        self, interaction: discord.Interaction, current: str,
+    ) -> list[app_commands.Choice[str]]:
+        names = await asyncio.to_thread(_search_event_names_sync, current)
+        return [app_commands.Choice(name=n, value=n) for n in names]
 
     @app_commands.command(name="pod-takeover", description="Take control of the Draftmancer session and disconnect the bot")
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
