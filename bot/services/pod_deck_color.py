@@ -199,12 +199,13 @@ class DeckColorSelect(ui.Select):
                 DeckColorWriteInModal(self._submit, self._review_toggle, self._current_review),
             )
             return
+        await interaction.response.defer()
         try:
             await self._submit(interaction, value)
         except NotInPodError:
-            await interaction.response.edit_message(content=NOT_IN_POD_MSG, view=None)
+            await interaction.edit_original_response(content=NOT_IN_POD_MSG, view=None)
             return
-        await interaction.response.edit_message(
+        await interaction.edit_original_response(
             content=SAVED_MSG,
             view=DeckColorSelectView(
                 self._submit, self._review_toggle,
@@ -249,12 +250,13 @@ class DraftReviewSelect(ui.Select):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         wants_review = self.values[0] == REVIEW_YES_VALUE
+        await interaction.response.defer()
         try:
             await self._review_toggle(interaction, wants_review)
         except NotInPodError:
-            await interaction.response.edit_message(content=NOT_IN_POD_MSG, view=None)
+            await interaction.edit_original_response(content=NOT_IN_POD_MSG, view=None)
             return
-        await interaction.response.edit_message(
+        await interaction.edit_original_response(
             content=SAVED_MSG,
             view=DeckColorSelectView(
                 self._submit, self._review_toggle,
@@ -294,12 +296,13 @@ class DeckColorWriteInModal(ui.Modal, title="Deck colors"):
                 ),
             )
             return
+        await interaction.response.defer()
         try:
             await self._submit(interaction, cleaned)
         except NotInPodError:
-            await interaction.response.edit_message(content=NOT_IN_POD_MSG, view=None)
+            await interaction.edit_original_response(content=NOT_IN_POD_MSG, view=None)
             return
-        await interaction.response.edit_message(
+        await interaction.edit_original_response(
             content=SAVED_MSG,
             view=DeckColorSelectView(
                 self._submit, self._review_toggle,
