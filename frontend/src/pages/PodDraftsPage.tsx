@@ -5,15 +5,14 @@ import { ChevronDown } from "lucide-react";
 import { AppHeader } from "../components/AppHeader";
 import { Footer } from "../components/Footer";
 import { SectionLabel } from "../components/SectionLabel";
-import { HeroSection } from "../components/HeroSection";
 import { MobilePageHeader } from "../components/PageNav";
 import { SetSwitcherDesktop, SetSwitcherMobile } from "../components/SetSwitcher";
-import { AAvatar, Trophy } from "../components/Brand";
+import { AAvatar, ArrowRight, SetGlyph, Trophy } from "../components/Brand";
+import { ChamferedButton } from "../components/ChamferedButton";
 import { Pips } from "../components/ManaPips";
-import { RankBadge } from "../components/RankBadge";
 import { Record } from "../components/Record";
 import { useIsMobile } from "../lib/use-is-mobile";
-import { fmtShortDate, winPct } from "../data/utils";
+import { fmtRange, fmtShortDate, weekOfSet, winPct } from "../data/utils";
 import {
   usePodEventParticipants,
   usePodEvents,
@@ -51,6 +50,7 @@ export function PodDraftsPage() {
 
   const { data: events } = usePodEvents(activeSet);
   const { data: leaderboard } = usePodLeaderboard(activeSet);
+  const setMeta = availableSets.find((s) => s.code === activeSet);
 
   return (
     <div className="bg-bg text-text min-h-screen flex flex-col animate-fadeIn">
@@ -66,38 +66,30 @@ export function PodDraftsPage() {
         <AppHeader subtitle="POD DRAFTS" />
       )}
 
-      <HeroSection className="px-4 md:px-10 pt-6 pb-6">
-        <SectionLabel className="mb-2">Pod Drafts</SectionLabel>
-        <div className="flex items-end justify-between gap-4 flex-wrap">
-          <h1
-            className="font-display text-text"
-            style={{
-              fontSize: "clamp(32px, 5vw, 56px)",
-              letterSpacing: "0.04em",
-              lineHeight: 0.95,
-            }}
-          >
-            ALL RECORDED PODS
-          </h1>
+      {isMobile ? (
+        <div className="px-3 py-2 border-b border-border bg-surface flex items-center gap-2">
+          <SetGlyph code={activeSet} size={28} />
+          <span className="font-display text-text tracking-[0.04em]" style={{ fontSize: 22 }}>
+            {activeSet}
+          </span>
           {availableSets.length > 1 && (
-            <div className="shrink-0">
-              {isMobile ? (
-                <SetSwitcherMobile
-                  sets={availableSets}
-                  activeCode={activeSet}
-                  onChange={setActiveSet}
-                />
-              ) : (
-                <SetSwitcherDesktop
-                  sets={availableSets}
-                  activeCode={activeSet}
-                  onChange={setActiveSet}
-                />
-              )}
+            <div className="ml-auto basis-[40%] min-w-0">
+              <SetSwitcherMobile
+                sets={availableSets}
+                activeCode={activeSet}
+                onChange={setActiveSet}
+              />
             </div>
           )}
         </div>
-      </HeroSection>
+      ) : (
+        <SetHero
+          activeSet={activeSet}
+          setMeta={setMeta}
+          sets={availableSets}
+          onSelectSet={setActiveSet}
+        />
+      )}
 
       <main className="flex-1 px-4 md:px-10 pt-6 pb-10">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
@@ -133,16 +125,20 @@ function EventRow({ event }: { event: PodEventSummary }) {
   const [open, setOpen] = useState(false);
   const dateLabel = fmtShortDate(event.eventDate);
   return (
-    <div className="bg-surface border border-border hover:border-border2 transition-colors">
-      <div className="grid grid-cols-[1fr_auto_auto] items-center gap-3 px-4 py-3">
+    <div className="bg-surface border border-border transition-colors">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="w-full grid grid-cols-[1fr_auto_auto] items-center gap-3 px-4 py-3 text-left bg-transparent border-0 cursor-pointer hover:bg-surface2 transition-colors"
+      >
         <div className="flex items-center gap-3 min-w-0">
-          <Link
-            to={`/pods/${event.slug}`}
-            className="font-display text-text hover:text-green no-underline transition-colors truncate"
+          <span
+            className="font-display text-text truncate"
             style={{ fontSize: 20, letterSpacing: "0.04em" }}
           >
             {event.name.toUpperCase()}
-          </Link>
+          </span>
           <span className="text-dim">·</span>
           <span
             className="font-display text-muted tracking-[0.18em] uppercase shrink-0"
@@ -168,19 +164,11 @@ function EventRow({ event }: { event: PodEventSummary }) {
             {event.participantCount} seats
           </span>
         </div>
-        <button
-          type="button"
-          onClick={() => setOpen((o) => !o)}
-          aria-expanded={open}
-          aria-label={open ? "Collapse standings" : "Expand standings"}
-          className="bg-transparent border-0 p-1.5 cursor-pointer text-muted hover:text-text transition-colors"
-        >
-          <ChevronDown
-            size={18}
-            className={`transition-transform duration-200 ${open ? "rotate-180" : ""}`}
-          />
-        </button>
-      </div>
+        <ChevronDown
+          size={18}
+          className={`text-muted transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+        />
+      </button>
 
       <div
         className={`grid transition-[grid-template-rows] duration-200 ease-out ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}
@@ -205,64 +193,69 @@ function EventStandings({ event }: { event: PodEventSummary }) {
     });
   }, [rows]);
   return (
-    <div className="px-4 pb-4 pt-1 border-t border-border">
-      <div className="flex items-center justify-end mb-3">
-        <Link
-          to={`/pods/${event.slug}`}
-          className="font-display text-muted hover:text-green tracking-[0.18em] uppercase no-underline transition-colors"
-          style={{ fontSize: 11 }}
-        >
-          Full Breakdown →
-        </Link>
-      </div>
+    <Link
+      to={`/pods/${event.slug}`}
+      aria-label={`View ${event.name} breakdown`}
+      className="block px-4 pt-3 pb-4 border-t border-dashed border-border2 cursor-pointer transition-colors hover:bg-green/5 no-underline text-inherit"
+    >
       {isLoading ? (
-        <div className="text-muted text-[13px]">Loading standings…</div>
+        <div className="text-muted text-[13px] py-2">Loading standings…</div>
       ) : (
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-[1.5px]">
           {sorted.map((p) => (
             <StandingRow key={`${p.eventId}-${p.displayName}`} p={p} />
           ))}
         </div>
       )}
-    </div>
+      <div className="flex justify-end mt-4">
+        <ChamferedButton>
+          <span className="inline-flex items-center gap-2">
+            VIEW BREAKDOWN
+            <ArrowRight size={12} />
+          </span>
+        </ChamferedButton>
+      </div>
+    </Link>
   );
 }
 
 function StandingRow({ p }: { p: PodEventParticipantRow }) {
+  const wins = p.record ? Number(p.record.split("-")[0] || 0) : 0;
+  const losses = p.record ? Number(p.record.split("-")[1] || 0) : 0;
   return (
-    <div className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-3 px-2 py-1.5 bg-bg">
-      {p.placement != null ? <RankBadge rank={p.placement} size="sm" /> : <span style={{ width: 32 }} />}
-      <div className="flex items-center gap-2 min-w-0">
-        {p.deckColors && <Pips colors={p.deckColors} size={12} />}
-        {p.playerSlug ? (
-          <Link
-            to={`/player/${p.playerSlug}`}
-            className="font-display text-text hover:text-green no-underline truncate"
-            style={{ fontSize: 16, letterSpacing: "0.03em" }}
-          >
-            {p.displayName}
-          </Link>
-        ) : (
-          <span className="font-display text-text truncate" style={{ fontSize: 16, letterSpacing: "0.03em" }}>
-            {p.displayName}
-          </span>
-        )}
+    <div
+      className="grid items-center gap-x-3 py-2 pl-2 pr-3 bg-surface"
+      style={{ gridTemplateColumns: "32px 1fr 80px 70px 110px" }}
+    >
+      <span className="mono text-[13px] text-muted text-center">{p.placement ?? ""}</span>
+      <div className="flex items-center gap-2.5 min-w-0">
+        <AAvatar displayName={p.displayName} avatarUrl={p.avatarUrl} size={28} />
+        <span
+          className="font-display leading-none tracking-[0.04em] whitespace-nowrap overflow-hidden text-ellipsis"
+          style={{ fontSize: 17 }}
+        >
+          {p.displayName.toUpperCase()}
+        </span>
       </div>
-      <span className="font-display tabular-nums text-muted" style={{ fontSize: 14, letterSpacing: "0.08em" }}>
-        {p.record ?? "—"}
-      </span>
-      {p.draftLogUrl ? (
-        <a
-          href={p.draftLogUrl}
-          target="_blank"
-          rel="noreferrer noopener"
-          className="font-display text-muted hover:text-green tracking-[0.16em] uppercase no-underline transition-colors"
+      <div className="flex items-center">
+        {p.deckColors ? <Pips colors={p.deckColors} size={14} /> : <span className="text-dim text-[12px]">—</span>}
+      </div>
+      <Record className="mono text-right text-[13px]" wins={wins} losses={losses} />
+      {p.deckScreenshotUrl ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            window.open(p.deckScreenshotUrl!, "_blank", "noreferrer");
+          }}
+          className="font-display tracking-[0.16em] text-text hover:text-green bg-bg border border-border hover:border-green/60 transition-colors leading-none px-2.5 py-1 cursor-pointer whitespace-nowrap"
           style={{ fontSize: 11 }}
         >
-          Log →
-        </a>
+          VIEW DECK
+        </button>
       ) : (
-        <span style={{ width: 32 }} />
+        <span />
       )}
     </div>
   );
@@ -355,6 +348,45 @@ function EmptyHint({ children }: { children: React.ReactNode }) {
   return (
     <div className="text-muted text-[13px] py-4 px-2 bg-surface border border-border">
       {children}
+    </div>
+  );
+}
+
+function SetHero({
+  activeSet,
+  setMeta,
+  sets,
+  onSelectSet,
+}: {
+  activeSet: string;
+  setMeta: SetSummary | undefined;
+  sets: SetSummary[];
+  onSelectSet: (code: string) => void;
+}) {
+  const week = weekOfSet(setMeta);
+  const isActive = setMeta?.isActive ?? false;
+  return (
+    <div className="relative px-10 py-5 border-b border-border bg-surface flex items-center gap-6">
+      <SetGlyph code={activeSet} size={84} />
+      <div>
+        <SectionLabel size={13} className={isActive ? "" : "invisible"}>CURRENT SET</SectionLabel>
+        <div className="flex items-baseline gap-3.5 mt-0.5">
+          <span className="font-display tracking-[0.04em]" style={{ fontSize: 56, lineHeight: 0.9 }}>
+            {activeSet}
+          </span>
+          <span className="font-display text-[22px] text-muted tracking-[0.06em]">
+            {setMeta?.name?.toUpperCase() ?? ""}
+          </span>
+        </div>
+        <div className="mono text-[11px] text-muted mt-1">
+          {setMeta && fmtRange(setMeta.startDate, setMeta.endDate)}
+          {week && ` · ${week}`}
+        </div>
+      </div>
+      <div className="flex-1" />
+      {sets.length > 1 && (
+        <SetSwitcherDesktop sets={sets} activeCode={activeSet} onChange={onSelectSet} />
+      )}
     </div>
   );
 }
