@@ -99,28 +99,29 @@ export function PodDraftsPage() {
         </div>
       </HeroSection>
 
-      <main className="flex-1 px-4 md:px-10 pt-6 pb-10 flex flex-col gap-10">
-        <section>
-          <SectionLabel className="mb-3">Events</SectionLabel>
-          {events && events.length > 0 ? (
-            <div className="flex flex-col gap-2">
-              {events.map((e) => (
-                <EventRow key={e.eventId} event={e} />
-              ))}
-            </div>
-          ) : (
-            <EmptyHint>No pod drafts recorded yet for {activeSet}.</EmptyHint>
-          )}
-        </section>
+      <main className="flex-1 px-4 md:px-10 pt-6 pb-10">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+          <section>
+            {leaderboard && leaderboard.length > 0 ? (
+              <PodLeaderboardTable rows={leaderboard} isMobile={isMobile} />
+            ) : (
+              <EmptyHint>No player stats yet for {activeSet}.</EmptyHint>
+            )}
+          </section>
 
-        <section>
-          <SectionLabel className="mb-3">Lifetime Standings</SectionLabel>
-          {leaderboard && leaderboard.length > 0 ? (
-            <PodLeaderboardTable rows={leaderboard} isMobile={isMobile} />
-          ) : (
-            <EmptyHint>No player stats yet for {activeSet}.</EmptyHint>
-          )}
-        </section>
+          <section>
+            <SectionLabel className="mb-3">Events</SectionLabel>
+            {events && events.length > 0 ? (
+              <div className="flex flex-col gap-2">
+                {events.map((e) => (
+                  <EventRow key={e.eventId} event={e} />
+                ))}
+              </div>
+            ) : (
+              <EmptyHint>No pod drafts recorded yet for {activeSet}.</EmptyHint>
+            )}
+          </section>
+        </div>
       </main>
 
       <Footer className="mt-auto px-4 md:px-10 py-4 md:pt-5 md:pb-3 shrink-0" />
