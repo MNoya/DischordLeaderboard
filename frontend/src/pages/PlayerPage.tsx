@@ -15,6 +15,8 @@ import { DonutChart } from "../components/DonutChart";
 import { ErrorState } from "../components/ErrorState";
 import { TrophyCount } from "../components/TrophyCount";
 import { SetCodeDropdown } from "../components/SetCodeDropdown";
+import { MobilePageHeader } from "../components/PageNav";
+import { RankBadge } from "../components/RankBadge";
 
 import { useAvailableFormats, useColorChips, useDraftEvents, useLeaderboard, usePlayerProfile, useSets } from "../data/hooks";
 import { colorsOf, effectiveColorCount, fmtShortDate, mainColors, prettyFormat, winPct } from "../data/utils";
@@ -231,21 +233,16 @@ function MobilePlayerHeader({
   navigate: ReturnType<typeof useNavigate>;
   qs?: string;
 }) {
+  const toFor = (s: string | null) =>
+    s ? { pathname: `/${sibling.setCode}/player/${s}`, search: qs } : null;
   return (
-    <header className="py-3 px-[18px] border-b border-border grid grid-cols-3 items-center">
-      <BackButton
-        onClick={() => navigate({ pathname: `/${sibling.setCode}`, search: qs })}
-        compact
-      />
-      <Link to="/" className="flex justify-center no-underline" aria-label="Home">
-        <div className="flex items-center overflow-visible" style={{ height: 14 }}>
-          <ALogo size={22} />
-        </div>
-      </Link>
-      <div className="justify-self-end">
-        <SiblingNavButtons sibling={sibling} qs={qs} compact />
-      </div>
-    </header>
+    <MobilePageHeader
+      backOnClick={() => navigate({ pathname: `/${sibling.setCode}`, search: qs })}
+      prevTo={toFor(sibling.prevSlug)}
+      nextTo={toFor(sibling.nextSlug)}
+      prevAriaLabel="Previous player"
+      nextAriaLabel="Next player"
+    />
   );
 }
 
@@ -514,25 +511,7 @@ function Desktop({
               ) : (
                 <span className="text-[22px]">{profile.setCode}</span>
               )}
-              <span
-                className="inline-block"
-                style={{
-                  clipPath: "polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%)",
-                  background: "#2ee85c",
-                  padding: 1,
-                  minHeight: 46,
-                }}
-              >
-                <span
-                  className="flex items-center bg-surface text-green font-display tracking-[0.06em] leading-none text-[26px] px-[18px] h-full"
-                  style={{
-                    clipPath: "polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%)",
-                    minHeight: 44,
-                  }}
-                >
-                  #{profile.rank}
-                </span>
-              </span>
+              <RankBadge rank={profile.rank} size="lg" />
             </div>
           </div>
           <StatStrip profile={profile} wp={wp} />
@@ -923,6 +902,8 @@ function EventLogRow({ event: e, variant }: { event: PlayerDraftEvent; variant: 
   const href = e.externalUrl ?? null;
   const linkClass = href ? "cursor-pointer transition-colors hover:bg-surface2 no-underline text-inherit" : "";
   const isPod = e.format === "PodDraft";
+  const podWithoutDeck = isPod && !e.colors;
+  const formatLabel = isPod && e.eventName ? e.eventName.toUpperCase() : prettyFormat(e.format).toUpperCase();
 
   if (variant === "desktop") {
     const inner = (
@@ -932,10 +913,10 @@ function EventLogRow({ event: e, variant }: { event: PlayerDraftEvent; variant: 
         </span>
         <span className="text-[11px] text-muted">{fmtShortDate(e.finishedAt)}</span>
         <span className="font-display text-[14px] tracking-[0.08em]">
-          {prettyFormat(e.format).toUpperCase()}
+          {formatLabel}
         </span>
-        {isPod ? (
-          <span />
+        {podWithoutDeck ? (
+          <span className="text-[11px] text-muted">Deck not submitted</span>
         ) : (() => {
           const { name, splash } = deckColorParts(e.colors);
           return (
@@ -985,13 +966,15 @@ function EventLogRow({ event: e, variant }: { event: PlayerDraftEvent; variant: 
       </span>
       <div>
         <div className="flex items-center gap-1.5">
-          {!isPod && <Pips colors={e.colors} size={11} />}
+          {!podWithoutDeck && <Pips colors={e.colors} size={11} />}
           <span className="font-display text-[13px] tracking-[0.08em]">
-            {prettyFormat(e.format).toUpperCase()}
+            {formatLabel}
           </span>
         </div>
         <div className="text-[11px] text-muted mt-0.5">
-          {isPod ? fmtShortDate(e.finishedAt) : `${formatDeckColors(e.colors)} · ${fmtShortDate(e.finishedAt)}`}
+          {podWithoutDeck
+            ? `Deck not submitted · ${fmtShortDate(e.finishedAt)}`
+            : `${formatDeckColors(e.colors)} · ${fmtShortDate(e.finishedAt)}`}
         </div>
       </div>
       <span className="inline-flex items-center gap-1.5">
@@ -1108,25 +1091,8 @@ function Mobile({
             </h1>
           </div>
           <div className="flex flex-col items-end gap-1.5 font-display tracking-[0.18em] shrink-0">
-            <span
-              className="inline-block"
-              style={{
-                clipPath: "polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%)",
-                background: "#2ee85c",
-                padding: 1,
-                minHeight: 38,
-                marginRight: -8,
-              }}
-            >
-              <span
-                className="flex items-center bg-surface text-green font-display tracking-[0.06em] leading-none text-[22px] px-[14px] h-full"
-                style={{
-                  clipPath: "polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%)",
-                  minHeight: 36,
-                }}
-              >
-                #{profile.rank}
-              </span>
+            <span style={{ marginRight: -8 }}>
+              <RankBadge rank={profile.rank} size="md" />
             </span>
             {sets ? (
               <SetCodeDropdown sets={sets} activeCode={profile.setCode} onChange={onChangeSet} size="sm" />

@@ -2,6 +2,8 @@ import { useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { LeaderboardPage } from "./pages/LeaderboardPage";
 import { PlayerPage } from "./pages/PlayerPage";
+import { PodPage } from "./pages/PodPage";
+import { PodDraftsPage } from "./pages/PodDraftsPage";
 import { AboutPage } from "./pages/AboutPage";
 import { preloadGuildLogos } from "./data/guild-art";
 
@@ -25,6 +27,9 @@ export function App() {
       <Route path="/about" element={<AboutPage />} />
       <Route path="/player/:slug" element={<PlayerPage />} />
       <Route path="/players" element={<Navigate to="/" replace />} />
+
+      <Route path="/pods" element={<PodDraftsPage />} />
+      <Route path="/pods/:slug" element={<PodPage />} />
 
       <Route path="/:setCode" element={<LeaderboardPage />} />
       <Route path="/:setCode/player/:slug" element={<PlayerPage />} />

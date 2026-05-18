@@ -22,3 +22,7 @@ export const fetchFormatColorsLeaderboard = impl.fetchFormatColorsLeaderboard;
 export const fetchPlayerDraftEvents = impl.fetchPlayerDraftEvents;
 export const fetchRecentTrophies = impl.fetchRecentTrophies;
 export const fetchFormatRecentTrophies = impl.fetchFormatRecentTrophies;
+export const fetchPodEvents = impl.fetchPodEvents;
+export const fetchPodEventParticipants = impl.fetchPodEventParticipants;
+export const fetchPodLeaderboard = impl.fetchPodLeaderboard;
+export const fetchPodSetCodes = impl.fetchPodSetCodes;

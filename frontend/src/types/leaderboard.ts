@@ -50,6 +50,8 @@ export interface PlayerDraftEvent {
   finishedAt: string;
   // 17lands deck URL for 17L events, Draftmancer draft log for pod drafts, null if no link
   externalUrl?: string | null;
+  // Pod draft event name (e.g. "Pod Draft #3"). Null for 17lands rows
+  eventName?: string | null;
 }
 
 export interface ColorsLeaderboardRow {
@@ -89,6 +91,50 @@ export interface RecentTrophy {
   wins: number;
   losses: number;
   finishedAt: string;
+}
+
+export interface PodEventSummary {
+  eventId: string;
+  slug: string;
+  name: string;
+  setCode: string;
+  eventDate: string;
+  eventTime: string;
+  formatLabel: string | null;
+  totalRounds: number;
+  championPlayerSlug: string | null;
+  championDisplayName: string | null;
+  championAvatarUrl: string | null;
+  championDeckColors: string | null;
+  championRecord: string | null;
+  participantCount: number;
+  isFinalized: boolean;
+}
+
+export interface PodEventParticipantRow {
+  eventId: string;
+  displayName: string;
+  placement: number | null;
+  record: string | null;
+  deckColors: string | null;
+  draftLogUrl: string | null;
+  deckScreenshotUrl: string | null;
+  playerSlug: string | null;
+  playerDisplayName: string | null;
+  avatarUrl: string | null;
+}
+
+export interface PodLeaderboardRow {
+  setCode: string;
+  rank: number;
+  slug: string;
+  displayName: string;
+  avatarUrl: string | null;
+  events: number;
+  wins: number;
+  losses: number;
+  trophies: number;
+  lastFinishedAt: string | null;
 }
 
 // View-shape composite used by the player profile page.

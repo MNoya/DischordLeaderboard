@@ -18,9 +18,18 @@ import type {
   PlayerDraftEvent,
   PlayerFormatBreakdown,
   PlayerProfile,
+  PodEventParticipantRow,
+  PodEventSummary,
+  PodLeaderboardRow,
   RecentTrophy,
   SetSummary,
 } from "../types/leaderboard";
+import {
+  podEventsFixture,
+  podEventParticipantsFixture,
+  podLeaderboardFixtureRaw,
+  podSetCodesFixture,
+} from "./fixtures/pod-events";
 
 import { setsFixture } from "./fixtures/sets";
 import { leaderboardSosFixture } from "./fixtures/leaderboard-sos";
@@ -329,3 +338,28 @@ function synthDraftEvents(slug: string): PlayerDraftEvent[] {
   }
   return out;
 }
+
+export const fetchPodEvents = (setCode: string): Promise<PodEventSummary[]> => {
+  return wait(podEventsFixture.filter((e) => e.setCode === setCode));
+};
+
+export const fetchPodEventParticipants = (
+  eventId: string,
+): Promise<PodEventParticipantRow[]> => {
+  return wait(podEventParticipantsFixture.filter((p) => p.eventId === eventId));
+};
+
+export const fetchPodLeaderboard = (setCode: string): Promise<PodLeaderboardRow[]> => {
+  const rows = podLeaderboardFixtureRaw
+    .filter((r) => r.setCode === setCode)
+    .slice()
+    .sort((a, b) => {
+      if (b.trophies !== a.trophies) return b.trophies - a.trophies;
+      if (b.wins !== a.wins) return b.wins - a.wins;
+      return a.events - b.events;
+    })
+    .map((r, i) => ({ ...r, rank: i + 1 }));
+  return wait(rows);
+};
+
+export const fetchPodSetCodes = (): Promise<string[]> => wait(podSetCodesFixture);

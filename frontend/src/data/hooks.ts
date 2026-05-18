@@ -18,6 +18,10 @@ import {
   fetchOtherColorsLeaderboard,
   fetchPlayerDraftEvents,
   fetchPlayerProfile,
+  fetchPodEventParticipants,
+  fetchPodEvents,
+  fetchPodLeaderboard,
+  fetchPodSetCodes,
   fetchRecentTrophies,
   fetchSets,
 } from "./api";
@@ -252,3 +256,38 @@ export function useColorChips(setCode: string): { chips: string[]; otherCombos: 
   }, [data]);
 }
 
+
+export function usePodEvents(setCode: string | undefined) {
+  return useQuery({
+    queryKey: ["pod-events", setCode],
+    queryFn: () => fetchPodEvents(setCode!),
+    enabled: !!setCode,
+    staleTime: FIVE_MINUTES,
+  });
+}
+
+export function usePodEventParticipants(eventId: string | undefined) {
+  return useQuery({
+    queryKey: ["pod-event-participants", eventId],
+    queryFn: () => fetchPodEventParticipants(eventId!),
+    enabled: !!eventId,
+    staleTime: FIVE_MINUTES,
+  });
+}
+
+export function usePodLeaderboard(setCode: string | undefined) {
+  return useQuery({
+    queryKey: ["pod-leaderboard", setCode],
+    queryFn: () => fetchPodLeaderboard(setCode!),
+    enabled: !!setCode,
+    staleTime: FIVE_MINUTES,
+  });
+}
+
+export function usePodSetCodes() {
+  return useQuery({
+    queryKey: ["pod-set-codes"],
+    queryFn: fetchPodSetCodes,
+    staleTime: FIVE_MINUTES,
+  });
+}

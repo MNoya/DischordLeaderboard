@@ -53,3 +53,31 @@ button {
 .no-scrollbar::-webkit-scrollbar-thumb {
   background: #2a3142;
 }
+
+.themed-scrollbar {
+  scrollbar-width: auto;
+  scrollbar-color: #3b4458 #14181f;
+}
+.themed-scrollbar::-webkit-scrollbar {
+  width: 14px;
+  height: 14px;
+}
+.themed-scrollbar::-webkit-scrollbar-track {
+  background: #14181f;
+}
+.themed-scrollbar::-webkit-scrollbar-thumb {
+  background: #3b4458;
+  border: 3px solid #14181f;
+  border-radius: 7px;
+}
+.themed-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #4b556b;
+}
+.themed-scrollbar::-webkit-scrollbar-corner {
+  background: #14181f;
+}
+
+.pod-panel-shell {
+  interpolate-size: allow-keywords;
+  transition: height 300ms ease-out;
+}

@@ -9,6 +9,7 @@ import { useIsMobile } from "../lib/use-is-mobile";
 
 const NAV: Array<{ label: string; to: string; match: (path: string) => boolean }> = [
   { label: "LEADERBOARD", to: "/", match: (p) => p === "/" || /^\/[A-Z0-9]{2,4}$/.test(p) },
+  { label: "POD DRAFTS", to: "/pods", match: (p) => p.startsWith("/pods") },
   { label: "ABOUT", to: "/about", match: (p) => p.startsWith("/about") },
 ];
 

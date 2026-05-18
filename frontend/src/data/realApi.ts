@@ -24,6 +24,9 @@ import type {
   PlayerDraftEvent,
   PlayerFormatBreakdown,
   PlayerProfile,
+  PodEventParticipantRow,
+  PodEventSummary,
+  PodLeaderboardRow,
   RecentTrophy,
   SetSummary,
 } from "../types/leaderboard";
@@ -128,7 +131,22 @@ export async function fetchFormatLeaderboard(
   setCode: string,
   format: string,
 ): Promise<LeaderboardRow[]> {
-  if (format === "Pod") return fetchPodLeaderboard(setCode);
+  if (format === "Pod") {
+    const rows = await fetchPodLeaderboard(setCode);
+    return rows.map((r) => ({
+      setCode: r.setCode,
+      slug: r.slug,
+      displayName: r.displayName,
+      avatarUrl: r.avatarUrl,
+      rank: r.rank,
+      score: 0,
+      trophies: r.trophies,
+      events: r.events,
+      wins: r.wins,
+      losses: r.losses,
+      lastCalculatedAt: r.lastFinishedAt ?? new Date(0).toISOString(),
+    }));
+  }
   const labels = FORMAT_LABEL_GROUPS[format] ?? [format];
   const [breakdown, leaderboard] = await Promise.all([
     client()
@@ -444,41 +462,6 @@ export async function fetchFormatRecentTrophies(
   return all;
 }
 
-async function fetchPodLeaderboard(setCode: string): Promise<LeaderboardRow[]> {
-  const { data, error } = await client()
-    .from("public_player_pod_stats")
-    .select("*")
-    .eq("set_code", setCode);
-  if (error) throw error;
-  const rows = (data ?? []).map((raw) => {
-    const r = raw as Record<string, unknown>;
-    return {
-      setCode,
-      slug: r.slug as string,
-      displayName: r.display_name as string,
-      avatarUrl: (r.avatar_url ?? null) as string | null,
-      rank: 0,
-      score: 0,
-      trophies: (r.trophies as number) ?? 0,
-      events: (r.events as number) ?? 0,
-      wins: (r.wins as number) ?? 0,
-      losses: (r.losses as number) ?? 0,
-      lastCalculatedAt:
-        (r.last_finished_at as string | null) ?? new Date(0).toISOString(),
-    } satisfies LeaderboardRow;
-  });
-  return rows
-    .sort((a, b) => {
-      if (b.trophies !== a.trophies) return b.trophies - a.trophies;
-      if (b.events !== a.events) return b.events - a.events;
-      const wpA = a.wins / Math.max(1, a.wins + a.losses);
-      const wpB = b.wins / Math.max(1, b.wins + b.losses);
-      if (wpB !== wpA) return wpB - wpA;
-      return a.slug.localeCompare(b.slug);
-    })
-    .map((r, i) => ({ ...r, rank: i + 1 }));
-}
-
 function adaptRecentTrophy(row: Record<string, unknown>): RecentTrophy {
   return {
     setCode: row.set_code as string,
@@ -491,5 +474,102 @@ function adaptRecentTrophy(row: Record<string, unknown>): RecentTrophy {
     wins: row.wins as number,
     losses: row.losses as number,
     finishedAt: row.finished_at as string,
+  };
+}
+
+export async function fetchPodEvents(setCode: string): Promise<PodEventSummary[]> {
+  const { data, error } = await client()
+    .from("public_pod_draft_events")
+    .select("*")
+    .eq("set_code", setCode)
+    .order("event_time", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((r) => adaptPodEvent(r as Record<string, unknown>));
+}
+
+export async function fetchPodEventParticipants(
+  eventId: string,
+): Promise<PodEventParticipantRow[]> {
+  const { data, error } = await client()
+    .from("public_pod_draft_event_participants")
+    .select("*")
+    .eq("event_id", eventId);
+  if (error) throw error;
+  return (data ?? []).map((r) => adaptPodEventParticipant(r as Record<string, unknown>));
+}
+
+export async function fetchPodLeaderboard(setCode: string): Promise<PodLeaderboardRow[]> {
+  const { data, error } = await client()
+    .from("public_player_pod_stats")
+    .select("*")
+    .eq("set_code", setCode);
+  if (error) throw error;
+  return (data ?? [])
+    .map((r) => adaptPodLeaderboardRow(r as Record<string, unknown>))
+    .sort((a, b) => {
+      if (b.trophies !== a.trophies) return b.trophies - a.trophies;
+      if (b.wins !== a.wins) return b.wins - a.wins;
+      return a.events - b.events;
+    })
+    .map((r, i) => ({ ...r, rank: i + 1 }));
+}
+
+export async function fetchPodSetCodes(): Promise<string[]> {
+  const { data, error } = await client()
+    .from("public_pod_draft_events")
+    .select("set_code");
+  if (error) throw error;
+  const seen = new Set<string>();
+  for (const r of data ?? []) seen.add((r as { set_code: string }).set_code);
+  return Array.from(seen);
+}
+
+function adaptPodEvent(row: Record<string, unknown>): PodEventSummary {
+  return {
+    eventId: row.event_id as string,
+    slug: row.slug as string,
+    name: row.name as string,
+    setCode: row.set_code as string,
+    eventDate: row.event_date as string,
+    eventTime: row.event_time as string,
+    formatLabel: (row.format_label ?? null) as string | null,
+    totalRounds: (row.total_rounds ?? 0) as number,
+    championPlayerSlug: (row.champion_player_slug ?? null) as string | null,
+    championDisplayName: (row.champion_display_name ?? null) as string | null,
+    championAvatarUrl: (row.champion_avatar_url ?? null) as string | null,
+    championDeckColors: (row.champion_deck_colors ?? null) as string | null,
+    championRecord: (row.champion_record ?? null) as string | null,
+    participantCount: (row.participant_count ?? 0) as number,
+    isFinalized: (row.is_finalized ?? false) as boolean,
+  };
+}
+
+function adaptPodEventParticipant(row: Record<string, unknown>): PodEventParticipantRow {
+  return {
+    eventId: row.event_id as string,
+    displayName: row.display_name as string,
+    placement: (row.placement ?? null) as number | null,
+    record: (row.record ?? null) as string | null,
+    deckColors: (row.deck_colors ?? null) as string | null,
+    draftLogUrl: (row.draft_log_url ?? null) as string | null,
+    deckScreenshotUrl: (row.deck_screenshot_url ?? null) as string | null,
+    playerSlug: (row.player_slug ?? null) as string | null,
+    playerDisplayName: (row.player_display_name ?? null) as string | null,
+    avatarUrl: (row.avatar_url ?? null) as string | null,
+  };
+}
+
+function adaptPodLeaderboardRow(row: Record<string, unknown>): PodLeaderboardRow {
+  return {
+    setCode: row.set_code as string,
+    rank: 0,
+    slug: row.slug as string,
+    displayName: row.display_name as string,
+    avatarUrl: (row.avatar_url ?? null) as string | null,
+    events: (row.events ?? 0) as number,
+    wins: (row.wins ?? 0) as number,
+    losses: (row.losses ?? 0) as number,
+    trophies: (row.trophies ?? 0) as number,
+    lastFinishedAt: (row.last_finished_at ?? null) as string | null,
   };
 }
