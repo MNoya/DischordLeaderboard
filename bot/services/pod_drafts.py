@@ -13,15 +13,21 @@ from bot.config import settings
 from bot.models import (
     MagicSet,
     Player,
+    PodDraftDmMessage,
     PodDraftEvent,
     PodDraftMatch,
     PodDraftParticipant,
 )
 
 
+DM_KIND_ROUND = "round_pairing"
+DM_KIND_SUBMIT_DECK = "submit_deck"
+
+
 @dataclass(frozen=True)
 class ParticipantDmInfo:
     """Per-participant info for round-start DMs. Keyed by normalized draftmancer_name."""
+    participant_id: str
     discord_id: str | None
     display_name: str
     arena_name: str | None
@@ -353,6 +359,118 @@ def finalize_champion(
     return event
 
 
+def upsert_dm_message(
+    session: Session,
+    *,
+    event_id: str,
+    participant_id: str,
+    kind: str,
+    round_num: int | None,
+    match_id: str | None,
+    dm_channel_id: str,
+    dm_message_id: str,
+) -> None:
+    """Upsert a DM message ref. Unique key is (participant_id, kind, round_num)."""
+    existing = session.execute(
+        select(PodDraftDmMessage).where(
+            PodDraftDmMessage.participant_id == participant_id,
+            PodDraftDmMessage.kind == kind,
+            PodDraftDmMessage.round_num.is_(round_num) if round_num is None
+            else PodDraftDmMessage.round_num == round_num,
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        existing.match_id = match_id
+        existing.dm_channel_id = dm_channel_id
+        existing.dm_message_id = dm_message_id
+        return
+    session.add(PodDraftDmMessage(
+        event_id=event_id,
+        participant_id=participant_id,
+        kind=kind,
+        round_num=round_num,
+        match_id=match_id,
+        dm_channel_id=dm_channel_id,
+        dm_message_id=dm_message_id,
+    ))
+
+
+def dm_messages_for_match(session: Session, match_id: str) -> list[PodDraftDmMessage]:
+    """All round_pairing DM messages tracked for a given match (both opponents)."""
+    return list(session.execute(
+        select(PodDraftDmMessage).where(
+            PodDraftDmMessage.match_id == match_id,
+            PodDraftDmMessage.kind == DM_KIND_ROUND,
+        )
+    ).scalars().all())
+
+
+def submit_deck_dm_for_participant(session: Session, participant_id: str) -> PodDraftDmMessage | None:
+    return session.execute(
+        select(PodDraftDmMessage).where(
+            PodDraftDmMessage.participant_id == participant_id,
+            PodDraftDmMessage.kind == DM_KIND_SUBMIT_DECK,
+        )
+    ).scalar_one_or_none()
+
+
+def participant_id_for_discord_user(
+    session: Session, event_id: str, discord_id: str,
+) -> str | None:
+    return session.execute(
+        select(PodDraftParticipant.id)
+        .join(Player, Player.id == PodDraftParticipant.player_id)
+        .where(
+            PodDraftParticipant.event_id == event_id,
+            Player.discord_id == discord_id,
+        )
+    ).scalar_one_or_none()
+
+
+def participants_with_discord_for_event(session: Session, event_id: str) -> list[dict]:
+    """Participant rows joined to Player.discord_id, with deck-state fields for Submit Deck DMs.
+    Skips participants whose Player row isn't linked (no real Discord user)."""
+    rows = session.execute(
+        select(
+            PodDraftParticipant.id,
+            PodDraftParticipant.deck_colors,
+            PodDraftParticipant.wants_draft_review,
+            Player.discord_id,
+        )
+        .join(Player, Player.id == PodDraftParticipant.player_id)
+        .where(PodDraftParticipant.event_id == event_id)
+    ).all()
+    return [
+        {"participant_id": pid, "deck_colors": dc, "wants_draft_review": wr, "discord_id": did}
+        for pid, dc, wr, did in rows
+        if did
+    ]
+
+
+def thread_id_for_event(session: Session, event_id: str) -> str | None:
+    return session.execute(
+        select(PodDraftEvent.discord_thread_id).where(PodDraftEvent.id == event_id)
+    ).scalar_one_or_none()
+
+
+def active_event_for_discord_user_in_dm(session: Session, discord_id: str) -> tuple[str, str] | None:
+    """Return (event_id, discord_thread_id) for the most recent unfinished pod-draft this user is in,
+    so the DM image redirect can point them at the correct thread. Picks the latest event_date and
+    only matches events that haven't been finalized (socket_status != 'complete')."""
+    row = session.execute(
+        select(PodDraftEvent.id, PodDraftEvent.discord_thread_id)
+        .join(PodDraftParticipant, PodDraftParticipant.event_id == PodDraftEvent.id)
+        .join(Player, Player.id == PodDraftParticipant.player_id)
+        .where(
+            Player.discord_id == discord_id,
+            PodDraftEvent.socket_status != "complete",
+        )
+        .order_by(PodDraftEvent.event_date.desc().nulls_last())
+        .limit(1)
+    ).first()
+    return (row[0], row[1]) if row else None
+
+
 def is_pod_thread_champion(session: Session, thread_id: str, discord_id: str) -> bool:
     """True if (thread_id, discord_id) maps to a participant with placement=1."""
     row = session.execute(
@@ -406,6 +524,7 @@ def participant_dm_info(session: Session, event_id: str) -> dict[str, Participan
     """
     rows = session.execute(
         select(
+            PodDraftParticipant.id,
             PodDraftParticipant.draftmancer_name,
             PodDraftParticipant.display_name,
             Player.discord_id,
@@ -414,9 +533,10 @@ def participant_dm_info(session: Session, event_id: str) -> dict[str, Participan
         .where(PodDraftParticipant.event_id == event_id)
     ).all()
     info: dict[str, ParticipantDmInfo] = {}
-    for dm_name, display_name, discord_id in rows:
+    for participant_id, dm_name, display_name, discord_id in rows:
         key = _normalize_player_name(dm_name) if dm_name else _normalize_player_name(display_name)
         info[key] = ParticipantDmInfo(
+            participant_id=participant_id,
             discord_id=discord_id,
             display_name=display_name,
             arena_name=dm_name,

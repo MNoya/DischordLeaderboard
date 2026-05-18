@@ -29,17 +29,25 @@ from bot.services.pod_deck_color import PAIR_EMOJI_NAME, NotInPodError, SubmitDe
 from bot.services.pod_replays import fetch_and_persist_replays_for_player
 from bot.services.seventeenlands import SeventeenLandsClient
 from bot.services.pod_drafts import (
+    DM_KIND_ROUND,
+    DM_KIND_SUBMIT_DECK,
     FinalStanding,
     _normalize_player_name,
     _normalized_column,
+    active_event_for_discord_user_in_dm,
     add_pairing,
+    dm_messages_for_match,
     finalize_champion as finalize_db,
     get_participant_deck_state,
     participant_dm_info,
+    participant_id_for_discord_user,
+    participants_with_discord_for_event,
     seed_event_participants,
     set_match_result,
     set_participant_deck_colors,
     set_participant_review_choice,
+    submit_deck_dm_for_participant,
+    upsert_dm_message,
 )
 from bot.services.pod_swiss import MatchOutcome, Player
 
@@ -69,14 +77,21 @@ async def _dm_round_pairings(
     pending_rows: list[tuple[str, str, str]],
     pairings_url: str,
 ) -> None:
-    """DM each linked participant their opponent for this round."""
+    """DM each linked participant their opponent for this round, with a single-match dropdown
+    so they can report from DM. Persists each DM message ref so later edits can sync."""
     dm_info = await asyncio.to_thread(_load_dm_info_sync, event_id)
     event_name = await asyncio.to_thread(_load_event_name_sync, event_id)
-    for _match_id, a_name, b_name in pending_rows:
+    match_states = await asyncio.to_thread(_load_round_states, event_id, round_num)
+    _mark_trophy_match(match_states, round_num)
+    by_match_id = {m["match_id"]: m for m in match_states}
+    for match_id, a_name, b_name in pending_rows:
+        match_state = by_match_id.get(match_id)
         a_key = _normalize_player_name(a_name)
         b_key = _normalize_player_name(b_name)
-        await _send_pairing_dm(bot_client, dm_info, a_key, b_key, round_num, pairings_url, event_name=event_name)
-        await _send_pairing_dm(bot_client, dm_info, b_key, a_key, round_num, pairings_url, event_name=event_name)
+        await _send_pairing_dm(bot_client, dm_info, a_key, b_key, round_num, pairings_url,
+                               event_id=event_id, match_state=match_state, event_name=event_name)
+        await _send_pairing_dm(bot_client, dm_info, b_key, a_key, round_num, pairings_url,
+                               event_id=event_id, match_state=match_state, event_name=event_name)
 
 
 def _load_dm_info_sync(event_id: str):
@@ -236,12 +251,15 @@ def build_pairing_dm_embed(
     pairings_url: str | None,
     event_name: str | None = None,
     updated: bool = False,
+    match_state: dict | None = None,
+    viewer_is_a: bool | None = None,
 ) -> discord.Embed:
     """Single source of truth for round-start + pairings-updated DMs.
 
     `opponent_label` is the pre-formatted opponent string — `<@id>` mention in production,
-    or `**Bold Name**` for testlobby (no real Discord ID). Both call sites prepare this and
-    pass it in, so every other string in the embed lives here.
+    or `**Bold Name**` for testlobby (no real Discord ID). When `match_state` carries a winner,
+    a status line ('✅ You won 2-1' / '❌ You lost 2-0' / '🚫 Not played') is appended; the line's
+    perspective is set by `viewer_is_a` (True if the recipient is player_a in the match).
     """
     short = _short_event_name(event_name)
     suffix = "Updated" if updated else "Started"
@@ -251,14 +269,30 @@ def build_pairing_dm_embed(
     mtga = emojis.get("mtga")
     arena_part = f" {mtga} `{opponent_arena}`" if opponent_arena else ""
     body_lines = [f"Opponent: {opponent_label}{arena_part}"]
+
+    if match_state and match_state.get("winner_name"):
+        winner = match_state["winner_name"]
+        score = match_state.get("score") or ""
+        if winner == SKIPPED_SENTINEL:
+            body_lines.append("🚫 Not played")
+        elif viewer_is_a is not None:
+            winner_is_a = winner.lower() == (match_state.get("a_name") or "").lower()
+            you_won = winner_is_a if viewer_is_a else not winner_is_a
+            body_lines.append(f"✅ You won {score}" if you_won else f"❌ You lost {score}")
+        else:
+            body_lines.append(f"Result: {winner} {score}")
+
     if pairings_url:
         link_prefix = emojis.get("manat") or "↳"
         body_lines.append(f"{link_prefix} [View pairings]({pairings_url})")
 
+    color = discord.Color.yellow() if updated else discord.Color.green()
+    if match_state and match_state.get("winner_name"):
+        color = discord.Color.dark_grey()
     return discord.Embed(
         title=title,
         description="\n".join(body_lines),
-        color=discord.Color.yellow() if updated else discord.Color.green(),
+        color=color,
     )
 
 
@@ -269,6 +303,9 @@ async def _send_pairing_dm(
     opponent_key: str,
     round_num: int,
     pairings_url: str,
+    *,
+    event_id: str | None = None,
+    match_state: dict | None = None,
     event_name: str | None = None,
     updated: bool = False,
 ) -> None:
@@ -281,6 +318,9 @@ async def _send_pairing_dm(
         else f"**{opponent.display_name if opponent else opponent_key}**"
     )
     opp_arena = opponent.arena_name if opponent else None
+    viewer_is_a = None
+    if match_state:
+        viewer_is_a = recipient_key == _normalize_player_name(match_state.get("a_name") or "")
     embed = build_pairing_dm_embed(
         round_num=round_num,
         opponent_label=opp_label,
@@ -288,20 +328,82 @@ async def _send_pairing_dm(
         pairings_url=pairings_url,
         event_name=event_name,
         updated=updated,
+        match_state=match_state,
+        viewer_is_a=viewer_is_a,
     )
+    view = RoundResultsView([match_state]) if match_state else None
+    msg = None
     try:
         user = bot_client.get_user(int(recipient.discord_id)) or await bot_client.fetch_user(int(recipient.discord_id))
-        await user.send(embed=embed)
+        msg = await user.send(embed=embed, view=view) if view else await user.send(embed=embed)
     except discord.Forbidden:
-        log.info("pairing DM blocked for user %s", recipient.discord_id)
+        log.info(f"pairing DM blocked for user {recipient.discord_id}")
+        return
     except discord.HTTPException:
         log.warning("pairing DM failed", exc_info=True)
+        return
+
+    if event_id and match_state and msg is not None:
+        await asyncio.to_thread(
+            _persist_dm_message_sync,
+            event_id=event_id,
+            participant_id=recipient.participant_id,
+            kind=DM_KIND_ROUND,
+            round_num=round_num,
+            match_id=match_state["match_id"],
+            dm_channel_id=str(msg.channel.id),
+            dm_message_id=str(msg.id),
+        )
+
+
+def _persist_dm_message_sync(
+    *,
+    event_id: str,
+    participant_id: str,
+    kind: str,
+    round_num: int | None,
+    match_id: str | None,
+    dm_channel_id: str,
+    dm_message_id: str,
+) -> None:
+    with SessionLocal() as session:
+        upsert_dm_message(
+            session,
+            event_id=event_id,
+            participant_id=participant_id,
+            kind=kind,
+            round_num=round_num,
+            match_id=match_id,
+            dm_channel_id=dm_channel_id,
+            dm_message_id=dm_message_id,
+        )
+        session.commit()
+
+
+async def _resolve_event_for_interaction(
+    interaction: discord.Interaction,
+) -> tuple[str | None, str | None]:
+    """Map interaction (thread or DM) to (event_id, thread_id). DM interactions look up the user's
+    most recent unfinished pod-draft so deck-color/review save works from DM too."""
+    discord_id = str(interaction.user.id)
+    if isinstance(interaction.channel, discord.DMChannel):
+        result = await asyncio.to_thread(_load_active_event_for_user_sync, discord_id)
+        return result if result else (None, None)
+    thread_id = str(interaction.channel_id)
+    event_id = await asyncio.to_thread(_load_event_id_by_thread_sync, thread_id)
+    return event_id, thread_id
+
+
+def _load_active_event_for_user_sync(discord_id: str) -> tuple[str, str] | None:
+    with SessionLocal() as session:
+        return active_event_for_discord_user_in_dm(session, discord_id)
 
 
 async def live_deck_state_lookup(interaction: discord.Interaction) -> tuple[str | None, bool | None]:
-    """Resolve the participant by (thread, user); raise NotInPodError if the user isn't in this pod.
-    Returns (deck_colors, wants_draft_review)."""
-    thread_id = str(interaction.channel_id)
+    """Resolve the participant; raise NotInPodError if the user isn't in any active pod."""
+    event_id, thread_id = await _resolve_event_for_interaction(interaction)
+    if thread_id is None:
+        raise NotInPodError()
     discord_id = str(interaction.user.id)
 
     def _do() -> tuple[bool, str | None, bool | None]:
@@ -315,21 +417,18 @@ async def live_deck_state_lookup(interaction: discord.Interaction) -> tuple[str 
 
 
 async def live_deck_color_submit(interaction: discord.Interaction, color: str) -> None:
-    thread_id = str(interaction.channel_id)
+    event_id, thread_id = await _resolve_event_for_interaction(interaction)
+    if thread_id is None:
+        raise NotInPodError()
     discord_id = str(interaction.user.id)
 
-    def _do() -> tuple[bool, str | None]:
+    def _do() -> bool:
         with SessionLocal() as session:
             ok = set_participant_deck_colors(session, thread_id, discord_id, color)
-            if not ok:
-                return False, None
-            event_id = session.execute(
-                select(PodDraftEvent.id).where(PodDraftEvent.discord_thread_id == thread_id)
-            ).scalar_one_or_none()
             session.commit()
-            return True, event_id
+            return ok
 
-    ok, event_id = await asyncio.to_thread(_do)
+    ok = await asyncio.to_thread(_do)
     if not ok:
         raise NotInPodError()
 
@@ -342,24 +441,22 @@ async def live_deck_color_submit(interaction: discord.Interaction, color: str) -
         # screenshot upload (or grace expiry) is the only thing that creates it.
         if manager.champion_announced:
             await _announce_or_update_champion(manager)
+    asyncio.create_task(_refresh_submit_deck_dm(interaction.client, event_id, discord_id))
 
 
 async def live_review_choice_submit(interaction: discord.Interaction, wants_review: bool) -> None:
-    thread_id = str(interaction.channel_id)
+    event_id, thread_id = await _resolve_event_for_interaction(interaction)
+    if thread_id is None:
+        raise NotInPodError()
     discord_id = str(interaction.user.id)
 
-    def _do() -> tuple[bool, str | None]:
+    def _do() -> bool:
         with SessionLocal() as session:
             ok = set_participant_review_choice(session, thread_id, discord_id, wants_review)
-            if not ok:
-                return False, None
-            event_id = session.execute(
-                select(PodDraftEvent.id).where(PodDraftEvent.discord_thread_id == thread_id)
-            ).scalar_one_or_none()
             session.commit()
-            return True, event_id
+            return ok
 
-    ok, event_id = await asyncio.to_thread(_do)
+    ok = await asyncio.to_thread(_do)
     if not ok:
         raise NotInPodError()
 
@@ -368,10 +465,105 @@ async def live_review_choice_submit(interaction: discord.Interaction, wants_revi
     manager = ACTIVE_POD_MANAGERS.get(event_id)
     if manager is not None:
         await _post_or_update_live_standings(manager)
+    asyncio.create_task(_refresh_submit_deck_dm(interaction.client, event_id, discord_id))
 
 
 def build_live_submit_deck_view() -> SubmitDeckView:
     return SubmitDeckView(live_deck_color_submit, live_deck_state_lookup, live_review_choice_submit)
+
+
+def _build_submit_deck_dm_content(deck_colors: str | None, wants_draft_review: bool | None) -> str:
+    """Body for the Submit Deck DM. Reflects saved state when present so re-opens don't look stale."""
+    if deck_colors:
+        review = "🙋 Yes" if wants_draft_review else "❌ No"
+        return (
+            f"🎨 Deck colors: **{deck_colors}** · Review opt-in: {review}\n"
+            "Click below to update."
+        )
+    return "🎨 **Submit your deck colors** when you're done drafting — click below."
+
+
+async def _send_submit_deck_dms(bot_client, event_id: str) -> None:
+    """At Round 1 start: DM each participant a Submit Deck button. Idempotent — skips participants
+    whose Submit Deck DM is already tracked. DM permission errors are logged and skipped silently."""
+    participants = await asyncio.to_thread(_load_participants_with_discord_sync, event_id)
+    for p in participants:
+        existing = await asyncio.to_thread(_load_submit_deck_dm_sync, p["participant_id"])
+        if existing is not None:
+            continue
+        content = _build_submit_deck_dm_content(p["deck_colors"], p["wants_draft_review"])
+        view = build_live_submit_deck_view()
+        msg = None
+        try:
+            user = bot_client.get_user(int(p["discord_id"])) or await bot_client.fetch_user(int(p["discord_id"]))
+            msg = await user.send(content=content, view=view)
+        except discord.Forbidden:
+            log.info(f"submit-deck DM blocked for {p['discord_id']}")
+            continue
+        except discord.HTTPException:
+            log.warning("submit-deck DM failed", exc_info=True)
+            continue
+        if msg is not None:
+            await asyncio.to_thread(
+                _persist_dm_message_sync,
+                event_id=event_id,
+                participant_id=p["participant_id"],
+                kind=DM_KIND_SUBMIT_DECK,
+                round_num=None,
+                match_id=None,
+                dm_channel_id=str(msg.channel.id),
+                dm_message_id=str(msg.id),
+            )
+
+
+def _load_participants_with_discord_sync(event_id: str) -> list[dict]:
+    with SessionLocal() as session:
+        return participants_with_discord_for_event(session, event_id)
+
+
+def _load_submit_deck_dm_sync(participant_id: str):
+    with SessionLocal() as session:
+        row = submit_deck_dm_for_participant(session, participant_id)
+        if row is not None:
+            session.expunge(row)
+        return row
+
+
+def _load_participant_deck_state_sync(event_id: str, discord_id: str) -> tuple[str | None, bool | None]:
+    with SessionLocal() as session:
+        row = session.execute(
+            select(PodDraftParticipant.deck_colors, PodDraftParticipant.wants_draft_review)
+            .join(DbPlayer, DbPlayer.id == PodDraftParticipant.player_id)
+            .where(
+                PodDraftParticipant.event_id == event_id,
+                DbPlayer.discord_id == discord_id,
+            )
+        ).first()
+    return (row[0], row[1]) if row else (None, None)
+
+
+async def _refresh_submit_deck_dm(bot_client, event_id: str, discord_id: str) -> None:
+    """Edit the user's Submit Deck DM (if tracked) so the body reflects their current saved state."""
+    participant_id = await asyncio.to_thread(_load_participant_id_sync, event_id, discord_id)
+    if participant_id is None:
+        return
+    dm_row = await asyncio.to_thread(_load_submit_deck_dm_sync, participant_id)
+    if dm_row is None:
+        return
+    deck_colors, wants_review = await asyncio.to_thread(_load_participant_deck_state_sync, event_id, discord_id)
+    content = _build_submit_deck_dm_content(deck_colors, wants_review)
+    try:
+        channel = bot_client.get_channel(int(dm_row.dm_channel_id)) \
+            or await bot_client.fetch_channel(int(dm_row.dm_channel_id))
+        msg = await channel.fetch_message(int(dm_row.dm_message_id))
+        await msg.edit(content=content, view=build_live_submit_deck_view())
+    except discord.HTTPException:
+        log.warning(f"refresh_submit_deck_dm: could not edit DM {dm_row.dm_message_id}", exc_info=True)
+
+
+def _load_participant_id_sync(event_id: str, discord_id: str) -> str | None:
+    with SessionLocal() as session:
+        return participant_id_for_discord_user(session, event_id, discord_id)
 
 
 def register_test_result_handler(prefix: str, handler) -> None:
@@ -437,6 +629,8 @@ async def advance_to_round(manager: "PodDraftManager", round_num: int) -> None:
         manager.round_messages[round_num] = posted
         await _pin_round_message(posted, round_num)
         await _dm_round_pairings(manager.bot, manager.event_id, round_num, pending_rows, posted.jump_url)
+        if round_num == 1:
+            asyncio.create_task(_send_submit_deck_dms(manager.bot, manager.event_id))
 
 
 class MatchResultSelect(ui.Select):
@@ -536,17 +730,149 @@ async def _handle_result_submission(interaction: discord.Interaction, value: str
     event_id = result["event_id"]
     match_states = await asyncio.to_thread(_load_round_states, event_id, round_num)
     _mark_trophy_match(match_states, round_num)
-    embed = _round_embed(round_num, match_states)
-    view = RoundResultsView(match_states)
+    match_state = next((m for m in match_states if m["match_id"] == match_id), None)
+
+    is_dm = isinstance(interaction.channel, discord.DMChannel)
     try:
-        await interaction.response.edit_message(content=None, embed=embed, view=view)
+        if is_dm and match_state is not None:
+            dm_info = await asyncio.to_thread(_load_dm_info_sync, event_id)
+            event_name = await asyncio.to_thread(_load_event_name_sync, event_id)
+            pairings_url = _resolve_pairings_url(event_id, round_num)
+            dm_embed, dm_view = _build_dm_match_view(
+                dm_info, str(interaction.user.id), match_state, round_num, pairings_url, event_name,
+            )
+            if dm_embed is not None:
+                await interaction.response.edit_message(embed=dm_embed, view=dm_view)
+        else:
+            await interaction.response.edit_message(
+                content=None,
+                embed=_round_embed(round_num, match_states),
+                view=RoundResultsView(match_states),
+            )
     except Exception:
-        log.warning("could not edit round message", exc_info=True)
+        log.warning("could not edit interaction message", exc_info=True)
+
+    asyncio.create_task(_propagate_match_to_other_surfaces(
+        interaction.client, event_id, match_id, round_num,
+        exclude_channel_id=str(interaction.channel.id) if interaction.channel else None,
+    ))
+
     await _maybe_advance(interaction.client, event_id, round_num)
     if round_num >= TOTAL_ROUNDS:
         asyncio.create_task(_fetch_replays_for_match_players(
             event_id, result["a_name"], result["b_name"],
         ))
+
+
+def _resolve_pairings_url(event_id: str, round_num: int) -> str | None:
+    """Best-effort pairings URL — pulls from the in-memory manager when available, else None."""
+    manager = ACTIVE_POD_MANAGERS.get(event_id)
+    if manager is None:
+        return None
+    msg = manager.round_messages.get(round_num)
+    return msg.jump_url if msg is not None else None
+
+
+def _build_dm_match_view(
+    dm_info: dict,
+    viewer_discord_id: str,
+    match_state: dict,
+    round_num: int,
+    pairings_url: str | None,
+    event_name: str | None,
+) -> tuple[discord.Embed | None, "RoundResultsView | None"]:
+    """Render the per-recipient DM body + Select view for one match. Returns (None, None) when the
+    viewer isn't a participant we can resolve from dm_info."""
+    recipient_key = next(
+        (k for k, v in dm_info.items() if v.discord_id == viewer_discord_id),
+        None,
+    )
+    if recipient_key is None:
+        return None, None
+    recipient = dm_info[recipient_key]
+    viewer_is_a = recipient_key == _normalize_player_name(match_state.get("a_name") or "")
+    opp_key = _normalize_player_name(
+        match_state["b_name"] if viewer_is_a else match_state["a_name"]
+    )
+    opponent = dm_info.get(opp_key)
+    opp_label = (
+        f"<@{opponent.discord_id}>" if opponent and opponent.discord_id
+        else f"**{opponent.display_name if opponent else opp_key}**"
+    )
+    embed = build_pairing_dm_embed(
+        round_num=round_num,
+        opponent_label=opp_label,
+        opponent_arena=opponent.arena_name if opponent else None,
+        pairings_url=pairings_url,
+        event_name=event_name,
+        match_state=match_state,
+        viewer_is_a=viewer_is_a,
+    )
+    return embed, RoundResultsView([match_state])
+
+
+async def _propagate_match_to_other_surfaces(
+    bot_client,
+    event_id: str,
+    match_id: str,
+    round_num: int,
+    exclude_channel_id: str | None,
+) -> None:
+    """Edit every other surface tracking this match (thread + the other player's DM) so they all
+    reflect the latest result. The interaction's own message is already edited inline."""
+    match_states = await asyncio.to_thread(_load_round_states, event_id, round_num)
+    _mark_trophy_match(match_states, round_num)
+    match_state = next((m for m in match_states if m["match_id"] == match_id), None)
+    if match_state is None:
+        return
+    event_name = await asyncio.to_thread(_load_event_name_sync, event_id)
+    dm_info = await asyncio.to_thread(_load_dm_info_sync, event_id)
+    pairings_url = _resolve_pairings_url(event_id, round_num)
+
+    dm_rows = await asyncio.to_thread(_dm_rows_for_match_sync, match_id)
+    for row in dm_rows:
+        if exclude_channel_id and row.dm_channel_id == exclude_channel_id:
+            continue
+        viewer_discord_id = next(
+            (v.discord_id for v in dm_info.values() if v.participant_id == row.participant_id),
+            None,
+        )
+        if viewer_discord_id is None:
+            continue
+        dm_embed, dm_view = _build_dm_match_view(
+            dm_info, viewer_discord_id, match_state, round_num, pairings_url, event_name,
+        )
+        if dm_embed is None:
+            continue
+        try:
+            channel = bot_client.get_channel(int(row.dm_channel_id)) \
+                or await bot_client.fetch_channel(int(row.dm_channel_id))
+            msg = await channel.fetch_message(int(row.dm_message_id))
+            await msg.edit(embed=dm_embed, view=dm_view)
+        except discord.HTTPException:
+            log.warning(f"propagate: could not edit DM {row.dm_message_id}", exc_info=True)
+
+    manager = ACTIVE_POD_MANAGERS.get(event_id)
+    if manager is None:
+        return
+    thread_msg = manager.round_messages.get(round_num)
+    if thread_msg is None or str(thread_msg.channel.id) == exclude_channel_id:
+        return
+    try:
+        await thread_msg.edit(
+            content=None,
+            embed=_round_embed(round_num, match_states),
+            view=RoundResultsView(match_states),
+        )
+    except discord.HTTPException:
+        log.warning(f"propagate: could not edit thread message {thread_msg.id}", exc_info=True)
+
+
+def _dm_rows_for_match_sync(match_id: str):
+    with SessionLocal() as session:
+        rows = dm_messages_for_match(session, match_id)
+        session.expunge_all()
+        return rows
 
 
 def _load_round_states(event_id: str, round_num: int) -> list[dict]:
@@ -651,8 +977,7 @@ async def _maybe_advance(bot_client, event_id: str, round_num: int) -> None:
         return
 
     if manager is None:
-        log.warning("round %d complete for %s but no active manager — re-run !testbracket",
-                    round_num, event_id)
+        log.warning(f"round {round_num} complete for {event_id} but no active manager")
         return
 
     is_edit_during_grace = (manager.grace_round == round_num and manager.grace_task is not None)
@@ -803,35 +1128,6 @@ def register_persistent_views(bot) -> None:
     """Register persistent views so component clicks dispatch after restart."""
     bot.add_view(RoundResultsView())
     bot.add_view(build_live_submit_deck_view())
-
-
-class HollowManager:
-    """Manager-shaped stand-in for !testbracket — no socket, just enough state for the bracket flow."""
-
-    def __init__(self, bot, event_id: str, thread_id: int, roster: list[str]) -> None:
-        self.bot = bot
-        self.event_id = event_id
-        self.thread_id = thread_id
-        self.tournament_roster = roster
-        self.tournament_players: list = []
-        self.current_round = 0
-        self.finalized = False
-        self.standings_message = None
-        self.round_messages: dict[int, "discord.Message"] = {}
-        self.grace_task = None
-        self.grace_round: int | None = None
-        self.champion_announced = False
-        self.champion_announcement_message = None
-
-    async def _fetch_thread(self):
-        try:
-            return await self.bot.fetch_channel(self.thread_id)
-        except Exception:
-            log.warning("could not fetch thread %s", self.thread_id, exc_info=True)
-            return None
-
-    async def disconnect_safely(self) -> None:
-        ACTIVE_POD_MANAGERS.pop(self.event_id, None)
 
 
 async def reset_event_matches(event_id: str) -> int:

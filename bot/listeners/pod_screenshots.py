@@ -14,7 +14,11 @@ from discord.ext import commands
 
 from bot.database import SessionLocal
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
-from bot.services.pod_drafts import capture_first_deck_screenshot, is_pod_thread_champion
+from bot.services.pod_drafts import (
+    active_event_for_discord_user_in_dm,
+    capture_first_deck_screenshot,
+    is_pod_thread_champion,
+)
 from bot.services.pod_tournament import _announce_or_update_champion
 
 
@@ -29,10 +33,15 @@ class PodScreenshotListener(commands.Cog):
     async def on_message(self, message: discord.Message) -> None:
         if message.author.bot:
             return
-        if not isinstance(message.channel, discord.Thread):
-            return
         image_url = _first_image_url(message)
         if image_url is None:
+            return
+
+        if isinstance(message.channel, discord.DMChannel):
+            await self._redirect_dm_image(message)
+            return
+
+        if not isinstance(message.channel, discord.Thread):
             return
 
         thread_id = str(message.channel.id)
@@ -55,6 +64,26 @@ class PodScreenshotListener(commands.Cog):
             except discord.HTTPException:
                 log.info("could not add 🏆 reaction", exc_info=True)
 
+    async def _redirect_dm_image(self, message: discord.Message) -> None:
+        """User posted an image in DM — point them at the pod thread so the screenshot is publicly
+        viewable. DM CDN URLs carry signed expiries and aren't reliably embeddable on the frontend."""
+        discord_id = str(message.author.id)
+        target = await asyncio.to_thread(_resolve_active_pod_thread_sync, discord_id)
+        if target is None:
+            return
+        _event_id, thread_id = target
+        try:
+            thread = self.bot.get_channel(int(thread_id)) or await self.bot.fetch_channel(int(thread_id))
+            link = thread.jump_url
+        except discord.HTTPException:
+            return
+        try:
+            await message.reply(
+                f"📸 Post your deck screenshot in the pod-draft thread so everyone can see it: {link}"
+            )
+        except discord.HTTPException:
+            log.warning("could not reply to DM image", exc_info=True)
+
 
 def _first_image_url(message: discord.Message) -> str | None:
     for att in message.attachments:
@@ -75,6 +104,11 @@ def _capture_sync(thread_id: str, discord_id: str, image_url: str, caption: str 
 def _is_thread_champion_sync(thread_id: str, discord_id: str) -> bool:
     with SessionLocal() as session:
         return is_pod_thread_champion(session, thread_id, discord_id)
+
+
+def _resolve_active_pod_thread_sync(discord_id: str) -> tuple[str, str] | None:
+    with SessionLocal() as session:
+        return active_event_for_discord_user_in_dm(session, discord_id)
 
 
 async def setup(bot: commands.Bot) -> None:

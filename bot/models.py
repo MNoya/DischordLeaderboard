@@ -303,6 +303,26 @@ class PodDraftMatch(Base):
     event = relationship("PodDraftEvent", back_populates="matches")
 
 
+class PodDraftDmMessage(Base):
+    __tablename__ = "pod_draft_dm_messages"
+
+    id             = Column(String, primary_key=True, default=lambda: str(uuid4()))
+    event_id       = Column(String, ForeignKey("pod_draft_events.id", ondelete="CASCADE"), nullable=False)
+    participant_id = Column(String, ForeignKey("pod_draft_participants.id", ondelete="CASCADE"), nullable=False)
+    kind           = Column(String, nullable=False)
+    round_num      = Column(Integer, nullable=True)
+    match_id       = Column(String, ForeignKey("pod_draft_matches.id", ondelete="CASCADE"), nullable=True)
+    dm_channel_id  = Column(String, nullable=False)
+    dm_message_id  = Column(String, nullable=False)
+    created_at     = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("participant_id", "kind", "round_num", name="uq_pod_dm_msg_participant_kind_round"),
+        Index("ix_pod_dm_msg_match_kind", "match_id", "kind"),
+        Index("ix_pod_dm_msg_event", "event_id"),
+    )
+
+
 class PodDraftReplay(Base):
     __tablename__ = "pod_draft_replays"
 
