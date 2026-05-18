@@ -977,7 +977,7 @@ def build_champion_announcement_view(
     actions.add_item(ui.Button(
         label="Replays",
         style=discord.ButtonStyle.link,
-        url=f"{settings.public_site_url.rstrip('/')}/pod/{slugify(event_name)}",
+        url=f"{settings.public_site_url.rstrip('/')}/pods/{slugify(event_name)}",
         emoji="🎬",
     ))
     view.add_item(actions)
