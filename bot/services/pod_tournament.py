@@ -1249,6 +1249,18 @@ async def _announce_or_update_champion(manager) -> None:
     if not manager.champion_announced and not rank1_screenshot_in and not grace_expired:
         return
 
+    if not manager.champion_announced:
+        mpt_task = getattr(manager, "mpt_task", None)
+        if mpt_task is not None and not mpt_task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(mpt_task), timeout=15)
+            except asyncio.TimeoutError:
+                log.warning(f"MPT submission still running after 15s for {event_id}; posting announcement anyway")
+            except Exception:
+                log.warning(f"MPT submission failed for {event_id}", exc_info=True)
+            deck_data = await asyncio.to_thread(_load_event_deck_data_sync, event_id)
+            player_colors = _colors_only(deck_data)
+
     pending_count = sum(1 for m in match_states if not m.get("winner_name"))
     thread_id = int(manager.thread_id) if isinstance(manager.thread_id, (int, str)) else None
     target = await _resolve_announcement_target(manager) if manager.champion_announcement_message is None else None

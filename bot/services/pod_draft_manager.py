@@ -75,6 +75,7 @@ class PodDraftManager:
         self.last_decliner_name: str | None = None
         self.last_cancel_reason: str | None = None
         self.draft_logs: dict[str, dict] = {}
+        self.mpt_task: asyncio.Task | None = None
         self.current_round = 0
         self.finalized = False
         self.tournament_roster: list[str] = []  # draftmancer userNames, set on endDraft
@@ -353,6 +354,11 @@ class PodDraftManager:
         self.draft_complete = True
         await self._mark_socket_status("draft_done")
         await self.refresh_lobby_now()
+        payload = next(iter(self.draft_logs.values()), None)
+        if payload is not None:
+            self.mpt_task = asyncio.create_task(self._submit_logs_to_magicprotools(payload))
+        else:
+            log.warning(f"endDraft for {self.session_id} but no draftLog payload cached; skipping MPT submit")
         # Snapshot roster and hand off to the Python-Swiss bracket flow
         if settings.pod_draft_test_roster.strip():
             self.tournament_roster = [n.strip() for n in settings.pod_draft_test_roster.split(",") if n.strip()]
@@ -376,7 +382,6 @@ class PodDraftManager:
                     break
         log.info(f"draftLog stored for {self.session_id} ({len(self.draft_logs)} total)")
         await asyncio.to_thread(self._persist_draft_log_gz, log_payload)
-        asyncio.create_task(self._submit_logs_to_magicprotools(log_payload))
 
     async def _submit_logs_to_magicprotools(self, log_payload: dict) -> None:
         """For each Draftmancer seat in the log, submit to MagicProTools and stash the URL on the
