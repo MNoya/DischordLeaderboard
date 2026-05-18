@@ -90,6 +90,7 @@ class PodDraftManager:
         self.sio.on("connect", self._on_connect)
         self.sio.on("disconnect", self._on_disconnect)
         self.sio.on("sessionUsers", self._on_session_users)
+        self.sio.on("updateUser", self._on_update_user)
         self.sio.on("setReady", self._on_set_ready)
         self.sio.on("endDraft", self._on_end_draft)
         self.sio.on("draftLog", self._on_draft_log)
@@ -113,12 +114,10 @@ class PodDraftManager:
                 return True
             except (socketio.exceptions.ConnectionError, OSError) as e:
                 if attempt >= _BACKOFF_MAX_RETRIES:
-                    log.error("draftmancer connect gave up after %d attempts for %s: %s",
-                              attempt, self.session_id, e)
+                    log.error(f"draftmancer connect gave up after {attempt} attempts for {self.session_id}: {e}")
                     return False
                 wait = min(delay + random.uniform(0, delay * 0.25), _BACKOFF_MAX_S)
-                log.warning("draftmancer connect attempt %d failed: %s; retrying in %.1fs",
-                            attempt, e, wait)
+                log.warning(f"draftmancer connect attempt {attempt} failed: {e}; retrying in {wait:.1f}s")
                 await asyncio.sleep(wait)
                 delay = min(delay * 2, _BACKOFF_MAX_S)
         return False
@@ -129,15 +128,15 @@ class PodDraftManager:
             if self.sio.connected:
                 await self.sio.disconnect()
         except Exception:
-            log.warning("clean disconnect failed for %s", self.session_id, exc_info=True)
+            log.warning(f"clean disconnect failed for {self.session_id}", exc_info=True)
         ACTIVE_POD_MANAGERS.pop(self.event_id, None)
 
     async def _on_connect(self) -> None:
-        log.info("draftmancer ws connected for %s", self.session_id)
+        log.info(f"draftmancer ws connected for {self.session_id}")
         await self._mark_socket_status("connected")
 
     async def _on_disconnect(self) -> None:
-        log.warning("draftmancer ws disconnected for %s (closed=%s)", self.session_id, self._closed)
+        log.warning(f"draftmancer ws disconnected for {self.session_id} (closed={self._closed})")
         # Reconnect-on-disconnect disabled during debugging so Draftmancer kicks don't loop;
         # disconnect_safely() is the explicit teardown path
         self._closed = True
@@ -146,7 +145,7 @@ class PodDraftManager:
     async def _on_session_users(self, users) -> None:
         self.session_users = list(users) if isinstance(users, list) else []
         names = [u.get("userName") for u in self.session_users]
-        log.info("draftmancer sessionUsers for %s: %s", self.session_id, names)
+        log.info(f"draftmancer sessionUsers for {self.session_id}: {names}")
         # Any session change clears the notready banner; lobby reverts to its normal state
         self.last_decliner_name = None
         self.last_cancel_reason = None
@@ -154,7 +153,7 @@ class PodDraftManager:
             for u in self.session_users:
                 if u.get("userName") == _BOT_USER_NAME:
                     self.bot_user_id = u.get("userID")
-                    log.info("found bot userID=%s for %s", self.bot_user_id, self.session_id)
+                    log.info(f"found bot userID={self.bot_user_id} for {self.session_id}")
                     if not self.owner_claimed:
                         asyncio.create_task(self._claim_ownership_and_apply_settings())
                     break
@@ -169,6 +168,21 @@ class PodDraftManager:
             if current != self.expected_user_ids:
                 asyncio.create_task(self._invalidate_ready_check("Player list changed"))
 
+    async def _on_update_user(self, payload) -> None:
+        if not isinstance(payload, dict):
+            return
+        user_id = payload.get("userID")
+        updates = payload.get("updatedProperties") or {}
+        if not user_id or not updates:
+            return
+        for u in self.session_users:
+            if u.get("userID") == user_id:
+                u.update(updates)
+                break
+        if "userName" in updates:
+            log.info(f"draftmancer updateUser rename for {self.session_id}: {user_id} → {updates['userName']}")
+            await self.refresh_lobby_now()
+
     async def _claim_ownership_and_apply_settings(self) -> None:
         if self.bot_user_id is None or self.owner_claimed:
             return
@@ -177,9 +191,9 @@ class PodDraftManager:
             await self.sio.emit("setSessionOwner", self.bot_user_id)
             await asyncio.sleep(0.3)
             await self._emit_session_settings()
-            log.info("session ownership + settings applied for %s", self.session_id)
+            log.info(f"session ownership + settings applied for {self.session_id}")
         except Exception:
-            log.exception("ownership/settings flow failed for %s", self.session_id)
+            log.exception(f"ownership/settings flow failed for {self.session_id}")
 
     async def _emit_session_settings(self) -> None:
         await self.sio.emit("setRestriction", [self.set_code.lower()])
@@ -190,8 +204,7 @@ class PodDraftManager:
         await self.sio.emit("setColorBalance", False)
         await self.sio.emit("setPersonalLogs", True)
         await self.sio.emit("setDraftLogRecipients", "delayed")
-        log.info("draftmancer settings emitted for %s (set=%s bots=%d)",
-                 self.session_id, self.set_code, settings.pod_draft_bots)
+        log.info(f"draftmancer settings emitted for {self.session_id} (set={self.set_code} bots={settings.pod_draft_bots})")
 
     async def _mark_socket_status(self, status: str) -> None:
         with SessionLocal() as session:
@@ -218,7 +231,7 @@ class PodDraftManager:
             await self.sio.emit("readyCheck")
         except Exception:
             self.ready_check_active = False
-            log.exception("readyCheck emit failed for %s", self.session_id)
+            log.exception(f"readyCheck emit failed for {self.session_id}")
             return "Could not start ready check — see logs."
         self._ready_timeout_task = asyncio.create_task(self._ready_timeout())
         await self.refresh_lobby_now()
@@ -312,12 +325,12 @@ class PodDraftManager:
             try:
                 self.lobby_status_message = await thread.send(embed=embed, view=view)
             except Exception:
-                log.warning("could not post lobby status for %s", self.session_id, exc_info=True)
+                log.warning(f"could not post lobby status for {self.session_id}", exc_info=True)
         else:
             try:
                 await self.lobby_status_message.edit(embed=embed, view=view)
             except Exception:
-                log.warning("could not edit lobby status for %s", self.session_id, exc_info=True)
+                log.warning(f"could not edit lobby status for {self.session_id}", exc_info=True)
 
     def _compute_state(self, classified: list[tuple[str, str | None]]) -> str:
         if self.draft_complete:
@@ -335,7 +348,7 @@ class PodDraftManager:
         return "linked"
 
     async def _on_end_draft(self, *_) -> None:
-        log.info("endDraft received for %s", self.session_id)
+        log.info(f"endDraft received for {self.session_id}")
         self.drafting = False
         self.draft_complete = True
         await self._mark_socket_status("draft_done")
@@ -343,7 +356,7 @@ class PodDraftManager:
         # Snapshot roster and hand off to the Python-Swiss bracket flow
         if settings.pod_draft_test_roster.strip():
             self.tournament_roster = [n.strip() for n in settings.pod_draft_test_roster.split(",") if n.strip()]
-            log.info("using POD_DRAFT_TEST_ROSTER for %s: %s", self.session_id, self.tournament_roster)
+            log.info(f"using POD_DRAFT_TEST_ROSTER for {self.session_id}: {self.tournament_roster}")
         else:
             self.tournament_roster = [
                 u.get("userName") for u in self.session_users
@@ -361,7 +374,7 @@ class PodDraftManager:
                 if name:
                     self.draft_logs[name] = log_payload
                     break
-        log.info("draftLog stored for %s (%d total)", self.session_id, len(self.draft_logs))
+        log.info(f"draftLog stored for {self.session_id} ({len(self.draft_logs)} total)")
         await asyncio.to_thread(self._persist_draft_log_gz, log_payload)
         asyncio.create_task(self._submit_logs_to_magicprotools(log_payload))
 
@@ -369,6 +382,7 @@ class PodDraftManager:
         """For each Draftmancer seat in the log, submit to MagicProTools and stash the URL on the
         matching pod_draft_participants row. Fire-and-forget; per-seat failures are silent."""
         if settings.mpt_api_key is None:
+            log.warning(f"MPT_API_KEY not configured; no draft logs uploaded for {self.session_id}")
             return
         users = log_payload.get("users") or {}
         if not isinstance(users, dict):
@@ -399,20 +413,20 @@ class PodDraftManager:
                     )
                 ).scalars().all()
                 if not rows:
-                    log.info("magicprotools: no participant row matching %s in %s", draftmancer_name, self.event_id)
+                    log.info(f"magicprotools: no participant row matching {draftmancer_name} in {self.event_id}")
                     return
                 for row in rows:
                     row.draft_log_url = url
                 session.commit()
         except Exception:
-            log.warning("magicprotools: store url failed for %s", draftmancer_name, exc_info=True)
+            log.warning(f"magicprotools: store url failed for {draftmancer_name}", exc_info=True)
 
     def _persist_draft_log_gz(self, log_payload: dict) -> None:
         try:
             compact = build_compact(log_payload)
             blob = gzip.compress(json.dumps(compact, separators=(",", ":")).encode("utf-8"))
         except Exception:
-            log.warning("draft_log_gz compact/gzip failed for %s", self.session_id, exc_info=True)
+            log.warning(f"draft_log_gz compact/gzip failed for {self.session_id}", exc_info=True)
             return
         try:
             with SessionLocal() as session:
@@ -420,19 +434,19 @@ class PodDraftManager:
                     select(PodDraftEvent).where(PodDraftEvent.id == self.event_id)
                 ).scalar_one_or_none()
                 if event is None:
-                    log.warning("draft_log_gz: event %s not found, skipping persist", self.event_id)
+                    log.warning(f"draft_log_gz: event {self.event_id} not found, skipping persist")
                     return
                 event.draft_log_gz = blob
                 session.commit()
-                log.info("draft_log_gz persisted for %s (%d bytes)", self.event_id, len(blob))
+                log.info(f"draft_log_gz persisted for {self.event_id} ({len(blob)} bytes)")
         except Exception:
-            log.warning("draft_log_gz persist failed for %s", self.event_id, exc_info=True)
+            log.warning(f"draft_log_gz persist failed for {self.event_id}", exc_info=True)
 
     async def _fetch_thread(self):
         try:
             return await self.bot.fetch_channel(self.thread_id)
         except Exception:
-            log.warning("could not fetch thread %s", self.thread_id, exc_info=True)
+            log.warning(f"could not fetch thread {self.thread_id}", exc_info=True)
             return None
 
     async def _on_set_ready(self, user_id, ready_state) -> None:
@@ -464,7 +478,7 @@ class PodDraftManager:
 
     async def _start_draft(self) -> None:
         result = await self._emit_with_ack("startDraft")
-        log.info("startDraft ack for %s: %r", self.session_id, result)
+        log.info(f"startDraft ack for {self.session_id}: {result!r}")
         error_text = _ack_error_text(result)
         if error_text is not None:
             thread = await self._fetch_thread()
@@ -511,27 +525,27 @@ class PodDraftManager:
             await self.sio.emit(event, *args, callback=_cb)
             return await asyncio.wait_for(future, timeout=timeout_s)
         except asyncio.TimeoutError:
-            log.warning("%s ack timeout for %s", event, self.session_id)
+            log.warning(f"{event} ack timeout for {self.session_id}")
             return None
         except Exception:
-            log.exception("%s emit failed for %s", event, self.session_id)
+            log.exception(f"{event} emit failed for {self.session_id}")
             return None
 
     async def share_draft_log(self) -> bool:
         """Owner-only emit that flips the session's delayed/personal logs to fully public."""
         if not self.sio.connected:
-            log.warning("share_draft_log skipped for %s — socket not connected", self.session_id)
+            log.warning(f"share_draft_log skipped for {self.session_id} — socket not connected")
             return False
         if not self.draft_logs:
-            log.warning("share_draft_log skipped for %s — no draftLog payload stored", self.session_id)
+            log.warning(f"share_draft_log skipped for {self.session_id} — no draftLog payload stored")
             return False
         payload = next(iter(self.draft_logs.values()))
         try:
             await self.sio.emit("shareDraftLog", payload)
-            log.info("shared draftLog for %s", self.session_id)
+            log.info(f"shared draftLog for {self.session_id}")
             return True
         except Exception:
-            log.exception("shareDraftLog emit failed for %s", self.session_id)
+            log.exception(f"shareDraftLog emit failed for {self.session_id}")
             return False
 
     async def takeover(self, target_user_id: str) -> tuple[bool, str]:
@@ -553,9 +567,9 @@ class PodDraftManager:
             await asyncio.sleep(1.0)
             await self.sio.emit("setSessionOwner", target_user_id)
             await asyncio.sleep(1.0)
-            log.info("takeover transferred ownership of %s to %s", self.session_id, target_user_id)
+            log.info(f"takeover transferred ownership of {self.session_id} to {target_user_id}")
         except Exception:
-            log.exception("takeover transfer failed for %s", self.session_id)
+            log.exception(f"takeover transfer failed for {self.session_id}")
             return False, "Ownership transfer failed; check logs."
         await self.disconnect_safely()
         return True, ""
@@ -613,7 +627,7 @@ async def start_manager(
 ) -> PodDraftManager | None:
     existing = ACTIVE_POD_MANAGERS.get(event_id)
     if existing is not None:
-        log.info("manager already active for event %s", event_id)
+        log.info(f"manager already active for event {event_id}")
         return existing
     manager = PodDraftManager(
         bot, event_id, session_id, thread_id, set_code, expected_attendee_count,
