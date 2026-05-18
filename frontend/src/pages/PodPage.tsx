@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { AppHeader } from "../components/AppHeader";
@@ -43,7 +43,32 @@ export function PodPage() {
     ? null
     : event.participants.find((p) => p.seatIndex === selectedSeat) ?? null;
 
+  const shellRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+
   const [displayParticipant, setDisplayParticipant] = useState<PodParticipant | null>(selectedParticipant);
+
+  useLayoutEffect(() => {
+    const shell = shellRef.current;
+    const content = contentRef.current;
+    if (!shell || !content) return;
+    let restoreTimeout: number | null = null;
+    const apply = () => {
+      shell.style.overflowY = "hidden";
+      shell.style.height = `${content.offsetHeight + 2}px`;
+      if (restoreTimeout !== null) clearTimeout(restoreTimeout);
+      restoreTimeout = window.setTimeout(() => {
+        shell.style.overflowY = "";
+      }, 320);
+    };
+    apply();
+    const obs = new ResizeObserver(apply);
+    obs.observe(content);
+    return () => {
+      obs.disconnect();
+      if (restoreTimeout !== null) clearTimeout(restoreTimeout);
+    };
+  }, []);
   useEffect(() => {
     if (selectedParticipant) {
       setDisplayParticipant(selectedParticipant);
@@ -151,9 +176,10 @@ export function PodPage() {
             }}
           >
             <div
+              ref={shellRef}
               className="pod-panel-shell bg-surface border border-border max-h-full overflow-y-auto overflow-x-hidden themed-scrollbar"
             >
-              <div style={{ minWidth: 360 }}>
+              <div ref={contentRef} style={{ minWidth: 360 }}>
                 {displayParticipant && (
                   <PlayerSeatPanel
                     key={displayParticipant.playerId}

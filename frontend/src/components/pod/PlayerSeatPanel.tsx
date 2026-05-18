@@ -4,7 +4,6 @@ import { Clock, ExternalLink } from "lucide-react";
 import { TbCards } from "react-icons/tb";
 import { AAvatar } from "../Brand";
 import { Pips } from "../ManaPips";
-import { RankBadge } from "../RankBadge";
 import { Record } from "../Record";
 import { cn } from "../../lib/utils";
 import { useIsMobile } from "../../lib/use-is-mobile";
@@ -66,66 +65,126 @@ function SeatHeader({
   participant: PodParticipant;
   onViewDeck: () => void;
 }) {
+  const isMobile = useIsMobile();
   const isChampion = participant.placement === 1;
   const wins = Number(participant.record.split("-")[0]);
   const losses = Number(participant.record.split("-")[1]);
   const hasDeck = participant.deckScreenshotUrl !== null;
-  return (
-    <header className="flex flex-col gap-4 px-4 md:px-5 xl:px-8 py-5 border-b border-border">
-      <div className="flex items-center gap-4 min-w-0">
-        <AAvatar
-          displayName={participant.displayName}
-          avatarUrl={null}
-          size={60}
-          green={isChampion}
-        />
-        <div className="min-w-0 flex-1 flex items-start justify-between gap-3">
-          <div className="min-w-0 flex flex-col gap-2">
-            <Link
-              to={`/player/${participant.slug}`}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="font-display leading-none no-underline text-text hover:text-green transition-colors truncate"
-              style={{ fontSize: 32, letterSpacing: "0.04em" }}
-            >
-              {participant.displayName}
-            </Link>
-            <div className="flex items-center gap-4 flex-wrap text-muted" style={{ fontSize: 15 }}>
-              <span className="inline-flex items-center gap-2">
-                <Pips colors={participant.deckColors} size={14} />
-                <span className="font-display tracking-[0.18em] uppercase">
-                  {isChampion ? "Champion" : `${ordinalLabel(participant.placement)} place`}
-                </span>
-              </span>
-              <span
-                className="font-display tabular-nums whitespace-nowrap"
-                style={{ fontSize: 17, letterSpacing: "0.1em" }}
-              >
-                <Record wins={wins} losses={losses} mono separatorMargin={2} />
-              </span>
+
+  const nameLink = (
+    <Link
+      to={`/player/${participant.slug}`}
+      target="_blank"
+      rel="noreferrer noopener"
+      className="font-display leading-none no-underline text-text hover:text-green transition-colors truncate"
+      style={{ fontSize: 32, letterSpacing: "0.04em" }}
+    >
+      {participant.displayName}
+    </Link>
+  );
+
+  const metaRow = (
+    <div className="flex items-center gap-4 flex-wrap text-muted" style={{ fontSize: 15 }}>
+      <span className="inline-flex items-center gap-2">
+        <Pips colors={participant.deckColors} size={14} />
+        <span className="font-display tracking-[0.18em] uppercase">
+          {isChampion ? "Champion" : `${ordinalLabel(participant.placement)} place`}
+        </span>
+      </span>
+      <span
+        className="font-display tabular-nums whitespace-nowrap"
+        style={{ fontSize: 17, letterSpacing: "0.1em" }}
+      >
+        <Record wins={wins} losses={losses} mono separatorMargin={2} />
+      </span>
+    </div>
+  );
+
+  if (isMobile) {
+    return (
+      <header className="flex flex-col gap-4 px-4 md:px-5 xl:px-8 py-7 border-b border-border">
+        <div className="flex items-center gap-4 min-w-0">
+          <AAvatar displayName={participant.displayName} avatarUrl={null} size={60} green={isChampion} />
+          <div className="min-w-0 flex-1 flex items-start justify-between gap-3">
+            <div className="min-w-0 flex flex-col gap-2">
+              {nameLink}
+              {metaRow}
             </div>
           </div>
-          <RankBadge rank={participant.placement} size="md" />
         </div>
+        <div className="flex items-center gap-2">
+          {hasDeck ? (
+            <button
+              type="button"
+              onClick={onViewDeck}
+              className="inline-flex items-center justify-center gap-2 bg-bg border border-border hover:border-green/60 hover:bg-green/10 hover:text-green text-text font-display tracking-[0.14em] px-4 cursor-pointer transition-colors flex-1"
+              style={{ fontSize: 14, height: 38 }}
+            >
+              <span>VIEW DECK</span>
+              <TbCards size={16} aria-hidden="true" />
+            </button>
+          ) : (
+            <span
+              className="inline-flex items-center justify-center gap-2 bg-bg border border-border text-dim font-display tracking-[0.14em] px-4 cursor-not-allowed flex-1"
+              style={{ fontSize: 14, height: 38 }}
+              title="No deck screenshot available"
+            >
+              <span>DECK MISSING</span>
+              <TbCards size={16} aria-hidden="true" />
+            </span>
+          )}
+          {participant.draftLogUrl ? (
+            <a
+              href={participant.draftLogUrl}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="inline-flex items-center justify-center gap-2 bg-bg border border-border hover:border-green/60 hover:bg-green/10 hover:text-green text-text font-display tracking-[0.14em] px-4 no-underline transition-colors flex-1"
+              style={{ fontSize: 14, height: 38 }}
+            >
+              <span>VIEW DRAFT LOG</span>
+              <ExternalLink size={15} aria-hidden="true" />
+            </a>
+          ) : (
+            <span
+              className="inline-flex items-center justify-center gap-2 bg-bg border border-border text-dim font-display tracking-[0.14em] px-4 cursor-not-allowed flex-1"
+              style={{ fontSize: 14, height: 38 }}
+              title="No draft log available"
+            >
+              <span>NO DRAFT LOG</span>
+              <ExternalLink size={15} aria-hidden="true" />
+            </span>
+          )}
+        </div>
+      </header>
+    );
+  }
+
+  return (
+    <header className="flex items-center gap-4 px-4 md:px-5 xl:px-8 py-7 border-b border-border">
+      <AAvatar displayName={participant.displayName} avatarUrl={null} size={60} green={isChampion} />
+      <div className="min-w-0 flex-1 flex flex-col gap-2">
+        {nameLink}
+        {metaRow}
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-col gap-2 shrink-0">
         {hasDeck ? (
           <button
             type="button"
             onClick={onViewDeck}
-            className="inline-flex items-center justify-center gap-2 bg-bg border border-border2 hover:border-green hover:text-green text-text font-display tracking-[0.14em] px-4 cursor-pointer transition-colors flex-1"
-            style={{ fontSize: 14, height: 38 }}
+            className="inline-flex items-center justify-center gap-2 bg-bg border border-border hover:border-green/60 hover:bg-green/10 hover:text-green text-text font-display tracking-[0.14em] px-3 cursor-pointer transition-colors"
+            style={{ fontSize: 14, height: 34 }}
           >
             <span>VIEW DECK</span>
-            <TbCards size={16} aria-hidden="true" />
+            <TbCards size={17} aria-hidden="true" />
           </button>
         ) : (
           <span
-            className="inline-flex items-center justify-center gap-2 bg-bg border border-border text-dim font-display tracking-[0.14em] px-4 cursor-not-allowed flex-1"
-            style={{ fontSize: 14, height: 38 }}
+            className="inline-flex items-center justify-center gap-2 bg-bg border border-border text-dim font-display tracking-[0.14em] px-3 cursor-not-allowed"
+            style={{ fontSize: 14, height: 34 }}
             title="No deck screenshot available"
           >
             <span>DECK MISSING</span>
+            <TbCards size={17} aria-hidden="true" />
           </span>
         )}
         {participant.draftLogUrl ? (
@@ -133,19 +192,20 @@ function SeatHeader({
             href={participant.draftLogUrl}
             target="_blank"
             rel="noreferrer noopener"
-            className="inline-flex items-center justify-center gap-2 bg-bg border border-border2 hover:border-green hover:text-green text-text font-display tracking-[0.14em] px-4 no-underline transition-colors flex-1"
-            style={{ fontSize: 14, height: 38 }}
+            className="inline-flex items-center justify-center gap-2 bg-bg border border-border hover:border-green/60 hover:bg-green/10 hover:text-green text-text font-display tracking-[0.14em] px-3 no-underline transition-colors"
+            style={{ fontSize: 14, height: 34 }}
           >
             <span>VIEW DRAFT LOG</span>
-            <ExternalLink size={15} aria-hidden="true" />
+            <ExternalLink size={17} aria-hidden="true" />
           </a>
         ) : (
           <span
-            className="inline-flex items-center justify-center gap-2 bg-bg border border-border text-dim font-display tracking-[0.14em] px-4 cursor-not-allowed flex-1"
-            style={{ fontSize: 14, height: 38 }}
+            className="inline-flex items-center justify-center gap-2 bg-bg border border-border text-dim font-display tracking-[0.14em] px-3 cursor-not-allowed"
+            style={{ fontSize: 14, height: 34 }}
             title="No draft log available"
           >
             <span>NO DRAFT LOG</span>
+            <ExternalLink size={17} aria-hidden="true" />
           </span>
         )}
       </div>
@@ -380,7 +440,7 @@ function GamesGrid({
   const playerDurations = computeGameDurationsMin(playerGames, reportedAt);
 
   return (
-    <div className="px-4 md:px-5 xl:px-8 pb-4 pt-2 flex flex-col gap-2">
+    <div className="px-4 md:px-5 xl:px-8 pb-4 flex flex-col gap-2">
       {Array.from({ length: gameCount }, (_, i) => {
         const pg = playerGames[i] ?? null;
         const og = pg ? findOpponentPov(pg, opponentGames) : (opponentGames[i] ?? null);
