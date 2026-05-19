@@ -12,6 +12,7 @@ import re
 import discord
 
 from bot import emojis
+from bot.services.pod_tournament import actor_label
 
 
 log = logging.getLogger("bot.lobby_embed")
@@ -45,16 +46,19 @@ class LobbyReadyButtonView(discord.ui.View):
         from bot.services.pod_active import ACTIVE_POD_MANAGERS
         channel = interaction.channel
         channel_id = channel.id if channel else None
+        actor = actor_label(interaction)
         manager = next(
             (m for m in ACTIVE_POD_MANAGERS.values() if m.thread_id == channel_id),
             None,
         )
         if manager is None:
+            log.info(f"{actor} clicked Ready Check in channel={channel_id} (no active pod)")
             await interaction.response.send_message(
                 "No active pod-draft session in this thread.",
                 ephemeral=True,
             )
             return
+        log.info(f"[{manager.event_name}] {actor} clicked Ready Check")
         await interaction.response.defer(ephemeral=True)
         thread = await interaction.client.fetch_channel(manager.thread_id)
         err = await manager.initiate_ready_check(thread)

@@ -37,6 +37,7 @@ from bot.services.pod_drafts import (
     active_event_for_discord_user_in_dm,
     add_pairing,
     dm_messages_for_match,
+    dm_messages_for_round,
     finalize_champion as finalize_db,
     get_participant_deck_state,
     participant_dm_info,
@@ -68,6 +69,41 @@ ANNOUNCEMENT_TOP_N = 4  # channel-level announcement shows top performers only; 
 # Test-only result handler hook (set by bot/commands/testlobby.py). Always None in prod.
 _test_result_handler = None
 _test_handler_prefix: str | None = None
+
+
+def actor_label(interaction: discord.Interaction) -> str:
+    return getattr(interaction.user, "display_name", None) or str(interaction.user)
+
+
+def surface_label(interaction: discord.Interaction) -> str:
+    return "DM" if isinstance(interaction.channel, discord.DMChannel) else "thread"
+
+
+def format_match_result_log(*, event_label: str, round_num: int, actor: str,
+                             match_id: str, winner: str, score: str, surface: str) -> str:
+    return (f"[{event_label}] R{round_num} {actor} reported {match_id}: "
+            f"{winner} {score} (from {surface})")
+
+
+def build_thread_link_button(guild_id: int | str, thread_id: int | str) -> ui.Button:
+    """`:manat: Thread` link button jumping to the pod-draft thread. Shared by the champion
+    announcement view and `/pod-draft-standings` when invoked outside the event's thread."""
+    return ui.Button(
+        label="Thread",
+        style=discord.ButtonStyle.link,
+        url=f"https://discord.com/channels/{guild_id}/{thread_id}",
+        emoji=emojis.get_emoji("manat"),
+    )
+
+
+def build_replays_link_button(event_name: str) -> ui.Button:
+    """🎬 Replays link button pointing to /pods/<slug> on the public site."""
+    return ui.Button(
+        label="Replays",
+        style=discord.ButtonStyle.link,
+        url=f"{settings.public_site_url.rstrip('/')}/pods/{slugify(event_name)}",
+        emoji="🎬",
+    )
 
 
 async def _dm_round_pairings(
@@ -163,6 +199,13 @@ def _load_event_id_by_name_sync(name: str) -> str | None:
     with SessionLocal() as session:
         return session.execute(
             select(PodDraftEvent.id).where(PodDraftEvent.name == name)
+        ).scalar_one_or_none()
+
+
+def _load_event_thread_id_sync(event_id: str) -> str | None:
+    with SessionLocal() as session:
+        return session.execute(
+            select(PodDraftEvent.discord_thread_id).where(PodDraftEvent.id == event_id)
         ).scalar_one_or_none()
 
 
@@ -278,7 +321,7 @@ def build_pairing_dm_embed(
         elif viewer_is_a is not None:
             winner_is_a = winner.lower() == (match_state.get("a_name") or "").lower()
             you_won = winner_is_a if viewer_is_a else not winner_is_a
-            body_lines.append(f"✅ You won {score}" if you_won else f"❌ You lost {score}")
+            body_lines.append(f"✅ You won {score}" if you_won else f"▫️ You lost {score}")
         else:
             body_lines.append(f"Result: {winner} {score}")
 
@@ -432,8 +475,13 @@ async def live_deck_color_submit(interaction: discord.Interaction, color: str) -
     if not ok:
         raise NotInPodError()
 
+    actor = actor_label(interaction)
+    surface = surface_label(interaction)
     if event_id is None:
+        log.info(f"{actor} saved deck colors: {color} (from {surface}, no event)")
         return
+    event_name = await asyncio.to_thread(_load_event_name_sync, event_id)
+    log.info(f"[{event_name}] {actor} saved deck colors: {color} (from {surface})")
     manager = ACTIVE_POD_MANAGERS.get(event_id)
     if manager is not None:
         await _post_or_update_live_standings(manager)
@@ -460,8 +508,13 @@ async def live_review_choice_submit(interaction: discord.Interaction, wants_revi
     if not ok:
         raise NotInPodError()
 
+    actor = actor_label(interaction)
+    surface = surface_label(interaction)
     if event_id is None:
+        log.info(f"{actor} set review opt-in: {wants_review} (from {surface}, no event)")
         return
+    event_name = await asyncio.to_thread(_load_event_name_sync, event_id)
+    log.info(f"[{event_name}] {actor} set review opt-in: {wants_review} (from {surface})")
     manager = ACTIVE_POD_MANAGERS.get(event_id)
     if manager is not None:
         await _post_or_update_live_standings(manager)
@@ -631,6 +684,27 @@ async def advance_to_round(manager: "PodDraftManager", round_num: int) -> None:
         await _dm_round_pairings(manager.bot, manager.event_id, round_num, pending_rows, posted.jump_url)
         if round_num == 1:
             asyncio.create_task(_send_submit_deck_dms(manager.bot, manager.event_id))
+        await _attach_next_round_link(manager, round_num - 1, posted.jump_url, round_num)
+
+
+async def _attach_next_round_link(manager: "PodDraftManager", prior_round: int,
+                                   next_url: str, next_round_num: int) -> None:
+    """Edit prior round's thread message to add a 'Go to Round N' link button pointing to `next_url`.
+    No-op when there's no prior round, no tracked prior message, or the prior view has no ActionRow
+    room (5-match pods)."""
+    if prior_round < 1:
+        return
+    prior_msg = manager.round_messages.get(prior_round)
+    if prior_msg is None:
+        return
+    prior_states = await asyncio.to_thread(_load_round_states, manager.event_id, prior_round)
+    _mark_trophy_match(prior_states, prior_round)
+    try:
+        await prior_msg.edit(view=RoundResultsView(
+            prior_states, next_round_url=next_url, next_round_num=next_round_num,
+        ))
+    except discord.HTTPException:
+        log.warning(f"could not attach next-round link to round {prior_round}", exc_info=True)
 
 
 class MatchResultSelect(ui.Select):
@@ -678,9 +752,14 @@ class MatchResultSelect(ui.Select):
 
 
 class RoundResultsView(ui.View):
-    """One View per round; holds up to MAX_MATCHES_PER_ROUND Selects, one per match."""
+    """One View per round; holds up to MAX_MATCHES_PER_ROUND Selects, one per match.
 
-    def __init__(self, match_states: list[dict] | None = None):
+    When `next_round_url` is provided AND there's an ActionRow free (matches < MAX_MATCHES_PER_ROUND),
+    a 'Next Round' link button is appended so players can jump to the next round's message.
+    """
+
+    def __init__(self, match_states: list[dict] | None = None, *,
+                 next_round_url: str | None = None, next_round_num: int | None = None):
         super().__init__(timeout=None)
         if match_states:
             for slot, m in enumerate(match_states):
@@ -696,6 +775,13 @@ class RoundResultsView(ui.View):
                     b_display=m.get("b_display") or m["b_name"],
                     selected_value=selected,
                     is_trophy_match=bool(m.get("is_trophy_match")),
+                ))
+            if next_round_url and next_round_num is not None and len(match_states) < MAX_MATCHES_PER_ROUND:
+                self.add_item(discord.ui.Button(
+                    style=discord.ButtonStyle.link,
+                    url=next_round_url,
+                    label=f"Go to Round {next_round_num}",
+                    emoji=emojis.get_emoji("manat"),
                 ))
         else:
             # Persistent template covering all possible slots; real messages will only render the slots they need
@@ -733,10 +819,14 @@ async def _handle_result_submission(interaction: discord.Interaction, value: str
     match_state = next((m for m in match_states if m["match_id"] == match_id), None)
 
     is_dm = isinstance(interaction.channel, discord.DMChannel)
+    event_name = await asyncio.to_thread(_load_event_name_sync, event_id)
+    log.info(format_match_result_log(
+        event_label=event_name, round_num=round_num, actor=actor_label(interaction),
+        match_id=match_id, winner=winner_name, score=score, surface=surface_label(interaction),
+    ))
     try:
         if is_dm and match_state is not None:
             dm_info = await asyncio.to_thread(_load_dm_info_sync, event_id)
-            event_name = await asyncio.to_thread(_load_event_name_sync, event_id)
             pairings_url = _resolve_pairings_url(event_id, round_num)
             dm_embed, dm_view = _build_dm_match_view(
                 dm_info, str(interaction.user.id), match_state, round_num, pairings_url, event_name,
@@ -1153,37 +1243,50 @@ def _standings_header_text(pending_count: int) -> str:
 def _format_deck_color_emojis(code: str | None) -> str:
     """Render deck color string as Mana font application emojis.
 
-    - 2 distinct colors → single guild-pair emoji (`:manarw:` for WR, `:managu:` for UG, etc.)
-    - 5 colors → single `:manawubrg:` emoji
-    - 1, 3, or 4 colors → individual mana emojis in WUBRG order
-    - Splash letters (lowercase) are promoted to full colors so a write-in like 'URGbw' shows every
-      involved color equally.
-    - Falls back to bare uppercase letters when the application emoji isn't loaded.
+    Main colors render first using guild-pair / pentacolor / WUBRG-order rules. Splash colors
+    (lowercase in `code`) render after, separated by '/'.
+
+    - "WR"   → :manarw:                        (guild pair, no splash)
+    - "URG"  → :manau::manar::manag:           (3 main, no splash)
+    - "WUBRG"→ :manawubrg:                     (5 main, no splash)
+    - "BGw"  → :manab::manag:/:manaw:          (BG main, W splash)
+    - "URw"  → :manaur:/:manaw:                (UR guild pair main, W splash)
     """
     if not code:
         return ""
-    seen: set[str] = set()
-    for c in code.upper():
-        if c in "WUBRG":
-            seen.add(c)
-    if not seen:
+    main: set[str] = set()
+    splash: set[str] = set()
+    for c in code:
+        u = c.upper()
+        if u not in "WUBRG":
+            continue
+        (main if c.isupper() else splash).add(u)
+    # All-lowercase input: treat splash as main (no separator)
+    if not main and splash:
+        main, splash = splash, set()
+    if not main:
         return ""
 
-    if len(seen) == 2:
-        emoji_name = PAIR_EMOJI_NAME.get(frozenset(seen))
+    main_glyph = _emojis_for_color_set(main)
+    if not splash:
+        return main_glyph
+    return f"{main_glyph}/{_emojis_for_color_set(splash)}"
+
+
+def _emojis_for_color_set(colors: set[str]) -> str:
+    if len(colors) == 2:
+        emoji_name = PAIR_EMOJI_NAME.get(frozenset(colors))
         if emoji_name:
             glyph = emojis.get(emoji_name)
             if glyph:
                 return glyph
-
-    if len(seen) == 5:
+    if len(colors) == 5:
         glyph = emojis.get("manawubrg")
         if glyph:
             return glyph
-
     out = []
     for c in "WUBRG":
-        if c in seen:
+        if c in colors:
             glyph = emojis.get(f"mana{c.lower()}") or c
             out.append(glyph)
     return "".join(out)
@@ -1306,18 +1409,8 @@ def build_champion_announcement_view(
 
     actions = ui.ActionRow()
     if guild_id and thread_id:
-        actions.add_item(ui.Button(
-            label="Thread",
-            style=discord.ButtonStyle.link,
-            url=f"https://discord.com/channels/{guild_id}/{thread_id}",
-            emoji=emojis.get_emoji("manat"),
-        ))
-    actions.add_item(ui.Button(
-        label="Replays",
-        style=discord.ButtonStyle.link,
-        url=f"{settings.public_site_url.rstrip('/')}/pods/{slugify(event_name)}",
-        emoji="🎬",
-    ))
+        actions.add_item(build_thread_link_button(guild_id, thread_id))
+    actions.add_item(build_replays_link_button(event_name))
     view.add_item(actions)
 
     return view
@@ -1440,6 +1533,8 @@ async def _grace_expire(manager, round_num: int) -> None:
         except Exception:
             log.warning("could not lock round %d view", round_num, exc_info=True)
 
+    await _lock_round_dms(manager.bot, manager.event_id, round_num)
+
     if round_num >= TOTAL_ROUNDS and not manager.finalized:
         await finalize_tournament(manager)
         # Fallback: if nobody submitted deck colors during the window, post the announcement anyway
@@ -1448,6 +1543,26 @@ async def _grace_expire(manager, round_num: int) -> None:
 
     manager.grace_round = None
     manager.grace_task = None
+
+
+async def _lock_round_dms(bot_client, event_id: str, round_num: int) -> None:
+    """Strip the result-dropdown view from every tracked pairing DM for this round."""
+    rows = await asyncio.to_thread(_dm_rows_for_round_sync, event_id, round_num)
+    for row in rows:
+        try:
+            channel = bot_client.get_channel(int(row.dm_channel_id)) \
+                or await bot_client.fetch_channel(int(row.dm_channel_id))
+            dm_msg = await channel.fetch_message(int(row.dm_message_id))
+            await dm_msg.edit(view=None)
+        except discord.HTTPException:
+            log.warning(f"could not lock DM {row.dm_message_id} for round {round_num}", exc_info=True)
+
+
+def _dm_rows_for_round_sync(event_id: str, round_num: int):
+    with SessionLocal() as session:
+        rows = dm_messages_for_round(session, event_id, round_num)
+        session.expunge_all()
+        return rows
 
 
 async def _regenerate_next_round(manager, next_round: int) -> None:
@@ -1766,26 +1881,29 @@ async def _pin_only_this_bot_message(message: discord.Message) -> None:
 
 
 def _mark_trophy_match(match_states: list[dict], round_num: int) -> None:
-    """Stamp is_trophy_match on every final-round pairing where at least one player can still go X-0.
+    """Stamp is_trophy_match on every final-round pairing where at least one player is genuinely
+    undefeated: every prior round played AND every one of them won.
 
-    In 8-player pods that's exactly one match (2-0 vs 2-0). In 10-player pods with cross-bracket
-    pairings it can be several (e.g. 2-0 vs 2-0 plus 2-0 vs 1-1).
+    Skipped matches (winner = SKIPPED_SENTINEL) leave the player with fewer games played, so a
+    1-0 entering R3 (one win, one skip) is NOT a trophy contender even though losses == 0.
     """
     if round_num != TOTAL_ROUNDS:
         return
 
-    def _losses(record: str | None) -> int | None:
+    def _wl(record: str | None) -> tuple[int, int] | None:
         if not record or "-" not in record:
             return None
         try:
-            return int(record.split("-", 1)[1])
+            w, l = record.split("-", 1)
+            return int(w), int(l)
         except ValueError:
             return None
 
+    expected_wins = round_num - 1
     for m in match_states:
-        a_l = _losses(m.get("a_record"))
-        b_l = _losses(m.get("b_record"))
-        if a_l == 0 or b_l == 0:
+        a = _wl(m.get("a_record"))
+        b = _wl(m.get("b_record"))
+        if (a and a == (expected_wins, 0)) or (b and b == (expected_wins, 0)):
             m["is_trophy_match"] = True
 
 

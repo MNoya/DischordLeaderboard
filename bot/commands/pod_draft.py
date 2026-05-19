@@ -19,8 +19,12 @@ from bot.services.pod_drafts import _normalize_player_name
 from bot.services.pod_tournament import (
     _load_event_id_by_name_sync,
     _load_event_id_by_thread_sync,
+    _load_event_name_sync,
+    _load_event_thread_id_sync,
     _search_event_names_sync,
+    build_replays_link_button,
     build_standings_embed_for_event,
+    build_thread_link_button,
 )
 from bot.slug import disambiguate_slug, slugify
 
@@ -164,7 +168,16 @@ class PodDraft(commands.Cog):
             await interaction.followup.send("No standings yet — this pod hasn't started pairings.", ephemeral=True)
             return
 
-        await interaction.followup.send(embed=embed)
+        view = discord.utils.MISSING
+        thread_id = await asyncio.to_thread(_load_event_thread_id_sync, event_id)
+        invoked_outside_thread = thread_id is not None and str(interaction.channel_id) != thread_id
+        if invoked_outside_thread and interaction.guild_id is not None:
+            event_name = await asyncio.to_thread(_load_event_name_sync, event_id)
+            view = discord.ui.View()
+            view.add_item(build_thread_link_button(interaction.guild_id, thread_id))
+            view.add_item(build_replays_link_button(event_name))
+
+        await interaction.followup.send(embed=embed, view=view)
 
     @pod_draft_standings.autocomplete("event")
     async def _pod_draft_standings_event_autocomplete(

@@ -36,10 +36,13 @@ from bot.services.pod_tournament import (
     _mark_trophy_match,
     _pin_only_this_bot_message,
     _round_embed,
+    actor_label,
     build_champion_announcement_view,
     build_champion_embed,
     build_pairing_dm_embed,
+    format_match_result_log,
     register_test_result_handler,
+    surface_label,
 )
 
 
@@ -63,19 +66,22 @@ def _test_arena_for(seat: str) -> str | None:
     return None
 
 
-def _find_invoker_match(matches: list[dict], invoker_seat: str) -> tuple[str, str] | None:
-    """Return (own_seat, opponent_seat) for the invoker's pairing in this round, if any."""
+def _find_invoker_match(matches: list[dict], invoker_seat: str) -> dict | None:
+    """Match dict for the invoker's pairing this round, if any."""
     for m in matches:
-        if m["a_name"] == invoker_seat:
-            return invoker_seat, m["b_name"]
-        if m["b_name"] == invoker_seat:
-            return invoker_seat, m["a_name"]
+        if m["a_name"] == invoker_seat or m["b_name"] == invoker_seat:
+            return m
     return None
 
 
 async def _dm_invoker_pairing(user: discord.User | discord.Member, round_num: int,
                                opponent: str, opponent_arena: str | None,
-                               pairings_url: str | None = None) -> None:
+                               pairings_url: str | None = None,
+                               match_state: dict | None = None,
+                               state: dict | None = None) -> None:
+    viewer_is_a = None
+    if match_state:
+        viewer_is_a = match_state.get("a_name") == _INVOKER_SEAT
     embed = build_pairing_dm_embed(
         round_num=round_num,
         opponent_label=f"**{opponent}**",
@@ -83,13 +89,23 @@ async def _dm_invoker_pairing(user: discord.User | discord.Member, round_num: in
         pairings_url=pairings_url,
         event_name=_THREAD_NAME,
         updated=False,
+        match_state=match_state,
+        viewer_is_a=viewer_is_a,
     )
+    view = RoundResultsView([match_state]) if match_state else None
+    msg = None
     try:
-        await user.send(embed=embed)
+        msg = await user.send(embed=embed, view=view) if view else await user.send(embed=embed)
     except discord.Forbidden:
         log.info(f"testlobby DM blocked for user {user.id}")
+        return
     except discord.HTTPException:
         log.warning("testlobby DM failed", exc_info=True)
+        return
+
+    if msg is not None and state is not None and match_state is not None:
+        state.setdefault("invoker_dm_messages", {})[round_num] = msg
+        _BRACKETS[msg.id] = state
 
 
 async def _test_submit_deck_color(interaction: discord.Interaction, color: str) -> None:
@@ -548,13 +564,62 @@ def _next_round_match_states(round_num: int, pairings: list[tuple[str, str]],
     return states
 
 
+async def _propagate_test_result_to_other_surface(
+    state: dict, round_num: int, match_state: dict, edited_was_dm: bool,
+) -> None:
+    """After editing the surface where the dropdown was clicked, update the other surface
+    (thread → invoker DM if clicked in thread; invoker DM → thread if clicked in DM)."""
+    matches = state["matches_by_round"].get(round_num, [])
+    if edited_was_dm:
+        thread_msg = state.get("round_messages", {}).get(round_num)
+        if thread_msg is None:
+            return
+        try:
+            await thread_msg.edit(
+                content=None,
+                embed=_round_embed(round_num, matches),
+                view=RoundResultsView(matches),
+            )
+        except discord.HTTPException:
+            log.warning("could not propagate testlobby result to thread", exc_info=True)
+        return
+
+    dm_msg = state.get("invoker_dm_messages", {}).get(round_num)
+    if dm_msg is None:
+        return
+    invoker_match = _find_invoker_match(matches, _INVOKER_SEAT)
+    if invoker_match is None or invoker_match["match_id"] != match_state["match_id"]:
+        return
+    viewer_is_a = invoker_match["a_name"] == _INVOKER_SEAT
+    opp = invoker_match["b_name"] if viewer_is_a else invoker_match["a_name"]
+    embed = build_pairing_dm_embed(
+        round_num=round_num,
+        opponent_label=f"**{opp}**",
+        opponent_arena=_test_arena_for(opp),
+        pairings_url=None,
+        event_name=_THREAD_NAME,
+        match_state=invoker_match,
+        viewer_is_a=viewer_is_a,
+    )
+    try:
+        await dm_msg.edit(embed=embed, view=RoundResultsView([invoker_match]))
+    except discord.HTTPException:
+        log.warning("could not propagate testlobby result to invoker DM", exc_info=True)
+
+
 async def _handle_test_result(interaction: discord.Interaction, match_id: str,
                                winner_name: str, score: str) -> None:
     message = interaction.message
     state = _BRACKETS.get(message.id) if message else None
     if state is None:
+        log.info(f"[testlobby] {actor_label(interaction)} clicked {match_id} but bracket state is gone "
+                 f"(likely bot restart since !testlobby round1)")
         try:
-            await interaction.response.defer()
+            await interaction.response.send_message(
+                "Bracket state was lost — likely the bot restarted since `!testlobby round1`. "
+                "Re-run `!testlobby round1` to start a fresh bracket.",
+                ephemeral=True,
+            )
         except discord.HTTPException:
             pass
         return
@@ -587,12 +652,34 @@ async def _handle_test_result(interaction: discord.Interaction, match_id: str,
     m["score"] = score
 
     _mark_trophy_match(matches, round_num)
-    embed = _round_embed(round_num, matches)
-    view = RoundResultsView(matches)
+
+    is_dm = isinstance(interaction.channel, discord.DMChannel)
+    log.info(format_match_result_log(
+        event_label="testlobby", round_num=round_num, actor=actor_label(interaction),
+        match_id=match_id, winner=winner_name, score=score, surface=surface_label(interaction),
+    ))
+
+    thread_embed = _round_embed(round_num, matches)
+    thread_view = RoundResultsView(matches)
     try:
-        await interaction.response.edit_message(content=None, embed=embed, view=view)
+        if is_dm:
+            viewer_is_a = m["a_name"] == _INVOKER_SEAT
+            dm_embed = build_pairing_dm_embed(
+                round_num=round_num,
+                opponent_label=f"**{m['b_name'] if viewer_is_a else m['a_name']}**",
+                opponent_arena=_test_arena_for(m["b_name"] if viewer_is_a else m["a_name"]),
+                pairings_url=None,
+                event_name=_THREAD_NAME,
+                match_state=m,
+                viewer_is_a=viewer_is_a,
+            )
+            await interaction.response.edit_message(embed=dm_embed, view=RoundResultsView([m]))
+        else:
+            await interaction.response.edit_message(content=None, embed=thread_embed, view=thread_view)
     except discord.HTTPException:
         log.warning("could not edit testlobby round message", exc_info=True)
+
+    asyncio.create_task(_propagate_test_result_to_other_surface(state, round_num, m, is_dm))
 
     if round_num == TOTAL_ROUNDS:
         await _maybe_post_or_update_test_standings(state, interaction.channel)
@@ -633,16 +720,27 @@ async def _handle_test_result(interaction: discord.Interaction, match_id: str,
         log.warning("could not post next testlobby round", exc_info=True)
         return
 
+    prior_msg = state.get("round_messages", {}).get(round_num)
+    if prior_msg is not None:
+        try:
+            await prior_msg.edit(view=RoundResultsView(
+                matches, next_round_url=new_msg.jump_url, next_round_num=round_num + 1,
+            ))
+        except discord.HTTPException:
+            log.warning(f"could not attach next-round link to testlobby round {round_num}", exc_info=True)
+
     _schedule_test_grace(state, round_num)
 
     invoker = state.get("invoker")
     if invoker is not None:
-        pairing = _find_invoker_match(next_matches, _INVOKER_SEAT)
-        if pairing is not None:
-            _, opp = pairing
+        invoker_match = _find_invoker_match(next_matches, _INVOKER_SEAT)
+        if invoker_match is not None:
+            opp = invoker_match["b_name"] if invoker_match["a_name"] == _INVOKER_SEAT else invoker_match["a_name"]
             await _dm_invoker_pairing(
                 invoker, round_num + 1, opp, _test_arena_for(opp),
                 pairings_url=new_msg.jump_url,
+                match_state=invoker_match,
+                state=state,
             )
 
 
@@ -665,6 +763,12 @@ async def _test_grace_expire(state: dict, round_num: int) -> None:
             await msg.edit(view=None)
         except discord.HTTPException:
             log.warning(f"could not lock testlobby round {round_num} view", exc_info=True)
+    dm_msg = state.get("invoker_dm_messages", {}).get(round_num)
+    if dm_msg is not None:
+        try:
+            await dm_msg.edit(view=None)
+        except discord.HTTPException:
+            log.warning(f"could not lock testlobby DM for round {round_num}", exc_info=True)
     state["grace_round"] = None
     state["grace_task"] = None
 
@@ -710,13 +814,21 @@ async def _regenerate_test_next_round(state: dict, next_round: int, channel) -> 
     prev_opp = _opp_in(prev_pairings, _INVOKER_SEAT)
     new_opp = _opp_in(pairings, _INVOKER_SEAT)
     if new_opp is not None and new_opp != prev_opp:
+        invoker_match = _find_invoker_match(next_matches, _INVOKER_SEAT)
         await _dm_invoker_changed_opponent(invoker, next_round, new_opp,
-                                            _test_arena_for(new_opp), msg.jump_url)
+                                            _test_arena_for(new_opp), msg.jump_url,
+                                            match_state=invoker_match,
+                                            state=state)
 
 
 async def _dm_invoker_changed_opponent(user: discord.User | discord.Member, round_num: int,
                                         opponent: str, opponent_arena: str | None,
-                                        pairings_url: str) -> None:
+                                        pairings_url: str,
+                                        match_state: dict | None = None,
+                                        state: dict | None = None) -> None:
+    viewer_is_a = None
+    if match_state:
+        viewer_is_a = match_state.get("a_name") == _INVOKER_SEAT
     embed = build_pairing_dm_embed(
         round_num=round_num,
         opponent_label=f"**{opponent}**",
@@ -724,13 +836,23 @@ async def _dm_invoker_changed_opponent(user: discord.User | discord.Member, roun
         pairings_url=pairings_url,
         event_name=_THREAD_NAME,
         updated=True,
+        match_state=match_state,
+        viewer_is_a=viewer_is_a,
     )
+    view = RoundResultsView([match_state]) if match_state else None
+    msg = None
     try:
-        await user.send(embed=embed)
+        msg = await user.send(embed=embed, view=view) if view else await user.send(embed=embed)
     except discord.Forbidden:
         log.info(f"testlobby re-pair DM blocked for user {user.id}")
+        return
     except discord.HTTPException:
         log.warning("testlobby re-pair DM failed", exc_info=True)
+        return
+
+    if msg is not None and state is not None and match_state is not None:
+        state.setdefault("invoker_dm_messages", {})[round_num] = msg
+        _BRACKETS[msg.id] = state
 
 
 class _TestlobbyScreenshotListener(commands.Cog):
@@ -831,12 +953,14 @@ async def setup(bot: commands.Bot) -> None:
                 "champion_announced": False,
                 "champion_announcement_message": None,
             }
-            pairing = _find_invoker_match(current_matches, _INVOKER_SEAT)
-            if pairing is not None:
-                _, opp = pairing
+            invoker_match = _find_invoker_match(current_matches, _INVOKER_SEAT)
+            if invoker_match is not None:
+                opp = invoker_match["b_name"] if invoker_match["a_name"] == _INVOKER_SEAT else invoker_match["a_name"]
                 await _dm_invoker_pairing(
                     ctx.author, current_round, opp, _test_arena_for(opp),
                     pairings_url=msg.jump_url,
+                    match_state=invoker_match,
+                    state=_BRACKETS[msg.id],
                 )
 
         if state == "champion":

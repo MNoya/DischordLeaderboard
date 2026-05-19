@@ -405,6 +405,17 @@ def dm_messages_for_match(session: Session, match_id: str) -> list[PodDraftDmMes
     ).scalars().all())
 
 
+def dm_messages_for_round(session: Session, event_id: str, round_num: int) -> list[PodDraftDmMessage]:
+    """All round_pairing DM messages tracked for a given (event, round)."""
+    return list(session.execute(
+        select(PodDraftDmMessage).where(
+            PodDraftDmMessage.event_id == event_id,
+            PodDraftDmMessage.round_num == round_num,
+            PodDraftDmMessage.kind == DM_KIND_ROUND,
+        )
+    ).scalars().all())
+
+
 def submit_deck_dm_for_participant(session: Session, participant_id: str) -> PodDraftDmMessage | None:
     return session.execute(
         select(PodDraftDmMessage).where(
