@@ -168,14 +168,14 @@ class PodDraft(commands.Cog):
             await interaction.followup.send("No standings yet — this pod hasn't started pairings.", ephemeral=True)
             return
 
-        view = discord.utils.MISSING
         thread_id = await asyncio.to_thread(_load_event_thread_id_sync, event_id)
         invoked_outside_thread = thread_id is not None and str(interaction.channel_id) != thread_id
+        event_name = await asyncio.to_thread(_load_event_name_sync, event_id)
+
+        view = discord.ui.View()
         if invoked_outside_thread and interaction.guild_id is not None:
-            event_name = await asyncio.to_thread(_load_event_name_sync, event_id)
-            view = discord.ui.View()
             view.add_item(build_thread_link_button(interaction.guild_id, thread_id))
-            view.add_item(build_replays_link_button(event_name))
+        view.add_item(build_replays_link_button(event_name))
 
         await interaction.followup.send(embed=embed, view=view)
 

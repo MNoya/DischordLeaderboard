@@ -45,6 +45,7 @@ class ParsedSeshEvent:
     attendees: Sequence[str]
     sesh_message_id: str
     discord_thread_id: str
+    discord_event_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -172,6 +173,7 @@ def record_event(session: Session, parsed: ParsedSeshEvent) -> PodDraftEvent:
         discord_thread_id=parsed.discord_thread_id,
         sesh_message_id=parsed.sesh_message_id,
         socket_status="pending",
+        discord_event_id=parsed.discord_event_id,
     )
     session.add(event)
     session.flush()

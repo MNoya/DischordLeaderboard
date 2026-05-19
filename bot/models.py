@@ -240,6 +240,7 @@ class PodDraftEvent(Base):
     socket_status       = Column(String, nullable=False)
     current_round       = Column(Integer, nullable=True)
     draft_log_gz        = Column(LargeBinary, nullable=True)
+    discord_event_id    = Column(String, nullable=True)
     created_at          = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     participants = relationship(
@@ -265,6 +266,7 @@ class PodDraftParticipant(Base):
     player_id        = Column(String, ForeignKey("players.id"), nullable=True)
     display_name     = Column(String, nullable=False)
     draftmancer_name = Column(String, nullable=True)
+    seat_index          = Column(Integer, nullable=True)
     placement           = Column(Integer, nullable=True)
     record              = Column(String, nullable=True)
     eliminated_round    = Column(Integer, nullable=True)

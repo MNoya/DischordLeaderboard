@@ -42,6 +42,7 @@ _BACKOFF_MAX_RETRIES = 8
 _BOT_USER_NAME = "DisChordBot"
 _READY_TIMEOUT_S = 90
 _ARENA_SUFFIX_RE = re.compile(r"#\d+$")
+_AI_BOT_NAME_RE = re.compile(r"^Bot #\d+$")
 
 
 class PodDraftManager:
@@ -442,6 +443,7 @@ class PodDraftManager:
                     log.warning(f"draft_log_gz: event {self.event_id} not found, skipping persist")
                     return
                 event.draft_log_gz = blob
+                _apply_seat_indexes(session, self.event_id, compact.get("seats") or [])
                 session.commit()
                 log.info(f"draft_log_gz persisted for {self.event_id} ({len(blob)} bytes)")
         except Exception:
@@ -596,6 +598,33 @@ class PodDraftManager:
         self.last_decliner_name = decliner_name
         self.last_cancel_reason = None if decliner_name is not None else reason
         await self.refresh_lobby_now()
+
+def _apply_seat_indexes(session, event_id: str, seats: list[str]) -> None:
+    if not seats:
+        return
+    rows = session.execute(
+        select(PodDraftParticipant).where(PodDraftParticipant.event_id == event_id)
+    ).scalars().all()
+    by_dm: dict[str, PodDraftParticipant] = {}
+    by_display: dict[str, PodDraftParticipant] = {}
+    for row in rows:
+        if row.draftmancer_name:
+            by_dm[_normalize_player_name(row.draftmancer_name)] = row
+        if row.display_name:
+            by_display[_normalize_player_name(row.display_name)] = row
+    matched = 0
+    for i, name in enumerate(seats):
+        if not name or name == _BOT_USER_NAME or _AI_BOT_NAME_RE.match(name):
+            continue
+        key = _normalize_player_name(name)
+        row = by_dm.get(key) or by_display.get(key)
+        if row is None:
+            log.info(f"seat_index: no participant matching {name!r} in {event_id}")
+            continue
+        row.seat_index = i
+        matched += 1
+    log.info(f"seat_index: applied to {matched}/{len(seats)} seats for {event_id}")
+
 
 def _is_ready_state(state) -> bool:
     """Draftmancer sends setReady(userID, state) where state can be 0/1 or 'Ready'/'NotReady'."""

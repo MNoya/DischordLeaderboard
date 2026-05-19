@@ -28,6 +28,8 @@ log = logging.getLogger(__name__)
 THREAD_POLL_INTERVAL_S = 5
 THREAD_POLL_TIMEOUT_S = 120
 
+SCHEDULED_EVENT_MATCH_WINDOW_S = 120
+
 
 class SeshListener(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
@@ -61,6 +63,8 @@ class SeshListener(commands.Cog):
             log.warning(f"sesh embed {message.id} never spawned a thread within {THREAD_POLL_TIMEOUT_S}s; skipping registration")
             return
 
+        discord_event_id = await _resolve_discord_event_id(message.guild, fields.event_time)
+
         parsed_event = ParsedSeshEvent(
             event_date=fields.event_date,
             event_time=fields.event_time,
@@ -71,6 +75,7 @@ class SeshListener(commands.Cog):
             attendees=fields.attendees,
             sesh_message_id=str(message.id),
             discord_thread_id=str(thread.id),
+            discord_event_id=discord_event_id,
         )
         event_row = await asyncio.to_thread(_persist_event, parsed_event)
 
@@ -138,6 +143,34 @@ class SeshListener(commands.Cog):
 async def _fire_after_delay(event_id: str, delay_s: float) -> None:
     await asyncio.sleep(delay_s)
     await fire_reminder(event_id)
+
+
+async def _resolve_discord_event_id(
+    guild: discord.Guild | None,
+    event_time: datetime,
+) -> str | None:
+    """Match a guild scheduled event whose start_time is within 2 minutes of the sesh event time."""
+    if guild is None:
+        return None
+    try:
+        scheduled = await guild.fetch_scheduled_events()
+    except discord.HTTPException as e:
+        log.warning(f"fetch_scheduled_events failed for guild {guild.id}: {e}")
+        return None
+    best: tuple[float, discord.ScheduledEvent] | None = None
+    for ev in scheduled:
+        if ev.start_time is None:
+            continue
+        delta = abs((ev.start_time - event_time).total_seconds())
+        if delta > SCHEDULED_EVENT_MATCH_WINDOW_S:
+            continue
+        if best is None or delta < best[0]:
+            best = (delta, ev)
+    if best is None:
+        log.info(f"no scheduled event within {SCHEDULED_EVENT_MATCH_WINDOW_S}s of {event_time.isoformat()}")
+        return None
+    log.info(f"matched scheduled event {best[1].id} (Δ={best[0]:.0f}s) for pod-draft at {event_time.isoformat()}")
+    return str(best[1].id)
 
 
 def _persist_event(parsed_event: ParsedSeshEvent) -> PodDraftEvent:
