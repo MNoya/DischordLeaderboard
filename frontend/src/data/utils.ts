@@ -8,12 +8,16 @@ const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "
 const MONTHS_SHORT = ["Jan.", "Feb.", "Mar.", "Apr.", "May", "Jun.", "Jul.", "Aug.", "Sept.", "Oct.", "Nov.", "Dec."] as const;
 
 // "May 8" / "Apr. 8" / "Dec. 23" — parses the YYYY-MM-DD prefix directly to
-// avoid timezone shifts on UTC-stored draft timestamps
-export function fmtShortDate(iso: string): string {
+// avoid timezone shifts on UTC-stored draft timestamps. Appends the year
+// ("May 8, 2023") when the date is not in the current calendar year.
+export function fmtShortDate(iso: string | null | undefined, today: Date = new Date()): string {
+  if (!iso) return "";
+  const year = parseInt(iso.slice(0, 4), 10);
   const month = parseInt(iso.slice(5, 7), 10);
   const day = parseInt(iso.slice(8, 10), 10);
   if (!month || !day) return "";
-  return `${MONTHS_SHORT[month - 1]} ${day}`;
+  const base = `${MONTHS_SHORT[month - 1]} ${day}`;
+  return year && year !== today.getFullYear() ? `${base}, ${year}` : base;
 }
 
 // Win percentage as a fixed-precision string, safe against zero-game players.
@@ -93,9 +97,10 @@ export function sumEvents(rows: ReadonlyArray<{ events: number }> | undefined): 
   return rows.reduce((s, r) => s + r.events, 0).toLocaleString();
 }
 
-// Compact relative time ("2h", "3d", "1w") suitable for sidebar timestamps.
+// Compact relative time ("2h", "3d", "1w", "5mo", "3y") suitable for sidebar timestamps.
 // Only goes one unit deep; "now" for events under a minute old.
-export function relativeTime(iso: string, now: Date = new Date()): string {
+export function relativeTime(iso: string | null | undefined, now: Date = new Date()): string {
+  if (!iso) return "";
   const then = new Date(iso).getTime();
   const diffMs = now.getTime() - then;
   if (diffMs < 60_000) return "now";
@@ -106,7 +111,11 @@ export function relativeTime(iso: string, now: Date = new Date()): string {
   const days = Math.floor(hours / 24);
   if (days < 7) return `${days}d`;
   const weeks = Math.floor(days / 7);
-  return `${weeks}w`;
+  if (weeks < 8) return `${weeks}w`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo`;
+  const years = Math.floor(days / 365);
+  return `${years}y`;
 }
 
 // Maps any raw 17lands format string OR a backend `format_label` group

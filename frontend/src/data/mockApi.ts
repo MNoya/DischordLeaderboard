@@ -275,7 +275,7 @@ function _allTrophiesFor(setCode: string): RecentTrophy[] {
   const out: RecentTrophy[] = [];
   for (const events of Object.values(REAL_DRAFT_EVENTS)) {
     for (const e of events) {
-      if (!e.isTrophy) continue;
+      if (!e.isTrophy || !e.finishedAt) continue;
       const headline = leaderboardSosFixture.find((r) => r.slug === e.slug);
       if (!headline) continue;
       out.push({

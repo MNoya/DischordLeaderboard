@@ -46,8 +46,8 @@ export interface PlayerDraftEvent {
   losses: number;
   isTrophy: boolean;
   colors: string; // 17lands convention: uppercase = main, lowercase = splash
-  startedAt: string;
-  finishedAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
   // 17lands deck URL for 17L events, Draftmancer draft log for pod drafts, null if no link
   externalUrl?: string | null;
   // Pod draft event name (e.g. "Pod Draft #3"). Null for 17lands rows
