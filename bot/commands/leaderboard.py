@@ -399,7 +399,10 @@ def process_leaderboard_for_pod(
 
     last_updated = session.execute(
         select(func.max(PodDraftEvent.event_time))
-        .where(func.upper(PodDraftEvent.set_code) == magic_set.code.upper())
+        .where(
+            func.upper(PodDraftEvent.set_code) == magic_set.code.upper(),
+            PodDraftEvent.event_time <= func.now(),
+        )
     ).scalar()
 
     return LeaderboardData(
