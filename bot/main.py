@@ -42,7 +42,7 @@ from bot.services.lobby_embed import LobbyReadyButtonView
 from bot.services.pod_tournament import (
     register_persistent_views as register_pod_views,
 )
-from bot.services.refresh import refresh_active_players
+from bot.services.refresh import refresh_active_players, refresh_active_players_all_sets
 from bot.services.seventeenlands import MinIntervalLimiter, SeventeenLandsClient
 from bot.sets import ACTIVE_SET_CODE
 from bot.tasks.pod_draft_reminder import fire_reminder, init_reminder
@@ -261,38 +261,33 @@ def build_bot(guild_id: int) -> commands.Bot:
 
         await _reply_quietly(ctx, f"✅ Synced: {len(synced_guild)} guild, {len(synced_global)} global.")
 
-    async def run_refresh(target_code: str, *, trigger: str) -> dict | None:
+    async def run_refresh(*, trigger: str) -> dict:
         """Pull 17lands data, recompute scores, repaint live messages, DM the owner a report.
 
-        Returns None if the set code is unknown; otherwise a dict with the
-        per-stage summaries and total elapsed time. ``trigger`` is "manual" or
-        "auto" — surfaced in the owner DM so the source is obvious.
+        ``trigger`` is "manual" (full all-sets rebuild via ``!refresh``) or
+        "auto" (periodic narrow window). Surfaced in the owner DM so the source
+        is obvious.
         """
         msg_invalidated_dm = (
             "⚠️ Your 17lands token appears to be invalid (possibly regenerated). "
             "Please use `/relink` to provide your new token."
         )
 
-        def _do_db_work() -> dict | None:
+        def _do_db_work() -> dict:
             limiter = (
                 MinIntervalLimiter(min_interval_s=AUTO_REFRESH_17L_INTERVAL_S)
                 if trigger == "auto" else None
             )
             client = SeventeenLandsClient(limiter=limiter)
             with SessionLocal() as session:
-                magic_set = session.execute(
-                    select(MagicSet).where(MagicSet.code == target_code)
-                ).scalar_one_or_none()
-                if magic_set is None:
-                    return None
-                return refresh_active_players(session, client, magic_set)
+                if trigger == "auto":
+                    return refresh_active_players(session, client)
+                return refresh_active_players_all_sets(session, client)
 
         # 17lands fetches and SQLAlchemy work are blocking; running them inline
         # would freeze the gateway heartbeat. Push to a worker thread so the
         # event loop stays free to dispatch other commands while this runs
         summary = await asyncio.to_thread(_do_db_work)
-        if summary is None:
-            return None
 
         invalidated_ids = list(summary.get("invalidated_players", []))
         invalidated_players: list[Player] = []
@@ -328,7 +323,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         edit_summary = {"edited": 0, "pruned": 0, "errors": 0}
         with SessionLocal() as session:
             ms = session.execute(
-                select(MagicSet).where(MagicSet.code == target_code)
+                select(MagicSet).where(MagicSet.code == ACTIVE_SET_CODE)
             ).scalar_one_or_none()
             if ms is not None:
                 edit_summary = await edit_tracked_messages_for_set(bot, ms)
@@ -340,7 +335,7 @@ def build_bot(guild_id: int) -> commands.Bot:
             "trigger": trigger,
         }
 
-        await _dm_owner_refresh_report(target_code, result)
+        await _dm_owner_refresh_report(result)
 
         with SessionLocal() as session:
             full_data = process_leaderboard(session, viewer_discord_id=None, top_n=10**6)
@@ -353,7 +348,7 @@ def build_bot(guild_id: int) -> commands.Bot:
 
         return result
 
-    async def _dm_owner_refresh_report(target_code: str, result: dict) -> None:
+    async def _dm_owner_refresh_report(result: dict) -> None:
         if bot.owner_id is None:
             return
         summary = result["summary"]
@@ -365,7 +360,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         )
         trigger_tag = " (auto)" if result["trigger"] == "auto" else ""
         body = (
-            f"🔄 Refresh complete for `{target_code}`{trigger_tag}\n"
+            f"🔄 Refresh complete{trigger_tag}\n"
             f"Elapsed: {_fmt_elapsed(summary.get('elapsed_s', 0.0))} · "
             f"Players: {n_players}{avg_line}\n"
             f"Updated: {summary['updated']} · "
@@ -383,18 +378,10 @@ def build_bot(guild_id: int) -> commands.Bot:
 
     @bot.command(name="refresh")
     @commands.is_owner()
-    async def refresh_cmd(ctx: commands.Context, set_code: str | None = None) -> None:
-        """Owner-only. Re-pull stats from 17lands for all active players.
-
-        `!refresh`         — refresh the current set (ACTIVE_SET_CODE in bot/sets.py)
-        `!refresh CODE`    — refresh a specific set, e.g. `!refresh ECL`
-        """
-        target_code = set_code or ACTIVE_SET_CODE
-        await _reply_quietly(ctx, f"⏳ Refreshing `{target_code}`…")
-        result = await run_refresh(target_code, trigger="manual")
-        if result is None:
-            await _reply_quietly(ctx, f"❌ No set with code `{target_code}`.")
-            return
+    async def refresh_cmd(ctx: commands.Context) -> None:
+        """Owner-only. Full all-sets rebuild from 17lands for every active player."""
+        await _reply_quietly(ctx, "⏳ Refreshing all sets…")
+        await run_refresh(trigger="manual")
 
     @bot.command(name="start")
     @commands.is_owner()
@@ -415,8 +402,8 @@ def build_bot(guild_id: int) -> commands.Bot:
     @tasks.loop(time=AUTO_REFRESH_TIMES)
     async def auto_refresh_tick() -> None:
         try:
-            log.info(f"auto-refresh: scheduled tick firing for {ACTIVE_SET_CODE}")
-            await run_refresh(ACTIVE_SET_CODE, trigger="auto")
+            log.info("auto-refresh: scheduled tick firing (periodic window)")
+            await run_refresh(trigger="auto")
         except Exception:
             log.exception("auto-refresh tick failed")
             await _notify_owner(bot, "⚠️ auto-refresh tick crashed:", traceback.format_exc())

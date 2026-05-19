@@ -1,6 +1,6 @@
-"""Refresh PlayerStats from 17lands for all active players.
+"""Full-history refresh of PlayerStats from 17lands for all active players.
 
-    DATABASE_URL=postgresql://... python -m bot.scripts.refresh_stats [--set-code ECL]
+    DATABASE_URL=postgresql://... python -m bot.scripts.refresh_stats [--cache]
 """
 from __future__ import annotations
 
@@ -8,13 +8,9 @@ import argparse
 import logging
 from pathlib import Path
 
-from sqlalchemy import select
-
 from bot.database import SessionLocal
-from bot.models import MagicSet
-from bot.services.refresh import refresh_active_players
+from bot.services.refresh import refresh_active_players_all_sets
 from bot.services.seventeenlands import SeventeenLandsClient
-from bot.sets import ACTIVE_SET_CODE
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -23,19 +19,8 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("refresh")
 
 
-def _resolve_set(session, set_code: str | None) -> MagicSet:
-    code = set_code or ACTIVE_SET_CODE
-    s = session.execute(
-        select(MagicSet).where(MagicSet.code == code)
-    ).scalar_one_or_none()
-    if s is None:
-        raise SystemExit(f"no set with code {code!r} (pass --set-code or update bot/sets.py)")
-    return s
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--set-code", help="set code to refresh; defaults to ACTIVE_SET_CODE in bot/sets.py")
     parser.add_argument(
         "--cache",
         nargs="?",
@@ -49,9 +34,8 @@ def main() -> None:
     if args.cache:
         log.info(f"17lands cache: {args.cache}")
     with SessionLocal() as session:
-        magic_set = _resolve_set(session, args.set_code)
-        log.info(f"refreshing set {magic_set.code} ({magic_set.name})")
-        summary = refresh_active_players(session, client, magic_set)
+        log.info("refreshing all registered sets")
+        summary = refresh_active_players_all_sets(session, client)
 
     log.info(f"done. updated={summary['updated']} invalidated={summary['invalidated']} errors={summary['errors']}")
 

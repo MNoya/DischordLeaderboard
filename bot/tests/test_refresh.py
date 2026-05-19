@@ -6,95 +6,115 @@ from sqlalchemy import select
 
 from bot.models import DraftEvent, MagicSet, Player, PlayerSetScore, PlayerStats
 from bot.services.refresh import (
-    aggregate_by_format_and_expansion,
+    aggregate_by_set_format_expansion,
     recompute_player_set_score,
     refresh_active_players,
+    refresh_active_players_all_sets,
     refresh_one_player_for_all_sets,
     refresh_player,
     upsert_draft_events,
 )
+from bot.sets import ACTIVE_SET_CODE
 
 
-# ---------------------------------------------------------------------------
-# aggregate_by_format_and_expansion
-# ---------------------------------------------------------------------------
+class _FakeSet:
+    __slots__ = ("id", "code")
+
+    def __init__(self, set_id: str, code: str) -> None:
+        self.id = set_id
+        self.code = code
 
 
-def test_aggregate_by_fmt_exp_empty():
-    assert aggregate_by_format_and_expansion([], "ECL") == []
+def test_aggregate_empty():
+    assert aggregate_by_set_format_expansion([], [_FakeSet("s1", "ECL")]) == []
 
 
-def test_aggregate_by_fmt_exp_buckets_per_pair():
+def test_aggregate_buckets_per_set_format_expansion():
     drafts = [
         {"format": "PremierDraft", "expansion": "ECL", "wins": 5, "losses": 3, "event_wins": 0},
         {"format": "PremierDraft", "expansion": "ECL", "wins": 7, "losses": 1, "event_wins": 7},
         {"format": "PremierDraft", "expansion": "Y26ECL", "wins": 4, "losses": 3, "event_wins": 0},
         {"format": "TradDraft", "expansion": "ECL", "wins": 4, "losses": 0, "event_wins": 4},
     ]
-    rows = aggregate_by_format_and_expansion(drafts, "ECL")
+    rows = aggregate_by_set_format_expansion(drafts, [_FakeSet("s1", "ECL")])
 
     by_key = {(r["format"], r["expansion"]): r for r in rows}
-    assert set(by_key.keys()) == {
-        ("PremierDraft", "ECL"),
-        ("PremierDraft", "Y26ECL"),
-        ("TradDraft", "ECL"),
-    }
-    assert by_key[("PremierDraft", "ECL")] == {
-        "format": "PremierDraft", "expansion": "ECL",
-        "events": 2, "wins": 12, "losses": 4, "games_played": 16, "trophies": 1,
-    }
+    assert set(by_key.keys()) == {("PremierDraft", "ECL"), ("PremierDraft", "Y26ECL"), ("TradDraft", "ECL")}
+    assert by_key[("PremierDraft", "ECL")]["set_id"] == "s1"
+    assert by_key[("PremierDraft", "ECL")]["set_code"] == "ECL"
+    assert by_key[("PremierDraft", "ECL")]["events"] == 2
+    assert by_key[("PremierDraft", "ECL")]["wins"] == 12
+    assert by_key[("PremierDraft", "ECL")]["games_played"] == 16
+    assert by_key[("PremierDraft", "ECL")]["trophies"] == 1
     assert by_key[("PremierDraft", "Y26ECL")]["events"] == 1
-    assert by_key[("PremierDraft", "Y26ECL")]["wins"] == 4
-    assert by_key[("PremierDraft", "Y26ECL")]["games_played"] == 7
     assert by_key[("TradDraft", "ECL")]["trophies"] == 1
 
 
-def test_aggregate_by_fmt_exp_substring_match():
-    drafts = [
-        {"format": "PremierDraft", "expansion": "Y26ECL", "wins": 7, "losses": 0, "event_wins": 7},
-    ]
-    rows = aggregate_by_format_and_expansion(drafts, "ECL")
+def test_aggregate_substring_match():
+    rows = aggregate_by_set_format_expansion(
+        [{"format": "PremierDraft", "expansion": "Y26ECL", "wins": 7, "losses": 0, "event_wins": 7}],
+        [_FakeSet("s1", "ECL")],
+    )
     assert len(rows) == 1
     assert rows[0]["expansion"] == "Y26ECL"
+    assert rows[0]["set_code"] == "ECL"
     assert rows[0]["trophies"] == 1
 
 
-def test_aggregate_by_fmt_exp_skips_unsupported_formats():
-    drafts = [
-        {"format": "MidWeekSealed", "expansion": "ECL", "wins": 7, "losses": 0, "event_wins": 7},
-    ]
-    assert aggregate_by_format_and_expansion(drafts, "ECL") == []
+def test_aggregate_skips_unsupported_formats():
+    rows = aggregate_by_set_format_expansion(
+        [{"format": "MidWeekSealed", "expansion": "ECL", "wins": 7, "losses": 0, "event_wins": 7}],
+        [_FakeSet("s1", "ECL")],
+    )
+    assert rows == []
 
 
-def test_aggregate_by_fmt_exp_skips_other_sets():
+def test_aggregate_drops_unknown_expansions(caplog):
     drafts = [
         {"format": "PremierDraft", "expansion": "BLB", "wins": 7, "losses": 0, "event_wins": 7},
         {"format": "PremierDraft", "expansion": "DSK", "wins": 4, "losses": 1},
     ]
-    assert aggregate_by_format_and_expansion(drafts, "ECL") == []
+    with caplog.at_level("INFO", logger="bot.services.refresh"):
+        rows = aggregate_by_set_format_expansion(drafts, [_FakeSet("s1", "ECL")])
+    assert rows == []
+    assert any("BLB" in r.message for r in caplog.records)
+    assert any("DSK" in r.message for r in caplog.records)
 
 
-def test_aggregate_by_fmt_exp_trophy_via_event_wins():
+def test_aggregate_routes_across_multiple_sets():
     drafts = [
-        {"format": "TradDraft", "expansion": "ECL", "wins": 4, "losses": 0, "event_wins": 4},
-        {"format": "TradDraft", "expansion": "ECL", "wins": 2, "losses": 1, "event_wins": 0},
+        {"format": "PremierDraft", "expansion": "SOS", "wins": 7, "losses": 0, "event_wins": 7},
+        {"format": "PremierDraft", "expansion": "ECL", "wins": 5, "losses": 3},
+        {"format": "PremierDraft", "expansion": "Y26ECL", "wins": 4, "losses": 0, "event_wins": 4},
     ]
-    rows = aggregate_by_format_and_expansion(drafts, "ECL")
+    sets = [_FakeSet("s-sos", "SOS"), _FakeSet("s-ecl", "ECL")]
+    rows = aggregate_by_set_format_expansion(drafts, sets)
+    by_set = {r["set_code"]: r for r in rows if r["expansion"] != "Y26ECL"}
+    assert by_set["SOS"]["wins"] == 7
+    assert by_set["ECL"]["wins"] == 5
+    y26 = next(r for r in rows if r["expansion"] == "Y26ECL")
+    assert y26["set_code"] == "ECL"
+    assert y26["trophies"] == 1
+
+
+def test_aggregate_trophy_via_event_wins():
+    rows = aggregate_by_set_format_expansion(
+        [
+            {"format": "TradDraft", "expansion": "ECL", "wins": 4, "losses": 0, "event_wins": 4},
+            {"format": "TradDraft", "expansion": "ECL", "wins": 2, "losses": 1, "event_wins": 0},
+        ],
+        [_FakeSet("s1", "ECL")],
+    )
     assert len(rows) == 1
     assert rows[0]["trophies"] == 1
     assert rows[0]["wins"] == 6
-
-
-# ---------------------------------------------------------------------------
-# Test helpers
-# ---------------------------------------------------------------------------
 
 
 class FakeClient:
     def __init__(self, drafts=None, raise_=None):
         self.drafts = drafts or []
         self.raise_ = raise_
-        self.calls: list[tuple[str, object]] = []
+        self.calls: list[tuple[str, object, object]] = []
 
     def fetch_drafts(self, token, start_date=None, end_date=None):
         self.calls.append((token, start_date, end_date))
@@ -120,11 +140,15 @@ def _make_500():
     return requests.HTTPError(response=resp)
 
 
-def _seed_set(session, code="ECL"):
-    s = MagicSet(code=code, name=code, start_date=date(2026, 1, 20))
+def _seed_set(session, code="ECL", start_date=date(2026, 1, 20)):
+    s = MagicSet(code=code, name=code, start_date=start_date)
     session.add(s)
     session.flush()
     return s
+
+
+def _seed_active_set(session):
+    return _seed_set(session, code=ACTIVE_SET_CODE, start_date=date(2026, 4, 21))
 
 
 def _seed_player(session, name="P", token_suffix="a", active=True, token_invalid=False):
@@ -142,11 +166,6 @@ def _seed_player(session, name="P", token_suffix="a", active=True, token_invalid
     return p
 
 
-# ---------------------------------------------------------------------------
-# refresh_player
-# ---------------------------------------------------------------------------
-
-
 def test_refresh_player_inserts_rows(session):
     s = _seed_set(session)
     p = _seed_player(session)
@@ -156,20 +175,26 @@ def test_refresh_player_inserts_rows(session):
     ]
     client = FakeClient(drafts=drafts)
 
-    result = refresh_player(session, client, p, s)
+    result = refresh_player(session, client, p)
     session.flush()
 
     assert result == {"status": "updated", "rows": 2}
-    assert client.calls == [(p.seventeenlands_token, s.start_date, s.end_date)]
-    rows = session.execute(
-        select(PlayerStats).where(PlayerStats.player_id == p.id)
-    ).scalars().all()
+    assert client.calls == [(p.seventeenlands_token, None, None)]
+    rows = session.execute(select(PlayerStats).where(PlayerStats.player_id == p.id)).scalars().all()
     assert len(rows) == 2
     by_fmt = {r.format: r for r in rows}
     assert by_fmt["PremierDraft"].wins == 5
     assert by_fmt["PremierDraft"].expansion == "ECL"
     assert by_fmt["PremierDraft"].last_fetched_at is not None
     assert by_fmt["TradDraft"].trophies == 1
+
+
+def test_refresh_player_passes_fetch_start(session):
+    s = _seed_set(session)
+    p = _seed_player(session)
+    client = FakeClient(drafts=[])
+    refresh_player(session, client, p, fetch_start=date(2026, 4, 1))
+    assert client.calls == [(p.seventeenlands_token, date(2026, 4, 1), None)]
 
 
 def test_refresh_player_updates_existing_row(session):
@@ -181,15 +206,11 @@ def test_refresh_player_updates_existing_row(session):
     ))
     session.flush()
 
-    client = FakeClient(drafts=[
-        {"format": "PremierDraft", "expansion": "ECL", "wins": 9, "losses": 4, "event_wins": 7},
-    ])
-    refresh_player(session, client, p, s)
+    client = FakeClient(drafts=[{"format": "PremierDraft", "expansion": "ECL", "wins": 9, "losses": 4, "event_wins": 7}])
+    refresh_player(session, client, p)
     session.flush()
 
-    row = session.execute(
-        select(PlayerStats).where(PlayerStats.player_id == p.id)
-    ).scalar_one()
+    row = session.execute(select(PlayerStats).where(PlayerStats.player_id == p.id)).scalar_one()
     assert row.wins == 9
     assert row.losses == 4
     assert row.games_played == 13
@@ -205,13 +226,11 @@ def test_refresh_player_multiple_expansions_coexist(session):
         {"format": "PremierDraft", "expansion": "Y26ECL", "wins": 7, "losses": 1, "event_wins": 7},
     ])
 
-    refresh_player(session, client, p, s)
+    refresh_player(session, client, p)
     session.flush()
 
     rows = session.execute(
-        select(PlayerStats).where(
-            PlayerStats.player_id == p.id, PlayerStats.format == "PremierDraft"
-        )
+        select(PlayerStats).where(PlayerStats.player_id == p.id, PlayerStats.format == "PremierDraft")
     ).scalars().all()
     by_exp = {r.expansion: r for r in rows}
     assert set(by_exp) == {"ECL", "Y26ECL"}
@@ -219,19 +238,35 @@ def test_refresh_player_multiple_expansions_coexist(session):
     assert by_exp["Y26ECL"].trophies == 1
 
 
+def test_refresh_player_routes_drafts_across_sets(session):
+    sos = _seed_set(session, code="SOS", start_date=date(2026, 4, 21))
+    ecl = _seed_set(session, code="ECL", start_date=date(2026, 1, 20))
+    p = _seed_player(session)
+    client = FakeClient(drafts=[
+        {"format": "PremierDraft", "expansion": "SOS", "wins": 7, "losses": 0, "event_wins": 7},
+        {"format": "PremierDraft", "expansion": "ECL", "wins": 4, "losses": 3, "event_wins": 0},
+    ])
+
+    refresh_player(session, client, p)
+    session.flush()
+
+    rows = session.execute(select(PlayerStats).where(PlayerStats.player_id == p.id)).scalars().all()
+    by_set = {r.set_id: r for r in rows}
+    assert by_set[sos.id].trophies == 1
+    assert by_set[ecl.id].wins == 4
+
+
 def test_refresh_player_404_invalidates_token(session):
     s = _seed_set(session)
     p = _seed_player(session)
     client = FakeClient(raise_=_make_404())
 
-    result = refresh_player(session, client, p, s)
+    result = refresh_player(session, client, p)
     session.flush()
 
     assert result == {"status": "invalidated"}
     assert p.token_invalid is True
-    rows = session.execute(
-        select(PlayerStats).where(PlayerStats.player_id == p.id)
-    ).scalars().all()
+    rows = session.execute(select(PlayerStats).where(PlayerStats.player_id == p.id)).scalars().all()
     assert rows == []
 
 
@@ -241,7 +276,7 @@ def test_refresh_player_malformed_response_does_not_invalidate(session):
     p = _seed_player(session)
     client = FakeClient(raise_=ValueError("bad json"))
 
-    result = refresh_player(session, client, p, s)
+    result = refresh_player(session, client, p)
 
     assert result["status"] == "error"
     assert p.token_invalid is False
@@ -252,7 +287,7 @@ def test_refresh_player_5xx_does_not_invalidate(session):
     p = _seed_player(session)
     client = FakeClient(raise_=_make_500())
 
-    result = refresh_player(session, client, p, s)
+    result = refresh_player(session, client, p)
 
     assert result["status"] == "error"
     assert p.token_invalid is False
@@ -263,51 +298,43 @@ def test_refresh_player_network_error_does_not_invalidate(session):
     p = _seed_player(session)
     client = FakeClient(raise_=requests.ConnectTimeout("timeout"))
 
-    result = refresh_player(session, client, p, s)
+    result = refresh_player(session, client, p)
 
     assert result["status"] == "error"
     assert p.token_invalid is False
 
 
-# ---------------------------------------------------------------------------
-# refresh_active_players
-# ---------------------------------------------------------------------------
-
-
 def test_refresh_active_players_skips_token_invalid_and_inactive(session):
-    s = _seed_set(session)
+    _seed_active_set(session)
     active_ok = _seed_player(session, name="ok", token_suffix="a")
     _seed_player(session, name="inactive", token_suffix="b", active=False)
     _seed_player(session, name="invalid", token_suffix="c", token_invalid=True)
     session.flush()
 
-    client = FakeClient(drafts=[
-        {"format": "PremierDraft", "expansion": "ECL", "wins": 7, "losses": 0, "event_wins": 7},
-    ])
+    client = FakeClient(drafts=[{"format": "PremierDraft", "expansion": ACTIVE_SET_CODE, "wins": 7, "losses": 0, "event_wins": 7}])
 
-    summary = refresh_active_players(session, client, s)
+    summary = refresh_active_players(session, client)
 
     assert summary["updated"] == 1
     assert summary["invalidated"] == 0
     assert summary["errors"] == 0
-    # Only the active+valid player got fetched
     assert [c[0] for c in client.calls] == [active_ok.seventeenlands_token]
 
 
 def test_refresh_active_players_does_not_call_client_when_all_skipped(session):
-    s = _seed_set(session)
+    _seed_active_set(session)
     _seed_player(session, name="inactive", token_suffix="a", active=False)
     _seed_player(session, name="invalid", token_suffix="b", token_invalid=True)
     session.flush()
 
-    summary = refresh_active_players(session, ExplodingClient(), s)
+    summary = refresh_active_players(session, ExplodingClient())
     assert summary["updated"] == 0
     assert summary["invalidated"] == 0
     assert summary["errors"] == 0
 
 
 def test_refresh_active_players_summary_counts(session):
-    s = _seed_set(session)
+    _seed_active_set(session)
     p_ok = _seed_player(session, name="ok", token_suffix="a")
     p_404 = _seed_player(session, name="bad", token_suffix="b")
     p_5xx = _seed_player(session, name="flaky", token_suffix="c")
@@ -326,9 +353,9 @@ def test_refresh_active_players_summary_counts(session):
                 raise error_404
             if token == p_5xx.seventeenlands_token:
                 raise error_500
-            return [{"format": "PremierDraft", "expansion": "ECL", "wins": 3, "losses": 2}]
+            return [{"format": "PremierDraft", "expansion": ACTIVE_SET_CODE, "wins": 3, "losses": 2}]
 
-    summary = refresh_active_players(session, RoutingClient(), s)
+    summary = refresh_active_players(session, RoutingClient())
 
     assert summary["updated"] == 1
     assert summary["invalidated"] == 1
@@ -340,9 +367,23 @@ def test_refresh_active_players_summary_counts(session):
     assert p_5xx.token_invalid is False
 
 
-# ---------------------------------------------------------------------------
-# refresh_one_player_for_all_sets
-# ---------------------------------------------------------------------------
+def test_refresh_active_players_no_active_set(session):
+    _seed_set(session, code="OLD")
+    _seed_player(session)
+    session.flush()
+    summary = refresh_active_players(session, ExplodingClient())
+    assert summary["status"] == "no_active_set"
+    assert summary["updated"] == 0
+
+
+def test_refresh_active_players_all_sets_uses_earliest_start(session):
+    _seed_set(session, code="A", start_date=date(2025, 6, 9))
+    _seed_set(session, code="B", start_date=date(2026, 1, 20))
+    p = _seed_player(session)
+    session.flush()
+    client = FakeClient(drafts=[])
+    refresh_active_players_all_sets(session, client)
+    assert client.calls and client.calls[0][1] == date(2025, 6, 9)
 
 
 def test_refresh_one_player_no_sets(session):
@@ -359,8 +400,8 @@ def test_refresh_one_player_unknown_player_id(session):
 
 
 def test_refresh_one_player_for_all_sets_writes_rows_per_set(session):
-    sos = _seed_set(session, code="SOS")
-    ecl = _seed_set(session, code="ECL")
+    _seed_set(session, code="SOS", start_date=date(2026, 4, 21))
+    _seed_set(session, code="ECL", start_date=date(2026, 1, 20))
     p = _seed_player(session)
     session.commit()
     client = FakeClient(drafts=[
@@ -371,17 +412,11 @@ def test_refresh_one_player_for_all_sets_writes_rows_per_set(session):
     result = refresh_one_player_for_all_sets(session, client, p.id)
     session.commit()
 
-    assert result["status"] == "ok"
-    assert len(result["per_set"]) == 2
-    rows = session.execute(
-        select(PlayerStats).where(PlayerStats.player_id == p.id)
-    ).scalars().all()
+    assert result["status"] == "updated"
+    assert result["rows"] == 2
+    assert client.calls == [(p.seventeenlands_token, date(2026, 1, 20), None)]
+    rows = session.execute(select(PlayerStats).where(PlayerStats.player_id == p.id)).scalars().all()
     assert len(rows) == 2
-
-
-# ---------------------------------------------------------------------------
-# upsert_draft_events
-# ---------------------------------------------------------------------------
 
 
 def _draft(event_id, **overrides):
@@ -412,9 +447,7 @@ def test_upsert_draft_events_inserts_each_event(session):
     session.flush()
 
     assert n == 3
-    rows = session.execute(
-        select(DraftEvent).where(DraftEvent.player_id == p.id)
-    ).scalars().all()
+    rows = session.execute(select(DraftEvent).where(DraftEvent.player_id == p.id)).scalars().all()
     assert sorted(r.seventeenlands_event_id for r in rows) == ["ev-a", "ev-b", "ev-c"]
     by_id = {r.seventeenlands_event_id: r for r in rows}
     assert by_id["ev-c"].colors == "WBg"
@@ -433,9 +466,7 @@ def test_upsert_draft_events_idempotent(session):
     upsert_draft_events(session, p.id, s.id, drafts, "SOS")
     session.flush()
 
-    count = session.execute(
-        select(DraftEvent).where(DraftEvent.player_id == p.id)
-    ).scalars().all()
+    count = session.execute(select(DraftEvent).where(DraftEvent.player_id == p.id)).scalars().all()
     assert len(count) == 2
 
 
@@ -450,9 +481,7 @@ def test_upsert_draft_events_updates_changed_fields(session):
     upsert_draft_events(session, p.id, s.id, [_draft("ev-a", wins=7, colors="WBg", event_wins=7)], "SOS")
     session.flush()
 
-    [row] = session.execute(
-        select(DraftEvent).where(DraftEvent.player_id == p.id)
-    ).scalars().all()
+    [row] = session.execute(select(DraftEvent).where(DraftEvent.player_id == p.id)).scalars().all()
     assert row.wins == 7
     assert row.colors == "WBg"
     assert row.is_trophy is True
@@ -486,12 +515,10 @@ def test_refresh_player_writes_draft_events(session):
     ]
     client = FakeClient(drafts=drafts)
 
-    refresh_player(session, client, p, s)
+    refresh_player(session, client, p)
     session.flush()
 
-    events = session.execute(
-        select(DraftEvent).where(DraftEvent.player_id == p.id)
-    ).scalars().all()
+    events = session.execute(select(DraftEvent).where(DraftEvent.player_id == p.id)).scalars().all()
     assert sorted(e.seventeenlands_event_id for e in events) == ["alpha", "beta"]
     by_id = {e.seventeenlands_event_id: e for e in events}
     assert by_id["alpha"].is_trophy is True
