@@ -25,12 +25,19 @@ from bot.database import SessionLocal
 from bot.models import Player as DbPlayer, PodDraftEvent, PodDraftMatch, PodDraftParticipant
 from bot.services import pod_swiss
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
-from bot.services.pod_deck_color import PAIR_EMOJI_NAME, NotInPodError, SubmitDeckView
+from bot.services.pod_deck_color import (
+    PAIR_EMOJI_NAME,
+    SAVED_MSG,
+    LiveDeckColorSelectView,
+    NotInPodError,
+    SubmitDeckView,
+)
 from bot.services.pod_replays import fetch_and_persist_replays_for_player
 from bot.services.seventeenlands import SeventeenLandsClient
 from bot.services.pod_drafts import (
     DM_KIND_ROUND,
     DM_KIND_SUBMIT_DECK,
+    DM_KIND_SUBMIT_DECK_FINAL,
     FinalStanding,
     _normalize_player_name,
     _normalized_column,
@@ -38,6 +45,7 @@ from bot.services.pod_drafts import (
     add_pairing,
     dm_messages_for_match,
     dm_messages_for_round,
+    final_submit_deck_dm_for_participant,
     finalize_champion as finalize_db,
     get_participant_deck_state,
     participant_dm_info,
@@ -525,15 +533,24 @@ def build_live_submit_deck_view() -> SubmitDeckView:
     return SubmitDeckView(live_deck_color_submit, live_deck_state_lookup, live_review_choice_submit)
 
 
-def _build_submit_deck_dm_content(deck_colors: str | None, wants_draft_review: bool | None) -> str:
-    """Body for the Submit Deck DM. Reflects saved state when present so re-opens don't look stale."""
-    if deck_colors:
-        review = "🙋 Yes" if wants_draft_review else "❌ No"
-        return (
-            f"🎨 Deck colors: **{deck_colors}** · Review opt-in: {review}\n"
-            "Click below to update."
-        )
-    return "🎨 **Submit your deck colors** when you're done drafting — click below."
+def build_live_deck_color_select_view(
+    current_value: str | None = None, current_review: bool | None = None,
+) -> LiveDeckColorSelectView:
+    """Direct-dropdown variant for DMs — both selects are visible on the message itself."""
+    return LiveDeckColorSelectView(
+        live_deck_color_submit, live_deck_state_lookup, live_review_choice_submit,
+        current_value=current_value, current_review=current_review,
+    )
+
+
+def _build_submit_deck_dm_embed(deck_colors: str | None, wants_draft_review: bool | None) -> discord.Embed:
+    """Embed body for the Submit Deck DM. Pre-submit shows the prompt; post-submit collapses to
+    SAVED_MSG (the dropdown defaults already convey the saved values visually)."""
+    if deck_colors is not None or wants_draft_review is not None:
+        body = SAVED_MSG
+    else:
+        body = "🎨 **Submit your deck colors** when you're done drafting"
+    return discord.Embed(description=body)
 
 
 async def _send_submit_deck_dms(bot_client, event_id: str) -> None:
@@ -544,12 +561,12 @@ async def _send_submit_deck_dms(bot_client, event_id: str) -> None:
         existing = await asyncio.to_thread(_load_submit_deck_dm_sync, p["participant_id"])
         if existing is not None:
             continue
-        content = _build_submit_deck_dm_content(p["deck_colors"], p["wants_draft_review"])
-        view = build_live_submit_deck_view()
+        embed = _build_submit_deck_dm_embed(p["deck_colors"], p["wants_draft_review"])
+        view = build_live_deck_color_select_view(p["deck_colors"], p["wants_draft_review"])
         msg = None
         try:
             user = bot_client.get_user(int(p["discord_id"])) or await bot_client.fetch_user(int(p["discord_id"]))
-            msg = await user.send(content=content, view=view)
+            msg = await user.send(embed=embed, view=view)
         except discord.Forbidden:
             log.info(f"submit-deck DM blocked for {p['discord_id']}")
             continue
@@ -567,6 +584,68 @@ async def _send_submit_deck_dms(bot_client, event_id: str) -> None:
                 dm_channel_id=str(msg.channel.id),
                 dm_message_id=str(msg.id),
             )
+
+
+def _build_final_submit_deck_dm_embed(deck_colors: str | None, wants_draft_review: bool | None) -> discord.Embed:
+    """Embed body for the post-R3 Submit Deck DM. Mirrors `_build_submit_deck_dm_embed` but with a thank-you header."""
+    chordo_love = emojis.get("chordo_love")
+    header = f"{chordo_love} Thank you for playing!"
+    if deck_colors is not None or wants_draft_review is not None:
+        body = f"{header}\n{SAVED_MSG}"
+    else:
+        body = f"{header}\n🎨 **Please submit your deck colors with the dropdown below**"
+    return discord.Embed(description=body)
+
+
+async def _send_final_submit_deck_dms_for_match(
+    bot_client, event_id: str, a_name: str, b_name: str,
+) -> None:
+    """After an R3 match is reported: DM both players a fresh Submit Deck prompt. Idempotent per
+    participant — if the opponent later re-reports, the second call no-ops for already-DMed players."""
+    dm_info = await asyncio.to_thread(_load_dm_info_sync, event_id)
+    seat_keys = (_normalize_player_name(a_name), _normalize_player_name(b_name))
+    for seat_key in seat_keys:
+        info = dm_info.get(seat_key)
+        if info is None or not info.discord_id:
+            continue
+        existing = await asyncio.to_thread(_load_final_submit_deck_dm_sync, info.participant_id)
+        if existing is not None:
+            continue
+        deck_colors, wants_review = await asyncio.to_thread(
+            _load_participant_deck_state_sync, event_id, info.discord_id,
+        )
+        embed = _build_final_submit_deck_dm_embed(deck_colors, wants_review)
+        view = build_live_deck_color_select_view(deck_colors, wants_review)
+        msg = None
+        try:
+            user = bot_client.get_user(int(info.discord_id)) \
+                or await bot_client.fetch_user(int(info.discord_id))
+            msg = await user.send(embed=embed, view=view)
+        except discord.Forbidden:
+            log.info(f"final submit-deck DM blocked for {info.discord_id}")
+            continue
+        except discord.HTTPException:
+            log.warning("final submit-deck DM failed", exc_info=True)
+            continue
+        if msg is not None:
+            await asyncio.to_thread(
+                _persist_dm_message_sync,
+                event_id=event_id,
+                participant_id=info.participant_id,
+                kind=DM_KIND_SUBMIT_DECK_FINAL,
+                round_num=TOTAL_ROUNDS,
+                match_id=None,
+                dm_channel_id=str(msg.channel.id),
+                dm_message_id=str(msg.id),
+            )
+
+
+def _load_final_submit_deck_dm_sync(participant_id: str):
+    with SessionLocal() as session:
+        row = final_submit_deck_dm_for_participant(session, participant_id)
+        if row is not None:
+            session.expunge(row)
+        return row
 
 
 def _load_participants_with_discord_sync(event_id: str) -> list[dict]:
@@ -596,20 +675,41 @@ def _load_participant_deck_state_sync(event_id: str, discord_id: str) -> tuple[s
 
 
 async def _refresh_submit_deck_dm(bot_client, event_id: str, discord_id: str) -> None:
-    """Edit the user's Submit Deck DM (if tracked) so the body reflects their current saved state."""
+    """Edit the user's Submit Deck DM(s) so the body reflects their current saved state. Updates both
+    the R1 DM and (if present) the post-R3 final DM, so color/review edits sync across both."""
     participant_id = await asyncio.to_thread(_load_participant_id_sync, event_id, discord_id)
     if participant_id is None:
         return
-    dm_row = await asyncio.to_thread(_load_submit_deck_dm_sync, participant_id)
-    if dm_row is None:
-        return
     deck_colors, wants_review = await asyncio.to_thread(_load_participant_deck_state_sync, event_id, discord_id)
-    content = _build_submit_deck_dm_content(deck_colors, wants_review)
+    r1_row = await asyncio.to_thread(_load_submit_deck_dm_sync, participant_id)
+    if r1_row is not None:
+        await _edit_submit_deck_dm(
+            bot_client, r1_row,
+            _build_submit_deck_dm_embed(deck_colors, wants_review),
+            deck_colors, wants_review,
+        )
+    final_row = await asyncio.to_thread(_load_final_submit_deck_dm_sync, participant_id)
+    if final_row is not None:
+        await _edit_submit_deck_dm(
+            bot_client, final_row,
+            _build_final_submit_deck_dm_embed(deck_colors, wants_review),
+            deck_colors, wants_review,
+        )
+
+
+async def _edit_submit_deck_dm(
+    bot_client, dm_row, embed: discord.Embed,
+    deck_colors: str | None, wants_review: bool | None,
+) -> None:
     try:
         channel = bot_client.get_channel(int(dm_row.dm_channel_id)) \
             or await bot_client.fetch_channel(int(dm_row.dm_channel_id))
         msg = await channel.fetch_message(int(dm_row.dm_message_id))
-        await msg.edit(content=content, view=build_live_submit_deck_view())
+        await msg.edit(
+            content=None,
+            embed=embed,
+            view=build_live_deck_color_select_view(deck_colors, wants_review),
+        )
     except discord.HTTPException:
         log.warning(f"refresh_submit_deck_dm: could not edit DM {dm_row.dm_message_id}", exc_info=True)
 
@@ -851,6 +951,9 @@ async def _handle_result_submission(interaction: discord.Interaction, value: str
     if round_num >= TOTAL_ROUNDS:
         asyncio.create_task(_fetch_replays_for_match_players(
             event_id, result["a_name"], result["b_name"],
+        ))
+        asyncio.create_task(_send_final_submit_deck_dms_for_match(
+            interaction.client, event_id, result["a_name"], result["b_name"],
         ))
 
 
@@ -1218,6 +1321,7 @@ def register_persistent_views(bot) -> None:
     """Register persistent views so component clicks dispatch after restart."""
     bot.add_view(RoundResultsView())
     bot.add_view(build_live_submit_deck_view())
+    bot.add_view(build_live_deck_color_select_view())
 
 
 async def reset_event_matches(event_id: str) -> int:
@@ -1469,7 +1573,7 @@ def build_champion_embed(
     description = f"{header}\n" + "\n".join(lines)
     if include_submit_cta:
         chordo_love = emojis.get("chordo_love")
-        description += f"\n\n**🎨 Submit Deck** and share a screenshot below!\nThank you for playing! {chordo_love}"
+        description += f"\n\n**🎨 Share a screenshot and comment on your deck below**\n{chordo_love} Thank you for playing!"
 
     return discord.Embed(
         title=title,
@@ -1830,10 +1934,7 @@ async def _post_or_update_live_standings(manager) -> None:
         if thread is None:
             return
         try:
-            manager.standings_message = await thread.send(
-                embed=embed,
-                view=build_live_submit_deck_view(),
-            )
+            manager.standings_message = await thread.send(embed=embed)
         except Exception:
             log.warning("could not post live standings", exc_info=True)
             return

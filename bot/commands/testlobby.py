@@ -25,7 +25,7 @@ from bot.commands.testcomponent import (
 
 from bot.services import pod_swiss
 from bot.services.lobby_embed import LobbyReadyButtonView, render as render_lobby_embed
-from bot.services.pod_deck_color import SubmitDeckView
+from bot.services.pod_deck_color import LiveDeckColorSelectView, SubmitDeckView
 from bot.services.pod_drafts import _normalize_player_name as _norm
 from bot.services.pod_tournament import (
     GRACE_SECONDS,
@@ -33,6 +33,7 @@ from bot.services.pod_tournament import (
     RoundResultsView,
     TOTAL_ROUNDS,
     SKIPPED_SENTINEL,
+    _build_final_submit_deck_dm_embed,
     _mark_trophy_match,
     _pin_only_this_bot_message,
     _round_embed,
@@ -123,27 +124,97 @@ async def _test_review_toggle(interaction: discord.Interaction, wants_review: bo
 
 
 def _submit_deck_view(state: dict | None = None) -> SubmitDeckView:
-    """Build a SubmitDeckView. When `state` is provided, the submit callback attributes the color to
-    the invoker's seat in the bracket and re-evaluates the champion announcement.
-    """
+    """Build a SubmitDeckView (button form) for the testlobby channel preview. The button gate is
+    kept for non-DM surfaces — DMs use `_live_deck_color_select_view` for direct dropdowns."""
     if state is None:
         return SubmitDeckView(_test_submit_deck_color, _test_lookup_deck_state, _test_review_toggle)
+    submit, toggle = _stateful_test_callbacks(state)
+    return SubmitDeckView(submit, _test_lookup_deck_state, toggle)
 
+
+def _live_deck_color_select_view(
+    state: dict | None,
+    current_value: str | None = None,
+    current_review: bool | None = None,
+) -> LiveDeckColorSelectView:
+    """Direct-dropdown view for testlobby DMs — mirrors the production R3 final DM."""
+    if state is None:
+        return LiveDeckColorSelectView(
+            _test_submit_deck_color, _test_lookup_deck_state, _test_review_toggle,
+            current_value=current_value, current_review=current_review,
+        )
+    submit, toggle = _stateful_test_callbacks(state)
+    return LiveDeckColorSelectView(
+        submit, _test_lookup_deck_state, toggle,
+        current_value=current_value, current_review=current_review,
+    )
+
+
+def _stateful_test_callbacks(state: dict):
     async def submit(interaction: discord.Interaction, color: str) -> None:
         _TEST_DECK_COLORS[interaction.user.id] = color
         state.setdefault("player_colors", {})[_norm(_INVOKER_SEAT)] = color
-        await _maybe_post_or_update_test_standings(state, interaction.channel)
-        # Color submit edits an existing announcement but never triggers the first post —
-        # screenshot upload (or grace expiry) is the only thing that creates it.
+        channel = state.get("origin_channel") or interaction.channel
+        await _maybe_post_or_update_test_standings(state, channel)
         if state.get("champion_announced"):
-            await _maybe_announce_or_update_test_champion(state, interaction.channel)
+            await _maybe_announce_or_update_test_champion(state, channel)
+        await _refresh_test_invoker_final_dm(state)
 
     async def toggle(interaction: discord.Interaction, wants_review: bool) -> None:
         _TEST_REVIEW_CHOICES[interaction.user.id] = wants_review
         state.setdefault("review_choices", {})[_norm(_INVOKER_SEAT)] = wants_review
-        await _maybe_post_or_update_test_standings(state, interaction.channel)
+        channel = state.get("origin_channel") or interaction.channel
+        await _maybe_post_or_update_test_standings(state, channel)
+        await _refresh_test_invoker_final_dm(state)
 
-    return SubmitDeckView(submit, _test_lookup_deck_state, toggle)
+    return submit, toggle
+
+
+async def _refresh_test_invoker_final_dm(state: dict) -> None:
+    msg = state.get("final_submit_dm_message")
+    invoker = state.get("invoker")
+    if msg is None or invoker is None:
+        return
+    deck_colors = _TEST_DECK_COLORS.get(invoker.id)
+    wants_review = _TEST_REVIEW_CHOICES.get(invoker.id)
+    embed = _build_final_submit_deck_dm_embed(deck_colors, wants_review)
+    try:
+        await msg.edit(
+            content=None,
+            embed=embed,
+            view=_live_deck_color_select_view(state, deck_colors, wants_review),
+        )
+    except discord.HTTPException:
+        log.warning("could not refresh testlobby final submit-deck DM", exc_info=True)
+
+
+async def _maybe_dm_invoker_final_submit_deck(state: dict, match: dict) -> None:
+    """Mirror of pod_tournament's R3 final Submit Deck DM. Fires only when the invoker is a player
+    in the just-reported R3 match. Idempotent via a flag on `state`."""
+    invoker = state.get("invoker")
+    if invoker is None:
+        return
+    if _INVOKER_SEAT not in (match.get("a_name"), match.get("b_name")):
+        return
+    if state.get("final_submit_dm_sent"):
+        return
+    deck_colors = _TEST_DECK_COLORS.get(invoker.id)
+    wants_review = _TEST_REVIEW_CHOICES.get(invoker.id)
+    embed = _build_final_submit_deck_dm_embed(deck_colors, wants_review)
+    try:
+        msg = await invoker.send(
+            embed=embed,
+            view=_live_deck_color_select_view(state, deck_colors, wants_review),
+        )
+    except discord.Forbidden:
+        log.info(f"testlobby final submit-deck DM blocked for user {invoker.id}")
+        return
+    except discord.HTTPException:
+        log.warning("testlobby final submit-deck DM failed", exc_info=True)
+        return
+    state["final_submit_dm_sent"] = True
+    state["final_submit_dm_message"] = msg
+
 
 _THREAD_NAME = "SOS Pod Draft #3 - May 15"
 _DRAFTMANCER_URL = "https://draftmancer.com/?session=LLUT-SOS-May-15-D"
@@ -443,7 +514,7 @@ async def _maybe_post_or_update_test_standings(state: dict, channel) -> None:
     existing = state.get("standings_message")
     if existing is None:
         try:
-            state["standings_message"] = await channel.send(embed=embed, view=_submit_deck_view(state))
+            state["standings_message"] = await channel.send(embed=embed)
         except discord.HTTPException:
             log.warning("could not post testlobby standings", exc_info=True)
             return
@@ -681,8 +752,11 @@ async def _handle_test_result(interaction: discord.Interaction, match_id: str,
 
     asyncio.create_task(_propagate_test_result_to_other_surface(state, round_num, m, is_dm))
 
+    bracket_channel = state.get("origin_channel") or interaction.channel
+
     if round_num == TOTAL_ROUNDS:
-        await _maybe_post_or_update_test_standings(state, interaction.channel)
+        await _maybe_post_or_update_test_standings(state, bracket_channel)
+        await _maybe_dm_invoker_final_submit_deck(state, m)
 
     if not all(mm["winner_name"] for mm in matches):
         return
@@ -691,7 +765,7 @@ async def _handle_test_result(interaction: discord.Interaction, match_id: str,
 
     if is_edit_during_grace:
         if round_num < TOTAL_ROUNDS:
-            await _regenerate_test_next_round(state, round_num + 1, interaction.channel)
+            await _regenerate_test_next_round(state, round_num + 1, bracket_channel)
         _schedule_test_grace(state, round_num)
         return
 
@@ -943,6 +1017,7 @@ async def setup(bot: commands.Bot) -> None:
                 "matches_by_round": dict(bracket["matches_by_round"]),
                 "outcomes": list(bracket["outcomes"]),
                 "invoker": ctx.author,
+                "origin_channel": ctx.channel,
                 "round_messages": {current_round: msg},
                 "grace_task": None,
                 "grace_round": None,

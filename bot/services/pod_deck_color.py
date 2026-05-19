@@ -309,3 +309,163 @@ class DeckColorWriteInModal(ui.Modal, title="Deck colors"):
                 current_value=cleaned, current_review=self._current_review,
             ),
         )
+
+
+LIVE_COLOR_CUSTOM_ID = "poddeckselect-color"
+LIVE_REVIEW_CUSTOM_ID = "poddeckselect-review"
+
+
+class LiveDeckColorSelectView(ui.View):
+    """Persistent direct-dropdown view for DM Submit Deck flow — both selects are visible on the
+    message itself, so players don't need to click a button first. Interactions defer silently and
+    rely on the parent module's refresh helper to re-render the message after persistence."""
+
+    def __init__(
+        self,
+        on_submit: SubmitCallback,
+        on_lookup: LookupCallback,
+        on_review_toggle: ReviewToggleCallback,
+        current_value: str | None = None,
+        current_review: bool | None = None,
+    ) -> None:
+        super().__init__(timeout=None)
+        self.add_item(LiveDeckColorSelect(
+            on_submit, on_lookup, on_review_toggle, current_value, current_review,
+        ))
+        self.add_item(LiveDraftReviewSelect(
+            on_submit, on_lookup, on_review_toggle, current_value, current_review,
+        ))
+
+
+def _dm_ephemeral(interaction: discord.Interaction) -> bool:
+    return interaction.guild is not None
+
+
+class LiveDeckColorSelect(ui.Select):
+    def __init__(
+        self,
+        on_submit: SubmitCallback,
+        on_lookup: LookupCallback,
+        on_review_toggle: ReviewToggleCallback,
+        current_value: str | None,
+        current_review: bool | None,
+    ) -> None:
+        from bot import emojis as _emojis
+        guild_codes = {code for code, _ in GUILDS}
+        is_write_in = current_value is not None and current_value not in guild_codes
+        options = [discord.SelectOption(
+            label=f"Other ({current_value})" if is_write_in else "Other (write-in)",
+            value=OTHER_VALUE,
+            description="Mono, 3-color, splash, etc.",
+            emoji=_emojis.get_emoji("manax"),
+            default=is_write_in,
+        )]
+        options.extend(
+            discord.SelectOption(
+                label=f"{name} ({code})",
+                value=code,
+                default=(current_value == code),
+                emoji=_emojis.get_emoji(PAIR_EMOJI_NAME[frozenset(code)]),
+            )
+            for code, name in GUILDS
+        )
+        super().__init__(
+            custom_id=LIVE_COLOR_CUSTOM_ID,
+            placeholder="Choose your deck colors",
+            options=options, min_values=1, max_values=1,
+        )
+        self._submit = on_submit
+        self._lookup = on_lookup
+        self._review_toggle = on_review_toggle
+        self._current_review = current_review
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        value = self.values[0]
+        if value == OTHER_VALUE:
+            await interaction.response.send_modal(LiveDeckColorWriteInModal(
+                self._submit, self._lookup, self._review_toggle, self._current_review,
+            ))
+            return
+        await interaction.response.defer()
+        try:
+            await self._submit(interaction, value)
+        except NotInPodError:
+            await interaction.followup.send(NOT_IN_POD_MSG, ephemeral=_dm_ephemeral(interaction))
+
+
+class LiveDraftReviewSelect(ui.Select):
+    def __init__(
+        self,
+        on_submit: SubmitCallback,
+        on_lookup: LookupCallback,
+        on_review_toggle: ReviewToggleCallback,
+        current_value: str | None,
+        current_review: bool | None,
+    ) -> None:
+        options = [
+            discord.SelectOption(
+                label="Yes, staying for draft review",
+                value=REVIEW_YES_VALUE,
+                emoji="🙋",
+                default=current_review is True,
+            ),
+            discord.SelectOption(
+                label="No, skipping draft review",
+                value=REVIEW_NO_VALUE,
+                emoji="⏭️",
+                default=current_review is False,
+            ),
+        ]
+        super().__init__(
+            custom_id=LIVE_REVIEW_CUSTOM_ID,
+            placeholder="Staying for draft review?",
+            options=options, min_values=1, max_values=1,
+        )
+        self._submit = on_submit
+        self._lookup = on_lookup
+        self._review_toggle = on_review_toggle
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        wants_review = self.values[0] == REVIEW_YES_VALUE
+        await interaction.response.defer()
+        try:
+            await self._review_toggle(interaction, wants_review)
+        except NotInPodError:
+            await interaction.followup.send(NOT_IN_POD_MSG, ephemeral=_dm_ephemeral(interaction))
+
+
+class LiveDeckColorWriteInModal(ui.Modal, title="Deck colors"):
+    colors = ui.TextInput(
+        label="Colors (e.g. URg, WUBR, WUBRG)",
+        placeholder="Uppercase = main, lowercase = splash",
+        min_length=1,
+        max_length=5,
+        required=True,
+    )
+
+    def __init__(
+        self,
+        on_submit: SubmitCallback,
+        on_lookup: LookupCallback,
+        on_review_toggle: ReviewToggleCallback,
+        current_review: bool | None,
+    ) -> None:
+        super().__init__()
+        self._submit = on_submit
+        self._lookup = on_lookup
+        self._review_toggle = on_review_toggle
+        self._current_review = current_review
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        cleaned = _sanitize(self.colors.value)
+        if cleaned is None:
+            await interaction.response.send_message(
+                f"⚠️ `{self.colors.value}` isn't valid — use only W/U/B/R/G letters, 1–5 chars.",
+                ephemeral=_dm_ephemeral(interaction),
+            )
+            return
+        await interaction.response.defer()
+        try:
+            await self._submit(interaction, cleaned)
+        except NotInPodError:
+            await interaction.followup.send(NOT_IN_POD_MSG, ephemeral=_dm_ephemeral(interaction))

@@ -22,6 +22,7 @@ from bot.models import (
 
 DM_KIND_ROUND = "round_pairing"
 DM_KIND_SUBMIT_DECK = "submit_deck"
+DM_KIND_SUBMIT_DECK_FINAL = "submit_deck_final"
 
 
 @dataclass(frozen=True)
@@ -423,6 +424,17 @@ def submit_deck_dm_for_participant(session: Session, participant_id: str) -> Pod
         select(PodDraftDmMessage).where(
             PodDraftDmMessage.participant_id == participant_id,
             PodDraftDmMessage.kind == DM_KIND_SUBMIT_DECK,
+        )
+    ).scalar_one_or_none()
+
+
+def final_submit_deck_dm_for_participant(
+    session: Session, participant_id: str,
+) -> PodDraftDmMessage | None:
+    return session.execute(
+        select(PodDraftDmMessage).where(
+            PodDraftDmMessage.participant_id == participant_id,
+            PodDraftDmMessage.kind == DM_KIND_SUBMIT_DECK_FINAL,
         )
     ).scalar_one_or_none()
 
