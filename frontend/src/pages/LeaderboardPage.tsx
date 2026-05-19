@@ -34,7 +34,7 @@ import {
   usePlayerProfile,
   useSets,
 } from "../data/hooks";
-import { colorsOf, effectiveColorCount, fmtRange, lastUpdated, prettyFormat, relativeTime, sumEvents, weekOfSet, winPct } from "../data/utils";
+import { colorsOf, effectiveColorCount, eventDate, fmtRange, lastUpdated, prettyFormat, relativeTime, sumEvents, weekOfSet, winPct } from "../data/utils";
 import { colorsDisplayName, FORMAT_LABEL_GROUPS, FORMAT_OPTIONS, matchesFormatFilter, MULTI, OTHER } from "../data/filters";
 import { FMT_COLORS, FMT_DEFAULT_COLOR, renderFormatOption, shortFormat } from "../data/format-display";
 import { guildLogoTransform, guildSvgUrl } from "../data/guild-art";
@@ -937,7 +937,7 @@ function LastTrophyPanel({
                   mono
                   className="mono text-[12px] text-muted text-right justify-self-end"
                 />
-                <span className="mono text-[12px] text-dim">{relativeTime(e.finishedAt)}</span>
+                <span className="mono text-[12px] text-dim">{relativeTime(eventDate(e))}</span>
                 <span className="flex justify-center text-subtle">
                   {href && <ExternalLink size={10} aria-hidden="true" />}
                 </span>
@@ -1035,7 +1035,7 @@ function MobileExpandedRow({
                 {prettyFormat(lastTrophy.format).toUpperCase()}
               </span>
               <span className="text-dim text-[11px]">·</span>
-              <span className="font-display text-[11px] tracking-[0.08em] text-dim tabular-nums">{relativeTime(lastTrophy.finishedAt)}</span>
+              <span className="font-display text-[11px] tracking-[0.08em] text-dim tabular-nums">{relativeTime(eventDate(lastTrophy))}</span>
             </>
           ) : lastDeck ? (
             <>
@@ -1046,7 +1046,7 @@ function MobileExpandedRow({
                 {prettyFormat(lastDeck.format).toUpperCase()}
               </span>
               <span className="text-dim text-[11px]">·</span>
-              <span className="font-display text-[11px] tracking-[0.08em] text-dim tabular-nums">{relativeTime(lastDeck.finishedAt)}</span>
+              <span className="font-display text-[11px] tracking-[0.08em] text-dim tabular-nums">{relativeTime(eventDate(lastDeck))}</span>
             </>
           ) : null}
         </div>

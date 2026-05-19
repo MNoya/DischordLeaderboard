@@ -19,7 +19,7 @@ import { MobilePageHeader } from "../components/PageNav";
 import { RankBadge } from "../components/RankBadge";
 
 import { useAvailableFormats, useColorChips, useDraftEvents, useLeaderboard, usePlayerProfile, useSets } from "../data/hooks";
-import { colorsOf, effectiveColorCount, fmtShortDate, mainColors, prettyFormat, winPct } from "../data/utils";
+import { colorsOf, effectiveColorCount, eventDate, fmtShortDate, isFlashbackEvent, mainColors, prettyFormat, winPct } from "../data/utils";
 import {
   colorsDisplayName,
   deckColorParts,
@@ -378,7 +378,7 @@ function DesktopSkeleton() {
             <div
               key={i}
               className="grid gap-3 py-[11px] border-b border-border items-center"
-              style={{ gridTemplateColumns: "30px 110px 110px 1fr 90px" }}
+              style={{ gridTemplateColumns: "30px 110px 170px 1fr 90px" }}
             >
               <SkeletonBox className="w-4 h-4 mx-auto" />
               <SkeletonBox className="w-20 h-3" />
@@ -529,6 +529,7 @@ function Desktop({
           setColorsFilter={setColorsFilter}
           colorOptions={colorOptions}
           formatOptions={formatOptions}
+          setEndDate={sets?.find((s) => s.code === profile.setCode)?.endDate ?? null}
         />
       </div>
     </div>
@@ -810,6 +811,7 @@ function DraftLogDesktop({
   setColorsFilter,
   colorOptions,
   formatOptions,
+  setEndDate,
 }: {
   events: PlayerDraftEvent[];
   filtered: PlayerDraftEvent[];
@@ -819,6 +821,7 @@ function DraftLogDesktop({
   setColorsFilter: (v: string) => void;
   colorOptions: FilterOption[];
   formatOptions: FilterOption[];
+  setEndDate: string | null;
 }) {
   const sectionRef = useRef<HTMLElement>(null);
   const scrollToTop = () =>
@@ -852,7 +855,7 @@ function DraftLogDesktop({
 
       <div className="mt-3">
         {filtered.map((e) => (
-          <EventLogRow key={e.eventId} event={e} variant="desktop" />
+          <EventLogRow key={e.eventId} event={e} variant="desktop" setEndDate={setEndDate} />
         ))}
         {filtered.length === 0 && (
           <div className="p-6 text-center text-muted font-display tracking-[0.2em]">
@@ -898,12 +901,21 @@ function GoToTopButton({
   );
 }
 
-function EventLogRow({ event: e, variant }: { event: PlayerDraftEvent; variant: "desktop" | "mobile" }) {
+function EventLogRow({
+  event: e,
+  variant,
+  setEndDate,
+}: {
+  event: PlayerDraftEvent;
+  variant: "desktop" | "mobile";
+  setEndDate?: string | null;
+}) {
   const href = e.externalUrl ?? null;
   const linkClass = href ? "cursor-pointer transition-colors hover:bg-surface2 no-underline text-inherit" : "";
   const isPod = e.format === "PodDraft";
   const podWithoutDeck = isPod && !e.colors;
   const formatLabel = isPod && e.eventName ? e.eventName.toUpperCase() : prettyFormat(e.format).toUpperCase();
+  const flashback = isFlashbackEvent(e.finishedAt, setEndDate);
 
   if (variant === "desktop") {
     const inner = (
@@ -911,24 +923,27 @@ function EventLogRow({ event: e, variant }: { event: PlayerDraftEvent; variant: 
         <span className="text-center">
           {e.isTrophy ? <Trophy size={18} color="#ffc63a" /> : <span className="text-dim">·</span>}
         </span>
-        <span className="text-[11px] text-muted">{fmtShortDate(e.finishedAt)}</span>
-        <span className="font-display text-[14px] tracking-[0.08em]">
-          {formatLabel}
+        <span className="text-[12px] text-muted text-center">{fmtShortDate(eventDate(e))}</span>
+        <span className="flex flex-col">
+          <span className="font-display text-[16px] tracking-[0.08em]">{formatLabel}</span>
+          {flashback && (
+            <span className="font-display text-[12px] tracking-[0.2em] text-teal mt-0.5">FLASHBACK</span>
+          )}
         </span>
         {podWithoutDeck ? (
-          <span className="text-[11px] text-muted">Deck not submitted</span>
+          <span className="text-[12px] text-muted">Deck not submitted</span>
         ) : (() => {
           const { name, splash } = deckColorParts(e.colors);
           return (
             <span className="grid items-center" style={{ gridTemplateColumns: "100px 60px 1fr" }}>
-              <Pips colors={e.colors} size={13} />
+              <Pips colors={e.colors} size={14} flat />
               <span
-                className="text-[11px] text-muted"
+                className="text-[12px] text-muted"
                 style={splash ? undefined : { gridColumn: "span 2" }}
               >
                 {name}
               </span>
-              {splash && <span className="text-[11px] text-muted">{splash}</span>}
+              {splash && <span className="text-[12px] text-muted">{splash}</span>}
             </span>
           );
         })()}
@@ -948,7 +963,7 @@ function EventLogRow({ event: e, variant }: { event: PlayerDraftEvent; variant: 
       "grid gap-3 py-[11px] px-2 -mx-2 border-b border-border items-center",
       linkClass,
     );
-    const style = { gridTemplateColumns: "30px 110px 110px 1fr 90px 14px" };
+    const style = { gridTemplateColumns: "30px 110px 170px 1fr 90px 14px" };
     return href ? (
       <a href={href} target="_blank" rel="noopener noreferrer" className={cls} style={style}>
         {inner}
@@ -966,15 +981,19 @@ function EventLogRow({ event: e, variant }: { event: PlayerDraftEvent; variant: 
       </span>
       <div>
         <div className="flex items-center gap-1.5">
-          {!podWithoutDeck && <Pips colors={e.colors} size={11} />}
+          {!podWithoutDeck && <Pips colors={e.colors} size={11} flat />}
           <span className="font-display text-[13px] tracking-[0.08em]">
             {formatLabel}
           </span>
+          {flashback && (
+            <span className="font-display text-[13px] tracking-[0.08em] text-teal">FLASHBACK</span>
+          )}
         </div>
         <div className="text-[11px] text-muted mt-0.5">
-          {podWithoutDeck
-            ? `Deck not submitted · ${fmtShortDate(e.finishedAt)}`
-            : `${formatDeckColors(e.colors)} · ${fmtShortDate(e.finishedAt)}`}
+          {[
+            podWithoutDeck ? "Deck not submitted" : formatDeckColors(e.colors),
+            fmtShortDate(eventDate(e)),
+          ].filter(Boolean).join(" · ")}
         </div>
       </div>
       <span className="inline-flex items-center gap-1.5">
@@ -983,7 +1002,7 @@ function EventLogRow({ event: e, variant }: { event: PlayerDraftEvent; variant: 
           wins={e.wins}
           losses={e.losses}
           color={e.isTrophy ? "#2ee85c" : "#e6ecf5"}
-          className="mono text-[14px] font-semibold"
+          className="font-display text-[22px]"
         />
         {href && <ExternalLink size={10} className="text-dim" aria-hidden="true" />}
       </span>
@@ -1153,7 +1172,12 @@ function Mobile({
           </div>
         </div>
         {filtered.map((e) => (
-          <EventLogRow key={e.eventId} event={e} variant="mobile" />
+          <EventLogRow
+            key={e.eventId}
+            event={e}
+            variant="mobile"
+            setEndDate={sets?.find((s) => s.code === profile.setCode)?.endDate ?? null}
+          />
         ))}
         {filtered.length === 0 && (
           <div className="p-6 text-center text-muted font-display tracking-[0.2em] text-[12px]">

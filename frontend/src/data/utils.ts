@@ -10,14 +10,25 @@ const MONTHS_SHORT = ["Jan.", "Feb.", "Mar.", "Apr.", "May", "Jun.", "Jul.", "Au
 // "May 8" / "Apr. 8" / "Dec. 23" — parses the YYYY-MM-DD prefix directly to
 // avoid timezone shifts on UTC-stored draft timestamps. Appends the year
 // ("May 8, 2023") when the date is not in the current calendar year.
-export function fmtShortDate(iso: string | null | undefined, today: Date = new Date()): string {
-  if (!iso) return "";
+export function fmtShortDate(iso: string, today: Date = new Date()): string {
   const year = parseInt(iso.slice(0, 4), 10);
   const month = parseInt(iso.slice(5, 7), 10);
   const day = parseInt(iso.slice(8, 10), 10);
   if (!month || !day) return "";
   const base = `${MONTHS_SHORT[month - 1]} ${day}`;
   return year && year !== today.getFullYear() ? `${base}, ${year}` : base;
+}
+
+export function eventDate(e: { finishedAt: string | null; startedAt: string | null }): string {
+  return e.finishedAt ?? e.startedAt ?? "";
+}
+
+export function isFlashbackEvent(
+  finishedAt: string | null | undefined,
+  setEndDate: string | null | undefined,
+): boolean {
+  if (!finishedAt || !setEndDate) return false;
+  return finishedAt.slice(0, 10) > setEndDate;
 }
 
 // Win percentage as a fixed-precision string, safe against zero-game players.
@@ -99,8 +110,7 @@ export function sumEvents(rows: ReadonlyArray<{ events: number }> | undefined): 
 
 // Compact relative time ("2h", "3d", "1w", "5mo", "3y") suitable for sidebar timestamps.
 // Only goes one unit deep; "now" for events under a minute old.
-export function relativeTime(iso: string | null | undefined, now: Date = new Date()): string {
-  if (!iso) return "";
+export function relativeTime(iso: string, now: Date = new Date()): string {
   const then = new Date(iso).getTime();
   const diffMs = now.getTime() - then;
   if (diffMs < 60_000) return "now";
