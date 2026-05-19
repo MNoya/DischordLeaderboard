@@ -58,7 +58,9 @@ export function PlayerSeatPanel({
       {deckView && (
         <DeckScreenshotModal
           participant={{
+            eventId: deckView.eventId,
             displayName: deckView.discordName,
+            participantDisplayName: deckView.displayName,
             deckColors: deckView.deckColors,
             deckScreenshotUrl: deckView.deckScreenshotUrl,
             deckScreenshotCaption: deckView.deckScreenshotCaption,

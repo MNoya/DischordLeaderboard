@@ -8,7 +8,9 @@
 // Stack: Deno runtime, Supabase Edge Functions.
 // Secrets required: SUPABASE_URL (built-in), SUPABASE_SERVICE_ROLE_KEY (built-in), DISCORD_BOT_TOKEN.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.0";
+
+declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void };
 
 const FRESH_WINDOW_MS = 60 * 60 * 1000;
 const DISCORD_REFRESH_ENDPOINT = "https://discord.com/api/v10/attachments/refresh-urls";
@@ -50,7 +52,7 @@ Deno.serve(async (req) => {
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const serviceRoleKey = Deno.env.get("SERVICE_ROLE_JWT") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   const botToken = Deno.env.get("DISCORD_BOT_TOKEN");
   if (!supabaseUrl || !serviceRoleKey || !botToken) {
     console.error("missing required env vars");
@@ -59,6 +61,7 @@ Deno.serve(async (req) => {
 
   const supabase = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false },
+    global: { headers: { Authorization: `Bearer ${serviceRoleKey}` } },
   });
 
   const { data, error } = await supabase
@@ -92,13 +95,14 @@ Deno.serve(async (req) => {
     return json({ url: currentUrl, refreshed: false } satisfies RefreshResponse, 200);
   }
 
-  const { error: updateError } = await supabase
+  const writeback = supabase
     .from("pod_draft_participants")
     .update({ deck_screenshot_url: refreshed })
-    .eq("id", data.id);
-  if (updateError) {
-    console.warn(`writeback failed: ${updateError.message}`);
-  }
+    .eq("id", data.id)
+    .then(({ error: updateError }) => {
+      if (updateError) console.warn(`writeback failed: ${updateError.message}`);
+    });
+  EdgeRuntime.waitUntil(writeback);
 
   return json({ url: refreshed, refreshed: true } satisfies RefreshResponse, 200);
 });

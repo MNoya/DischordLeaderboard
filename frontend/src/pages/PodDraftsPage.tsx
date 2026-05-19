@@ -498,27 +498,26 @@ function EventRowBody({ event, today }: { event: PodEventSummary; today: string 
       <span
         className={cn(
           "font-display text-text min-w-0 line-clamp-2 lg:line-clamp-none lg:truncate",
-          isUpcoming ? "lg:flex-none" : "flex-1 lg:flex-none",
+          isUpcoming ? "lg:flex-none" : "flex-1 lg:flex-none lg:w-2/5",
         )}
-        style={{ fontSize: 18, letterSpacing: "0.04em", lineHeight: 1.15 }}
+        style={{ fontSize: 21, letterSpacing: "0.04em", lineHeight: 1.15 }}
       >
         {cleanPodEventName(event.name, event.setCode).toUpperCase()}
       </span>
       {isUpcoming && <CountdownChip iso={event.eventTime} />}
-      <div className="hidden lg:block flex-1" />
       {hasChamp && event.championDisplayName && (
-        <div className="flex flex-col items-center gap-1 min-w-0 max-w-[50%] lg:flex-row lg:items-center lg:gap-2 lg:max-w-none lg:shrink-0">
+        <div className="flex flex-col items-center gap-1 min-w-0 max-w-[50%] lg:flex-row lg:items-center lg:gap-2.5 lg:max-w-none lg:shrink-0 lg:w-[260px]">
           <div className="flex items-center gap-1 min-w-0 max-w-full lg:contents">
-            <Trophy size={14} color="#ffc63a" className="-translate-y-[1px]" />
+            <Trophy size={17} color="#ffc63a" className="-translate-y-[1px]" />
             <span
               className="font-display text-text tracking-[0.04em] truncate max-w-full"
-              style={{ fontSize: 15, lineHeight: 1 }}
+              style={{ fontSize: 18, lineHeight: 1 }}
             >
               {stripDiscriminator(event.championDisplayName).toUpperCase()}
             </span>
           </div>
           {event.championDeckColors && (
-            <Pips colors={event.championDeckColors} size={12} />
+            <Pips colors={event.championDeckColors} size={15} />
           )}
         </div>
       )}
@@ -593,7 +592,9 @@ function EventStandings({ event }: { event: PodEventSummary }) {
       {deckTarget && (
         <DeckScreenshotModal
           participant={{
+            eventId: deckTarget.eventId,
             displayName: podDiscordName(deckTarget),
+            participantDisplayName: deckTarget.displayName,
             deckColors: deckTarget.deckColors,
             deckScreenshotUrl: deckTarget.deckScreenshotUrl,
             deckScreenshotCaption: deckTarget.deckScreenshotCaption,

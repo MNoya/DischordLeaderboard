@@ -32,6 +32,9 @@ cache/
 .dev.vars*
 !.dev.vars.example
 
+# Supabase CLI local cache
+supabase/.temp/
+
 # Vite + TypeScript build artifacts
 frontend/dist/
 frontend/node_modules/

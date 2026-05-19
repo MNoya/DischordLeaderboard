@@ -23,14 +23,16 @@ the participant exists but has no stored screenshot.
 
 ## Secrets
 
-`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are provided by the platform automatically. Set
-the third one yourself:
+`SUPABASE_URL` is provided by the platform automatically. Set the other two yourself:
 
 ```
 supabase secrets set DISCORD_BOT_TOKEN=...
+supabase secrets set SERVICE_ROLE_JWT=...    # legacy service_role JWT from dashboard → API Keys → Legacy
 ```
 
-(Dashboard alternative: Project Settings → Edge Functions → Secrets.)
+The auto-injected `SUPABASE_SERVICE_ROLE_KEY` is the new `sb_secret_*` format which PostgREST
+doesn't translate to a role claim, so the function falls back to the legacy JWT. The role itself
+also needs explicit grants on the table (see migration `a8t9u0v1w2x3`).
 
 The bot token must belong to a bot that's still a member of the guild where the screenshot was
 originally posted and has read access to the channel/thread — otherwise Discord refuses to
@@ -38,20 +40,16 @@ re-sign the URL and we fall back to the stale value.
 
 ## Deploy
 
-### Option A: CLI
-
 ```
-npm install -g supabase           # or use the standalone install
-supabase login
-supabase link --project-ref yrecdosksgigpceholjl
-supabase secrets set DISCORD_BOT_TOKEN=...
-supabase functions deploy refresh-deck-url
+npm install -g supabase
+supabase login                                                          # or set SUPABASE_ACCESS_TOKEN
+supabase secrets set DISCORD_BOT_TOKEN=... SERVICE_ROLE_JWT=... --project-ref yrecdosksgigpceholjl
+supabase functions deploy refresh-deck-url --project-ref yrecdosksgigpceholjl --no-verify-jwt
 ```
 
-### Option B: Dashboard
-
-Supabase dashboard → Edge Functions → **Deploy new function** → name `refresh-deck-url` → paste
-`index.ts` contents → Deploy. Set the secret under **Settings → Edge Functions → Secrets**.
+`--no-verify-jwt` is required: the function is called from the browser with a publishable key
+which the gateway rejects as not-a-JWT. The function does its own DB lookup, has no destructive
+paths, and the only side-effect of misuse is hitting Discord's rate limit on refresh-urls.
 
 ## Sanity check after deploy
 

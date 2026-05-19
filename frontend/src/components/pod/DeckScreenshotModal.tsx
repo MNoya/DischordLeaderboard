@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { X, ZoomIn, ZoomOut } from "lucide-react";
@@ -7,11 +7,18 @@ import { ChamferedButton } from "../ChamferedButton";
 import { Pips } from "../ManaPips";
 import { Record } from "../Record";
 import { useIsMobile } from "../../lib/use-is-mobile";
+import {
+  isDiscordCdnUrl,
+  isDiscordUrlFresh,
+  refreshDeckUrl,
+} from "../../data/refresh-deck-url";
 
 export const BREAKDOWN_CAPTION = "Seats, logs & replays";
 
 export interface DeckLike {
+  eventId?: string;
   displayName: string;
+  participantDisplayName?: string;
   deckColors: string | null;
   deckScreenshotUrl: string | null;
   deckScreenshotCaption?: string | null;
@@ -29,6 +36,40 @@ export function DeckScreenshotModal({ participant, breakdownHref, onClose }: Pro
   const [zoomed, setZoomed] = useState(false);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
+
+  const needsRefresh = useMemo(() => {
+    const url = participant.deckScreenshotUrl;
+    if (!url || !participant.eventId) return false;
+    return isDiscordCdnUrl(url) && !isDiscordUrlFresh(url);
+  }, [participant.deckScreenshotUrl, participant.eventId]);
+
+  const [resolvedUrl, setResolvedUrl] = useState<string | null>(
+    needsRefresh ? null : participant.deckScreenshotUrl,
+  );
+  const [isResolving, setIsResolving] = useState(needsRefresh);
+
+  useEffect(() => {
+    if (!needsRefresh || !participant.eventId) return;
+    const lookupName = participant.participantDisplayName ?? participant.displayName;
+    let cancelled = false;
+    refreshDeckUrl(participant.eventId, lookupName)
+      .then((url) => {
+        if (cancelled) return;
+        setResolvedUrl(url ?? participant.deckScreenshotUrl);
+      })
+      .finally(() => {
+        if (!cancelled) setIsResolving(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    needsRefresh,
+    participant.eventId,
+    participant.displayName,
+    participant.participantDisplayName,
+    participant.deckScreenshotUrl,
+  ]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -104,10 +145,14 @@ export function DeckScreenshotModal({ participant, breakdownHref, onClose }: Pro
             zoomed ? "overflow-auto" : "overflow-y-auto overflow-x-hidden"
           }`}
         >
-          {participant.deckScreenshotUrl ? (
+          {isResolving ? (
+            <div className="px-5 py-16 text-center text-muted font-body animate-pulse">
+              Refreshing deck image…
+            </div>
+          ) : resolvedUrl ? (
             <img
               ref={imgRef}
-              src={participant.deckScreenshotUrl}
+              src={resolvedUrl}
               alt={`${participant.displayName} deck screenshot`}
               onClick={toggleZoom}
               className={`block h-auto select-none ${
@@ -121,7 +166,7 @@ export function DeckScreenshotModal({ participant, breakdownHref, onClose }: Pro
             </div>
           )}
         </div>
-        {isMobile && participant.deckScreenshotUrl && (
+        {isMobile && resolvedUrl && (
           <button
             type="button"
             onClick={toggleZoom}
