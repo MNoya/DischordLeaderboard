@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 
 
 class _DraftClient(Protocol):
-    def fetch_drafts(self, token: str, start_date=..., end_date=...) -> list[dict]: ...
+    def fetch_drafts(self, token: str, start_date=..., end_date=..., expansion=...) -> list[dict]: ...
 
 
 def aggregate_by_set_format_expansion(drafts: Iterable[dict], sets: Iterable[MagicSet]) -> list[dict]:

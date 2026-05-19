@@ -104,6 +104,7 @@ class SeventeenLandsClient:
         token: str,
         start_date: date | None,
         end_date: date | None,
+        expansion: str | None,
     ) -> Path | None:
         if self.cache_dir is None:
             return None
@@ -112,6 +113,8 @@ class SeventeenLandsClient:
         ]
         if end_date is not None:
             parts.append(end_date.isoformat())
+        if expansion is not None:
+            parts.append(f"exp-{expansion}")
         return self.cache_dir / f"{token}__{'__'.join(parts)}.json"
 
     def fetch_drafts(
@@ -119,18 +122,21 @@ class SeventeenLandsClient:
         token: str,
         start_date: date | None = None,
         end_date: date | None = None,
+        expansion: str | None = None,
     ) -> list[dict]:
         """Return the list of draft events for a token.
 
-        Pass ``start_date`` and ``end_date`` to scope the upstream request to a
-        set's active window. Alchemy variants (e.g. YECL26) drafted in the same
-        window come along — caller handles substring matching against the base
-        set code.
+        Args:
+            token: 17lands user token.
+            start_date: Earliest draft date to include (server-side filter).
+            end_date: Latest draft date to include (server-side filter).
+            expansion: Single expansion code to scope to (server-side filter). Excludes alchemy variants — fall back to the date window when alchemy drafts must come along.
 
-        Raises ``requests.HTTPError`` on non-2xx and ``ValueError`` on a
-        malformed response body.
+        Raises:
+            requests.HTTPError: Upstream returned non-2xx.
+            ValueError: Response body was not valid JSON or missing 'drafts'.
         """
-        cache_path = self._cache_path(token, start_date, end_date)
+        cache_path = self._cache_path(token, start_date, end_date, expansion)
         if cache_path is not None and cache_path.exists():
             with cache_path.open("r", encoding="utf-8") as f:
                 cached = json.load(f)
@@ -141,6 +147,8 @@ class SeventeenLandsClient:
             params["start_date"] = start_date.isoformat()
         if end_date is not None:
             params["end_date"] = end_date.isoformat()
+        if expansion is not None:
+            params["expansion"] = expansion
 
         self.limiter.wait()
         resp = self.session.get(self._data_url(token), params=params, timeout=self.timeout_s)
