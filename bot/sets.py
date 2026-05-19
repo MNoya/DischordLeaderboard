@@ -24,6 +24,7 @@ class SetSeed:
 
 
 ALL_SETS: tuple[SetSeed, ...] = (
+    SetSeed("STX", "Strixhaven: School of Mages",  date(2021,  4, 15), date(2021,  7,  7)),
     SetSeed("FIN", "Final Fantasy",                date(2025,  6,  9), date(2025,  7, 28)),
     SetSeed("EOE", "Edge of Eternities",           date(2025,  7, 29), date(2025,  9, 23)),
     SetSeed("CUBE", "Arena Powered Cube",          date(2025, 10, 28), None, expansion_match="Cube - Powered"),
