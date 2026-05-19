@@ -111,23 +111,29 @@ function SeatHeader({
     nameContent
   );
 
+  const placementLabel = isChampion
+    ? "Champion"
+    : participant.placement != null
+      ? `${ordinalLabel(participant.placement)} place`
+      : "Unplaced";
   const metaRow = (
-    <div className="flex items-center gap-4 flex-wrap text-muted" style={{ fontSize: 15 }}>
-      <span className="inline-flex items-center gap-2">
-        {participant.deckColors && <Pips colors={participant.deckColors} size={14} />}
-        <span className="font-display tracking-[0.18em] uppercase">
-          {isChampion
-            ? "Champion"
-            : participant.placement != null
-              ? `${ordinalLabel(participant.placement)} place`
-              : "Unplaced"}
+    <div className="flex items-baseline gap-2.5 lg:gap-4 flex-wrap text-muted" style={{ fontSize: 16 }}>
+      <span className="inline-flex items-center gap-2 self-center">
+        {participant.deckColors && <Pips colors={participant.deckColors} size={16} />}
+        <span
+          className="font-display tabular-nums whitespace-nowrap text-text"
+          style={{ letterSpacing: "0.08em" }}
+        >
+          <Record wins={wins} losses={losses} mono separatorMargin={3} />
         </span>
       </span>
       <span
-        className="font-display tabular-nums whitespace-nowrap"
-        style={{ fontSize: 17, letterSpacing: "0.1em" }}
+        className={cn(
+          "font-display tracking-[0.16em] uppercase whitespace-nowrap",
+          isChampion ? "text-green" : "text-muted",
+        )}
       >
-        <Record wins={wins} losses={losses} mono separatorMargin={2} />
+        {placementLabel}
       </span>
     </div>
   );
@@ -431,7 +437,6 @@ function RoundRow({
       <GamesGrid
         playerGames={playerGames}
         opponentGames={opponentGames}
-        reportedAt={match.reportedAt}
       />
     </section>
   );
@@ -462,11 +467,9 @@ function ResultBadge({ won, yourScore, oppScore }: { won: boolean; yourScore: st
 function GamesGrid({
   playerGames,
   opponentGames,
-  reportedAt,
 }: {
   playerGames: PodEventReplayRow[];
   opponentGames: PodEventReplayRow[];
-  reportedAt: string | null;
 }) {
   const isMobile = useIsMobile();
   if (playerGames.length === 0 && opponentGames.length === 0) {
@@ -477,7 +480,7 @@ function GamesGrid({
     );
   }
   const gameCount = Math.max(playerGames.length, opponentGames.length);
-  const playerDurations = computeGameDurationsMin(playerGames, reportedAt);
+  const playerDurations = computeGameDurationsMin(playerGames);
 
   return (
     <div className="px-4 md:px-5 xl:px-8 pb-4 flex flex-col gap-2">
@@ -624,18 +627,13 @@ function findOpponentPov(playerGame: PodEventReplayRow, opponentGames: PodEventR
   return null;
 }
 
-function computeGameDurationsMin(
-  games: PodEventReplayRow[],
-  reportedAt: string | null,
-): (number | null)[] {
+function computeGameDurationsMin(games: PodEventReplayRow[]): (number | null)[] {
   if (games.length === 0) return [];
-  const reported = reportedAt ? new Date(reportedAt).getTime() : null;
   return games.map((g, i) => {
+    if (i === 0) return null;
+    const prevTime = new Date(games[i - 1].gameTime).getTime();
     const thisTime = new Date(g.gameTime).getTime();
-    const nextTime =
-      i + 1 < games.length ? new Date(games[i + 1].gameTime).getTime() : reported;
-    if (nextTime == null) return null;
-    const min = Math.max(0, Math.round((nextTime - thisTime) / 60_000));
+    const min = Math.max(0, Math.round((thisTime - prevTime) / 60_000));
     return min > 0 ? min : null;
   });
 }
@@ -649,10 +647,14 @@ function computeMatchDurationMin(
   const allTimes = [
     ...playerGames.map((g) => new Date(g.gameTime).getTime()),
     ...opponentGames.map((g) => new Date(g.gameTime).getTime()),
-  ];
+  ].sort((a, b) => a - b);
   if (allTimes.length === 0) return null;
-  const firstStart = Math.min(...allTimes);
+  const firstEnd = allTimes[0];
   const reported = new Date(reportedAt).getTime();
-  const min = Math.max(0, Math.round((reported - firstStart) / 60_000));
-  return min > 0 ? min : null;
+  const tailSpanMin = (reported - firstEnd) / 60_000;
+
+  const gameCount = Math.max(playerGames.length, opponentGames.length);
+  const game1EstimateMin = gameCount >= 2 ? tailSpanMin / Math.max(1, gameCount - 1) : 0;
+  const totalMin = Math.max(0, Math.round(tailSpanMin + game1EstimateMin));
+  return totalMin > 0 ? totalMin : null;
 }

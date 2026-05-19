@@ -1,11 +1,12 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
-import { X } from "lucide-react";
+import { X, ZoomIn, ZoomOut } from "lucide-react";
 import { ArrowRight } from "../Brand";
 import { ChamferedButton } from "../ChamferedButton";
 import { Pips } from "../ManaPips";
 import { Record } from "../Record";
+import { useIsMobile } from "../../lib/use-is-mobile";
 
 export const BREAKDOWN_CAPTION = "Seats, logs & replays";
 
@@ -24,6 +25,11 @@ interface Props {
 }
 
 export function DeckScreenshotModal({ participant, breakdownHref, onClose }: Props) {
+  const isMobile = useIsMobile();
+  const [zoomed, setZoomed] = useState(false);
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const imgRef = useRef<HTMLImageElement | null>(null);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -36,6 +42,24 @@ export function DeckScreenshotModal({ participant, breakdownHref, onClose }: Pro
       document.body.style.overflow = prevOverflow;
     };
   }, [onClose]);
+
+  const toggleZoom = () => {
+    if (!isMobile) return;
+    setZoomed((prev) => {
+      const next = !prev;
+      requestAnimationFrame(() => {
+        const scroller = scrollerRef.current;
+        const img = imgRef.current;
+        if (next && scroller && img) {
+          const target = Math.max(0, (img.scrollWidth - scroller.clientWidth) / 2);
+          scroller.scrollLeft = target;
+        } else if (!next && scroller) {
+          scroller.scrollLeft = 0;
+        }
+      });
+      return next;
+    });
+  };
 
   return createPortal(
     <div
@@ -74,12 +98,22 @@ export function DeckScreenshotModal({ participant, breakdownHref, onClose }: Pro
           </button>
         </header>
 
-        <div className="flex-1 min-h-0 overflow-y-auto themed-scrollbar">
+        <div
+          ref={scrollerRef}
+          className={`flex-1 min-h-0 themed-scrollbar ${
+            zoomed ? "overflow-auto" : "overflow-y-auto overflow-x-hidden"
+          }`}
+        >
           {participant.deckScreenshotUrl ? (
             <img
+              ref={imgRef}
               src={participant.deckScreenshotUrl}
               alt={`${participant.displayName} deck screenshot`}
-              className="block w-full h-auto"
+              onClick={toggleZoom}
+              className={`block h-auto select-none ${
+                zoomed ? "w-auto max-w-none" : "w-full"
+              } ${isMobile ? (zoomed ? "cursor-zoom-out" : "cursor-zoom-in") : ""}`}
+              draggable={false}
             />
           ) : (
             <div className="px-5 py-16 text-center text-muted font-body">
@@ -87,6 +121,18 @@ export function DeckScreenshotModal({ participant, breakdownHref, onClose }: Pro
             </div>
           )}
         </div>
+        {isMobile && participant.deckScreenshotUrl && (
+          <button
+            type="button"
+            onClick={toggleZoom}
+            aria-label={zoomed ? "Exit zoom" : "Zoom deck"}
+            className="absolute right-2 z-10 inline-flex items-center gap-1.5 bg-bg/85 border border-border text-text px-2.5 py-1.5 font-display tracking-[0.14em] text-[11px] cursor-pointer backdrop-blur-sm"
+            style={{ top: 60 }}
+          >
+            {zoomed ? <ZoomOut size={13} /> : <ZoomIn size={13} />}
+            {zoomed ? "FIT" : "ZOOM"}
+          </button>
+        )}
 
         {breakdownHref ? (
           <Link to={breakdownHref} className="block no-underline border-t border-border shrink-0">

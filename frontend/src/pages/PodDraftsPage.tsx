@@ -487,9 +487,19 @@ function EventRowBody({ event, today }: { event: PodEventSummary; today: string 
   const inProgress = !hasChamp && event.eventDate <= today;
   const isUpcoming = !hasChamp && event.eventDate > today;
   return (
-    <div className="flex-1 min-w-0 flex items-center gap-4 py-2.5 px-3 md:px-4">
+    <div
+      className={cn(
+        "flex-1 min-w-0 py-2.5 px-3 md:px-4",
+        isUpcoming
+          ? "flex flex-col items-start gap-1.5 lg:flex-row lg:items-center lg:gap-4"
+          : "flex items-center gap-4",
+      )}
+    >
       <span
-        className="font-display text-text line-clamp-2 lg:line-clamp-none lg:truncate flex-1 lg:flex-none min-w-0"
+        className={cn(
+          "font-display text-text min-w-0 line-clamp-2 lg:line-clamp-none lg:truncate",
+          isUpcoming ? "lg:flex-none" : "flex-1 lg:flex-none",
+        )}
         style={{ fontSize: 18, letterSpacing: "0.04em", lineHeight: 1.15 }}
       >
         {cleanPodEventName(event.name, event.setCode).toUpperCase()}

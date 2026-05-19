@@ -12,7 +12,7 @@ import { SetSwitcherDesktop, SetSwitcherMobile } from "../components/SetSwitcher
 import { FilterDropdown } from "../components/FilterDropdown";
 import { ColorsSwitcher } from "../components/ColorsSwitcher";
 import { LeaderboardSidebar } from "../components/LeaderboardSidebar";
-import { DEFAULT_SORT, LeaderboardColumnHeader, LeaderboardTable, sortRows } from "../components/LeaderboardTable";
+import { DEFAULT_SORT, DEFAULT_SORT_NOSCORE, LeaderboardColumnHeader, LeaderboardTable, sortRows } from "../components/LeaderboardTable";
 import type { SortDir, SortKey, SortState } from "../components/LeaderboardTable";
 import { SectionLabel } from "../components/SectionLabel";
 import { ChamferedButton } from "../components/ChamferedButton";
@@ -137,7 +137,10 @@ export function LeaderboardPage() {
   const isLoading = active.isLoading;
   const error = active.error as Error | null;
 
-  const sort = readSortFromParams(searchParams);
+  const isPodMode = format === "Pod";
+  const effectiveDefaultSort: SortState = isPodMode ? DEFAULT_SORT_NOSCORE : DEFAULT_SORT;
+  const rawSort = readSortFromParams(searchParams);
+  const sort: SortState = isPodMode && rawSort.key === "score" ? DEFAULT_SORT_NOSCORE : rawSort;
   const rows = useMemo(
     () => (baseRows ? sortRows(baseRows, sort) : baseRows),
     [baseRows, sort.key, sort.dir],
@@ -146,11 +149,11 @@ export function LeaderboardPage() {
   const onSort = (key: SortKey) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
-      const curKey = (next.get("sort") as SortKey | null) ?? DEFAULT_SORT.key;
-      const curDir = (next.get("dir") as SortDir | null) ?? DEFAULT_SORT.dir;
+      const curKey = (next.get("sort") as SortKey | null) ?? effectiveDefaultSort.key;
+      const curDir = (next.get("dir") as SortDir | null) ?? effectiveDefaultSort.dir;
       const dir: SortDir =
         curKey === key ? (curDir === "desc" ? "asc" : "desc") : "desc";
-      if (key === DEFAULT_SORT.key && dir === DEFAULT_SORT.dir) {
+      if (key === effectiveDefaultSort.key && dir === effectiveDefaultSort.dir) {
         next.delete("sort");
         next.delete("dir");
       } else {
@@ -273,6 +276,7 @@ function Desktop({
           variant="desktop"
           loading={isLoading}
           error={error}
+          showScore={filters.format !== "Pod"}
           sort={sort}
           onSort={onSort}
           renderExpanded={(r) => (
@@ -550,7 +554,7 @@ function Mobile({
         </div>
         {/* Column header is part of the sticky chrome so it stays pinned with the
             rest of the page chrome as rows scroll under it. */}
-        <LeaderboardColumnHeader variant="mobile" sort={sort} onSort={onSort} />
+        <LeaderboardColumnHeader variant="mobile" showScore={filters.format !== "Pod"} sort={sort} onSort={onSort} />
       </div>
 
       <LeaderboardTable
@@ -559,6 +563,7 @@ function Mobile({
         loading={isLoading}
         error={error}
         showHeader={false}
+        showScore={filters.format !== "Pod"}
         renderExpanded={(r) => (
           <MobileExpandedRow
             row={r}
