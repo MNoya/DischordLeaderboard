@@ -17,6 +17,7 @@ export function AppHeader({ subtitle = "LEADERBOARD" }: { subtitle?: string }) {
   const loc = useLocation();
   const isMobile = useIsMobile();
   const [menuOpen, setMenuOpen] = useState(false);
+  const brandHref = /^\/pods\/[^/]+/.test(loc.pathname) ? "/pods" : "/";
 
   // Close the mobile menu whenever the route changes so it doesn't linger
   // after a tap.
@@ -42,7 +43,7 @@ export function AppHeader({ subtitle = "LEADERBOARD" }: { subtitle?: string }) {
       )}
     >
       <Link
-        to="/"
+        to={brandHref}
         className={cn(
           "flex items-center no-underline",
           isMobile ? "gap-4" : "gap-6 pl-[13px]",

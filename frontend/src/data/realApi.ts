@@ -24,7 +24,9 @@ import type {
   PlayerDraftEvent,
   PlayerFormatBreakdown,
   PlayerProfile,
+  PodEventMatchRow,
   PodEventParticipantRow,
+  PodEventReplayRow,
   PodEventSummary,
   PodLeaderboardRow,
   RecentTrophy,
@@ -498,6 +500,37 @@ export async function fetchPodEventParticipants(
   return (data ?? []).map((r) => adaptPodEventParticipant(r as Record<string, unknown>));
 }
 
+export async function fetchPodEventBySlug(slug: string): Promise<PodEventSummary | null> {
+  const { data, error } = await client()
+    .from("public_pod_draft_events")
+    .select("*")
+    .eq("slug", slug)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return adaptPodEvent(data as Record<string, unknown>);
+}
+
+export async function fetchPodEventMatches(eventId: string): Promise<PodEventMatchRow[]> {
+  const { data, error } = await client()
+    .from("public_pod_draft_event_matches")
+    .select("*")
+    .eq("event_id", eventId)
+    .order("round", { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map((r) => adaptPodEventMatch(r as Record<string, unknown>));
+}
+
+export async function fetchPodEventReplays(eventId: string): Promise<PodEventReplayRow[]> {
+  const { data, error } = await client()
+    .from("public_pod_draft_replays")
+    .select("*")
+    .eq("event_id", eventId)
+    .order("game_time", { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map((r) => adaptPodEventReplay(r as Record<string, unknown>));
+}
+
 export async function fetchPodLeaderboard(setCode: string): Promise<PodLeaderboardRow[]> {
   const { data, error } = await client()
     .from("public_player_pod_stats")
@@ -541,6 +574,7 @@ function adaptPodEvent(row: Record<string, unknown>): PodEventSummary {
     championRecord: (row.champion_record ?? null) as string | null,
     participantCount: (row.participant_count ?? 0) as number,
     isFinalized: (row.is_finalized ?? false) as boolean,
+    discordEventId: (row.discord_event_id ?? null) as string | null,
   };
 }
 
@@ -548,14 +582,48 @@ function adaptPodEventParticipant(row: Record<string, unknown>): PodEventPartici
   return {
     eventId: row.event_id as string,
     displayName: row.display_name as string,
+    seatIndex: (row.seat_index ?? null) as number | null,
     placement: (row.placement ?? null) as number | null,
     record: (row.record ?? null) as string | null,
     deckColors: (row.deck_colors ?? null) as string | null,
     draftLogUrl: (row.draft_log_url ?? null) as string | null,
     deckScreenshotUrl: (row.deck_screenshot_url ?? null) as string | null,
+    deckScreenshotCaption: (row.deck_screenshot_caption ?? null) as string | null,
     playerSlug: (row.player_slug ?? null) as string | null,
     playerDisplayName: (row.player_display_name ?? null) as string | null,
     avatarUrl: (row.avatar_url ?? null) as string | null,
+  };
+}
+
+function adaptPodEventMatch(row: Record<string, unknown>): PodEventMatchRow {
+  return {
+    eventId: row.event_id as string,
+    eventName: row.event_name as string,
+    round: row.round as number,
+    playerAName: row.player_a_name as string,
+    playerBName: row.player_b_name as string,
+    winnerName: (row.winner_name ?? null) as string | null,
+    score: (row.score ?? null) as string | null,
+    reportedAt: (row.reported_at ?? null) as string | null,
+  };
+}
+
+function adaptPodEventReplay(row: Record<string, unknown>): PodEventReplayRow {
+  return {
+    eventId: row.event_id as string,
+    eventName: row.event_name as string,
+    eventDate: row.event_date as string,
+    setCode: row.set_code as string,
+    playerId: row.player_id as string,
+    playerSlug: row.player_slug as string,
+    playerDisplayName: row.player_display_name as string,
+    gameId: row.game_id as string,
+    link: row.link as string,
+    gameTime: row.game_time as string,
+    won: row.won as boolean,
+    turns: (row.turns ?? null) as number | null,
+    onPlay: (row.on_play ?? null) as boolean | null,
+    inferredRound: (row.inferred_round ?? null) as number | null,
   };
 }
 

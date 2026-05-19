@@ -136,3 +136,22 @@ export function prettyFormat(format: string): string {
   return FORMAT_DISPLAY[format] ?? format;
 }
 
+export function stripDiscriminator(name: string): string {
+  return name.replace(/#\d+$/, "");
+}
+
+export function podDiscordName(p: {
+  playerDisplayName: string | null;
+  displayName: string;
+}): string {
+  return stripDiscriminator(p.playerDisplayName ?? p.displayName);
+}
+
+export function cleanPodEventName(name: string, setCode: string): string {
+  const escaped = setCode.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return name
+    .replace(new RegExp(`^${escaped}\\s+`, "i"), "")
+    .replace(/\s+-\s+.+$/, "")
+    .trim();
+}
+

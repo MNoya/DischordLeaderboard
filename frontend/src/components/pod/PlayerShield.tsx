@@ -1,8 +1,9 @@
 import { useId, useLayoutEffect, useRef } from "react";
 import { Pips } from "../ManaPips";
 import { Record } from "../Record";
+import { Trophy } from "../Brand";
 import { cn } from "../../lib/utils";
-import type { PodParticipant } from "../../data/fixtures/pod-sos-3";
+import type { PodSeat } from "../../types/leaderboard";
 
 const VIEWBOX = "0 0 100 122";
 const OUTER_PATH = "M 0 0 H 100 V 60 C 100 80, 85 100, 50 122 C 15 100, 0 80, 0 60 Z";
@@ -10,7 +11,7 @@ const INNER_PATH = "M 2 2 H 98 V 60 C 98 78, 84 98, 50 119 C 16 98, 2 78, 2 60 Z
 const RING_PATH = "M 1 1 H 99 V 60 C 99 79, 84.5 99, 50 120.5 C 15.5 99, 1 79, 1 60 Z";
 
 interface Props {
-  participant: PodParticipant;
+  participant: PodSeat;
   selected: boolean;
   highlighted?: boolean;
   highlightedWon?: boolean | null;
@@ -22,8 +23,9 @@ const REF = { w: 118, h: 144, nameMax: 20, nameMin: 11, pip: 16, rec: 22 };
 
 export function PlayerShield({ participant, selected, highlighted = false, highlightedWon = null, onClick, scale = 1 }: Props) {
   const isChampion = participant.placement === 1;
-  const wins = Number(participant.record.split("-")[0]);
-  const losses = Number(participant.record.split("-")[1]);
+  const rec = participant.record ?? "0-0";
+  const wins = Number(rec.split("-")[0] || 0);
+  const losses = Number(rec.split("-")[1] || 0);
   const dims = {
     w: REF.w * scale,
     h: REF.h * scale,
@@ -45,7 +47,7 @@ export function PlayerShield({ participant, selected, highlighted = false, highl
       type="button"
       onClick={onClick}
       aria-pressed={selected}
-      aria-label={`Seat ${participant.seatIndex + 1}: ${participant.displayName}, ${participant.record}`}
+      aria-label={`Seat ${participant.seatIndex + 1}: ${participant.discordName}, ${participant.record ?? "0-0"}`}
       className={cn(
         "group relative block p-0 m-0 border-0 bg-transparent cursor-pointer outline-none",
         "transition-transform duration-300 ease-out will-change-transform",
@@ -98,22 +100,28 @@ export function PlayerShield({ participant, selected, highlighted = false, highl
       <div
         className="absolute inset-0 flex flex-col items-center"
         style={{
-          paddingTop: "11%",
+          paddingTop: participant.deckColors ? "16%" : "5%",
           paddingBottom: "23%",
           paddingLeft: 10,
           paddingRight: 10,
         }}
       >
-        <Pips colors={participant.deckColors} size={dims.pip} />
-        <div className="flex-1 flex items-center justify-center min-h-0 w-full px-1">
+        {participant.deckColors && (
+          <Pips colors={participant.deckColors} size={dims.pip} />
+        )}
+        <div className="flex-1 flex flex-col items-center justify-center min-h-0 w-full px-1 gap-0.5">
+          {isChampion && (
+            <Trophy
+              size={Math.round(dims.nameMax * 0.95)}
+              color="#ffc63a"
+              className="shrink-0"
+            />
+          )}
           <FitName
-            text={participant.displayName}
+            text={participant.discordName}
             maxSize={dims.nameMax}
             minSize={dims.nameMin}
-            className={cn(
-              "leading-none uppercase whitespace-nowrap",
-              isChampion ? "text-green" : "text-text",
-            )}
+            className="leading-none uppercase text-text text-center"
           />
         </div>
         <div
@@ -157,14 +165,30 @@ function FitName({
     if (!el) return;
     const parent = el.parentElement;
     if (!parent) return;
+    const canWrap = /\s/.test(text);
     const fit = () => {
       const avail = parent.clientWidth;
       if (avail <= 0) return;
-      let size = maxSize;
-      el.style.fontSize = `${size}px`;
-      while (el.scrollWidth > avail && size > minSize) {
-        size -= 0.5;
+      // Try to fit on a single line at max size
+      el.style.whiteSpace = "nowrap";
+      el.style.fontSize = `${maxSize}px`;
+      if (el.scrollWidth <= avail) return;
+      if (canWrap) {
+        // Multi-word — allow wrap onto two lines, shrink until height fits
+        el.style.whiteSpace = "normal";
+        let size = maxSize;
         el.style.fontSize = `${size}px`;
+        while (el.scrollHeight > size * 2.2 && size > minSize) {
+          size -= 0.5;
+          el.style.fontSize = `${size}px`;
+        }
+      } else {
+        // Single word — shrink the font until it fits on one line
+        let size = maxSize;
+        while (el.scrollWidth > avail && size > minSize) {
+          size -= 0.5;
+          el.style.fontSize = `${size}px`;
+        }
       }
     };
     fit();

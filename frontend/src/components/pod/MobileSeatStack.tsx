@@ -1,19 +1,20 @@
 import { Fragment, useLayoutEffect, useRef, useState } from "react";
 import { Pips } from "../ManaPips";
 import { Record } from "../Record";
+import { Trophy } from "../Brand";
 import { cn } from "../../lib/utils";
 import { HeroSection } from "../HeroSection";
 import { PlayerSeatPanel } from "./PlayerSeatPanel";
-import type { PodMatch, PodParticipant, PodReplayRow } from "../../data/fixtures/pod-sos-3";
+import type { PodEventMatchRow, PodEventReplayRow, PodSeat } from "../../types/leaderboard";
 
 interface Props {
-  participants: PodParticipant[];
-  participantsBySeatName: Map<string, PodParticipant>;
-  matches: PodMatch[];
-  replays: PodReplayRow[];
+  participants: PodSeat[];
+  participantsBySeatName: Map<string, PodSeat>;
+  matches: PodEventMatchRow[];
+  replays: PodEventReplayRow[];
   selectedSeat: number | null;
   onSelect: (seat: number | null) => void;
-  podNumber: number;
+  eventLabel: string;
   setCode: string;
 }
 
@@ -22,6 +23,100 @@ const GRID_MAX_WIDTH = 560;
 const REF_TILE = { w: 74, h: 64 };
 const REF_ARROW = 16;
 
+export function MobileSeatStackSkeleton({ seatCount = 8 }: { seatCount?: number }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => {
+      const w = el.clientWidth;
+      if (w > 0) setScale(w / GRID_REF_WIDTH);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const cols = Math.ceil(seatCount / 2);
+  const topCount = cols;
+  const bottomCount = seatCount - cols;
+  const tileW = REF_TILE.w * scale;
+  const tileH = REF_TILE.h * scale;
+
+  return (
+    <div className="flex flex-col">
+      <HeroSection className="px-[18px] pt-5 pb-5">
+        <div
+          ref={ref}
+          className="w-full mx-auto"
+          style={{ maxWidth: GRID_MAX_WIDTH }}
+        >
+          <SkeletonRow count={topCount} tileW={tileW} tileH={tileH} scale={scale} />
+          <div
+            className="flex items-center justify-between gap-2"
+            style={{ paddingTop: 10 * scale, paddingBottom: 10 * scale }}
+          >
+            <div style={{ width: tileW }} />
+            <div
+              className="h-3 bg-surface2 animate-pulse"
+              style={{ width: 120 * scale }}
+            />
+            <div style={{ width: tileW }} />
+          </div>
+          <SkeletonRow count={bottomCount} tileW={tileW} tileH={tileH} scale={scale} />
+        </div>
+      </HeroSection>
+      <div className="bg-surface border-b border-border px-4 py-6 flex flex-col gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-[60px] h-[60px] bg-surface2 animate-pulse" />
+          <div className="flex flex-col gap-2 min-w-0 flex-1">
+            <div className="h-6 w-2/3 bg-surface2 animate-pulse" />
+            <div className="h-3 w-1/3 bg-surface2 animate-pulse" />
+          </div>
+        </div>
+        <div className="flex flex-col gap-2">
+          <div className="h-10 w-full bg-surface2 animate-pulse" />
+          <div className="h-10 w-full bg-surface2 animate-pulse" />
+          <div className="h-10 w-full bg-surface2 animate-pulse" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SkeletonRow({
+  count,
+  tileW,
+  tileH,
+  scale,
+}: {
+  count: number;
+  tileW: number;
+  tileH: number;
+  scale: number;
+}) {
+  return (
+    <div className="flex items-center justify-between">
+      {Array.from({ length: count }, (_, i) => (
+        <Fragment key={i}>
+          <div
+            className="bg-surface2 border border-border animate-pulse"
+            style={{ width: tileW, height: tileH }}
+          />
+          {i < count - 1 && (
+            <div
+              className="bg-surface2 animate-pulse"
+              style={{ width: REF_ARROW * scale, height: 2 * scale }}
+            />
+          )}
+        </Fragment>
+      ))}
+    </div>
+  );
+}
+
 export function MobileSeatStack({
   participants,
   participantsBySeatName,
@@ -29,7 +124,7 @@ export function MobileSeatStack({
   replays,
   selectedSeat,
   onSelect,
-  podNumber,
+  eventLabel,
   setCode,
 }: Props) {
   const sorted = [...participants].sort((a, b) => a.seatIndex - b.seatIndex);
@@ -44,7 +139,7 @@ export function MobileSeatStack({
           participants={sorted}
           selectedSeat={selectedSeat}
           onSelect={onSelect}
-          podNumber={podNumber}
+          eventLabel={eventLabel}
           setCode={setCode}
         />
       </HeroSection>
@@ -57,7 +152,7 @@ export function MobileSeatStack({
           {selected && (
             <div className="bg-surface">
               <PlayerSeatPanel
-                key={selected.playerId}
+                key={selected.displayName}
                 participant={selected}
                 participantsBySeatName={participantsBySeatName}
                 matches={matches}
@@ -75,13 +170,13 @@ function TileGrid({
   participants,
   selectedSeat,
   onSelect,
-  podNumber,
+  eventLabel,
   setCode,
 }: {
-  participants: PodParticipant[];
+  participants: PodSeat[];
   selectedSeat: number | null;
   onSelect: (seat: number | null) => void;
-  podNumber: number;
+  eventLabel: string;
   setCode: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -126,21 +221,18 @@ function TileGrid({
           <PassChevron direction="up" scale={scale} />
         </div>
         <div
-          className="flex items-center text-muted font-display"
+          className="flex items-center text-text font-display min-w-0 px-1"
           style={{
-            gap: 8 * scale,
-            fontSize: Math.round(18 * scale),
+            gap: 6 * scale,
+            fontSize: Math.round(mobileLabelFontSize(eventLabel) * scale),
           }}
         >
-          <span>
-            POD <span className="text-text">#{podNumber}</span>
-          </span>
           <i
-            className={`ss ss-${setCode.toLowerCase()} text-text`}
-            style={{ fontSize: Math.round(22 * scale), lineHeight: 1 }}
+            className={`ss ss-${setCode.toLowerCase()} text-text shrink-0`}
+            style={{ fontSize: Math.round(20 * scale), lineHeight: 1 }}
             aria-hidden="true"
           />
-          <span className="text-text">{setCode}</span>
+          <span className="truncate">{renderEventLabel(eventLabel)}</span>
         </div>
         <div style={{ width: tileW, display: "flex", justifyContent: "center" }}>
           <PassChevron direction="down" scale={scale} />
@@ -164,7 +256,7 @@ function TileRow({
   onSelect,
   scale,
 }: {
-  tiles: PodParticipant[];
+  tiles: PodSeat[];
   arrowDir: "right" | "left";
   selectedSeat: number | null;
   onSelect: (seat: number | null) => void;
@@ -173,7 +265,7 @@ function TileRow({
   return (
     <div className="flex items-center justify-between">
       {tiles.map((p, i) => (
-        <Fragment key={p.playerId}>
+        <Fragment key={p.displayName}>
           <PlayerTile
             participant={p}
             selected={selectedSeat === p.seatIndex}
@@ -229,14 +321,15 @@ function PlayerTile({
   onClick,
   scale,
 }: {
-  participant: PodParticipant;
+  participant: PodSeat;
   selected: boolean;
   onClick: () => void;
   scale: number;
 }) {
   const isChampion = participant.placement === 1;
-  const wins = Number(participant.record.split("-")[0]);
-  const losses = Number(participant.record.split("-")[1]);
+  const rec = participant.record ?? "0-0";
+  const wins = Number(rec.split("-")[0] || 0);
+  const losses = Number(rec.split("-")[1] || 0);
   const w = REF_TILE.w * scale;
   const h = REF_TILE.h * scale;
 
@@ -245,7 +338,7 @@ function PlayerTile({
       type="button"
       onClick={onClick}
       aria-pressed={selected}
-      aria-label={`Seat ${participant.seatIndex + 1}: ${participant.displayName}, ${participant.record}`}
+      aria-label={`Seat ${participant.seatIndex + 1}: ${participant.discordName}, ${participant.record ?? "0-0"}`}
       className={cn(
         "block p-0 m-0 bg-surface border transition-colors text-left",
         selected
@@ -261,19 +354,31 @@ function PlayerTile({
       }}
     >
       <div className="h-full flex flex-col items-center justify-between" style={{ paddingTop: 5 * scale, paddingBottom: 5 * scale }}>
-        <Pips colors={participant.deckColors} size={Math.round(10 * scale)} />
+        {participant.deckColors ? (
+          <Pips colors={participant.deckColors} size={Math.round(10 * scale)} />
+        ) : (
+          <div style={{ height: Math.round(10 * scale) }} />
+        )}
         <div
-          className={cn(
-            "font-display leading-none uppercase truncate w-full text-center px-1",
-            isChampion ? "text-green" : "text-text",
-          )}
-          style={{
-            fontSize: Math.round(12 * scale),
-            letterSpacing: "0.02em",
-            fontFamily: "'Bebas Neue', sans-serif",
-          }}
+          className="flex items-center justify-center gap-1 w-full px-1 min-w-0"
         >
-          {participant.displayName}
+          {isChampion && (
+            <Trophy
+              size={Math.round(10 * scale)}
+              color="#ffc63a"
+              className="shrink-0"
+            />
+          )}
+          <span
+            className="font-display leading-none uppercase truncate text-text"
+            style={{
+              fontSize: Math.round(12 * scale),
+              letterSpacing: "0.02em",
+              fontFamily: "'Bebas Neue', sans-serif",
+            }}
+          >
+            {participant.discordName}
+          </span>
         </div>
         <div
           className="tabular-nums leading-none text-text"
@@ -287,5 +392,25 @@ function PlayerTile({
         </div>
       </div>
     </button>
+  );
+}
+
+function mobileLabelFontSize(label: string): number {
+  const len = label.length;
+  if (len <= 8) return 18;
+  if (len <= 14) return 16;
+  if (len <= 20) return 14;
+  return 12;
+}
+
+function renderEventLabel(label: string) {
+  const m = label.match(/^(.*?)(#\d+)(.*)$/);
+  if (!m) return label;
+  return (
+    <>
+      {m[1]}
+      <span className="text-green">{m[2]}</span>
+      {m[3]}
+    </>
   );
 }

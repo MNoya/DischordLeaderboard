@@ -1,5 +1,7 @@
 import type {
+  PodEventMatchRow,
   PodEventParticipantRow,
+  PodEventReplayRow,
   PodEventSummary,
   PodLeaderboardRow,
 } from "../../types/leaderboard";
@@ -9,11 +11,13 @@ function participantToRow(p: PodParticipant): PodEventParticipantRow {
   return {
     eventId: p.eventId,
     displayName: p.displayName,
+    seatIndex: p.seatIndex,
     placement: p.placement ?? null,
     record: p.record,
     deckColors: p.deckColors,
     draftLogUrl: p.draftLogUrl,
     deckScreenshotUrl: p.deckScreenshotUrl,
+    deckScreenshotCaption: p.deckScreenshotCaption,
     playerSlug: p.slug,
     playerDisplayName: p.displayName,
     avatarUrl: null,
@@ -38,10 +42,29 @@ function summaryFromFixture(): PodEventSummary {
     championRecord: champion?.record ?? null,
     participantCount: podSos3Fixture.participants.length,
     isFinalized: podSos3Fixture.participants.every((p) => p.placement != null),
+    discordEventId: null,
   };
 }
 
 const extraSummaries: PodEventSummary[] = [
+  {
+    eventId: "mock-sos-4",
+    slug: "sos-pod-draft-4",
+    name: "SOS Pod Draft #4",
+    setCode: "SOS",
+    eventDate: "2026-05-20",
+    eventTime: "2026-05-20T20:00:00Z",
+    formatLabel: "Pod Draft · Swiss · 3 Rounds",
+    totalRounds: 3,
+    championPlayerSlug: null,
+    championDisplayName: null,
+    championAvatarUrl: null,
+    championDeckColors: null,
+    championRecord: null,
+    participantCount: 0,
+    isFinalized: false,
+    discordEventId: "1505785425049030818",
+  },
   {
     eventId: "mock-sos-2",
     slug: "sos-pod-draft-2",
@@ -58,6 +81,7 @@ const extraSummaries: PodEventSummary[] = [
     championRecord: "3-0",
     participantCount: 8,
     isFinalized: true,
+    discordEventId: null,
   },
   {
     eventId: "mock-sos-1",
@@ -75,6 +99,7 @@ const extraSummaries: PodEventSummary[] = [
     championRecord: "3-0",
     participantCount: 8,
     isFinalized: true,
+    discordEventId: null,
   },
 ];
 
@@ -85,6 +110,34 @@ export const podEventsFixture: PodEventSummary[] = [
 
 export const podEventParticipantsFixture: PodEventParticipantRow[] =
   podSos3Fixture.participants.map(participantToRow);
+
+export const podEventMatchesFixture: PodEventMatchRow[] = podSos3Fixture.matches.map((m) => ({
+  eventId: m.eventId,
+  eventName: podSos3Fixture.name,
+  round: m.round,
+  playerAName: m.playerA,
+  playerBName: m.playerB,
+  winnerName: m.winner,
+  score: m.score,
+  reportedAt: m.reportedAt,
+}));
+
+export const podEventReplaysFixture: PodEventReplayRow[] = podSos3Fixture.replays.map((r) => ({
+  eventId: r.eventId,
+  eventName: r.eventName,
+  eventDate: r.eventDate,
+  setCode: r.setCode,
+  playerId: r.playerId,
+  playerSlug: r.playerSlug,
+  playerDisplayName: r.playerDisplayName,
+  gameId: r.gameId,
+  link: r.link,
+  gameTime: r.gameTime,
+  won: r.won,
+  turns: r.turns,
+  onPlay: r.onPlay,
+  inferredRound: r.inferredRound,
+}));
 
 export const podLeaderboardFixtureRaw: Omit<PodLeaderboardRow, "rank">[] =
   podSos3Fixture.participants.map((p) => {

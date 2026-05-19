@@ -1,16 +1,16 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { PlayerShield } from "./PlayerShield";
 import { cn } from "../../lib/utils";
-import type { PodParticipant } from "../../data/fixtures/pod-sos-3";
+import type { PodSeat } from "../../types/leaderboard";
 
 interface Props {
-  participants: PodParticipant[];
+  participants: PodSeat[];
   selectedSeat: number | null;
   highlightedSeat?: number | null;
   highlightedRound?: number | null;
   highlightedWon?: boolean | null;
   onSelect: (seat: number | null) => void;
-  podNumber: number;
+  eventLabel: string;
   setCode: string;
   date: string;
   maxWidth?: number | string;
@@ -24,6 +24,10 @@ const ARROW_OFFSET_BY_INDEX: Record<number, number> = {
   6: ARROW_OFFSET_RAD,
 };
 const SHIELD_REF_WIDTH = 640;
+const SHIELD_VIEWBOX = "0 0 100 122";
+const SHIELD_OUTER_PATH = "M 0 0 H 100 V 60 C 100 80, 85 100, 50 122 C 15 100, 0 80, 0 60 Z";
+const SHIELD_INNER_PATH = "M 2 2 H 98 V 60 C 98 78, 84 98, 50 119 C 16 98, 2 78, 2 60 Z";
+const SHIELD_REF_DIMS = { w: 118, h: 144 };
 
 export function PodTable({
   participants,
@@ -32,7 +36,7 @@ export function PodTable({
   highlightedRound = null,
   highlightedWon = null,
   onSelect,
-  podNumber,
+  eventLabel,
   setCode,
   date,
   maxWidth = 720,
@@ -83,7 +87,7 @@ export function PodTable({
       </div>
 
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <CenterMedallion podNumber={podNumber} setCode={setCode} date={date} />
+        <CenterMedallion eventLabel={eventLabel} setCode={setCode} date={date} />
       </div>
 
       <PassDirectionArrows seatCount={sorted.length} />
@@ -105,7 +109,7 @@ export function PodTable({
         const isSelected = selectedSeat === p.seatIndex;
         return (
           <div
-            key={p.playerId}
+            key={p.displayName}
             className="absolute"
             style={{
               left: `${x}%`,
@@ -245,18 +249,19 @@ function PassDirectionArrows({ seatCount }: { seatCount: number }) {
   );
 }
 
-function CenterMedallion({ podNumber, setCode, date }: { podNumber: number; setCode: string; date: string }) {
+function CenterMedallion({ eventLabel, setCode, date }: { eventLabel: string; setCode: string; date: string }) {
   const dateLabel = formatDate(date);
+  const labelFontSize = medallionFontSize(eventLabel);
   return (
     <div
       className="flex flex-col items-center justify-center text-center select-none"
       style={{ gap: "2.2cqw" }}
     >
       <div
-        className="font-display text-text leading-none"
-        style={{ fontSize: "11cqw", letterSpacing: "0.02em" }}
+        className="font-display text-text leading-none px-2"
+        style={{ fontSize: labelFontSize, letterSpacing: "0.02em" }}
       >
-        POD <span className="text-green">#{podNumber}</span>
+        {renderLabelWithGreenNumber(eventLabel)}
       </div>
       <div className="flex items-center" style={{ gap: "2.2cqw" }}>
         <i
@@ -281,9 +286,126 @@ function CenterMedallion({ podNumber, setCode, date }: { podNumber: number; setC
   );
 }
 
+function medallionFontSize(label: string): string {
+  const len = label.length;
+  if (len <= 6) return "11cqw";
+  if (len <= 10) return "9cqw";
+  if (len <= 14) return "7cqw";
+  if (len <= 18) return "5.5cqw";
+  return "4.5cqw";
+}
+
+function renderLabelWithGreenNumber(label: string) {
+  const m = label.match(/^(.*?)(#\d+)(.*)$/);
+  if (!m) return label;
+  return (
+    <>
+      {m[1]}
+      <span className="text-green">{m[2]}</span>
+      {m[3]}
+    </>
+  );
+}
+
 function formatDate(iso: string): string {
   const d = new Date(iso + "T00:00:00Z");
   const weekday = d.toLocaleString("en-US", { weekday: "short", timeZone: "UTC" }).toUpperCase();
   const month = d.toLocaleString("en-US", { month: "long", timeZone: "UTC" }).toUpperCase();
   return `${weekday} · ${month} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
+}
+
+export function PodTableSkeleton({
+  seatCount = 8,
+  maxWidth = 720,
+}: {
+  seatCount?: number;
+  maxWidth?: number | string;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => {
+      const w = el.clientWidth;
+      if (w > 0) setScale(w / SHIELD_REF_WIDTH);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const w = SHIELD_REF_DIMS.w * scale;
+  const h = SHIELD_REF_DIMS.h * scale;
+  return (
+    <div
+      ref={ref}
+      className="relative mx-auto w-full"
+      style={{ maxWidth, aspectRatio: "1 / 1", containerType: "inline-size" }}
+    >
+      <div className="absolute inset-[15%] overflow-hidden rounded-full">
+        <div
+          className="absolute inset-0"
+          style={{
+            background:
+              "radial-gradient(circle at 50% 38%, #232a3a 0%, #181d28 28%, #10141c 58%, #070a0f 100%)",
+          }}
+        />
+        <div
+          className="absolute inset-0 pointer-events-none rounded-full"
+          style={{
+            boxShadow:
+              "inset 0 0 0 1px #2a3142, inset 0 0 0 5px #0a0c10, inset 0 0 0 6px #2a3142, inset 0 60px 90px -40px rgba(0,0,0,0.85), inset 0 -60px 90px -40px rgba(0,0,0,0.85)",
+          }}
+        />
+      </div>
+      {Array.from({ length: seatCount }, (_, i) => {
+        const angle = (i / seatCount) * Math.PI * 2 - Math.PI / 2;
+        const x = 50 + Math.cos(angle) * ORBIT_RADIUS_PCT;
+        const y = 50 + Math.sin(angle) * ORBIT_RADIUS_PCT;
+        return (
+          <div
+            key={i}
+            className="absolute animate-pulse"
+            style={{
+              left: `${x}%`,
+              top: `${y}%`,
+              transform: "translate(-50%, -50%)",
+              width: w,
+              height: h,
+            }}
+          >
+            <ShieldShape />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ShieldShape() {
+  return (
+    <svg
+      viewBox={SHIELD_VIEWBOX}
+      preserveAspectRatio="none"
+      className="absolute inset-0 w-full h-full overflow-visible"
+      aria-hidden="true"
+      style={{ filter: "drop-shadow(0 4px 8px rgba(0, 0, 0, 0.5))" }}
+    >
+      <defs>
+        <linearGradient id="shield-bezel-sk" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#3b4458" />
+          <stop offset="30%" stopColor="#2a3142" />
+          <stop offset="100%" stopColor="#14181f" />
+        </linearGradient>
+        <linearGradient id="shield-face-sk" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#181d27" />
+          <stop offset="55%" stopColor="#10141c" />
+          <stop offset="100%" stopColor="#06080d" />
+        </linearGradient>
+      </defs>
+      <path d={SHIELD_OUTER_PATH} fill="url(#shield-bezel-sk)" />
+      <path d={SHIELD_INNER_PATH} fill="url(#shield-face-sk)" />
+    </svg>
+  );
 }

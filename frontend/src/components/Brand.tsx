@@ -92,13 +92,21 @@ export function AAvatar({
 export { ArrowRight } from "lucide-react";
 
 // Trophy glyph — the marquee stat in this community (spec).
-export function Trophy({ size = 12, color }: { size?: number; color?: string }) {
+export function Trophy({
+  size = 12,
+  color,
+  className,
+}: {
+  size?: number;
+  color?: string;
+  className?: string;
+}) {
   return (
     <svg
       width={size}
       height={size}
       viewBox="0 0 16 16"
-      className="shrink-0"
+      className={className ? `shrink-0 ${className}` : "shrink-0"}
       style={color ? { color } : undefined}
       aria-hidden="true"
     >

@@ -40,8 +40,14 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
-    <!-- Cloudflare Web Analytics -->
-    <script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "08eb4be2467b4c539328625a446fee2b"}'></script>
-    <!-- End Cloudflare Web Analytics -->
+    <script>
+      if (location.hostname.endsWith('pages.dev')) {
+        const s = document.createElement('script');
+        s.defer = true;
+        s.src = 'https://static.cloudflareinsights.com/beacon.min.js';
+        s.setAttribute('data-cf-beacon', '{"token": "08eb4be2467b4c539328625a446fee2b"}');
+        document.body.appendChild(s);
+      }
+    </script>
   </body>
 </html>

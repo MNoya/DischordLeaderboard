@@ -7,14 +7,15 @@ import { Pips } from "../ManaPips";
 import { Record } from "../Record";
 import { cn } from "../../lib/utils";
 import { useIsMobile } from "../../lib/use-is-mobile";
+import { stripDiscriminator } from "../../data/utils";
 import { DeckScreenshotModal } from "./DeckScreenshotModal";
-import type { PodMatch, PodParticipant, PodReplayRow } from "../../data/fixtures/pod-sos-3";
+import type { PodEventMatchRow, PodEventReplayRow, PodSeat } from "../../types/leaderboard";
 
 interface Props {
-  participant: PodParticipant;
-  participantsBySeatName: Map<string, PodParticipant>;
-  matches: PodMatch[];
-  replays: PodReplayRow[];
+  participant: PodSeat;
+  participantsBySeatName: Map<string, PodSeat>;
+  matches: PodEventMatchRow[];
+  replays: PodEventReplayRow[];
   onRoundHover?: (opponentSeatIndex: number | null, round: number | null, won: boolean | null) => void;
 }
 
@@ -25,9 +26,11 @@ export function PlayerSeatPanel({
   replays,
   onRoundHover,
 }: Props) {
-  const [deckView, setDeckView] = useState<PodParticipant | null>(null);
+  const [deckView, setDeckView] = useState<PodSeat | null>(null);
   const playerMatches = matches
-    .filter((m) => m.playerA === participant.displayName || m.playerB === participant.displayName)
+    .filter(
+      (m) => m.playerAName === participant.displayName || m.playerBName === participant.displayName,
+    )
     .sort((a, b) => a.round - b.round);
 
   return (
@@ -35,7 +38,8 @@ export function PlayerSeatPanel({
       <SeatHeader participant={participant} onViewDeck={() => setDeckView(participant)} />
       <div className="flex flex-col">
         {playerMatches.map((match) => {
-          const opponentName = match.playerA === participant.displayName ? match.playerB : match.playerA;
+          const opponentName =
+            match.playerAName === participant.displayName ? match.playerBName : match.playerAName;
           const opponent = participantsBySeatName.get(opponentName);
           return (
             <RoundRow
@@ -52,7 +56,16 @@ export function PlayerSeatPanel({
         })}
       </div>
       {deckView && (
-        <DeckScreenshotModal participant={deckView} onClose={() => setDeckView(null)} />
+        <DeckScreenshotModal
+          participant={{
+            displayName: deckView.discordName,
+            deckColors: deckView.deckColors,
+            deckScreenshotUrl: deckView.deckScreenshotUrl,
+            deckScreenshotCaption: deckView.deckScreenshotCaption,
+            record: deckView.record,
+          }}
+          onClose={() => setDeckView(null)}
+        />
       )}
     </div>
   );
@@ -62,33 +75,52 @@ function SeatHeader({
   participant,
   onViewDeck,
 }: {
-  participant: PodParticipant;
+  participant: PodSeat;
   onViewDeck: () => void;
 }) {
   const isMobile = useIsMobile();
   const isChampion = participant.placement === 1;
-  const wins = Number(participant.record.split("-")[0]);
-  const losses = Number(participant.record.split("-")[1]);
+  const rec = participant.record ?? "0-0";
+  const wins = Number(rec.split("-")[0] || 0);
+  const losses = Number(rec.split("-")[1] || 0);
   const hasDeck = participant.deckScreenshotUrl !== null;
 
-  const nameLink = (
-    <Link
-      to={`/player/${participant.slug}`}
-      target="_blank"
-      rel="noreferrer noopener"
-      className="font-display leading-none no-underline text-text hover:text-green transition-colors truncate"
+  const nameContent = (
+    <span
+      className={cn(
+        "font-display leading-none truncate",
+        participant.playerSlug
+          ? "no-underline text-text hover:text-green transition-colors"
+          : "text-text",
+      )}
       style={{ fontSize: 32, letterSpacing: "0.04em" }}
     >
-      {participant.displayName}
+      {participant.discordName}
+    </span>
+  );
+  const nameLink = participant.playerSlug ? (
+    <Link
+      to={`/player/${participant.playerSlug}`}
+      target="_blank"
+      rel="noreferrer noopener"
+      className="no-underline"
+    >
+      {nameContent}
     </Link>
+  ) : (
+    nameContent
   );
 
   const metaRow = (
     <div className="flex items-center gap-4 flex-wrap text-muted" style={{ fontSize: 15 }}>
       <span className="inline-flex items-center gap-2">
-        <Pips colors={participant.deckColors} size={14} />
+        {participant.deckColors && <Pips colors={participant.deckColors} size={14} />}
         <span className="font-display tracking-[0.18em] uppercase">
-          {isChampion ? "Champion" : `${ordinalLabel(participant.placement)} place`}
+          {isChampion
+            ? "Champion"
+            : participant.placement != null
+              ? `${ordinalLabel(participant.placement)} place`
+              : "Unplaced"}
         </span>
       </span>
       <span
@@ -104,7 +136,7 @@ function SeatHeader({
     return (
       <header className="flex flex-col gap-4 px-4 md:px-5 xl:px-8 py-7 border-b border-border">
         <div className="flex items-center gap-4 min-w-0">
-          <AAvatar displayName={participant.displayName} avatarUrl={null} size={60} green={isChampion} />
+          <AAvatar displayName={participant.discordName} avatarUrl={participant.avatarUrl} size={60} green={isChampion} />
           <div className="min-w-0 flex-1 flex items-start justify-between gap-3">
             <div className="min-w-0 flex flex-col gap-2">
               {nameLink}
@@ -161,7 +193,7 @@ function SeatHeader({
 
   return (
     <header className="flex items-center gap-4 px-4 md:px-5 xl:px-8 py-7 border-b border-border">
-      <AAvatar displayName={participant.displayName} avatarUrl={null} size={60} green={isChampion} />
+      <AAvatar displayName={participant.discordName} avatarUrl={participant.avatarUrl} size={60} green={isChampion} />
       <div className="min-w-0 flex-1 flex flex-col gap-2">
         {nameLink}
         {metaRow}
@@ -236,30 +268,37 @@ function RoundRow({
   onHover,
   onViewDeck,
 }: {
-  match: PodMatch;
-  participant: PodParticipant;
+  match: PodEventMatchRow;
+  participant: PodSeat;
   opponentName: string;
-  opponent: PodParticipant | undefined;
-  replays: PodReplayRow[];
+  opponent: PodSeat | undefined;
+  replays: PodEventReplayRow[];
   onHover?: (opponentSeatIndex: number | null, round: number | null, won: boolean | null) => void;
-  onViewDeck: (participant: PodParticipant) => void;
+  onViewDeck: (participant: PodSeat) => void;
 }) {
   const isMobile = useIsMobile();
-  const won = match.winner === participant.displayName;
-  const yourScore = won ? match.score.split("-")[0] : match.score.split("-")[1];
-  const oppScore = won ? match.score.split("-")[1] : match.score.split("-")[0];
+  const won = match.winnerName === participant.displayName;
+  const score = match.score ?? "0-0";
+  const yourScore = won ? score.split("-")[0] : score.split("-")[1];
+  const oppScore = won ? score.split("-")[1] : score.split("-")[0];
 
-  const playerGames = replays
-    .filter((r) => r.playerId === participant.playerId && r.inferredRound === match.round)
-    .sort((a, b) => new Date(a.gameTime).getTime() - new Date(b.gameTime).getTime());
+  const participantSlug = participant.playerSlug;
+  const opponentSlug = opponent?.playerSlug ?? null;
 
-  const opponentGames = opponent
+  const playerGames = participantSlug
     ? replays
-        .filter((r) => r.playerId === opponent.playerId && r.inferredRound === match.round)
+        .filter((r) => r.playerSlug === participantSlug && r.inferredRound === match.round)
+        .sort((a, b) => new Date(a.gameTime).getTime() - new Date(b.gameTime).getTime())
+    : [];
+
+  const opponentGames = opponentSlug
+    ? replays
+        .filter((r) => r.playerSlug === opponentSlug && r.inferredRound === match.round)
         .sort((a, b) => new Date(a.gameTime).getTime() - new Date(b.gameTime).getTime())
     : [];
 
   const matchDurationMin = computeMatchDurationMin(playerGames, opponentGames, match.reportedAt);
+  const opponentDisplay = opponent?.discordName ?? stripDiscriminator(opponentName);
 
   const handleEnter = () => {
     if (opponent) onHover?.(opponent.seatIndex, match.round, won);
@@ -268,39 +307,40 @@ function RoundRow({
     onHover?.(null, null, null);
   };
 
+  const opponentNameNode = opponent && opponent.playerSlug ? (
+    <Link
+      to={`/player/${opponent.playerSlug}`}
+      target="_blank"
+      rel="noreferrer noopener"
+      className="font-display text-text hover:text-green transition-colors no-underline truncate"
+      style={{ fontSize: 21, letterSpacing: "0.03em" }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {opponentDisplay}
+    </Link>
+  ) : (
+    <span
+      className="font-display text-text truncate"
+      style={{ fontSize: 21, letterSpacing: "0.03em" }}
+    >
+      {opponentDisplay}
+    </span>
+  );
   const opponentNameLink = opponent ? (
     isMobile ? (
       <span className="flex flex-col gap-1 min-w-0">
-        <Link
-          to={`/player/${opponent.slug}`}
-          target="_blank"
-          rel="noreferrer noopener"
-          className="font-display text-text hover:text-green transition-colors no-underline truncate"
-          style={{ fontSize: 21, letterSpacing: "0.03em" }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {opponentName}
-        </Link>
-        <Pips colors={opponent.deckColors} size={14} />
+        {opponentNameNode}
+        {opponent.deckColors && <Pips colors={opponent.deckColors} size={14} />}
       </span>
     ) : (
       <span className="flex items-center min-w-0 gap-2">
-        <Pips colors={opponent.deckColors} size={14} />
-        <Link
-          to={`/player/${opponent.slug}`}
-          target="_blank"
-          rel="noreferrer noopener"
-          className="font-display text-text hover:text-green transition-colors no-underline truncate"
-          style={{ fontSize: 21, letterSpacing: "0.03em" }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {opponentName}
-        </Link>
+        {opponent.deckColors && <Pips colors={opponent.deckColors} size={14} />}
+        {opponentNameNode}
       </span>
     )
   ) : (
     <span className="font-display text-text truncate" style={{ fontSize: 21 }}>
-      {opponentName}
+      {opponentDisplay}
     </span>
   );
 
@@ -312,7 +352,7 @@ function RoundRow({
           e.stopPropagation();
           onViewDeck(opponent);
         }}
-        title={`View ${opponentName}'s deck`}
+        title={`View ${opponentDisplay}'s deck`}
         className="group/deck inline-flex items-center gap-2 bg-bg border border-border hover:border-green/60 hover:bg-green/10 transition-colors px-3 cursor-pointer shrink-0"
         style={{ height: 34 }}
       >
@@ -424,9 +464,9 @@ function GamesGrid({
   opponentGames,
   reportedAt,
 }: {
-  playerGames: PodReplayRow[];
-  opponentGames: PodReplayRow[];
-  reportedAt: string;
+  playerGames: PodEventReplayRow[];
+  opponentGames: PodEventReplayRow[];
+  reportedAt: string | null;
 }) {
   const isMobile = useIsMobile();
   if (playerGames.length === 0 && opponentGames.length === 0) {
@@ -466,7 +506,7 @@ function PlayerReplayCell({
   row,
   durationMin,
 }: {
-  row: PodReplayRow | null;
+  row: PodEventReplayRow | null;
   durationMin: number | null | undefined;
 }) {
   const isMobile = useIsMobile();
@@ -530,7 +570,7 @@ function PlayerReplayCell({
   );
 }
 
-function OpponentReplayCell({ row }: { row: PodReplayRow | null }) {
+function OpponentReplayCell({ row }: { row: PodEventReplayRow | null }) {
   const isMobile = useIsMobile();
   if (!row) {
     if (isMobile) return null;
@@ -573,7 +613,7 @@ function OpponentReplayCell({ row }: { row: PodReplayRow | null }) {
   );
 }
 
-function findOpponentPov(playerGame: PodReplayRow, opponentGames: PodReplayRow[]): PodReplayRow | null {
+function findOpponentPov(playerGame: PodEventReplayRow, opponentGames: PodEventReplayRow[]): PodEventReplayRow | null {
   const playerTime = new Date(playerGame.gameTime).getTime();
   for (const r of opponentGames) {
     if (r.turns !== playerGame.turns) continue;
@@ -584,22 +624,28 @@ function findOpponentPov(playerGame: PodReplayRow, opponentGames: PodReplayRow[]
   return null;
 }
 
-function computeGameDurationsMin(games: PodReplayRow[], reportedAt: string): (number | null)[] {
+function computeGameDurationsMin(
+  games: PodEventReplayRow[],
+  reportedAt: string | null,
+): (number | null)[] {
   if (games.length === 0) return [];
-  const reported = new Date(reportedAt).getTime();
+  const reported = reportedAt ? new Date(reportedAt).getTime() : null;
   return games.map((g, i) => {
     const thisTime = new Date(g.gameTime).getTime();
-    const nextTime = i + 1 < games.length ? new Date(games[i + 1].gameTime).getTime() : reported;
+    const nextTime =
+      i + 1 < games.length ? new Date(games[i + 1].gameTime).getTime() : reported;
+    if (nextTime == null) return null;
     const min = Math.max(0, Math.round((nextTime - thisTime) / 60_000));
     return min > 0 ? min : null;
   });
 }
 
 function computeMatchDurationMin(
-  playerGames: PodReplayRow[],
-  opponentGames: PodReplayRow[],
-  reportedAt: string,
+  playerGames: PodEventReplayRow[],
+  opponentGames: PodEventReplayRow[],
+  reportedAt: string | null,
 ): number | null {
+  if (!reportedAt) return null;
   const allTimes = [
     ...playerGames.map((g) => new Date(g.gameTime).getTime()),
     ...opponentGames.map((g) => new Date(g.gameTime).getTime()),

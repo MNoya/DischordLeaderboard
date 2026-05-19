@@ -18,7 +18,9 @@ import type {
   PlayerDraftEvent,
   PlayerFormatBreakdown,
   PlayerProfile,
+  PodEventMatchRow,
   PodEventParticipantRow,
+  PodEventReplayRow,
   PodEventSummary,
   PodLeaderboardRow,
   RecentTrophy,
@@ -26,7 +28,9 @@ import type {
 } from "../types/leaderboard";
 import {
   podEventsFixture,
+  podEventMatchesFixture,
   podEventParticipantsFixture,
+  podEventReplaysFixture,
   podLeaderboardFixtureRaw,
   podSetCodesFixture,
 } from "./fixtures/pod-events";
@@ -347,6 +351,28 @@ export const fetchPodEventParticipants = (
   eventId: string,
 ): Promise<PodEventParticipantRow[]> => {
   return wait(podEventParticipantsFixture.filter((p) => p.eventId === eventId));
+};
+
+export const fetchPodEventBySlug = (slug: string): Promise<PodEventSummary | null> => {
+  return wait(podEventsFixture.find((e) => e.slug === slug) ?? null);
+};
+
+export const fetchPodEventMatches = (eventId: string): Promise<PodEventMatchRow[]> => {
+  return wait(
+    podEventMatchesFixture
+      .filter((m) => m.eventId === eventId)
+      .slice()
+      .sort((a, b) => a.round - b.round),
+  );
+};
+
+export const fetchPodEventReplays = (eventId: string): Promise<PodEventReplayRow[]> => {
+  return wait(
+    podEventReplaysFixture
+      .filter((r) => r.eventId === eventId)
+      .slice()
+      .sort((a, b) => (a.gameTime < b.gameTime ? -1 : a.gameTime > b.gameTime ? 1 : 0)),
+  );
 };
 
 export const fetchPodLeaderboard = (setCode: string): Promise<PodLeaderboardRow[]> => {

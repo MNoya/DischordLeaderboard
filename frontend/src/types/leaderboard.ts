@@ -109,19 +109,55 @@ export interface PodEventSummary {
   championRecord: string | null;
   participantCount: number;
   isFinalized: boolean;
+  discordEventId: string | null;
 }
 
 export interface PodEventParticipantRow {
   eventId: string;
   displayName: string;
+  seatIndex: number | null;
   placement: number | null;
   record: string | null;
   deckColors: string | null;
   draftLogUrl: string | null;
   deckScreenshotUrl: string | null;
+  deckScreenshotCaption: string | null;
   playerSlug: string | null;
   playerDisplayName: string | null;
   avatarUrl: string | null;
+}
+
+export interface PodEventMatchRow {
+  eventId: string;
+  eventName: string;
+  round: number;
+  playerAName: string;
+  playerBName: string;
+  winnerName: string | null;
+  score: string | null;
+  reportedAt: string | null;
+}
+
+export interface PodSeat extends PodEventParticipantRow {
+  seatIndex: number;
+  discordName: string;
+}
+
+export interface PodEventReplayRow {
+  eventId: string;
+  eventName: string;
+  eventDate: string;
+  setCode: string;
+  playerId: string;
+  playerSlug: string;
+  playerDisplayName: string;
+  gameId: string;
+  link: string;
+  gameTime: string;
+  won: boolean;
+  turns: number | null;
+  onPlay: boolean | null;
+  inferredRound: number | null;
 }
 
 export interface PodLeaderboardRow {

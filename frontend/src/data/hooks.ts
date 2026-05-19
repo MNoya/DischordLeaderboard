@@ -18,7 +18,10 @@ import {
   fetchOtherColorsLeaderboard,
   fetchPlayerDraftEvents,
   fetchPlayerProfile,
+  fetchPodEventBySlug,
+  fetchPodEventMatches,
   fetchPodEventParticipants,
+  fetchPodEventReplays,
   fetchPodEvents,
   fetchPodLeaderboard,
   fetchPodSetCodes,
@@ -270,6 +273,33 @@ export function usePodEventParticipants(eventId: string | undefined) {
   return useQuery({
     queryKey: ["pod-event-participants", eventId],
     queryFn: () => fetchPodEventParticipants(eventId!),
+    enabled: !!eventId,
+    staleTime: FIVE_MINUTES,
+  });
+}
+
+export function usePodEventBySlug(slug: string | undefined) {
+  return useQuery({
+    queryKey: ["pod-event-by-slug", slug],
+    queryFn: () => fetchPodEventBySlug(slug!),
+    enabled: !!slug,
+    staleTime: FIVE_MINUTES,
+  });
+}
+
+export function usePodEventMatches(eventId: string | undefined) {
+  return useQuery({
+    queryKey: ["pod-event-matches", eventId],
+    queryFn: () => fetchPodEventMatches(eventId!),
+    enabled: !!eventId,
+    staleTime: FIVE_MINUTES,
+  });
+}
+
+export function usePodEventReplays(eventId: string | undefined) {
+  return useQuery({
+    queryKey: ["pod-event-replays", eventId],
+    queryFn: () => fetchPodEventReplays(eventId!),
     enabled: !!eventId,
     staleTime: FIVE_MINUTES,
   });
