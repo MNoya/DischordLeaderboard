@@ -5,7 +5,8 @@ import logging
 import logging.handlers
 import signal
 import traceback
-from datetime import time as dtime
+import unicodedata
+from datetime import datetime, time as dtime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -13,7 +14,7 @@ import discord
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from discord import app_commands
 from discord.ext import commands, tasks
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from bot.commands.delete_account import setup as setup_delete_account
 from bot.commands.help import setup as setup_help
@@ -37,7 +38,7 @@ from bot.commands.testcomponent import setup as setup_testcomponent
 from bot.commands.testlobby import setup as setup_testlobby
 from bot.listeners.pod_screenshots import setup as setup_pod_screenshots
 from bot.listeners.sesh_listener import reschedule_pending_events, setup as setup_sesh_listener
-from bot.models import MagicSet, Player, PodDraftEvent
+from bot.models import LeaderboardMessage, MagicSet, Player, PodDraftEvent
 from bot.services.lobby_embed import LobbyReadyButtonView
 from bot.services.pod_tournament import (
     register_persistent_views as register_pod_views,
@@ -179,6 +180,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_testcomponent(bot)
         reschedule_pending_events(bot)
         register_pod_views(bot)
+        _log_startup_summary()
         bot.tree.copy_global_to(guild=guild)
 
         # Register the persistent leaderboard view so Join buttons on previously-posted
@@ -432,6 +434,59 @@ def build_bot(guild_id: int) -> commands.Bot:
             auto_refresh_tick.start()
 
     return bot
+
+
+def _log_startup_summary() -> None:
+    now = datetime.now(timezone.utc)
+    with SessionLocal() as session:
+        active_set = session.execute(
+            select(MagicSet).where(MagicSet.code == ACTIVE_SET_CODE)
+        ).scalar_one_or_none()
+        player_count = session.execute(select(func.count()).select_from(Player)).scalar()
+        lb_count = session.execute(select(func.count()).select_from(LeaderboardMessage)).scalar()
+        upcoming = session.execute(
+            select(PodDraftEvent)
+            .where(PodDraftEvent.socket_status.in_(["pending", "open", "drafting", "in_progress"]))
+            .order_by(PodDraftEvent.event_time)
+        ).scalars().all()
+
+    set_code = active_set.code if active_set else ACTIVE_SET_CODE
+    sep = "  ⚡  "
+    header = f"⚡  {set_code}{sep}{player_count} Players  ⚡"
+    lb_line = f"{lb_count} Leaderboard Messages"
+    if upcoming:
+        pod_lines = [
+            f"{ev.name:<28}  {ev.socket_status.replace('_', ' ').title():<14}  {ev.event_time.strftime('%Y-%m-%d %H:%M UTC')}  ({(ev.event_time - now).total_seconds() / 3600:+.1f}h)"
+            for ev in upcoming
+        ]
+    else:
+        pod_lines = ["No Upcoming Pod Drafts"]
+
+    rows = [header, lb_line] + pod_lines
+    w = max(_display_width(r) for r in rows) + 4
+
+    def box_row(text: str) -> str:
+        padding = " " * (w - 4 - _display_width(text))
+        return f"║  {text}{padding}  ║"
+
+    def box_row_centered(text: str) -> str:
+        total = w - 4 - _display_width(text)
+        left = total // 2
+        return f"║  {' ' * left}{text}{' ' * (total - left)}  ║"
+
+    box = "\n".join([
+        "",
+        f"╔{'═' * w}╗",
+        box_row(header),
+        box_row_centered(lb_line),
+        *[box_row_centered(l) for l in pod_lines],
+        f"╚{'═' * w}╝",
+    ])
+    log.info(box)
+
+
+def _display_width(s: str) -> int:
+    return sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in s)
 
 
 def _restart_banner() -> None:

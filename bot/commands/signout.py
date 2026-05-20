@@ -56,12 +56,14 @@ class Signout(commands.Cog):
     @app_commands.allowed_installs(guilds=True, users=False)
     async def signout(self, interaction: discord.Interaction) -> None:
         user_id = str(interaction.user.id)
-        audit.event("signout_invoked", user_id=user_id, username=str(interaction.user))
+        username = str(interaction.user)
+        audit.event("signout_invoked", user_id=user_id, username=username)
 
         with SessionLocal() as session:
             result = process_signout(session, user_id)
 
         audit.event("signout_result", user_id=user_id, kind=result.kind, player_id=result.player_id)
+        logger.info(f"retire: {username} → {result.kind}")
 
         if result.kind == "signed_out":
             in_guild = interaction.guild is not None

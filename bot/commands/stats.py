@@ -214,12 +214,16 @@ class Stats(commands.Cog):
         self, interaction: discord.Interaction, player: str | None = None
     ) -> None:
         user_id = str(interaction.user.id)
+        username = str(interaction.user)
         audit.event("stats_invoked", user_id=user_id, player=player)
+        target = player or "self"
+        logger.info(f"stats: {username} looked up {target!r}")
 
         with SessionLocal() as session:
             data = process_stats(session, player_name=player, viewer_discord_id=user_id)
 
         if data is None:
+            logger.info(f"stats: not found for {target!r}")
             if player:
                 msg = f"No active player found with display name `{player}`."
             else:
@@ -227,6 +231,7 @@ class Stats(commands.Cog):
             await interaction.response.send_message(msg, ephemeral=(interaction.guild is not None))
             return
 
+        logger.info(f"stats: {data.player_name} rank={data.rank} score={data.total_score:.1f}")
         await interaction.response.send_message(embed=render_embed(data), ephemeral=(interaction.guild is not None))
 
 

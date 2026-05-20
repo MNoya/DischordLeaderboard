@@ -60,7 +60,9 @@ class DeleteAccount(commands.Cog):
     @app_commands.allowed_installs(guilds=True, users=False)
     async def delete_account(self, interaction: discord.Interaction) -> None:
         user_id = str(interaction.user.id)
-        audit.event("delete_account_invoked", user_id=user_id, username=str(interaction.user))
+        username = str(interaction.user)
+        audit.event("delete_account_invoked", user_id=user_id, username=username)
+        logger.info(f"exile: {username} invoked")
 
         with SessionLocal() as session:
             existing = session.execute(
@@ -68,6 +70,7 @@ class DeleteAccount(commands.Cog):
             ).scalar_one_or_none()
         if existing is None:
             audit.event("delete_account_short_circuit", user_id=user_id, reason="not_registered")
+            logger.info(f"exile: {username} not registered")
             await interaction.response.send_message(MSG_NOT_REGISTERED, ephemeral=(interaction.guild is not None))
             return
 
@@ -80,11 +83,13 @@ class DeleteAccount(commands.Cog):
             reply = await self.bot.wait_for("message", check=is_user_dm, timeout=CONFIRM_TIMEOUT_S)
         except asyncio.TimeoutError:
             audit.event("delete_account_timeout", user_id=user_id)
+            logger.info(f"exile: {username} timed out")
             await interaction.followup.send(MSG_CANCELLED, ephemeral=(interaction.guild is not None))
             return
 
         if reply.content.strip().upper() != "YES":
             audit.event("delete_account_declined", user_id=user_id)
+            logger.info(f"exile: {username} declined")
             await interaction.followup.send(MSG_CANCELLED, ephemeral=(interaction.guild is not None))
             return
 
@@ -92,6 +97,7 @@ class DeleteAccount(commands.Cog):
             result = process_delete_account(session, user_id)
 
         audit.event("delete_account_result", user_id=user_id, kind=result.kind, deleted_player_id=result.deleted_player_id)
+        logger.info(f"exile: {username} deleted player_id={result.deleted_player_id}")
         await interaction.followup.send(MSG_DELETED, ephemeral=(interaction.guild is not None))
 
 

@@ -178,8 +178,10 @@ class Signup(commands.Cog):
         username = str(interaction.user)
         audit.event("signup_invoked", user_id=user_id, username=username)
 
+        logger.info(f"join: {username} invoked")
         if user_id in self._active_signups:
             audit.event("signup_concurrent_invocation", user_id=user_id)
+            logger.info(f"join: {username} duplicate flow blocked")
             await interaction.response.send_message(MSG_ALREADY_IN_PROGRESS, ephemeral=(interaction.guild is not None))
             return
         self._active_signups.add(user_id)
@@ -197,6 +199,7 @@ class Signup(commands.Cog):
             check = check_signup_eligibility(session, user_id, avatar_hash=avatar_hash)
         if check.kind == "reactivated":
             audit.event("signup_reactivated", user_id=user_id, player_id=check.player_id)
+            logger.info(f"join: {username} reactivated")
             # Defer because the refresh may take a second or two on a cold rate limiter
             await interaction.response.defer(ephemeral=(interaction.guild is not None), thinking=True)
             with SessionLocal() as session:
@@ -234,6 +237,7 @@ class Signup(commands.Cog):
             await dm.send(**kwargs)
         except discord.Forbidden:
             audit.event("signup_dms_disabled", user_id=user_id)
+            logger.warning(f"join: {username} DMs blocked")
             await interaction.followup.send(MSG_DMS_DISABLED, ephemeral=(interaction.guild is not None))
             return
 
@@ -247,6 +251,7 @@ class Signup(commands.Cog):
             reply = await self.bot.wait_for("message", check=is_user_dm, timeout=DM_TIMEOUT_S)
         except asyncio.TimeoutError:
             audit.event("signup_timeout", user_id=user_id)
+            logger.info(f"join: {username} timed out")
             await dm.send(MSG_TIMEOUT)
             return
 
@@ -270,6 +275,7 @@ class Signup(commands.Cog):
             kind=result.kind,
             player_id=result.player_id,
         )
+        logger.info(f"join: {username} → {result.kind}")
 
         if result.kind == "invalid_format":
             await dm.send(MSG_INVALID_FORMAT)

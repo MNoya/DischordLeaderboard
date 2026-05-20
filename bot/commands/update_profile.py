@@ -103,7 +103,9 @@ class UpdateProfile(commands.Cog):
     @app_commands.allowed_installs(guilds=True, users=False)
     async def update_profile(self, interaction: discord.Interaction) -> None:
         user_id = str(interaction.user.id)
-        audit.event("update_profile_invoked", user_id=user_id, username=str(interaction.user))
+        username = str(interaction.user)
+        audit.event("update_profile_invoked", user_id=user_id, username=username)
+        logger.info(f"relink: {username} invoked")
 
         with SessionLocal() as session:
             existing = session.execute(
@@ -111,6 +113,7 @@ class UpdateProfile(commands.Cog):
             ).scalar_one_or_none()
         if existing is None:
             audit.event("update_profile_short_circuit", user_id=user_id, reason="not_registered")
+            logger.info(f"relink: {username} not registered")
             await interaction.response.send_message(MSG_NOT_REGISTERED, ephemeral=(interaction.guild is not None))
             return
 
@@ -120,6 +123,7 @@ class UpdateProfile(commands.Cog):
             await dm.send(INSTRUCTIONS)
         except discord.Forbidden:
             audit.event("update_profile_dms_disabled", user_id=user_id)
+            logger.warning(f"relink: {username} DMs blocked")
             await interaction.response.send_message(MSG_DMS_DISABLED, ephemeral=(interaction.guild is not None))
             return
 
@@ -133,6 +137,7 @@ class UpdateProfile(commands.Cog):
             reply = await self.bot.wait_for("message", check=is_user_dm, timeout=DM_TIMEOUT_S)
         except asyncio.TimeoutError:
             audit.event("update_profile_timeout", user_id=user_id)
+            logger.info(f"relink: {username} timed out")
             await dm.send(MSG_TIMEOUT)
             return
 
@@ -148,6 +153,7 @@ class UpdateProfile(commands.Cog):
             )
 
         audit.event("update_profile_result", user_id=user_id, kind=result.kind, player_id=result.player_id)
+        logger.info(f"relink: {username} → {result.kind}")
 
         if result.kind == "invalid_format":
             await dm.send(MSG_INVALID_FORMAT)

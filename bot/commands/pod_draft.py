@@ -51,9 +51,11 @@ class PodDraft(commands.Cog):
             )
             return
         thread = interaction.channel
+        log.info(f"ready-check: {interaction.user} in thread {interaction.channel_id}")
         await interaction.response.defer(ephemeral=True, thinking=False)
         err = await manager.initiate_ready_check(thread)
         if err is not None:
+            log.warning(f"ready-check: failed — {err}")
             await interaction.followup.send(f"⚠️ {err}", ephemeral=True)
         else:
             await interaction.followup.send("Ready check started — watch the thread for status.", ephemeral=True)
@@ -129,6 +131,7 @@ class PodDraft(commands.Cog):
             session.commit()
 
         audit.event("pod_link_arena_success", user_id=user_id, player_id=player_id)
+        log.info(f"pod-link-arena: {interaction.user} linked {arena_name} (player_id={player_id})")
         await interaction.response.send_message(
             f"{emojis.get('mtga')} {mention} is **{arena_name}** on Arena.",
             allowed_mentions=no_pings,
@@ -168,6 +171,7 @@ class PodDraft(commands.Cog):
             await interaction.followup.send("No standings yet — this pod hasn't started pairings.", ephemeral=True)
             return
 
+        log.info(f"pod-standings: {interaction.user} posted standings for event_id={event_id}")
         thread_id = await asyncio.to_thread(_load_event_thread_id_sync, event_id)
         invoked_outside_thread = thread_id is not None and str(interaction.channel_id) != thread_id
         event_name = await asyncio.to_thread(_load_event_name_sync, event_id)
@@ -205,9 +209,11 @@ class PodDraft(commands.Cog):
             return
         target_user_id, target_user_name = target
 
+        log.info(f"pod-takeover: {interaction.user} → {target_user_name}")
         await interaction.response.defer(ephemeral=False, thinking=False)
         ok, err = await manager.takeover(target_user_id)
         if not ok:
+            log.warning(f"pod-takeover: failed — {err}")
             await interaction.followup.send(f"⚠️ Takeover failed: {err}", ephemeral=True)
             return
         await interaction.followup.send(
