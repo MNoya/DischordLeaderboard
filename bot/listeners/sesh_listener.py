@@ -2,13 +2,14 @@
 
 Pipeline: on_message (SESH_BOT_ID + POD_DRAFT_CHANNEL_ID filter) → parse_sesh_embed → poll for sesh's
 thread (5s × 2min) → record_event → APScheduler date job → quiet confirmation in the thread.
+on_raw_message_edit re-parses the embed and re-arms the reminder when sesh edits the event time.
 reschedule_pending_events() re-arms reminders on startup so the in-memory scheduler survives restarts.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import discord
 from discord.ext import commands
@@ -17,7 +18,7 @@ from sqlalchemy import select
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.models import PodDraftEvent
-from bot.services.pod_drafts import ParsedSeshEvent, record_event
+from bot.services.pod_drafts import ParsedSeshEvent, record_event, update_event_time_if_changed
 from bot.services.sesh_parser import ParsedSeshFields, parse_sesh_embed
 from bot.sets import ACTIVE_SET_CODE
 from bot.tasks.pod_draft_reminder import REMINDER_LEAD_MIN, fire_reminder
@@ -49,12 +50,55 @@ class SeshListener(commands.Cog):
                 log.exception(f"pod draft detection failed for message {message.id}")
             return
 
+    @commands.Cog.listener()
+    async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent) -> None:
+        if payload.channel_id != settings.pod_draft_channel_id:
+            return
+        author = (payload.data or {}).get("author") or {}
+        try:
+            author_id = int(author.get("id") or 0)
+        except (TypeError, ValueError):
+            return
+        if author_id != settings.sesh_bot_id:
+            return
+
+        message = await self._fetch_edited_message(payload.channel_id, payload.message_id)
+        if message is None:
+            return
+
+        fields = None
+        for embed in message.embeds:
+            fields = parse_sesh_embed(embed)
+            if fields is not None:
+                break
+        if fields is None:
+            return
+
+        try:
+            await self._handle_pod_draft_edit(message, fields)
+        except Exception:
+            log.exception(f"pod draft edit handling failed for message {message.id}")
+
     def _is_target_message(self, message: discord.Message) -> bool:
         if message.author.id != settings.sesh_bot_id:
             return False
         if message.channel.id != settings.pod_draft_channel_id:
             return False
         return bool(message.embeds)
+
+    async def _fetch_edited_message(self, channel_id: int, message_id: int) -> discord.Message | None:
+        channel = self.bot.get_channel(channel_id)
+        if channel is None:
+            try:
+                channel = await self.bot.fetch_channel(channel_id)
+            except discord.HTTPException as e:
+                log.warning(f"fetch_channel({channel_id}) failed: {e}")
+                return None
+        try:
+            return await channel.fetch_message(message_id)
+        except discord.HTTPException as e:
+            log.warning(f"fetch_message({message_id}) failed: {e}")
+            return None
 
     async def _handle_pod_draft(self, message: discord.Message, fields: ParsedSeshFields) -> None:
         log.info(f"sesh pod-draft embed detected: {fields.name}")
@@ -94,6 +138,55 @@ class SeshListener(commands.Cog):
             ))
         except discord.HTTPException:
             log.warning(f"could not post confirmation in pod draft thread {thread.id}", exc_info=True)
+
+    async def _handle_pod_draft_edit(self, message: discord.Message, fields: ParsedSeshFields) -> None:
+        result = await asyncio.to_thread(
+            _apply_event_time_update, str(message.id), fields.event_time, fields.event_date
+        )
+        if result is None:
+            return
+        event, time_changed = result
+        if not time_changed:
+            return
+
+        log.info(
+            f"sesh embed {message.id} rescheduled pod-draft {event.id} to {event.event_time.isoformat()}"
+        )
+        self._schedule_reminder(event.id, event.event_time)
+
+        thread = await self._resolve_thread(message.guild, event.discord_thread_id)
+        if thread is None:
+            return
+        try:
+            unix = int(event.event_time.timestamp())
+            await thread.send(embed=discord.Embed(
+                title="🕐 Pod Draft rescheduled",
+                description=(
+                    f"New time: <t:{unix}:F> (<t:{unix}:R>).\n"
+                    f"Draftmancer link will be posted {REMINDER_LEAD_MIN} minutes before the event starts."
+                ),
+                color=discord.Color.blue(),
+            ))
+        except discord.HTTPException:
+            log.warning(f"could not post reschedule notice in thread {thread.id}", exc_info=True)
+
+    async def _resolve_thread(
+        self, guild: discord.Guild | None, thread_id: str | None,
+    ) -> discord.Thread | None:
+        if guild is None or thread_id is None:
+            return None
+        try:
+            tid = int(thread_id)
+        except (TypeError, ValueError):
+            return None
+        thread = guild.get_thread(tid)
+        if thread is not None:
+            return thread
+        try:
+            ch = await self.bot.fetch_channel(tid)
+        except discord.HTTPException:
+            return None
+        return ch if isinstance(ch, discord.Thread) else None
 
     async def _wait_for_thread(self, message: discord.Message) -> discord.Thread | None:
         """Poll for the sesh-created thread (Discord assigns thread_id = message_id); None on timeout."""
@@ -181,6 +274,25 @@ def _persist_event(parsed_event: ParsedSeshEvent) -> PodDraftEvent:
         session.refresh(event)
         session.expunge(event)
         return event
+
+
+def _apply_event_time_update(
+    sesh_message_id: str,
+    new_event_time: datetime,
+    new_event_date: date,
+) -> tuple[PodDraftEvent, bool] | None:
+    """Worker-thread wrapper around update_event_time_if_changed; returns a detached row."""
+    with SessionLocal() as session:
+        result = update_event_time_if_changed(
+            session, sesh_message_id, new_event_time, new_event_date,
+        )
+        if result is None:
+            return None
+        event, time_changed = result
+        if time_changed:
+            session.commit()
+        session.expunge(event)
+        return event, time_changed
 
 
 def reschedule_pending_events(bot: commands.Bot) -> None:

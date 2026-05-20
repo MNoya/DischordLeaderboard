@@ -185,6 +185,31 @@ def record_event(session: Session, parsed: ParsedSeshEvent) -> PodDraftEvent:
     return event
 
 
+def update_event_time_if_changed(
+    session: Session,
+    sesh_message_id: str,
+    new_event_time: datetime,
+    new_event_date: date,
+) -> tuple[PodDraftEvent, bool] | None:
+    """Sync event_time/event_date from a re-parsed sesh embed.
+
+    Returns (event, time_changed) for the matching pending event, or None if no pending event
+    matches (already complete, or never tracked). time_changed=False means the parsed values
+    matched the stored ones — caller can skip re-arming the reminder.
+    """
+    event = session.execute(
+        select(PodDraftEvent).where(PodDraftEvent.sesh_message_id == sesh_message_id)
+    ).scalar_one_or_none()
+    if event is None or event.socket_status != "pending":
+        return None
+    if event.event_time == new_event_time and event.event_date == new_event_date:
+        return event, False
+    event.event_time = new_event_time
+    event.event_date = new_event_date
+    session.flush()
+    return event, True
+
+
 def seed_event_participants(session: Session, event_id: str, roster: list[str]) -> None:
     """Upsert one pod_draft_participants row per Draftmancer userName in `roster`. Idempotent —
     safe to call multiple times on the same event; existing rows get backfilled instead of

@@ -16,6 +16,7 @@ from bot.services.pod_drafts import (
     record_match,
     set_participant_deck_colors,
     set_participant_review_choice,
+    update_event_time_if_changed,
     upsert_participant,
 )
 
@@ -99,6 +100,67 @@ def test_record_event_with_no_matching_set_leaves_set_id_null(session):
     event = record_event(session, _parsed_event(set_code="CUBE"))
     assert event.set_id is None
     assert event.set_code == "CUBE"
+
+
+def test_update_event_time_if_changed_no_match_returns_none(session):
+    result = update_event_time_if_changed(
+        session,
+        sesh_message_id="nope",
+        new_event_time=datetime(2026, 5, 14, 0, 0, tzinfo=timezone.utc),
+        new_event_date=date(2026, 5, 14),
+    )
+    assert result is None
+
+
+def test_update_event_time_if_changed_skips_completed_event(session):
+    _seed_set(session)
+    event = record_event(session, _parsed_event(attendees=()))
+    event.socket_status = "complete"
+    session.flush()
+
+    result = update_event_time_if_changed(
+        session,
+        sesh_message_id=event.sesh_message_id,
+        new_event_time=datetime(2026, 5, 14, 0, 0, tzinfo=timezone.utc),
+        new_event_date=date(2026, 5, 14),
+    )
+    assert result is None
+
+
+def test_update_event_time_if_changed_no_op_when_time_matches(session):
+    _seed_set(session)
+    event = record_event(session, _parsed_event(attendees=()))
+
+    returned, time_changed = update_event_time_if_changed(
+        session,
+        sesh_message_id=event.sesh_message_id,
+        new_event_time=event.event_time,
+        new_event_date=event.event_date,
+    )
+    assert returned.id == event.id
+    assert time_changed is False
+
+
+def test_update_event_time_if_changed_writes_new_time(session):
+    _seed_set(session)
+    event = record_event(session, _parsed_event(attendees=()))
+    new_time = datetime(2026, 5, 14, 18, 30, tzinfo=timezone.utc)
+
+    returned, time_changed = update_event_time_if_changed(
+        session,
+        sesh_message_id=event.sesh_message_id,
+        new_event_time=new_time,
+        new_event_date=date(2026, 5, 14),
+    )
+    assert time_changed is True
+    assert returned.event_time == new_time
+    assert returned.event_date == date(2026, 5, 14)
+
+    reread = session.execute(
+        select(PodDraftEvent).where(PodDraftEvent.id == event.id)
+    ).scalar_one()
+    assert reread.event_time == new_time
+    assert reread.event_date == date(2026, 5, 14)
 
 
 def test_upsert_participant_matches_existing_by_display_name(session):
