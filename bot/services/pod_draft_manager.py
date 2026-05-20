@@ -569,6 +569,7 @@ class PodDraftManager:
                 "A draft is already in progress — Draftmancer doesn't allow ownership "
                 "transfer mid-draft when the bot is owner-spectator. Finish the draft, then retry."
             )
+        await self.share_draft_log()
         try:
             await self.sio.emit("setOwnerIsPlayer", True)
             await asyncio.sleep(1.0)

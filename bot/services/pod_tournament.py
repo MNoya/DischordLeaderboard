@@ -1182,6 +1182,7 @@ async def _maybe_advance(bot_client, event_id: str, round_num: int) -> None:
         return
 
     if round_num >= TOTAL_ROUNDS:
+        await manager.share_draft_log()
         _schedule_grace(manager, round_num)
         return
 
