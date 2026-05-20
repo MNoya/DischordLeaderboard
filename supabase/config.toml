@@ -1,0 +1,4 @@
+project_id = "yrecdosksgigpceholjl"
+
+[functions.refresh-deck-url]
+verify_jwt = false
