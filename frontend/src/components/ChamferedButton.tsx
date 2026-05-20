@@ -25,7 +25,7 @@ export function ChamferedButton({
       className={
         isSm
           ? "bg-green text-bg font-display tracking-[0.14em] text-[12px] py-[5px] pl-[14px] pr-[16px] cursor-pointer transition-colors hover:bg-green-2"
-          : "bg-green text-bg font-display tracking-[0.14em] text-[13px] py-[8px] pl-[22px] pr-[24px] cursor-pointer transition-colors hover:bg-green-2"
+          : "bg-green text-bg font-display tracking-[0.10em] text-[15px] leading-none pt-[11px] pb-[5px] pl-[22px] pr-[24px] cursor-pointer transition-colors hover:bg-green-2"
       }
       style={{
         clipPath: `polygon(${chamfer}px 0, 100% 0, calc(100% - ${chamfer}px) 100%, 0 100%)`,

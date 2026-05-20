@@ -1,4 +1,4 @@
-import { SiDiscord, SiGithub, SiPatreon, SiYoutube } from "react-icons/si";
+import { SiDiscord, SiGithub, SiPatreon, SiYoutube } from "./Icons";
 
 type IconProps = { size?: number; className?: string };
 

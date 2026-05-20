@@ -1,14 +1,16 @@
-import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Clock, ExternalLink } from "lucide-react";
-import { TbCards } from "react-icons/tb";
 import { AAvatar } from "../Brand";
+import {
+  Clock,
+  ExternalLink,
+  LuScrollText,
+  TbCards,
+} from "../Icons";
 import { Pips } from "../ManaPips";
 import { Record } from "../Record";
 import { cn } from "../../lib/utils";
 import { useIsMobile } from "../../lib/use-is-mobile";
 import { stripDiscriminator } from "../../data/utils";
-import { DeckScreenshotModal } from "./DeckScreenshotModal";
 import type { PodEventMatchRow, PodEventReplayRow, PodSeat } from "../../types/leaderboard";
 
 interface Props {
@@ -17,6 +19,7 @@ interface Props {
   matches: PodEventMatchRow[];
   replays: PodEventReplayRow[];
   onRoundHover?: (opponentSeatIndex: number | null, round: number | null, won: boolean | null) => void;
+  onShowDeck: (p: PodSeat) => void;
 }
 
 export function PlayerSeatPanel({
@@ -25,8 +28,8 @@ export function PlayerSeatPanel({
   matches,
   replays,
   onRoundHover,
+  onShowDeck,
 }: Props) {
-  const [deckView, setDeckView] = useState<PodSeat | null>(null);
   const playerMatches = matches
     .filter(
       (m) => m.playerAName === participant.displayName || m.playerBName === participant.displayName,
@@ -35,7 +38,7 @@ export function PlayerSeatPanel({
 
   return (
     <div>
-      <SeatHeader participant={participant} onViewDeck={() => setDeckView(participant)} />
+      <SeatHeader participant={participant} onViewDeck={() => onShowDeck(participant)} />
       <div className="flex flex-col">
         {playerMatches.map((match) => {
           const opponentName =
@@ -50,25 +53,11 @@ export function PlayerSeatPanel({
               opponent={opponent}
               replays={replays}
               onHover={onRoundHover}
-              onViewDeck={(p) => setDeckView(p)}
+              onViewDeck={onShowDeck}
             />
           );
         })}
       </div>
-      {deckView && (
-        <DeckScreenshotModal
-          participant={{
-            eventId: deckView.eventId,
-            displayName: deckView.discordName,
-            participantDisplayName: deckView.displayName,
-            deckColors: deckView.deckColors,
-            deckScreenshotUrl: deckView.deckScreenshotUrl,
-            deckScreenshotCaption: deckView.deckScreenshotCaption,
-            record: deckView.record,
-          }}
-          onClose={() => setDeckView(null)}
-        />
-      )}
     </div>
   );
 }
@@ -87,30 +76,23 @@ function SeatHeader({
   const losses = Number(rec.split("-")[1] || 0);
   const hasDeck = participant.deckScreenshotUrl !== null;
 
-  const nameContent = (
-    <span
-      className={cn(
-        "font-display leading-none truncate",
-        participant.playerSlug
-          ? "no-underline text-text hover:text-green transition-colors"
-          : "text-text",
-      )}
-      style={{ fontSize: 32, letterSpacing: "0.04em" }}
-    >
-      {participant.discordName}
-    </span>
-  );
   const nameLink = participant.playerSlug ? (
     <Link
       to={`/player/${participant.playerSlug}`}
       target="_blank"
       rel="noreferrer noopener"
-      className="no-underline"
+      className="self-start max-w-full no-underline font-display leading-none truncate text-text hover:text-green transition-colors"
+      style={{ fontSize: 32, letterSpacing: "0.04em" }}
     >
-      {nameContent}
+      {participant.discordName}
     </Link>
   ) : (
-    nameContent
+    <span
+      className="self-start max-w-full font-display leading-none truncate text-text"
+      style={{ fontSize: 32, letterSpacing: "0.04em" }}
+    >
+      {participant.discordName}
+    </span>
   );
 
   const placementLabel = isChampion
@@ -182,7 +164,7 @@ function SeatHeader({
               style={{ fontSize: 14, height: 38 }}
             >
               <span>VIEW DRAFT LOG</span>
-              <ExternalLink size={15} aria-hidden="true" />
+              <LuScrollText size={15} aria-hidden="true" />
             </a>
           ) : (
             <span
@@ -191,7 +173,7 @@ function SeatHeader({
               title="No draft log available"
             >
               <span>NO DRAFT LOG</span>
-              <ExternalLink size={15} aria-hidden="true" />
+              <LuScrollText size={15} aria-hidden="true" />
             </span>
           )}
         </div>
@@ -206,25 +188,25 @@ function SeatHeader({
         {nameLink}
         {metaRow}
       </div>
-      <div className="flex flex-col gap-2 shrink-0">
+      <div className="flex flex-col gap-2 shrink-0 min-w-[200px]">
         {hasDeck ? (
           <button
             type="button"
             onClick={onViewDeck}
-            className="inline-flex items-center justify-center gap-2 bg-bg border border-border hover:border-green/60 hover:bg-green/10 hover:text-green text-text font-display tracking-[0.14em] px-3 cursor-pointer transition-colors"
-            style={{ fontSize: 14, height: 34 }}
+            className="inline-flex items-center justify-end gap-5 bg-bg border border-border hover:border-green/60 hover:bg-green/10 hover:text-green text-text font-display tracking-[0.12em] px-5 cursor-pointer transition-colors leading-none"
+            style={{ fontSize: 17, height: 44, paddingTop: 2 }}
           >
             <span>VIEW DECK</span>
-            <TbCards size={17} aria-hidden="true" />
+            <TbCards size={20} aria-hidden="true" />
           </button>
         ) : (
           <span
-            className="inline-flex items-center justify-center gap-2 bg-bg border border-border text-dim font-display tracking-[0.14em] px-3 cursor-not-allowed"
-            style={{ fontSize: 14, height: 34 }}
+            className="inline-flex items-center justify-end gap-5 bg-bg border border-border text-dim font-display tracking-[0.12em] px-5 cursor-not-allowed leading-none"
+            style={{ fontSize: 17, height: 44, paddingTop: 2 }}
             title="No deck screenshot available"
           >
             <span>DECK MISSING</span>
-            <TbCards size={17} aria-hidden="true" />
+            <TbCards size={20} aria-hidden="true" />
           </span>
         )}
         {participant.draftLogUrl ? (
@@ -232,20 +214,20 @@ function SeatHeader({
             href={participant.draftLogUrl}
             target="_blank"
             rel="noreferrer noopener"
-            className="inline-flex items-center justify-center gap-2 bg-bg border border-border hover:border-green/60 hover:bg-green/10 hover:text-green text-text font-display tracking-[0.14em] px-3 no-underline transition-colors"
-            style={{ fontSize: 14, height: 34 }}
+            className="inline-flex items-center justify-end gap-5 bg-bg border border-border hover:border-green/60 hover:bg-green/10 hover:text-green text-text font-display tracking-[0.12em] px-5 no-underline transition-colors leading-none"
+            style={{ fontSize: 17, height: 44, paddingTop: 2 }}
           >
             <span>VIEW DRAFT LOG</span>
-            <ExternalLink size={17} aria-hidden="true" />
+            <LuScrollText size={20} aria-hidden="true" />
           </a>
         ) : (
           <span
-            className="inline-flex items-center justify-center gap-2 bg-bg border border-border text-dim font-display tracking-[0.14em] px-3 cursor-not-allowed"
-            style={{ fontSize: 14, height: 34 }}
+            className="inline-flex items-center justify-end gap-5 bg-bg border border-border text-dim font-display tracking-[0.12em] px-5 cursor-not-allowed leading-none"
+            style={{ fontSize: 17, height: 44, paddingTop: 2 }}
             title="No draft log available"
           >
             <span>NO DRAFT LOG</span>
-            <ExternalLink size={17} aria-hidden="true" />
+            <LuScrollText size={20} aria-hidden="true" />
           </span>
         )}
       </div>
@@ -524,7 +506,7 @@ function PlayerReplayCell({
       >
         <span
           className="font-display tracking-[0.16em] leading-none whitespace-nowrap"
-          style={{ fontSize: 12 }}
+          style={{ fontSize: 14 }}
         >
           {isMobile ? "NO REPLAY" : "NO REPLAY CAPTURED"}
         </span>
@@ -562,7 +544,7 @@ function PlayerReplayCell({
       )}
       <span
         className="font-display tracking-[0.16em] text-text group-hover:text-green transition-colors leading-none whitespace-nowrap"
-        style={{ fontSize: 12 }}
+        style={{ fontSize: 14 }}
       >
         {isMobile ? "REPLAY" : "VIEW REPLAY"}
       </span>
@@ -587,7 +569,7 @@ function OpponentReplayCell({ row }: { row: PodEventReplayRow | null }) {
       >
         <span
           className="font-display tracking-[0.16em] leading-none whitespace-nowrap"
-          style={{ fontSize: 12 }}
+          style={{ fontSize: 14 }}
         >
           NO REPLAY CAPTURED
         </span>
@@ -605,7 +587,7 @@ function OpponentReplayCell({ row }: { row: PodEventReplayRow | null }) {
     >
       <span
         className="font-display tracking-[0.16em] text-text group-hover:text-green transition-colors leading-none whitespace-nowrap"
-        style={{ fontSize: 12 }}
+        style={{ fontSize: 14 }}
       >
         {isMobile ? "OPP REPLAY" : "VIEW OPPONENT'S REPLAY"}
       </span>

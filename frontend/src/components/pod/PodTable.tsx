@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
+import { LuScrollText, TbCards } from "../Icons";
 import { PlayerShield } from "./PlayerShield";
 import { cn } from "../../lib/utils";
 import type { PodSeat } from "../../types/leaderboard";
@@ -10,6 +11,7 @@ interface Props {
   highlightedRound?: number | null;
   highlightedWon?: boolean | null;
   onSelect: (seat: number | null) => void;
+  onShowDeck?: (p: PodSeat) => void;
   eventLabel: string;
   setCode: string;
   date: string;
@@ -36,6 +38,7 @@ export function PodTable({
   highlightedRound = null,
   highlightedWon = null,
   onSelect,
+  onShowDeck,
   eventLabel,
   setCode,
   date,
@@ -108,26 +111,106 @@ export function PodTable({
         const y = 50 + Math.sin(angle) * ORBIT_RADIUS_PCT;
         const isSelected = selectedSeat === p.seatIndex;
         return (
-          <div
-            key={p.displayName}
-            className="absolute"
-            style={{
-              left: `${x}%`,
-              top: `${y}%`,
-              transform: "translate(-50%, -50%)",
-            }}
-          >
-            <PlayerShield
-              participant={p}
-              selected={isSelected}
-              highlighted={!isSelected && highlightedSeat === p.seatIndex}
-              highlightedWon={highlightedWon}
-              onClick={() => onSelect(isSelected ? null : p.seatIndex)}
-              scale={scale}
-            />
+          <div key={p.displayName}>
+            <div
+              className="absolute"
+              style={{
+                left: `${x}%`,
+                top: `${y}%`,
+                transform: "translate(-50%, -50%)",
+              }}
+            >
+              <PlayerShield
+                participant={p}
+                selected={isSelected}
+                highlighted={!isSelected && highlightedSeat === p.seatIndex}
+                highlightedWon={highlightedWon}
+                onClick={() => onSelect(isSelected ? null : p.seatIndex)}
+                scale={scale}
+              />
+            </div>
+            {isSelected && onShowDeck && (
+              <ShieldActions
+                angle={angle}
+                participant={p}
+                onShowDeck={onShowDeck}
+                scale={scale}
+              />
+            )}
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function ShieldActions({
+  angle,
+  participant,
+  onShowDeck,
+  scale,
+}: {
+  angle: number;
+  participant: PodSeat;
+  onShowDeck: (p: PodSeat) => void;
+  scale: number;
+}) {
+  const hasDeck = !!participant.deckScreenshotUrl;
+  const hasDraftLog = !!participant.draftLogUrl;
+  if (!hasDeck && !hasDraftLog) return null;
+
+  const orbitX = 50 + Math.cos(angle) * ORBIT_RADIUS_PCT;
+  const orbitY = 50 + Math.sin(angle) * ORBIT_RADIUS_PCT;
+  const horizontalOffsetPct = 14.5;
+  const verticalNudgePct = -3;
+  const x = orbitX + horizontalOffsetPct;
+  const y = orbitY + verticalNudgePct;
+  const btnSize = Math.max(38, 44 * scale);
+
+  return (
+    <div
+      className="absolute z-30 animate-fadeIn"
+      style={{
+        left: `${x}%`,
+        top: `${y}%`,
+        transform: "translate(-50%, -50%)",
+      }}
+    >
+      <div className="flex flex-col gap-2">
+        {hasDeck && (
+          <button
+            type="button"
+            onClick={() => onShowDeck(participant)}
+            title="View deck"
+            aria-label="View deck"
+            className="group flex items-center justify-center rounded-full bg-bg border border-border hover:border-green/60 hover:bg-green/10 transition-colors cursor-pointer shadow-[0_4px_10px_rgba(0,0,0,0.55)]"
+            style={{ width: btnSize, height: btnSize }}
+          >
+            <TbCards
+              size={Math.round(btnSize * 0.46)}
+              aria-hidden="true"
+              className="text-text group-hover:text-green transition-colors"
+            />
+          </button>
+        )}
+        {hasDraftLog && (
+          <a
+            href={participant.draftLogUrl!}
+            target="_blank"
+            rel="noreferrer noopener"
+            title="View draft log"
+            aria-label="View draft log"
+            className="group flex items-center justify-center rounded-full bg-bg border border-border hover:border-green/60 hover:bg-green/10 transition-colors no-underline shadow-[0_4px_10px_rgba(0,0,0,0.55)]"
+            style={{ width: btnSize, height: btnSize }}
+          >
+            <LuScrollText
+              size={Math.round(btnSize * 0.46)}
+              aria-hidden="true"
+              className="text-text group-hover:text-green transition-colors"
+            />
+          </a>
+        )}
+      </div>
     </div>
   );
 }

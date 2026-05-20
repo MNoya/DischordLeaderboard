@@ -1,6 +1,5 @@
 import { Link } from "react-router-dom";
-import { BsAsterisk, BsPaletteFill } from "react-icons/bs";
-import { ExternalLink } from "lucide-react";
+import { BsAsterisk, BsPaletteFill, ExternalLink } from "./Icons";
 
 import { Trophy } from "./Brand";
 import { Pips } from "./ManaPips";

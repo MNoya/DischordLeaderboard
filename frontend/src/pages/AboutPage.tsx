@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
-import { Globe } from "lucide-react";
 import { AppHeader } from "../components/AppHeader";
-import { ArrowRight } from "../components/Brand";
+import { ArrowRight, Globe } from "../components/Icons";
 import { DiscordIcon, PatreonIcon, YoutubeIcon } from "../components/BrandIcons";
 import { Footer } from "../components/Footer";
 import { cn } from "../lib/utils";
@@ -67,7 +66,7 @@ function CTA() {
           <span className="font-display text-[17px] md:text-[20px] tracking-[0.14em] leading-none">
             JOIN THE DISCHORD
           </span>
-          <ArrowRight size={18} strokeWidth={3} className="shrink-0" />
+          <ArrowRight size={18} />
         </button>
       </a>
     </div>

@@ -14,6 +14,7 @@ interface Props {
   replays: PodEventReplayRow[];
   selectedSeat: number | null;
   onSelect: (seat: number | null) => void;
+  onShowDeck: (p: PodSeat) => void;
   eventLabel: string;
   setCode: string;
 }
@@ -124,6 +125,7 @@ export function MobileSeatStack({
   replays,
   selectedSeat,
   onSelect,
+  onShowDeck,
   eventLabel,
   setCode,
 }: Props) {
@@ -157,6 +159,7 @@ export function MobileSeatStack({
                 participantsBySeatName={participantsBySeatName}
                 matches={matches}
                 replays={replays}
+                onShowDeck={onShowDeck}
               />
             </div>
           )}

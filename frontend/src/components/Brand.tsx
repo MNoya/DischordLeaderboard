@@ -89,7 +89,6 @@ export function AAvatar({
   );
 }
 
-export { ArrowRight } from "lucide-react";
 
 // Trophy glyph — the marquee stat in this community (spec).
 export function Trophy({
@@ -106,7 +105,7 @@ export function Trophy({
       width={size}
       height={size}
       viewBox="0 0 16 16"
-      className={className ? `shrink-0 ${className}` : "shrink-0"}
+      className={className ? `shrink-0 icon-cap-align ${className}` : "shrink-0 icon-cap-align"}
       style={color ? { color } : undefined}
       aria-hidden="true"
     >

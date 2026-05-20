@@ -81,3 +81,12 @@ button {
   interpolate-size: allow-keywords;
   transition: height 300ms ease-out;
 }
+
+/* Bebas Neue caps sit visually ~1px above their line-box center, while SVG icons
+ * are centered in their viewBox. When the two share an items-center row, icons
+ * look slightly low. Apply this class to any icon rendered alongside font-display
+ * text to nudge it back onto the caps' visual centerline.
+ */
+.icon-cap-align {
+  transform: translateY(-1px);
+}

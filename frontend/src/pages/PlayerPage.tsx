@@ -1,11 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ArrowUp, ChevronLeft, ChevronRight, ExternalLink } from "lucide-react";
-import { BsAsterisk, BsPaletteFill } from "react-icons/bs";
 
 import { AppHeader } from "../components/AppHeader";
 import { useIsMobile } from "../lib/use-is-mobile";
 import { AAvatar, ALogo, SetGlyph, Trophy, fmtPts } from "../components/Brand";
+import {
+  ArrowUp,
+  BsAsterisk,
+  BsPaletteFill,
+  ChevronLeft,
+  ChevronRight,
+  ExternalLink,
+} from "../components/Icons";
 import { Pip, Pips } from "../components/ManaPips";
 import { StatChip } from "../components/StatChip";
 import { FilterDropdown } from "../components/FilterDropdown";

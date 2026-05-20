@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { X, ZoomIn, ZoomOut } from "lucide-react";
-import { ArrowRight } from "../Brand";
+import { ArrowRight, GiRoundTable } from "../Icons";
 import { ChamferedButton } from "../ChamferedButton";
 import { Pips } from "../ManaPips";
 import { Record } from "../Record";
@@ -211,8 +211,9 @@ export function DeckScreenshotModal({ participant, breakdownHref, onClose }: Pro
                 </span>
                 <ChamferedButton>
                   <span className="inline-flex items-center gap-2">
+                    <GiRoundTable size={30} className="-my-[6px]" />
                     VIEW BREAKDOWN
-                    <ArrowRight size={12} />
+                     <ArrowRight size={14} />
                   </span>
                 </ChamferedButton>
               </div>

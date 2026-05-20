@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ChevronDown, ExternalLink } from "lucide-react";
-import { TbCards } from "react-icons/tb";
+import { ChevronDown } from "lucide-react";
 
 import { AppHeader } from "../components/AppHeader";
 import { Footer } from "../components/Footer";
 import { SectionLabel } from "../components/SectionLabel";
 import { SetSwitcherDesktop, SetSwitcherMobile } from "../components/SetSwitcher";
-import { AAvatar, ArrowRight, SetGlyph, Trophy } from "../components/Brand";
+import { AAvatar, SetGlyph, Trophy } from "../components/Brand";
+import { ArrowRight, GiRoundTable, LuScrollText, TbCards } from "../components/Icons";
 import { DiscordIcon } from "../components/BrandIcons";
 import { ChamferedButton } from "../components/ChamferedButton";
 import { BREAKDOWN_CAPTION, DeckScreenshotModal } from "../components/pod/DeckScreenshotModal";
@@ -410,10 +410,10 @@ function JoinEventCTA() {
         <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-bg text-text shrink-0">
           <DiscordIcon size={15} />
         </span>
-        <span className="font-display text-[13px] tracking-[0.14em] leading-none">
+        <span className="font-display text-[15px] tracking-[0.10em] leading-none">
           JOIN EVENT
         </span>
-        <ArrowRight size={14} strokeWidth={3} className="shrink-0" />
+        <ArrowRight size={14} />
       </span>
     </div>
   );
@@ -509,7 +509,7 @@ function EventRowBody({ event, nowMs }: { event: PodEventSummary; nowMs: number 
       {hasChamp && event.championDisplayName && (
         <div className="flex flex-col items-center gap-1 min-w-0 max-w-[50%] lg:flex-row lg:items-center lg:gap-2.5 lg:max-w-none lg:shrink-0 lg:w-[260px]">
           <div className="flex items-center gap-1 min-w-0 max-w-full lg:contents">
-            <Trophy size={17} color="#ffc63a" className="-translate-y-[1px]" />
+            <Trophy size={17} color="#ffc63a" />
             <span
               className="font-display text-text tracking-[0.04em] truncate max-w-full"
               style={{ fontSize: 18, lineHeight: 1 }}
@@ -583,8 +583,9 @@ function EventStandings({ event }: { event: PodEventSummary }) {
             </span>
             <ChamferedButton>
               <span className="inline-flex items-center gap-2">
+                <GiRoundTable size={30} className="-my-[6px]" />
                 VIEW BREAKDOWN
-                <ArrowRight size={12} />
+                 <ArrowRight size={14} />
               </span>
             </ChamferedButton>
           </div>
@@ -690,8 +691,8 @@ function StandingRow({
           >
             DRAFT LOG
           </span>
-          <ExternalLink
-            size={15}
+          <LuScrollText
+            size={16}
             aria-hidden="true"
             className="text-text group-hover/action:text-green group-hover/row:text-green transition-colors"
           />

@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "./Icons";
 import { cn } from "../lib/utils";
 import { ALogo } from "./Brand";
 
@@ -30,7 +30,7 @@ export function BackButton({
   );
   const content = (
     <>
-      <ChevronLeft size={14} className="shrink-0 -mt-px" />
+      <ChevronLeft size={14} className="shrink-0" />
       {compact ? "BACK" : label}
     </>
   );
@@ -74,21 +74,21 @@ export function PrevNextNav({
     <div className={cn("flex items-center", compact ? "gap-2" : "gap-3")}>
       {prevTo ? (
         <Link to={prevTo} className={cls} aria-label={prevAriaLabel ?? "Previous"}>
-          <ChevronLeft size={14} className="shrink-0 -mt-px" /> {prevLabel}
+          <ChevronLeft size={14} className="shrink-0" /> {prevLabel}
         </Link>
       ) : (
         <span className={cn(cls, disabledCls)} aria-disabled="true">
-          <ChevronLeft size={14} className="shrink-0 -mt-px" /> {prevLabel}
+          <ChevronLeft size={14} className="shrink-0" /> {prevLabel}
         </span>
       )}
       <span className="text-dim text-[12px]">·</span>
       {nextTo ? (
         <Link to={nextTo} className={cls} aria-label={nextAriaLabel ?? "Next"}>
-          {nextLabel} <ChevronRight size={14} className="shrink-0 -mt-px" />
+          {nextLabel} <ChevronRight size={14} className="shrink-0" />
         </Link>
       ) : (
         <span className={cn(cls, disabledCls)} aria-disabled="true">
-          {nextLabel} <ChevronRight size={14} className="shrink-0 -mt-px" />
+          {nextLabel} <ChevronRight size={14} className="shrink-0" />
         </span>
       )}
     </div>

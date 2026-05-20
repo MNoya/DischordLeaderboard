@@ -8,6 +8,7 @@ import { useIsMobile } from "../lib/use-is-mobile";
 import { PodTable, PodTableSkeleton } from "../components/pod/PodTable";
 import { PlayerSeatPanel } from "../components/pod/PlayerSeatPanel";
 import { MobileSeatStack, MobileSeatStackSkeleton } from "../components/pod/MobileSeatStack";
+import { DeckScreenshotModal } from "../components/pod/DeckScreenshotModal";
 import {
   usePodEventBySlug,
   usePodEventMatches,
@@ -65,6 +66,7 @@ export function PodPage() {
   const [highlightedRound, setHighlightedRound] = useState<number | null>(null);
   const [highlightedWon, setHighlightedWon] = useState<boolean | null>(null);
   const [animateLayout, setAnimateLayout] = useState(false);
+  const [deckTarget, setDeckTarget] = useState<PodSeat | null>(null);
 
   const handleRoundHover = (seat: number | null, round: number | null, won: boolean | null) => {
     setHighlightedSeat(seat);
@@ -307,9 +309,24 @@ export function PodPage() {
           replays={loadedReplays}
           selectedSeat={selectedSeat}
           onSelect={handleSelectSeat}
+          onShowDeck={setDeckTarget}
           eventLabel={eventLabel}
           setCode={event.setCode}
         />
+        {deckTarget && (
+          <DeckScreenshotModal
+            participant={{
+              eventId: deckTarget.eventId,
+              displayName: deckTarget.discordName,
+              participantDisplayName: deckTarget.displayName,
+              deckColors: deckTarget.deckColors,
+              deckScreenshotUrl: deckTarget.deckScreenshotUrl,
+              deckScreenshotCaption: deckTarget.deckScreenshotCaption,
+              record: deckTarget.record,
+            }}
+            onClose={() => setDeckTarget(null)}
+          />
+        )}
       </div>
     );
   }
@@ -344,6 +361,7 @@ export function PodPage() {
               highlightedRound={highlightedRound}
               highlightedWon={highlightedWon}
               onSelect={handleSelectSeat}
+              onShowDeck={setDeckTarget}
               eventLabel={eventLabel}
               setCode={event.setCode}
               date={event.eventDate}
@@ -373,6 +391,7 @@ export function PodPage() {
                     matches={loadedMatches}
                     replays={loadedReplays}
                     onRoundHover={handleRoundHover}
+                    onShowDeck={setDeckTarget}
                   />
                 )}
                 {displayParticipant && auxLoading && (
@@ -385,6 +404,20 @@ export function PodPage() {
           </div>
         </div>
       </main>
+      {deckTarget && (
+        <DeckScreenshotModal
+          participant={{
+            eventId: deckTarget.eventId,
+            displayName: deckTarget.discordName,
+            participantDisplayName: deckTarget.displayName,
+            deckColors: deckTarget.deckColors,
+            deckScreenshotUrl: deckTarget.deckScreenshotUrl,
+            deckScreenshotCaption: deckTarget.deckScreenshotCaption,
+            record: deckTarget.record,
+          }}
+          onClose={() => setDeckTarget(null)}
+        />
+      )}
     </div>
   );
 }

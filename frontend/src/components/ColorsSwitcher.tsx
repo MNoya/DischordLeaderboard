@@ -1,4 +1,4 @@
-import { BsAsterisk, BsPaletteFill } from "react-icons/bs";
+import { BsAsterisk, BsPaletteFill } from "./Icons";
 
 import { Pip } from "./ManaPips";
 import { cn } from "../lib/utils";

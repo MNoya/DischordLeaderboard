@@ -1,11 +1,15 @@
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import React, { Fragment, useEffect, useMemo, useState } from "react";
-import { ExternalLink } from "lucide-react";
-import { BsAsterisk, BsPaletteFill } from "react-icons/bs";
 
 import { AppHeader } from "../components/AppHeader";
 import { useIsMobile } from "../lib/use-is-mobile";
-import { ArrowRight, SetGlyph, Trophy } from "../components/Brand";
+import { SetGlyph, Trophy } from "../components/Brand";
+import {
+  ArrowRight,
+  BsAsterisk,
+  BsPaletteFill,
+  ExternalLink,
+} from "../components/Icons";
 import { Footer } from "../components/Footer";
 import { Pip, Pips } from "../components/ManaPips";
 import { SetSwitcherDesktop, SetSwitcherMobile } from "../components/SetSwitcher";
