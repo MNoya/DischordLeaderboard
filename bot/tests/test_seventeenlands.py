@@ -8,8 +8,7 @@ from bot.services.seventeenlands import (
     SUPPORTED_FORMATS,
     MinIntervalLimiter,
     SeventeenLandsClient,
-    aggregate_for_set,
-    extract_events_for_set,
+    extract_event_row,
     extract_token,
 )
 
@@ -251,96 +250,7 @@ def test_client_invokes_limiter_once_per_call():
 
 
 # ---------------------------------------------------------------------------
-# aggregate_for_set
-# ---------------------------------------------------------------------------
-
-
-def test_aggregate_empty_drafts_returns_zeroed_buckets():
-    result = aggregate_for_set([], "ECL")
-    assert set(result.keys()) == set(SUPPORTED_FORMATS)
-    for stats in result.values():
-        assert stats == {"wins": 0, "losses": 0, "games_played": 0, "trophies": 0}
-
-
-def test_aggregate_filters_unsupported_formats():
-    drafts = [
-        {"format": "MidWeekSealed", "expansion": "ECL", "wins": 7, "losses": 0, "event_wins": 7},
-    ]
-    result = aggregate_for_set(drafts, "ECL")
-    for stats in result.values():
-        assert stats["wins"] == 0
-        assert stats["games_played"] == 0
-
-
-def test_aggregate_filters_other_sets():
-    drafts = [
-        {"format": "PremierDraft", "expansion": "BLB", "wins": 7, "losses": 0, "event_wins": 7},
-        {"format": "PremierDraft", "expansion": "ECL", "wins": 5, "losses": 3, "event_wins": 0},
-    ]
-    result = aggregate_for_set(drafts, "ECL")
-    assert result["PremierDraft"] == {
-        "wins": 5,
-        "losses": 3,
-        "games_played": 8,
-        "trophies": 0,
-    }
-
-
-def test_aggregate_substring_match_includes_alchemy_variants():
-    """Y26ECL should bucket under ECL — mirrors legacy 'in' behavior."""
-    drafts = [
-        {"format": "PremierDraft", "expansion": "Y26ECL", "wins": 7, "losses": 1, "event_wins": 7},
-        {"format": "PremierDraft", "expansion": "ECL", "wins": 4, "losses": 3, "event_wins": 0},
-    ]
-    result = aggregate_for_set(drafts, "ECL")
-    assert result["PremierDraft"]["wins"] == 11
-    assert result["PremierDraft"]["losses"] == 4
-    assert result["PremierDraft"]["games_played"] == 15
-    assert result["PremierDraft"]["trophies"] == 1
-
-
-def test_aggregate_counts_trophies_via_event_wins():
-    """A trad 4-0 (event_wins truthy but != 7) still counts as a trophy."""
-    drafts = [
-        {"format": "TradDraft", "expansion": "ECL", "wins": 4, "losses": 0, "event_wins": 4},
-        {"format": "TradDraft", "expansion": "ECL", "wins": 2, "losses": 1, "event_wins": 0},
-    ]
-    result = aggregate_for_set(drafts, "ECL")
-    assert result["TradDraft"]["trophies"] == 1
-    assert result["TradDraft"]["wins"] == 6
-
-
-def test_aggregate_handles_missing_fields():
-    drafts = [
-        {"format": "PremierDraft", "expansion": "ECL"},  # no wins/losses/event_wins
-        {"format": "PremierDraft", "expansion": "ECL", "wins": None, "losses": None, "event_wins": None},
-    ]
-    result = aggregate_for_set(drafts, "ECL")
-    assert result["PremierDraft"] == {
-        "wins": 0,
-        "losses": 0,
-        "games_played": 0,
-        "trophies": 0,
-    }
-
-
-def test_aggregate_sums_across_all_supported_formats():
-    drafts = [
-        {"format": "PremierDraft", "expansion": "ECL", "wins": 7, "losses": 2, "event_wins": 7},
-        {"format": "TradDraft",    "expansion": "ECL", "wins": 4, "losses": 0, "event_wins": 4},
-        {"format": "Sealed",       "expansion": "ECL", "wins": 3, "losses": 3, "event_wins": 0},
-        {"format": "TradSealed",   "expansion": "ECL", "wins": 4, "losses": 1, "event_wins": 4},
-    ]
-    result = aggregate_for_set(drafts, "ECL")
-    assert result["PremierDraft"]["trophies"] == 1
-    assert result["TradDraft"]["trophies"] == 1
-    assert result["Sealed"]["trophies"] == 0
-    assert result["TradSealed"]["trophies"] == 1
-    assert sum(s["games_played"] for s in result.values()) == 24
-
-
-# ---------------------------------------------------------------------------
-# extract_events_for_set
+# extract_event_row
 # ---------------------------------------------------------------------------
 
 
@@ -362,99 +272,76 @@ def _draft(**overrides):
     return base
 
 
-def test_extract_events_returns_one_per_draft():
-    drafts = [_draft(id="a"), _draft(id="b"), _draft(id="c")]
-    events = extract_events_for_set(drafts, "SOS")
-    assert [e["seventeenlands_event_id"] for e in events] == ["a", "b", "c"]
+def test_extract_event_row_basic_fields():
+    row = extract_event_row(_draft(id="abc"))
+    assert row["seventeenlands_event_id"] == "abc"
+    assert row["format"] == "PremierDraft"
+    assert row["expansion"] == "SOS"
+    assert row["wins"] == 5
+    assert row["losses"] == 3
 
 
-def test_extract_events_preserves_color_case_for_splash():
+def test_extract_event_row_preserves_color_case_for_splash():
     """Lowercase letters in colors are splash markers — case must survive."""
-    drafts = [
-        _draft(id="main", colors="WB"),
-        _draft(id="splash", colors="WBg"),
-        _draft(id="five", colors="WUBRG"),
-        _draft(id="busy", colors="RGwub"),
-        _draft(id="mono", colors="W"),
-    ]
-    events = extract_events_for_set(drafts, "SOS")
-    by_id = {e["seventeenlands_event_id"]: e["colors"] for e in events}
-    assert by_id == {"main": "WB", "splash": "WBg", "five": "WUBRG",
-                     "busy": "RGwub", "mono": "W"}
+    for colors in ("WB", "WBg", "WUBRG", "RGwub", "W"):
+        assert extract_event_row(_draft(colors=colors))["colors"] == colors
 
 
-def test_extract_events_handles_null_colors_and_ranks():
-    drafts = [_draft(colors=None, start_rank=None, end_rank=None)]
-    [event] = extract_events_for_set(drafts, "SOS")
-    assert event["colors"] is None
-    assert event["start_rank"] is None
-    assert event["end_rank"] is None
+def test_extract_event_row_handles_null_colors_and_ranks():
+    row = extract_event_row(_draft(colors=None, start_rank=None, end_rank=None))
+    assert row["colors"] is None
+    assert row["start_rank"] is None
+    assert row["end_rank"] is None
 
 
-def test_extract_events_trophy_flag_from_event_wins():
-    drafts = [
-        _draft(id="t", event_wins=7),
-        _draft(id="nt", event_wins=0),
-        _draft(id="trad", event_wins=4),
-    ]
-    events = extract_events_for_set(drafts, "SOS")
-    assert {e["seventeenlands_event_id"]: e["is_trophy"] for e in events} == {
-        "t": True, "nt": False, "trad": True,
-    }
+def test_extract_event_row_trophy_flag_from_event_wins():
+    assert extract_event_row(_draft(event_wins=7))["is_trophy"] is True
+    assert extract_event_row(_draft(event_wins=0))["is_trophy"] is False
+    assert extract_event_row(_draft(event_wins=4))["is_trophy"] is True
 
 
-def test_extract_events_skips_unsupported_formats():
-    drafts = [
-        _draft(id="ok", format="PremierDraft"),
-        _draft(id="bad", format="MidWeekSealed"),
-    ]
-    events = extract_events_for_set(drafts, "SOS")
-    assert [e["seventeenlands_event_id"] for e in events] == ["ok"]
+def test_extract_event_row_keeps_unknown_format():
+    """Format is never filtered at extract; storage layer keeps everything."""
+    row = extract_event_row(_draft(format="MidWeekSealed"))
+    assert row["format"] == "MidWeekSealed"
 
 
-def test_extract_events_filters_by_set_substring():
-    """Y26ECL matches set ECL — same rule as aggregate_for_set."""
-    drafts = [
-        _draft(id="alc", expansion="Y26ECL"),
-        _draft(id="std", expansion="ECL"),
-        _draft(id="other", expansion="SOS"),
-    ]
-    events = extract_events_for_set(drafts, "ECL")
-    assert sorted(e["seventeenlands_event_id"] for e in events) == ["alc", "std"]
+def test_extract_event_row_normalizes_expansion_alias():
+    """``Cube - Powered`` aliases to ``CUBE`` via ``normalize_expansion``."""
+    row = extract_event_row(_draft(expansion="Cube - Powered"))
+    assert row["expansion"] == "CUBE"
 
 
-def test_extract_events_skips_events_without_id():
-    drafts = [_draft(id=None), _draft(id="")]
-    assert extract_events_for_set(drafts, "SOS") == []
+def test_extract_event_row_returns_none_without_id():
+    assert extract_event_row(_draft(id=None)) is None
+    assert extract_event_row(_draft(id="")) is None
 
 
-def test_extract_events_parses_timestamps():
-    drafts = [_draft(
+def test_extract_event_row_returns_none_without_format():
+    assert extract_event_row(_draft(format=None)) is None
+
+
+def test_extract_event_row_parses_timestamps():
+    row = extract_event_row(_draft(
         first_event_server_time="2026-04-28 23:16:43",
         last_event_server_time="2026-04-28 23:39:04",
-    )]
-    [event] = extract_events_for_set(drafts, "SOS")
+    ))
     # 17lands serves UTC-naive strings; we tag them as UTC-aware on parse
-    assert event["started_at"].isoformat() == "2026-04-28T23:16:43+00:00"
-    assert event["finished_at"].isoformat() == "2026-04-28T23:39:04+00:00"
+    assert row["started_at"].isoformat() == "2026-04-28T23:16:43+00:00"
+    assert row["finished_at"].isoformat() == "2026-04-28T23:39:04+00:00"
 
 
-def test_extract_events_handles_minute_precision_timestamps():
+def test_extract_event_row_handles_minute_precision_timestamps():
     """Some 17lands timestamps come at minute precision (no seconds)."""
-    drafts = [_draft(
+    row = extract_event_row(_draft(
         first_event_server_time="2026-04-28 23:16",
         last_event_server_time="2026-04-28 23:39",
-    )]
-    [event] = extract_events_for_set(drafts, "SOS")
-    assert event["started_at"].isoformat() == "2026-04-28T23:16:00+00:00"
-    assert event["finished_at"].isoformat() == "2026-04-28T23:39:00+00:00"
+    ))
+    assert row["started_at"].isoformat() == "2026-04-28T23:16:00+00:00"
+    assert row["finished_at"].isoformat() == "2026-04-28T23:39:00+00:00"
 
 
-def test_extract_events_handles_missing_timestamps():
-    drafts = [_draft(
-        first_event_server_time=None,
-        last_event_server_time=None,
-    )]
-    [event] = extract_events_for_set(drafts, "SOS")
-    assert event["started_at"] is None
-    assert event["finished_at"] is None
+def test_extract_event_row_handles_missing_timestamps():
+    row = extract_event_row(_draft(first_event_server_time=None, last_event_server_time=None))
+    assert row["started_at"] is None
+    assert row["finished_at"] is None

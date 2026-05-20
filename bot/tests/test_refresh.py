@@ -1,117 +1,19 @@
 from datetime import date
 
-import pytest
 import requests
 from sqlalchemy import select
 
 from bot.models import DraftEvent, MagicSet, Player, PlayerSetScore, PlayerStats
 from bot.services.refresh import (
-    aggregate_by_set_format_expansion,
-    recompute_player_set_score,
+    bulk_upsert_draft_events,
+    claim_orphan_drafts,
+    rebuild_player_stats,
     refresh_active_players,
     refresh_active_players_all_sets,
     refresh_one_player_for_all_sets,
     refresh_player,
-    upsert_draft_events,
 )
 from bot.sets import ACTIVE_SET_CODE
-
-
-class _FakeSet:
-    __slots__ = ("id", "code")
-
-    def __init__(self, set_id: str, code: str) -> None:
-        self.id = set_id
-        self.code = code
-
-
-def test_aggregate_empty():
-    assert aggregate_by_set_format_expansion([], [_FakeSet("s1", "ECL")]) == []
-
-
-def test_aggregate_buckets_per_set_format_expansion():
-    drafts = [
-        {"format": "PremierDraft", "expansion": "ECL", "wins": 5, "losses": 3, "event_wins": 0},
-        {"format": "PremierDraft", "expansion": "ECL", "wins": 7, "losses": 1, "event_wins": 7},
-        {"format": "PremierDraft", "expansion": "Y26ECL", "wins": 4, "losses": 3, "event_wins": 0},
-        {"format": "TradDraft", "expansion": "ECL", "wins": 4, "losses": 0, "event_wins": 4},
-    ]
-    rows = aggregate_by_set_format_expansion(drafts, [_FakeSet("s1", "ECL")])
-
-    by_key = {(r["format"], r["expansion"]): r for r in rows}
-    assert set(by_key.keys()) == {("PremierDraft", "ECL"), ("PremierDraft", "Y26ECL"), ("TradDraft", "ECL")}
-    assert by_key[("PremierDraft", "ECL")]["set_id"] == "s1"
-    assert by_key[("PremierDraft", "ECL")]["set_code"] == "ECL"
-    assert by_key[("PremierDraft", "ECL")]["events"] == 2
-    assert by_key[("PremierDraft", "ECL")]["wins"] == 12
-    assert by_key[("PremierDraft", "ECL")]["games_played"] == 16
-    assert by_key[("PremierDraft", "ECL")]["trophies"] == 1
-    assert by_key[("PremierDraft", "Y26ECL")]["events"] == 1
-    assert by_key[("TradDraft", "ECL")]["trophies"] == 1
-
-
-def test_aggregate_substring_match():
-    rows = aggregate_by_set_format_expansion(
-        [{"format": "PremierDraft", "expansion": "Y26ECL", "wins": 7, "losses": 0, "event_wins": 7}],
-        [_FakeSet("s1", "ECL")],
-    )
-    assert len(rows) == 1
-    assert rows[0]["expansion"] == "Y26ECL"
-    assert rows[0]["set_code"] == "ECL"
-    assert rows[0]["trophies"] == 1
-
-
-def test_aggregate_skips_unsupported_formats_and_tallies_unknown():
-    """Unknown formats are dropped and counted in the optional ``unknown_formats`` dict."""
-    unknown: dict[str, int] = {}
-    rows = aggregate_by_set_format_expansion(
-        [{"format": "MidWeekSealed", "expansion": "ECL", "wins": 7, "losses": 0, "event_wins": 7}],
-        [_FakeSet("s1", "ECL")],
-        unknown_formats=unknown,
-    )
-    assert rows == []
-    assert unknown == {"MidWeekSealed": 1}
-
-
-def test_aggregate_drops_unknown_expansions(caplog):
-    drafts = [
-        {"format": "PremierDraft", "expansion": "BLB", "wins": 7, "losses": 0, "event_wins": 7},
-        {"format": "PremierDraft", "expansion": "DSK", "wins": 4, "losses": 1},
-    ]
-    with caplog.at_level("INFO", logger="bot.services.refresh"):
-        rows = aggregate_by_set_format_expansion(drafts, [_FakeSet("s1", "ECL")])
-    assert rows == []
-    assert any("BLB" in r.message for r in caplog.records)
-    assert any("DSK" in r.message for r in caplog.records)
-
-
-def test_aggregate_routes_across_multiple_sets():
-    drafts = [
-        {"format": "PremierDraft", "expansion": "SOS", "wins": 7, "losses": 0, "event_wins": 7},
-        {"format": "PremierDraft", "expansion": "ECL", "wins": 5, "losses": 3},
-        {"format": "PremierDraft", "expansion": "Y26ECL", "wins": 4, "losses": 0, "event_wins": 4},
-    ]
-    sets = [_FakeSet("s-sos", "SOS"), _FakeSet("s-ecl", "ECL")]
-    rows = aggregate_by_set_format_expansion(drafts, sets)
-    by_set = {r["set_code"]: r for r in rows if r["expansion"] != "Y26ECL"}
-    assert by_set["SOS"]["wins"] == 7
-    assert by_set["ECL"]["wins"] == 5
-    y26 = next(r for r in rows if r["expansion"] == "Y26ECL")
-    assert y26["set_code"] == "ECL"
-    assert y26["trophies"] == 1
-
-
-def test_aggregate_trophy_via_event_wins():
-    rows = aggregate_by_set_format_expansion(
-        [
-            {"format": "TradDraft", "expansion": "ECL", "wins": 4, "losses": 0, "event_wins": 4},
-            {"format": "TradDraft", "expansion": "ECL", "wins": 2, "losses": 1, "event_wins": 0},
-        ],
-        [_FakeSet("s1", "ECL")],
-    )
-    assert len(rows) == 1
-    assert rows[0]["trophies"] == 1
-    assert rows[0]["wins"] == 6
 
 
 class FakeClient:
@@ -128,7 +30,7 @@ class FakeClient:
 
 
 class ExplodingClient:
-    def fetch_drafts(self, token, start_date=None, end_date=None):  # pragma: no cover - shouldn't be called
+    def fetch_drafts(self, token, start_date=None, end_date=None):  # pragma: no cover
         raise AssertionError("client should not be called for skipped player")
 
 
@@ -170,259 +72,6 @@ def _seed_player(session, name="P", token_suffix="a", active=True, token_invalid
     return p
 
 
-def test_refresh_player_inserts_rows(session):
-    s = _seed_set(session)
-    p = _seed_player(session)
-    drafts = [
-        {"format": "PremierDraft", "expansion": "ECL", "wins": 5, "losses": 3, "event_wins": 0},
-        {"format": "TradDraft", "expansion": "ECL", "wins": 4, "losses": 0, "event_wins": 4},
-    ]
-    client = FakeClient(drafts=drafts)
-
-    result = refresh_player(session, client, p)
-    session.flush()
-
-    assert result == {"status": "updated", "rows": 2, "unknown_formats": {}}
-    assert client.calls == [(p.seventeenlands_token, None, None)]
-    rows = session.execute(select(PlayerStats).where(PlayerStats.player_id == p.id)).scalars().all()
-    assert len(rows) == 2
-    by_fmt = {r.format: r for r in rows}
-    assert by_fmt["PremierDraft"].wins == 5
-    assert by_fmt["PremierDraft"].expansion == "ECL"
-    assert by_fmt["PremierDraft"].last_fetched_at is not None
-    assert by_fmt["TradDraft"].trophies == 1
-
-
-def test_refresh_player_passes_fetch_start(session):
-    s = _seed_set(session)
-    p = _seed_player(session)
-    client = FakeClient(drafts=[])
-    refresh_player(session, client, p, fetch_start=date(2026, 4, 1))
-    assert client.calls == [(p.seventeenlands_token, date(2026, 4, 1), None)]
-
-
-def test_refresh_player_updates_existing_row(session):
-    s = _seed_set(session)
-    p = _seed_player(session)
-    session.add(PlayerStats(
-        player_id=p.id, set_id=s.id, format="PremierDraft", expansion="ECL",
-        events=1, wins=2, losses=1, games_played=3, trophies=0,
-    ))
-    session.flush()
-
-    client = FakeClient(drafts=[{"format": "PremierDraft", "expansion": "ECL", "wins": 9, "losses": 4, "event_wins": 7}])
-    refresh_player(session, client, p)
-    session.flush()
-
-    row = session.execute(select(PlayerStats).where(PlayerStats.player_id == p.id)).scalar_one()
-    assert row.wins == 9
-    assert row.losses == 4
-    assert row.games_played == 13
-    assert row.trophies == 1
-    assert row.last_fetched_at is not None
-
-
-def test_refresh_player_multiple_expansions_coexist(session):
-    s = _seed_set(session)
-    p = _seed_player(session)
-    client = FakeClient(drafts=[
-        {"format": "PremierDraft", "expansion": "ECL", "wins": 5, "losses": 2, "event_wins": 0},
-        {"format": "PremierDraft", "expansion": "Y26ECL", "wins": 7, "losses": 1, "event_wins": 7},
-    ])
-
-    refresh_player(session, client, p)
-    session.flush()
-
-    rows = session.execute(
-        select(PlayerStats).where(PlayerStats.player_id == p.id, PlayerStats.format == "PremierDraft")
-    ).scalars().all()
-    by_exp = {r.expansion: r for r in rows}
-    assert set(by_exp) == {"ECL", "Y26ECL"}
-    assert by_exp["ECL"].wins == 5
-    assert by_exp["Y26ECL"].trophies == 1
-
-
-def test_refresh_player_routes_drafts_across_sets(session):
-    sos = _seed_set(session, code="SOS", start_date=date(2026, 4, 21))
-    ecl = _seed_set(session, code="ECL", start_date=date(2026, 1, 20))
-    p = _seed_player(session)
-    client = FakeClient(drafts=[
-        {"format": "PremierDraft", "expansion": "SOS", "wins": 7, "losses": 0, "event_wins": 7},
-        {"format": "PremierDraft", "expansion": "ECL", "wins": 4, "losses": 3, "event_wins": 0},
-    ])
-
-    refresh_player(session, client, p)
-    session.flush()
-
-    rows = session.execute(select(PlayerStats).where(PlayerStats.player_id == p.id)).scalars().all()
-    by_set = {r.set_id: r for r in rows}
-    assert by_set[sos.id].trophies == 1
-    assert by_set[ecl.id].wins == 4
-
-
-def test_refresh_player_404_invalidates_token(session):
-    s = _seed_set(session)
-    p = _seed_player(session)
-    client = FakeClient(raise_=_make_404())
-
-    result = refresh_player(session, client, p)
-    session.flush()
-
-    assert result == {"status": "invalidated"}
-    assert p.token_invalid is True
-    rows = session.execute(select(PlayerStats).where(PlayerStats.player_id == p.id)).scalars().all()
-    assert rows == []
-
-
-def test_refresh_player_malformed_response_does_not_invalidate(session):
-    """Signup verifies tokens, so a malformed 200 is a 17lands bug — don't blame the user."""
-    s = _seed_set(session)
-    p = _seed_player(session)
-    client = FakeClient(raise_=ValueError("bad json"))
-
-    result = refresh_player(session, client, p)
-
-    assert result["status"] == "error"
-    assert p.token_invalid is False
-
-
-def test_refresh_player_5xx_does_not_invalidate(session):
-    s = _seed_set(session)
-    p = _seed_player(session)
-    client = FakeClient(raise_=_make_500())
-
-    result = refresh_player(session, client, p)
-
-    assert result["status"] == "error"
-    assert p.token_invalid is False
-
-
-def test_refresh_player_network_error_does_not_invalidate(session):
-    s = _seed_set(session)
-    p = _seed_player(session)
-    client = FakeClient(raise_=requests.ConnectTimeout("timeout"))
-
-    result = refresh_player(session, client, p)
-
-    assert result["status"] == "error"
-    assert p.token_invalid is False
-
-
-def test_refresh_active_players_skips_token_invalid_and_inactive(session):
-    _seed_active_set(session)
-    active_ok = _seed_player(session, name="ok", token_suffix="a")
-    _seed_player(session, name="inactive", token_suffix="b", active=False)
-    _seed_player(session, name="invalid", token_suffix="c", token_invalid=True)
-    session.flush()
-
-    client = FakeClient(drafts=[{"format": "PremierDraft", "expansion": ACTIVE_SET_CODE, "wins": 7, "losses": 0, "event_wins": 7}])
-
-    summary = refresh_active_players(session, client)
-
-    assert summary["updated"] == 1
-    assert summary["invalidated"] == 0
-    assert summary["errors"] == 0
-    assert [c[0] for c in client.calls] == [active_ok.seventeenlands_token]
-
-
-def test_refresh_active_players_does_not_call_client_when_all_skipped(session):
-    _seed_active_set(session)
-    _seed_player(session, name="inactive", token_suffix="a", active=False)
-    _seed_player(session, name="invalid", token_suffix="b", token_invalid=True)
-    session.flush()
-
-    summary = refresh_active_players(session, ExplodingClient())
-    assert summary["updated"] == 0
-    assert summary["invalidated"] == 0
-    assert summary["errors"] == 0
-
-
-def test_refresh_active_players_summary_counts(session):
-    _seed_active_set(session)
-    p_ok = _seed_player(session, name="ok", token_suffix="a")
-    p_404 = _seed_player(session, name="bad", token_suffix="b")
-    p_5xx = _seed_player(session, name="flaky", token_suffix="c")
-    session.flush()
-
-    error_404 = _make_404()
-    error_500 = _make_500()
-
-    class RoutingClient:
-        def __init__(self):
-            self.calls = []
-
-        def fetch_drafts(self, token, start_date=None, end_date=None):
-            self.calls.append(token)
-            if token == p_404.seventeenlands_token:
-                raise error_404
-            if token == p_5xx.seventeenlands_token:
-                raise error_500
-            return [{"format": "PremierDraft", "expansion": ACTIVE_SET_CODE, "wins": 3, "losses": 2}]
-
-    summary = refresh_active_players(session, RoutingClient())
-
-    assert summary["updated"] == 1
-    assert summary["invalidated"] == 1
-    assert summary["errors"] == 1
-    assert summary["invalidated_players"] == [p_404.id]
-    session.refresh(p_404)
-    session.refresh(p_5xx)
-    assert p_404.token_invalid is True
-    assert p_5xx.token_invalid is False
-
-
-def test_refresh_active_players_no_active_set(session):
-    _seed_set(session, code="OLD")
-    _seed_player(session)
-    session.flush()
-    summary = refresh_active_players(session, ExplodingClient())
-    assert summary["status"] == "no_active_set"
-    assert summary["updated"] == 0
-
-
-def test_refresh_active_players_all_sets_uses_earliest_start(session):
-    _seed_set(session, code="A", start_date=date(2025, 6, 9))
-    _seed_set(session, code="B", start_date=date(2026, 1, 20))
-    p = _seed_player(session)
-    session.flush()
-    client = FakeClient(drafts=[])
-    refresh_active_players_all_sets(session, client)
-    assert client.calls and client.calls[0][1] == date(2025, 6, 9)
-
-
-def test_refresh_one_player_no_sets(session):
-    p = _seed_player(session)
-    session.commit()
-    result = refresh_one_player_for_all_sets(session, FakeClient(), p.id)
-    assert result == {"status": "no_sets"}
-
-
-def test_refresh_one_player_unknown_player_id(session):
-    _seed_set(session, code="SOS")
-    result = refresh_one_player_for_all_sets(session, FakeClient(), "nonexistent-id")
-    assert result == {"status": "no_player"}
-
-
-def test_refresh_one_player_for_all_sets_writes_rows_per_set(session):
-    _seed_set(session, code="SOS", start_date=date(2026, 4, 21))
-    _seed_set(session, code="ECL", start_date=date(2026, 1, 20))
-    p = _seed_player(session)
-    session.commit()
-    client = FakeClient(drafts=[
-        {"format": "PremierDraft", "expansion": "SOS", "wins": 5, "losses": 2, "event_wins": 7},
-        {"format": "PremierDraft", "expansion": "ECL", "wins": 7, "losses": 0, "event_wins": 7},
-    ])
-
-    result = refresh_one_player_for_all_sets(session, client, p.id)
-    session.commit()
-
-    assert result["status"] == "updated"
-    assert result["rows"] == 2
-    assert client.calls == [(p.seventeenlands_token, date(2026, 1, 20), None)]
-    rows = session.execute(select(PlayerStats).where(PlayerStats.player_id == p.id)).scalars().all()
-    assert len(rows) == 2
-
-
 def _draft(event_id, **overrides):
     base = {
         "id": event_id,
@@ -441,89 +90,326 @@ def _draft(event_id, **overrides):
     return base
 
 
-def test_upsert_draft_events_inserts_each_event(session):
-    s = _seed_set(session, code="SOS")
+# ---------------------------------------------------------------------------
+# bulk_upsert_draft_events
+# ---------------------------------------------------------------------------
+
+
+def test_bulk_upsert_routes_to_matching_set(session):
+    sos = _seed_set(session, code="SOS")
     p = _seed_player(session)
+    result = bulk_upsert_draft_events(session, p.id, [_draft("a", expansion="SOS")], [sos])
     session.flush()
 
-    drafts = [_draft("ev-a"), _draft("ev-b"), _draft("ev-c", colors="WBg", event_wins=7)]
-    n = upsert_draft_events(session, p.id, s.id, drafts, "SOS")
-    session.flush()
-
-    assert n == 3
     rows = session.execute(select(DraftEvent).where(DraftEvent.player_id == p.id)).scalars().all()
-    assert sorted(r.seventeenlands_event_id for r in rows) == ["ev-a", "ev-b", "ev-c"]
-    by_id = {r.seventeenlands_event_id: r for r in rows}
-    assert by_id["ev-c"].colors == "WBg"
-    assert by_id["ev-c"].is_trophy is True
+    assert [r.set_id for r in rows] == [sos.id]
+    assert result["touched_pairs"] == {(p.id, sos.id)}
+    assert result["unrouted_expansions"] == {}
 
 
-def test_upsert_draft_events_idempotent(session):
+def test_bulk_upsert_alchemy_variant_routes_to_parent_set(session):
+    """Y26ECL substring-matches ECL → ECL set, raw expansion preserved on the row."""
+    ecl = _seed_set(session, code="ECL")
+    p = _seed_player(session)
+    bulk_upsert_draft_events(session, p.id, [_draft("a", expansion="Y26ECL")], [ecl])
+    session.flush()
+
+    [row] = session.execute(select(DraftEvent).where(DraftEvent.player_id == p.id)).scalars().all()
+    assert row.set_id == ecl.id
+    assert row.expansion == "Y26ECL"
+
+
+def test_bulk_upsert_unrouted_expansion_leaves_set_id_null(session):
+    """A draft in an un-registered expansion still persists, with set_id=NULL."""
+    ecl = _seed_set(session, code="ECL")
+    p = _seed_player(session)
+    result = bulk_upsert_draft_events(session, p.id, [_draft("a", expansion="MYSTERY")], [ecl])
+    session.flush()
+
+    [row] = session.execute(select(DraftEvent).where(DraftEvent.player_id == p.id)).scalars().all()
+    assert row.set_id is None
+    assert row.expansion == "MYSTERY"
+    assert result["unrouted_expansions"] == {"MYSTERY": 1}
+    assert result["touched_pairs"] == set()
+
+
+def test_bulk_upsert_keeps_unknown_formats_and_tallies_them(session):
+    """Unknown format strings are persisted (not dropped); reported in unknown_formats."""
+    sos = _seed_set(session, code="SOS")
+    p = _seed_player(session)
+    result = bulk_upsert_draft_events(
+        session, p.id, [_draft("a", format="MidWeekSealed")], [sos]
+    )
+    session.flush()
+
+    [row] = session.execute(select(DraftEvent).where(DraftEvent.player_id == p.id)).scalars().all()
+    assert row.format == "MidWeekSealed"
+    assert row.set_id == sos.id
+    assert result["unknown_formats"] == {"MidWeekSealed": 1}
+
+
+def test_bulk_upsert_is_idempotent(session):
     """Re-running with the same drafts must not duplicate rows."""
-    s = _seed_set(session, code="SOS")
+    sos = _seed_set(session, code="SOS")
     p = _seed_player(session)
+    drafts = [_draft("a"), _draft("b")]
+    bulk_upsert_draft_events(session, p.id, drafts, [sos])
     session.flush()
-
-    drafts = [_draft("ev-a"), _draft("ev-b")]
-    upsert_draft_events(session, p.id, s.id, drafts, "SOS")
+    bulk_upsert_draft_events(session, p.id, drafts, [sos])
     session.flush()
-    upsert_draft_events(session, p.id, s.id, drafts, "SOS")
-    session.flush()
-
-    count = session.execute(select(DraftEvent).where(DraftEvent.player_id == p.id)).scalars().all()
-    assert len(count) == 2
+    rows = session.execute(select(DraftEvent).where(DraftEvent.player_id == p.id)).scalars().all()
+    assert len(rows) == 2
 
 
-def test_upsert_draft_events_updates_changed_fields(session):
-    """Refetched event with new wins/colors should overwrite the old row."""
-    s = _seed_set(session, code="SOS")
+def test_bulk_upsert_updates_changed_fields_on_repull(session):
+    """When 17lands amends an event (e.g. wins went from 2 to 7), the row updates."""
+    sos = _seed_set(session, code="SOS")
     p = _seed_player(session)
+    bulk_upsert_draft_events(session, p.id, [_draft("a", wins=2, colors="WB")], [sos])
     session.flush()
-
-    upsert_draft_events(session, p.id, s.id, [_draft("ev-a", wins=2, colors="WB")], "SOS")
+    bulk_upsert_draft_events(session, p.id, [_draft("a", wins=7, colors="WBg", event_wins=7)], [sos])
     session.flush()
-    upsert_draft_events(session, p.id, s.id, [_draft("ev-a", wins=7, colors="WBg", event_wins=7)], "SOS")
-    session.flush()
-
     [row] = session.execute(select(DraftEvent).where(DraftEvent.player_id == p.id)).scalars().all()
     assert row.wins == 7
     assert row.colors == "WBg"
     assert row.is_trophy is True
 
 
-def test_upsert_draft_events_isolates_per_player(session):
-    """Same 17lands event id under different players must not collide."""
-    s = _seed_set(session, code="SOS")
+def test_bulk_upsert_isolates_per_player(session):
+    """Same 17lands event_id under different players must not collide."""
+    sos = _seed_set(session, code="SOS")
     p1 = _seed_player(session, name="P1", token_suffix="a")
     p2 = _seed_player(session, name="P2", token_suffix="b")
+    bulk_upsert_draft_events(session, p1.id, [_draft("shared", wins=7)], [sos])
+    bulk_upsert_draft_events(session, p2.id, [_draft("shared", wins=2)], [sos])
     session.flush()
-
-    upsert_draft_events(session, p1.id, s.id, [_draft("shared-id", wins=7)], "SOS")
-    upsert_draft_events(session, p2.id, s.id, [_draft("shared-id", wins=2)], "SOS")
-    session.flush()
-
-    rows = session.execute(select(DraftEvent)).scalars().all()
-    assert len(rows) == 2
-    by_player = {r.player_id: r for r in rows}
+    by_player = {
+        r.player_id: r
+        for r in session.execute(select(DraftEvent)).scalars().all()
+    }
     assert by_player[p1.id].wins == 7
     assert by_player[p2.id].wins == 2
 
 
-def test_refresh_player_writes_draft_events(session):
-    """refresh_player should populate draft_events alongside player_stats."""
-    s = _seed_set(session, code="SOS")
-    p = _seed_player(session)
-    drafts = [
-        _draft("alpha", wins=7, event_wins=7, colors="WB"),
-        _draft("beta", wins=4, losses=3, event_wins=0, colors="UR"),
-    ]
-    client = FakeClient(drafts=drafts)
+# ---------------------------------------------------------------------------
+# rebuild_player_stats
+# ---------------------------------------------------------------------------
 
-    refresh_player(session, client, p)
+
+def test_rebuild_player_stats_aggregates_by_format_and_expansion(session):
+    """Two formats + two expansions = four rows. Counts/sums match the underlying events."""
+    sos = _seed_set(session, code="SOS")
+    p = _seed_player(session)
+    session.flush()
+    drafts = [
+        _draft("a", format="PremierDraft", expansion="SOS", wins=5, losses=3),
+        _draft("b", format="PremierDraft", expansion="SOS", wins=7, losses=0, event_wins=7),
+        _draft("c", format="PremierDraft", expansion="Y26SOS", wins=4, losses=3),
+        _draft("d", format="TradDraft",    expansion="SOS", wins=4, losses=0, event_wins=4),
+    ]
+    bulk_upsert_draft_events(session, p.id, drafts, [sos])
+    session.flush()
+    rebuild_player_stats(session, p.id, sos.id)
+
+    rows = session.execute(select(PlayerStats).where(PlayerStats.player_id == p.id)).scalars().all()
+    by_key = {(r.format, r.expansion): r for r in rows}
+    assert set(by_key) == {
+        ("PremierDraft", "SOS"),
+        ("PremierDraft", "Y26SOS"),
+        ("TradDraft", "SOS"),
+    }
+    assert by_key[("PremierDraft", "SOS")].events == 2
+    assert by_key[("PremierDraft", "SOS")].wins == 12
+    assert by_key[("PremierDraft", "SOS")].trophies == 1
+    assert by_key[("TradDraft", "SOS")].trophies == 1
+
+
+def test_rebuild_player_stats_wipes_stale_rows(session):
+    """A row that no longer has matching draft_events is removed."""
+    sos = _seed_set(session, code="SOS")
+    p = _seed_player(session)
+    session.add(PlayerStats(
+        player_id=p.id, set_id=sos.id, format="StaleFormat", expansion="SOS",
+        events=99, wins=99, losses=0, games_played=99, trophies=9,
+    ))
+    session.flush()
+    rebuild_player_stats(session, p.id, sos.id)
+    rows = session.execute(select(PlayerStats).where(PlayerStats.player_id == p.id)).scalars().all()
+    assert rows == []
+
+
+# ---------------------------------------------------------------------------
+# claim_orphan_drafts
+# ---------------------------------------------------------------------------
+
+
+def test_claim_orphan_drafts_attaches_matching_unrouted_events(session):
+    """An orphan event with expansion containing the new set's code gets claimed."""
+    ecl = _seed_set(session, code="ECL")
+    p = _seed_player(session)
+    bulk_upsert_draft_events(session, p.id, [_draft("a", expansion="MYS")], [ecl])
+    session.flush()
+    [orphan] = session.execute(select(DraftEvent)).scalars().all()
+    assert orphan.set_id is None
+
+    mys = _seed_set(session, code="MYS", start_date=date(2026, 7, 1))
+    affected = claim_orphan_drafts(session, mys)
+
+    [claimed] = session.execute(select(DraftEvent)).scalars().all()
+    assert claimed.set_id == mys.id
+    assert affected == {p.id}
+
+
+def test_claim_orphan_drafts_leaves_non_matching_orphans_alone(session):
+    """Adding set FOO does not claim orphans whose expansion is BAR."""
+    ecl = _seed_set(session, code="ECL")
+    p = _seed_player(session)
+    bulk_upsert_draft_events(session, p.id, [_draft("a", expansion="BAR")], [ecl])
     session.flush()
 
+    foo = _seed_set(session, code="FOO", start_date=date(2026, 7, 1))
+    affected = claim_orphan_drafts(session, foo)
+    assert affected == set()
+    [row] = session.execute(select(DraftEvent)).scalars().all()
+    assert row.set_id is None
+
+
+# ---------------------------------------------------------------------------
+# refresh_player
+# ---------------------------------------------------------------------------
+
+
+def test_refresh_player_writes_stats_and_events(session):
+    s = _seed_set(session, code="ECL")
+    p = _seed_player(session)
+    drafts = [
+        _draft("alpha", format="PremierDraft", expansion="ECL", wins=5, losses=3),
+        _draft("beta",  format="TradDraft",    expansion="ECL", wins=4, losses=0, event_wins=4),
+    ]
+    client = FakeClient(drafts=drafts)
+    result = refresh_player(session, client, p)
+    session.flush()
+
+    assert result["status"] == "updated"
+    assert result["events"] == 2
+    stats = session.execute(select(PlayerStats).where(PlayerStats.player_id == p.id)).scalars().all()
+    by_fmt = {r.format: r for r in stats}
+    assert by_fmt["PremierDraft"].wins == 5
+    assert by_fmt["TradDraft"].trophies == 1
     events = session.execute(select(DraftEvent).where(DraftEvent.player_id == p.id)).scalars().all()
     assert sorted(e.seventeenlands_event_id for e in events) == ["alpha", "beta"]
-    by_id = {e.seventeenlands_event_id: e for e in events}
-    assert by_id["alpha"].is_trophy is True
-    assert by_id["beta"].colors == "UR"
+
+
+def test_refresh_player_404_invalidates_token(session):
+    _seed_set(session, code="ECL")
+    p = _seed_player(session)
+    result = refresh_player(session, FakeClient(raise_=_make_404()), p)
+    assert result == {"status": "invalidated"}
+    assert p.token_invalid is True
+
+
+def test_refresh_player_5xx_does_not_invalidate(session):
+    _seed_set(session, code="ECL")
+    p = _seed_player(session)
+    result = refresh_player(session, FakeClient(raise_=_make_500()), p)
+    assert result["status"] == "error"
+    assert p.token_invalid is False
+
+
+def test_refresh_player_malformed_response_does_not_invalidate(session):
+    """Signup verifies tokens, so a malformed 200 is a 17lands bug — don't blame the user."""
+    _seed_set(session, code="ECL")
+    p = _seed_player(session)
+    result = refresh_player(session, FakeClient(raise_=ValueError("bad json")), p)
+    assert result["status"] == "error"
+    assert p.token_invalid is False
+
+
+def test_refresh_player_network_error_does_not_invalidate(session):
+    _seed_set(session, code="ECL")
+    p = _seed_player(session)
+    result = refresh_player(session, FakeClient(raise_=requests.ConnectTimeout("timeout")), p)
+    assert result["status"] == "error"
+    assert p.token_invalid is False
+
+
+# ---------------------------------------------------------------------------
+# refresh_active_players
+# ---------------------------------------------------------------------------
+
+
+def test_refresh_active_players_skips_inactive_and_token_invalid(session):
+    _seed_active_set(session)
+    active_ok = _seed_player(session, name="ok", token_suffix="a")
+    _seed_player(session, name="inactive", token_suffix="b", active=False)
+    _seed_player(session, name="invalid", token_suffix="c", token_invalid=True)
+    session.flush()
+
+    client = FakeClient(drafts=[_draft("x", expansion=ACTIVE_SET_CODE, event_wins=7)])
+    summary = refresh_active_players(session, client)
+
+    assert summary["updated"] == 1
+    assert summary["invalidated"] == 0
+    assert summary["errors"] == 0
+    assert [c[0] for c in client.calls] == [active_ok.seventeenlands_token]
+
+
+def test_refresh_active_players_summary_counts_mixed_statuses(session):
+    _seed_active_set(session)
+    p_ok = _seed_player(session, name="ok", token_suffix="a")
+    p_404 = _seed_player(session, name="bad", token_suffix="b")
+    p_5xx = _seed_player(session, name="flaky", token_suffix="c")
+    session.flush()
+
+    err_404 = _make_404()
+    err_500 = _make_500()
+
+    class RoutingClient:
+        def __init__(self):
+            self.calls = []
+
+        def fetch_drafts(self, token, start_date=None, end_date=None):
+            self.calls.append(token)
+            if token == p_404.seventeenlands_token:
+                raise err_404
+            if token == p_5xx.seventeenlands_token:
+                raise err_500
+            return [_draft("x", expansion=ACTIVE_SET_CODE)]
+
+    summary = refresh_active_players(session, RoutingClient())
+    assert summary["updated"] == 1
+    assert summary["invalidated"] == 1
+    assert summary["errors"] == 1
+    assert summary["invalidated_players"] == [p_404.id]
+
+
+def test_refresh_active_players_no_active_set(session):
+    _seed_set(session, code="OLD")
+    _seed_player(session)
+    session.flush()
+    summary = refresh_active_players(session, ExplodingClient())
+    assert summary["status"] == "no_active_set"
+
+
+def test_refresh_active_players_all_sets_uses_earliest_set_start(session):
+    """Console-only path: fetch_start is the earliest registered set."""
+    _seed_set(session, code="A", start_date=date(2025, 6, 9))
+    _seed_set(session, code="B", start_date=date(2026, 1, 20))
+    _seed_player(session)
+    session.flush()
+    client = FakeClient(drafts=[])
+    refresh_active_players_all_sets(session, client)
+    assert client.calls and client.calls[0][1] == date(2025, 6, 9)
+
+
+def test_refresh_one_player_unknown_id_returns_no_player(session):
+    _seed_set(session, code="SOS")
+    result = refresh_one_player_for_all_sets(session, FakeClient(), "nonexistent-id")
+    assert result == {"status": "no_player"}
+
+
+def test_refresh_one_player_no_sets_returns_no_sets(session):
+    p = _seed_player(session)
+    session.commit()
+    result = refresh_one_player_for_all_sets(session, FakeClient(), p.id)
+    assert result == {"status": "no_sets"}

@@ -64,7 +64,7 @@ docker exec dischord-pg psql -U postgres -d dischord -c 'DROP SCHEMA public CASC
 ### Owner-only prefix commands (DM the bot)
 
 - `!sync` — push slash-command schema changes to Discord. Run after editing any command's name/description/options. Body-only changes don't need it.
-- `!refresh [SET_CODE]` — re-pull 17lands for active players, recompute scores, edit tracked leaderboard messages in place. Defaults to `ACTIVE_SET_CODE`.
+- `!refresh` — re-pull 17lands for active players against the active set's window, recompute scores, edit tracked leaderboard messages in place. Same code path as the periodic tick. For full-history reconciliation (formula change, retroactive set add, drift recovery) run `python -m bot.scripts.refresh_stats` from a console instead.
 
 ## Architecture
 
@@ -73,12 +73,16 @@ docker exec dischord-pg psql -U postgres -d dischord -c 'DROP SCHEMA public CASC
 ```
 17lands API → bot/services/seventeenlands.py → bot/services/refresh.py
                                                        ↓
-                                          PlayerStats + DraftEvent + PlayerSetScore
+                                       draft_events (source of truth, additive)
+                                                       ↓
+                            player_stats + score tables (derived, rebuilt per refresh)
                                                        ↓
                                        Postgres (public_* curated views)
                                                        ↓
                               Frontend (supabase-js, anon key, browser-direct)
 ```
+
+`draft_events` is keyed on `(player_id, seventeenlands_event_id)` and only grows — never wiped. `player_stats` and the score tables are recomputed from `draft_events` after every refresh, so a partial-window fetch is safe (writes only the events it returned; aggregates rebuild from the full history already on disk).
 
 The bot is the only writer. The frontend reads through curated `public_*` Postgres views (no service-role key in the client). View row shapes are mirrored as camelCase TS types in `frontend/src/types/leaderboard.ts`; `frontend/src/data/adapter.ts` converts snake_case → camelCase.
 
@@ -104,7 +108,7 @@ group_score = trophies × group_points × trophy_rate × t/(t+2)
 
 After editing `DEFAULT_QUEUE_GROUPS`:
 - Formula/weights only → `python -m bot.scripts.recompute_scores` (no 17L fetch)
-- New format strings added → `python -m bot.scripts.refresh_stats --cache` (re-aggregate from cached JSON)
+- New format strings added → `python -m bot.scripts.rebuild_player_stats` (re-aggregates from existing `draft_events`, no 17L fetch)
 
 The formula may diverge per set in the future — `DEFAULT_QUEUE_GROUPS` is global today but plausibly becomes per-set.
 
@@ -112,9 +116,9 @@ The formula may diverge per set in the future — `DEFAULT_QUEUE_GROUPS` is glob
 
 - **All `DateTime` columns are `DateTime(timezone=True)` (TIMESTAMPTZ).** Naive UTC was misinterpreted as local time by `discord.py`, shifting embed timestamps. Don't reintroduce naive datetimes.
 - `players.seventeenlands_token` is nullable so `/pod-link-arena` can create lightweight pod-draft-only players without a 17lands profile.
-- `player_stats` is unique per `(player, set, format, expansion)`. Alchemy variants like `Y26ECL` get their own row but bucket under `ECL` for scoring.
+- `player_stats` is unique per `(player, set, format, expansion)` and **fully derived** from `draft_events` — rebuilt via `DELETE + INSERT … SELECT GROUP BY` per touched (player, set) on every refresh. Alchemy variants like `Y26ECL` get their own row but bucket under `ECL` for scoring.
 - `player_set_scores.last_calculated_at` is force-bumped every refresh (not just on score change) so the "Last updated" footer reflects refresh time.
-- `draft_events` captures one row per individual draft (color archetypes, trophy streaks, etc.). 17lands' case-encoded color string (`WBg` = WB main + green splash) is preserved verbatim in `colors`.
+- `draft_events` is the additive event log — one row per individual 17lands draft, keyed on `(player_id, seventeenlands_event_id)`. `set_id` is nullable so drafts in not-yet-registered expansions still persist; `/add-set` claims orphans by matching `expansion` to the new set's `code`. 17lands' case-encoded color string (`WBg` = WB main + green splash) is preserved verbatim in `colors`.
 - `leaderboard_messages` tracks the bot's posted leaderboard per `(channel, set)` so `/leaderboard` delete-and-reposts (instead of duplicating) and `!refresh` edits in place. Stale rows get pruned on next edit attempt.
 
 ### Slash commands — `bot/commands/`

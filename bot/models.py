@@ -195,7 +195,8 @@ class DraftEvent(Base):
 
     id                      = Column(String, primary_key=True, default=lambda: str(uuid4()))
     player_id               = Column(String, ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
-    set_id                  = Column(String, ForeignKey("sets.id"), nullable=False)
+    # Nullable so drafts in not-yet-registered sets can persist; claimed when /add-set adds the parent set
+    set_id                  = Column(String, ForeignKey("sets.id"), nullable=True)
     # 17lands' own event ID — upsert key so re-fetches stay idempotent
     seventeenlands_event_id = Column(String, nullable=False)
 

@@ -13,7 +13,7 @@ import re
 import time
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Callable
 
 import requests
 
@@ -212,41 +212,6 @@ class SeventeenLandsClient:
         return isinstance(body, dict) and "drafts" in body
 
 
-def aggregate_for_set(drafts: Iterable[dict], set_code: str) -> dict[str, dict]:
-    """Aggregate raw drafts into per-format stats for a single set.
-
-    Returns one bucket per ``SUPPORTED_FORMATS`` entry (always present, zeroed
-    when no events match). Drafts in unsupported formats are skipped. The set
-    match is substring-based so Alchemy variants (e.g. ``Y26ECL``) bucket
-    under their parent set code (``ECL``) — mirrors legacy behavior.
-
-    A trophy is any event with a truthy ``event_wins`` field, which 17lands
-    sets when an event ended in a winning run (7-0 Premier, 4-0 Trad, etc.).
-    """
-    result: dict[str, dict] = {
-        fmt: {"wins": 0, "losses": 0, "games_played": 0, "trophies": 0}
-        for fmt in SUPPORTED_FORMATS
-    }
-
-    for d in drafts:
-        fmt = d.get("format")
-        if fmt not in result:
-            continue
-        expansion = normalize_expansion(d.get("expansion") or "")
-        if set_code not in expansion:
-            continue
-        wins = int(d.get("wins") or 0)
-        losses = int(d.get("losses") or 0)
-        bucket = result[fmt]
-        bucket["wins"] += wins
-        bucket["losses"] += losses
-        bucket["games_played"] += wins + losses
-        if d.get("event_wins"):
-            bucket["trophies"] += 1
-
-    return result
-
-
 def _parse_17lands_ts(value: str | None) -> datetime | None:
     """17lands serves timestamps as ``YYYY-MM-DD HH:MM[:SS]`` UTC strings (no tz).
 
@@ -263,40 +228,37 @@ def _parse_17lands_ts(value: str | None) -> datetime | None:
     return None
 
 
-def extract_events_for_set(drafts: Iterable[dict], set_code: str) -> list[dict]:
-    """One dict per individual draft event matching ``set_code``.
+def extract_event_row(draft: dict) -> dict | None:
+    """Build a ``DraftEvent``-shaped row dict from one 17lands draft. No filtering.
 
-    Same set-match rule as ``aggregate_for_set`` (substring of ``expansion``).
-    Drafts in formats outside SUPPORTED_FORMATS are skipped — mirrors what
-    aggregation considers "real" for this leaderboard.
+    Returns ``None`` if the draft lacks an event id (defensive — 17lands has
+    always provided one in observed responses). Otherwise returns every field
+    the model needs except ``player_id`` and ``set_id``; the caller resolves
+    those.
 
-    Output dicts use the same field names as ``DraftEvent`` columns so callers
-    can construct rows with ``DraftEvent(**row)`` after attaching ``player_id``
-    and ``set_id``.
+    Format/set/expansion are kept raw (other than ``normalize_expansion``) so
+    unrecognized values still persist — the leaderboard score layer decides
+    what counts, the storage layer keeps everything.
     """
-    out: list[dict] = []
-    for d in drafts:
-        fmt = d.get("format")
-        if fmt not in SUPPORTED_FORMATS:
-            continue
-        expansion = normalize_expansion(d.get("expansion") or "")
-        if set_code not in expansion:
-            continue
-        event_id = d.get("id")
-        if not event_id:
-            # 17lands has always provided id in observed responses; skip defensively
-            continue
-        out.append({
-            "seventeenlands_event_id": event_id,
-            "format": fmt,
-            "expansion": expansion,
-            "wins": int(d.get("wins") or 0),
-            "losses": int(d.get("losses") or 0),
-            "is_trophy": bool(d.get("event_wins")),
-            "colors": d.get("colors") or None,
-            "start_rank": d.get("start_rank") or None,
-            "end_rank": d.get("end_rank") or None,
-            "started_at": _parse_17lands_ts(d.get("first_event_server_time")),
-            "finished_at": _parse_17lands_ts(d.get("last_event_server_time")),
-        })
-    return out
+    event_id = draft.get("id")
+    if not event_id:
+        return None
+    fmt = draft.get("format")
+    if not fmt:
+        return None
+    expansion = normalize_expansion(draft.get("expansion") or "")
+    return {
+        "seventeenlands_event_id": event_id,
+        "format": fmt,
+        "expansion": expansion,
+        "wins": int(draft.get("wins") or 0),
+        "losses": int(draft.get("losses") or 0),
+        "is_trophy": bool(draft.get("event_wins")),
+        "colors": draft.get("colors") or None,
+        "start_rank": draft.get("start_rank") or None,
+        "end_rank": draft.get("end_rank") or None,
+        "started_at": _parse_17lands_ts(draft.get("first_event_server_time")),
+        "finished_at": _parse_17lands_ts(draft.get("last_event_server_time")),
+    }
+
+

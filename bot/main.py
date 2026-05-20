@@ -42,7 +42,7 @@ from bot.services.lobby_embed import LobbyReadyButtonView
 from bot.services.pod_tournament import (
     register_persistent_views as register_pod_views,
 )
-from bot.services.refresh import refresh_active_players, refresh_active_players_all_sets
+from bot.services.refresh import refresh_active_players
 from bot.services.seventeenlands import MinIntervalLimiter, SeventeenLandsClient
 from bot.sets import ACTIVE_SET_CODE
 from bot.tasks.pod_draft_reminder import fire_reminder, init_reminder
@@ -264,9 +264,8 @@ def build_bot(guild_id: int) -> commands.Bot:
     async def run_refresh(*, trigger: str) -> dict:
         """Pull 17lands data, recompute scores, repaint live messages, DM the owner a report.
 
-        ``trigger`` is "manual" (full all-sets rebuild via ``!refresh``) or
-        "auto" (periodic narrow window). Surfaced in the owner DM so the source
-        is obvious.
+        ``trigger`` is "manual" (``!refresh`` DM) or "auto" (periodic tick); both use the
+        same active-set window. Tag is included in the owner DM so the source is obvious.
         """
         msg_invalidated_dm = (
             "⚠️ Your 17lands token appears to be invalid (possibly regenerated). "
@@ -280,9 +279,8 @@ def build_bot(guild_id: int) -> commands.Bot:
             )
             client = SeventeenLandsClient(limiter=limiter)
             with SessionLocal() as session:
-                if trigger == "auto":
-                    return refresh_active_players(session, client)
-                return refresh_active_players_all_sets(session, client)
+                # Full-history rebuilds live in bot/scripts/refresh_stats.py — too slow for a live command
+                return refresh_active_players(session, client)
 
         # 17lands fetches and SQLAlchemy work are blocking; running them inline
         # would freeze the gateway heartbeat. Push to a worker thread so the
@@ -373,7 +371,11 @@ def build_bot(guild_id: int) -> commands.Bot:
         unknown = summary.get("unknown_formats") or {}
         if unknown:
             tally = ", ".join(f"`{fmt}` ×{n}" for fmt, n in sorted(unknown.items(), key=lambda kv: (-kv[1], kv[0])))
-            body += f"\n⚠️ Unknown format(s): {tally}"
+            body += f"\n⚠️ New format(s) observed (stored, not scoring): {tally}"
+        unrouted = summary.get("unrouted_expansions") or {}
+        if unrouted:
+            tally = ", ".join(f"`{exp}` ×{n}" for exp, n in sorted(unrouted.items(), key=lambda kv: (-kv[1], kv[0])))
+            body += f"\n⚠️ Unrouted expansion(s) — events stored without a set (add to bot/sets.py): {tally}"
         try:
             owner = bot.get_user(bot.owner_id) or await bot.fetch_user(bot.owner_id)
             await owner.send(content=body)
@@ -383,7 +385,7 @@ def build_bot(guild_id: int) -> commands.Bot:
     @bot.command(name="refresh")
     @commands.is_owner()
     async def refresh_cmd(ctx: commands.Context) -> None:
-        """Owner-only. Full all-sets rebuild from 17lands for every active player."""
+        """Owner-only. Refresh the active set for every active player (same window as the periodic tick)."""
         await _reply_quietly(ctx, "⏳ Refreshing all sets…")
         await run_refresh(trigger="manual")
 

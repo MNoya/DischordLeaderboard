@@ -16,6 +16,13 @@ from sqlalchemy.orm import Session
 
 from bot.database import SessionLocal
 from bot.models import MagicSet
+from bot.services.refresh import (
+    claim_orphan_drafts,
+    rebuild_player_stats,
+    recompute_player_archetype_scores,
+    recompute_player_format_archetype_scores,
+    recompute_player_set_score,
+)
 from bot.sets import ALL_SETS, SetSeed
 
 
@@ -23,7 +30,7 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("seed_sets")
 
 
-def upsert_set(session: Session, seed: SetSeed) -> None:
+def upsert_set(session: Session, seed: SetSeed) -> MagicSet:
     existing = session.execute(
         select(MagicSet).where(MagicSet.code == seed.code)
     ).scalar_one_or_none()
@@ -39,21 +46,35 @@ def upsert_set(session: Session, seed: SetSeed) -> None:
             log.info(f"updating set {seed.code} (metadata refreshed)")
         else:
             log.info(f"set {seed.code} exists, leaving as-is")
-        return
-    session.add(MagicSet(
+        return existing
+    new_set = MagicSet(
         code=seed.code,
         name=seed.name,
         start_date=seed.start_date,
         end_date=seed.end_date,
-    ))
+    )
+    session.add(new_set)
     log.info(f"seeding set {seed.code} ({seed.name})")
+    session.flush()
+    return new_set
 
 
 def main() -> None:
     with SessionLocal() as session:
-        for seed in ALL_SETS:
-            upsert_set(session, seed)
+        seeded_sets = [(seed, upsert_set(session, seed)) for seed in ALL_SETS]
         session.commit()
+
+        for _, magic_set in seeded_sets:
+            affected_players = claim_orphan_drafts(session, magic_set)
+            if not affected_players:
+                continue
+            log.info(f"claiming orphan drafts for {magic_set.code}: {len(affected_players)} player(s)")
+            for player_id in affected_players:
+                rebuild_player_stats(session, player_id, magic_set.id)
+                recompute_player_set_score(session, player_id, magic_set.id)
+                recompute_player_archetype_scores(session, player_id, magic_set.id)
+                recompute_player_format_archetype_scores(session, player_id, magic_set.id)
+            session.commit()
     log.info("done.")
 
 

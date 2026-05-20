@@ -1,6 +1,11 @@
-"""Full-history refresh of PlayerStats from 17lands for all active players.
+"""Full-history refresh from 17lands for every active player. Console-only.
 
     DATABASE_URL=postgresql://... python -m bot.scripts.refresh_stats [--cache]
+
+Hits 17lands for every player back to the earliest registered set's start_date.
+Heavy — use only when reconciling (new set added retroactively, formula change,
+suspected drift). The periodic tick and the ``!refresh`` DM both use the
+narrower active-set window via ``refresh_active_players``.
 """
 from __future__ import annotations
 
@@ -15,7 +20,7 @@ from bot.services.seventeenlands import SeventeenLandsClient
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-logging.basicConfig(level=logging.INFO, format="%(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
 log = logging.getLogger("refresh")
 
 
@@ -34,10 +39,8 @@ def main() -> None:
     if args.cache:
         log.info(f"17lands cache: {args.cache}")
     with SessionLocal() as session:
-        log.info("refreshing all registered sets")
-        summary = refresh_active_players_all_sets(session, client)
-
-    log.info(f"done. updated={summary['updated']} invalidated={summary['invalidated']} errors={summary['errors']}")
+        log.info("starting full-history refresh across all registered sets")
+        refresh_active_players_all_sets(session, client)
 
 
 if __name__ == "__main__":

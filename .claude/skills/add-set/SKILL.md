@@ -81,7 +81,7 @@ python -m bot.scripts.seed_sets
 python -m bot.scripts.refresh_stats
 ```
 
-`refresh_stats` iterates all registered sets, so it picks up the newly inserted row whether NEW or OLD. If either script fails, stop. Do not commit. Report the error verbatim and let the user fix it.
+`seed_sets` registers the new set and **claims any orphan `draft_events`** whose expansion already matches it (rebuilds `player_stats` and scores for those players). For OLD-mode backfills this is usually enough on its own. `refresh_stats` then fetches any drafts 17lands has that we haven't ingested yet. If either script fails, stop. Do not commit. Report the error verbatim and let the user fix it.
 
 ### 7. Commit (do not push)
 
