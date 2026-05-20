@@ -474,7 +474,10 @@ class _CycleButton(discord.ui.Button):
         embed = render_public_embed(data)
         if suffix:
             embed.title = f"{embed.title} · {suffix}"
-        await interaction.response.edit_message(embed=embed, view=render_view(cycle_label=next_label))
+        await interaction.response.edit_message(
+            embed=embed,
+            view=render_view(cycle_label=next_label, filter_type=next_ft, filter_value=next_fv),
+        )
 
 DISCORD_EMBED_DESC_LIMIT = 4096
 
@@ -630,12 +633,20 @@ class LeaderboardView(discord.ui.View):
     The Stats button is a URL link handled client-side by Discord.
     """
 
-    def __init__(self, cycle_label: str = _CYCLE_LABELS[0]) -> None:
+    def __init__(
+        self,
+        cycle_label: str = _CYCLE_LABELS[0],
+        filter_type: str | None = None,
+        filter_value: str | None = None,
+    ) -> None:
         super().__init__(timeout=None)
         self.add_item(_CycleButton(label=cycle_label))
+        stats_url = settings.public_site_url
+        if filter_type == "format" and filter_value:
+            stats_url = f"{stats_url.rstrip('/')}?format={filter_value}"
         # URL buttons are exempt from the persistent-view custom_id requirement
         self.add_item(discord.ui.Button(
-            label="Stats", url=settings.public_site_url,
+            label="Stats", url=stats_url,
             style=discord.ButtonStyle.link,
             emoji=emojis.get_emoji("llu"),
         ))
@@ -667,8 +678,12 @@ class LeaderboardView(discord.ui.View):
         await signup_cog.signup.callback(signup_cog, interaction)
 
 
-def render_view(cycle_label: str = _CYCLE_LABELS[0]) -> discord.ui.View:
-    return LeaderboardView(cycle_label=cycle_label)
+def render_view(
+    cycle_label: str = _CYCLE_LABELS[0],
+    filter_type: str | None = None,
+    filter_value: str | None = None,
+) -> discord.ui.View:
+    return LeaderboardView(cycle_label=cycle_label, filter_type=filter_type, filter_value=filter_value)
 
 
 CODE_TO_COLOR_LABEL: dict[str, str] = {code: label for label, code in COLOR_CHOICES.items()}
@@ -871,7 +886,10 @@ async def edit_tracked_messages_for_set(bot: commands.Bot, magic_set: MagicSet) 
             channel = bot.get_channel(int(channel_id)) or await bot.fetch_channel(int(channel_id))
             msg = await channel.fetch_message(int(message_id))
             # Pass content=None to strip any prior message-content variant (transient format)
-            await msg.edit(content=None, embed=embed, view=render_view(cycle_label=_cycle_label_for(filter_type, filter_value)))
+            await msg.edit(content=None, embed=embed, view=render_view(
+                cycle_label=_cycle_label_for(filter_type, filter_value),
+                filter_type=filter_type, filter_value=filter_value,
+            ))
             with SessionLocal() as session:
                 tracked = session.get(LeaderboardMessage, row_id)
                 if tracked is not None:
@@ -975,7 +993,10 @@ class Leaderboard(commands.Cog):
                 channel_id=str(interaction.channel_id),
                 set_id=magic_set.id,
                 embed=embed,
-                view=render_view(cycle_label=_cycle_label_for(filter_type, filter_value)),
+                view=render_view(
+                    cycle_label=_cycle_label_for(filter_type, filter_value),
+                    filter_type=filter_type, filter_value=filter_value,
+                ),
                 filter_type=filter_type,
                 filter_value=filter_value,
             )
@@ -990,7 +1011,13 @@ class Leaderboard(commands.Cog):
             # then the stats embed (or /join prompt) via dm.send so it doesn't visually
             # thread as a reply under the leaderboard message. Personal followup only
             # makes sense for the unfiltered overall leaderboard.
-            await interaction.response.send_message(embed=embed, view=render_view())
+            await interaction.response.send_message(
+                embed=embed,
+                view=render_view(
+                    cycle_label=_cycle_label_for(filter_type, filter_value),
+                    filter_type=filter_type, filter_value=filter_value,
+                ),
+            )
             if filter_type is not None:
                 return
             try:
