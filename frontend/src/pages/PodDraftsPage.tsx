@@ -144,17 +144,17 @@ export function PodDraftsPage() {
     );
   };
 
-  const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const nowMs = useNow(60_000);
   const { played, upcoming } = useMemo(() => {
     if (!events) return { played: [] as PodEventSummary[], upcoming: [] as PodEventSummary[] };
     const p: PodEventSummary[] = [];
     const u: PodEventSummary[] = [];
     for (const e of events) {
-      if (!e.championDisplayName && e.eventDate > today) u.push(e);
+      if (!e.championDisplayName && new Date(e.eventTime).getTime() > nowMs) u.push(e);
       else p.push(e);
     }
     return { played: p, upcoming: u };
-  }, [events, today]);
+  }, [events, nowMs]);
 
   usePodEventParticipants(played[0]?.eventId);
 
@@ -216,14 +216,14 @@ export function PodDraftsPage() {
                 <EmptyHint>No pod drafts recorded yet for {activeSet}.</EmptyHint>
               </div>
             ) : isMobile ? (
-              <MobileEventsBlock played={played} upcoming={upcoming} today={today} />
+              <MobileEventsBlock played={played} upcoming={upcoming} nowMs={nowMs} />
             ) : (
               <>
                 {upcoming.length > 0 && (
-                  <EventsBlock label="UPCOMING" events={upcoming} today={today} />
+                  <EventsBlock label="UPCOMING" events={upcoming} nowMs={nowMs} />
                 )}
                 {played.length > 0 && (
-                  <EventsBlock label="PAST" events={played} today={today} defaultOpenFirst />
+                  <EventsBlock label="PAST" events={played} nowMs={nowMs} defaultOpenFirst />
                 )}
               </>
             )}
@@ -289,12 +289,12 @@ function SectionHeading({
 function EventsBlock({
   label,
   events,
-  today,
+  nowMs,
   defaultOpenFirst = false,
 }: {
   label: string;
   events: PodEventSummary[];
-  today: string;
+  nowMs: number;
   defaultOpenFirst?: boolean;
 }) {
   return (
@@ -310,7 +310,7 @@ function EventsBlock({
             key={e.eventId}
             event={e}
             index={i}
-            today={today}
+            nowMs={nowMs}
             defaultOpen={defaultOpenFirst && i === 0}
           />
         ))}
@@ -322,15 +322,15 @@ function EventsBlock({
 function EventRow({
   event,
   index,
-  today,
+  nowMs,
   defaultOpen = false,
 }: {
   event: PodEventSummary;
   index: number;
-  today: string;
+  nowMs: number;
   defaultOpen?: boolean;
 }) {
-  const isUpcoming = !event.championDisplayName && event.eventDate > today;
+  const isUpcoming = !event.championDisplayName && new Date(event.eventTime).getTime() > nowMs;
   const expandable = !isUpcoming;
   const isJoinable = isUpcoming && !!event.discordEventId;
   const [open, setOpen] = useState(defaultOpen && expandable);
@@ -352,7 +352,7 @@ function EventRow({
         highlighted={open}
         time={isUpcoming ? formatLocalTime(event.eventTime) : null}
       />
-      <EventRowBody event={event} today={today} />
+      <EventRowBody event={event} nowMs={nowMs} />
       {isJoinable ? (
         <JoinEventCTA />
       ) : (
@@ -482,10 +482,11 @@ function DateRail({
   );
 }
 
-function EventRowBody({ event, today }: { event: PodEventSummary; today: string }) {
+function EventRowBody({ event, nowMs }: { event: PodEventSummary; nowMs: number }) {
   const hasChamp = !!event.championDisplayName;
-  const inProgress = !hasChamp && event.eventDate <= today;
-  const isUpcoming = !hasChamp && event.eventDate > today;
+  const startMs = new Date(event.eventTime).getTime();
+  const inProgress = !hasChamp && startMs <= nowMs;
+  const isUpcoming = !hasChamp && startMs > nowMs;
   return (
     <div
       className={cn(
@@ -730,11 +731,11 @@ type EventsTab = "last" | "upcoming" | "all";
 function MobileEventsBlock({
   played,
   upcoming,
-  today,
+  nowMs,
 }: {
   played: PodEventSummary[];
   upcoming: PodEventSummary[];
-  today: string;
+  nowMs: number;
 }) {
   const [tab, setTab] = useState<EventsTab>("last");
   const list = useMemo<PodEventSummary[]>(() => {
@@ -766,7 +767,7 @@ function MobileEventsBlock({
               key={e.eventId}
               event={e}
               index={i}
-              today={today}
+              nowMs={nowMs}
             />
           ))}
         </div>

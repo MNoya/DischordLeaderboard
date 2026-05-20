@@ -100,8 +100,10 @@ export function PodPage() {
 
   const { prevSlug, nextSlug } = useMemo(() => {
     if (!setEvents || !event) return { prevSlug: null, nextSlug: null };
-    const today = new Date().toISOString().slice(0, 10);
-    const started = setEvents.filter((e) => e.championDisplayName || e.eventDate <= today);
+    const nowMs = Date.now();
+    const started = setEvents.filter(
+      (e) => e.championDisplayName || new Date(e.eventTime).getTime() <= nowMs,
+    );
     const idx = started.findIndex((e) => e.eventId === event.eventId);
     if (idx < 0) return { prevSlug: null, nextSlug: null };
     return {
