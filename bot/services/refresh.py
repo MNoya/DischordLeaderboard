@@ -53,10 +53,15 @@ class _DraftClient(Protocol):
     def fetch_drafts(self, token: str, start_date=..., end_date=..., expansion=...) -> list[dict]: ...
 
 
-def aggregate_by_set_format_expansion(drafts: Iterable[dict], sets: Iterable[MagicSet]) -> list[dict]:
+def aggregate_by_set_format_expansion(
+    drafts: Iterable[dict],
+    sets: Iterable[MagicSet],
+    unknown_formats: dict[str, int] | None = None,
+) -> list[dict]:
     """One row per (set, format, expansion). Each draft is routed to the set whose code substring-matches its
-    normalized expansion (Y26ECL → ECL, "Cube - Powered" → CUBE). Drafts with no match are logged and dropped;
-    unsupported formats are skipped silently.
+    normalized expansion (Y26ECL → ECL, "Cube - Powered" → CUBE). Drafts with no expansion match are logged and
+    dropped; drafts in formats no queue group claims are dropped too, and their format strings get tallied into
+    ``unknown_formats`` so callers can surface them.
     """
     sets_by_code: dict[str, MagicSet] = {s.code: s for s in sets}
     codes = list(sets_by_code.keys())
@@ -65,7 +70,11 @@ def aggregate_by_set_format_expansion(drafts: Iterable[dict], sets: Iterable[Mag
 
     for d in drafts:
         fmt = d.get("format")
+        if not fmt:
+            continue
         if fmt not in SUPPORTED_FORMATS:
+            if unknown_formats is not None:
+                unknown_formats[fmt] = unknown_formats.get(fmt, 0) + 1
             continue
         expansion = normalize_expansion(d.get("expansion") or "")
         matched: MagicSet | None = None
@@ -135,7 +144,8 @@ def refresh_player(
             return {"status": "error", "error": str(e)}
 
     sets = session.execute(select(MagicSet)).scalars().all()
-    rows = aggregate_by_set_format_expansion(drafts, sets)
+    unknown_formats: dict[str, int] = {}
+    rows = aggregate_by_set_format_expansion(drafts, sets, unknown_formats=unknown_formats)
     now = datetime.now(timezone.utc)
 
     for row in rows:
@@ -187,7 +197,7 @@ def refresh_player(
         recompute_player_set_score(session, player.id, set_id)
         recompute_player_archetype_scores(session, player.id, set_id)
         recompute_player_format_archetype_scores(session, player.id, set_id)
-    return {"status": "updated", "rows": len(rows)}
+    return {"status": "updated", "rows": len(rows), "unknown_formats": unknown_formats}
 
 
 def upsert_draft_events(
@@ -498,7 +508,7 @@ def refresh_active_players(session: Session, client: _DraftClient) -> dict:
     if active is None:
         return {
             "updated": 0, "invalidated": 0, "errors": 0,
-            "invalidated_players": [], "per_player": [], "elapsed_s": 0.0,
+            "invalidated_players": [], "per_player": [], "unknown_formats": {}, "elapsed_s": 0.0,
             "status": "no_active_set",
         }
     fetch_start = max(date.today() - timedelta(days=PERIODIC_WINDOW_DAYS), active.start_date)
@@ -513,7 +523,7 @@ def refresh_active_players_all_sets(session: Session, client: _DraftClient) -> d
     if not sets:
         return {
             "updated": 0, "invalidated": 0, "errors": 0,
-            "invalidated_players": [], "per_player": [], "elapsed_s": 0.0,
+            "invalidated_players": [], "per_player": [], "unknown_formats": {}, "elapsed_s": 0.0,
             "status": "no_sets",
         }
     return _refresh_active_with_window(session, client, sets[0].start_date)
@@ -530,6 +540,7 @@ def _refresh_active_with_window(session: Session, client: _DraftClient, fetch_st
         "errors": 0,
         "invalidated_players": [],
         "per_player": [],
+        "unknown_formats": {},
         "elapsed_s": 0.0,
     }
     t_total = _time.monotonic()
@@ -547,6 +558,8 @@ def _refresh_active_with_window(session: Session, client: _DraftClient, fetch_st
             summary["invalidated_players"].append(player.id)
         else:
             summary["errors"] += 1
+        for fmt, count in (result.get("unknown_formats") or {}).items():
+            summary["unknown_formats"][fmt] = summary["unknown_formats"].get(fmt, 0) + count
         summary["per_player"].append({
             "display_name": player.display_name,
             "status": status,

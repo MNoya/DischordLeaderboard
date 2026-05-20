@@ -370,6 +370,10 @@ def build_bot(guild_id: int) -> commands.Bot:
             f"{result['edit_summary']['pruned']} pruned, "
             f"{result['edit_summary']['errors']} failed"
         )
+        unknown = summary.get("unknown_formats") or {}
+        if unknown:
+            tally = ", ".join(f"`{fmt}` ×{n}" for fmt, n in sorted(unknown.items(), key=lambda kv: (-kv[1], kv[0])))
+            body += f"\n⚠️ Unknown format(s): {tally}"
         try:
             owner = bot.get_user(bot.owner_id) or await bot.fetch_user(bot.owner_id)
             await owner.send(content=body)

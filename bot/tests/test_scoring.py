@@ -60,6 +60,14 @@ def test_compute_score_ignores_unknown_formats():
     assert compute_score(rows) == 0.0
 
 
+def test_compute_score_includes_qualifier_sealed_variants():
+    """Qualifier Weekend and Play-In Trad Sealed map to the Sealed group at 8 pts."""
+    rows = [
+        {"format": "Qualifier_D1_Sealed", "events": 1, "wins": 7, "losses": 1, "trophies": 1},
+    ]
+    assert compute_score(rows) == round(1 * 8 * 1 * (1 / 3), 2)
+
+
 def test_compute_score_lcq_draft_2_special_rule():
     # rule="lcq_draft_2": wins × winrate × points (no trophies, no shrinkage)
     # wins=5, losses=2 → games=7, winrate=5/7

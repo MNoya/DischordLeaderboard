@@ -61,12 +61,16 @@ def test_aggregate_substring_match():
     assert rows[0]["trophies"] == 1
 
 
-def test_aggregate_skips_unsupported_formats():
+def test_aggregate_skips_unsupported_formats_and_tallies_unknown():
+    """Unknown formats are dropped and counted in the optional ``unknown_formats`` dict."""
+    unknown: dict[str, int] = {}
     rows = aggregate_by_set_format_expansion(
         [{"format": "MidWeekSealed", "expansion": "ECL", "wins": 7, "losses": 0, "event_wins": 7}],
         [_FakeSet("s1", "ECL")],
+        unknown_formats=unknown,
     )
     assert rows == []
+    assert unknown == {"MidWeekSealed": 1}
 
 
 def test_aggregate_drops_unknown_expansions(caplog):
@@ -178,7 +182,7 @@ def test_refresh_player_inserts_rows(session):
     result = refresh_player(session, client, p)
     session.flush()
 
-    assert result == {"status": "updated", "rows": 2}
+    assert result == {"status": "updated", "rows": 2, "unknown_formats": {}}
     assert client.calls == [(p.seventeenlands_token, None, None)]
     rows = session.execute(select(PlayerStats).where(PlayerStats.player_id == p.id)).scalars().all()
     assert len(rows) == 2
