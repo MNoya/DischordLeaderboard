@@ -142,6 +142,17 @@ def _fmt_elapsed(seconds: float) -> str:
     return f"{minutes}m {sec}s"
 
 
+def _fmt_eta(delta: object) -> str:
+    total = int(delta.total_seconds())
+    if total < 0:
+        return "overdue"
+    h, rem = divmod(total, 3600)
+    m = rem // 60
+    if h:
+        return f"{h}h {m}m"
+    return f"{m}m"
+
+
 def build_bot(guild_id: int) -> commands.Bot:
     intents = discord.Intents.default()
     intents.message_content = True
@@ -467,15 +478,13 @@ def _log_startup_summary() -> None:
     lb_line = f"{lb_count} Leaderboard Messages"
     if upcoming:
         pod_lines = [
-            f"{ev.name:<28}  {ev.socket_status.replace('_', ' ').title():<14}  {ev.event_time.strftime('%Y-%m-%d %H:%M UTC')}  ({(ev.event_time - now).total_seconds() / 3600:+.1f}h)"
+            f"{ev.name:<28}  {ev.event_time.strftime('%Y-%m-%d %H:%M UTC')}  (in {_fmt_eta(ev.event_time - now)})"
             for ev in upcoming
         ]
     else:
         pod_lines = ["No Upcoming Pod Drafts"]
 
-    rows = [header, lb_line] + pod_lines
-    centered = frozenset(range(1, len(rows)))
-    log.info(log_box(rows, centered=centered))
+    log.info(log_box([header, lb_line] + pod_lines))
 
 
 def _restart_banner() -> None:
