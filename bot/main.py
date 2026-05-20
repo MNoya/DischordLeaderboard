@@ -5,7 +5,7 @@ import logging
 import logging.handlers
 import signal
 import traceback
-import unicodedata
+from bot.log_box import log_box
 from datetime import datetime, time as dtime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -354,15 +354,28 @@ def build_bot(guild_id: int) -> commands.Bot:
         summary = result["summary"]
         per_player = summary.get("per_player", [])
         n_players = len(per_player)
-        avg_line = (
-            f" · Avg {summary['elapsed_s'] / n_players:.1f}s/player"
-            if n_players else ""
-        )
-        trigger_tag = " (auto)" if result["trigger"] == "auto" else ""
+        elapsed = _fmt_elapsed(summary.get("elapsed_s", 0.0))
+        avg = f"  ⚡  {summary['elapsed_s'] / n_players:.1f}s avg" if n_players else ""
+        trigger = result["trigger"].title()
+
+        rows: list[str] = [
+            f"{trigger} Refresh  ⚡  {elapsed}  ⚡  {n_players} Players{avg}",
+            f"Updated {summary['updated']}  ⚡  Invalidated {summary['invalidated']}  ⚡  Errors {summary['errors']}",
+            f"Messages: {result['edit_summary']['edited']} edited  ⚡  {result['edit_summary']['pruned']} pruned  ⚡  {result['edit_summary']['errors']} failed",
+        ]
+        unknown = summary.get("unknown_formats") or {}
+        if unknown:
+            tally = "  ".join(f"{fmt} ×{n}" for fmt, n in sorted(unknown.items(), key=lambda kv: (-kv[1], kv[0])))
+            rows.append(f"⚠️  New formats (stored, not scoring): {tally}")
+        unrouted = summary.get("unrouted_expansions") or {}
+        if unrouted:
+            tally = "  ".join(f"{exp} ×{n}" for exp, n in sorted(unrouted.items(), key=lambda kv: (-kv[1], kv[0])))
+            rows.append(f"⚠️  Unrouted expansions (add to sets.py): {tally}")
+        log.info(log_box(rows, centered=frozenset(range(len(rows)))))
+
         body = (
-            f"🔄 Refresh complete{trigger_tag}\n"
-            f"Elapsed: {_fmt_elapsed(summary.get('elapsed_s', 0.0))} · "
-            f"Players: {n_players}{avg_line}\n"
+            f"🔄 Refresh complete\n"
+            f"Elapsed: {elapsed} · Players: {n_players}{avg.strip()}\n"
             f"Updated: {summary['updated']} · "
             f"Invalidated: {summary['invalidated']} · "
             f"Errors: {summary['errors']}\n"
@@ -370,11 +383,9 @@ def build_bot(guild_id: int) -> commands.Bot:
             f"{result['edit_summary']['pruned']} pruned, "
             f"{result['edit_summary']['errors']} failed"
         )
-        unknown = summary.get("unknown_formats") or {}
         if unknown:
             tally = ", ".join(f"`{fmt}` ×{n}" for fmt, n in sorted(unknown.items(), key=lambda kv: (-kv[1], kv[0])))
             body += f"\n⚠️ New format(s) observed (stored, not scoring): {tally}"
-        unrouted = summary.get("unrouted_expansions") or {}
         if unrouted:
             tally = ", ".join(f"`{exp}` ×{n}" for exp, n in sorted(unrouted.items(), key=lambda kv: (-kv[1], kv[0])))
             body += f"\n⚠️ Unrouted expansion(s) — events stored without a set (add to bot/sets.py): {tally}"
@@ -463,30 +474,8 @@ def _log_startup_summary() -> None:
         pod_lines = ["No Upcoming Pod Drafts"]
 
     rows = [header, lb_line] + pod_lines
-    w = max(_display_width(r) for r in rows) + 4
-
-    def box_row(text: str) -> str:
-        padding = " " * (w - 4 - _display_width(text))
-        return f"║  {text}{padding}  ║"
-
-    def box_row_centered(text: str) -> str:
-        total = w - 4 - _display_width(text)
-        left = total // 2
-        return f"║  {' ' * left}{text}{' ' * (total - left)}  ║"
-
-    box = "\n".join([
-        "",
-        f"╔{'═' * w}╗",
-        box_row(header),
-        box_row_centered(lb_line),
-        *[box_row_centered(l) for l in pod_lines],
-        f"╚{'═' * w}╝",
-    ])
-    log.info(box)
-
-
-def _display_width(s: str) -> int:
-    return sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in s)
+    centered = frozenset(range(1, len(rows)))
+    log.info(log_box(rows, centered=centered))
 
 
 def _restart_banner() -> None:
