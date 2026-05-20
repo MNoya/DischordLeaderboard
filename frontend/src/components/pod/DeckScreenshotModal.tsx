@@ -47,6 +47,20 @@ export function DeckScreenshotModal({ participant, breakdownHref, onClose }: Pro
     needsRefresh ? null : participant.deckScreenshotUrl,
   );
   const [isResolving, setIsResolving] = useState(needsRefresh);
+  const [imgLoaded, setImgLoaded] = useState(false);
+  const [imgFailed, setImgFailed] = useState(false);
+
+  useEffect(() => {
+    setImgLoaded(false);
+    setImgFailed(false);
+    if (!resolvedUrl) return;
+    const preloader = new Image();
+    preloader.onload = () => setImgLoaded(true);
+    preloader.onerror = () => setImgFailed(true);
+    preloader.src = resolvedUrl;
+  }, [resolvedUrl]);
+
+  const showSkeleton = isResolving || (resolvedUrl !== null && !imgLoaded && !imgFailed);
 
   useEffect(() => {
     if (!needsRefresh || !participant.eventId) return;
@@ -145,9 +159,11 @@ export function DeckScreenshotModal({ participant, breakdownHref, onClose }: Pro
             zoomed ? "overflow-auto" : "overflow-y-auto overflow-x-hidden"
           }`}
         >
-          {isResolving ? (
-            <div className="px-5 py-16 text-center text-muted font-body animate-pulse">
-              Refreshing deck image…
+          {showSkeleton ? (
+            <div className="w-full aspect-video bg-surface2 animate-pulse" />
+          ) : imgFailed ? (
+            <div className="px-5 py-16 text-center text-muted font-body">
+              Deck screenshot failed to load
             </div>
           ) : resolvedUrl ? (
             <img
@@ -166,7 +182,7 @@ export function DeckScreenshotModal({ participant, breakdownHref, onClose }: Pro
             </div>
           )}
         </div>
-        {isMobile && resolvedUrl && (
+        {isMobile && resolvedUrl && !showSkeleton && !imgFailed && (
           <button
             type="button"
             onClick={toggleZoom}
