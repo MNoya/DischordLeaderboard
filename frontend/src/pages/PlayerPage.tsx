@@ -377,7 +377,7 @@ function DesktopSkeleton() {
           {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
             <div
               key={i}
-              className="grid gap-3 py-[11px] border-b border-border items-center"
+              className="grid gap-3 py-[6px] border-b border-border items-center"
               style={{ gridTemplateColumns: "30px 110px 170px 1fr 90px" }}
             >
               <SkeletonBox className="w-4 h-4 mx-auto" />
@@ -854,9 +854,20 @@ function DraftLogDesktop({
       </div>
 
       <div className="mt-3">
-        {filtered.map((e) => (
-          <EventLogRow key={e.eventId} event={e} variant="desktop" setEndDate={setEndDate} />
-        ))}
+        {filtered.map((e, i) => {
+          const isFB = isFlashbackEvent(e.finishedAt, setEndDate);
+          const prev = filtered[i - 1];
+          const next = filtered[i + 1];
+          const showBoundary = !isFB && !!prev && isFlashbackEvent(prev.finishedAt, setEndDate);
+          const hideBottomBorder =
+            isFB && !!next && !isFlashbackEvent(next.finishedAt, setEndDate);
+          return (
+            <React.Fragment key={e.eventId}>
+              {showBoundary && <FlashbackDivider variant="desktop" />}
+              <EventLogRow event={e} variant="desktop" hideBottomBorder={hideBottomBorder} />
+            </React.Fragment>
+          );
+        })}
         {filtered.length === 0 && (
           <div className="p-6 text-center text-muted font-display tracking-[0.2em]">
             NO EVENTS MATCH FILTER
@@ -901,35 +912,41 @@ function GoToTopButton({
   );
 }
 
+function FlashbackDivider({ variant }: { variant: "desktop" | "mobile" }) {
+  const mxClass = variant === "mobile" ? "-mx-[18px]" : "-mx-2";
+  return (
+    <div className={cn("relative my-1 border-t border-teal", mxClass)}>
+      <span className="absolute left-1/2 -translate-x-1/2 -top-[9px] px-2 py-0.5 bg-bg border border-teal text-teal font-display text-[11px] tracking-[0.2em] leading-none">
+        FLASHBACK
+      </span>
+    </div>
+  );
+}
+
 function EventLogRow({
   event: e,
   variant,
-  setEndDate,
+  hideBottomBorder = false,
 }: {
   event: PlayerDraftEvent;
   variant: "desktop" | "mobile";
-  setEndDate?: string | null;
+  hideBottomBorder?: boolean;
 }) {
   const href = e.externalUrl ?? null;
   const linkClass = href ? "cursor-pointer transition-colors hover:bg-surface2 no-underline text-inherit" : "";
   const isPod = e.format === "PodDraft";
   const podWithoutDeck = isPod && !e.colors;
   const formatLabel = isPod && e.eventName ? e.eventName.toUpperCase() : prettyFormat(e.format).toUpperCase();
-  const flashback = isFlashbackEvent(e.finishedAt, setEndDate);
+  const borderCls = hideBottomBorder ? "" : "border-b border-border";
 
   if (variant === "desktop") {
     const inner = (
       <>
-        <span className="text-center">
-          {e.isTrophy ? <Trophy size={18} color="#ffc63a" /> : <span className="text-dim">·</span>}
+        <span className="text-right pr-1">
+          {e.isTrophy && <Trophy size={18} color="#ffc63a" />}
         </span>
         <span className="text-[12px] text-muted text-center">{fmtShortDate(eventDate(e))}</span>
-        <span className="flex flex-col">
-          <span className="font-display text-[16px] tracking-[0.08em]">{formatLabel}</span>
-          {flashback && (
-            <span className="font-display text-[12px] tracking-[0.2em] text-teal mt-0.5">FLASHBACK</span>
-          )}
-        </span>
+        <span className="font-display text-[16px] tracking-[0.08em]">{formatLabel}</span>
         {podWithoutDeck ? (
           <span className="text-[12px] text-muted">Deck not submitted</span>
         ) : (() => {
@@ -955,12 +972,13 @@ function EventLogRow({
           className="text-right font-display text-[22px]"
         />
         <span className="flex justify-center text-dim">
-          {href && <ExternalLink size={11} aria-hidden="true" />}
+          {href && <ExternalLink size={14} aria-hidden="true" />}
         </span>
       </>
     );
     const cls = cn(
-      "grid gap-3 py-[11px] px-2 -mx-2 border-b border-border items-center",
+      "grid gap-3 py-[6px] px-2 -mx-2 items-center",
+      borderCls,
       linkClass,
     );
     const style = { gridTemplateColumns: "30px 110px 170px 1fr 90px 14px" };
@@ -977,7 +995,7 @@ function EventLogRow({
   const inner = (
     <>
       <span>
-        {e.isTrophy ? <Trophy size={16} color="#ffc63a" /> : <span className="text-dim">·</span>}
+        {e.isTrophy && <Trophy size={16} color="#ffc63a" />}
       </span>
       <div>
         <div className="flex items-center gap-1.5">
@@ -985,9 +1003,6 @@ function EventLogRow({
           <span className="font-display text-[13px] tracking-[0.08em]">
             {formatLabel}
           </span>
-          {flashback && (
-            <span className="font-display text-[13px] tracking-[0.08em] text-teal">FLASHBACK</span>
-          )}
         </div>
         <div className="text-[11px] text-muted mt-0.5">
           {[
@@ -1004,12 +1019,13 @@ function EventLogRow({
           color={e.isTrophy ? "#2ee85c" : "#e6ecf5"}
           className="font-display text-[22px]"
         />
-        {href && <ExternalLink size={10} className="text-dim" aria-hidden="true" />}
+        {href && <ExternalLink size={13} className="text-dim" aria-hidden="true" />}
       </span>
     </>
   );
   const cls = cn(
-    "grid gap-2.5 py-2.5 px-2 -mx-2 border-b border-border items-center",
+    "grid gap-2.5 py-2.5 px-[18px] -mx-[18px] items-center",
+    borderCls,
     linkClass,
   );
   const style = { gridTemplateColumns: "20px 1fr auto" };
@@ -1171,14 +1187,23 @@ function Mobile({
             />
           </div>
         </div>
-        {filtered.map((e) => (
-          <EventLogRow
-            key={e.eventId}
-            event={e}
-            variant="mobile"
-            setEndDate={sets?.find((s) => s.code === profile.setCode)?.endDate ?? null}
-          />
-        ))}
+        {(() => {
+          const mobileEndDate = sets?.find((s) => s.code === profile.setCode)?.endDate ?? null;
+          return filtered.map((e, i) => {
+            const isFB = isFlashbackEvent(e.finishedAt, mobileEndDate);
+            const prev = filtered[i - 1];
+            const next = filtered[i + 1];
+            const showBoundary = !isFB && !!prev && isFlashbackEvent(prev.finishedAt, mobileEndDate);
+            const hideBottomBorder =
+              isFB && !!next && !isFlashbackEvent(next.finishedAt, mobileEndDate);
+            return (
+              <React.Fragment key={e.eventId}>
+                {showBoundary && <FlashbackDivider variant="mobile" />}
+                <EventLogRow event={e} variant="mobile" hideBottomBorder={hideBottomBorder} />
+              </React.Fragment>
+            );
+          });
+        })()}
         {filtered.length === 0 && (
           <div className="p-6 text-center text-muted font-display tracking-[0.2em] text-[12px]">
             NO EVENTS MATCH FILTER
