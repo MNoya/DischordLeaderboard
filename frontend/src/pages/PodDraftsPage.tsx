@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, ExternalLink } from "lucide-react";
 import { TbCards } from "react-icons/tb";
 
 import { AppHeader } from "../components/AppHeader";
@@ -572,7 +572,7 @@ function EventStandings({ event }: { event: PodEventSummary }) {
                 <StandingRow
                   key={`${p.eventId}-${p.displayName}`}
                   p={p}
-                  onClick={p.deckScreenshotUrl ? () => setDeckTarget(p) : undefined}
+                  onShowDeck={p.deckScreenshotUrl ? () => setDeckTarget(p) : undefined}
                 />
               ))}
         </div>
@@ -611,18 +611,24 @@ function EventStandings({ event }: { event: PodEventSummary }) {
 
 function StandingRow({
   p,
-  onClick,
+  onShowDeck,
 }: {
   p: PodEventParticipantRow;
-  onClick?: () => void;
+  onShowDeck?: () => void;
 }) {
   const wins = p.record ? Number(p.record.split("-")[0] || 0) : 0;
   const losses = p.record ? Number(p.record.split("-")[1] || 0) : 0;
   const name = podDiscordName(p);
-  const interactive = !!onClick;
+  const hasDeck = !!onShowDeck;
+  const draftLogUrl = !hasDeck ? p.draftLogUrl : null;
+  const interactive = hasDeck || !!draftLogUrl;
+  const handleRowClick = () => {
+    if (onShowDeck) onShowDeck();
+    else if (draftLogUrl) window.open(draftLogUrl, "_blank", "noopener,noreferrer");
+  };
   return (
     <div
-      onClick={onClick}
+      onClick={interactive ? handleRowClick : undefined}
       className={cn(
         "group/row grid items-center gap-x-2 lg:gap-x-3 py-2.5 pl-2 pr-3 lg:pr-5 bg-surface transition-colors",
         STANDING_COLS_CLASS,
@@ -647,18 +653,18 @@ function StandingRow({
         )}
       </div>
       <Record className="mono text-center text-[13px]" wins={wins} losses={losses} />
-      {interactive ? (
+      {hasDeck ? (
         <button
           type="button"
           onClick={(e) => {
             e.stopPropagation();
-            onClick?.();
+            onShowDeck?.();
           }}
-          className="group/deck inline-flex items-center justify-center gap-2 bg-bg border border-border hover:border-green/60 hover:bg-green/10 group-hover/row:border-green/60 group-hover/row:bg-green/10 transition-colors px-1.5 lg:px-3 cursor-pointer whitespace-nowrap"
+          className="group/action inline-flex items-center justify-center gap-2 bg-bg border border-border hover:border-green/60 hover:bg-green/10 group-hover/row:border-green/60 group-hover/row:bg-green/10 transition-colors px-1.5 lg:px-3 cursor-pointer whitespace-nowrap"
           style={{ height: 34 }}
         >
           <span
-            className="hidden lg:inline font-display tracking-[0.16em] text-text group-hover/deck:text-green group-hover/row:text-green transition-colors leading-none"
+            className="hidden lg:inline font-display tracking-[0.16em] text-text group-hover/action:text-green group-hover/row:text-green transition-colors leading-none"
             style={{ fontSize: 14 }}
           >
             VIEW DECK
@@ -666,9 +672,30 @@ function StandingRow({
           <TbCards
             size={17}
             aria-hidden="true"
-            className="text-text group-hover/deck:text-green group-hover/row:text-green transition-colors"
+            className="text-text group-hover/action:text-green group-hover/row:text-green transition-colors"
           />
         </button>
+      ) : draftLogUrl ? (
+        <a
+          href={draftLogUrl}
+          target="_blank"
+          rel="noreferrer noopener"
+          onClick={(e) => e.stopPropagation()}
+          className="group/action inline-flex items-center justify-center gap-2 bg-bg border border-border hover:border-green/60 hover:bg-green/10 group-hover/row:border-green/60 group-hover/row:bg-green/10 transition-colors px-1.5 lg:px-3 no-underline whitespace-nowrap"
+          style={{ height: 34 }}
+        >
+          <span
+            className="hidden lg:inline font-display tracking-[0.16em] text-text group-hover/action:text-green group-hover/row:text-green transition-colors leading-none"
+            style={{ fontSize: 14 }}
+          >
+            DRAFT LOG
+          </span>
+          <ExternalLink
+            size={15}
+            aria-hidden="true"
+            className="text-text group-hover/action:text-green group-hover/row:text-green transition-colors"
+          />
+        </a>
       ) : (
         <span />
       )}

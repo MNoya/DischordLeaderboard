@@ -160,7 +160,7 @@ export function DeckScreenshotModal({ participant, breakdownHref, onClose }: Pro
           }`}
         >
           {showSkeleton ? (
-            <div className="w-full aspect-video bg-surface2 animate-pulse" />
+            <div className="w-full aspect-[5/2] bg-surface2 animate-pulse" />
           ) : imgFailed ? (
             <div className="px-5 py-16 text-center text-muted font-body">
               Deck screenshot failed to load
