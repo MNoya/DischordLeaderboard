@@ -26,7 +26,15 @@ export const FORMAT_LABEL_GROUPS: Record<string, string[]> = {
 export const FORMAT_RAW_GROUPS: Record<string, string[]> = {
   Premier: ["PremierDraft"],
   Trad: ["TradDraft"],
-  Sealed: ["Sealed", "TradSealed", "ArenaDirect_Sealed", "QualifierPlayInSealed"],
+  Sealed: [
+    "Sealed",
+    "TradSealed",
+    "ArenaDirect_Sealed",
+    "QualifierPlayInSealed",
+    "QualifierPlayInTradSealed",
+    "Qualifier_D1_Sealed",
+    "Qualifier_D2_Sealed",
+  ],
   Quick: ["QuickDraft", "PickTwoDraft", "Emblem_QuickDraft"],
   LCQ: ["LimitedChampionshipQualifier_Draft1", "LimitedChampionshipQualifier_Draft2"],
   Pod: ["PodDraft"],
