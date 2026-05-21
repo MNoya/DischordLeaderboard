@@ -23,8 +23,9 @@ from bot.commands.stats import process_stats, render_embed as render_stats_embed
 from bot.database import SessionLocal
 from bot.discord_helpers import extract_avatar_hash
 from bot.models import Player
+from bot.services.dm_flows import dm_flow, is_in_flight
 from bot.services.refresh import refresh_one_player_for_all_sets
-from bot.services.seventeenlands import SeventeenLandsClient, extract_token
+from bot.services.seventeenlands import SeventeenLandsClient, classify_token_reply, extract_token
 from bot.slug import disambiguate_slug, slugify
 
 logger = logging.getLogger(__name__)
@@ -164,11 +165,6 @@ class Signup(commands.Cog):
     def __init__(self, bot: commands.Bot, client: SeventeenLandsClient | None = None) -> None:
         self.bot = bot
         self.client = client or SeventeenLandsClient()
-        # Per-user in-flight signup tracker. Prevents a second /join (or Join button
-        # click) from kicking off a parallel flow while the first is still waiting
-        # on a DM reply — that race produced contradictory 'already signed up' +
-        # 'signed up' messages on the same paste
-        self._active_signups: set[str] = set()
 
     @app_commands.command(name="join", description="Join the LLU Community Leaderboard")
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
@@ -179,16 +175,13 @@ class Signup(commands.Cog):
         audit.event("signup_invoked", user_id=user_id, username=username)
 
         logger.info(f"join: {username} invoked")
-        if user_id in self._active_signups:
+        if is_in_flight(user_id):
             audit.event("signup_concurrent_invocation", user_id=user_id)
             logger.info(f"join: {username} duplicate flow blocked")
             await interaction.response.send_message(MSG_ALREADY_IN_PROGRESS, ephemeral=(interaction.guild is not None))
             return
-        self._active_signups.add(user_id)
-        try:
+        with dm_flow(user_id):
             await self._run_signup_flow(interaction, user_id, username)
-        finally:
-            self._active_signups.discard(user_id)
 
     async def _run_signup_flow(
         self, interaction: discord.Interaction, user_id: str, username: str,
@@ -231,15 +224,32 @@ class Signup(commands.Cog):
         await interaction.response.defer(ephemeral=(interaction.guild is not None), thinking=True)
         try:
             dm = await interaction.user.create_dm()
-            kwargs: dict = {"content": INSTRUCTIONS}
-            if INSTRUCTIONS_IMAGE.exists():
-                kwargs["file"] = discord.File(INSTRUCTIONS_IMAGE)
-            await dm.send(**kwargs)
         except discord.Forbidden:
-            audit.event("signup_dms_disabled", user_id=user_id)
+            audit.event("signup_dms_disabled", user_id=user_id, username=username)
             logger.warning(f"join: {username} DMs blocked")
             await interaction.followup.send(MSG_DMS_DISABLED, ephemeral=(interaction.guild is not None))
             return
+
+        sent_with_attachment = False
+        if INSTRUCTIONS_IMAGE.exists():
+            try:
+                await dm.send(content=INSTRUCTIONS, file=discord.File(INSTRUCTIONS_IMAGE))
+                sent_with_attachment = True
+            except discord.Forbidden:
+                audit.event("signup_dms_disabled", user_id=user_id, username=username)
+                logger.warning(f"join: {username} DMs blocked on instructions send")
+                await interaction.followup.send(MSG_DMS_DISABLED, ephemeral=(interaction.guild is not None))
+                return
+            except discord.HTTPException as exc:
+                logger.warning(f"join: {username} instructions attachment failed ({exc}); falling back to text-only")
+        if not sent_with_attachment:
+            try:
+                await dm.send(INSTRUCTIONS)
+            except discord.Forbidden:
+                audit.event("signup_dms_disabled", user_id=user_id, username=username)
+                logger.warning(f"join: {username} DMs blocked on instructions send")
+                await interaction.followup.send(MSG_DMS_DISABLED, ephemeral=(interaction.guild is not None))
+                return
 
         await interaction.followup.send(MSG_DM_SENT, ephemeral=(interaction.guild is not None))
         audit.event("signup_dm_sent", user_id=user_id)
@@ -250,7 +260,7 @@ class Signup(commands.Cog):
         try:
             reply = await self.bot.wait_for("message", check=is_user_dm, timeout=DM_TIMEOUT_S)
         except asyncio.TimeoutError:
-            audit.event("signup_timeout", user_id=user_id)
+            audit.event("signup_timeout", user_id=user_id, username=username)
             logger.info(f"join: {username} timed out")
             await dm.send(MSG_TIMEOUT)
             return
@@ -272,10 +282,11 @@ class Signup(commands.Cog):
         audit.event(
             "signup_result",
             user_id=user_id,
+            username=username,
             kind=result.kind,
             player_id=result.player_id,
         )
-        logger.info(f"join: {username} → {result.kind}")
+        logger.info(f"join: {username} → {result.kind} {_outcome_log_suffix(result.kind, reply.content)}")
 
         if result.kind == "invalid_format":
             await dm.send(MSG_INVALID_FORMAT)
@@ -340,6 +351,21 @@ async def _build_join_preview(user_id: str):
     stats_embed = render_stats_embed(stats_data) if stats_data is not None else None
 
     return lb_embed, render_lb_view(), stats_embed
+
+
+def _outcome_log_suffix(kind: str, raw_reply: str) -> str:
+    """Return a short bracketed tag with diagnostic context for the result log.
+
+    Token tail on successful extraction, shape label on parse failure. No raw
+    user content ever lands in logs.
+    """
+    if kind == "invalid_format":
+        return f"[shape={classify_token_reply(raw_reply)} len={len(raw_reply or '')}]"
+    try:
+        token = extract_token(raw_reply)
+    except ValueError:
+        return ""
+    return f"[token=…{token[-4:]}]"
 
 
 def _next_available_slug(session: Session, display_name: str) -> str:

@@ -8,6 +8,7 @@ from bot.services.seventeenlands import (
     SUPPORTED_FORMATS,
     MinIntervalLimiter,
     SeventeenLandsClient,
+    classify_token_reply,
     extract_event_row,
     extract_token,
 )
@@ -53,6 +54,25 @@ def test_extract_token_rejects_invalid_inputs(raw):
 def test_extract_token_handles_none():
     with pytest.raises(ValueError):
         extract_token(None)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("", "empty"),
+        ("   ", "empty"),
+        (None, "empty"),
+        ("x" * 2001, "too_long"),
+        (VALID_TOKEN, "hex_present"),
+        (f"https://17lands.com/history/events", "17lands_url_no_token"),
+        (f"http://www.17lands.com/user_history/short", "17lands_url_no_token"),
+        ("https://example.com/foo", "other_url"),
+        ("abc123def", "hex_but_wrong_length"),
+        ("just text reply", "text_only"),
+    ],
+)
+def test_classify_token_reply(raw, expected):
+    assert classify_token_reply(raw) == expected
 
 
 # ---------------------------------------------------------------------------

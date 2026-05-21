@@ -15,8 +15,9 @@ from bot import audit
 from bot.database import SessionLocal
 from bot.discord_helpers import extract_avatar_hash
 from bot.models import Player
+from bot.services.dm_flows import dm_flow, is_in_flight
 from bot.services.refresh import refresh_one_player_for_all_sets
-from bot.services.seventeenlands import SeventeenLandsClient, extract_token
+from bot.services.seventeenlands import SeventeenLandsClient, classify_token_reply, extract_token
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +118,12 @@ class UpdateProfile(commands.Cog):
             await interaction.response.send_message(MSG_NOT_REGISTERED, ephemeral=(interaction.guild is not None))
             return
 
+        with dm_flow(user_id):
+            await self._run_relink_flow(interaction, user_id, username)
+
+    async def _run_relink_flow(
+        self, interaction: discord.Interaction, user_id: str, username: str,
+    ) -> None:
         # Token entry always happens via DM regardless of where /relink was invoked
         try:
             dm = await interaction.user.create_dm()
@@ -153,7 +160,7 @@ class UpdateProfile(commands.Cog):
             )
 
         audit.event("update_profile_result", user_id=user_id, kind=result.kind, player_id=result.player_id)
-        logger.info(f"relink: {username} → {result.kind}")
+        logger.info(f"relink: {username} → {result.kind} {_outcome_log_suffix(result.kind, reply.content)}")
 
         if result.kind == "invalid_format":
             await dm.send(MSG_INVALID_FORMAT)
@@ -173,6 +180,16 @@ class UpdateProfile(commands.Cog):
             refresh_one_player_for_all_sets(session, self.client, result.player_id)
             session.commit()
         await dm.send(MSG_SUCCESS)
+
+
+def _outcome_log_suffix(kind: str, raw_reply: str) -> str:
+    if kind == "invalid_format":
+        return f"[shape={classify_token_reply(raw_reply)} len={len(raw_reply or '')}]"
+    try:
+        token = extract_token(raw_reply)
+    except ValueError:
+        return ""
+    return f"[token=…{token[-4:]}]"
 
 
 async def setup(bot: commands.Bot) -> None:

@@ -27,6 +27,9 @@ SUPPORTED_FORMATS: tuple[str, ...] = supported_formats()
 
 DEFAULT_BASE_URL = "https://www.17lands.com"
 _TOKEN_RE = re.compile(r"[a-f0-9]{32}")
+_HEX_RUN_RE = re.compile(r"[a-f0-9]{6,}")
+_URL_RE = re.compile(r"https?://", re.IGNORECASE)
+_17LANDS_URL_RE = re.compile(r"17lands\.com", re.IGNORECASE)
 
 
 def extract_token(value: str) -> str:
@@ -41,6 +44,34 @@ def extract_token(value: str) -> str:
     if not match:
         raise ValueError(f"could not extract a 17lands token from: {value!r}")
     return match.group(0)
+
+
+def classify_token_reply(value: str | None) -> str:
+    """Categorise why a reply failed extract_token, without leaking content.
+
+    Returns a short label suitable for logging. Use this only when extract_token
+    has already raised — callers shouldn't branch on the label, it's diagnostic.
+    """
+    if not value or not isinstance(value, str):
+        return "empty"
+    stripped = value.strip()
+    if not stripped:
+        return "empty"
+    if len(stripped) > 2000:
+        return "too_long"
+    lower = stripped.lower()
+    if _TOKEN_RE.search(lower):
+        return "hex_present"
+    is_17l = bool(_17LANDS_URL_RE.search(lower))
+    is_url = bool(_URL_RE.search(lower))
+    has_hex_run = bool(_HEX_RUN_RE.search(lower))
+    if is_17l:
+        return "17lands_url_no_token"
+    if is_url:
+        return "other_url"
+    if has_hex_run:
+        return "hex_but_wrong_length"
+    return "text_only"
 
 
 class MinIntervalLimiter:

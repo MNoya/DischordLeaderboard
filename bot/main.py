@@ -5,7 +5,7 @@ import logging
 import logging.handlers
 import signal
 import traceback
-from datetime import datetime, time as dtime, timezone
+from datetime import datetime, time as dtime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -35,6 +35,7 @@ from bot.discord_helpers import refresh_player_avatars
 from bot import emojis
 from bot.commands.testcomponent import setup as setup_testcomponent
 from bot.commands.testlobby import setup as setup_testlobby
+from bot.listeners.auto_link_listener import setup as setup_auto_link_listener
 from bot.listeners.pod_screenshots import setup as setup_pod_screenshots
 from bot.listeners.sesh_listener import reschedule_pending_events, setup as setup_sesh_listener
 from bot.models import LeaderboardMessage, MagicSet, Player, PodDraftEvent
@@ -42,6 +43,11 @@ from bot.services.lobby_embed import LobbyReadyButtonView
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_tournament import (
     register_persistent_views as register_pod_views,
+)
+from bot.services.onboarding_report import (
+    format_report_section as format_onboarding_section,
+    recent_join_failures,
+    recent_joiners,
 )
 from bot.services.refresh import refresh_active_players
 from bot.services.seventeenlands import MinIntervalLimiter, SeventeenLandsClient
@@ -187,6 +193,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_pod_draft(bot)
         await setup_sesh_listener(bot)
         await setup_pod_screenshots(bot)
+        await setup_auto_link_listener(bot)
         await setup_testlobby(bot)
         await setup_testcomponent(bot)
         reschedule_pending_events(bot)
@@ -401,6 +408,16 @@ def build_bot(guild_id: int) -> commands.Bot:
         if unrouted:
             tally = ", ".join(f"`{exp}` ×{n}" for exp, n in sorted(unrouted.items(), key=lambda kv: (-kv[1], kv[0])))
             body += f"\n⚠️ Unrouted expansion(s) — events stored without a set (add to bot/sets.py): {tally}"
+
+        now = datetime.now(timezone.utc)
+        since = now - timedelta(hours=12)
+        with SessionLocal() as session:
+            joiners = recent_joiners(session, since)
+        failures = recent_join_failures(since)
+        section = format_onboarding_section(joiners, failures, now=now)
+        if section:
+            body += "\n\n" + section
+
         try:
             owner = bot.get_user(bot.owner_id) or await bot.fetch_user(bot.owner_id)
             await owner.send(content=body)
