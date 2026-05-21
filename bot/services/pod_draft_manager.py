@@ -138,10 +138,14 @@ class PodDraftManager:
         await self._mark_socket_status("connected")
 
     async def _on_disconnect(self) -> None:
-        log.warning(f"draftmancer ws disconnected for {self.session_id} (closed={self._closed})")
-        # Reconnect-on-disconnect disabled during debugging so Draftmancer kicks don't loop;
-        # disconnect_safely() is the explicit teardown path
+        log.warning(
+            f"draftmancer ws disconnected for {self.session_id} "
+            f"(closed={self._closed}, drafting={self.drafting}, draft_complete={self.draft_complete})"
+        )
         self._closed = True
+        if self.drafting or self.draft_complete:
+            log.info(f"keeping manager {self.event_id} in ACTIVE_POD_MANAGERS — tournament in flight")
+            return
         ACTIVE_POD_MANAGERS.pop(self.event_id, None)
 
     async def _on_session_users(self, users) -> None:
