@@ -31,7 +31,7 @@ export function ColorsSwitcher({
           key={code}
           code={code}
           active={code === activeCode}
-          onClick={() => onChange(code)}
+          onClick={() => onChange(code === activeCode && code !== "ALL" ? "ALL" : code)}
           pipSize={isMobile ? 12 : 12}
         />
       ))}

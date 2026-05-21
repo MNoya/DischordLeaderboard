@@ -33,7 +33,7 @@ function computeHideCount(): number {
   return 4;
 }
 
-export function useSetVisibleCap(total: number): number {
+export function useSetVisibleCap(total: number, extraHide = 0): number {
   const [hide, setHide] = React.useState<number>(computeHideCount);
   React.useEffect(() => {
     const mqls = SET_HIDE_BREAKPOINTS.map(([w]) =>
@@ -44,5 +44,5 @@ export function useSetVisibleCap(total: number): number {
     update();
     return () => mqls.forEach((m) => m.removeEventListener("change", update));
   }, []);
-  return Math.max(VISIBLE_FLOOR, total - hide);
+  return Math.max(VISIBLE_FLOOR, total - hide - extraHide);
 }

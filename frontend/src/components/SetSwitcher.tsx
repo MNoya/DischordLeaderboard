@@ -40,12 +40,14 @@ export function SetSwitcherDesktop({
   sets,
   activeCode,
   onChange,
+  extraHide = 0,
 }: {
   sets: SetSummary[];
   activeCode: string;
   onChange: (code: string) => void;
+  extraHide?: number;
 }) {
-  const cap = useSetVisibleCap(sets.length);
+  const cap = useSetVisibleCap(sets.length, extraHide);
   const { visible, overflow } = partitionSets(sets, activeCode, cap);
   return (
     <div className="flex gap-1.5">

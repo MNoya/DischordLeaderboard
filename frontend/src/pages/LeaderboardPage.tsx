@@ -355,7 +355,12 @@ function SetHero({
       </div>
       <div className="flex-1" />
       {sets && (
-        <SetSwitcherDesktop sets={sets} activeCode={activeSet} onChange={onSelectSet} />
+        <SetSwitcherDesktop
+          sets={sets}
+          activeCode={activeSet}
+          onChange={onSelectSet}
+          extraHide={filterActive ? 2 : 0}
+        />
       )}
       {filterActive && <FilterHero format={format} colors={colors} />}
     </div>
