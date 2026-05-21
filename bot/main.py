@@ -5,7 +5,6 @@ import logging
 import logging.handlers
 import signal
 import traceback
-from bot.log_box import log_box
 from datetime import datetime, time as dtime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -382,7 +381,8 @@ def build_bot(guild_id: int) -> commands.Bot:
         if unrouted:
             tally = "  ".join(f"{exp} ×{n}" for exp, n in sorted(unrouted.items(), key=lambda kv: (-kv[1], kv[0])))
             rows.append(f"⚠️  Unrouted expansions (add to sets.py): {tally}")
-        log.info(log_box(rows, centered=frozenset(range(len(rows)))))
+        for row in rows:
+            log.info(row)
 
         body = (
             f"🔄 Refresh complete\n"
@@ -484,7 +484,10 @@ def _log_startup_summary() -> None:
     else:
         pod_lines = ["No Upcoming Pod Drafts"]
 
-    log.info(log_box([header, lb_line] + pod_lines))
+    log.info(header)
+    log.info(lb_line)
+    for line in pod_lines:
+        log.info(line)
 
 
 def _restart_banner() -> None:
