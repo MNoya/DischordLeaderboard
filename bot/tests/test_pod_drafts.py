@@ -419,3 +419,39 @@ def test_set_participant_review_choice_independent_of_colors(session):
 def test_set_participant_review_choice_rejects_non_participant(session):
     _seed_pod_for_deck_color_tests(session)
     assert set_participant_review_choice(session, "thread-42", "99", True) is False
+
+
+def test_apply_mainboards_writes_when_decklist_present_and_skips_others(session):
+    from bot.services.pod_draft_manager import _apply_mainboards
+
+    _seed_set(session)
+    event = record_event(session, _parsed_event(attendees=("Alice", "Bob", "Carl", "Dee")))
+    upsert_participant(session, event.id, display_name="Alice", draftmancer_name="Alice#1")
+    upsert_participant(session, event.id, display_name="Bob",   draftmancer_name="Bob#2")
+    upsert_participant(session, event.id, display_name="Carl",  draftmancer_name="Carl#3")
+    upsert_participant(session, event.id, display_name="Dee",   draftmancer_name=None)
+    session.flush()
+
+    log_payload = {
+        "users": {
+            "u1": {"userName": "Alice#1", "decklist": {"main": ["c-a1", "c-a2", "c-a3"]}},
+            "u2": {"userName": "Bob#2"},
+            "u3": {"userName": "Carl#3", "decklist": {"main": ["c-c1"]}, "isBot": True},
+            "u4": {"userName": "Dee",    "decklist": {"main": ["c-d1", "c-d2"]}},
+            "u5": {"userName": "DisChordBot", "decklist": {"main": ["junk"]}},
+            "u6": {"userName": "Bot #1",      "decklist": {"main": ["junk"]}},
+        },
+    }
+    _apply_mainboards(session, event.id, log_payload)
+    session.flush()
+
+    by_name = {
+        r.display_name: r
+        for r in session.execute(
+            select(PodDraftParticipant).where(PodDraftParticipant.event_id == event.id)
+        ).scalars().all()
+    }
+    assert by_name["Alice"].mainboard_card_ids == ["c-a1", "c-a2", "c-a3"]
+    assert by_name["Bob"].mainboard_card_ids is None
+    assert by_name["Carl"].mainboard_card_ids is None
+    assert by_name["Dee"].mainboard_card_ids == ["c-d1", "c-d2"]

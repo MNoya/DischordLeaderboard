@@ -455,6 +455,7 @@ class PodDraftManager:
                     return
                 event.draft_log_gz = blob
                 _apply_seat_indexes(session, self.event_id, compact.get("seats") or [])
+                _apply_mainboards(session, self.event_id, log_payload)
                 session.commit()
                 log.info(f"draft_log_gz persisted for {self.event_id} ({len(blob)} bytes)")
         except Exception:
@@ -628,6 +629,43 @@ class PodDraftManager:
         self.last_decliner_name = decliner_name
         self.last_cancel_reason = None if decliner_name is not None else reason
         await self.refresh_lobby_now()
+
+def _apply_mainboards(session, event_id: str, log_payload: dict) -> None:
+    users = log_payload.get("users")
+    if not isinstance(users, dict):
+        return
+    rows = session.execute(
+        select(PodDraftParticipant).where(PodDraftParticipant.event_id == event_id)
+    ).scalars().all()
+    by_dm: dict[str, PodDraftParticipant] = {}
+    by_display: dict[str, PodDraftParticipant] = {}
+    for row in rows:
+        if row.draftmancer_name:
+            by_dm[_normalize_player_name(row.draftmancer_name)] = row
+        if row.display_name:
+            by_display[_normalize_player_name(row.display_name)] = row
+    matched = 0
+    for user in users.values():
+        if not isinstance(user, dict) or user.get("isBot"):
+            continue
+        name = user.get("userName")
+        if not name or name == _BOT_USER_NAME or _AI_BOT_NAME_RE.match(name):
+            continue
+        decklist = user.get("decklist")
+        if not isinstance(decklist, dict):
+            continue
+        main = decklist.get("main")
+        if not isinstance(main, list) or not main:
+            continue
+        key = _normalize_player_name(name)
+        row = by_dm.get(key) or by_display.get(key)
+        if row is None:
+            log.info(f"mainboard: no participant matching {name!r} in {event_id}")
+            continue
+        row.mainboard_card_ids = list(main)
+        matched += 1
+    log.info(f"mainboard: applied to {matched} seats for {event_id}")
+
 
 def _apply_seat_indexes(session, event_id: str, seats: list[str]) -> None:
     if not seats:

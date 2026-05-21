@@ -13,7 +13,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, relationship
 from sqlalchemy.sql import func, text
 
@@ -272,6 +272,7 @@ class PodDraftParticipant(Base):
     record              = Column(String, nullable=True)
     eliminated_round    = Column(Integer, nullable=True)
     draft_log_url       = Column(String, nullable=True)
+    mainboard_card_ids  = Column(JSONB, nullable=True)
     deck_colors             = Column(String, nullable=True)
     deck_screenshot_url     = Column(String, nullable=True)
     deck_screenshot_caption = Column(String, nullable=True)
