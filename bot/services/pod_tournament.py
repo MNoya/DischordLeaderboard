@@ -27,6 +27,7 @@ from bot.services import pod_swiss
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_deck_color import (
     PAIR_EMOJI_NAME,
+    DRAFT_REVIEW_FEATURE_ENABLED,
     SAVED_MSG,
     LiveDeckColorSelectView,
     NotInPodError,
@@ -282,7 +283,10 @@ def _build_standings_row(
         f"  [Draft Log]({data.draft_log_url}) 📜"
         if data is not None and data.draft_log_url else ""
     )
-    review_suffix = " 🙋" if show_review_flag and data is not None and data.wants_draft_review else ""
+    review_suffix = (
+        " 🙋" if DRAFT_REVIEW_FEATURE_ENABLED and show_review_flag
+        and data is not None and data.wants_draft_review else ""
+    )
     caption_cleaned = (
         _clean_caption(data.screenshot_caption)
         if inline_caption and data is not None and data.screenshot_caption else ""

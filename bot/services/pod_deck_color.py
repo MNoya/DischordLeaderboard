@@ -72,6 +72,8 @@ SAVED_MSG = "Choices saved. Adjust or dismiss below"
 REVIEW_YES_VALUE = "yes"
 REVIEW_NO_VALUE = "no"
 
+DRAFT_REVIEW_FEATURE_ENABLED = False
+
 
 def _label(code: str) -> str:
     if code in GUILD_LABEL:
@@ -157,7 +159,8 @@ class DeckColorSelectView(ui.View):
     ) -> None:
         super().__init__(timeout=300)
         self.add_item(DeckColorSelect(on_submit, on_review_toggle, current_value, current_review))
-        self.add_item(DraftReviewSelect(on_submit, on_review_toggle, current_value, current_review))
+        if DRAFT_REVIEW_FEATURE_ENABLED:
+            self.add_item(DraftReviewSelect(on_submit, on_review_toggle, current_value, current_review))
 
 
 class DeckColorSelect(ui.Select):
@@ -332,9 +335,10 @@ class LiveDeckColorSelectView(ui.View):
         self.add_item(LiveDeckColorSelect(
             on_submit, on_lookup, on_review_toggle, current_value, current_review,
         ))
-        self.add_item(LiveDraftReviewSelect(
-            on_submit, on_lookup, on_review_toggle, current_value, current_review,
-        ))
+        if DRAFT_REVIEW_FEATURE_ENABLED:
+            self.add_item(LiveDraftReviewSelect(
+                on_submit, on_lookup, on_review_toggle, current_value, current_review,
+            ))
 
 
 def _dm_ephemeral(interaction: discord.Interaction) -> bool:
