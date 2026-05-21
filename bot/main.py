@@ -39,6 +39,7 @@ from bot.listeners.pod_screenshots import setup as setup_pod_screenshots
 from bot.listeners.sesh_listener import reschedule_pending_events, setup as setup_sesh_listener
 from bot.models import LeaderboardMessage, MagicSet, Player, PodDraftEvent
 from bot.services.lobby_embed import LobbyReadyButtonView
+from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_tournament import (
     register_persistent_views as register_pod_views,
 )
@@ -416,11 +417,27 @@ def build_bot(guild_id: int) -> commands.Bot:
     @bot.command(name="start")
     @commands.is_owner()
     async def start_pod(ctx: commands.Context, identifier: str | None = None) -> None:
-        """Owner-only. Open a scheduled pod-draft lobby now instead of waiting for T-5.
+        """Owner-only.
 
+        In a pod-draft thread → force-starts the draft past a stuck ready check.
+        Elsewhere:
         `!start`            — picks the lone pending pod; lists candidates if there's more than one
         `!start <id>`       — explicit pick by event UUID, thread ID, or sesh message ID
         """
+        channel_id = str(ctx.channel.id) if ctx.channel else None
+        if channel_id and identifier is None:
+            manager = next(
+                (m for m in ACTIVE_POD_MANAGERS.values() if str(m.thread_id) == channel_id),
+                None,
+            )
+            if manager is not None:
+                log.info(f"!start force-start: {ctx.author} in thread {channel_id}")
+                await ctx.send("⚙️ Force-starting the draft…")
+                err = await manager.force_start()
+                if err is not None:
+                    await ctx.send(f"⚠️ {err}")
+                return
+
         target = await asyncio.to_thread(_resolve_pending_pod, identifier)
         if isinstance(target, str):
             await _reply_quietly(ctx, target)

@@ -494,6 +494,24 @@ class PodDraftManager:
             self._ready_timeout_task.cancel()
         await self._start_draft()
 
+    async def force_start(self) -> str | None:
+        """Bypass the ready-check and emit startDraft directly. Returns an error string on failure, None on success."""
+        if not self.sio.connected:
+            return "Draftmancer session is not connected."
+        if self.draft_complete:
+            return "Draft is already complete."
+        if self.drafting:
+            return "Draft is already in progress."
+        if self._ready_timeout_task is not None:
+            self._ready_timeout_task.cancel()
+        self.ready_check_active = False
+        self.ready_users = set()
+        self.last_decliner_name = None
+        self.last_cancel_reason = None
+        log.info(f"force_start: bypassing ready check for {self.session_id}")
+        await self._start_draft()
+        return None
+
     async def _start_draft(self) -> None:
         result = await self._emit_with_ack("startDraft")
         log.info(f"startDraft ack for {self.session_id}: {result!r}")
