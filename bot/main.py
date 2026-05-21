@@ -365,13 +365,13 @@ def build_bot(guild_id: int) -> commands.Bot:
         per_player = summary.get("per_player", [])
         n_players = len(per_player)
         elapsed = _fmt_elapsed(summary.get("elapsed_s", 0.0))
-        avg = f"  ⚡  {summary['elapsed_s'] / n_players:.1f}s avg" if n_players else ""
+        avg = f" | {summary['elapsed_s'] / n_players:.1f}s avg" if n_players else ""
         trigger = result["trigger"].title()
 
         rows: list[str] = [
-            f"{trigger} Refresh  ⚡  {elapsed}  ⚡  {n_players} Players{avg}",
-            f"Updated {summary['updated']}  ⚡  Invalidated {summary['invalidated']}  ⚡  Errors {summary['errors']}",
-            f"Messages: {result['edit_summary']['edited']} edited  ⚡  {result['edit_summary']['pruned']} pruned  ⚡  {result['edit_summary']['errors']} failed",
+            f"{trigger} Refresh | {elapsed} | {n_players} Players{avg}",
+            f"Updated {summary['updated']} | Invalidated {summary['invalidated']} | Errors {summary['errors']}",
+            f"Messages: {result['edit_summary']['edited']} edited | {result['edit_summary']['pruned']} pruned | {result['edit_summary']['errors']} failed",
         ]
         unknown = summary.get("unknown_formats") or {}
         if unknown:
@@ -473,8 +473,7 @@ def _log_startup_summary() -> None:
         ).scalars().all()
 
     set_code = active_set.code if active_set else ACTIVE_SET_CODE
-    sep = "  ⚡  "
-    header = f"⚡  {set_code}{sep}{player_count} Players  ⚡"
+    header = f"{set_code} | {player_count} Players"
     lb_line = f"{lb_count} Leaderboard Messages"
     if upcoming:
         pod_lines = [
