@@ -18,6 +18,7 @@ from sqlalchemy import select
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.models import PodDraftEvent
+from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_drafts import ParsedSeshEvent, record_event, update_event_time_if_changed
 from bot.services.sesh_parser import ParsedSeshFields, parse_sesh_embed
 from bot.sets import ACTIVE_SET_CODE
@@ -145,9 +146,15 @@ class SeshListener(commands.Cog):
         )
         if result is None:
             return
-        event, time_changed = result
-        if not time_changed:
+        event, needs_reschedule, was_active = result
+        if not needs_reschedule:
             return
+
+        if was_active:
+            manager = ACTIVE_POD_MANAGERS.get(event.id)
+            if manager is not None:
+                log.info(f"reschedule: tearing down live manager for {event.id} before re-arming reminder")
+                await manager.disconnect_safely()
 
         log.info(
             f"sesh embed {message.id} rescheduled pod-draft {event.id} to {event.event_time.isoformat()}"
@@ -280,7 +287,7 @@ def _apply_event_time_update(
     sesh_message_id: str,
     new_event_time: datetime,
     new_event_date: date,
-) -> tuple[PodDraftEvent, bool] | None:
+) -> tuple[PodDraftEvent, bool, bool] | None:
     """Worker-thread wrapper around update_event_time_if_changed; returns a detached row."""
     with SessionLocal() as session:
         result = update_event_time_if_changed(
@@ -288,11 +295,11 @@ def _apply_event_time_update(
         )
         if result is None:
             return None
-        event, time_changed = result
-        if time_changed:
+        event, needs_reschedule, was_active = result
+        if needs_reschedule:
             session.commit()
         session.expunge(event)
-        return event, time_changed
+        return event, needs_reschedule, was_active
 
 
 def reschedule_pending_events(bot: commands.Bot) -> None:

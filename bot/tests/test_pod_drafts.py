@@ -131,14 +131,15 @@ def test_update_event_time_if_changed_no_op_when_time_matches(session):
     _seed_set(session)
     event = record_event(session, _parsed_event(attendees=()))
 
-    returned, time_changed = update_event_time_if_changed(
+    returned, needs_reschedule, was_active = update_event_time_if_changed(
         session,
         sesh_message_id=event.sesh_message_id,
         new_event_time=event.event_time,
         new_event_date=event.event_date,
     )
     assert returned.id == event.id
-    assert time_changed is False
+    assert needs_reschedule is False
+    assert was_active is False
 
 
 def test_update_event_time_if_changed_writes_new_time(session):
@@ -146,13 +147,14 @@ def test_update_event_time_if_changed_writes_new_time(session):
     event = record_event(session, _parsed_event(attendees=()))
     new_time = datetime(2026, 5, 14, 18, 30, tzinfo=timezone.utc)
 
-    returned, time_changed = update_event_time_if_changed(
+    returned, needs_reschedule, was_active = update_event_time_if_changed(
         session,
         sesh_message_id=event.sesh_message_id,
         new_event_time=new_time,
         new_event_date=date(2026, 5, 14),
     )
-    assert time_changed is True
+    assert needs_reschedule is True
+    assert was_active is False
     assert returned.event_time == new_time
     assert returned.event_date == date(2026, 5, 14)
 
@@ -161,6 +163,25 @@ def test_update_event_time_if_changed_writes_new_time(session):
     ).scalar_one()
     assert reread.event_time == new_time
     assert reread.event_date == date(2026, 5, 14)
+
+
+def test_update_event_time_if_changed_resets_status_when_active(session):
+    _seed_set(session)
+    event = record_event(session, _parsed_event(attendees=()))
+    event.socket_status = "connected"
+    session.flush()
+    new_time = datetime(2026, 5, 14, 18, 30, tzinfo=timezone.utc)
+
+    returned, needs_reschedule, was_active = update_event_time_if_changed(
+        session,
+        sesh_message_id=event.sesh_message_id,
+        new_event_time=new_time,
+        new_event_date=date(2026, 5, 14),
+    )
+    assert needs_reschedule is True
+    assert was_active is True
+    assert returned.socket_status == "pending"
+    assert returned.event_time == new_time
 
 
 def test_upsert_participant_matches_existing_by_display_name(session):
