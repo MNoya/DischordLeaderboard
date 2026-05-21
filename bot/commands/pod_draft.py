@@ -22,6 +22,7 @@ from bot.services.pod_tournament import (
     _load_event_name_sync,
     _load_event_thread_id_sync,
     _search_event_names_sync,
+    build_champion_announcement_view_for_event,
     build_replays_link_button,
     build_standings_embed_for_event,
     build_thread_link_button,
@@ -185,6 +186,41 @@ class PodDraft(commands.Cog):
 
     @pod_draft_standings.autocomplete("event")
     async def _pod_draft_standings_event_autocomplete(
+        self, interaction: discord.Interaction, current: str,
+    ) -> list[app_commands.Choice[str]]:
+        names = await asyncio.to_thread(_search_event_names_sync, current)
+        return [app_commands.Choice(name=n, value=n) for n in names]
+
+    @app_commands.command(
+        name="pod-champion",
+        description="Re-post the champion announcement for a completed pod-draft event",
+    )
+    @app_commands.describe(event="Pod-draft event to announce")
+    @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def pod_champion(self, interaction: discord.Interaction, event: str) -> None:
+        await interaction.response.defer(thinking=False)
+
+        event_id = await asyncio.to_thread(_load_event_id_by_name_sync, event)
+        if event_id is None:
+            await interaction.followup.send(f"No pod-draft event named `{event}`.", ephemeral=True)
+            return
+
+        view = await build_champion_announcement_view_for_event(
+            event_id, guild_id=interaction.guild_id,
+        )
+        if view is None:
+            await interaction.followup.send(
+                "Champion announcement isn't ready — trophy match has no winner on record yet.",
+                ephemeral=True,
+            )
+            return
+
+        log.info(f"pod-champion: {interaction.user} re-posted champion announcement for event_id={event_id}")
+        await interaction.followup.send(view=view)
+
+    @pod_champion.autocomplete("event")
+    async def _pod_champion_event_autocomplete(
         self, interaction: discord.Interaction, current: str,
     ) -> list[app_commands.Choice[str]]:
         names = await asyncio.to_thread(_search_event_names_sync, current)

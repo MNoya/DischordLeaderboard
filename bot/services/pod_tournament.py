@@ -1621,6 +1621,53 @@ async def build_standings_embed_for_event(event_id: str) -> discord.Embed | None
     )
 
 
+async def build_champion_announcement_view_for_event(
+    event_id: str,
+    *,
+    guild_id: int | None = None,
+) -> ui.LayoutView | None:
+    """Manager-free builder for the channel-level champion announcement view. Returns None when the
+    trophy match has no winner yet, the event has no pairings, or nobody is undefeated. Used by
+    /pod-champion to re-post the announcement after the fact (e.g. when finalization was missed)."""
+    players = await asyncio.to_thread(_load_tournament_players_sync, event_id)
+    if not players:
+        return None
+    match_states = await asyncio.to_thread(_load_round_states, event_id, TOTAL_ROUNDS)
+    if not match_states:
+        return None
+    _mark_trophy_match(match_states, TOTAL_ROUNDS)
+    trophy = [m for m in match_states if m.get("is_trophy_match")]
+    if not trophy or not all(m.get("winner_name") for m in trophy):
+        return None
+
+    prior = await asyncio.to_thread(_load_matches, event_id)
+    standings = pod_swiss.compute_standings(players, prior)
+    if not standings or not any(s.losses == 0 for s in standings):
+        return None
+
+    displays = await asyncio.to_thread(_load_participant_displays, event_id)
+    deck_data = await asyncio.to_thread(_load_event_deck_data_sync, event_id)
+    player_colors = _colors_only(deck_data)
+    event_name = await asyncio.to_thread(_load_event_name_sync, event_id)
+    event_started_at = await asyncio.to_thread(_load_event_started_at_sync, event_id)
+    thread_id_str = await asyncio.to_thread(_load_event_thread_id_sync, event_id)
+    thread_id = int(thread_id_str) if thread_id_str else None
+    pending_count = sum(1 for m in match_states if not m.get("winner_name"))
+
+    return build_champion_announcement_view(
+        standings,
+        event_name=event_name,
+        displays=displays,
+        player_colors=player_colors,
+        site_root=settings.public_site_url.rstrip("/"),
+        pending_count=pending_count,
+        deck_data=deck_data,
+        event_started_at=event_started_at,
+        guild_id=guild_id,
+        thread_id=thread_id,
+    )
+
+
 def _schedule_grace(manager, round_num: int) -> None:
     """(Re)start the grace timer for round_num. Cancels any pending grace on the same manager."""
     if manager.grace_task is not None and not manager.grace_task.done():
