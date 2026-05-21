@@ -303,6 +303,12 @@ class PodDraftManager:
             return
         state = self._compute_state(classified)
         ready_now = len(self.ready_users) if state == "ready" else None
+        ready_arena_names: set[str] | None = None
+        if state == "ready":
+            ready_arena_names = {
+                u.get("userName") for u in self.session_users
+                if u.get("userID") in self.ready_users and u.get("userName")
+            }
         embed = render_lobby_embed(
             title=self.event_name,
             rsvps_yes=self.rsvps_yes,
@@ -311,6 +317,7 @@ class PodDraftManager:
             state=state,
             draftmancer_url=self.draftmancer_url,
             ready_count=ready_now,
+            ready_arena_names=ready_arena_names,
             decliner_name=self.last_decliner_name,
             cancel_reason=self.last_cancel_reason,
             display_name_by_mention_id=await self._resolve_rsvp_mentions(thread.guild),

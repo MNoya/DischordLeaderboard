@@ -75,6 +75,7 @@ def render(
     state: str,
     draftmancer_url: str | None = None,
     ready_count: int | None = None,
+    ready_arena_names: set[str] | None = None,
     decliner_name: str | None = None,
     cancel_reason: str | None = None,
     display_name_by_mention_id: dict[int, str] | None = None,
@@ -146,8 +147,12 @@ def render(
         return "\n".join(f"> {line}" for line in lines) + trailing
 
     if state == "ready":
-        ready_players = in_draftmancer[:ready_now]
-        pending_players = in_draftmancer[ready_now:]
+        if ready_arena_names is not None:
+            ready_players = [(a, dn) for a, dn in in_draftmancer if a in ready_arena_names]
+            pending_players = [(a, dn) for a, dn in in_draftmancer if a not in ready_arena_names]
+        else:
+            ready_players = in_draftmancer[:ready_now]
+            pending_players = in_draftmancer[ready_now:]
         ready_trailing = "\n​" if len(ready_players) > len(pending_players) else ""
         embed.add_field(
             name=f"✅ Ready ({len(ready_players)})",
