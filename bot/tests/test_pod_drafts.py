@@ -165,6 +165,24 @@ def test_update_event_time_if_changed_writes_new_time(session):
     assert reread.event_date == date(2026, 5, 14)
 
 
+def test_update_event_time_if_changed_no_op_when_active_and_time_matches(session):
+    _seed_set(session)
+    event = record_event(session, _parsed_event(attendees=()))
+    event.socket_status = "connected"
+    session.flush()
+
+    returned, needs_reschedule, was_active = update_event_time_if_changed(
+        session,
+        sesh_message_id=event.sesh_message_id,
+        new_event_time=event.event_time,
+        new_event_date=event.event_date,
+    )
+    assert returned.id == event.id
+    assert needs_reschedule is False
+    assert was_active is True
+    assert returned.socket_status == "connected"
+
+
 def test_update_event_time_if_changed_resets_status_when_active(session):
     _seed_set(session)
     event = record_event(session, _parsed_event(attendees=()))

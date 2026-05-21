@@ -298,6 +298,7 @@ def _apply_event_time_update(
         event, needs_reschedule, was_active = result
         if needs_reschedule:
             session.commit()
+            session.refresh(event)
         session.expunge(event)
         return event, needs_reschedule, was_active
 

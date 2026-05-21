@@ -23,6 +23,7 @@ from bot.services.pod_tournament import (
     _load_event_thread_id_sync,
     _search_event_names_sync,
     build_champion_announcement_view_for_event,
+    build_live_submit_deck_button,
     build_replays_link_button,
     build_standings_embed_for_event,
     build_thread_link_button,
@@ -59,7 +60,7 @@ class PodDraft(commands.Cog):
             log.warning(f"ready-check: failed — {err}")
             await interaction.followup.send(f"⚠️ {err}", ephemeral=True)
         else:
-            await interaction.followup.send("Ready check started — watch the thread for status.", ephemeral=True)
+            await interaction.followup.send("Ready check initiated — watch the thread for status.", ephemeral=True)
 
     @app_commands.command(
         name="pod-link-arena",
@@ -181,6 +182,8 @@ class PodDraft(commands.Cog):
         if invoked_outside_thread and interaction.guild_id is not None:
             view.add_item(build_thread_link_button(interaction.guild_id, thread_id))
         view.add_item(build_replays_link_button(event_name))
+        if not invoked_outside_thread:
+            view.add_item(build_live_submit_deck_button())
 
         await interaction.followup.send(embed=embed, view=view)
 

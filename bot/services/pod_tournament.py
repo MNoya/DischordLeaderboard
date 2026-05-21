@@ -31,6 +31,7 @@ from bot.services.pod_deck_color import (
     SAVED_MSG,
     LiveDeckColorSelectView,
     NotInPodError,
+    SubmitDeckButton,
     SubmitDeckView,
 )
 from bot.services.pod_replays import fetch_and_persist_replays_for_player
@@ -535,6 +536,15 @@ async def live_review_choice_submit(interaction: discord.Interaction, wants_revi
 
 def build_live_submit_deck_view() -> SubmitDeckView:
     return SubmitDeckView(live_deck_color_submit, live_deck_state_lookup, live_review_choice_submit)
+
+
+def build_live_submit_deck_button() -> SubmitDeckButton:
+    """A standalone Submit Deck button for composing into other Views (e.g. the in-thread standings).
+
+    Shares the persistent custom_id ('poddecksubmit') with build_live_submit_deck_view, so the
+    persistent view registered at startup catches the click regardless of which message it came from.
+    """
+    return SubmitDeckButton(live_deck_color_submit, live_deck_state_lookup, live_review_choice_submit)
 
 
 def build_live_deck_color_select_view(
@@ -1986,11 +1996,16 @@ async def _post_or_update_live_standings(manager) -> None:
         if thread is None:
             return
         try:
-            manager.standings_message = await thread.send(embed=embed)
+            manager.standings_message = await thread.send(
+                embed=embed, view=build_live_submit_deck_view(),
+            )
         except Exception:
             log.warning("could not post live standings", exc_info=True)
             return
-        await _pin_only_this_bot_message(manager.standings_message)
+        try:
+            await manager.standings_message.pin(reason="pod-draft live standings")
+        except discord.HTTPException:
+            log.warning(f"could not pin standings message {manager.standings_message.id}", exc_info=True)
     else:
         try:
             await manager.standings_message.edit(embed=embed)
@@ -2002,9 +2017,7 @@ async def _post_or_update_live_standings(manager) -> None:
 
 
 async def _pin_round_message(message: discord.Message, round_num: int) -> None:
-    """Pin a round-pairings message to the thread; silent on Forbidden / HTTPException.
-    Standings-post at tournament end runs _pin_only_this_bot_message which intentionally clears
-    these round pins, leaving a clean thread with the final standings as the sole pin."""
+    """Pin a round-pairings message to the thread; silent on Forbidden / HTTPException."""
     try:
         await message.pin(reason=f"pod-draft round {round_num} pairings")
     except discord.HTTPException:

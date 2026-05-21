@@ -25,7 +25,11 @@ from bot.database import SessionLocal
 from bot.discord_helpers import extract_avatar_hash
 from bot.models import Player, PodDraftEvent, PodDraftParticipant
 from bot.scripts.draftmancer_log import build_compact
-from bot.services.lobby_embed import LobbyReadyButtonView, render as render_lobby_embed
+from bot.services.lobby_embed import (
+    LobbyReadyButtonView,
+    render as render_lobby_embed,
+    render_ready_check_progress,
+)
 from bot.services.magicprotools import submit_to_api as submit_to_magicprotools
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_drafts import _normalize_player_name, classify_lobby_names, seed_event_participants
@@ -70,6 +74,7 @@ class PodDraftManager:
         self.ready_users: set[str] = set()
         self.expected_user_ids: set[str] = set()
         self.lobby_status_message: object | None = None
+        self.ready_check_progress_message: object | None = None
         self._ready_timeout_task: asyncio.Task | None = None
         self.drafting = False
         self.draft_complete = False
@@ -240,7 +245,39 @@ class PodDraftManager:
             log.exception(f"readyCheck emit failed for {self.session_id}")
             return "Could not start ready check — see logs."
         self._ready_timeout_task = asyncio.create_task(self._ready_timeout())
-        await self.refresh_lobby_now()
+
+        prior_progress = self.ready_check_progress_message
+        self.ready_check_progress_message = None
+        if prior_progress is not None:
+            try:
+                await prior_progress.edit(
+                    view=LobbyReadyButtonView(
+                        draftmancer_url=self.draftmancer_url, ready_disabled=True,
+                    ),
+                )
+            except Exception:
+                log.warning("could not lock prior ready-check progress card", exc_info=True)
+
+        non_bot_names = [u.get("userName") for u in non_bot if u.get("userName")]
+        classified = await self._classify_users(non_bot_names) if non_bot_names else []
+        progress_embed = render_ready_check_progress(
+            title=self.event_name,
+            in_session=classified,
+            state="ready",
+            ready_arena_names=set(),
+        )
+        try:
+            self.ready_check_progress_message = await thread.send(
+                content="**🔔 Ready check initiated — accept on Draftmancer to start the draft!**",
+                embed=progress_embed,
+                view=LobbyReadyButtonView(
+                    draftmancer_url=self.draftmancer_url, ready_disabled=True,
+                ),
+            )
+        except Exception:
+            log.warning("could not post ready-check progress card", exc_info=True)
+
+        await self._refresh_lobby_status(classified)
         return None
 
     async def _classify_users(self, names: list[str]) -> list[tuple[str, str | None]]:
@@ -344,6 +381,27 @@ class PodDraftManager:
                 await self.lobby_status_message.edit(embed=embed, view=view)
             except Exception:
                 log.warning(f"could not edit lobby status for {self.session_id}", exc_info=True)
+
+        if self.ready_check_progress_message is not None:
+            progress_embed = render_ready_check_progress(
+                title=self.event_name,
+                in_session=classified,
+                state=state,
+                ready_arena_names=ready_arena_names,
+                decliner_name=self.last_decliner_name,
+                cancel_reason=self.last_cancel_reason,
+            )
+            if state in ("drafting", "complete"):
+                progress_view = None
+            else:
+                progress_view = LobbyReadyButtonView(
+                    draftmancer_url=self.draftmancer_url,
+                    ready_disabled=(state == "ready" or has_unrecognized),
+                )
+            try:
+                await self.ready_check_progress_message.edit(embed=progress_embed, view=progress_view)
+            except Exception:
+                log.warning("could not edit ready-check progress card", exc_info=True)
 
     def _compute_state(self, classified: list[tuple[str, str | None]]) -> str:
         if self.draft_complete:
@@ -531,6 +589,12 @@ class PodDraftManager:
         self.drafting = True
         await asyncio.to_thread(self._seed_participants_at_draft_start)
         await self.refresh_lobby_now()
+        thread = await self._fetch_thread()
+        if thread is not None:
+            try:
+                await thread.send(content="**🎉 Draft started!**")
+            except Exception:
+                log.warning("could not post draft-started notification", exc_info=True)
 
     def _seed_participants_at_draft_start(self) -> None:
         """Insert pod_draft_participants for every non-bot Draftmancer userName now that the draft

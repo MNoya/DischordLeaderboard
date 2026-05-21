@@ -218,6 +218,65 @@ def render(
     return embed
 
 
+def render_ready_check_progress(
+    title: str,
+    in_session: list[tuple[str, str | None]],
+    *,
+    state: str,
+    ready_arena_names: set[str] | None = None,
+    decliner_name: str | None = None,
+    cancel_reason: str | None = None,
+) -> discord.Embed:
+    """Compact ready-check progress card.
+
+    Posted fresh each ready check and updated in place as players respond, so the active card
+    stays at the bottom of the thread even when the main lobby card has scrolled away.
+    `state` mirrors the lobby state machine: 'ready', 'notready', 'drafting', 'complete', and
+    falls through to a neutral header otherwise.
+    """
+    in_draftmancer = [(arena, dn) for arena, dn in in_session if dn is not None]
+
+    if state == "ready":
+        status = "### 🔔 Ready check in progress"
+        color = discord.Color.gold()
+    elif state in ("drafting", "complete"):
+        status = "### 🎉 All players ready — draft starting!"
+        color = discord.Color.green()
+    elif decliner_name:
+        status = f"### ❌ `{decliner_name}` declined"
+        color = discord.Color.red()
+    elif cancel_reason:
+        status = f"### ❌ Ready check {cancel_reason}"
+        color = discord.Color.red()
+    else:
+        status = "### Ready check"
+        color = discord.Color.blurple()
+
+    embed = discord.Embed(title=title, description=status, color=color)
+
+    def _block(lines: list[str]) -> str:
+        return "\n".join(f"> {line}" for line in lines) if lines else "​"
+
+    if ready_arena_names is not None:
+        ready_players = [(a, dn) for a, dn in in_draftmancer if a in ready_arena_names]
+        pending_players = [(a, dn) for a, dn in in_draftmancer if a not in ready_arena_names]
+    else:
+        ready_players = []
+        pending_players = in_draftmancer
+
+    embed.add_field(
+        name=f"✅ Ready ({len(ready_players)})",
+        value=_block([f"{dn} | {arena}" for arena, dn in ready_players]),
+        inline=True,
+    )
+    embed.add_field(
+        name=f"⏳ Pending ({len(pending_players)})",
+        value=_block([f"{dn} | {arena}" for arena, dn in pending_players]),
+        inline=True,
+    )
+    return embed
+
+
 def _rsvp_dedup_key(rsvp: str, display_name_by_mention_id: dict[int, str]) -> str:
     """Normalize an rsvp line to a lowercase comparison key. Handles both sesh formats:
     when sesh's `Display Usernames as Plain Text` is on, lines are bare display names;

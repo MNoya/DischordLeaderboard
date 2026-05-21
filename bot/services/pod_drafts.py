@@ -193,11 +193,15 @@ def update_event_time_if_changed(
 ) -> tuple[PodDraftEvent, bool, bool] | None:
     """Sync event_time/event_date from a re-parsed sesh embed.
 
-    Returns (event, needs_reschedule, was_active) for the matching event, or None if the row
-    is missing or already finalized (draft_done / complete). was_active=True means the bot
-    had already advanced past 'pending' (reminded / connected / error) — caller must tear
-    down any live manager before re-arming. needs_reschedule=False means time matched stored
-    values and the status was still pending — caller can skip the re-arm.
+    Returns None if the row is missing or already finalized as draft_done or complete.
+    Otherwise returns (event, needs_reschedule, was_active):
+        - event: the matching PodDraftEvent row.
+        - needs_reschedule: True when the parsed time differs from the stored value.
+            False means the caller can skip the re-arm regardless of status.
+        - was_active: True when the bot had already advanced past 'pending'.
+            Caller must tear down any live manager before re-arming.
+
+    Sesh re-edits the embed at the scheduled start to strip RSVP reactions, and that edit is not a reschedule.
     """
     event = session.execute(
         select(PodDraftEvent).where(PodDraftEvent.sesh_message_id == sesh_message_id)
@@ -206,8 +210,8 @@ def update_event_time_if_changed(
         return None
     was_active = event.socket_status != "pending"
     time_changed = event.event_time != new_event_time or event.event_date != new_event_date
-    if not (time_changed or was_active):
-        return event, False, False
+    if not time_changed:
+        return event, False, was_active
     event.event_time = new_event_time
     event.event_date = new_event_date
     if was_active:
