@@ -1,15 +1,19 @@
 """Ingest a raw Draftmancer DraftLog .txt into a pod_draft_events row.
 
 Packs the log into compact-gz form (same shape build_compact emits), stores it on
-pod_draft_events.draft_log_gz, and reconciles pod_draft_participants.draftmancer_name to match
-the canonical Draftmancer userName so the downstream MPT submit can map seat -> participant.
+pod_draft_events.draft_log_gz, reconciles pod_draft_participants.draftmancer_name to match the
+canonical Draftmancer userName, applies seat indexes + mainboards, and (when MPT_API_KEY is set)
+submits each non-bot seat to MagicProTools, stashing the URL on pod_draft_participants.draft_log_url.
 
-    DATABASE_URL=... python -m bot.scripts.ingest_pod_draft_log <event_id> <path/to/DraftLog.txt>
+    DATABASE_URL=... [MPT_API_KEY=...] python -m bot.scripts.ingest_pod_draft_log \\
+        <event_id> <path/to/DraftLog.txt> [--no-mpt]
 
-Idempotent — re-running overwrites draft_log_gz and re-aligns names from the same log.
+Idempotent — re-running overwrites draft_log_gz, re-applies mainboards, and re-aligns names from
+the same log. Pass --no-mpt to skip the MagicProTools submission step.
 """
 from __future__ import annotations
 
+import asyncio
 import gzip
 import json
 import sys
@@ -17,9 +21,12 @@ from pathlib import Path
 
 from sqlalchemy import select
 
+from bot.config import settings
 from bot.database import SessionLocal
 from bot.models import Player, PodDraftEvent, PodDraftParticipant
 from bot.scripts.draftmancer_log import build_compact
+from bot.services.magicprotools import submit_to_api
+from bot.services.pod_draft_manager import _apply_mainboards, _apply_seat_indexes
 
 
 def _arena_name_needs_fix(current: str | None, log_name: str) -> bool:
@@ -91,7 +98,44 @@ def _match_participant(
     return None
 
 
-def main(event_id: str, log_path: Path) -> int:
+async def _submit_mpt(event_id: str, log: dict) -> None:
+    if settings.mpt_api_key is None:
+        print("MPT_API_KEY not set; skipping MagicProTools submission")
+        return
+    seats = [
+        (uid, ud) for uid, ud in log["users"].items()
+        if isinstance(ud, dict)
+        and ud.get("userName") and not ud.get("isBot")
+    ]
+    print(f"\nsubmitting {len(seats)} seat(s) to MagicProTools...")
+    submitted = 0
+    failed = 0
+    for user_id, user_data in seats:
+        user_name = user_data["userName"]
+        url = await submit_to_api(user_id, log)
+        if not url:
+            print(f"  {user_name}: MPT submit failed")
+            failed += 1
+            continue
+        with SessionLocal() as session:
+            rows = session.execute(
+                select(PodDraftParticipant).where(
+                    PodDraftParticipant.event_id == event_id,
+                    PodDraftParticipant.draftmancer_name == user_name,
+                )
+            ).scalars().all()
+            if not rows:
+                print(f"  {user_name}: no participant row, URL discarded")
+                continue
+            for row in rows:
+                row.draft_log_url = url
+            session.commit()
+        print(f"  {user_name}: {url}")
+        submitted += 1
+    print(f"MPT done: submitted={submitted} failed={failed}")
+
+
+async def main(event_id: str, log_path: Path, submit_mpt: bool) -> int:
     with log_path.open() as f:
         log = json.load(f)
 
@@ -146,14 +190,26 @@ def main(event_id: str, log_path: Path) -> int:
             json.dumps(compact, separators=(",", ":")).encode(), compresslevel=9
         )
         print(f"stored draft_log_gz: {len(event.draft_log_gz):,} bytes")
+        _apply_seat_indexes(session, event_id, compact.get("seats") or [])
+        _apply_mainboards(session, event_id, log)
         session.commit()
 
     print(f"done: renamed={renamed} unchanged={unchanged} arena_fixed={arena_fixed}")
+
+    if submit_mpt:
+        await _submit_mpt(event_id, log)
+
     return 0
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print("usage: python -m bot.scripts.ingest_pod_draft_log <event_id> <path/to/DraftLog.txt>", file=sys.stderr)
+    raw_args = sys.argv[1:]
+    submit_mpt = "--no-mpt" not in raw_args
+    pos = [a for a in raw_args if a != "--no-mpt"]
+    if len(pos) != 2:
+        print(
+            "usage: python -m bot.scripts.ingest_pod_draft_log <event_id> <path/to/DraftLog.txt> [--no-mpt]",
+            file=sys.stderr,
+        )
         sys.exit(64)
-    sys.exit(main(sys.argv[1], Path(sys.argv[2])))
+    sys.exit(asyncio.run(main(pos[0], Path(pos[1]), submit_mpt)))

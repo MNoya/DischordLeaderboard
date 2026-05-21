@@ -455,27 +455,37 @@ class PodDraftManager:
 
     async def _submit_logs_to_magicprotools(self, log_payload: dict) -> None:
         """For each Draftmancer seat in the log, submit to MagicProTools and stash the URL on the
-        matching pod_draft_participants row. Fire-and-forget; per-seat failures are silent."""
+        matching pod_draft_participants row. Per-seat failures log + continue."""
         if settings.mpt_api_key is None:
             log.warning(f"MPT_API_KEY not configured; no draft logs uploaded for {self.session_id}")
             return
         users = log_payload.get("users") or {}
         if not isinstance(users, dict):
             return
-        for user_id, user_data in users.items():
-            if not isinstance(user_data, dict):
+        seats = [
+            (uid, ud) for uid, ud in users.items()
+            if isinstance(ud, dict)
+            and ud.get("userName") and ud.get("userName") != _BOT_USER_NAME
+            and not ud.get("isBot")
+        ]
+        log.info(f"magicprotools: submitting {len(seats)} seat(s) for {self.session_id}")
+        stored = 0
+        for user_id, user_data in seats:
+            user_name = user_data["userName"]
+            try:
+                url = await submit_to_magicprotools(user_id, log_payload)
+            except Exception:
+                log.warning(f"magicprotools: submit raised for {user_name} in {self.session_id}", exc_info=True)
                 continue
-            user_name = user_data.get("userName")
-            if not user_name or user_name == _BOT_USER_NAME:
-                continue
-            # Skip Draftmancer AI bots — they have no participant row, the URL would be discarded
-            # downstream, and we'd waste an MPT API call per bot seat.
-            if user_data.get("isBot"):
-                continue
-            url = await submit_to_magicprotools(user_id, log_payload)
             if not url:
                 continue
-            await asyncio.to_thread(self._store_draft_log_url, user_name, url)
+            try:
+                await asyncio.to_thread(self._store_draft_log_url, user_name, url)
+                stored += 1
+                log.info(f"magicprotools: stored url for {user_name} in {self.session_id}")
+            except Exception:
+                log.warning(f"magicprotools: store raised for {user_name} in {self.session_id}", exc_info=True)
+        log.info(f"magicprotools: stored {stored}/{len(seats)} url(s) for {self.session_id}")
 
     def _store_draft_log_url(self, draftmancer_name: str, url: str) -> None:
         try:

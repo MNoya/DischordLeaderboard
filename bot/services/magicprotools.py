@@ -133,3 +133,6 @@ async def submit_to_api(user_id: str, draft_log: dict[str, Any]) -> str | None:
     except (aiohttp.ClientError, TimeoutError):
         log.warning(f"magicprotools HTTP error for {session_id} / {user_name}", exc_info=True)
         return None
+    except Exception:
+        log.warning(f"magicprotools unexpected error for {session_id} / {user_name}", exc_info=True)
+        return None

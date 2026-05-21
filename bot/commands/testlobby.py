@@ -28,6 +28,7 @@ from bot.services.lobby_embed import LobbyReadyButtonView, render as render_lobb
 from bot.services.pod_deck_color import LiveDeckColorSelectView, SubmitDeckView
 from bot.services.pod_drafts import _normalize_player_name as _norm
 from bot.services.pod_tournament import (
+    CLEAR_SENTINEL,
     GRACE_SECONDS,
     ParticipantDeckData,
     RoundResultsView,
@@ -713,14 +714,18 @@ async def _handle_test_result(interaction: discord.Interaction, match_id: str,
         if not (o.round_num == round_num
                 and {o.player_a_id, o.player_b_id} == {m["a_name"], m["b_name"]})
     ]
-    if winner_name != SKIPPED_SENTINEL:
-        state["outcomes"].append(pod_swiss.MatchOutcome(
-            round_num=round_num,
-            player_a_id=m["a_name"], player_b_id=m["b_name"],
-            winner_id=winner_name, score=score,
-        ))
-    m["winner_name"] = winner_name
-    m["score"] = score
+    if winner_name == CLEAR_SENTINEL:
+        m["winner_name"] = None
+        m["score"] = None
+    else:
+        if winner_name != SKIPPED_SENTINEL:
+            state["outcomes"].append(pod_swiss.MatchOutcome(
+                round_num=round_num,
+                player_a_id=m["a_name"], player_b_id=m["b_name"],
+                winner_id=winner_name, score=score,
+            ))
+        m["winner_name"] = winner_name
+        m["score"] = score
 
     _mark_trophy_match(matches, round_num)
 

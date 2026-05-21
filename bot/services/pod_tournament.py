@@ -73,6 +73,7 @@ TOTAL_ROUNDS = 3
 SELECT_CUSTOM_PREFIX = "podmatchresult"
 MAX_MATCHES_PER_ROUND = 5  # Discord caps ActionRows at 5; supports pods up to 10 players
 SKIPPED_SENTINEL = "(skipped)"  # winner_name value for "Not played" matches
+CLEAR_SENTINEL = "(clear)"  # transient value from the dropdown; commits NULL winner/score
 GRACE_SECONDS = 60  # window after round completion during which edits regenerate the next round
 ANNOUNCEMENT_TOP_N = 4  # channel-level announcement shows top performers only; thread keeps full standings
 
@@ -841,6 +842,8 @@ class MatchResultSelect(ui.Select):
                 (f"{b_disp} wins: 2-0", f"{match_id}|{b_name}|2-0", True),
                 ("No Match Played", f"{match_id}|{SKIPPED_SENTINEL}|0-0", False),
             ]
+            if selected_value:
+                values.insert(0, ("Clear Result", f"{match_id}|{CLEAR_SENTINEL}|0-0", False))
             options = [
                 discord.SelectOption(
                     label=f"🏆 {label}" if (is_trophy_match and trophy_eligible) else label,
@@ -931,9 +934,42 @@ async def _handle_result_submission(interaction: discord.Interaction, value: str
     match_states = await asyncio.to_thread(_load_round_states, event_id, round_num)
     _mark_trophy_match(match_states, round_num)
     match_state = next((m for m in match_states if m["match_id"] == match_id), None)
-
-    is_dm = isinstance(interaction.channel, discord.DMChannel)
     event_name = await asyncio.to_thread(_load_event_name_sync, event_id)
+    is_dm = isinstance(interaction.channel, discord.DMChannel)
+
+    if result.get("cleared"):
+        manager = ACTIVE_POD_MANAGERS.get(event_id)
+        if manager is not None and manager.grace_round == round_num and manager.grace_task is not None:
+            manager.grace_task.cancel()
+            manager.grace_round = None
+            manager.grace_task = None
+        log.info(
+            f"[{event_name}] R{round_num} cleared {match_id} by {actor_label(interaction)} "
+            f"({surface_label(interaction)})"
+        )
+        try:
+            if is_dm and match_state is not None:
+                dm_info = await asyncio.to_thread(_load_dm_info_sync, event_id)
+                pairings_url = _resolve_pairings_url(event_id, round_num)
+                dm_embed, dm_view = _build_dm_match_view(
+                    dm_info, str(interaction.user.id), match_state, round_num, pairings_url, event_name,
+                )
+                if dm_embed is not None:
+                    await interaction.response.edit_message(embed=dm_embed, view=dm_view)
+            else:
+                await interaction.response.edit_message(
+                    content=None,
+                    embed=_round_embed(round_num, match_states),
+                    view=RoundResultsView(match_states),
+                )
+        except Exception:
+            log.warning("could not edit interaction message after clear", exc_info=True)
+        asyncio.create_task(_propagate_match_to_other_surfaces(
+            interaction.client, event_id, match_id, round_num,
+            exclude_channel_id=str(interaction.channel.id) if interaction.channel else None,
+        ))
+        return
+
     log.info(format_match_result_log(
         event_label=event_name, round_num=round_num, actor=actor_label(interaction),
         match_id=match_id, winner=winner_name, score=score, surface=surface_label(interaction),
@@ -1122,6 +1158,19 @@ def _commit_result(match_id: str, winner_name: str, score: str):
         match = session.get(PodDraftMatch, match_id)
         if match is None:
             return "not_found"
+        if winner_name == CLEAR_SENTINEL:
+            match.winner_name = None
+            match.score = None
+            match.reported_at = None
+            session.commit()
+            return {
+                "cleared": True,
+                "loser_name": None,
+                "a_name": match.player_a_name,
+                "b_name": match.player_b_name,
+                "round": match.round,
+                "event_id": match.event_id,
+            }
         # Allow editing — overwrite winner/score on each submission
         set_match_result(session, match_id, winner_name, score)
         session.commit()
@@ -1469,6 +1518,14 @@ def build_champion_announcement_view(
         display = info.get("display_name") or s.player_name
         champs_named.append((display, player_colors.get(key)))
 
+    # Fall back to crowning rank 1 when nobody finished undefeated; tiebreakers below explain it
+    if not champs_named and standings:
+        top = standings[0]
+        key = _normalize_player_name(top.player_name)
+        info = displays.get(key, {})
+        display = info.get("display_name") or top.player_name
+        champs_named.append((display, player_colors.get(key)))
+
     short = _short_event_name(event_name) or event_name
     title = _format_champion_title(champs_named, short)
 
@@ -1499,7 +1556,7 @@ def build_champion_announcement_view(
         data = deck_data.get(key)
         info = displays.get(key, {})
         name = info.get("display_name") or s.player_name
-        is_champion = s.rank == 1 and s.losses == 0
+        is_champion = s.rank == 1
         has_screenshot = data is not None and data.screenshot_url
 
         if is_champion and has_screenshot:
@@ -1523,6 +1580,26 @@ def build_champion_announcement_view(
         container.add_item(ui.TextDisplay("\n".join(pending_lines)))
     if runners_up_items:
         container.add_item(ui.MediaGallery(*runners_up_items))
+
+    champion = standings[0] if standings else None
+    if champion is not None and champion.losses > 0:
+        tied = [s for s in standings if s.wins == champion.wins]
+        if len(tied) > 1:
+            name_col = max(
+                len(displays.get(_normalize_player_name(s.player_name), {}).get("display_name") or s.player_name)
+                for s in tied
+            )
+            rows = ["```"]
+            for s in tied:
+                key = _normalize_player_name(s.player_name)
+                info = displays.get(key, {})
+                name = info.get("display_name") or s.player_name
+                rows.append(f"{s.rank}. {name:<{name_col}}  {s.omw_pct:.3f}")
+            rows.append("```")
+            container.add_item(ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small))
+            container.add_item(ui.TextDisplay(
+                "**Tiebreakers** — opponents' match-win %\n" + "\n".join(rows)
+            ))
 
     view.add_item(container)
 
@@ -1652,8 +1729,12 @@ async def build_champion_announcement_view_for_event(
 
     prior = await asyncio.to_thread(_load_matches, event_id)
     standings = pod_swiss.compute_standings(players, prior)
-    if not standings or not any(s.losses == 0 for s in standings):
+    if not standings:
         return None
+    if not any(s.losses == 0 for s in standings):
+        # No undefeated player; wait for every R3 match to resolve before crowning rank 1
+        if not all(m.get("winner_name") for m in match_states):
+            return None
 
     displays = await asyncio.to_thread(_load_participant_displays, event_id)
     deck_data = await asyncio.to_thread(_load_event_deck_data_sync, event_id)
@@ -1888,9 +1969,15 @@ async def _announce_or_update_champion(manager) -> None:
 
     prior = await asyncio.to_thread(_load_matches, event_id)
     standings = pod_swiss.compute_standings(manager.tournament_players, prior)
+    if not standings:
+        return
     champions = [s for s in standings if s.losses == 0]
     if not champions:
-        return
+        # No undefeated player; wait for ALL R3 matches to resolve before crowning rank 1 so
+        # Swiss tiebreakers are final
+        if not all(m.get("winner_name") for m in match_states):
+            return
+        champions = [standings[0]]
 
     displays = await asyncio.to_thread(_load_participant_displays, event_id)
     deck_data = await asyncio.to_thread(_load_event_deck_data_sync, event_id)
