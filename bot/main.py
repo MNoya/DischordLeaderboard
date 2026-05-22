@@ -39,6 +39,7 @@ from bot.listeners.auto_link_listener import setup as setup_auto_link_listener
 from bot.listeners.pod_screenshots import setup as setup_pod_screenshots
 from bot.listeners.sesh_listener import reschedule_pending_events, setup as setup_sesh_listener
 from bot.models import LeaderboardMessage, MagicSet, Player, PodDraftEvent
+from bot.services.bot_log import BotLog
 from bot.services.lobby_embed import LobbyReadyButtonView
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_tournament import (
@@ -172,6 +173,8 @@ def build_bot(guild_id: int) -> commands.Bot:
         # Discord doesn't auto-populate owner_id; fetch it so /command crashes can DM the right person
         app_info = await bot.application_info()
         bot.owner_id = app_info.owner.id
+
+        bot.bot_log = BotLog(bot, settings.discord_botlog_channel_id)
 
         await emojis.load(bot)
 

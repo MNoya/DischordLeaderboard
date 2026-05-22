@@ -1,0 +1,69 @@
+"""Discord channel sink for pod-draft "something went wrong" signals.
+
+Smoke alarm, not audit log — Railway has the full picture. Posts a terse line per
+surprise event, with a 60s per-fingerprint cooldown to collapse storms.
+Silent no-op when the channel is unconfigured.
+"""
+from __future__ import annotations
+
+import hashlib
+import logging
+import time
+
+import discord
+from discord.ext import commands
+
+
+log = logging.getLogger(__name__)
+
+
+_PER_FP_COOLDOWN_S = 60.0
+_MESSAGE_MAX_CHARS = 1900
+
+
+class BotLog:
+    def __init__(self, bot: commands.Bot, channel_id: int | None) -> None:
+        self.bot = bot
+        self.channel_id = channel_id
+        self._last_posted: dict[str, float] = {}
+
+    async def post(self, summary: str, *, fingerprint: str | None = None, tag: str = "INFO") -> None:
+        if self.channel_id is None:
+            return
+        now = time.monotonic()
+        fp = fingerprint or hashlib.sha1(f"{tag}|{summary}".encode("utf-8")).hexdigest()
+        last = self._last_posted.get(fp)
+        if last is not None and now - last < _PER_FP_COOLDOWN_S:
+            log.info(f"bot_log suppressed (cooldown) tag={tag} fp={fp}")
+            return
+        body = f"**[{tag}]** {summary}"
+        if len(body) > _MESSAGE_MAX_CHARS:
+            body = body[:_MESSAGE_MAX_CHARS]
+        try:
+            channel = self.bot.get_channel(self.channel_id) or await self.bot.fetch_channel(self.channel_id)
+        except discord.HTTPException:
+            log.warning(f"bot_log channel {self.channel_id} unreachable", exc_info=True)
+            return
+        try:
+            await channel.send(body)
+        except discord.HTTPException:
+            log.warning("bot_log channel send failed", exc_info=True)
+            return
+        self._last_posted[fp] = now
+        if len(self._last_posted) > 256:
+            cutoff = now - _PER_FP_COOLDOWN_S * 4
+            self._last_posted = {k: v for k, v in self._last_posted.items() if v > cutoff}
+
+
+_NOOP_LOG: "BotLog | None" = None
+
+
+def get(bot: commands.Bot) -> BotLog:
+    """Return the BotLog attached to ``bot``; silent fallback for tests or pre-setup_hook callers."""
+    existing = getattr(bot, "bot_log", None)
+    if isinstance(existing, BotLog):
+        return existing
+    global _NOOP_LOG
+    if _NOOP_LOG is None:
+        _NOOP_LOG = BotLog(bot, None)
+    return _NOOP_LOG

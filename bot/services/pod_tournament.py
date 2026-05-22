@@ -1230,26 +1230,45 @@ async def _maybe_advance(bot_client, event_id: str, round_num: int) -> None:
 
     pending_remaining = await asyncio.to_thread(_count_pending_in_round, event_id, round_num)
     if pending_remaining > 0:
+        log.info(
+            f"[FINALIZE] maybe_advance.pending event={event_id} round={round_num} "
+            f"pending_remaining={pending_remaining} decision=wait"
+        )
         return
 
     if manager is None:
-        log.warning(f"round {round_num} complete for {event_id} but no active manager")
+        log.warning(
+            f"[FINALIZE] maybe_advance.no_manager event={event_id} round={round_num} decision=bail"
+        )
         return
 
     is_edit_during_grace = (manager.grace_round == round_num and manager.grace_task is not None)
+    grace_active = manager.grace_task is not None and not manager.grace_task.done()
 
     if is_edit_during_grace:
+        log.info(
+            f"[FINALIZE] maybe_advance.edit_during_grace event={event_id} round={round_num} "
+            f"grace_round={manager.grace_round} decision=regenerate_or_refresh"
+        )
         if round_num < TOTAL_ROUNDS:
             await _regenerate_next_round(manager, round_num + 1)
         _schedule_grace(manager, round_num)
         return
 
     if round_num >= TOTAL_ROUNDS:
+        log.info(
+            f"[FINALIZE] maybe_advance.final_round event={event_id} round={round_num} "
+            f"grace_active={grace_active} decision=share_log_and_schedule_grace"
+        )
         await manager.share_draft_log()
         _schedule_grace(manager, round_num)
         return
 
     next_exists = await asyncio.to_thread(_round_has_rows, event_id, round_num + 1)
+    log.info(
+        f"[FINALIZE] maybe_advance.advance event={event_id} round={round_num} "
+        f"next_exists={next_exists} decision={'schedule_grace' if next_exists else 'advance_and_grace'}"
+    )
     if not next_exists:
         await advance_to_round(manager, round_num + 1)
     _schedule_grace(manager, round_num)
@@ -1278,7 +1297,9 @@ def _round_has_rows(event_id: str, round_num: int) -> bool:
 
 async def finalize_tournament(manager: "PodDraftManager") -> None:
     if manager.finalized:
+        log.info(f"[FINALIZE] tournament.already_finalized event={manager.event_id}")
         return
+    log.info(f"[FINALIZE] tournament.start event={manager.event_id}")
     manager.finalized = True
     prior = await asyncio.to_thread(_load_matches, manager.event_id)
     players = manager.tournament_players
@@ -1763,6 +1784,13 @@ def _schedule_grace(manager, round_num: int) -> None:
     """(Re)start the grace timer for round_num. Cancels any pending grace on the same manager."""
     if manager.grace_task is not None and not manager.grace_task.done():
         manager.grace_task.cancel()
+        log.info(
+            f"[FINALIZE] grace.reset event={manager.event_id} round={round_num} window_s={GRACE_SECONDS}"
+        )
+    else:
+        log.info(
+            f"[FINALIZE] grace.scheduled event={manager.event_id} round={round_num} window_s={GRACE_SECONDS}"
+        )
     manager.grace_round = round_num
     manager.grace_task = asyncio.create_task(_grace_expire(manager, round_num))
 
@@ -1773,18 +1801,19 @@ async def _grace_expire(manager, round_num: int) -> None:
     except asyncio.CancelledError:
         return
 
+    log.info(f"[FINALIZE] grace.expired event={manager.event_id} round={round_num}")
+
     msg = manager.round_messages.get(round_num)
     if msg is not None:
         try:
             await msg.edit(view=None)
         except Exception:
-            log.warning("could not lock round %d view", round_num, exc_info=True)
+            log.warning(f"[FINALIZE] grace.lock_view_error round={round_num}", exc_info=True)
 
     await _lock_round_dms(manager.bot, manager.event_id, round_num)
 
     if round_num >= TOTAL_ROUNDS and not manager.finalized:
         await finalize_tournament(manager)
-        # Fallback: if nobody submitted deck colors during the window, post the announcement anyway
         if not manager.champion_announced:
             await _announce_or_update_champion(manager)
 
