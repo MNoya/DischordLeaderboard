@@ -152,10 +152,31 @@ const FORMAT_DISPLAY: Record<string, string> = {
   LimitedChampionshipQualifier_Draft1: "LCQ Draft 1",
   LimitedChampionshipQualifier_Draft2: "LCQ Draft 2",
   PodDraft: "Pod Draft",
+  MidWeekQuickDraft: "Quick Draft",
+  MidWeekSealed: "Sealed",
+  DraftChallenge: "Draft Challenge",
+  OpenSealed_D1_Bo1: "Day 1 Sealed Bo1",
+  OpenSealed_D1_Bo3: "Day 1 Sealed Bo3",
+  OpenSealed_D2_Bo3: "Day 2 Sealed Bo3",
+  OpenSealed_D2_Sealed1_Bo3: "Day 2 Sealed 1 Bo3",
+  OpenDraft_D1_Bo1: "Day 1 Draft Bo1",
+  OpenDraft_D1_Bo3: "Day 1 Draft Bo3",
+  OpenDraft_D2_Bo3: "Day 2 Draft Bo3",
+  OpenDraft_D2_Draft1_Bo3: "Day 2 Draft 1 Bo3",
+  OpenDraft_D2_Draft2_Bo3: "Day 2 Draft 2 Bo3",
+  OpenDraft_D2_Draft2B_Bo3: "Day 2 Draft 2B Bo3",
 };
 
 export function prettyFormat(format: string): string {
   return FORMAT_DISPLAY[format] ?? format;
+}
+
+export type FormatTag = { label: string; tone: "midweek" | "open" };
+
+export function formatTag(format: string): FormatTag | null {
+  if (format.startsWith("MidWeek")) return { label: "MidWeek Magic", tone: "midweek" };
+  if (format.startsWith("Open")) return { label: "Arena Open", tone: "open" };
+  return null;
 }
 
 export function stripDiscriminator(name: string): string {

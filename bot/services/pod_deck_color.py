@@ -62,10 +62,7 @@ PAIR_EMOJI_NAME: dict[frozenset[str], str] = {
 }
 OTHER_VALUE = "__other__"
 
-NOT_IN_POD_MSG = (
-    "You weren't registered as a player in this pod. "
-    "Use `/pod-link-arena Name#1234` to link your Arena handle, then ping an admin to re-link."
-)
+NOT_IN_POD_MSG = "You are not registered as a player in this pod"
 
 SAVED_MSG = "Choices saved. Adjust or dismiss below"
 

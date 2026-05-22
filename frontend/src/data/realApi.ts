@@ -16,7 +16,7 @@ import {
 } from "./adapter";
 import { computeScore, type ScoringStatRow } from "./scoring";
 import { colorsOf, effectiveColorCount } from "./utils";
-import { FORMAT_LABEL_GROUPS, FORMAT_RAW_GROUPS } from "./filters";
+import { FORMAT_LABEL_GROUPS, FORMAT_RAW_GROUPS, MULTI, OTHER } from "./filters";
 import type {
   ColorsLeaderboardRow,
   ColorsSummary,
@@ -54,6 +54,10 @@ export async function fetchFormatColorsLeaderboard(
   format: string,
   archetypes: string | string[],
 ): Promise<ColorsLeaderboardRow[]> {
+  if (format === "Pod") {
+    const arch = Array.isArray(archetypes) ? archetypes[0] : archetypes;
+    return fetchPodColorsLeaderboard(setCode, arch, null);
+  }
   const labels = FORMAT_LABEL_GROUPS[format] ?? [format];
   const archs = Array.isArray(archetypes) ? archetypes : [archetypes];
   if (archs.length === 0) return [];
@@ -261,6 +265,9 @@ export async function fetchOtherColorsLeaderboard(
   formatFilter?: string,
 ): Promise<ColorsLeaderboardRow[]> {
   if (otherCombos.length === 0) return [];
+  if (formatFilter === "Pod") {
+    return fetchPodColorsLeaderboard(setCode, OTHER, otherCombos);
+  }
   const otherSet = new Set(otherCombos);
   const formatGroup = formatFilter
     ? (FORMAT_RAW_GROUPS[formatFilter] ?? [formatFilter])
@@ -443,6 +450,7 @@ export async function fetchFormatRecentTrophies(
   setCode: string,
   format: string,
 ): Promise<RecentTrophy[]> {
+  if (format === "Pod") return fetchPodRecentTrophies(setCode);
   const group = FORMAT_RAW_GROUPS[format];
 
   const all: RecentTrophy[] = [];
@@ -529,6 +537,140 @@ export async function fetchPodEventReplays(eventId: string): Promise<PodEventRep
     .order("game_time", { ascending: true });
   if (error) throw error;
   return (data ?? []).map((r) => adaptPodEventReplay(r as Record<string, unknown>));
+}
+
+interface PodParticipantParsed {
+  eventId: string;
+  finishedAt: string;
+  slug: string | null;
+  displayName: string;
+  avatarUrl: string | null;
+  deckColors: string | null;
+  placement: number | null;
+  wins: number;
+  losses: number;
+}
+
+function parseRecord(record: string | null | undefined): { wins: number; losses: number } {
+  const [w, l] = (record ?? "").split("-");
+  return { wins: parseInt(w || "0", 10) || 0, losses: parseInt(l || "0", 10) || 0 };
+}
+
+async function fetchPodParticipantsForSet(setCode: string): Promise<PodParticipantParsed[]> {
+  const eventsResp = await client()
+    .from("public_pod_draft_events")
+    .select("event_id, event_time")
+    .eq("set_code", setCode);
+  if (eventsResp.error) throw eventsResp.error;
+  const eventTimeById = new Map<string, string>(
+    ((eventsResp.data ?? []) as Array<{ event_id: string; event_time: string }>)
+      .map((e) => [e.event_id, e.event_time]),
+  );
+  if (eventTimeById.size === 0) return [];
+
+  const partsResp = await client()
+    .from("public_pod_draft_event_participants")
+    .select("event_id, player_slug, player_display_name, avatar_url, deck_colors, record, placement")
+    .in("event_id", Array.from(eventTimeById.keys()));
+  if (partsResp.error) throw partsResp.error;
+
+  return (partsResp.data ?? []).map((raw) => {
+    const r = raw as Record<string, unknown>;
+    const slug = (r.player_slug as string | null) ?? null;
+    return {
+      eventId: r.event_id as string,
+      finishedAt: eventTimeById.get(r.event_id as string) ?? "",
+      slug,
+      displayName: (r.player_display_name as string | null) ?? slug ?? "",
+      avatarUrl: (r.avatar_url as string | null) ?? null,
+      deckColors: (r.deck_colors as string | null) ?? null,
+      placement: (r.placement as number | null) ?? null,
+      ...parseRecord(r.record as string | null),
+    };
+  });
+}
+
+async function fetchPodRecentTrophies(setCode: string): Promise<RecentTrophy[]> {
+  const parts = await fetchPodParticipantsForSet(setCode);
+  return parts
+    .filter((p) => p.placement === 1 && p.slug)
+    .map((p) => ({
+      setCode,
+      slug: p.slug!,
+      displayName: p.displayName,
+      avatarUrl: p.avatarUrl,
+      seventeenlandsEventId: null,
+      format: "PodDraft",
+      colors: p.deckColors ?? "",
+      wins: p.wins,
+      losses: p.losses,
+      finishedAt: p.finishedAt,
+    }))
+    .sort((a, b) => (a.finishedAt < b.finishedAt ? 1 : a.finishedAt > b.finishedAt ? -1 : 0));
+}
+
+async function fetchPodColorsLeaderboard(
+  setCode: string,
+  colorsFilter: string,
+  otherCombos: string[] | null,
+): Promise<ColorsLeaderboardRow[]> {
+  const parts = await fetchPodParticipantsForSet(setCode);
+  const otherSet = otherCombos ? new Set(otherCombos) : null;
+  const colorMatches = (deckColors: string | null): boolean => {
+    if (!deckColors) return false;
+    if (colorsFilter === MULTI) return effectiveColorCount(deckColors) >= 4;
+    if (colorsFilter === OTHER) {
+      if (effectiveColorCount(deckColors) >= 4) return false;
+      return otherSet ? otherSet.has(colorsOf(deckColors)) : false;
+    }
+    return colorsOf(deckColors) === colorsFilter;
+  };
+
+  interface Agg {
+    displayName: string;
+    avatarUrl: string | null;
+    events: number;
+    wins: number;
+    losses: number;
+    trophies: number;
+    lastFinishedAt: string;
+  }
+  const perSlug = new Map<string, Agg>();
+  for (const p of parts) {
+    if (p.placement === null || !p.slug || !colorMatches(p.deckColors)) continue;
+    let agg = perSlug.get(p.slug);
+    if (!agg) {
+      agg = { displayName: p.displayName, avatarUrl: p.avatarUrl, events: 0, wins: 0, losses: 0, trophies: 0, lastFinishedAt: "" };
+      perSlug.set(p.slug, agg);
+    }
+    agg.events += 1;
+    agg.wins += p.wins;
+    agg.losses += p.losses;
+    if (p.placement === 1) agg.trophies += 1;
+    if (p.finishedAt > agg.lastFinishedAt) agg.lastFinishedAt = p.finishedAt;
+  }
+
+  return Array.from(perSlug.entries())
+    .map(([slug, a]) => ({
+      setCode,
+      colors: colorsFilter,
+      slug,
+      displayName: a.displayName,
+      avatarUrl: a.avatarUrl,
+      rank: 0,
+      score: 0,
+      trophies: a.trophies,
+      events: a.events,
+      wins: a.wins,
+      losses: a.losses,
+      lastCalculatedAt: a.lastFinishedAt || new Date(0).toISOString(),
+    }))
+    .sort((a, b) => {
+      if (b.trophies !== a.trophies) return b.trophies - a.trophies;
+      if (b.wins !== a.wins) return b.wins - a.wins;
+      return a.slug.localeCompare(b.slug);
+    })
+    .map((r, i) => ({ ...r, rank: i + 1 }));
 }
 
 export async function fetchPodLeaderboard(setCode: string): Promise<PodLeaderboardRow[]> {

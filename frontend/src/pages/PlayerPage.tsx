@@ -25,7 +25,8 @@ import { MobilePageHeader } from "../components/PageNav";
 import { RankBadge } from "../components/RankBadge";
 
 import { useAvailableFormats, useColorChips, useDraftEvents, useLeaderboard, usePlayerProfile, useSets } from "../data/hooks";
-import { colorsOf, effectiveColorCount, eventDate, fmtShortDate, isFlashbackEvent, mainColors, prettyFormat, winPct } from "../data/utils";
+import { computeScore, type ScoringStatRow } from "../data/scoring";
+import { colorsOf, effectiveColorCount, eventDate, fmtShortDate, formatTag, isFlashbackEvent, mainColors, prettyFormat, winPct } from "../data/utils";
 import {
   colorsDisplayName,
   deckColorParts,
@@ -413,6 +414,31 @@ interface PlayerAggregates {
   comboTrophies: Record<string, number>;
 }
 
+interface StatStripStats {
+  trophies: number;
+  events: number;
+  wins: number;
+  losses: number;
+  score: number;
+}
+
+function statsFromEvents(events: PlayerDraftEvent[]): StatStripStats {
+  let trophies = 0;
+  let wins = 0;
+  let losses = 0;
+  let countedEvents = 0;
+  const rows: ScoringStatRow[] = [];
+  for (const e of events) {
+    if (e.format.startsWith("MidWeek")) continue;
+    if (e.isTrophy) trophies += 1;
+    wins += e.wins;
+    losses += e.losses;
+    countedEvents += 1;
+    rows.push({ format: e.format, wins: e.wins, losses: e.losses, trophies: e.isTrophy ? 1 : 0, events: 1 });
+  }
+  return { trophies, events: countedEvents, wins, losses, score: computeScore(rows) };
+}
+
 function aggregate(events: PlayerDraftEvent[]): PlayerAggregates {
   const colorCount: PlayerAggregates["colorCount"] = { W: 0, U: 0, B: 0, R: 0, G: 0 };
   const comboCount: Record<string, number> = {};
@@ -446,7 +472,6 @@ function Desktop({
   onChangeSet: (code: string) => void;
 }) {
   const navigate = useNavigate();
-  const wp = winPct(profile.wins, profile.losses);
 
   const [formatFilter, setFormatFilter, colorsFilter, setColorsFilter, qs] =
     useUrlFilters();
@@ -490,6 +515,16 @@ function Desktop({
     [events, formatFilter, colorsFilter, otherSet]
   );
 
+  const filtersActive = formatFilter !== "ALL" || colorsFilter !== "ALL";
+  const stats: StatStripStats = useMemo(
+    () =>
+      filtersActive
+        ? statsFromEvents(filtered)
+        : { trophies: profile.trophies, events: profile.events, wins: profile.wins, losses: profile.losses, score: profile.score },
+    [filtersActive, filtered, profile.trophies, profile.events, profile.wins, profile.losses, profile.score],
+  );
+  const wp = winPct(stats.wins, stats.losses);
+
   return (
     <div className="bg-bg text-text min-h-screen animate-fadeIn">
       <AppHeader subtitle="PLAYER PROFILE" />
@@ -520,7 +555,7 @@ function Desktop({
               <RankBadge rank={profile.rank} size="lg" />
             </div>
           </div>
-          <StatStrip profile={profile} wp={wp} />
+          <StatStrip stats={stats} wp={wp} />
         </div>
       </section>
 
@@ -542,7 +577,7 @@ function Desktop({
   );
 }
 
-function StatStrip({ profile, wp }: { profile: PlayerProfile; wp: string }) {
+function StatStrip({ stats, wp }: { stats: StatStripStats; wp: string }) {
   const valueCls = "font-display leading-none text-[clamp(26px,3vw,44px)]";
   const tiles: Array<{ label: string; value: React.ReactNode; accent?: boolean }> = [
     {
@@ -550,21 +585,21 @@ function StatStrip({ profile, wp }: { profile: PlayerProfile; wp: string }) {
       value: (
         <span className="flex items-center gap-1.5">
           <Trophy size={26} color="#ffc63a" />
-          <span className={valueCls}>{profile.trophies}</span>
+          <span className={valueCls}>{stats.trophies}</span>
         </span>
       ),
     },
     {
       label: "EVENTS",
-      value: <span className={valueCls}>{profile.events}</span>,
+      value: <span className={valueCls}>{stats.events}</span>,
     },
     {
       label: "RECORD",
       value: (
         <Record
           mono
-          wins={profile.wins}
-          losses={profile.losses}
+          wins={stats.wins}
+          losses={stats.losses}
           separatorMargin={4}
           className={valueCls}
         />
@@ -582,7 +617,7 @@ function StatStrip({ profile, wp }: { profile: PlayerProfile; wp: string }) {
     {
       label: "POINTS",
       value: (
-        <span className={cn(valueCls, "text-green")}>{fmtPts(profile.score)}</span>
+        <span className={cn(valueCls, "text-green")}>{fmtPts(stats.score)}</span>
       ),
       accent: true,
     },
@@ -859,7 +894,10 @@ function DraftLogDesktop({
         </div>
       </div>
 
-      <div className="mt-3">
+      <div
+        className="mt-3 grid gap-x-3 items-stretch"
+        style={{ gridTemplateColumns: "30px 110px max-content 1fr 90px 14px" }}
+      >
         {filtered.map((e, i) => {
           const isFB = isFlashbackEvent(e.finishedAt, setEndDate);
           const prev = filtered[i - 1];
@@ -875,7 +913,7 @@ function DraftLogDesktop({
           );
         })}
         {filtered.length === 0 && (
-          <div className="p-6 text-center text-muted font-display tracking-[0.2em]">
+          <div className="p-6 text-center text-muted font-display tracking-[0.2em] col-span-full">
             NO EVENTS MATCH FILTER
           </div>
         )}
@@ -918,10 +956,28 @@ function GoToTopButton({
   );
 }
 
+function FormatTagPill({ tag }: { tag: { label: string; tone: "midweek" | "open" } }) {
+  const toneCls =
+    tag.tone === "midweek"
+      ? "border-[#a86bff] text-[#a86bff]"
+      : "border-[#ffc63a] text-[#ffc63a]";
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center px-2 py-0.5 bg-bg border font-display text-[11px] tracking-[0.2em] leading-none uppercase whitespace-nowrap",
+        toneCls,
+      )}
+    >
+      {tag.label}
+    </span>
+  );
+}
+
 function FlashbackDivider({ variant }: { variant: "desktop" | "mobile" }) {
   const mxClass = variant === "mobile" ? "-mx-[18px]" : "-mx-2";
+  const spanCls = variant === "desktop" ? "col-span-full" : "";
   return (
-    <div className={cn("relative my-1 border-t border-teal", mxClass)}>
+    <div className={cn("relative my-1 border-t border-teal", mxClass, spanCls)}>
       <span className="absolute left-1/2 -translate-x-1/2 -top-[9px] px-2 py-0.5 bg-bg border border-teal text-teal font-display text-[11px] tracking-[0.2em] leading-none">
         FLASHBACK
       </span>
@@ -943,6 +999,7 @@ function EventLogRow({
   const isPod = e.format === "PodDraft";
   const podWithoutDeck = isPod && !e.colors;
   const formatLabel = isPod && e.eventName ? e.eventName.toUpperCase() : prettyFormat(e.format).toUpperCase();
+  const tag = isPod ? null : formatTag(e.format);
   const borderCls = hideBottomBorder ? "" : "border-b border-border";
 
   if (variant === "desktop") {
@@ -952,7 +1009,10 @@ function EventLogRow({
           {e.isTrophy && <Trophy size={18} color="#ffc63a" />}
         </span>
         <span className="text-[12px] text-muted text-center">{fmtShortDate(eventDate(e))}</span>
-        <span className="font-display text-[16px] tracking-[0.08em]">{formatLabel}</span>
+        <span className="flex items-center justify-between gap-2 min-w-0">
+          <span className="font-display text-[16px] tracking-[0.08em] whitespace-nowrap">{formatLabel}</span>
+          {tag && <FormatTagPill tag={tag} />}
+        </span>
         {podWithoutDeck ? (
           <span className="text-[12px] text-muted">Deck not submitted</span>
         ) : (() => {
@@ -983,11 +1043,11 @@ function EventLogRow({
       </>
     );
     const cls = cn(
-      "grid gap-3 py-[6px] px-2 -mx-2 items-center",
+      "grid gap-x-3 py-[6px] px-2 -mx-2 items-center col-span-full",
       borderCls,
       linkClass,
     );
-    const style = { gridTemplateColumns: "30px 110px 170px 1fr 90px 14px" };
+    const style = { gridTemplateColumns: "subgrid" };
     return href ? (
       <a href={href} target="_blank" rel="noopener noreferrer" className={cls} style={style}>
         {inner}
@@ -1004,11 +1064,12 @@ function EventLogRow({
         {e.isTrophy && <Trophy size={16} color="#ffc63a" />}
       </span>
       <div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 flex-wrap">
           {!podWithoutDeck && <Pips colors={e.colors} size={11} flat />}
           <span className="font-display text-[13px] tracking-[0.08em]">
             {formatLabel}
           </span>
+          {tag && <FormatTagPill tag={tag} />}
         </div>
         <div className="text-[11px] text-muted mt-0.5">
           {[
@@ -1060,7 +1121,6 @@ function Mobile({
   onChangeSet: (code: string) => void;
 }) {
   const navigate = useNavigate();
-  const wp = winPct(profile.wins, profile.losses);
 
   const [formatFilter, setFormatFilter, colorsFilter, setColorsFilter, qs] =
     useUrlFilters();
@@ -1103,6 +1163,16 @@ function Mobile({
       }),
     [events, formatFilter, colorsFilter, otherSet]
   );
+
+  const filtersActive = formatFilter !== "ALL" || colorsFilter !== "ALL";
+  const stats: StatStripStats = useMemo(
+    () =>
+      filtersActive
+        ? statsFromEvents(filtered)
+        : { trophies: profile.trophies, events: profile.events, wins: profile.wins, losses: profile.losses, score: profile.score },
+    [filtersActive, filtered, profile.trophies, profile.events, profile.wins, profile.losses, profile.score],
+  );
+  const wp = winPct(stats.wins, stats.losses);
 
   const eventLogRef = useRef<HTMLElement>(null);
   const scrollToTop = () =>
@@ -1149,15 +1219,15 @@ function Mobile({
             value={
               <span className="flex items-center gap-[3px]">
                 <Trophy size={12} color="#ffc63a" />
-                {profile.trophies}
+                {stats.trophies}
               </span>
             }
             mono={false}
           />
-          <StatChip label="EVENTS" value={profile.events} />
-          <StatChip label="RECORD" value={`${profile.wins}–${profile.losses}`} />
+          <StatChip label="EVENTS" value={stats.events} />
+          <StatChip label="RECORD" value={`${stats.wins}–${stats.losses}`} />
           <StatChip label="WIN %" value={`${wp}%`} />
-          <StatChip label="POINTS" value={fmtPts(profile.score)} accent mono={false} />
+          <StatChip label="POINTS" value={fmtPts(stats.score)} accent mono={false} />
         </div>
       </section>
 

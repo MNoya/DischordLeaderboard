@@ -25,6 +25,7 @@ from bot.database import SessionLocal
 from bot.discord_helpers import extract_avatar_hash
 from bot.models import Player, PodDraftEvent, PodDraftParticipant
 from bot.scripts.draftmancer_log import build_compact
+from bot.services import bot_log as bot_log_mod
 from bot.services.lobby_embed import (
     LobbyReadyButtonView,
     render as render_lobby_embed,
@@ -93,6 +94,7 @@ class PodDraftManager:
         self.champion_announced = False
         self.champion_announcement_message = None
         self.champion_discord_ids: set[str] = set()
+        self._end_watchdog_task: asyncio.Task | None = None
         self.sio = socketio.AsyncClient(reconnection=False, logger=False, engineio_logger=False)
         self.sio.on("connect", self._on_connect)
         self.sio.on("disconnect", self._on_disconnect)

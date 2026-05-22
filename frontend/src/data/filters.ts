@@ -34,14 +34,17 @@ export const FORMAT_RAW_GROUPS: Record<string, string[]> = {
     "QualifierPlayInTradSealed",
     "Qualifier_D1_Sealed",
     "Qualifier_D2_Sealed",
+    "MidWeekSealed",
   ],
-  Quick: ["QuickDraft", "PickTwoDraft", "Emblem_QuickDraft"],
+  Quick: ["QuickDraft", "PickTwoDraft", "Emblem_QuickDraft", "MidWeekQuickDraft"],
   LCQ: ["LimitedChampionshipQualifier_Draft1", "LimitedChampionshipQualifier_Draft2"],
   Pod: ["PodDraft"],
 };
 
 export function matchesFormatFilter(rawFormat: string, filter: string): boolean {
   if (filter === "ALL") return true;
+  if (filter === "Sealed" && rawFormat.startsWith("OpenSealed")) return true;
+  if (filter === "Trad" && rawFormat.startsWith("OpenDraft")) return true;
   const group = FORMAT_RAW_GROUPS[filter];
   if (group) return group.includes(rawFormat);
   return rawFormat.toLowerCase().includes(filter.toLowerCase());
