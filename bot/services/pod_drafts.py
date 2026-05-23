@@ -627,20 +627,31 @@ def set_participant_deck_colors(
     return True
 
 
-def capture_first_deck_screenshot(
+_RECORD_PATTERN = re.compile(r"\b[0-3]\s*[-:\s]\s*[0-3]\b")
+
+
+def caption_has_record_pattern(caption: str | None) -> bool:
+    return bool(caption and _RECORD_PATTERN.search(caption))
+
+
+def capture_deck_screenshot(
     session: Session,
     discord_thread_id: str,
     discord_id: str,
     image_url: str,
     caption: str | None = None,
 ) -> str | None:
-    """First-image-per-participant. Returns event_id on capture, None otherwise.
+    """Capture (or overwrite) a participant's deck screenshot. Returns event_id on capture.
 
-    No-op when the participant already has a deck_screenshot_url set, or the thread/user pair
-    doesn't map to a registered participant.
+    Gating:
+      - Picks must be done — event.current_round IS NOT NULL.
+      - A stored caption that already matches the record-pattern locks the slot; a new image with
+        no record-pattern is ignored. A new image WITH a record-pattern overwrites unconditionally
+        (latest-record-wins).
+      - Otherwise last-wins.
     """
     row = session.execute(
-        select(PodDraftParticipant, PodDraftEvent.id)
+        select(PodDraftParticipant, PodDraftEvent.id, PodDraftEvent.current_round)
         .join(Player, Player.id == PodDraftParticipant.player_id)
         .join(PodDraftEvent, PodDraftEvent.id == PodDraftParticipant.event_id)
         .where(
@@ -650,8 +661,12 @@ def capture_first_deck_screenshot(
     ).first()
     if row is None:
         return None
-    participant, event_id = row
-    if participant.deck_screenshot_url:
+    participant, event_id, current_round = row
+    if current_round is None:
+        return None
+    new_has_record = caption_has_record_pattern(caption)
+    existing_locked = caption_has_record_pattern(participant.deck_screenshot_caption)
+    if not new_has_record and existing_locked:
         return None
     participant.deck_screenshot_url = image_url
     participant.deck_screenshot_caption = caption or None

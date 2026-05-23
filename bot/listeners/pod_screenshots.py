@@ -1,4 +1,8 @@
-"""Capture the first image a participant posts in a pod-draft thread → stash on participant row.
+"""Capture images a participant posts in a pod-draft thread → stash on participant row.
+
+Active from the moment Draftmancer picks finish (event.current_round becomes non-null).
+Last-image-wins, except a stored caption matching the record-pattern (e.g. "3-0", "2-1",
+"trophy") locks the slot — only another record-pattern image can replace it.
 
 On capture we trigger _announce_or_update_champion so the announcement (Components V2 layout)
 either posts for the first time (rank-1 screenshot is the trigger) or edits in place with the
@@ -16,7 +20,7 @@ from bot.database import SessionLocal
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_drafts import (
     active_event_for_discord_user_in_dm,
-    capture_first_deck_screenshot,
+    capture_deck_screenshot,
     is_pod_thread_champion,
 )
 from bot.services.pod_tournament import _announce_or_update_champion
@@ -95,7 +99,7 @@ def _first_image_url(message: discord.Message) -> str | None:
 
 def _capture_sync(thread_id: str, discord_id: str, image_url: str, caption: str | None) -> str | None:
     with SessionLocal() as session:
-        event_id = capture_first_deck_screenshot(session, thread_id, discord_id, image_url, caption)
+        event_id = capture_deck_screenshot(session, thread_id, discord_id, image_url, caption)
         if event_id is not None:
             session.commit()
         return event_id

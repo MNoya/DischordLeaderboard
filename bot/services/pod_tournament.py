@@ -45,6 +45,8 @@ from bot.services.pod_drafts import (
     _normalized_column,
     active_event_for_discord_user_in_dm,
     add_pairing,
+    capture_deck_screenshot,
+    caption_has_record_pattern,
     dm_messages_for_match,
     dm_messages_for_round,
     final_submit_deck_dm_for_participant,
@@ -1005,6 +1007,9 @@ async def _handle_result_submission(interaction: discord.Interaction, value: str
         asyncio.create_task(_send_final_submit_deck_dms_for_match(
             interaction.client, event_id, result["a_name"], result["b_name"],
         ))
+        asyncio.create_task(_r3_deck_recovery_scan(
+            interaction.client, event_id, result["a_name"], result["b_name"],
+        ))
 
 
 def _resolve_pairings_url(event_id: str, round_num: int) -> str | None:
@@ -1191,6 +1196,81 @@ async def _fetch_replays_for_match_players(event_id: str, a_name: str, b_name: s
     client = SeventeenLandsClient()
     for player_id, seat_name, token in pairs:
         await fetch_and_persist_replays_for_player(client, event_id, player_id, seat_name, token)
+
+
+async def _r3_deck_recovery_scan(
+    bot_client, event_id: str, a_name: str, b_name: str,
+) -> None:
+    """After an R3 match reports, walk thread history for the two players and capture the most
+    recent record-pattern image either of them posted but the live listener missed. Skips players
+    who already have a record-pattern caption stored."""
+    targets = await asyncio.to_thread(_r3_recovery_targets_sync, event_id, a_name, b_name)
+    if not targets:
+        return
+    thread_id, target_discord_ids = targets
+    try:
+        thread = bot_client.get_channel(int(thread_id)) or await bot_client.fetch_channel(int(thread_id))
+    except discord.HTTPException:
+        log.info("[R3-RECOVERY] could not fetch thread", exc_info=True)
+        return
+    if not isinstance(thread, discord.Thread):
+        return
+
+    latest_by_user: dict[str, tuple[str, str]] = {}
+    try:
+        async for msg in thread.history(limit=200):
+            if msg.author.bot:
+                continue
+            author_id = str(msg.author.id)
+            if author_id not in target_discord_ids or author_id in latest_by_user:
+                continue
+            caption = (msg.content or "").strip() or None
+            if not caption_has_record_pattern(caption):
+                continue
+            image_url = next(
+                (att.url for att in msg.attachments
+                 if (att.content_type or "").lower().startswith("image/")),
+                None,
+            )
+            if image_url is None:
+                continue
+            latest_by_user[author_id] = (image_url, caption)
+            if len(latest_by_user) == len(target_discord_ids):
+                break
+    except discord.HTTPException:
+        log.info("[R3-RECOVERY] thread.history failed", exc_info=True)
+        return
+
+    for discord_id, (image_url, caption) in latest_by_user.items():
+        await asyncio.to_thread(_capture_recovery_sync, str(thread.id), discord_id, image_url, caption)
+
+
+def _r3_recovery_targets_sync(
+    event_id: str, a_name: str, b_name: str,
+) -> tuple[str, set[str]] | None:
+    with SessionLocal() as session:
+        thread_id = session.execute(
+            select(PodDraftEvent.discord_thread_id).where(PodDraftEvent.id == event_id)
+        ).scalar_one_or_none()
+        if thread_id is None:
+            return None
+        rows = session.execute(
+            select(DbPlayer.discord_id, PodDraftParticipant.deck_screenshot_caption)
+            .join(DbPlayer, DbPlayer.id == PodDraftParticipant.player_id)
+            .where(
+                PodDraftParticipant.event_id == event_id,
+                PodDraftParticipant.draftmancer_name.in_([a_name, b_name]),
+                DbPlayer.discord_id.is_not(None),
+            )
+        ).all()
+        targets = {did for did, cap in rows if not caption_has_record_pattern(cap)}
+        return (thread_id, targets) if targets else None
+
+
+def _capture_recovery_sync(thread_id: str, discord_id: str, image_url: str, caption: str | None) -> None:
+    with SessionLocal() as session:
+        capture_deck_screenshot(session, thread_id, discord_id, image_url, caption)
+        session.commit()
 
 
 def _resolve_match_player_tokens_sync(
