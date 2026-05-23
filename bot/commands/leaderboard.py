@@ -11,10 +11,10 @@ from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from bot import audit, emojis
-from bot.commands.stats import process_stats, render_embed as render_stats_embed
+from bot.commands.stats import _rank_players_for_set, process_stats, render_embed as render_stats_embed
 from bot.config import settings
 from bot.database import SessionLocal
-from bot.models import DraftEvent, LeaderboardMessage, MagicSet, Player, PlayerArchetypeScore, PlayerSetScore, PlayerStats, PodDraftEvent, PodDraftParticipant
+from bot.models import DraftEvent, LeaderboardMessage, MagicSet, Player, PlayerStats, PodDraftEvent, PodDraftParticipant
 from bot.scoring import DEFAULT_QUEUE_GROUPS, boxes_for_event, compute_score
 from bot.sets import ACTIVE_SET_CODE
 
@@ -82,18 +82,8 @@ def process_leaderboard(
     if magic_set is None:
         return None
 
-    rows = session.execute(
-        select(Player.id, Player.slug, Player.display_name, Player.discord_id,
-               PlayerSetScore.score, PlayerSetScore.trophies)
-        .join(PlayerSetScore, PlayerSetScore.player_id == Player.id)
-        .where(Player.active.is_(True), PlayerSetScore.set_id == magic_set.id)
-        .order_by(PlayerSetScore.score.desc(), Player.display_name.asc())
-    ).all()
+    ranked = _rank_players_for_set(session, magic_set.id)
 
-    ranked = [
-        (idx + 1, r.id, r.slug, r.display_name, r.discord_id, float(r.score), int(r.trophies))
-        for idx, r in enumerate(rows)
-    ]
     # Default view hides players with no points yet — they're "drafting but
     # not on the board". The full-DM view passes include_zero_scores=True
     # so signed-up players who haven't scored still appear
@@ -113,8 +103,8 @@ def process_leaderboard(
                 break
 
     last_updated = session.execute(
-        select(func.max(PlayerSetScore.last_calculated_at))
-        .where(PlayerSetScore.set_id == magic_set.id)
+        select(func.max(PlayerStats.last_fetched_at))
+        .where(PlayerStats.set_id == magic_set.id)
     ).scalar()
 
     drafter_count = session.execute(
@@ -205,8 +195,8 @@ def process_leaderboard_for_format(
                 break
 
     last_updated = session.execute(
-        select(func.max(PlayerSetScore.last_calculated_at))
-        .where(PlayerSetScore.set_id == magic_set.id)
+        select(func.max(PlayerStats.last_fetched_at))
+        .where(PlayerStats.set_id == magic_set.id)
     ).scalar()
 
     return LeaderboardData(
@@ -222,35 +212,58 @@ def process_leaderboard_for_format(
 def process_leaderboard_for_archetype(
     session: Session, viewer_discord_id: str | None, archetype: str, top_n: int = 10,
 ) -> LeaderboardData | None:
-    """Per-archetype (color combo) leaderboard, reading pre-computed
-    PlayerArchetypeScore rows.
+    """Per-archetype (color combo) leaderboard. Aggregates from draft_events,
+    filtering by archetype, then runs compute_score per player.
     """
     magic_set = _current_set(session)
     if magic_set is None:
         return None
 
-    rows = session.execute(
+    events = session.execute(
         select(
             Player.id, Player.slug, Player.display_name, Player.discord_id,
-            PlayerArchetypeScore.score, PlayerArchetypeScore.trophies,
+            DraftEvent.format, DraftEvent.colors, DraftEvent.wins, DraftEvent.losses,
+            DraftEvent.is_trophy,
         )
-        .join(PlayerArchetypeScore, PlayerArchetypeScore.player_id == Player.id)
-        .where(
-            Player.active.is_(True),
-            PlayerArchetypeScore.set_id == magic_set.id,
-            PlayerArchetypeScore.archetype == archetype,
-        )
-        .order_by(PlayerArchetypeScore.score.desc(), Player.display_name.asc())
+        .join(DraftEvent, DraftEvent.player_id == Player.id)
+        .where(Player.active.is_(True), DraftEvent.set_id == magic_set.id)
     ).all()
 
+    bucket: dict[str, dict] = {}
+    for r in events:
+        if not _archetype_matches(r.colors, archetype):
+            continue
+        b = bucket.setdefault(r.id, {
+            "slug": r.slug, "display_name": r.display_name, "discord_id": r.discord_id,
+            "stats_by_format": {}, "trophies": 0,
+        })
+        f = b["stats_by_format"].setdefault(
+            r.format,
+            {"format": r.format, "events": 0, "wins": 0, "losses": 0, "trophies": 0},
+        )
+        f["events"] += 1
+        f["wins"] += int(r.wins or 0)
+        f["losses"] += int(r.losses or 0)
+        if r.is_trophy:
+            f["trophies"] += 1
+            b["trophies"] += 1
+
+    scored: list[tuple[float, int, str, str, str, str | None]] = []
+    for pid, b in bucket.items():
+        score = compute_score(list(b["stats_by_format"].values()))
+        if score <= 0:
+            continue
+        scored.append((score, b["trophies"], pid, b["slug"], b["display_name"], b["discord_id"]))
+
+    scored.sort(key=lambda x: (-x[0], x[4].lower()))
+
     ranked = [
-        (idx + 1, r.id, r.slug, r.display_name, r.discord_id, float(r.score), int(r.trophies))
-        for idx, r in enumerate(rows)
+        (idx + 1, pid, slug, name, did, score, trophies)
+        for idx, (score, trophies, pid, slug, name, did) in enumerate(scored)
     ]
-    visible = [row for row in ranked if row[5] > 0]
     top = [
         LeaderboardEntry(rank=rank, player_id=pid, slug=slug, display_name=name, score=score, trophies=trophies)
-        for rank, pid, slug, name, _did, score, trophies in visible[:top_n]
+        for rank, pid, slug, name, _did, score, trophies in ranked[:top_n]
     ]
     viewer_entry: LeaderboardEntry | None = None
     if viewer_discord_id is not None:
@@ -262,8 +275,8 @@ def process_leaderboard_for_archetype(
                 break
 
     last_updated = session.execute(
-        select(func.max(PlayerArchetypeScore.last_calculated_at))
-        .where(PlayerArchetypeScore.set_id == magic_set.id)
+        select(func.max(DraftEvent.fetched_at))
+        .where(DraftEvent.set_id == magic_set.id)
     ).scalar()
 
     return LeaderboardData(
@@ -272,7 +285,7 @@ def process_leaderboard_for_archetype(
         top=top,
         viewer=viewer_entry,
         last_updated=last_updated,
-        drafter_count=len(visible),
+        drafter_count=len(scored),
     )
 
 
@@ -1093,3 +1106,25 @@ def _current_set(session: Session) -> MagicSet | None:
     return session.execute(
         select(MagicSet).where(MagicSet.code == ACTIVE_SET_CODE)
     ).scalar_one_or_none()
+
+
+_WUBRG = "WUBRG"
+_MULTI_ARCHETYPE = "MULTI"
+
+
+def _normalize_archetype(colors: str | None) -> str:
+    if not colors:
+        return ""
+    return "".join(sorted((c for c in colors if c.isupper()), key=_WUBRG.index))
+
+
+def _effective_color_count(colors: str | None) -> int:
+    if not colors:
+        return 0
+    return len({c.upper() for c in colors if c.upper() in _WUBRG})
+
+
+def _archetype_matches(colors: str | None, archetype: str) -> bool:
+    if archetype == _MULTI_ARCHETYPE:
+        return _effective_color_count(colors) >= 4
+    return _normalize_archetype(colors) == archetype

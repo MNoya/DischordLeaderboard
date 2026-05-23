@@ -1,14 +1,13 @@
-"""Rebuild ``player_stats`` (and all derived score tables) from ``draft_events`` for every active player.
+"""Rebuild ``player_stats`` from ``draft_events`` for every active player.
 
     DATABASE_URL=postgresql://... python -m bot.scripts.rebuild_player_stats
 
-No 17lands HTTP. Pure SQL/Python recompute against existing ``draft_events`` rows.
+No 17lands HTTP. Pure SQL re-aggregation against existing ``draft_events`` rows.
 
 Use cases:
   - Restoring after a refresh that wrote a narrow window into ``player_stats``
     (the additive ``draft_events`` rows survive — this rebuilds the aggregates).
-  - Recovery after a scoring-formula change (alternative to running !refresh,
-    which re-pulls from 17lands).
+  - Adding new format strings to scoring_buckets.json without re-pulling 17lands.
   - Sanity check that ``player_stats`` matches ``draft_events``.
 
 Per-player commit boundary so a mid-run crash keeps already-rebuilt rows.
@@ -22,12 +21,7 @@ from sqlalchemy import distinct, select
 
 from bot.database import SessionLocal
 from bot.models import DraftEvent, Player
-from bot.services.refresh import (
-    rebuild_player_stats,
-    recompute_player_archetype_scores,
-    recompute_player_format_archetype_scores,
-    recompute_player_set_score,
-)
+from bot.services.refresh import rebuild_player_stats
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 log = logging.getLogger("rebuild")
@@ -49,9 +43,6 @@ def main() -> None:
 
             for set_id in set_ids:
                 rebuild_player_stats(session, player.id, set_id)
-                recompute_player_set_score(session, player.id, set_id)
-                recompute_player_archetype_scores(session, player.id, set_id)
-                recompute_player_format_archetype_scores(session, player.id, set_id)
 
             session.commit()
             total_pairs += len(set_ids)

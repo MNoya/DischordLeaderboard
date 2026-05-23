@@ -13,8 +13,8 @@ from sqlalchemy.orm import Session
 from bot import audit
 from bot.config import settings
 from bot.database import SessionLocal
-from bot.models import DraftEvent, MagicSet, Player, PlayerSetScore, PlayerStats
-from bot.scoring import boxes_for_event, compute_score_breakdown
+from bot.models import DraftEvent, MagicSet, Player, PlayerStats
+from bot.scoring import boxes_for_event, compute_score, compute_score_breakdown
 from bot.services.pod_drafts import player_pod_stats
 from bot.sets import ACTIVE_SET_CODE
 
@@ -70,35 +70,21 @@ def process_stats(
             PlayerStats.set_id == magic_set.id,
         )
     ).scalars().all()
-    breakdown = compute_score_breakdown([
+    stat_dicts = [
         {"format": r.format, "events": r.events, "wins": r.wins, "losses": r.losses, "trophies": r.trophies}
         for r in stats_rows
-    ])
-
-    score_row = session.execute(
-        select(PlayerSetScore).where(
-            PlayerSetScore.player_id == player.id,
-            PlayerSetScore.set_id == magic_set.id,
-        )
-    ).scalar_one_or_none()
-
-    total_score = float(score_row.score) if score_row else 0.0
-    total_trophies = int(score_row.trophies) if score_row else 0
-    last_updated = score_row.last_calculated_at if score_row else None
+    ]
+    breakdown = compute_score_breakdown(stat_dicts)
+    total_score = compute_score(stat_dicts)
+    total_trophies = sum(int(r.trophies or 0) for r in stats_rows)
+    last_updated = max((r.last_fetched_at for r in stats_rows if r.last_fetched_at), default=None)
 
     rank: int | None = None
-    if score_row is not None:
-        higher_count = session.execute(
-            select(func.count())
-            .select_from(PlayerSetScore)
-            .join(Player, Player.id == PlayerSetScore.player_id)
-            .where(
-                Player.active.is_(True),
-                PlayerSetScore.set_id == magic_set.id,
-                PlayerSetScore.score > score_row.score,
-            )
-        ).scalar()
-        rank = (higher_count or 0) + 1
+    if total_score > 0:
+        for entry in _rank_players_for_set(session, magic_set.id):
+            if entry[1] == player.id:
+                rank = entry[0]
+                break
 
     pod = player_pod_stats(session, player.discord_id)
     pod_stats = pod if pod and pod["events_played"] > 0 else None
@@ -237,3 +223,45 @@ class Stats(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Stats(bot))
+
+
+def _rank_players_for_set(
+    session: Session, set_id: str,
+) -> list[tuple[int, str, str, str, str | None, float, int]]:
+    """Compute every active player's score for the set from PlayerStats; sort and rank.
+
+    Returns (rank, player_id, slug, display_name, discord_id, score, trophies) per player.
+    Lives in stats.py (not leaderboard.py) so the import direction stays one-way.
+    """
+    rows = session.execute(
+        select(
+            Player.id, Player.slug, Player.display_name, Player.discord_id,
+            PlayerStats.format, PlayerStats.events, PlayerStats.wins,
+            PlayerStats.losses, PlayerStats.trophies,
+        )
+        .join(PlayerStats, PlayerStats.player_id == Player.id)
+        .where(Player.active.is_(True), PlayerStats.set_id == set_id)
+    ).all()
+
+    bucket: dict[str, dict] = {}
+    for r in rows:
+        b = bucket.setdefault(r.id, {
+            "slug": r.slug, "display_name": r.display_name, "discord_id": r.discord_id,
+            "stats": [], "trophies": 0,
+        })
+        b["stats"].append({
+            "format": r.format, "events": int(r.events or 0),
+            "wins": int(r.wins or 0), "losses": int(r.losses or 0),
+            "trophies": int(r.trophies or 0),
+        })
+        b["trophies"] += int(r.trophies or 0)
+
+    scored = [
+        (compute_score(b["stats"]), b["trophies"], pid, b["slug"], b["display_name"], b["discord_id"])
+        for pid, b in bucket.items()
+    ]
+    scored.sort(key=lambda x: (-x[0], x[4].lower()))
+    return [
+        (idx + 1, pid, slug, name, did, score, trophies)
+        for idx, (score, trophies, pid, slug, name, did) in enumerate(scored)
+    ]

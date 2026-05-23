@@ -16,13 +16,7 @@ from sqlalchemy.orm import Session
 
 from bot.database import SessionLocal
 from bot.models import MagicSet
-from bot.services.refresh import (
-    claim_orphan_drafts,
-    rebuild_player_stats,
-    recompute_player_archetype_scores,
-    recompute_player_format_archetype_scores,
-    recompute_player_set_score,
-)
+from bot.services.refresh import claim_orphan_drafts, rebuild_player_stats
 from bot.sets import ALL_SETS, SetSeed
 
 
@@ -71,9 +65,6 @@ def main() -> None:
             log.info(f"claiming orphan drafts for {magic_set.code}: {len(affected_players)} player(s)")
             for player_id in affected_players:
                 rebuild_player_stats(session, player_id, magic_set.id)
-                recompute_player_set_score(session, player_id, magic_set.id)
-                recompute_player_archetype_scores(session, player_id, magic_set.id)
-                recompute_player_format_archetype_scores(session, player_id, magic_set.id)
             session.commit()
     log.info("done.")
 

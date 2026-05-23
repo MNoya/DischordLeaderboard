@@ -8,7 +8,6 @@
         "PremierDraft",
         "ContenderDraft",
         "OpenDraft_D1_Bo1",
-        "Omniscience_Draft",
         "PremierDraftRemixArtifacts",
         "ArenaDirect_Draft",
         "DraftChallenge"
@@ -52,6 +51,7 @@
       "formats": [
         "QuickDraft",
         "PickTwoDraft",
+        "Omniscience_Draft",
         "Emblem_QuickDraft",
         "DecathlonQuickDraft"
       ]

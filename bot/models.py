@@ -5,7 +5,6 @@ from sqlalchemy import (
     Column,
     Date,
     DateTime,
-    Float,
     ForeignKey,
     Index,
     Integer,
@@ -89,76 +88,6 @@ class PlayerStats(Base):
             "player_id", "set_id", "format", "expansion",
             name="uq_player_set_format_expansion",
         ),
-    )
-
-
-class PlayerSetScore(Base):
-    """Pre-computed total score per (player, set), refreshed alongside PlayerStats.
-
-    /leaderboard reads from this table so the formula isn't re-run on every read.
-    Bucket/weight changes only require a recompute, not a 17lands re-fetch.
-    """
-    __tablename__ = "player_set_scores"
-
-    id                 = Column(String, primary_key=True, default=lambda: str(uuid4()))
-    player_id          = Column(String, ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
-    set_id             = Column(String, ForeignKey("sets.id"), nullable=False)
-    score              = Column(Float, nullable=False, default=0)
-    trophies           = Column(Integer, nullable=False, default=0)
-    last_calculated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
-
-    __table_args__ = (
-        UniqueConstraint("player_id", "set_id", name="uq_player_set_score"),
-    )
-
-
-class PlayerArchetypeScore(Base):
-    """Pre-computed score per (player, set, archetype). Parallels PlayerSetScore.
-
-    Backs the per-archetype leaderboard. Score is `compute_score` re-run on the
-    player's `draft_events` restricted to this archetype — subset replay.
-    Refreshed alongside PlayerSetScore in `!refresh`.
-    """
-    __tablename__ = "player_archetype_scores"
-
-    id                 = Column(String, primary_key=True, default=lambda: str(uuid4()))
-    player_id          = Column(String, ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
-    set_id             = Column(String, ForeignKey("sets.id"), nullable=False)
-    # WUBRG-sorted main colors only; '' for colorless
-    archetype          = Column(String, nullable=False)
-    score              = Column(Float, nullable=False, default=0)
-    trophies           = Column(Integer, nullable=False, default=0)
-    events             = Column(Integer, nullable=False, default=0)
-    wins               = Column(Integer, nullable=False, default=0)
-    losses             = Column(Integer, nullable=False, default=0)
-    last_calculated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
-
-    __table_args__ = (
-        UniqueConstraint("player_id", "set_id", "archetype", name="uq_player_set_archetype_score"),
-    )
-
-
-class PlayerFormatArchetypeScore(Base):
-    __tablename__ = "player_format_archetype_scores"
-
-    id                 = Column(String, primary_key=True, default=lambda: str(uuid4()))
-    player_id          = Column(String, ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
-    set_id             = Column(String, ForeignKey("sets.id"), nullable=False)
-    format_label       = Column(String, nullable=False)
-    archetype          = Column(String, nullable=False)
-    score              = Column(Float, nullable=False, default=0)
-    trophies           = Column(Integer, nullable=False, default=0)
-    events             = Column(Integer, nullable=False, default=0)
-    wins               = Column(Integer, nullable=False, default=0)
-    losses             = Column(Integer, nullable=False, default=0)
-    last_calculated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
-
-    __table_args__ = (
-        UniqueConstraint(
-            "player_id", "set_id", "format_label", "archetype",
-            name="uq_player_set_format_label_archetype_score",
-        ),
-        Index("ix_pfas_set_format_archetype", "set_id", "format_label", "archetype"),
     )
 
 

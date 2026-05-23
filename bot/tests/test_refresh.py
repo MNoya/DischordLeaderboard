@@ -3,7 +3,7 @@ from datetime import date
 import requests
 from sqlalchemy import select
 
-from bot.models import DraftEvent, MagicSet, Player, PlayerSetScore, PlayerStats
+from bot.models import DraftEvent, MagicSet, Player, PlayerStats
 from bot.services.refresh import (
     bulk_upsert_draft_events,
     claim_orphan_drafts,

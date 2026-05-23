@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 import time as _time
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 from typing import Iterable, Protocol
 
 import requests
@@ -28,21 +28,13 @@ from bot.models import (
     DraftEvent,
     MagicSet,
     Player,
-    PlayerArchetypeScore,
-    PlayerFormatArchetypeScore,
-    PlayerSetScore,
     PlayerStats,
 )
-from bot.scoring import DEFAULT_QUEUE_GROUPS, compute_score
 from bot.services.seventeenlands import SUPPORTED_FORMATS, extract_event_row
 from bot.sets import ACTIVE_SET_CODE
 
 PERIODIC_WINDOW_DAYS = 7
 
-
-_RAW_FORMAT_TO_LABEL: dict[str, str] = {
-    fmt: g.label for g in DEFAULT_QUEUE_GROUPS for fmt in g.formats
-}
 
 logger = logging.getLogger(__name__)
 
@@ -174,9 +166,6 @@ def refresh_player(
     session.flush()
     for set_id in touched_set_ids:
         rebuild_player_stats(session, player.id, set_id)
-        recompute_player_set_score(session, player.id, set_id)
-        recompute_player_archetype_scores(session, player.id, set_id)
-        recompute_player_format_archetype_scores(session, player.id, set_id)
 
     return {
         "status": "updated",
@@ -249,209 +238,6 @@ def rebuild_player_stats(session: Session, player_id: str, set_id: str) -> int:
         {"pid": player_id, "sid": set_id},
     )
     return result.rowcount or 0
-
-
-def recompute_player_set_score(session: Session, player_id: str, set_id: str) -> PlayerSetScore:
-    """Recompute and upsert the score for one (player, set) from current PlayerStats."""
-    rows = session.execute(
-        select(PlayerStats).where(
-            PlayerStats.player_id == player_id, PlayerStats.set_id == set_id
-        )
-    ).scalars().all()
-    stats_dicts = [
-        {
-            "format": r.format,
-            "events": r.events,
-            "wins": r.wins,
-            "losses": r.losses,
-            "trophies": r.trophies,
-        }
-        for r in rows
-    ]
-    score = compute_score(stats_dicts)
-    total_trophies = sum(r.trophies for r in rows)
-    now = datetime.now(timezone.utc)
-
-    existing = session.execute(
-        select(PlayerSetScore).where(
-            PlayerSetScore.player_id == player_id,
-            PlayerSetScore.set_id == set_id,
-        )
-    ).scalar_one_or_none()
-    if existing is None:
-        existing = PlayerSetScore(
-            player_id=player_id, set_id=set_id, score=score, trophies=total_trophies,
-            last_calculated_at=now,
-        )
-        session.add(existing)
-    else:
-        existing.score = score
-        existing.trophies = total_trophies
-        # Set explicitly so the 'Last updated' footer tracks every refresh, not just score changes
-        existing.last_calculated_at = now
-    return existing
-
-
-_WUBRG = "WUBRG"
-
-# Heavy-multicolor bucket — effective colors (main + splash) ≥ 4
-MULTI = "MULTI"
-
-
-def _normalize_archetype(colors: str | None) -> str:
-    """WUBRG-sorted main colors. Splashes dropped. None/empty → ''."""
-    if not colors:
-        return ""
-    main = "".join(c for c in colors if c.isupper())
-    return "".join(sorted(main, key=_WUBRG.index))
-
-
-def _effective_color_count(colors: str | None) -> int:
-    """Distinct colors played (main + splash deduped)."""
-    if not colors:
-        return 0
-    return len({c.upper() for c in colors if c.upper() in _WUBRG})
-
-
-def _archetype_keys(colors: str | None) -> list[str]:
-    """Buckets this event contributes to: main-color always, plus MULTI when effective ≥ 4."""
-    keys = [_normalize_archetype(colors)]
-    if _effective_color_count(colors) >= 4:
-        keys.append(MULTI)
-    return keys
-
-
-def recompute_player_archetype_scores(
-    session: Session, player_id: str, set_id: str
-) -> None:
-    """Recompute per-(player, set, archetype) scores from draft_events.
-
-    Subset-replay: for each WUBRG-sorted main-color archetype the player has
-    events in, run compute_score over just that subset and store the result.
-    Plus a synthetic MULTI bucket for events with ≥4 effective colors.
-
-    Wipes and rebuilds in one transaction — three round-trips total regardless
-    of archetype count.
-    """
-    events = session.execute(
-        select(DraftEvent).where(
-            DraftEvent.player_id == player_id,
-            DraftEvent.set_id == set_id,
-        )
-    ).scalars().all()
-
-    grouped: dict[str, dict[tuple[str, str], dict]] = {}
-    for ev in events:
-        bucket_key = (ev.format, ev.expansion)
-        for arch in _archetype_keys(ev.colors):
-            bucket = grouped.setdefault(arch, {}).setdefault(
-                bucket_key,
-                {
-                    "format": ev.format,
-                    "expansion": ev.expansion,
-                    "events": 0,
-                    "wins": 0,
-                    "losses": 0,
-                    "trophies": 0,
-                },
-            )
-            bucket["events"] += 1
-            bucket["wins"] += ev.wins
-            bucket["losses"] += ev.losses
-            if ev.is_trophy:
-                bucket["trophies"] += 1
-
-    now = datetime.now(timezone.utc)
-    rows_to_insert: list[dict] = []
-    for arch, buckets in grouped.items():
-        rows = list(buckets.values())
-        rows_to_insert.append({
-            "player_id": player_id,
-            "set_id": set_id,
-            "archetype": arch,
-            "score": compute_score(rows),
-            "trophies": sum(r["trophies"] for r in rows),
-            "events": sum(r["events"] for r in rows),
-            "wins": sum(r["wins"] for r in rows),
-            "losses": sum(r["losses"] for r in rows),
-            "last_calculated_at": now,
-        })
-
-    session.execute(
-        delete(PlayerArchetypeScore).where(
-            PlayerArchetypeScore.player_id == player_id,
-            PlayerArchetypeScore.set_id == set_id,
-        )
-    )
-    if rows_to_insert:
-        session.execute(pg_insert(PlayerArchetypeScore).values(rows_to_insert))
-
-
-def recompute_player_format_archetype_scores(
-    session: Session, player_id: str, set_id: str
-) -> None:
-    """Recompute per-(player, set, format_label, archetype) scores from draft_events.
-
-    Backs the combined format+colors leaderboard. format_label uses the same
-    bucketing as public_player_format_breakdown (Premier, Trad, Sealed, Quick,
-    LCQ Draft 1, LCQ Draft 2).
-    """
-    events = session.execute(
-        select(DraftEvent).where(
-            DraftEvent.player_id == player_id,
-            DraftEvent.set_id == set_id,
-        )
-    ).scalars().all()
-
-    grouped: dict[tuple[str, str], dict[tuple[str, str], dict]] = {}
-    for ev in events:
-        label = _RAW_FORMAT_TO_LABEL.get(ev.format)
-        if label is None:
-            continue
-        bucket_key = (ev.format, ev.expansion)
-        for arch in _archetype_keys(ev.colors):
-            bucket = grouped.setdefault((label, arch), {}).setdefault(
-                bucket_key,
-                {
-                    "format": ev.format,
-                    "expansion": ev.expansion,
-                    "events": 0,
-                    "wins": 0,
-                    "losses": 0,
-                    "trophies": 0,
-                },
-            )
-            bucket["events"] += 1
-            bucket["wins"] += ev.wins
-            bucket["losses"] += ev.losses
-            if ev.is_trophy:
-                bucket["trophies"] += 1
-
-    now = datetime.now(timezone.utc)
-    rows_to_insert: list[dict] = []
-    for (label, arch), buckets in grouped.items():
-        rows = list(buckets.values())
-        rows_to_insert.append({
-            "player_id": player_id,
-            "set_id": set_id,
-            "format_label": label,
-            "archetype": arch,
-            "score": compute_score(rows),
-            "trophies": sum(r["trophies"] for r in rows),
-            "events": sum(r["events"] for r in rows),
-            "wins": sum(r["wins"] for r in rows),
-            "losses": sum(r["losses"] for r in rows),
-            "last_calculated_at": now,
-        })
-
-    session.execute(
-        delete(PlayerFormatArchetypeScore).where(
-            PlayerFormatArchetypeScore.player_id == player_id,
-            PlayerFormatArchetypeScore.set_id == set_id,
-        )
-    )
-    if rows_to_insert:
-        session.execute(pg_insert(PlayerFormatArchetypeScore).values(rows_to_insert))
 
 
 def refresh_one_player_for_all_sets(session: Session, client: _DraftClient, player_id: str) -> dict:
