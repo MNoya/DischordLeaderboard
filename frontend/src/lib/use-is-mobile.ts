@@ -18,31 +18,32 @@ export function useIsMobile(breakpoint = 720): boolean {
   return isMobile;
 }
 
-const SET_HIDE_BREAKPOINTS: Array<[number, number]> = [
-  [1400, 2],
-  [1100, 3],
+const SET_VISIBLE_BREAKPOINTS: Array<[number, number]> = [
+  [1400, 6],
+  [1100, 5],
 ];
 
 const VISIBLE_FLOOR = 2;
+const NARROW_VISIBLE = 4;
 
-function computeHideCount(): number {
-  if (typeof window === "undefined") return 4;
-  for (const [w, hide] of SET_HIDE_BREAKPOINTS) {
-    if (window.matchMedia(`(min-width: ${w}px)`).matches) return hide;
+function computeVisibleCap(): number {
+  if (typeof window === "undefined") return NARROW_VISIBLE;
+  for (const [w, cap] of SET_VISIBLE_BREAKPOINTS) {
+    if (window.matchMedia(`(min-width: ${w}px)`).matches) return cap;
   }
-  return 4;
+  return NARROW_VISIBLE;
 }
 
 export function useSetVisibleCap(total: number, extraHide = 0): number {
-  const [hide, setHide] = React.useState<number>(computeHideCount);
+  const [cap, setCap] = React.useState<number>(computeVisibleCap);
   React.useEffect(() => {
-    const mqls = SET_HIDE_BREAKPOINTS.map(([w]) =>
+    const mqls = SET_VISIBLE_BREAKPOINTS.map(([w]) =>
       window.matchMedia(`(min-width: ${w}px)`),
     );
-    const update = () => setHide(computeHideCount());
+    const update = () => setCap(computeVisibleCap());
     mqls.forEach((m) => m.addEventListener("change", update));
     update();
     return () => mqls.forEach((m) => m.removeEventListener("change", update));
   }, []);
-  return Math.max(VISIBLE_FLOOR, total - hide - extraHide);
+  return Math.max(VISIBLE_FLOOR, Math.min(total, cap - extraHide));
 }

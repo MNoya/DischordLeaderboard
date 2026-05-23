@@ -14,7 +14,7 @@ import {
   adaptLeaderboardRow,
   adaptSet,
 } from "./adapter";
-import { computeScore, type ScoringStatRow } from "./scoring";
+import { bucketScoreContribution, computeScore, type ScoringStatRow } from "./scoring";
 import { colorsOf, effectiveColorCount } from "./utils";
 import { FORMAT_LABEL_GROUPS, FORMAT_RAW_GROUPS, MULTI, OTHER } from "./filters";
 import type {
@@ -182,6 +182,16 @@ export async function fetchFormatLeaderboard(
     const events = (r.events as number) ?? 0;
     if (events <= 0 || !info.has(slug)) continue;
     const inf = info.get(slug)!;
+    const wins = (r.wins as number) ?? 0;
+    const losses = (r.losses as number) ?? 0;
+    const trophies = (r.trophies as number) ?? 0;
+    const contribution = bucketScoreContribution(
+      r.format_label as string,
+      events,
+      wins,
+      losses,
+      trophies,
+    );
     const cur = agg.get(slug);
     if (!cur) {
       agg.set(slug, {
@@ -190,19 +200,19 @@ export async function fetchFormatLeaderboard(
         displayName: inf.display_name as string,
         avatarUrl: (inf.avatar_url ?? null) as string | null,
         rank: 0,
-        score: Number(r.score_contribution ?? 0),
-        trophies: (r.trophies as number) ?? 0,
+        score: contribution,
+        trophies,
         events,
-        wins: (r.wins as number) ?? 0,
-        losses: (r.losses as number) ?? 0,
+        wins,
+        losses,
         lastCalculatedAt: inf.last_calculated_at as string,
       });
     } else {
-      cur.score += Number(r.score_contribution ?? 0);
-      cur.trophies += (r.trophies as number) ?? 0;
+      cur.score += contribution;
+      cur.trophies += trophies;
       cur.events += events;
-      cur.wins += (r.wins as number) ?? 0;
-      cur.losses += (r.losses as number) ?? 0;
+      cur.wins += wins;
+      cur.losses += losses;
     }
   }
 

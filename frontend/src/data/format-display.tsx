@@ -18,6 +18,7 @@ export const FMT_DEFAULT_COLOR = "#5c8aff";
 
 const FORMAT_SHORT: Record<string, string> = {
   PremierDraft: "PREMIER",
+  ContenderDraft: "CONTENDER",
   TradDraft: "TRAD",
   QuickDraft: "QUICK",
   Sealed: "SEALED",

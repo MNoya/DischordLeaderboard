@@ -139,6 +139,7 @@ const FORMAT_DISPLAY: Record<string, string> = {
   "LCQ Draft 1": "LCQ Draft 1",
   "LCQ Draft 2": "LCQ Draft 2",
   PremierDraft: "Premier Draft",
+  ContenderDraft: "Contender Draft",
   TradDraft: "Traditional Draft",
   QuickDraft: "Quick Draft",
   TradSealed: "Traditional Sealed",

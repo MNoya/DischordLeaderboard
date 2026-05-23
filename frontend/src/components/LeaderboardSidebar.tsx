@@ -69,7 +69,7 @@ export function LeaderboardSidebar({
   );
   const { data: recentAll } = useRecentTrophies(
     formatScoped ? undefined : setCode,
-    colorsScoped ? 100 : 5,
+    colorsScoped ? 100 : 10,
   );
 
   const topColors: ColorsSummary[] | undefined = formatScoped
@@ -78,7 +78,7 @@ export function LeaderboardSidebar({
 
   const recentSource: RecentTrophy[] | undefined = formatScoped ? formatTrophies : recentAll;
   const recentScoped = !colorsScoped
-    ? (recentSource ? recentSource.slice(0, 5) : undefined)
+    ? (recentSource ? recentSource.slice(0, 10) : undefined)
     : (recentSource ?? [])
         .filter((t) => {
           if (colors === MULTI) return effectiveColorCount(t.colors) >= 4;
@@ -88,7 +88,7 @@ export function LeaderboardSidebar({
           }
           return colorsOf(t.colors) === colors;
         })
-        .slice(0, 5);
+        .slice(0, 10);
 
   const scopeLabel = colorsScoped
     ? colorsDisplayName(colors)
@@ -186,8 +186,8 @@ export function LeaderboardSidebar({
             const cls =
               "grid gap-2 items-center py-[7px] no-underline text-inherit transition-colors hover:bg-surface2 -mx-1 px-1 " +
               (showRowPips
-                ? "grid-cols-[auto_1fr_38px_78px_16px] "
-                : "grid-cols-[1fr_38px_78px_16px] ") +
+                ? "grid-cols-[auto_1fr_38px_80px_16px] "
+                : "grid-cols-[1fr_38px_80px_16px] ") +
               (i ? "border-t border-border" : "");
             const inner = (
               <>

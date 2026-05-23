@@ -1,6 +1,5 @@
-// Shared filter option lists and color-combo metadata.
-// Keep this file as the single source of truth so dropdowns and switchers
-// can never drift out of sync.
+// Single source of truth for filter options and color-combo metadata.
+import { formatsForBucket } from "./format-buckets";
 
 export interface FilterOption {
   value: string;
@@ -24,20 +23,11 @@ export const FORMAT_LABEL_GROUPS: Record<string, string[]> = {
 };
 
 export const FORMAT_RAW_GROUPS: Record<string, string[]> = {
-  Premier: ["PremierDraft"],
-  Trad: ["TradDraft"],
-  Sealed: [
-    "Sealed",
-    "TradSealed",
-    "ArenaDirect_Sealed",
-    "QualifierPlayInSealed",
-    "QualifierPlayInTradSealed",
-    "Qualifier_D1_Sealed",
-    "Qualifier_D2_Sealed",
-    "MidWeekSealed",
-  ],
-  Quick: ["QuickDraft", "PickTwoDraft", "Emblem_QuickDraft", "MidWeekQuickDraft"],
-  LCQ: ["LimitedChampionshipQualifier_Draft1", "LimitedChampionshipQualifier_Draft2"],
+  Premier: formatsForBucket("Premier"),
+  Trad: formatsForBucket("Trad"),
+  Sealed: [...formatsForBucket("Sealed"), "MidWeekSealed"],
+  Quick: [...formatsForBucket("Quick"), "MidWeekQuickDraft"],
+  LCQ: [...formatsForBucket("LCQ Draft 1"), ...formatsForBucket("LCQ Draft 2")],
   Pod: ["PodDraft"],
 };
 

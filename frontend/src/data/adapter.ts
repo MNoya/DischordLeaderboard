@@ -17,6 +17,7 @@ import type {
   PlayerFormatBreakdown,
   SetSummary,
 } from "../types/leaderboard";
+import { bucketScoreContribution } from "./scoring";
 
 type SnakeRow = Record<string, unknown>;
 
@@ -40,7 +41,16 @@ export const adaptColorsRow = (row: SnakeRow): ColorsLeaderboardRow => {
   }
   return camel as unknown as ColorsLeaderboardRow;
 };
-export const adaptFormatBreakdown = (row: SnakeRow): PlayerFormatBreakdown =>
-  camelify(row);
+export const adaptFormatBreakdown = (row: SnakeRow): PlayerFormatBreakdown => {
+  const camel = camelify<PlayerFormatBreakdown>(row);
+  camel.scoreContribution = bucketScoreContribution(
+    camel.formatLabel,
+    camel.events,
+    camel.wins,
+    camel.losses,
+    camel.trophies,
+  );
+  return camel;
+};
 export const adaptDraftEvent = (row: SnakeRow): PlayerDraftEvent =>
   camelify(row);
