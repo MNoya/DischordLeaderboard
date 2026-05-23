@@ -9,7 +9,7 @@ import { TrophyCount } from "./TrophyCount";
 import { Record } from "./Record";
 
 import { useColorsSummary, useFormatScopedTrophies, useRecentTrophies } from "../data/hooks";
-import { colorsOf, effectiveColorCount, relativeTime } from "../data/utils";
+import { colorsOf, effectiveColorCount, mainColors, relativeTime } from "../data/utils";
 import { FMT_COLORS, FMT_DEFAULT_COLOR, shortFormat } from "../data/format-display";
 import { colorsDisplayName, MULTI, OTHER } from "../data/filters";
 import { guildLogoTransform, guildSvgUrl } from "../data/guild-art";
@@ -186,12 +186,21 @@ export function LeaderboardSidebar({
             const cls =
               "grid gap-2 items-center py-[7px] no-underline text-inherit transition-colors hover:bg-surface2 -mx-1 px-1 " +
               (showRowPips
-                ? "grid-cols-[auto_1fr_38px_80px_16px] "
-                : "grid-cols-[1fr_38px_80px_16px] ") +
+                ? "grid-cols-[auto_1fr_28px_96px] "
+                : "grid-cols-[1fr_28px_96px] ") +
               (i ? "border-t border-border" : "");
             const inner = (
               <>
-                {showRowPips && <Pips colors={colorsOf(t.colors)} size={10} />}
+                {showRowPips && (
+                  effectiveColorCount(t.colors) >= 4
+                    ? (
+                      <span className="inline-flex items-center gap-px shrink-0">
+                        <Pips colors={mainColors(t.colors).slice(0, 3)} size={10} />
+                        <BsPaletteFill size={12} aria-hidden="true" />
+                      </span>
+                    )
+                    : <Pips colors={t.colors} size={10} />
+                )}
                 <span className="font-display text-[15px] leading-none tracking-[0.04em] whitespace-nowrap overflow-hidden text-ellipsis min-w-0">
                   {t.displayName.toUpperCase()}
                 </span>
@@ -201,11 +210,9 @@ export function LeaderboardSidebar({
                   mono
                   className="mono text-[13px] text-subtle text-right"
                 />
-                <span className="flex items-baseline justify-end gap-2 mono text-dim">
+                <span className="flex items-baseline justify-end gap-1 mono text-dim">
                   <span className="text-[11px]">{shortFormat(t.format)}</span>
                   <span className="text-[11px] tabular-nums">{relativeTime(t.finishedAt)}</span>
-                </span>
-                <span className="flex justify-center text-dim">
                   {isExternal && <ExternalLink size={13} aria-hidden="true" />}
                 </span>
               </>

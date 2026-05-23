@@ -1,6 +1,6 @@
-// JS port of bot/scoring.py — must stay in sync with the Python source.
-// Used client-side to aggregate OTHER-bucket scores from raw draft events.
-import { formatsForBucket } from "./format-buckets";
+// Formula port of bot/scoring.py — must stay in sync. Buckets + points come
+// from the shared scoring_buckets.json (same file the Python side loads).
+import { BUCKET_DEFS, formatsForBucket } from "./format-buckets";
 
 interface QueueGroup {
   label: string;
@@ -9,16 +9,7 @@ interface QueueGroup {
   rule?: "lcq_draft_2";
 }
 
-const QUEUE_GROUP_DEFS: readonly Omit<QueueGroup, "formats">[] = [
-  { label: "Premier", points: 10 },
-  { label: "Trad", points: 8 },
-  { label: "Sealed", points: 8 },
-  { label: "Quick", points: 4 },
-  { label: "LCQ Draft 1", points: 30 },
-  { label: "LCQ Draft 2", points: 10, rule: "lcq_draft_2" },
-];
-
-const DEFAULT_QUEUE_GROUPS: readonly QueueGroup[] = QUEUE_GROUP_DEFS.map(d => ({
+const DEFAULT_QUEUE_GROUPS: readonly QueueGroup[] = BUCKET_DEFS.map((d) => ({
   ...d,
   formats: formatsForBucket(d.label),
 }));

@@ -58,7 +58,7 @@ function Chip({
       <button
         onClick={onClick}
         className={cn(
-          "shrink-0 h-[26px] px-2.5 border inline-flex items-center gap-1.5 cursor-pointer transition-colors font-display tracking-[0.18em] text-[11px]",
+          "shrink-0 h-[26px] px-2.5 border inline-flex items-center gap-1.5 cursor-pointer transition-colors font-display tracking-[0.18em] text-[13px]",
           activeAccent && "border-green bg-green/10 text-green",
           activeAll && "border-border2 bg-surface text-text",
           !active && "border-border2 bg-transparent text-muted hover:bg-surface",

@@ -1,23 +1,30 @@
-export const FORMAT_BUCKETS: Record<string, string> = {
-  PremierDraft: "Premier",
-  ContenderDraft: "Premier",
-  TradDraft: "Trad",
-  Sealed: "Sealed",
-  TradSealed: "Sealed",
-  ArenaDirect_Sealed: "Sealed",
-  QualifierPlayInSealed: "Sealed",
-  QualifierPlayInTradSealed: "Sealed",
-  Qualifier_D1_Sealed: "Sealed",
-  Qualifier_D2_Sealed: "Sealed",
-  QuickDraft: "Quick",
-  PickTwoDraft: "Quick",
-  Emblem_QuickDraft: "Quick",
-  LimitedChampionshipQualifier_Draft1: "LCQ Draft 1",
-  LimitedChampionshipQualifier_Draft2: "LCQ Draft 2",
-};
+import bucketsConfig from "../../../scoring_buckets.json";
+
+interface BucketGroup {
+  label: string;
+  points: number;
+  formats: string[];
+  rule?: string;
+}
+
+const GROUPS: readonly BucketGroup[] = (bucketsConfig as { groups: BucketGroup[] }).groups;
+
+export const FORMAT_BUCKETS: Record<string, string> = Object.fromEntries(
+  GROUPS.flatMap((g) => g.formats.map((fmt) => [fmt, g.label] as const)),
+);
 
 export function formatsForBucket(bucket: string): string[] {
-  return Object.entries(FORMAT_BUCKETS)
-    .filter(([, b]) => b === bucket)
-    .map(([fmt]) => fmt);
+  return GROUPS.find((g) => g.label === bucket)?.formats ?? [];
 }
+
+export interface BucketDef {
+  label: string;
+  points: number;
+  rule?: "lcq_draft_2";
+}
+
+export const BUCKET_DEFS: readonly BucketDef[] = GROUPS.map((g) => ({
+  label: g.label,
+  points: g.points,
+  rule: g.rule as "lcq_draft_2" | undefined,
+}));
