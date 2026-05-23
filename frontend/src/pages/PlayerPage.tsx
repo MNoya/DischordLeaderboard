@@ -956,7 +956,16 @@ function GoToTopButton({
   );
 }
 
-function FormatTagPill({ tag }: { tag: { label: string; tone: "midweek" | "open" } }) {
+function FormatTagPill({ tag }: { tag: { label: string; tone: "midweek" | "open" | "alchemy" } }) {
+  if (tag.tone === "alchemy") {
+    return (
+      <img
+        src="/leaderboard/alchemy.png"
+        alt={tag.label}
+        className="h-6 w-auto object-contain"
+      />
+    );
+  }
   const toneCls =
     tag.tone === "midweek"
       ? "border-[#a86bff] text-[#a86bff]"
@@ -999,7 +1008,7 @@ function EventLogRow({
   const isPod = e.format === "PodDraft";
   const podWithoutDeck = isPod && !e.colors;
   const formatLabel = isPod && e.eventName ? e.eventName.toUpperCase() : prettyFormat(e.format).toUpperCase();
-  const tag = isPod ? null : formatTag(e.format);
+  const tag = isPod ? null : formatTag(e.format, e.expansion);
   const borderCls = hideBottomBorder ? "" : "border-b border-border";
 
   if (variant === "desktop") {

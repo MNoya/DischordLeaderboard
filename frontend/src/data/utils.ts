@@ -172,11 +172,12 @@ export function prettyFormat(format: string): string {
   return FORMAT_DISPLAY[format] ?? format;
 }
 
-export type FormatTag = { label: string; tone: "midweek" | "open" };
+export type FormatTag = { label: string; tone: "midweek" | "open" | "alchemy" };
 
-export function formatTag(format: string): FormatTag | null {
+export function formatTag(format: string, expansion?: string | null): FormatTag | null {
   if (format.startsWith("MidWeek")) return { label: "MidWeek Magic", tone: "midweek" };
   if (format.startsWith("Open")) return { label: "Arena Open", tone: "open" };
+  if (expansion && expansion.startsWith("Y")) return { label: "Alchemy", tone: "alchemy" };
   return null;
 }
 
