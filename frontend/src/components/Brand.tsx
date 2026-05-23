@@ -105,7 +105,7 @@ export function Trophy({
       width={size}
       height={size}
       viewBox="0 0 16 16"
-      className={className ? `shrink-0 icon-cap-align ${className}` : "shrink-0 icon-cap-align"}
+      className={className ? `shrink-0 ${className}` : "shrink-0"}
       style={color ? { color } : undefined}
       aria-hidden="true"
     >

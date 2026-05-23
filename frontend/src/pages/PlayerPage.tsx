@@ -11,9 +11,11 @@ import {
   ChevronLeft,
   ChevronRight,
   ExternalLink,
+  Info,
 } from "../components/Icons";
 import { Pip, Pips } from "../components/ManaPips";
 import { StatChip } from "../components/StatChip";
+import { PointsBreakdown } from "../components/PointsBreakdown";
 import { FilterDropdown } from "../components/FilterDropdown";
 import { SectionLabel } from "../components/SectionLabel";
 import { Record } from "../components/Record";
@@ -110,8 +112,9 @@ export function PlayerPage() {
   const navigate = useNavigate();
   const { data: sets } = useSets();
   const setCode = params.setCode ?? sets?.find((s) => s.isActive)?.code ?? "SOS";
-  const { data: profile, isLoading, error } = usePlayerProfile(slug, setCode);
-  const { data: events } = useDraftEvents(slug, setCode);
+  const { data: profile, isLoading, isFetching, error } = usePlayerProfile(slug, setCode);
+  const { data: events, isFetching: isFetchingEvents } = useDraftEvents(slug, setCode);
+  const showLoadingBar = (isFetching || isFetchingEvents) && !isLoading;
   // Sibling navigation needs the leaderboard rows so we know who's adjacent
   // by rank. Cached behind TanStack Query — same fetch as the leaderboard
   // page, so navigating between profiles doesn't re-hit the network.
@@ -197,10 +200,26 @@ export function PlayerPage() {
     navigate({ pathname: `/${newCode}/player/${slug}`, search: topQs });
   };
 
-  return isMobile ? (
-    <Mobile profile={profile} events={events ?? []} sibling={sibling} sets={sets} onChangeSet={onChangeSet} />
-  ) : (
-    <Desktop profile={profile} events={events ?? []} sibling={sibling} sets={sets} onChangeSet={onChangeSet} />
+  return (
+    <>
+      {showLoadingBar && <TopLoadingBar />}
+      {isMobile ? (
+        <Mobile profile={profile} events={events ?? []} sibling={sibling} sets={sets} onChangeSet={onChangeSet} />
+      ) : (
+        <Desktop profile={profile} events={events ?? []} sibling={sibling} sets={sets} onChangeSet={onChangeSet} />
+      )}
+    </>
+  );
+}
+
+function TopLoadingBar() {
+  return (
+    <div
+      aria-hidden="true"
+      className="fixed top-0 left-0 right-0 h-[2px] z-[60] overflow-hidden pointer-events-none bg-border/30"
+    >
+      <div className="h-full w-1/3 bg-green animate-loadingBar" />
+    </div>
   );
 }
 
@@ -524,16 +543,18 @@ function Desktop({
     [filtersActive, filtered, profile.trophies, profile.events, profile.wins, profile.losses, profile.score],
   );
   const wp = winPct(stats.wins, stats.losses);
+  const [pointsModalOpen, setPointsModalOpen] = useState(false);
+  const pointsBtnRef = useRef<HTMLButtonElement>(null);
 
   return (
     <div className="bg-bg text-text min-h-screen animate-fadeIn">
       <AppHeader subtitle="PLAYER PROFILE" />
 
       <section
-        className="px-10 pt-7 pb-[30px] border-b border-border"
+        className="px-10 pt-5 pb-[30px] border-b border-border"
         style={{ background: "linear-gradient(180deg, #14181f 0%, #0a0c10 100%)" }}
       >
-        <div className="flex items-center justify-between mb-3.5">
+        <div className="flex items-center justify-between mb-4">
           <BackButton onClick={() => navigate({ pathname: `/${profile.setCode}`, search: qs })} inline />
           <SiblingNavButtons sibling={sibling} qs={qs} />
         </div>
@@ -555,7 +576,12 @@ function Desktop({
               <RankBadge rank={profile.rank} size="lg" />
             </div>
           </div>
-          <StatStrip stats={stats} wp={wp} />
+          <StatStrip
+            stats={stats}
+            wp={wp}
+            onPointsClick={() => setPointsModalOpen((o) => !o)}
+            pointsBtnRef={pointsBtnRef}
+          />
         </div>
       </section>
 
@@ -573,13 +599,36 @@ function Desktop({
           setEndDate={sets?.find((s) => s.code === profile.setCode)?.endDate ?? null}
         />
       </div>
+
+      <PointsBreakdown
+        open={pointsModalOpen}
+        onClose={() => setPointsModalOpen(false)}
+        breakdown={profile.formatBreakdown}
+        anchorRef={pointsBtnRef}
+      />
     </div>
   );
 }
 
-function StatStrip({ stats, wp }: { stats: StatStripStats; wp: string }) {
+function StatStrip({
+  stats,
+  wp,
+  onPointsClick,
+  pointsBtnRef,
+}: {
+  stats: StatStripStats;
+  wp: string;
+  onPointsClick?: () => void;
+  pointsBtnRef?: React.RefObject<HTMLButtonElement>;
+}) {
   const valueCls = "font-display leading-none text-[clamp(26px,3vw,44px)]";
-  const tiles: Array<{ label: string; value: React.ReactNode; accent?: boolean }> = [
+  const tiles: Array<{
+    label: string;
+    value: React.ReactNode;
+    accent?: boolean;
+    onClick?: () => void;
+    btnRef?: React.RefObject<HTMLButtonElement>;
+  }> = [
     {
       label: "TROPHIES",
       value: (
@@ -616,10 +665,10 @@ function StatStrip({ stats, wp }: { stats: StatStripStats; wp: string }) {
     },
     {
       label: "POINTS",
-      value: (
-        <span className={cn(valueCls, "text-green")}>{fmtPts(stats.score)}</span>
-      ),
+      value: <span className={cn(valueCls, "text-green")}>{fmtPts(stats.score)}</span>,
       accent: true,
+      onClick: onPointsClick,
+      btnRef: pointsBtnRef,
     },
   ];
   return (
@@ -627,18 +676,55 @@ function StatStrip({ stats, wp }: { stats: StatStripStats; wp: string }) {
       className="grid border border-border2 bg-bg self-stretch min-w-0 ml-auto"
       style={{ flex: "0 1 720px", gridTemplateColumns: "1fr 1fr 1.3fr 1fr 0.9fr" }}
     >
-      {tiles.map((t, i) => (
-        <div
-          key={t.label}
-          className={cn(
-            "py-3.5 px-3 flex flex-col items-center text-center min-w-0",
-            i < tiles.length - 1 && "border-r border-border2",
-          )}
-        >
-          <SectionLabel size={14}>{t.label}</SectionLabel>
-          <div className="flex-1 flex items-center justify-center">{t.value}</div>
-        </div>
-      ))}
+      {tiles.map((t, i) => {
+        const tileCls = cn(
+          "py-3.5 px-3 flex flex-col items-center text-center min-w-0",
+          i < tiles.length - 1 && "border-r border-border2",
+        );
+        const label = (
+          <SectionLabel size={14}>
+            {t.onClick ? (
+              <span className="relative inline-block leading-none">
+                {t.label}
+                <span
+                  aria-hidden="true"
+                  className="absolute top-1/2 -translate-y-1/2 ml-1.5 leading-none"
+                  style={{ left: "100%" }}
+                >
+                  <Info size={14} className="text-muted" />
+                </span>
+              </span>
+            ) : (
+              t.label
+            )}
+          </SectionLabel>
+        );
+        const body = (
+          <>
+            {label}
+            <div className="flex-1 flex items-center justify-center">{t.value}</div>
+          </>
+        );
+        if (t.onClick) {
+          return (
+            <button
+              key={t.label}
+              type="button"
+              ref={t.btnRef}
+              onClick={t.onClick}
+              aria-label={`Show ${t.label.toLowerCase()} breakdown`}
+              className={cn(tileCls, "bg-transparent cursor-pointer hover:bg-surface2/40 transition-colors")}
+            >
+              {body}
+            </button>
+          );
+        }
+        return (
+          <div key={t.label} className={tileCls}>
+            {body}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -1182,6 +1268,8 @@ function Mobile({
     [filtersActive, filtered, profile.trophies, profile.events, profile.wins, profile.losses, profile.score],
   );
   const wp = winPct(stats.wins, stats.losses);
+  const [pointsModalOpen, setPointsModalOpen] = useState(false);
+  const pointsBtnRef = useRef<HTMLButtonElement>(null);
 
   const eventLogRef = useRef<HTMLElement>(null);
   const scrollToTop = () =>
@@ -1231,12 +1319,17 @@ function Mobile({
                 {stats.trophies}
               </span>
             }
-            mono={false}
           />
           <StatChip label="EVENTS" value={stats.events} />
           <StatChip label="RECORD" value={`${stats.wins}–${stats.losses}`} />
           <StatChip label="WIN %" value={`${wp}%`} />
-          <StatChip label="POINTS" value={fmtPts(stats.score)} accent mono={false} />
+          <StatChip
+            label="POINTS"
+            value={fmtPts(stats.score)}
+            accent
+            onClick={() => setPointsModalOpen((o) => !o)}
+            buttonRef={pointsBtnRef}
+          />
         </div>
       </section>
 
@@ -1296,6 +1389,13 @@ function Mobile({
         )}
         <GoToTopButton onClick={scrollToTop} compact />
       </section>
+
+      <PointsBreakdown
+        open={pointsModalOpen}
+        onClose={() => setPointsModalOpen(false)}
+        breakdown={profile.formatBreakdown}
+        anchorRef={pointsBtnRef}
+      />
     </div>
   );
 }
@@ -1569,12 +1669,12 @@ function BackButton({
     <button
       onClick={onClick}
       className={cn(
-        "bg-transparent border-none text-muted font-display text-[12px] leading-none cursor-pointer flex items-center transition-colors hover:text-text",
-        compact ? "tracking-[0.15em] gap-1.5" : "tracking-[0.18em] gap-1",
+        "bg-transparent border-none text-muted font-display leading-none cursor-pointer flex items-center transition-colors hover:text-text",
+        compact ? "text-[12px] tracking-[0.15em] gap-1.5" : "text-[14px] tracking-[0.18em] gap-1.5",
         !compact && !inline && "mb-3.5",
       )}
     >
-      <ChevronLeft size={14} className="shrink-0 -mt-px" /> {compact ? "BACK" : "BACK TO LEADERBOARD"}
+      <ChevronLeft size={compact ? 14 : 16} className="shrink-0" /> {compact ? "BACK" : "BACK TO LEADERBOARD"}
     </button>
   );
 }
@@ -1589,7 +1689,8 @@ function SiblingNavButtons({
   compact?: boolean;
 }) {
   const baseCls = cn(
-    "bg-transparent border-none font-display tracking-[0.15em] leading-none flex items-center gap-1.5 text-[12px] transition-colors",
+    "bg-transparent border-none font-display tracking-[0.15em] leading-none flex items-center gap-1.5 transition-colors",
+    compact ? "text-[12px]" : "text-[14px]",
     "cursor-pointer hover:text-text no-underline text-muted",
   );
   const disabledCls = "opacity-30 cursor-default pointer-events-none text-muted";
@@ -1598,24 +1699,26 @@ function SiblingNavButtons({
   const prevTo = toFor(sibling.prevSlug);
   const nextTo = toFor(sibling.nextSlug);
   return (
-    <div className={cn("flex items-center", compact ? "gap-2" : "gap-3")}>
+    <div
+      data-popover-keep-open
+      className={cn("flex items-center", compact ? "gap-3" : "gap-5")}
+    >
       {prevTo ? (
         <Link to={prevTo} className={baseCls} aria-label="Previous player">
-          <ChevronLeft size={14} className="shrink-0 -mt-px" /> PREV
+          <ChevronLeft size={16} className="shrink-0" /> PREV
         </Link>
       ) : (
         <span className={cn(baseCls, disabledCls)} aria-disabled="true">
-          <ChevronLeft size={14} className="shrink-0 -mt-px" /> PREV
+          <ChevronLeft size={16} className="shrink-0" /> PREV
         </span>
       )}
-      <span className="text-dim text-[12px]">·</span>
       {nextTo ? (
         <Link to={nextTo} className={baseCls} aria-label="Next player">
-          NEXT <ChevronRight size={14} className="shrink-0 -mt-px" />
+          NEXT <ChevronRight size={16} className="shrink-0" />
         </Link>
       ) : (
         <span className={cn(baseCls, disabledCls)} aria-disabled="true">
-          NEXT <ChevronRight size={14} className="shrink-0 -mt-px" />
+          NEXT <ChevronRight size={16} className="shrink-0" />
         </span>
       )}
     </div>

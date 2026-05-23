@@ -4,7 +4,7 @@
 // fetch logic, fixtures, or supabase. Wired through TanStack Query so caching
 // keys, stale-time, and idle prefetch sit in one place.
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo } from "react";
 
 import {
@@ -120,6 +120,7 @@ export function usePlayerProfile(slug: string | undefined, setCode: string) {
     queryFn: () => fetchPlayerProfile(slug!, setCode),
     enabled: !!slug,
     staleTime: FIVE_MINUTES,
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -129,6 +130,7 @@ export function useDraftEvents(slug: string | undefined, setCode: string) {
     queryFn: () => fetchPlayerDraftEvents(slug!, setCode),
     enabled: !!slug,
     staleTime: FIVE_MINUTES,
+    placeholderData: keepPreviousData,
   });
 }
 

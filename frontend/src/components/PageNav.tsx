@@ -6,7 +6,7 @@ import { ALogo } from "./Brand";
 type To = string | { pathname: string; search?: string };
 
 const baseLinkCls =
-  "bg-transparent border-none font-display text-[12px] leading-none flex items-center transition-colors";
+  "bg-transparent border-none font-display leading-none flex items-center transition-colors";
 const disabledCls = "opacity-30 cursor-default pointer-events-none";
 
 export function BackButton({
@@ -25,12 +25,12 @@ export function BackButton({
   const cls = cn(
     baseLinkCls,
     "text-muted cursor-pointer hover:text-text no-underline",
-    compact ? "tracking-[0.15em] gap-1.5" : "tracking-[0.18em] gap-1",
+    compact ? "text-[12px] tracking-[0.15em] gap-1.5" : "text-[14px] tracking-[0.18em] gap-1.5",
     !compact && !inline && "mb-3.5",
   );
   const content = (
     <>
-      <ChevronLeft size={14} className="shrink-0" />
+      <ChevronLeft size={compact ? 14 : 16} className="shrink-0" />
       {compact ? "BACK" : label}
     </>
   );
@@ -67,28 +67,32 @@ export function PrevNextNav({
 }) {
   const cls = cn(
     baseLinkCls,
-    "tracking-[0.15em] gap-1.5 text-muted",
+    "gap-1.5 text-muted",
+    compact ? "text-[12px] tracking-[0.15em]" : "text-[14px] tracking-[0.18em]",
     "cursor-pointer hover:text-text no-underline",
   );
+  const iconSize = compact ? 14 : 16;
   return (
-    <div className={cn("flex items-center", compact ? "gap-2" : "gap-3")}>
+    <div
+      data-popover-keep-open
+      className={cn("flex items-center", compact ? "gap-3" : "gap-5")}
+    >
       {prevTo ? (
         <Link to={prevTo} className={cls} aria-label={prevAriaLabel ?? "Previous"}>
-          <ChevronLeft size={14} className="shrink-0" /> {prevLabel}
+          <ChevronLeft size={iconSize} className="shrink-0" /> {prevLabel}
         </Link>
       ) : (
         <span className={cn(cls, disabledCls)} aria-disabled="true">
-          <ChevronLeft size={14} className="shrink-0" /> {prevLabel}
+          <ChevronLeft size={iconSize} className="shrink-0" /> {prevLabel}
         </span>
       )}
-      <span className="text-dim text-[12px]">·</span>
       {nextTo ? (
         <Link to={nextTo} className={cls} aria-label={nextAriaLabel ?? "Next"}>
-          {nextLabel} <ChevronRight size={14} className="shrink-0" />
+          {nextLabel} <ChevronRight size={iconSize} className="shrink-0" />
         </Link>
       ) : (
         <span className={cn(cls, disabledCls)} aria-disabled="true">
-          {nextLabel} <ChevronRight size={14} className="shrink-0" />
+          {nextLabel} <ChevronRight size={iconSize} className="shrink-0" />
         </span>
       )}
     </div>

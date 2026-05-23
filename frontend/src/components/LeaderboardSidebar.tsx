@@ -210,7 +210,7 @@ export function LeaderboardSidebar({
                   mono
                   className="mono text-[13px] text-subtle text-right"
                 />
-                <span className="flex items-baseline justify-end gap-1 mono text-dim">
+                <span className="flex items-center justify-end gap-1 mono text-dim">
                   <span className="text-[11px]">{shortFormat(t.format)}</span>
                   <span className="text-[11px] tabular-nums">{relativeTime(t.finishedAt)}</span>
                   {isExternal && <ExternalLink size={13} aria-hidden="true" />}
