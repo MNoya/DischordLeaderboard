@@ -421,7 +421,7 @@ MEDAL_EMOJIS = {1: "🥇", 2: "🥈", 3: "🥉"}
 _CYCLE: list[tuple[str | None, str | None]] = [
     (None, None),
     ("format", "Premier"),
-    ("format", "Traditional"),
+    ("format", "Trad"),
     ("format", "Pod"),
     ("format", "Direct"),
 ]
@@ -921,7 +921,7 @@ class Leaderboard(commands.Cog):
     @app_commands.choices(
         format=[
             app_commands.Choice(name="Premier",     value="Premier"),
-            app_commands.Choice(name="Traditional", value="Traditional"),
+            app_commands.Choice(name="Traditional", value="Trad"),
             app_commands.Choice(name="Sealed",      value="Sealed"),
             app_commands.Choice(name="Quick",       value="Quick"),
             app_commands.Choice(name="Pod",         value="Pod"),

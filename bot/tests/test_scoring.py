@@ -120,7 +120,7 @@ def test_compute_score_breakdown_returns_per_group():
     assert by_label["Sealed"]["wins"] == 18
 
     # Groups with no rows are skipped
-    assert "Traditional" not in by_label
+    assert "Trad" not in by_label
     assert "Quick" not in by_label
 
 

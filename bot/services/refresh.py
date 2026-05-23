@@ -40,13 +40,8 @@ from bot.sets import ACTIVE_SET_CODE
 PERIODIC_WINDOW_DAYS = 7
 
 
-_TRAD_LABEL = "Trad"
-
-# Mirror the SQL _FORMAT_LABEL_CASE in public_player_format_breakdown
 _RAW_FORMAT_TO_LABEL: dict[str, str] = {
-    fmt: (_TRAD_LABEL if g.label == "Traditional" else g.label)
-    for g in DEFAULT_QUEUE_GROUPS
-    for fmt in g.formats
+    fmt: g.label for g in DEFAULT_QUEUE_GROUPS for fmt in g.formats
 }
 
 logger = logging.getLogger(__name__)

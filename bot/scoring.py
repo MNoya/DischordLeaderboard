@@ -14,8 +14,10 @@ groups sit dormant until WOTC actually runs LCQ events for the season.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Iterable, Sequence
 
 from bot.sets import is_collector_booster_window
@@ -30,42 +32,23 @@ class QueueGroup:
     rule: str | None = None
 
 
-DEFAULT_QUEUE_GROUPS: tuple[QueueGroup, ...] = (
-    QueueGroup("Premier", points=10, formats=("PremierDraft", "ContenderDraft")),
-    QueueGroup("Traditional", points=8, formats=("TradDraft",)),
+BUCKETS_JSON = Path(__file__).resolve().parents[1] / "scoring_buckets.json"
+
+DEFAULT_QUEUE_GROUPS: tuple[QueueGroup, ...] = tuple(
     QueueGroup(
-        "Sealed",
-        points=8,
-        formats=(
-            "Sealed",
-            "TradSealed",
-            "ArenaDirect_Sealed",
-            "QualifierPlayInSealed",
-            "QualifierPlayInTradSealed",
-            "Qualifier_D1_Sealed",
-            "Qualifier_D2_Sealed",
-        ),
-    ),
-    QueueGroup("Quick", points=4, formats=("QuickDraft", "PickTwoDraft", "Emblem_QuickDraft")),
-    QueueGroup("LCQ Draft 1", points=30, formats=("LimitedChampionshipQualifier_Draft1",)),
-    QueueGroup(
-        "LCQ Draft 2",
-        points=10,
-        formats=("LimitedChampionshipQualifier_Draft2",),
-        rule="lcq_draft_2",
-    ),
+        label=g["label"],
+        points=int(g["points"]),
+        formats=tuple(g["formats"]),
+        rule=g.get("rule"),
+    )
+    for g in json.loads(BUCKETS_JSON.read_text())["groups"]
 )
+
+ARENA_DIRECT_SEALED_FORMAT = "ArenaDirect_Sealed"
 
 
 def supported_formats(groups: Iterable[QueueGroup] = DEFAULT_QUEUE_GROUPS) -> tuple[str, ...]:
     return tuple(fmt for g in groups for fmt in g.formats)
-
-
-def _group_for_format(groups: Iterable[QueueGroup], fmt: str) -> QueueGroup | None:
-    for g in groups:
-        if fmt in g.formats:
-            return g
-    return None
 
 
 def compute_score_breakdown(
@@ -139,9 +122,6 @@ def compute_score(
     return round(total, 2)
 
 
-ARENA_DIRECT_SEALED_FORMAT = "ArenaDirect_Sealed"
-
-
 def boxes_for_event(set_code: str, wins: int, finished_at: datetime | None) -> int:
     """Boxes awarded for a single Arena Direct Sealed event.
 
@@ -154,3 +134,10 @@ def boxes_for_event(set_code: str, wins: int, finished_at: datetime | None) -> i
     if finished_at is not None and is_collector_booster_window(set_code, finished_at.date()):
         return 1 if wins == 7 else 0
     return 2 if wins == 7 else 1
+
+
+def _group_for_format(groups: Iterable[QueueGroup], fmt: str) -> QueueGroup | None:
+    for g in groups:
+        if fmt in g.formats:
+            return g
+    return None
