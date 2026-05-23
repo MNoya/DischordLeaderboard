@@ -8,7 +8,6 @@
 
 import { supabase } from "./supabase";
 import {
-  adaptColorsRow,
   adaptDraftEvent,
   adaptFormatBreakdown,
   adaptLeaderboardRow,
@@ -58,41 +57,17 @@ export async function fetchFormatColorsLeaderboard(
     const arch = Array.isArray(archetypes) ? archetypes[0] : archetypes;
     return fetchPodColorsLeaderboard(setCode, arch, null);
   }
-  const labels = FORMAT_LABEL_GROUPS[format] ?? [format];
   const archs = Array.isArray(archetypes) ? archetypes : [archetypes];
   if (archs.length === 0) return [];
-  const { data, error } = await client()
-    .from("public_player_format_archetype_leaderboard")
-    .select("*")
-    .eq("set_code", setCode)
-    .in("archetype", archs)
-    .in("format_label", labels);
-  if (error) throw error;
-  // Aggregate per player (LCQ splits into two labels)
-  const agg = new Map<string, ColorsLeaderboardRow>();
-  for (const r of (data ?? [])) {
-    const row = adaptColorsRow(r as Record<string, unknown>);
-    const prev = agg.get(row.slug);
-    if (!prev) {
-      agg.set(row.slug, row);
-    } else {
-      prev.score += row.score;
-      prev.trophies += row.trophies;
-      prev.events += row.events;
-      prev.wins += row.wins;
-      prev.losses += row.losses;
-    }
-  }
-  return Array.from(agg.values())
-    .filter((r) => r.events > 0)
-    .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      const wpA = a.wins / Math.max(1, a.wins + a.losses);
-      const wpB = b.wins / Math.max(1, b.wins + b.losses);
-      if (wpB !== wpA) return wpB - wpA;
-      return a.slug.localeCompare(b.slug);
-    })
-    .map((r, i) => ({ ...r, rank: i + 1 }));
+  const archSet = new Set(archs);
+  const matcher = archSet.has(MULTI) && archs.length === 1
+    ? (c: string) => effectiveColorCount(c) >= 4
+    : (c: string) => {
+        if (effectiveColorCount(c) >= 4) return archSet.has(MULTI);
+        return archSet.has(colorsOf(c));
+      };
+  const bucketLabel = archs.length === 1 ? archs[0] : archs.join(",");
+  return aggregateColorsFromEvents(setCode, bucketLabel, matcher, format);
 }
 
 export async function fetchAvailableFormats(setCode: string): Promise<string[]> {
@@ -118,13 +93,52 @@ export async function fetchAvailableFormats(setCode: string): Promise<string[]> 
 // ─── public_leaderboard ────────────────────────────────────────────────────
 
 export async function fetchLeaderboard(setCode: string): Promise<LeaderboardRow[]> {
-  const { data, error } = await client()
-    .from("public_leaderboard")
-    .select("*")
-    .eq("set_code", setCode)
-    .order("rank", { ascending: true });
-  if (error) throw error;
-  return (data ?? []).map((r) => adaptLeaderboardRow(r as Record<string, unknown>));
+  const [leaderboard, breakdown] = await Promise.all([
+    client().from("public_leaderboard").select("*").eq("set_code", setCode),
+    client().from("public_player_format_breakdown").select("*").eq("set_code", setCode),
+  ]);
+  if (leaderboard.error) throw leaderboard.error;
+  if (breakdown.error) throw breakdown.error;
+
+  const scoreBySlug = new Map<string, number>();
+  for (const raw of breakdown.data ?? []) {
+    const r = raw as Record<string, unknown>;
+    const slug = r.slug as string;
+    const contribution = bucketScoreContribution(
+      r.format_label as string,
+      (r.events as number) ?? 0,
+      (r.wins as number) ?? 0,
+      (r.losses as number) ?? 0,
+      (r.trophies as number) ?? 0,
+    );
+    scoreBySlug.set(slug, (scoreBySlug.get(slug) ?? 0) + contribution);
+  }
+
+  const rows: LeaderboardRow[] = [];
+  for (const raw of leaderboard.data ?? []) {
+    const r = raw as Record<string, unknown>;
+    const slug = r.slug as string;
+    rows.push({
+      setCode,
+      slug,
+      displayName: r.display_name as string,
+      avatarUrl: (r.avatar_url ?? null) as string | null,
+      rank: 0,
+      score: Math.round((scoreBySlug.get(slug) ?? 0) * 100) / 100,
+      trophies: (r.trophies as number) ?? 0,
+      events: (r.events as number) ?? 0,
+      wins: (r.wins as number) ?? 0,
+      losses: (r.losses as number) ?? 0,
+      lastCalculatedAt: (r.last_calculated_at as string) ?? new Date(0).toISOString(),
+    });
+  }
+
+  return rows
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return a.displayName.localeCompare(b.displayName);
+    })
+    .map((r, i) => ({ ...r, rank: i + 1 }));
 }
 
 // ─── per-format leaderboard ────────────────────────────────────────────────
@@ -222,23 +236,34 @@ export async function fetchFormatLeaderboard(
 }
 
 export async function fetchColorsSummary(setCode: string): Promise<ColorsSummary[]> {
-  const { data, error } = await client()
-    .from("public_archetype_leaderboard")
-    .select("archetype, trophies, events")
-    .eq("set_code", setCode);
-  if (error) throw error;
+  const allEvents: Array<Record<string, unknown>> = [];
+  const pageSize = 1000;
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await client()
+      .from("public_player_draft_events")
+      .select("slug, colors, is_trophy")
+      .eq("set_code", setCode)
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    const batch = (data ?? []) as Array<Record<string, unknown>>;
+    allEvents.push(...batch);
+    if (batch.length < pageSize) break;
+  }
 
-  const agg = new Map<string, { trophies: number; events: number; players: number }>();
-  for (const r of (data ?? []) as Array<Record<string, unknown>>) {
-    const c = r.archetype as string;
-    const cur = agg.get(c) ?? { trophies: 0, events: 0, players: 0 };
-    cur.trophies += (r.trophies as number) ?? 0;
-    cur.events += (r.events as number) ?? 0;
-    cur.players += 1;
-    agg.set(c, cur);
+  const agg = new Map<string, { trophies: number; events: number; players: Set<string> }>();
+  for (const raw of allEvents) {
+    const colors = (raw.colors as string | null) ?? "";
+    const slug = raw.slug as string;
+    const key = effectiveColorCount(colors) >= 4 ? MULTI : colorsOf(colors);
+    if (!key) continue;
+    const cur = agg.get(key) ?? { trophies: 0, events: 0, players: new Set<string>() };
+    cur.events += 1;
+    if (raw.is_trophy) cur.trophies += 1;
+    cur.players.add(slug);
+    agg.set(key, cur);
   }
   return Array.from(agg.entries())
-    .map(([colors, v]) => ({ setCode, colors, ...v }))
+    .map(([colors, v]) => ({ setCode, colors, trophies: v.trophies, events: v.events, players: v.players.size }))
     .sort((a, b) => b.trophies - a.trophies);
 }
 
@@ -246,29 +271,12 @@ export async function fetchColorsLeaderboard(
   setCode: string,
   colors: string,
 ): Promise<ColorsLeaderboardRow[]> {
-  const { data, error } = await client()
-    .from("public_archetype_leaderboard")
-    .select("*")
-    .eq("set_code", setCode)
-    .eq("archetype", colors);
-  if (error) throw error;
-  return (data ?? [])
-    .map((r) => adaptColorsRow(r as Record<string, unknown>))
-    .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      const wpA = a.wins / Math.max(1, a.wins + a.losses);
-      const wpB = b.wins / Math.max(1, b.wins + b.losses);
-      if (wpB !== wpA) return wpB - wpA;
-      return a.slug.localeCompare(b.slug);
-    })
-    .map((r, i) => ({ ...r, rank: i + 1 }));
+  const matcher = colors === MULTI
+    ? (c: string) => effectiveColorCount(c) >= 4
+    : (c: string) => effectiveColorCount(c) < 4 && colorsOf(c) === colors;
+  return aggregateColorsFromEvents(setCode, colors, matcher, null);
 }
 
-// OTHER aggregates raw events client-side because the archetype rollup also
-// counts splash-into-MULTI trophies under their main archetype, which would
-// double-count them into the OTHER bucket. By walking events directly we can
-// enforce "main archetype is sub-threshold AND effective < 4" — keeping OTHER
-// and SOUP exclusive — at the cost of fetching the set's full event stream.
 export async function fetchOtherColorsLeaderboard(
   setCode: string,
   otherCombos: string[],
@@ -279,12 +287,24 @@ export async function fetchOtherColorsLeaderboard(
     return fetchPodColorsLeaderboard(setCode, OTHER, otherCombos);
   }
   const otherSet = new Set(otherCombos);
+  const matcher = (c: string) => effectiveColorCount(c) < 4 && otherSet.has(colorsOf(c));
+  return aggregateColorsFromEvents(setCode, OTHER, matcher, formatFilter);
+}
+
+async function aggregateColorsFromEvents(
+  setCode: string,
+  bucketLabel: string,
+  colorMatches: (colors: string) => boolean,
+  formatFilter: string | null | undefined,
+): Promise<ColorsLeaderboardRow[]> {
+  if (formatFilter === "Pod") {
+    return fetchPodColorsLeaderboard(setCode, bucketLabel, null);
+  }
   const formatGroup = formatFilter
     ? (FORMAT_RAW_GROUPS[formatFilter] ?? [formatFilter])
     : null;
   const formatAllowed = formatGroup ? new Set(formatGroup) : null;
 
-  // Supabase caps each request at db-max-rows (default 1000). Page until done.
   const allEvents: Array<Record<string, unknown>> = [];
   const pageSize = 1000;
   for (let from = 0; ; from += pageSize) {
@@ -322,8 +342,7 @@ export async function fetchOtherColorsLeaderboard(
 
   for (const raw of allEvents) {
     const colors = (raw.colors as string | null) ?? "";
-    if (effectiveColorCount(colors) >= 4) continue;
-    if (!otherSet.has(colorsOf(colors))) continue;
+    if (!colorMatches(colors)) continue;
 
     const slug = raw.slug as string;
     const fmt = (raw.format as string) ?? "";
@@ -352,7 +371,7 @@ export async function fetchOtherColorsLeaderboard(
     const meta = metaBySlug.get(slug);
     rows.push({
       setCode,
-      colors: "OTHER",
+      colors: bucketLabel,
       slug,
       displayName: (meta?.display_name as string) ?? slug,
       avatarUrl: (meta?.avatar_url as string | null) ?? null,
@@ -406,13 +425,15 @@ export async function fetchPlayerProfile(
   const breakdown = (breakdownResp.data ?? []).map((r) =>
     adaptFormatBreakdown(r as Record<string, unknown>),
   );
+  const board = await fetchLeaderboard(setCode);
+  const inBoard = board.find((r) => r.slug === slug);
   return {
     slug: headline.slug,
     displayName: headline.displayName,
     avatarUrl: headline.avatarUrl,
     setCode: headline.setCode,
-    rank: headline.rank,
-    score: headline.score,
+    rank: inBoard?.rank ?? 0,
+    score: inBoard?.score ?? 0,
     trophies: headline.trophies,
     events: headline.events,
     wins: headline.wins,

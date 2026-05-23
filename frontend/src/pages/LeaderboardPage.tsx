@@ -647,13 +647,13 @@ function DesktopExpandedRow({
     <Link
       to={to}
       aria-label={`View ${row.displayName}'s profile`}
-      className="pt-3.5 pb-4 pr-4 pl-[76px] border-t border-dashed border-border2 flex items-center gap-6 cursor-pointer transition-colors hover:bg-green/5 no-underline text-inherit"
+      className="pt-3 pb-2 pr-4 pl-[76px] border-t border-dashed border-border2 flex items-start gap-6 cursor-pointer transition-colors hover:bg-green/5 no-underline text-inherit"
     >
       <div className="flex-1 min-w-0 overflow-hidden"><FormatBreakdownPreview breakdown={profile?.formatBreakdown} /></div>
       <div className="flex-1 min-w-0 overflow-hidden"><MostPlayedDecks events={events} /></div>
       <div className="flex-1 min-w-0 overflow-hidden"><LastTrophyPanel data={trophiesToShow} decks={scopedDecks} loading={!events} activeFormat={activeFormat} activeColors={activeColors} /></div>
-      <div className="flex-[0.4] min-w-0 overflow-hidden flex items-center justify-center -ml-6"><BiggestStreakPanel data={biggestStreak} loading={!events} /></div>
-      <ChamferedButton className="!pt-[10px] !pb-[10px]">
+      <div className="flex-[0.4] min-w-0 overflow-hidden self-stretch -ml-6"><BiggestStreakPanel data={biggestStreak} loading={!events} /></div>
+      <ChamferedButton className="!pt-[10px] !pb-[10px] self-center">
         <span className="inline-flex items-center gap-2">
           VIEW PROFILE
           <ArrowRight size={12} />
@@ -685,7 +685,7 @@ function FormatBreakdownPreview({
   const numCls = dense ? "text-[11px]" : "text-[12px]";
   return (
     <div style={{ minHeight: PANEL_MIN_HEIGHT }}>
-      <SectionLabel className="text-subtle">FORMAT BREAKDOWN</SectionLabel>
+      <SectionLabel size={13} className="text-subtle">FORMAT BREAKDOWN</SectionLabel>
       <div className="flex items-center gap-2.5 mt-2 min-w-0">
         <div className="shrink-0">
           <DonutChart
@@ -753,7 +753,7 @@ function MostPlayedDecks({ events }: { events: PlayerDraftEvent[] | undefined })
 
   return (
     <div style={{ minHeight: PANEL_MIN_HEIGHT }}>
-      <SectionLabel className="text-subtle">MOST PLAYED DECKS</SectionLabel>
+      <SectionLabel size={13} className="text-subtle">MOST PLAYED DECKS</SectionLabel>
       <div
         className="grid items-center gap-x-3 gap-y-1 mt-2 w-fit"
         style={{ gridTemplateColumns: "auto 64px auto" }}
@@ -887,7 +887,7 @@ function LastTrophyPanel({
   const headerNoun = showDecks ? "DECKS" : "TROPHIES";
   return (
     <div style={{ minHeight: PANEL_MIN_HEIGHT }}>
-      <SectionLabel className="text-subtle">
+      <SectionLabel size={13} className="text-subtle">
         LAST{filterLabel && (
           <>
             {" "}
@@ -969,12 +969,10 @@ function BiggestStreakPanel({
   loading: boolean;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center" style={{ minHeight: PANEL_MIN_HEIGHT }}>
-      <SectionLabel className="text-subtle text-center">MAX TROPHY</SectionLabel>
+    <div className="flex flex-col items-center justify-center h-full" style={{ minHeight: PANEL_MIN_HEIGHT }}>
+      <SectionLabel size={13} className="text-subtle text-center">MAX TROPHY</SectionLabel>
       {loading ? (
-        <div className="mt-1 flex justify-center">
-          <span className="block h-5 w-12 bg-surface2" />
-        </div>
+        <span className="block h-5 w-12 bg-surface2 mt-1" />
       ) : data ? (
         <>
           <span className="flex items-center gap-1.5 my-0.5">
@@ -983,7 +981,7 @@ function BiggestStreakPanel({
               ×{data.count}
             </span>
           </span>
-          <SectionLabel className="text-subtle text-center">STREAK</SectionLabel>
+          <SectionLabel size={13} className="text-subtle text-center">STREAK</SectionLabel>
         </>
       ) : (
         <div className="mono text-[12px] text-muted text-center mt-1">—</div>
