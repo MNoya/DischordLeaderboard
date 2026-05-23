@@ -31,7 +31,7 @@ class QueueGroup:
 
 
 DEFAULT_QUEUE_GROUPS: tuple[QueueGroup, ...] = (
-    QueueGroup("Premier", points=10, formats=("PremierDraft",)),
+    QueueGroup("Premier", points=10, formats=("PremierDraft", "ContenderDraft")),
     QueueGroup("Traditional", points=8, formats=("TradDraft",)),
     QueueGroup(
         "Sealed",
