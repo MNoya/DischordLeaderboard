@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from bot import audit
 from bot.database import SessionLocal
 from bot.models import Player
+from bot.services import bot_log
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,9 @@ class Signout(commands.Cog):
         logger.info(f"retire: {username} → {result.kind}")
 
         if result.kind == "signed_out":
+            await bot_log.get(self.bot).post_plain(
+                f"🧎‍♂️ **{interaction.user.display_name}** retired from the leaderboard"
+            )
             in_guild = interaction.guild is not None
             if in_guild:
                 # Guild context — DM the actual confirmation so the user is already

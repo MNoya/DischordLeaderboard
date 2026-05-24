@@ -31,6 +31,7 @@ from bot.commands.update_profile import process_update_profile
 from bot.database import SessionLocal
 from bot.discord_helpers import extract_avatar_hash
 from bot.models import Player
+from bot.services import bot_log
 from bot.services.dm_flows import dm_flow, is_in_flight
 from bot.services.refresh import refresh_one_player_for_all_sets
 from bot.services.seventeenlands import SeventeenLandsClient, extract_token
@@ -125,6 +126,9 @@ class AutoLinkListener(commands.Cog):
                 refresh_one_player_for_all_sets(session, self.client, result.player_id)
                 session.commit()
             await _safe_broadcast(self.bot)
+            await bot_log.get(self.bot).post_plain(
+                f"🆕 **{message.author.display_name}** joined the leaderboard"
+            )
             await _safe_dm(message.author, MSG_SUCCESS)
         elif result.kind == "token_in_use":
             await _safe_dm(message.author, MSG_TOKEN_IN_USE)
@@ -158,6 +162,9 @@ class AutoLinkListener(commands.Cog):
                 session.commit()
             if was_inactive:
                 await _safe_broadcast(self.bot)
+                await bot_log.get(self.bot).post_plain(
+                    f"🔁 **{message.author.display_name}** rejoined the leaderboard"
+                )
                 await _safe_dm(message.author, MSG_WELCOME_BACK)
             else:
                 await _safe_dm(message.author, MSG_SUCCESS)

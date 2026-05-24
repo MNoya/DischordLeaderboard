@@ -3,9 +3,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import logging.handlers
+import os
 import signal
 import traceback
-from datetime import datetime, time as dtime, timedelta, timezone
+from datetime import datetime, time as dtime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -45,11 +46,6 @@ from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_tournament import (
     register_persistent_views as register_pod_views,
 )
-from bot.services.onboarding_report import (
-    format_report_section as format_onboarding_section,
-    recent_join_failures,
-    recent_joiners,
-)
 from bot.services.refresh import refresh_active_players
 from bot.services.seventeenlands import MinIntervalLimiter, SeventeenLandsClient
 from bot.sets import ACTIVE_SET_CODE
@@ -62,10 +58,28 @@ LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
 
 AUTO_REFRESH_TZ = ZoneInfo("America/Montevideo")
 AUTO_REFRESH_TIMES = [
+    dtime(hour=2, minute=0, tzinfo=AUTO_REFRESH_TZ),
     dtime(hour=8, minute=0, tzinfo=AUTO_REFRESH_TZ),
+    dtime(hour=14, minute=0, tzinfo=AUTO_REFRESH_TZ),
     dtime(hour=20, minute=0, tzinfo=AUTO_REFRESH_TZ),
 ]
 AUTO_REFRESH_17L_INTERVAL_S = 3.0
+
+MSG_GENERIC_ERROR = "⚠️ Something went wrong handling that command. The bot owner has been notified."
+
+
+def main() -> None:
+    if settings.discord_bot_token is None or settings.discord_guild_id is None:
+        raise SystemExit("DISCORD_BOT_TOKEN and DISCORD_GUILD_ID must be set to run the bot")
+
+    _restart_banner()
+    configure_logging()
+    run_migrations()
+
+    signal.signal(signal.SIGTERM, lambda *_: signal.raise_signal(signal.SIGINT))
+
+    bot = build_bot(settings.discord_guild_id)
+    bot.run(settings.discord_bot_token.get_secret_value(), log_handler=None)
 
 
 def configure_logging() -> None:
@@ -88,76 +102,6 @@ def configure_logging() -> None:
 
     for noisy in ("discord.http", "engineio.client", "socketio.client"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
-
-
-MSG_GENERIC_ERROR = "⚠️ Something went wrong handling that command. The bot owner has been notified."
-
-
-async def _notify_owner(bot: commands.Bot, header: str, body: str) -> None:
-    """Best-effort DM the bot's owner. Crashes inside the notifier itself are swallowed."""
-    owner_id = bot.owner_id
-    if owner_id is None:
-        return
-    try:
-        owner = bot.get_user(owner_id) or await bot.fetch_user(owner_id)
-        # Discord caps message body at 2000 chars; truncate the traceback to fit comfortably
-        snippet = body[-1700:]
-        await owner.send(f"{header}\n```\n{snippet}\n```")
-    except discord.HTTPException:
-        log.warning("could not DM owner about crash", exc_info=True)
-
-
-def _resolve_pending_pod(identifier: str | None) -> dict | str:
-    """Resolve `identifier` to a single pending PodDraftEvent. Returns a dict with id / name /
-    session_id on success, or a string error message ready to relay to the caller.
-
-    With no identifier, returns the lone pending event if exactly one is queued, otherwise lists
-    all candidates so the caller can be specific. Pending = `socket_status == 'pending'`.
-    """
-    with SessionLocal() as session:
-        pending = session.execute(
-            select(PodDraftEvent).where(PodDraftEvent.socket_status == "pending")
-            .order_by(PodDraftEvent.event_time.asc())
-        ).scalars().all()
-        if identifier:
-            ident = identifier.strip()
-            match = next(
-                (e for e in pending
-                 if e.id == ident or e.discord_thread_id == ident or e.sesh_message_id == ident),
-                None,
-            )
-            if match is None:
-                return f"❌ No pending pod-draft matches `{ident}` (id, thread, or sesh message)."
-            return {"id": match.id, "name": match.name, "session_id": match.draftmancer_session}
-
-        if not pending:
-            return "❌ No pending pod-draft events to open."
-        if len(pending) > 1:
-            lines = [
-                f"- `{e.id}` · {e.name} · {e.event_time:%Y-%m-%d %H:%M %Z} · thread `{e.discord_thread_id}`"
-                for e in pending
-            ]
-            return "⚠️ Multiple pending pods — pick one with `!start <id>`:\n" + "\n".join(lines)
-        e = pending[0]
-        return {"id": e.id, "name": e.name, "session_id": e.draftmancer_session}
-
-
-def _fmt_elapsed(seconds: float) -> str:
-    if seconds < 60:
-        return f"{seconds:.1f}s"
-    minutes, sec = divmod(int(round(seconds)), 60)
-    return f"{minutes}m {sec}s"
-
-
-def _fmt_eta(delta: object) -> str:
-    total = int(delta.total_seconds())
-    if total < 0:
-        return "overdue"
-    h, rem = divmod(total, 3600)
-    m = rem // 60
-    if h:
-        return f"{h}h {m}m"
-    return f"{m}m"
 
 
 def build_bot(guild_id: int) -> commands.Bot:
@@ -285,10 +229,10 @@ def build_bot(guild_id: int) -> commands.Bot:
         await _reply_quietly(ctx, f"✅ Synced: {len(synced_guild)} guild, {len(synced_global)} global.")
 
     async def run_refresh(*, trigger: str) -> dict:
-        """Pull 17lands data, recompute scores, repaint live messages, DM the owner a report.
+        """Pull 17lands data, recompute scores, repaint live messages, post a report to bot-spam.
 
         ``trigger`` is "manual" (``!refresh`` DM) or "auto" (periodic tick); both use the
-        same active-set window. Tag is included in the owner DM so the source is obvious.
+        same active-set window. Tag is included in the channel post so the source is obvious.
         """
         msg_invalidated_dm = (
             "⚠️ Your 17lands token appears to be invalid (possibly regenerated). "
@@ -356,7 +300,7 @@ def build_bot(guild_id: int) -> commands.Bot:
             "trigger": trigger,
         }
 
-        await _dm_owner_refresh_report(result)
+        await _post_refresh_report(result)
 
         with SessionLocal() as session:
             full_data = process_leaderboard(session, viewer_discord_id=None, top_n=10**6)
@@ -369,14 +313,12 @@ def build_bot(guild_id: int) -> commands.Bot:
 
         return result
 
-    async def _dm_owner_refresh_report(result: dict) -> None:
-        if bot.owner_id is None:
-            return
+    async def _post_refresh_report(result: dict) -> None:
         summary = result["summary"]
         per_player = summary.get("per_player", [])
         n_players = len(per_player)
         elapsed = _fmt_elapsed(summary.get("elapsed_s", 0.0))
-        avg = f" | {summary['elapsed_s'] / n_players:.1f}s avg" if n_players else ""
+        avg = f"{summary['elapsed_s'] / n_players:.1f}s avg" if n_players else ""
         trigger = result["trigger"].title()
 
         rows: list[str] = [
@@ -396,8 +338,8 @@ def build_bot(guild_id: int) -> commands.Bot:
             log.info(row)
 
         body = (
-            f"🔄 Refresh complete\n"
-            f"Elapsed: {elapsed} · Players: {n_players}{avg.strip()}\n"
+            f"🔄 {trigger} refresh complete\n"
+            f"Elapsed: {elapsed} · Players: {n_players} · {avg}\n"
             f"Updated: {summary['updated']} · "
             f"Invalidated: {summary['invalidated']} · "
             f"Errors: {summary['errors']}\n"
@@ -412,20 +354,7 @@ def build_bot(guild_id: int) -> commands.Bot:
             tally = ", ".join(f"`{exp}` ×{n}" for exp, n in sorted(unrouted.items(), key=lambda kv: (-kv[1], kv[0])))
             body += f"\n⚠️ Unrouted expansion(s) — events stored without a set (add to bot/sets.py): {tally}"
 
-        now = datetime.now(timezone.utc)
-        since = now - timedelta(hours=12)
-        with SessionLocal() as session:
-            joiners = recent_joiners(session, since)
-        failures = recent_join_failures(since)
-        section = format_onboarding_section(joiners, failures, now=now)
-        if section:
-            body += "\n\n" + section
-
-        try:
-            owner = bot.get_user(bot.owner_id) or await bot.fetch_user(bot.owner_id)
-            await owner.send(content=body)
-        except discord.HTTPException:
-            log.warning("could not DM owner the refresh report", exc_info=True)
+        await bot.bot_log.post_plain(body)
 
     @bot.command(name="refresh")
     @commands.is_owner()
@@ -479,6 +408,8 @@ def build_bot(guild_id: int) -> commands.Bot:
     async def _before_auto_refresh() -> None:
         await bot.wait_until_ready()
 
+    bot.startup_announced = False
+
     @bot.event
     async def on_ready() -> None:
         log.info(f"logged in as {bot.user} (id={bot.user.id if bot.user else '?'})")
@@ -486,6 +417,9 @@ def build_bot(guild_id: int) -> commands.Bot:
             type=discord.ActivityType.competing,
             name="dischord.pages.dev | /join",
         ))
+        if not bot.startup_announced:
+            bot.startup_announced = True
+            await bot.bot_log.post_plain(_deploy_announcement())
         if not settings.auto_refresh_enabled:
             log.info("AUTO_REFRESH_ENABLED=false; skipping the scheduled 17lands refresh tick")
             return
@@ -493,6 +427,89 @@ def build_bot(guild_id: int) -> commands.Bot:
             auto_refresh_tick.start()
 
     return bot
+
+
+async def _notify_owner(bot: commands.Bot, header: str, body: str) -> None:
+    """Best-effort DM the bot's owner. Crashes inside the notifier itself are swallowed."""
+    owner_id = bot.owner_id
+    if owner_id is None:
+        return
+    try:
+        owner = bot.get_user(owner_id) or await bot.fetch_user(owner_id)
+        # Discord caps message body at 2000 chars; truncate the traceback to fit comfortably
+        snippet = body[-1700:]
+        await owner.send(f"{header}\n```\n{snippet}\n```")
+    except discord.HTTPException:
+        log.warning("could not DM owner about crash", exc_info=True)
+
+
+def _resolve_pending_pod(identifier: str | None) -> dict | str:
+    """Resolve `identifier` to a single pending PodDraftEvent. Returns a dict with id / name /
+    session_id on success, or a string error message ready to relay to the caller.
+
+    With no identifier, returns the lone pending event if exactly one is queued, otherwise lists
+    all candidates so the caller can be specific. Pending = `socket_status == 'pending'`.
+    """
+    with SessionLocal() as session:
+        pending = session.execute(
+            select(PodDraftEvent).where(PodDraftEvent.socket_status == "pending")
+            .order_by(PodDraftEvent.event_time.asc())
+        ).scalars().all()
+        if identifier:
+            ident = identifier.strip()
+            match = next(
+                (e for e in pending
+                 if e.id == ident or e.discord_thread_id == ident or e.sesh_message_id == ident),
+                None,
+            )
+            if match is None:
+                return f"❌ No pending pod-draft matches `{ident}` (id, thread, or sesh message)."
+            return {"id": match.id, "name": match.name, "session_id": match.draftmancer_session}
+
+        if not pending:
+            return "❌ No pending pod-draft events to open."
+        if len(pending) > 1:
+            lines = [
+                f"- `{e.id}` · {e.name} · {e.event_time:%Y-%m-%d %H:%M %Z} · thread `{e.discord_thread_id}`"
+                for e in pending
+            ]
+            return "⚠️ Multiple pending pods — pick one with `!start <id>`:\n" + "\n".join(lines)
+        e = pending[0]
+        return {"id": e.id, "name": e.name, "session_id": e.draftmancer_session}
+
+
+def _fmt_elapsed(seconds: float) -> str:
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes, sec = divmod(int(round(seconds)), 60)
+    return f"{minutes}m {sec}s"
+
+
+def _fmt_eta(delta: object) -> str:
+    total = int(delta.total_seconds())
+    if total < 0:
+        return "overdue"
+    h, rem = divmod(total, 3600)
+    m = rem // 60
+    if h:
+        return f"{h}h {m}m"
+    return f"{m}m"
+
+
+def _deploy_announcement() -> str:
+    """Build the startup channel post, enriching with Railway's git env vars if present."""
+    sha = os.environ.get("RAILWAY_GIT_COMMIT_SHA") or ""
+    if not sha:
+        return "🚀 Bot redeployed"
+    short = sha[:7]
+    link = f"[`{short}`](https://github.com/MNoya/DischordLeaderboard/commit/{sha})"
+    raw = (os.environ.get("RAILWAY_GIT_COMMIT_MESSAGE") or "").strip()
+    subject = raw.split("\n", 1)[0].strip() if raw else ""
+    if subject:
+        if len(subject) > 120:
+            subject = subject[:119] + "…"
+        return f"🚀 Bot redeployed: {link} {subject}"
+    return f"🚀 Bot redeployed: {link}"
 
 
 def _log_startup_summary() -> None:
@@ -532,20 +549,6 @@ def _restart_banner() -> None:
     from datetime import datetime
     line = f"═══════════ BOT RESTART @ {datetime.now():%Y-%m-%d %H:%M:%S} ═══════════"
     print(f"\033[1;33m{line}\033[0m", file=sys.stderr, flush=True)
-
-
-def main() -> None:
-    if settings.discord_bot_token is None or settings.discord_guild_id is None:
-        raise SystemExit("DISCORD_BOT_TOKEN and DISCORD_GUILD_ID must be set to run the bot")
-
-    _restart_banner()
-    configure_logging()
-    run_migrations()
-
-    signal.signal(signal.SIGTERM, lambda *_: signal.raise_signal(signal.SIGINT))
-
-    bot = build_bot(settings.discord_guild_id)
-    bot.run(settings.discord_bot_token.get_secret_value(), log_handler=None)
 
 
 if __name__ == "__main__":

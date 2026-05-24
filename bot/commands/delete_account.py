@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from bot import audit
 from bot.database import SessionLocal
 from bot.models import Player
+from bot.services import bot_log
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,10 @@ class DeleteAccount(commands.Cog):
 
         audit.event("delete_account_result", user_id=user_id, kind=result.kind, deleted_player_id=result.deleted_player_id)
         logger.info(f"exile: {username} deleted player_id={result.deleted_player_id}")
+        if result.kind == "deleted":
+            await bot_log.get(self.bot).post_plain(
+                f"🗑️ **{interaction.user.display_name}** exiled from the leaderboard"
+            )
         await interaction.followup.send(MSG_DELETED, ephemeral=(interaction.guild is not None))
 
 

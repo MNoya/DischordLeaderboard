@@ -23,6 +23,7 @@ from bot.commands.stats import process_stats, render_embed as render_stats_embed
 from bot.database import SessionLocal
 from bot.discord_helpers import extract_avatar_hash
 from bot.models import Player
+from bot.services import bot_log
 from bot.services.dm_flows import dm_flow, is_in_flight
 from bot.services.refresh import refresh_one_player_for_all_sets
 from bot.services.seventeenlands import SeventeenLandsClient, classify_token_reply, extract_token
@@ -199,6 +200,9 @@ class Signup(commands.Cog):
                 refresh_one_player_for_all_sets(session, self.client, check.player_id)
                 session.commit()
             await _broadcast_current_set_safely(self.bot)
+            await bot_log.get(self.bot).post_plain(
+                f"🔁 **{interaction.user.display_name}** rejoined the leaderboard"
+            )
             # Welcome-back text uses the followup so the deferred interaction resolves;
             # leaderboard + stats go via dm.send so they render as plain bot messages
             # rather than threaded replies under the welcome-back message.
@@ -306,6 +310,9 @@ class Signup(commands.Cog):
             refresh_one_player_for_all_sets(session, self.client, result.player_id)
             session.commit()
         await _broadcast_current_set_safely(self.bot)
+        await bot_log.get(self.bot).post_plain(
+            f"🆕 **{interaction.user.display_name}** joined the leaderboard"
+        )
         await dm.send(MSG_SUCCESS)
 
         # Show the leaderboard right here in DM, plus the personal stats

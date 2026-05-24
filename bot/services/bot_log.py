@@ -39,10 +39,8 @@ class BotLog:
         body = f"**[{tag}]** {summary}"
         if len(body) > _MESSAGE_MAX_CHARS:
             body = body[:_MESSAGE_MAX_CHARS]
-        try:
-            channel = self.bot.get_channel(self.channel_id) or await self.bot.fetch_channel(self.channel_id)
-        except discord.HTTPException:
-            log.warning(f"bot_log channel {self.channel_id} unreachable", exc_info=True)
+        channel = await self._resolve_channel()
+        if channel is None:
             return
         try:
             await channel.send(body)
@@ -53,6 +51,29 @@ class BotLog:
         if len(self._last_posted) > 256:
             cutoff = now - _PER_FP_COOLDOWN_S * 4
             self._last_posted = {k: v for k, v in self._last_posted.items() if v > cutoff}
+
+    async def post_plain(self, content: str | None = None, *, embed: "discord.Embed | None" = None) -> None:
+        """Send raw content/embed to the bot-spam channel"""
+        if self.channel_id is None:
+            return
+        if content is None and embed is None:
+            return
+        if content is not None and len(content) > _MESSAGE_MAX_CHARS:
+            content = content[:_MESSAGE_MAX_CHARS]
+        channel = await self._resolve_channel()
+        if channel is None:
+            return
+        try:
+            await channel.send(content=content, embed=embed)
+        except discord.HTTPException:
+            log.warning("bot_log channel send failed", exc_info=True)
+
+    async def _resolve_channel(self):
+        try:
+            return self.bot.get_channel(self.channel_id) or await self.bot.fetch_channel(self.channel_id)
+        except discord.HTTPException:
+            log.warning(f"bot_log channel {self.channel_id} unreachable", exc_info=True)
+            return None
 
 
 _NOOP_LOG: "BotLog | None" = None
