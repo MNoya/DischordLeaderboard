@@ -502,7 +502,7 @@ def _deploy_announcement() -> str:
     if not sha:
         return "🚀 Bot redeployed"
     short = sha[:7]
-    link = f"[`{short}`](https://github.com/MNoya/DischordLeaderboard/commit/{sha})"
+    link = f"[`{short}`](<https://github.com/MNoya/DischordLeaderboard/commit/{sha}>)"
     raw = (os.environ.get("RAILWAY_GIT_COMMIT_MESSAGE") or "").strip()
     subject = raw.split("\n", 1)[0].strip() if raw else ""
     if subject:
