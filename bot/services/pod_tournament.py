@@ -831,29 +831,33 @@ class MatchResultSelect(ui.Select):
     def __init__(self, slot: int, match_id: str = "", a_name: str = "", b_name: str = "",
                  a_display: str = "", b_display: str = "",
                  selected_value: str | None = None, winner_name: str | None = None,
-                 is_trophy_match: bool = False):
-        if match_id and a_name and b_name:
+                 is_trophy_match: bool = False, placeholder_text: str = ""):
+        disabled = False
+        if placeholder_text:
+            disabled = True
+            placeholder = placeholder_text[:150]
+            options = [discord.SelectOption(label="—", value="placeholder")]
+        elif match_id and a_name and b_name:
             a_disp = a_display or a_name
             b_disp = b_display or b_name
             base = f"🏆 {a_disp} vs {b_disp} 🏆" if is_trophy_match else f"{a_disp} vs {b_disp}"
             placeholder = base if selected_value else f"⚔️ {base}"
             values = [
-                (f"{a_disp} wins: 2-0", f"{match_id}|{a_name}|2-0", True),
-                (f"{a_disp} wins: 2-1", f"{match_id}|{a_name}|2-1", True),
-                (f"{b_disp} wins: 2-1", f"{match_id}|{b_name}|2-1", True),
-                (f"{b_disp} wins: 2-0", f"{match_id}|{b_name}|2-0", True),
-                ("No Match Played", f"{match_id}|{SKIPPED_SENTINEL}|0-0", False),
+                (f"{a_disp} wins: 2-0", f"{a_disp} wins 2-0 vs {b_disp}", f"{match_id}|{a_name}|2-0", True),
+                (f"{a_disp} wins: 2-1", f"{a_disp} wins 2-1 vs {b_disp}", f"{match_id}|{a_name}|2-1", True),
+                (f"{b_disp} wins: 2-1", f"{b_disp} wins 2-1 vs {a_disp}", f"{match_id}|{b_name}|2-1", True),
+                (f"{b_disp} wins: 2-0", f"{b_disp} wins 2-0 vs {a_disp}", f"{match_id}|{b_name}|2-0", True),
+                ("No Match Played", None, f"{match_id}|{SKIPPED_SENTINEL}|0-0", False),
             ]
             if selected_value:
-                values.insert(0, ("Clear Result", f"{match_id}|{CLEAR_SENTINEL}|0-0", False))
-            options = [
-                discord.SelectOption(
-                    label=f"🏆 {label}" if (is_trophy_match and trophy_eligible) else label,
-                    value=val,
-                    default=(val == selected_value),
-                )
-                for label, val, trophy_eligible in values
-            ]
+                values.insert(0, ("Clear Result", None, f"{match_id}|{CLEAR_SENTINEL}|0-0", False))
+            options = []
+            for short, long, val, trophy_eligible in values:
+                is_selected = val == selected_value
+                label = long if (is_selected and long) else short
+                if is_trophy_match and trophy_eligible:
+                    label = f"🏆 {label}"
+                options.append(discord.SelectOption(label=label[:100], value=val, default=is_selected))
         else:
             placeholder = "Result"
             options = [discord.SelectOption(label="—", value="placeholder")]
@@ -864,6 +868,7 @@ class MatchResultSelect(ui.Select):
             min_values=1,
             max_values=1,
             row=slot,
+            disabled=disabled,
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
@@ -882,6 +887,13 @@ class RoundResultsView(ui.View):
         super().__init__(timeout=None)
         if match_states:
             for slot, m in enumerate(match_states):
+                if m.get("placeholder"):
+                    trophy = "🏆 " if m.get("is_trophy_match") else ""
+                    self.add_item(MatchResultSelect(
+                        slot=slot,
+                        placeholder_text=f"⏳ {trophy}{m['label']}",
+                    ))
+                    continue
                 selected = None
                 if m.get("winner_name") and m.get("score"):
                     selected = f"{m['match_id']}|{m['winner_name']}|{m['score']}"
@@ -2294,6 +2306,10 @@ def _round_embed(round_num: int, match_states: list[dict]) -> discord.Embed:
     title = _round_header(round_num, all_done)
     lines: list[str] = []
     for m in match_states:
+        if m.get("placeholder"):
+            trophy = "🏆 " if m.get("is_trophy_match") else ""
+            lines.append(f"⏳ {trophy}{m['label']}")
+            continue
         a_disp = m.get("a_display") or m["a_name"]
         b_disp = m.get("b_display") or m["b_name"]
         winner = m["winner_name"]

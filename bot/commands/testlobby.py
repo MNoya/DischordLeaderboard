@@ -23,7 +23,7 @@ from bot.commands.testcomponent import (
     _DECK_SCREENSHOT_URL_D,
 )
 
-from bot.services import pod_swiss
+from bot.services import pod_bracket, pod_swiss
 from bot.services.lobby_embed import LobbyReadyButtonView, render as render_lobby_embed
 from bot.services.pod_deck_color import LiveDeckColorSelectView, SubmitDeckView
 from bot.services.pod_drafts import _normalize_player_name as _norm
@@ -238,7 +238,7 @@ _LINKED_EIGHT: list[tuple[str, str]] = [
 ]
 _VALID_STATES = (
     "empty", "partial", "linked", "unlinked", "ready", "notready", "cancelled",
-    "drafting", "complete", "round1", "round3", "champion", "submit",
+    "drafting", "complete", "round1", "round3", "champion", "submit", "podbracket",
 )
 
 # Real deck colors from Pod Draft #3 for the top 4; bottom 4 are fake fill so the in-thread
@@ -418,6 +418,21 @@ def _build(state: str) -> tuple[discord.Embed, discord.ui.View | None, dict | No
         }
         return embed, view, bracket
 
+    if state == "podbracket":
+        players = [pod_swiss.Player(id=dn, name=dn) for _, dn in _LINKED_EIGHT]
+        pairings = [(players[i].id, players[i + 1].id) for i in range(0, len(players), 2)]
+        match_states = _next_round_match_states(1, pairings, [], players)
+        embed = _round_embed(1, match_states)
+        view = RoundResultsView(match_states)
+        bracket = {
+            "mode": "bracket",
+            "players": players,
+            "round": 1,
+            "matches_by_round": {1: list(match_states)},
+            "outcomes": [],
+        }
+        return embed, view, bracket
+
     if state == "round3":
         players = [pod_swiss.Player(id=dn, name=dn) for _, dn in _LINKED_EIGHT]
         # Seed: top of each pairing wins, except the bot owner's seat always wins so it's 2-0 in R3
@@ -476,6 +491,17 @@ def _final_embed(state: dict) -> discord.Embed:
     return build_champion_embed(standings, event_name=_THREAD_NAME)
 
 
+def _r3_pending_count(state: dict, matches: list[dict]) -> int:
+    """How many final-round matches are still outstanding. In bracket mode the round is built
+    incrementally, so 'pending' counts the matches not yet reported out of the full expected set
+    (roster/2) rather than just the matches that happen to exist right now."""
+    if state.get("mode") == "bracket":
+        expected = len(state["players"]) // 2
+        reported = sum(1 for m in matches if m.get("winner_name"))
+        return max(expected - reported, 0)
+    return sum(1 for m in matches if not m.get("winner_name"))
+
+
 async def _maybe_post_or_update_test_standings(state: dict, channel) -> None:
     """Mirror pod_tournament._post_or_update_live_standings for the in-memory testlobby bracket."""
     matches = state["matches_by_round"].get(TOTAL_ROUNDS, [])
@@ -487,7 +513,7 @@ async def _maybe_post_or_update_test_standings(state: dict, channel) -> None:
 
     trophy = [m for m in matches if m.get("is_trophy_match")]
     champion_locked = bool(trophy) and all(m.get("winner_name") for m in trophy)
-    pending_count = sum(1 for m in matches if not m.get("winner_name"))
+    pending_count = _r3_pending_count(state, matches)
 
     player_colors = state.get("player_colors", {})
     screenshots = state.get("screenshots", {})
@@ -560,7 +586,7 @@ async def _maybe_announce_or_update_test_champion(state: dict, channel) -> None:
     if not state.get("champion_announced") and not rank1_screenshot_in and not grace_expired:
         return
 
-    pending_count = sum(1 for m in matches if not m.get("winner_name"))
+    pending_count = _r3_pending_count(state, matches)
     standings_msg = state.get("standings_message")
     log_urls = state.get("draft_log_urls", {})
     review_choices = state.get("review_choices", {})
@@ -617,17 +643,16 @@ async def _maybe_announce_or_update_test_champion(state: dict, channel) -> None:
 
 def _next_round_match_states(round_num: int, pairings: list[tuple[str, str]],
                               outcomes: list[pod_swiss.MatchOutcome],
-                              players: list[pod_swiss.Player]) -> list[dict]:
+                              players: list[pod_swiss.Player],
+                              *, start_idx: int = 0) -> list[dict]:
     prior = [m for m in outcomes if m.round_num < round_num]
-    distinct = {pid for p in pairings for pid in p}
-    pool = [p for p in players if p.id in distinct]
-    standings_by_id = {s.player_id: s for s in pod_swiss.compute_standings(pool, prior)}
+    standings_by_id = {s.player_id: s for s in pod_swiss.compute_standings(players, prior)}
     states = []
     for idx, (a, b) in enumerate(pairings):
         a_s = standings_by_id.get(a)
         b_s = standings_by_id.get(b)
         states.append({
-            "match_id": _make_match_id(round_num, idx),
+            "match_id": _make_match_id(round_num, start_idx + idx),
             "a_name": a, "b_name": b,
             "a_record": f"{a_s.wins}-{a_s.losses}" if a_s else "0-0",
             "b_record": f"{b_s.wins}-{b_s.losses}" if b_s else "0-0",
@@ -642,15 +667,17 @@ async def _propagate_test_result_to_other_surface(
     """After editing the surface where the dropdown was clicked, update the other surface
     (thread → invoker DM if clicked in thread; invoker DM → thread if clicked in DM)."""
     matches = state["matches_by_round"].get(round_num, [])
+    is_bracket = state.get("mode") == "bracket"
     if edited_was_dm:
         thread_msg = state.get("round_messages", {}).get(round_num)
         if thread_msg is None:
             return
+        render_matches = _bracket_display(state, round_num) if is_bracket else matches
         try:
             await thread_msg.edit(
                 content=None,
-                embed=_round_embed(round_num, matches),
-                view=RoundResultsView(matches),
+                embed=_round_embed(round_num, render_matches),
+                view=RoundResultsView(render_matches),
             )
         except discord.HTTPException:
             log.warning("could not propagate testlobby result to thread", exc_info=True)
@@ -735,8 +762,10 @@ async def _handle_test_result(interaction: discord.Interaction, match_id: str,
         match_id=match_id, winner=winner_name, score=score, surface=surface_label(interaction),
     ))
 
-    thread_embed = _round_embed(round_num, matches)
-    thread_view = RoundResultsView(matches)
+    is_bracket = state.get("mode") == "bracket"
+    render_matches = _bracket_display(state, round_num) if is_bracket else matches
+    thread_embed = _round_embed(round_num, render_matches)
+    thread_view = RoundResultsView(render_matches)
     try:
         if is_dm:
             viewer_is_a = m["a_name"] == _INVOKER_SEAT
@@ -762,6 +791,10 @@ async def _handle_test_result(interaction: discord.Interaction, match_id: str,
     if round_num == TOTAL_ROUNDS:
         await _maybe_post_or_update_test_standings(state, bracket_channel)
         await _maybe_dm_invoker_final_submit_deck(state, m)
+
+    if state.get("mode") == "bracket":
+        await _bracket_advance(state, round_num, interaction, bracket_channel)
+        return
 
     if not all(mm["winner_name"] for mm in matches):
         return
@@ -818,6 +851,119 @@ async def _handle_test_result(interaction: discord.Interaction, match_id: str,
             await _dm_invoker_pairing(
                 invoker, round_num + 1, opp, _test_arena_for(opp),
                 pairings_url=new_msg.jump_url,
+                match_state=invoker_match,
+                state=state,
+            )
+
+
+def _compute_bracket_placeholders(state: dict, round_num: int) -> list[dict]:
+    """Display-only placeholder match states that round out a bracket round's full slate. Each carries
+    a `label` and prospective records. Empty for round 1 or before the prior round is posted."""
+    source_round = round_num - 1
+    source = state["matches_by_round"].get(source_round, [])
+    if round_num < 2 or not source:
+        return []
+    source_matches = [
+        (m["a_name"], m["b_name"], bool(m["winner_name"]))
+        for m in source if not m.get("placeholder")
+    ]
+    created = [(m["a_name"], m["b_name"]) for m in state["matches_by_round"].get(round_num, [])]
+    pairs = pod_bracket.projected_placeholders(
+        state["players"], state["outcomes"], source_matches, round_num, created,
+    )
+    return [
+        {
+            "placeholder": True,
+            "label": pod_bracket.render_placeholder(a, b),
+            "a_record": f"{a.record[0]}-{a.record[1]}",
+            "b_record": f"{b.record[0]}-{b.record[1]}",
+            "winner_name": None, "score": None,
+        }
+        for a, b in pairs
+    ]
+
+
+def _bracket_display(state: dict, round_num: int) -> list[dict]:
+    """The full ordered match list to render for a bracket round: real (reportable) matches first,
+    then waiting-on placeholders. Swiss mode / round 1 just returns the real matches."""
+    real = state["matches_by_round"].get(round_num, [])
+    if state.get("mode") != "bracket" or round_num < 2:
+        return real
+    display = list(real) + _compute_bracket_placeholders(state, round_num)
+    _mark_trophy_match(display, round_num)
+    return display
+
+
+async def _bracket_advance(state: dict, source_round: int, interaction: discord.Interaction,
+                            bracket_channel) -> None:
+    """Fast-advance (pod_bracket) flow: after each result, append any next-round pairings that the
+    new records now allow, growing the next round's message in place. The final round just (re)posts
+    standings — already done by the caller — and schedules the finalize grace once the full round has
+    landed. Re-pair-on-edit (the Swiss grace regenerate) isn't supported in bracket mode."""
+    if source_round >= TOTAL_ROUNDS:
+        r3 = state["matches_by_round"].get(TOTAL_ROUNDS, [])
+        expected = len(state["players"]) // 2
+        if len(r3) >= expected and all(mm["winner_name"] for mm in r3):
+            _schedule_test_grace(state, TOTAL_ROUNDS)
+        return
+
+    target = source_round + 1
+    source_matches = state["matches_by_round"].get(source_round, [])
+    source_complete = all(mm["winner_name"] for mm in source_matches)
+    target_matches = state["matches_by_round"].setdefault(target, [])
+    existing_pairs = [(mm["a_name"], mm["b_name"]) for mm in target_matches]
+    new = pod_bracket.incremental_pairings(
+        state["players"], state["outcomes"], existing_pairs, target,
+        source_round_complete=source_complete,
+    )
+    appended = _next_round_match_states(
+        target, new, state["outcomes"], state["players"], start_idx=len(target_matches),
+    ) if new else []
+    target_matches.extend(appended)
+    if appended:
+        state["round"] = max(state.get("round", 1), target)
+
+    target_msg = state.get("round_messages", {}).get(target)
+    if target_msg is None and not target_matches:
+        return  # don't post an all-placeholder bracket; wait for the first real pairing
+
+    display = _bracket_display(state, target)
+    if not display:
+        return
+
+    embed = _round_embed(target, display)
+    view = RoundResultsView(display)
+    if target_msg is None:
+        try:
+            target_msg = await bracket_channel.send(embed=embed, view=view)
+        except discord.HTTPException:
+            log.warning(f"could not post bracket round {target}", exc_info=True)
+            return
+        _BRACKETS[target_msg.id] = state
+        state.setdefault("round_messages", {})[target] = target_msg
+        prior_msg = state.get("round_messages", {}).get(source_round)
+        if prior_msg is not None:
+            try:
+                await prior_msg.edit(view=RoundResultsView(
+                    _bracket_display(state, source_round),
+                    next_round_url=target_msg.jump_url, next_round_num=target,
+                ))
+            except discord.HTTPException:
+                log.warning(f"could not attach next-round link to bracket round {source_round}", exc_info=True)
+    else:
+        try:
+            await target_msg.edit(content=None, embed=embed, view=view)
+        except discord.HTTPException:
+            log.warning(f"could not edit bracket round {target}", exc_info=True)
+
+    invoker = state.get("invoker")
+    if invoker is not None and appended and state.get("invoker_dm_messages", {}).get(target) is None:
+        invoker_match = _find_invoker_match(appended, _INVOKER_SEAT)
+        if invoker_match is not None:
+            opp = invoker_match["b_name"] if invoker_match["a_name"] == _INVOKER_SEAT else invoker_match["a_name"]
+            await _dm_invoker_pairing(
+                invoker, target, opp, _test_arena_for(opp),
+                pairings_url=target_msg.jump_url,
                 match_state=invoker_match,
                 state=state,
             )
@@ -989,8 +1135,10 @@ async def setup(bot: commands.Bot) -> None:
     async def test_lobby(ctx: commands.Context, state: str = "") -> None:
         """Owner-only. Render the pod-draft lobby embed in this channel.
 
-        `state` ∈ empty | partial | linked | unlinked | ready | notready | drafting | complete | round1.
-        No arg → posts every state in sequence. A specific state → edits the last in place."""
+        `state` ∈ empty | partial | linked | unlinked | ready | notready | drafting | complete |
+        round1 | round3 | champion | submit | podbracket.
+        No arg → posts every state in sequence. A specific state → edits the last in place.
+        `podbracket` starts a live 8-player fast-advance bracket (per-match round advancing)."""
         if state and state not in _VALID_STATES:
             await ctx.send(f"unknown state `{state}`; pick one of: {', '.join(_VALID_STATES)}")
             return
@@ -1017,6 +1165,7 @@ async def setup(bot: commands.Bot) -> None:
             current_round = bracket["round"]
             current_matches = bracket["matches_by_round"][current_round]
             _BRACKETS[msg.id] = {
+                "mode": bracket.get("mode", "swiss"),
                 "players": bracket["players"],
                 "round": current_round,
                 "matches_by_round": dict(bracket["matches_by_round"]),
@@ -1058,8 +1207,8 @@ async def setup(bot: commands.Bot) -> None:
 
         if state == "":
             for s in _VALID_STATES:
-                if s in ("champion", "submit"):
-                    continue  # both post bespoke messages handled separately above
+                if s in ("champion", "submit", "podbracket"):
+                    continue  # each posts a bespoke / live flow handled separately
                 embed, view, bracket = _build(s)
                 msg = await ctx.send(embed=embed, view=view)
                 if bracket is not None:
