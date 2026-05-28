@@ -3,13 +3,14 @@ import { LuScrollText, TbCards } from "../Icons";
 import { PlayerShield } from "./PlayerShield";
 import { cn } from "../../lib/utils";
 import type { PodSeat } from "../../types/leaderboard";
+import type { RoundOutcome } from "./PlayerSeatPanel";
 
 interface Props {
   participants: PodSeat[];
   selectedSeat: number | null;
   highlightedSeat?: number | null;
   highlightedRound?: number | null;
-  highlightedWon?: boolean | null;
+  highlightedOutcome?: RoundOutcome | null;
   onSelect: (seat: number | null) => void;
   onShowDeck?: (p: PodSeat) => void;
   eventLabel: string;
@@ -36,7 +37,7 @@ export function PodTable({
   selectedSeat,
   highlightedSeat = null,
   highlightedRound = null,
-  highlightedWon = null,
+  highlightedOutcome = null,
   onSelect,
   onShowDeck,
   eventLabel,
@@ -101,7 +102,7 @@ export function PodTable({
           toSeat={highlightedSeat}
           seatCount={sorted.length}
           round={highlightedRound}
-          won={highlightedWon}
+          outcome={highlightedOutcome}
         />
       )}
 
@@ -124,7 +125,7 @@ export function PodTable({
                 participant={p}
                 selected={isSelected}
                 highlighted={!isSelected && highlightedSeat === p.seatIndex}
-                highlightedWon={highlightedWon}
+                highlightedOutcome={highlightedOutcome}
                 onClick={() => onSelect(isSelected ? null : p.seatIndex)}
                 scale={scale}
               />
@@ -220,13 +221,13 @@ function PairingLine({
   toSeat,
   seatCount,
   round,
-  won,
+  outcome,
 }: {
   fromSeat: number;
   toSeat: number;
   seatCount: number;
   round: number | null;
-  won: boolean | null;
+  outcome: RoundOutcome | null;
 }) {
   const project = (s: number) => {
     const a = (s / seatCount) * Math.PI * 2 - Math.PI / 2;
@@ -238,9 +239,10 @@ function PairingLine({
   const a = project(fromSeat);
   const b = project(toSeat);
   const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-  const isLoss = won === false;
-  const tone = isLoss ? "text-red" : "text-green";
-  const pillBorder = isLoss ? "border-red/60" : "border-green/60";
+  const tone =
+    outcome === "skip" ? "text-muted" : outcome === "loss" ? "text-red" : "text-green";
+  const pillBorder =
+    outcome === "skip" ? "border-border" : outcome === "loss" ? "border-red/60" : "border-green/60";
   return (
     <>
       <svg

@@ -13,12 +13,16 @@ import { useIsMobile } from "../../lib/use-is-mobile";
 import { stripDiscriminator } from "../../data/utils";
 import type { PodEventMatchRow, PodEventReplayRow, PodSeat } from "../../types/leaderboard";
 
+const SKIPPED_SENTINEL = "(skipped)";
+
+export type RoundOutcome = "win" | "loss" | "skip";
+
 interface Props {
   participant: PodSeat;
   participantsBySeatName: Map<string, PodSeat>;
   matches: PodEventMatchRow[];
   replays: PodEventReplayRow[];
-  onRoundHover?: (opponentSeatIndex: number | null, round: number | null, won: boolean | null) => void;
+  onRoundHover?: (opponentSeatIndex: number | null, round: number | null, outcome: RoundOutcome | null) => void;
   onShowDeck: (p: PodSeat) => void;
 }
 
@@ -263,11 +267,13 @@ function RoundRow({
   opponentName: string;
   opponent: PodSeat | undefined;
   replays: PodEventReplayRow[];
-  onHover?: (opponentSeatIndex: number | null, round: number | null, won: boolean | null) => void;
+  onHover?: (opponentSeatIndex: number | null, round: number | null, outcome: RoundOutcome | null) => void;
   onViewDeck: (participant: PodSeat) => void;
 }) {
   const isMobile = useIsMobile();
-  const won = match.winnerName === participant.displayName;
+  const isSkipped = match.winnerName === SKIPPED_SENTINEL;
+  const won = !isSkipped && match.winnerName === participant.displayName;
+  const outcome: RoundOutcome = isSkipped ? "skip" : won ? "win" : "loss";
   const score = match.score ?? "0-0";
   const yourScore = won ? score.split("-")[0] : score.split("-")[1];
   const oppScore = won ? score.split("-")[1] : score.split("-")[0];
@@ -275,23 +281,25 @@ function RoundRow({
   const participantSlug = participant.playerSlug;
   const opponentSlug = opponent?.playerSlug ?? null;
 
-  const playerGames = participantSlug
+  const playerGames = participantSlug && !isSkipped
     ? replays
         .filter((r) => r.playerSlug === participantSlug && r.inferredRound === match.round)
         .sort((a, b) => new Date(a.gameTime).getTime() - new Date(b.gameTime).getTime())
     : [];
 
-  const opponentGames = opponentSlug
+  const opponentGames = opponentSlug && !isSkipped
     ? replays
         .filter((r) => r.playerSlug === opponentSlug && r.inferredRound === match.round)
         .sort((a, b) => new Date(a.gameTime).getTime() - new Date(b.gameTime).getTime())
     : [];
 
-  const matchDurationMin = computeMatchDurationMin(playerGames, opponentGames, match.reportedAt);
+  const matchDurationMin = isSkipped
+    ? null
+    : computeMatchDurationMin(playerGames, opponentGames, match.reportedAt);
   const opponentDisplay = opponent?.discordName ?? stripDiscriminator(opponentName);
 
   const handleEnter = () => {
-    if (opponent) onHover?.(opponent.seatIndex, match.round, won);
+    if (opponent) onHover?.(opponent.seatIndex, match.round, outcome);
   };
   const handleLeave = () => {
     onHover?.(null, null, null);
@@ -393,7 +401,7 @@ function RoundRow({
           isMobile ? "grid-cols-[auto_1fr_auto]" : "grid-cols-[auto_auto_1fr_auto]",
         )}
       >
-        <ResultBadge won={won} yourScore={yourScore} oppScore={oppScore} />
+        <ResultBadge outcome={outcome} yourScore={yourScore} oppScore={oppScore} />
         {!isMobile && (
           <span className="text-text font-display tracking-[0.12em] ml-2" style={{ fontSize: 16 }}>
             vs.
@@ -418,16 +426,45 @@ function RoundRow({
         )}
       </div>
 
-      <GamesGrid
-        playerGames={playerGames}
-        opponentGames={opponentGames}
-      />
+      {!isSkipped && (
+        <GamesGrid
+          playerGames={playerGames}
+          opponentGames={opponentGames}
+        />
+      )}
     </section>
   );
 }
 
-function ResultBadge({ won, yourScore, oppScore }: { won: boolean; yourScore: string; oppScore: string }) {
+function ResultBadge({
+  outcome,
+  yourScore,
+  oppScore,
+}: {
+  outcome: RoundOutcome;
+  yourScore: string;
+  oppScore: string;
+}) {
   const isMobile = useIsMobile();
+  if (outcome === "skip") {
+    return (
+      <span
+        className={cn(
+          "flex items-center justify-center font-display leading-none",
+          isMobile ? "px-2" : "px-3",
+          "bg-surface2/40 border border-border text-muted",
+        )}
+        style={{
+          minWidth: isMobile ? 52 : 72,
+          height: isMobile ? 42 : 56,
+          letterSpacing: "0.08em",
+        }}
+      >
+        <span style={{ fontSize: isMobile ? 14 : 18 }}>DROP</span>
+      </span>
+    );
+  }
+  const won = outcome === "win";
   return (
     <span
       className={cn(

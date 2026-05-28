@@ -7,6 +7,7 @@ import { BackButton, MobilePageHeader, PrevNextNav } from "../components/PageNav
 import { useIsMobile } from "../lib/use-is-mobile";
 import { PodTable, PodTableSkeleton } from "../components/pod/PodTable";
 import { PlayerSeatPanel } from "../components/pod/PlayerSeatPanel";
+import type { RoundOutcome } from "../components/pod/PlayerSeatPanel";
 import { MobileSeatStack, MobileSeatStackSkeleton } from "../components/pod/MobileSeatStack";
 import { DeckScreenshotModal } from "../components/pod/DeckScreenshotModal";
 import {
@@ -64,14 +65,14 @@ export function PodPage() {
   const [selectedSeat, setSelectedSeat] = useState<number | null>(null);
   const [highlightedSeat, setHighlightedSeat] = useState<number | null>(null);
   const [highlightedRound, setHighlightedRound] = useState<number | null>(null);
-  const [highlightedWon, setHighlightedWon] = useState<boolean | null>(null);
+  const [highlightedOutcome, setHighlightedOutcome] = useState<RoundOutcome | null>(null);
   const [animateLayout, setAnimateLayout] = useState(false);
   const [deckTarget, setDeckTarget] = useState<PodSeat | null>(null);
 
-  const handleRoundHover = (seat: number | null, round: number | null, won: boolean | null) => {
+  const handleRoundHover = (seat: number | null, round: number | null, outcome: RoundOutcome | null) => {
     setHighlightedSeat(seat);
     setHighlightedRound(round);
-    setHighlightedWon(won);
+    setHighlightedOutcome(outcome);
   };
 
   const handleSelectSeat = (seat: number | null) => {
@@ -359,7 +360,7 @@ export function PodPage() {
               selectedSeat={selectedSeat}
               highlightedSeat={highlightedSeat}
               highlightedRound={highlightedRound}
-              highlightedWon={highlightedWon}
+              highlightedOutcome={highlightedOutcome}
               onSelect={handleSelectSeat}
               onShowDeck={setDeckTarget}
               eventLabel={eventLabel}

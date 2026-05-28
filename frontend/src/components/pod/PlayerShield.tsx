@@ -4,6 +4,7 @@ import { Record } from "../Record";
 import { Trophy } from "../Brand";
 import { cn } from "../../lib/utils";
 import type { PodSeat } from "../../types/leaderboard";
+import type { RoundOutcome } from "./PlayerSeatPanel";
 
 const VIEWBOX = "0 0 100 122";
 const OUTER_PATH = "M 0 0 H 100 V 60 C 100 80, 85 100, 50 122 C 15 100, 0 80, 0 60 Z";
@@ -14,14 +15,14 @@ interface Props {
   participant: PodSeat;
   selected: boolean;
   highlighted?: boolean;
-  highlightedWon?: boolean | null;
+  highlightedOutcome?: RoundOutcome | null;
   onClick: () => void;
   scale?: number;
 }
 
 const REF = { w: 118, h: 144, nameMax: 20, nameMin: 11, pip: 16, rec: 22 };
 
-export function PlayerShield({ participant, selected, highlighted = false, highlightedWon = null, onClick, scale = 1 }: Props) {
+export function PlayerShield({ participant, selected, highlighted = false, highlightedOutcome = null, onClick, scale = 1 }: Props) {
   const isChampion = participant.placement === 1;
   const rec = participant.record ?? "0-0";
   const wins = Number(rec.split("-")[0] || 0);
@@ -39,7 +40,7 @@ export function PlayerShield({ participant, selected, highlighted = false, highl
   const bezelId = `bezel-${uid}`;
   const faceId = `face-${uid}`;
 
-  const ring = ringColor(selected, highlightedWon);
+  const ring = ringColor(selected, highlightedOutcome);
   const isHighlight = highlighted && !selected;
 
   return (
@@ -139,13 +140,16 @@ export function PlayerShield({ participant, selected, highlighted = false, highl
   );
 }
 
-function ringColor(selected: boolean, highlightedWon: boolean | null): string {
+function ringColor(selected: boolean, outcome: RoundOutcome | null): string {
   const WHITE = "#e6ecf5";
   const GREEN = "#2ee85c";
   const RED = "#ff5e5e";
-  if (highlightedWon == null) return WHITE;
-  if (selected) return highlightedWon ? GREEN : RED;
-  return highlightedWon ? RED : GREEN;
+  const MUTED = "#7a849a";
+  if (outcome == null) return WHITE;
+  if (outcome === "skip") return MUTED;
+  const won = outcome === "win";
+  if (selected) return won ? GREEN : RED;
+  return won ? RED : GREEN;
 }
 
 function FitName({
