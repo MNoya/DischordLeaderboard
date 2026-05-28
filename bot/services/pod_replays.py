@@ -66,16 +66,18 @@ def attribute_games_to_rounds(
         lower = prev_reported_at
         upper = m.reported_at
         prev_reported_at = upper
+        upper_with_grace = upper + timedelta(minutes=1)
         eligible = [
             g for g in usable
             if (lower is None or _parse_game_time(g.get("game_time")) > lower)
-            and _parse_game_time(g.get("game_time")) <= upper
+            and _parse_game_time(g.get("game_time")) <= upper_with_grace
         ]
         if len(eligible) != total_games:
             continue
         wins_in_window = sum(1 for g in eligible if g.get("won"))
         if wins_in_window != expected_wins:
             continue
+        prev_reported_at = upper_with_grace
         for g in eligible:
             gid = _extract_game_id(g)
             if gid:

@@ -33,19 +33,15 @@ def extract_avatar_hash(user: "discord.abc.User | discord.User | discord.Member 
     return getattr(avatar, "key", None)
 
 
-async def refresh_player_avatars(
+async def refresh_player_profiles(
     bot: "commands.Bot",
     session: "Session",
     players: "Iterable[Player]",
 ) -> dict:
-    """Re-fetch each linked player and update their avatar_hash if it changed.
-
-    Cheap operation — one HTTP call per active player per refresh. We only
-    touch rows where the hash actually changed so the `updated_at` column
-    isn't bumped on every refresh.
+    """Re-fetch each linked player and sync their avatar, display name, and username if changed.
 
     Players without a `discord_id` are skipped; players we can't resolve
-    (deleted account, banned) keep their last-known hash.
+    (deleted account, banned) keep their last-known values.
     """
     summary = {"checked": 0, "updated": 0, "skipped": 0, "errors": 0}
     for player in players:
@@ -56,12 +52,23 @@ async def refresh_player_avatars(
         try:
             user = await bot.fetch_user(int(player.discord_id))
         except Exception:  # noqa: BLE001 - Discord can throw a wide variety
-            logger.warning(f"avatar refresh: could not fetch user {player.discord_id}", exc_info=True)
+            logger.warning(f"profile refresh: could not fetch user {player.discord_id}", exc_info=True)
             summary["errors"] += 1
             continue
+        changed = False
         new_hash = extract_avatar_hash(user)
         if player.avatar_hash != new_hash:
             player.avatar_hash = new_hash
+            changed = True
+        new_display_name = user.display_name
+        if player.display_name != new_display_name:
+            player.display_name = new_display_name
+            changed = True
+        new_username = str(user)
+        if player.discord_username != new_username:
+            player.discord_username = new_username
+            changed = True
+        if changed:
             summary["updated"] += 1
     session.commit()
     return summary

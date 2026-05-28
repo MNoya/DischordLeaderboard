@@ -226,3 +226,21 @@ def test_alias_no_match_falls_back_to_display_name(session):
         arena_name=None,
     )
     assert _player_for_name(session, "zoinks#42").discord_id == "14"
+
+
+# --- token-in-display-name matching (tier 4) ---
+
+def test_token_match_in_display_name(session):
+    _seed_player(session, discord_id="20", username="zorn", display_name="Zorn (Kael)")
+    assert _player_for_name(session, "Kael#12345").discord_id == "20"
+
+
+def test_token_match_does_not_fire_for_short_norm(session):
+    _seed_player(session, discord_id="21", username="xy", display_name="XY (ab)")
+    assert _player_for_name(session, "ab#1") is None
+
+
+def test_exact_display_name_beats_token_match(session):
+    exact = _seed_player(session, discord_id="22", username="u22", display_name="Kael")
+    _seed_player(session, discord_id="23", username="u23", display_name="Zorn (Kael)")
+    assert _player_for_name(session, "Kael#12345").discord_id == exact.discord_id

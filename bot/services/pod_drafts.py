@@ -92,6 +92,7 @@ def _build_draftmancer_session(session: Session, parsed: ParsedSeshEvent) -> str
 
 _ARENA_ID_RE = re.compile(r"#\d+$")
 _ARENA_ID_SQL = r"#\d+$"
+_NAME_TOKEN_RE = re.compile(r"[\s()/\\,|-]+")
 
 
 def _normalize_player_name(name: str) -> str:
@@ -116,10 +117,12 @@ def classify_lobby_names(session: Session, names: Sequence[str]) -> list[tuple[s
 def _player_for_name(session: Session, name: str) -> Player | None:
     """Resolve a Draftmancer/Discord name to a Player.
 
-    Priority: exact match against any arena_aliases entry, longest-prefix match against
-    arena_aliases, then normalized display_name / discord_username. Aliases are stored already
-    normalized (lower + trailing `#NNNN` stripped); the input is normalized the same way before
-    matching.
+    Matching tiers (first hit wins):
+      1. Exact match against any arena_aliases entry (normalized).
+      2. Longest-prefix match against arena_aliases.
+      3. Exact normalized display_name or discord_username.
+      4. norm is a word token within display_name or discord_username
+         (e.g. display "Alice (Wonderland)" matches Draftmancer name "Wonderland#12345").
     """
     norm = _normalize_player_name(name)
     if not norm:
@@ -136,6 +139,7 @@ def _player_for_name(session: Session, name: str) -> Player | None:
     candidates = session.execute(
         select(Player).where(Player.active.is_(True))
     ).scalars().all()
+
     best: tuple[Player, str] | None = None
     for p in candidates:
         for alias in (p.arena_aliases or []):
@@ -145,7 +149,7 @@ def _player_for_name(session: Session, name: str) -> Player | None:
     if best is not None:
         return best[0]
 
-    return session.execute(
+    found = session.execute(
         select(Player)
         .where(
             Player.active.is_(True),
@@ -154,6 +158,16 @@ def _player_for_name(session: Session, name: str) -> Player | None:
         )
         .limit(1)
     ).scalar_one_or_none()
+    if found is not None:
+        return found
+
+    if len(norm) >= 3:
+        for p in candidates:
+            for field in (p.display_name or "", p.discord_username or ""):
+                if norm in _NAME_TOKEN_RE.split(field.lower()):
+                    return p
+
+    return None
 
 
 def record_event(session: Session, parsed: ParsedSeshEvent) -> PodDraftEvent:

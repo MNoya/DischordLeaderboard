@@ -32,7 +32,7 @@ from bot.commands.stats import setup as setup_stats
 from bot.commands.update_profile import setup as setup_update_profile
 from bot.config import settings
 from bot.database import SessionLocal, run_migrations
-from bot.discord_helpers import refresh_player_avatars
+from bot.discord_helpers import refresh_player_profiles
 from bot import emojis
 from bot.commands.testcomponent import setup as setup_testcomponent
 from bot.commands.testlobby import setup as setup_testlobby
@@ -281,9 +281,9 @@ def build_bot(guild_id: int) -> commands.Bot:
                         select(Player).where(Player.active.is_(True))
                     ).scalars().all()
                 )
-                avatar_summary = await refresh_player_avatars(bot, session, active_players)
+                avatar_summary = await refresh_player_profiles(bot, session, active_players)
         except Exception:
-            log.warning("avatar refresh sweep failed", exc_info=True)
+            log.warning("profile refresh sweep failed", exc_info=True)
 
         edit_summary = {"edited": 0, "pruned": 0, "errors": 0}
         with SessionLocal() as session:
