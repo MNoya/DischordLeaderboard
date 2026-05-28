@@ -75,7 +75,6 @@ def render(
     state: str,
     draftmancer_url: str | None = None,
     ready_count: int | None = None,
-    ready_arena_names: set[str] | None = None,
     decliner_name: str | None = None,
     cancel_reason: str | None = None,
     display_name_by_mention_id: dict[int, str] | None = None,
@@ -83,15 +82,17 @@ def render(
     """Lobby embed. `title` is the thread/event name; `rsvps_yes` / `rsvps_maybe` are sesh display
     names by RSVP type; `in_session` is Draftmancer sessionUsers as (arena_name,
     linked_display_name_or_None). `draftmancer_url` appears under the header; `ready_count`
-    (ready state only) is how many of in_draftmancer have responded.
+    seeds the notready decliner fallback when an explicit name isn't supplied.
 
     Buckets: In Draftmancer (linked + in session), Unrecognized name (in session, no Player row),
     Waiting on (Yes RSVP not in session), Maybe (Maybe RSVP not in session). Waiting + Maybe are
-    hidden once ready check fires."""
+    hidden once ready check fires; the live Ready/Pending split lives on the separate ready-check
+    progress card, not here."""
     in_draftmancer = [(arena, dn) for arena, dn in in_session if dn is not None]
     unrecognized = [arena for arena, dn in in_session if dn is None]
     mention_map = display_name_by_mention_id or {}
     in_session_keys = {dn.lower() for _, dn in in_draftmancer if dn}
+    in_session_keys |= {arena.lower() for arena, _ in in_session}
     waiting_yes = [
         name for name in rsvps_yes
         if _rsvp_dedup_key(name, mention_map) not in in_session_keys
@@ -140,45 +141,13 @@ def render(
 
     embed = discord.Embed(title=title, description=description, color=color)
 
-    def _block(lines: list[str], *, trailing: str = "") -> str:
-        """`> name`-prefix each line so Discord renders the blockquote vertical bar."""
-        if not lines:
-            return "​"
-        return "\n".join(f"> {line}" for line in lines) + trailing
-
-    if state == "ready":
-        if ready_arena_names is not None:
-            ready_players = [(a, dn) for a, dn in in_draftmancer if a in ready_arena_names]
-            pending_players = [(a, dn) for a, dn in in_draftmancer if a not in ready_arena_names]
-        else:
-            ready_players = in_draftmancer[:ready_now]
-            pending_players = in_draftmancer[ready_now:]
-        ready_trailing = "\n​" if len(ready_players) > len(pending_players) else ""
-        embed.add_field(
-            name=f"✅ Ready ({len(ready_players)})",
-            value=_block([f"{dn} | {arena}" for arena, dn in ready_players], trailing=ready_trailing),
-            inline=True,
-        )
-        embed.add_field(
-            name=f"⏳ Pending ({len(pending_players)})",
-            value=_block([f"{dn} | {arena}" for arena, dn in pending_players]),
-            inline=True,
-        )
-    elif in_draftmancer:
+    if in_draftmancer:
         trailing = "\n​" if show_pending else ""
         in_drft_label = "Players" if state == "complete" else "In Draftmancer"
-        embed.add_field(
-            name=f"✅ {in_drft_label} ({len(in_draftmancer)})",
-            value=_block([dn for _, dn in in_draftmancer], trailing=trailing),
-            inline=True,
+        _player_columns(
+            embed, f"✅ {in_drft_label} ({len(in_draftmancer)})", in_draftmancer,
+            trailing=trailing, spacer=show_pending,
         )
-        embed.add_field(
-            name="​",
-            value="\n".join(f"`{arena}`" for arena, _ in in_draftmancer) + trailing,
-            inline=True,
-        )
-        if show_pending:
-            embed.add_field(name="​", value="​", inline=True)
 
     if show_pending:
         if unrecognized:
@@ -196,12 +165,12 @@ def render(
         waiting_trailing = "\n​" if len(waiting_yes) > len(waiting_maybe) else ""
         embed.add_field(
             name=f"⌛ Waiting on ({len(waiting_yes)})",
-            value=_block(waiting_yes, trailing=waiting_trailing),
+            value=_quote_block(waiting_yes, trailing=waiting_trailing),
             inline=True,
         )
         embed.add_field(
             name=f"🤷 Maybe ({len(waiting_maybe)})",
-            value=_block(waiting_maybe),
+            value=_quote_block(waiting_maybe),
             inline=True,
         )
         embed.add_field(name="​", value="​", inline=True)
@@ -223,6 +192,7 @@ def render_ready_check_progress(
     in_session: list[tuple[str, str | None]],
     *,
     state: str,
+    draftmancer_url: str | None = None,
     ready_arena_names: set[str] | None = None,
     decliner_name: str | None = None,
     cancel_reason: str | None = None,
@@ -237,44 +207,64 @@ def render_ready_check_progress(
     in_draftmancer = [(arena, dn) for arena, dn in in_session if dn is not None]
 
     if state == "ready":
-        status = "### 🔔 Ready check in progress"
+        status = "### 🔔 Ready Check initiated - accept on Draftmancer to start the draft!"
         color = discord.Color.gold()
-    elif state in ("drafting", "complete"):
-        status = "### 🎉 All players ready — draft starting!"
+    elif state == "drafting":
+        status = "### 🎉 All players ready! Draft started"
+        color = discord.Color.green()
+    elif state == "complete":
+        status = f"### {emojis.get('draftmancer')} Draft complete!"
         color = discord.Color.green()
     elif decliner_name:
         status = f"### ❌ `{decliner_name}` declined"
         color = discord.Color.red()
     elif cancel_reason:
-        status = f"### ❌ Ready check {cancel_reason}"
+        status = f"### ❌ Ready Check {cancel_reason}"
         color = discord.Color.red()
     else:
-        status = "### Ready check"
+        status = "### Ready Check"
         color = discord.Color.blurple()
 
-    embed = discord.Embed(title=title, description=status, color=color)
+    header_lines = [f"### {draftmancer_url}"] if draftmancer_url else []
+    header_lines.append(status)
+    embed = discord.Embed(title=title, description="\n".join(header_lines), color=color)
 
-    def _block(lines: list[str]) -> str:
-        return "\n".join(f"> {line}" for line in lines) if lines else "​"
-
-    if ready_arena_names is not None:
+    if state in ("drafting", "complete"):
+        ready_players = in_draftmancer
+        pending_players = []
+    elif ready_arena_names is not None:
         ready_players = [(a, dn) for a, dn in in_draftmancer if a in ready_arena_names]
         pending_players = [(a, dn) for a, dn in in_draftmancer if a not in ready_arena_names]
     else:
         ready_players = []
         pending_players = in_draftmancer
 
-    embed.add_field(
-        name=f"✅ Ready ({len(ready_players)})",
-        value=_block([f"{dn} | {arena}" for arena, dn in ready_players]),
-        inline=True,
-    )
-    embed.add_field(
-        name=f"⏳ Pending ({len(pending_players)})",
-        value=_block([f"{dn} | {arena}" for arena, dn in pending_players]),
-        inline=True,
-    )
+    ready_label = "Players" if state == "complete" else "Ready"
+    two_groups = bool(pending_players) or state == "ready"
+    _player_columns(embed, f"✅ {ready_label} ({len(ready_players)})", ready_players, spacer=two_groups)
+    if two_groups:
+        _player_columns(embed, f"⏳ Pending ({len(pending_players)})", pending_players, spacer=True)
     return embed
+
+
+def _quote_block(lines: list[str], *, trailing: str = "") -> str:
+    """`> `-prefix each line so Discord renders the blockquote vertical bar."""
+    if not lines:
+        return "​"
+    return "\n".join(f"> {line}" for line in lines) + trailing
+
+
+def _player_columns(
+    embed: discord.Embed, label: str, players: list[tuple[str, str]], *,
+    trailing: str = "", spacer: bool = False,
+) -> None:
+    """Two columns from `players` (arena_name, display_name): blockquoted names | code Arena
+    handles. `spacer` closes the inline row when another group follows."""
+    embed.add_field(name=label, value=_quote_block([dn for _, dn in players], trailing=trailing), inline=True)
+    arenas = "\n".join(f"`{arena}`" for arena, _ in players)
+    embed.add_field(name="​", value=(arenas or "​") + trailing, inline=True)
+    if spacer:
+        embed.add_field(name="​", value="​", inline=True)
 
 
 def _rsvp_dedup_key(rsvp: str, display_name_by_mention_id: dict[int, str]) -> str:

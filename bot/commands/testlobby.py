@@ -24,10 +24,15 @@ from bot.commands.testcomponent import (
 )
 
 from bot.services import pod_bracket, pod_swiss
-from bot.services.lobby_embed import LobbyReadyButtonView, render as render_lobby_embed
+from bot.services.lobby_embed import (
+    LobbyReadyButtonView,
+    render as render_lobby_embed,
+    render_ready_check_progress,
+)
 from bot.services.pod_deck_color import LiveDeckColorSelectView, SubmitDeckView
 from bot.services.pod_drafts import _normalize_player_name as _norm
 from bot.services.pod_tournament import (
+    CHAMPIONSHIP_DEADLINE_SECONDS,
     CLEAR_SENTINEL,
     GRACE_SECONDS,
     ParticipantDeckData,
@@ -35,14 +40,18 @@ from bot.services.pod_tournament import (
     TOTAL_ROUNDS,
     SKIPPED_SENTINEL,
     _build_final_submit_deck_dm_embed,
+    _deck_complete,
+    _incomplete_top_decks,
     _mark_trophy_match,
     _pin_only_this_bot_message,
     _round_embed,
     actor_label,
     build_champion_announcement_view,
     build_champion_embed,
+    build_deck_reminder_text,
     build_pairing_dm_embed,
     format_match_result_log,
+    match_was_played,
     register_test_result_handler,
     surface_label,
 )
@@ -157,8 +166,6 @@ def _stateful_test_callbacks(state: dict):
         state.setdefault("player_colors", {})[_norm(_INVOKER_SEAT)] = color
         channel = state.get("origin_channel") or interaction.channel
         await _maybe_post_or_update_test_standings(state, channel)
-        if state.get("champion_announced"):
-            await _maybe_announce_or_update_test_champion(state, channel)
         await _refresh_test_invoker_final_dm(state)
 
     async def toggle(interaction: discord.Interaction, wants_review: bool) -> None:
@@ -283,7 +290,22 @@ _CHAMPION_CAPTIONS_BY_SEAT: dict[str, str] = {
 }
 
 _LAST_MESSAGE: dict[int, discord.Message] = {}
+_LAST_PROGRESS_MESSAGE: dict[int, discord.Message] = {}
 _BRACKETS: dict[int, dict] = {}
+_PROGRESS_STATES = ("ready", "notready", "cancelled", "drafting", "complete")
+_STATE_NOTES = {
+    "empty": "nobody in the Draftmancer session yet",
+    "partial": "a couple of players joined, rest still missing",
+    "linked": "everyone present is recognized/linked",
+    "unlinked": "a present player has no linked Arena name",
+    "ready": "ready check running",
+    "notready": "a player declined the ready check",
+    "cancelled": "ready check invalidated (player list changed)",
+    "drafting": "draft started",
+    "complete": "draft finished",
+    "round1": "round 1 pairings + results buttons",
+    "round3": "round 3 (final) pairings + results buttons",
+}
 
 
 def _make_match_id(round_num: int, idx: int) -> str:
@@ -381,8 +403,10 @@ def _build_champion_state(invoker) -> dict:
         "draft_log_urls": log_urls,
         "review_choices": review_choices,
         "event_started_at": event_started_at,
+        "finalized": True,
         "champion_announced": False,
         "champion_announcement_message": None,
+        "championship_task": None,
     }
 
 
@@ -486,6 +510,71 @@ def _build(state: str) -> tuple[discord.Embed, discord.ui.View | None, dict | No
     return embed, view, None
 
 
+def _sweep_caption(state: str, kind: str) -> str:
+    """One-line label above each embed in the no-arg `!testlobby` sweep naming the card, its
+    builder, and the state variation."""
+    note = _STATE_NOTES.get(state, state)
+    if kind == "progress":
+        return f"**Ready-check progress card** · `render_ready_check_progress()` · `{state}` · {note}"
+    if state in ("round1", "round3"):
+        return f"**Round results card** · `_round_embed()` · `{state}` · {note}"
+    return f"**Lobby card** · `render()` · `{state}` · {note}"
+
+
+def _build_ready_progress(state: str) -> tuple[discord.Embed, discord.ui.View | None] | None:
+    """Preview the ready-check progress card (embed + view) for the states where one is posted in
+    prod. View mirrors the manager: buttons disabled during `ready`, gone once the draft starts."""
+    if state not in _PROGRESS_STATES:
+        return None
+    in_session = list(_LINKED_EIGHT)
+    if state == "ready":
+        ready_arena_names = {arena for arena, _ in _LINKED_EIGHT[:3]}
+        embed = render_ready_check_progress(
+            _THREAD_NAME, in_session, state="ready",
+            draftmancer_url=_DRAFTMANCER_URL, ready_arena_names=ready_arena_names,
+        )
+    elif state in ("notready", "cancelled"):
+        decliner = None if state == "cancelled" else _LINKED_EIGHT[3][0]
+        cancel_reason = "Player list changed" if state == "cancelled" else None
+        embed = render_ready_check_progress(
+            _THREAD_NAME, in_session, state="notready", draftmancer_url=_DRAFTMANCER_URL,
+            decliner_name=decliner, cancel_reason=cancel_reason,
+        )
+    else:
+        embed = render_ready_check_progress(
+            _THREAD_NAME, in_session, state=state, draftmancer_url=_DRAFTMANCER_URL,
+        )
+    view = (
+        None if state in ("drafting", "complete")
+        else LobbyReadyButtonView(draftmancer_url=_DRAFTMANCER_URL, ready_disabled=(state == "ready"))
+    )
+    return embed, view
+
+
+async def _sync_progress_card(
+    channel: discord.abc.Messageable, progress: tuple[discord.Embed, discord.ui.View | None] | None,
+) -> None:
+    """Edit the lingering progress card in place, post a fresh one, or clear it — mirroring how the
+    live manager keeps a single progress card updated across a ready check's lifecycle."""
+    existing = _LAST_PROGRESS_MESSAGE.get(channel.id)
+    if progress is None:
+        if existing is not None:
+            try:
+                await existing.delete()
+            except discord.HTTPException:
+                pass
+            _LAST_PROGRESS_MESSAGE.pop(channel.id, None)
+        return
+    embed, view = progress
+    if existing is not None:
+        try:
+            await existing.edit(embed=embed, view=view)
+            return
+        except discord.HTTPException:
+            _LAST_PROGRESS_MESSAGE.pop(channel.id, None)
+    _LAST_PROGRESS_MESSAGE[channel.id] = await channel.send(embed=embed, view=view)
+
+
 def _final_embed(state: dict) -> discord.Embed:
     standings = pod_swiss.compute_standings(state["players"], state["outcomes"])
     return build_champion_embed(standings, event_name=_THREAD_NAME)
@@ -502,25 +591,14 @@ def _r3_pending_count(state: dict, matches: list[dict]) -> int:
     return sum(1 for m in matches if not m.get("winner_name"))
 
 
-async def _maybe_post_or_update_test_standings(state: dict, channel) -> None:
-    """Mirror pod_tournament._post_or_update_live_standings for the in-memory testlobby bracket."""
-    matches = state["matches_by_round"].get(TOTAL_ROUNDS, [])
-    if not matches:
-        return
-    _mark_trophy_match(matches, TOTAL_ROUNDS)
-    if not any(m.get("winner_name") for m in matches):
-        return
-
-    trophy = [m for m in matches if m.get("is_trophy_match")]
-    champion_locked = bool(trophy) and all(m.get("winner_name") for m in trophy)
-    pending_count = _r3_pending_count(state, matches)
-
+def _build_test_deck_data(state: dict) -> dict:
+    """Assemble normalized_name → ParticipantDeckData from the in-memory testlobby state dicts."""
     player_colors = state.get("player_colors", {})
     screenshots = state.get("screenshots", {})
     captions = state.get("screenshot_captions", {})
     log_urls = state.get("draft_log_urls", {})
     review_choices = state.get("review_choices", {})
-    deck_data = {
+    return {
         _norm(p.name): ParticipantDeckData(
             colors=player_colors.get(_norm(p.name)),
             screenshot_url=screenshots.get(_norm(p.name)),
@@ -530,6 +608,23 @@ async def _maybe_post_or_update_test_standings(state: dict, channel) -> None:
         )
         for p in state["players"]
     }
+
+
+async def _maybe_post_or_update_test_standings(state: dict, channel) -> None:
+    """Mirror pod_tournament._post_or_update_live_standings for the in-memory testlobby bracket."""
+    matches = state["matches_by_round"].get(TOTAL_ROUNDS, [])
+    if not matches:
+        return
+    _mark_trophy_match(matches, TOTAL_ROUNDS)
+    if not any(match_was_played(m) for m in matches):
+        return
+
+    trophy = [m for m in matches if m.get("is_trophy_match")]
+    champion_locked = bool(trophy) and all(m.get("winner_name") for m in trophy)
+    pending_count = _r3_pending_count(state, matches)
+
+    player_colors = state.get("player_colors", {})
+    deck_data = _build_test_deck_data(state)
     embed = build_champion_embed(
         pod_swiss.compute_standings(state["players"], state["outcomes"]),
         event_name=_THREAD_NAME,
@@ -552,55 +647,65 @@ async def _maybe_post_or_update_test_standings(state: dict, channel) -> None:
         except discord.HTTPException:
             log.warning("could not edit testlobby standings", exc_info=True)
 
-    if state.get("champion_announced"):
-        await _maybe_announce_or_update_test_champion(state, channel)
+    await _maybe_announce_or_update_test_champion(state, channel)
 
 
-async def _maybe_announce_or_update_test_champion(state: dict, channel) -> None:
-    """Mirror of pod_tournament._announce_or_update_champion for in-memory testlobby state.
+async def _ping_missing_deck_test_participants(state: dict, channel) -> None:
+    """Mirror pod_tournament._ping_missing_deck_participants — @ping the invoker (and name other
+    seats) still missing colors or a screenshot. Only the invoker is a real Discord user to mention."""
+    deck_data = _build_test_deck_data(state)
+    invoker = state.get("invoker")
+    tokens = []
+    for p in state["players"]:
+        if _deck_complete(deck_data.get(_norm(p.name))):
+            continue
+        if invoker is not None and _norm(p.name) == _norm(_INVOKER_SEAT):
+            tokens.append(f"<@{invoker.id}>")
+        else:
+            tokens.append(p.name)
+    if not tokens:
+        return
+    try:
+        await channel.send(
+            content=build_deck_reminder_text(" ".join(tokens)),
+            allowed_mentions=discord.AllowedMentions(users=True),
+        )
+    except discord.HTTPException:
+        log.warning("could not send testlobby deck reminder", exc_info=True)
 
-    Trigger: champion locked AND (all champion colors submitted OR grace expired).
-    Fallback: post without colors if grace expires without submissions.
+
+async def _test_championship_deadline(state: dict, channel) -> None:
+    """Mirror pod_tournament._championship_deadline — force the announcement after the deadline."""
+    try:
+        await asyncio.sleep(max(0, CHAMPIONSHIP_DEADLINE_SECONDS - GRACE_SECONDS))
+    except asyncio.CancelledError:
+        return
+    await _maybe_announce_or_update_test_champion(state, channel, force=True)
+
+
+async def _maybe_announce_or_update_test_champion(state: dict, channel, *, force: bool = False) -> None:
+    """Mirror of pod_tournament._maybe_post_championship for in-memory testlobby state.
+
+    One-time post: fires once the top finishers all have colors and a screenshot, or when forced by
+    the deadline. Never edits after posting.
     """
+    if state.get("champion_announced") or not state.get("finalized"):
+        return
     matches = state["matches_by_round"].get(TOTAL_ROUNDS, [])
     if not matches:
         return
     _mark_trophy_match(matches, TOTAL_ROUNDS)
-    trophy = [m for m in matches if m.get("is_trophy_match")]
-    if not trophy or not all(m.get("winner_name") for m in trophy):
+    if any(not m.get("winner_name") for m in matches):
         return
 
     standings = pod_swiss.compute_standings(state["players"], state["outcomes"])
-    champions = [s for s in standings if s.losses == 0]
-    if not champions:
+    if not standings:
+        return
+    deck_data = _build_test_deck_data(state)
+    if _incomplete_top_decks(standings, deck_data) and not force:
         return
 
-    player_colors = state.get("player_colors", {})
-    rank1_key = _norm(champions[0].player_name)
-    screenshots = state.get("screenshots", {})
-    captions = state.get("screenshot_captions", {})
-    rank1_screenshot_in = bool(screenshots.get(rank1_key))
-    grace_task = state.get("grace_task")
-    grace_expired = grace_task is None or grace_task.done()
-
-    if not state.get("champion_announced") and not rank1_screenshot_in and not grace_expired:
-        return
-
-    pending_count = _r3_pending_count(state, matches)
     standings_msg = state.get("standings_message")
-    log_urls = state.get("draft_log_urls", {})
-    review_choices = state.get("review_choices", {})
-    deck_data = {
-        _norm(p.name): ParticipantDeckData(
-            colors=player_colors.get(_norm(p.name)),
-            screenshot_url=screenshots.get(_norm(p.name)),
-            screenshot_caption=captions.get(_norm(p.name)),
-            draft_log_url=log_urls.get(_norm(p.name)),
-            wants_draft_review=review_choices.get(_norm(p.name)),
-        )
-        for p in state["players"]
-    }
-
     target = channel
     if state.get("champion_announcement_message") is None and isinstance(channel, discord.Thread):
         parent = channel.parent
@@ -617,8 +722,8 @@ async def _maybe_announce_or_update_test_champion(state: dict, channel) -> None:
     view = build_champion_announcement_view(
         standings,
         event_name=_THREAD_NAME,
-        player_colors=player_colors,
-        pending_count=pending_count,
+        player_colors=state.get("player_colors", {}),
+        pending_count=0,
         deck_data=deck_data,
         guild_id=guild_id,
         thread_id=thread_id,
@@ -626,19 +731,16 @@ async def _maybe_announce_or_update_test_champion(state: dict, channel) -> None:
         subtitle_override=state.get("subtitle_override"),
     )
 
-    existing = state.get("champion_announcement_message")
-    if existing is None:
-        try:
-            state["champion_announcement_message"] = await target.send(view=view)
-            state["champion_announced"] = True
-        except discord.HTTPException:
-            log.warning("could not post testlobby champion announcement", exc_info=True)
-        return
-
+    state["champion_announced"] = True
     try:
-        await existing.edit(view=view)
+        state["champion_announcement_message"] = await target.send(view=view)
     except discord.HTTPException:
-        log.warning("could not edit testlobby champion announcement", exc_info=True)
+        state["champion_announced"] = False
+        log.warning("could not post testlobby champion announcement", exc_info=True)
+        return
+    task = state.get("championship_task")
+    if not force and task is not None and not task.done():
+        task.cancel()
 
 
 def _next_round_match_states(round_num: int, pairings: list[tuple[str, str]],
@@ -1000,7 +1102,12 @@ async def _test_grace_expire(state: dict, round_num: int) -> None:
     if round_num >= TOTAL_ROUNDS and not state.get("champion_announced"):
         standings_msg = state.get("standings_message")
         if standings_msg is not None:
-            await _maybe_announce_or_update_test_champion(state, standings_msg.channel)
+            channel = standings_msg.channel
+            state["finalized"] = True
+            await _ping_missing_deck_test_participants(state, channel)
+            if state.get("championship_task") is None:
+                state["championship_task"] = asyncio.create_task(_test_championship_deadline(state, channel))
+            await _maybe_announce_or_update_test_champion(state, channel)
 
 
 async def _regenerate_test_next_round(state: dict, next_round: int, channel) -> None:
@@ -1210,18 +1317,23 @@ async def setup(bot: commands.Bot) -> None:
                 if s in ("champion", "submit", "podbracket"):
                     continue  # each posts a bespoke / live flow handled separately
                 embed, view, bracket = _build(s)
-                msg = await ctx.send(embed=embed, view=view)
+                msg = await ctx.send(content=_sweep_caption(s, "lobby"), embed=embed, view=view)
                 if bracket is not None:
                     await _register_bracket(msg, bracket)
+                progress = _build_ready_progress(s)
+                if progress is not None:
+                    await ctx.send(content=_sweep_caption(s, "progress"), embed=progress[0], view=progress[1])
             return
 
         embed, view, bracket = _build(state)
+        progress = _build_ready_progress(state)
         last = _LAST_MESSAGE.get(ctx.channel.id)
         if last is not None:
             try:
                 await last.edit(embed=embed, view=view, attachments=[])
                 if bracket is not None:
                     await _register_bracket(last, bracket)
+                await _sync_progress_card(ctx.channel, progress)
                 return
             except discord.HTTPException:
                 _LAST_MESSAGE.pop(ctx.channel.id, None)
@@ -1229,3 +1341,4 @@ async def setup(bot: commands.Bot) -> None:
         _LAST_MESSAGE[ctx.channel.id] = msg
         if bracket is not None:
             await _register_bracket(msg, bracket)
+        await _sync_progress_card(ctx.channel, progress)

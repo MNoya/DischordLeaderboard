@@ -76,6 +76,7 @@ class PodDraftManager:
         self.expected_user_ids: set[str] = set()
         self.lobby_status_message: object | None = None
         self.ready_check_progress_message: object | None = None
+        self._lobby_post_lock = asyncio.Lock()
         self._ready_timeout_task: asyncio.Task | None = None
         self.drafting = False
         self.draft_complete = False
@@ -94,6 +95,7 @@ class PodDraftManager:
         self.champion_announced = False
         self.champion_announcement_message = None
         self.champion_discord_ids: set[str] = set()
+        self.championship_task: asyncio.Task | None = None
         self._end_watchdog_task: asyncio.Task | None = None
         self.sio = socketio.AsyncClient(reconnection=False, logger=False, engineio_logger=False)
         self.sio.on("connect", self._on_connect)
@@ -314,11 +316,11 @@ class PodDraftManager:
             title=self.event_name,
             in_session=classified,
             state="ready",
+            draftmancer_url=self.draftmancer_url,
             ready_arena_names=set(),
         )
         try:
             self.ready_check_progress_message = await thread.send(
-                content="**🔔 Ready check initiated — accept on Draftmancer to start the draft!**",
                 embed=progress_embed,
                 view=LobbyReadyButtonView(
                     draftmancer_url=self.draftmancer_url, ready_disabled=True,
@@ -408,7 +410,6 @@ class PodDraftManager:
             state=state,
             draftmancer_url=self.draftmancer_url,
             ready_count=ready_now,
-            ready_arena_names=ready_arena_names,
             decliner_name=self.last_decliner_name,
             cancel_reason=self.last_cancel_reason,
             display_name_by_mention_id=await self._resolve_rsvp_mentions(thread.guild),
@@ -421,22 +422,24 @@ class PodDraftManager:
                 ready_disabled=(state == "ready" or has_unrecognized),
             )
         )
-        if self.lobby_status_message is None:
-            try:
-                self.lobby_status_message = await thread.send(embed=embed, view=view)
-            except Exception:
-                log.warning(f"could not post lobby status for {self.session_id}", exc_info=True)
-        else:
-            try:
-                await self.lobby_status_message.edit(embed=embed, view=view)
-            except Exception:
-                log.warning(f"could not edit lobby status for {self.session_id}", exc_info=True)
+        async with self._lobby_post_lock:
+            if self.lobby_status_message is None:
+                try:
+                    self.lobby_status_message = await thread.send(embed=embed, view=view)
+                except Exception:
+                    log.warning(f"could not post lobby status for {self.session_id}", exc_info=True)
+            else:
+                try:
+                    await self.lobby_status_message.edit(embed=embed, view=view)
+                except Exception:
+                    log.warning(f"could not edit lobby status for {self.session_id}", exc_info=True)
 
         if self.ready_check_progress_message is not None:
             progress_embed = render_ready_check_progress(
                 title=self.event_name,
                 in_session=classified,
                 state=state,
+                draftmancer_url=self.draftmancer_url,
                 ready_arena_names=ready_arena_names,
                 decliner_name=self.last_decliner_name,
                 cancel_reason=self.last_cancel_reason,

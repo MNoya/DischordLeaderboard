@@ -4,9 +4,9 @@ Active from the moment Draftmancer picks finish (event.current_round becomes non
 Last-image-wins, except a stored caption matching the record-pattern (e.g. "3-0", "2-1",
 "trophy") locks the slot — only another record-pattern image can replace it.
 
-On capture we trigger _announce_or_update_champion so the announcement (Components V2 layout)
-either posts for the first time (rank-1 screenshot is the trigger) or edits in place with the
-new image / caption. If the author is a champion, we also react 🏆 on the message itself.
+On capture we trigger _maybe_post_championship — once the top finishers all have colors and a
+screenshot the one-time coordination announcement (Components V2 layout) posts to the parent
+channel. If the author is a champion, we also react 🏆 on the message itself.
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from bot.services.pod_drafts import (
     capture_deck_screenshot,
     is_pod_thread_champion,
 )
-from bot.services.pod_tournament import _announce_or_update_champion
+from bot.services.pod_tournament import _maybe_post_championship
 
 
 log = logging.getLogger(__name__)
@@ -58,11 +58,15 @@ class PodScreenshotListener(commands.Cog):
         if event_id is not None:
             manager = ACTIVE_POD_MANAGERS.get(event_id)
             if manager is not None:
-                await _announce_or_update_champion(manager)
+                await _maybe_post_championship(manager)
                 is_champion_in_memory = discord_id in manager.champion_discord_ids
 
         is_champion_in_db = await asyncio.to_thread(_is_thread_champion_sync, thread_id, discord_id)
         if is_champion_in_memory or is_champion_in_db:
+            log.info(
+                f"[DECK] champion_screenshot event={event_id} discord_id={discord_id} "
+                f"in_memory={is_champion_in_memory} in_db={is_champion_in_db}"
+            )
             try:
                 await message.add_reaction("🏆")
             except discord.HTTPException:
@@ -75,12 +79,13 @@ class PodScreenshotListener(commands.Cog):
         target = await asyncio.to_thread(_resolve_active_pod_thread_sync, discord_id)
         if target is None:
             return
-        _event_id, thread_id = target
+        event_id, thread_id = target
         try:
             thread = self.bot.get_channel(int(thread_id)) or await self.bot.fetch_channel(int(thread_id))
             link = thread.jump_url
         except discord.HTTPException:
             return
+        log.info(f"[DECK] dm_image_redirect event={event_id} discord_id={discord_id} thread={thread_id}")
         try:
             await message.reply(
                 f"📸 Post your deck screenshot in the pod-draft thread so everyone can see it: {link}"

@@ -1,6 +1,7 @@
 """Pod draft persistence and matching logic — pure SQLAlchemy, no Discord or websocket deps."""
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
@@ -18,6 +19,9 @@ from bot.models import (
     PodDraftMatch,
     PodDraftParticipant,
 )
+
+
+log = logging.getLogger(__name__)
 
 
 DM_KIND_ROUND = "round_pairing"
@@ -675,14 +679,24 @@ def capture_deck_screenshot(
         return None
     participant, event_id, current_round = row
     if current_round is None:
+        log.info(f"[DECK] screenshot.too_early event={event_id} discord_id={discord_id} caption={caption!r}")
         return None
     new_has_record = caption_has_record_pattern(caption)
     existing_locked = caption_has_record_pattern(participant.deck_screenshot_caption)
     if not new_has_record and existing_locked:
+        log.info(
+            f"[DECK] screenshot.locked_ignored event={event_id} discord_id={discord_id} "
+            f"locked_caption={participant.deck_screenshot_caption!r} new_caption={caption!r}"
+        )
         return None
+    replaced = participant.deck_screenshot_url is not None
     participant.deck_screenshot_url = image_url
     participant.deck_screenshot_caption = caption or None
     session.flush()
+    log.info(
+        f"[DECK] screenshot.stored event={event_id} discord_id={discord_id} round={current_round} "
+        f"caption={caption!r} has_record={new_has_record} replaced={replaced}"
+    )
     return event_id
 
 

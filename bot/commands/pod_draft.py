@@ -60,7 +60,7 @@ class PodDraft(commands.Cog):
             log.warning(f"ready-check: failed — {err}")
             await interaction.followup.send(f"⚠️ {err}", ephemeral=True)
         else:
-            await interaction.followup.send("Ready check initiated — watch the thread for status.", ephemeral=True)
+            await interaction.followup.send("Ready Check initiated — watch the thread for status.", ephemeral=True)
 
     @app_commands.command(
         name="pod-link-arena",

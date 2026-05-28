@@ -78,10 +78,21 @@ SKIPPED_SENTINEL = "(skipped)"  # winner_name value for "Not played" matches
 CLEAR_SENTINEL = "(clear)"  # transient value from the dropdown; commits NULL winner/score
 GRACE_SECONDS = 60  # window after round completion during which edits regenerate the next round
 ANNOUNCEMENT_TOP_N = 4  # channel-level announcement shows top performers only; thread keeps full standings
+CHAMPIONSHIP_DEADLINE_SECONDS = 600  # hard cap from R3 end: post the announcement with whatever decks landed
 
 # Test-only result handler hook (set by bot/commands/testlobby.py). Always None in prod.
 _test_result_handler = None
 _test_handler_prefix: str | None = None
+
+
+def build_deck_reminder_text(mentions: str) -> str:
+    return f"{mentions} drop your deck screenshot and set your colors so the championship post can go up 🏆"
+
+
+def match_was_played(match: dict) -> bool:
+    """True when a match has a real reported result — a "No Match Played" drop doesn't count."""
+    winner = match.get("winner_name")
+    return bool(winner) and winner != SKIPPED_SENTINEL
 
 
 def actor_label(interaction: discord.Interaction) -> str:
@@ -266,6 +277,7 @@ def _build_standings_row(
     site_root: str | None,
     show_review_flag: bool = False,
     inline_caption: bool = False,
+    show_medal: bool = True,
 ) -> str:
     """One standings row used by both the V2 announcement and the thread-side classic embed:
     `{rank}. {medal} {name}  {wins}-{losses}  {colors}  [Draft Log]({url}) 📜`.
@@ -276,7 +288,8 @@ def _build_standings_row(
     name = info.get("display_name") or s.player_name
     slug = info.get("slug")
     data = deck_data.get(key)
-    prefix = f"{s.rank}. {_RANK_MEDALS[s.rank]} " if s.rank in _RANK_MEDALS else f"{s.rank}. "
+    medal = _RANK_MEDALS.get(s.rank) if show_medal else None
+    prefix = f"{s.rank}. {medal} " if medal else f"{s.rank}. "
     rendered = (
         f"[{name}]({site_root}/player/{slug})"
         if slug and site_root else name
@@ -501,10 +514,7 @@ async def live_deck_color_submit(interaction: discord.Interaction, color: str) -
     manager = ACTIVE_POD_MANAGERS.get(event_id)
     if manager is not None:
         await _post_or_update_live_standings(manager)
-        # Color submit edits an existing announcement but never triggers the first post —
-        # screenshot upload (or grace expiry) is the only thing that creates it.
-        if manager.champion_announced:
-            await _announce_or_update_champion(manager)
+        await _maybe_post_championship(manager)
     asyncio.create_task(_refresh_submit_deck_dm(interaction.client, event_id, discord_id))
 
 
@@ -1431,8 +1441,7 @@ async def finalize_tournament(manager: "PodDraftManager") -> None:
         except Exception:
             log.warning("could not send champion ping", exc_info=True)
 
-    if hasattr(manager, "disconnect_safely"):
-        await manager.disconnect_safely()
+    # disconnect is deferred to the championship post so the manager stays reachable while top-4 finish
 
 
 def _load_participant_slugs(event_id: str) -> dict[str, str]:
@@ -1761,11 +1770,12 @@ def build_champion_embed(
     displays = displays or {}
     player_colors = player_colors or {}
     deck_data = deck_data or {}
+    medals_locked = pending_count == 0
     lines = [
         _build_standings_row(
             s, displays=displays, player_colors=player_colors,
             deck_data=deck_data, site_root=site_root,
-            show_review_flag=True,
+            show_review_flag=True, show_medal=medals_locked,
         )
         for s in standings
     ]
@@ -1905,8 +1915,10 @@ async def _grace_expire(manager, round_num: int) -> None:
 
     if round_num >= TOTAL_ROUNDS and not manager.finalized:
         await finalize_tournament(manager)
-        if not manager.champion_announced:
-            await _announce_or_update_champion(manager)
+        await _ping_missing_deck_participants(manager)
+        if manager.championship_task is None:
+            manager.championship_task = asyncio.create_task(_championship_deadline(manager))
+        await _maybe_post_championship(manager)
 
     manager.grace_round = None
     manager.grace_task = None
@@ -2073,108 +2085,158 @@ async def _resolve_announcement_target(manager):
     return parent or thread
 
 
-async def _announce_or_update_champion(manager) -> None:
-    """Post the channel-level champion announcement when champion is locked AND the rank-1
-    screenshot lands, OR when the grace window expires. Edits the announcement in place when
-    later submissions (colors, more screenshots) come in.
-    """
+def _deck_complete(data: "ParticipantDeckData | None") -> bool:
+    """A participant's deck is share-complete once both colors and a screenshot are on record."""
+    return bool(data and data.colors and data.screenshot_url)
+
+
+def _incomplete_top_decks(standings, deck_data) -> list[str]:
+    """Names among the top finishers (ANNOUNCEMENT_TOP_N, or fewer for a smaller pod) still missing
+    colors or a screenshot. Empty list means the championship post is clear to go up."""
+    return [
+        s.player_name for s in standings[:ANNOUNCEMENT_TOP_N]
+        if not _deck_complete(deck_data.get(_normalize_player_name(s.player_name)))
+    ]
+
+
+async def _ping_missing_deck_participants(manager) -> None:
+    """At R3 end, @ping every linked participant still missing colors or a deck screenshot."""
     event_id = manager.event_id
+    deck_data = await asyncio.to_thread(_load_event_deck_data_sync, event_id)
+    dm_info = await asyncio.to_thread(_load_dm_info_sync, event_id)
+    missing_ids = [
+        info.discord_id for key, info in dm_info.items()
+        if info.discord_id and not _deck_complete(deck_data.get(key))
+    ]
+    if not missing_ids:
+        log.info(f"[FINALIZE] deck_ping.skip event={event_id} reason=all_complete")
+        return
+    thread = await manager._fetch_thread()
+    if thread is None:
+        log.info(f"[FINALIZE] deck_ping.skip event={event_id} reason=no_thread")
+        return
+    mentions = " ".join(f"<@{i}>" for i in missing_ids)
+    try:
+        await thread.send(
+            content=build_deck_reminder_text(mentions),
+            allowed_mentions=discord.AllowedMentions(users=True),
+        )
+        log.info(f"[FINALIZE] deck_ping.sent event={event_id} count={len(missing_ids)}")
+    except Exception:
+        log.warning(f"[FINALIZE] deck_ping.error event={event_id}", exc_info=True)
+
+
+async def _championship_deadline(manager) -> None:
+    """Hard cap: CHAMPIONSHIP_DEADLINE_SECONDS after R3 ends, post the announcement with whatever
+    decks have landed. R3 end already cost one grace window, so only wait the remainder here."""
+    try:
+        await asyncio.sleep(max(0, CHAMPIONSHIP_DEADLINE_SECONDS - GRACE_SECONDS))
+    except asyncio.CancelledError:
+        return
+    log.info(f"[FINALIZE] championship.deadline_reached event={manager.event_id}")
+    await _maybe_post_championship(manager, force=True)
+    await manager.disconnect_safely()
+
+
+async def _maybe_post_championship(manager, *, force: bool = False) -> None:
+    """Post the one-time pod-draft-coordination announcement (ComponentsV2 screenshot gallery) to the
+    thread's parent channel. Fires once the top finishers (ANNOUNCEMENT_TOP_N, or the whole pod if
+    smaller) all have colors and a screenshot, or when forced by the deadline. Posts once, never edits.
+    """
+    if manager.champion_announced:
+        return
+    event_id = manager.event_id
+    if not manager.finalized:
+        log.info(f"[FINALIZE] champion.skip event={event_id} reason=not_finalized")
+        return
+
     match_states = await asyncio.to_thread(_load_round_states, event_id, TOTAL_ROUNDS)
     if not match_states:
+        log.info(f"[FINALIZE] champion.skip event={event_id} reason=no_match_states")
         return
-    _mark_trophy_match(match_states, TOTAL_ROUNDS)
-    trophy = [m for m in match_states if m.get("is_trophy_match")]
-    if not trophy or not all(m.get("winner_name") for m in trophy):
+    if any(not m.get("winner_name") for m in match_states):
+        log.info(f"[FINALIZE] champion.skip event={event_id} reason=r3_incomplete")
         return
 
     prior = await asyncio.to_thread(_load_matches, event_id)
     standings = pod_swiss.compute_standings(manager.tournament_players, prior)
     if not standings:
+        log.info(f"[FINALIZE] champion.skip event={event_id} reason=no_standings")
         return
-    champions = [s for s in standings if s.losses == 0]
-    if not champions:
-        # No undefeated player; wait for ALL R3 matches to resolve before crowning rank 1 so
-        # Swiss tiebreakers are final
-        if not all(m.get("winner_name") for m in match_states):
-            return
-        champions = [standings[0]]
+
+    deck_data = await asyncio.to_thread(_load_event_deck_data_sync, event_id)
+    incomplete = _incomplete_top_decks(standings, deck_data)
+    if incomplete and not force:
+        log.info(
+            f"[FINALIZE] champion.skip event={event_id} reason=awaiting_top{ANNOUNCEMENT_TOP_N} "
+            f"missing={incomplete}"
+        )
+        return
+
+    mpt_task = manager.mpt_task
+    if mpt_task is not None and not mpt_task.done():
+        try:
+            await asyncio.wait_for(asyncio.shield(mpt_task), timeout=15)
+        except asyncio.TimeoutError:
+            log.warning(f"MPT submission still running after 15s for {event_id}; posting announcement anyway")
+        except Exception:
+            log.warning(f"MPT submission failed for {event_id}", exc_info=True)
+        deck_data = await asyncio.to_thread(_load_event_deck_data_sync, event_id)
+
+    if manager.champion_announced:
+        return
+    target = await _resolve_announcement_target(manager)
+    if target is None:
+        log.info(f"[FINALIZE] champion.skip event={event_id} reason=no_target")
+        return
 
     displays = await asyncio.to_thread(_load_participant_displays, event_id)
-    deck_data = await asyncio.to_thread(_load_event_deck_data_sync, event_id)
-    player_colors = _colors_only(deck_data)
-    champion_keys = [_normalize_player_name(c.player_name) for c in champions]
+    champions = [s for s in standings if s.losses == 0] or [standings[0]]
+    champion_keys = {_normalize_player_name(c.player_name) for c in champions}
     dm_info = await asyncio.to_thread(_load_dm_info_sync, event_id)
     manager.champion_discord_ids = {
         info.discord_id for key, info in dm_info.items()
-        if key in set(champion_keys) and info.discord_id
+        if key in champion_keys and info.discord_id
     }
-    rank1_data = deck_data.get(_normalize_player_name(champions[0].player_name))
-    rank1_screenshot_in = bool(rank1_data and rank1_data.screenshot_url)
-
-    # First-time post waits for the rank-1 screenshot (the trigger), OR for the grace window to
-    # expire. Colors are not gating — they edit the message in place after the announcement is up.
-    grace_expired = manager.grace_task is None or manager.grace_task.done()
-    if not manager.champion_announced and not rank1_screenshot_in and not grace_expired:
-        return
-
-    if not manager.champion_announced:
-        mpt_task = getattr(manager, "mpt_task", None)
-        if mpt_task is not None and not mpt_task.done():
-            try:
-                await asyncio.wait_for(asyncio.shield(mpt_task), timeout=15)
-            except asyncio.TimeoutError:
-                log.warning(f"MPT submission still running after 15s for {event_id}; posting announcement anyway")
-            except Exception:
-                log.warning(f"MPT submission failed for {event_id}", exc_info=True)
-            deck_data = await asyncio.to_thread(_load_event_deck_data_sync, event_id)
-            player_colors = _colors_only(deck_data)
-
-    pending_count = sum(1 for m in match_states if not m.get("winner_name"))
     thread_id = int(manager.thread_id) if isinstance(manager.thread_id, (int, str)) else None
-    target = await _resolve_announcement_target(manager) if manager.champion_announcement_message is None else None
-    guild_id = (
-        getattr(getattr(target, "guild", None), "id", None) if target is not None
-        else getattr(getattr(manager.champion_announcement_message, "guild", None), "id", None)
-    )
+    guild_id = getattr(getattr(target, "guild", None), "id", None)
 
     view = build_champion_announcement_view(
         standings,
         event_name=await asyncio.to_thread(_load_event_name_sync, event_id),
         displays=displays,
-        player_colors=player_colors,
+        player_colors=_colors_only(deck_data),
         site_root=settings.public_site_url.rstrip("/"),
-        pending_count=pending_count,
+        pending_count=0,
         deck_data=deck_data,
         event_started_at=await asyncio.to_thread(_load_event_started_at_sync, event_id),
         guild_id=guild_id,
         thread_id=thread_id,
     )
-
-    existing = manager.champion_announcement_message
-    if existing is None:
-        if target is None:
-            return
-        try:
-            manager.champion_announcement_message = await target.send(view=view)
-            manager.champion_announced = True
-        except Exception:
-            log.warning("could not post champion announcement", exc_info=True)
-        return
-
+    manager.champion_announced = True  # claim before the await so concurrent triggers don't double-post
     try:
-        await existing.edit(view=view)
+        manager.champion_announcement_message = await target.send(view=view)
+        log.info(
+            f"[FINALIZE] champion.posted event={event_id} rank1={champions[0].player_name!r} "
+            f"forced={force} missing={incomplete}"
+        )
     except Exception:
-        log.warning("could not edit champion announcement", exc_info=True)
+        manager.champion_announced = False
+        log.warning(f"[FINALIZE] champion.post_error event={event_id}", exc_info=True)
+        return
+    if not force and manager.championship_task is not None and not manager.championship_task.done():
+        manager.championship_task.cancel()
+    await manager.disconnect_safely()
 
 
 async def _post_or_update_live_standings(manager) -> None:
-    """Post or edit the standings embed as R3 results land."""
+    """Post or edit the standings embed as R3 results land. A "No Match Played" drop never triggers it on its own."""
     event_id = manager.event_id
     match_states = await asyncio.to_thread(_load_round_states, event_id, TOTAL_ROUNDS)
     if not match_states:
         return
     _mark_trophy_match(match_states, TOTAL_ROUNDS)
-    if not any(m.get("winner_name") for m in match_states):
+    if not any(match_was_played(m) for m in match_states) and not manager.finalized:
         return
 
     trophy = [m for m in match_states if m.get("is_trophy_match")]
@@ -2218,9 +2280,6 @@ async def _post_or_update_live_standings(manager) -> None:
             await manager.standings_message.edit(embed=embed)
         except Exception:
             log.warning("could not edit live standings", exc_info=True)
-
-    if manager.champion_announced:
-        await _announce_or_update_champion(manager)
 
 
 async def _pin_round_message(message: discord.Message, round_num: int) -> None:
