@@ -1,16 +1,18 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useHref, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { AppHeader } from "../components/AppHeader";
 import { useIsMobile } from "../lib/use-is-mobile";
 import { AAvatar, ALogo, SetGlyph, Trophy, fmtPts } from "../components/Brand";
 import {
+  ArrowRight,
   ArrowUp,
   BsAsterisk,
   BsPaletteFill,
   ChevronLeft,
   ChevronRight,
   ExternalLink,
+  GiRoundTable,
   Info,
 } from "../components/Icons";
 import { Pip, Pips } from "../components/ManaPips";
@@ -25,10 +27,11 @@ import { TrophyCount } from "../components/TrophyCount";
 import { SetCodeDropdown } from "../components/SetCodeDropdown";
 import { MobilePageHeader } from "../components/PageNav";
 import { RankBadge } from "../components/RankBadge";
+import { Tooltip } from "../components/Tooltip";
 
 import { useAvailableFormats, useColorChips, useDraftEvents, useLeaderboard, usePlayerProfile, useSets } from "../data/hooks";
 import { computeScore, type ScoringStatRow } from "../data/scoring";
-import { colorsOf, effectiveColorCount, eventDate, fmtShortDate, formatTag, isFlashbackEvent, mainColors, prettyFormat, winPct } from "../data/utils";
+import { colorsOf, effectiveColorCount, eventDate, eventDisplayLabel, fmtShortDate, formatTag, isFlashbackEvent, mainColors, prettyFormat, winPct } from "../data/utils";
 import {
   colorsDisplayName,
   deckColorParts,
@@ -597,6 +600,7 @@ function Desktop({
           colorOptions={colorOptions}
           formatOptions={formatOptions}
           setEndDate={sets?.find((s) => s.code === profile.setCode)?.endDate ?? null}
+          playerDisplayName={profile.displayName}
         />
       </div>
 
@@ -939,6 +943,7 @@ function DraftLogDesktop({
   colorOptions,
   formatOptions,
   setEndDate,
+  playerDisplayName,
 }: {
   events: PlayerDraftEvent[];
   filtered: PlayerDraftEvent[];
@@ -949,6 +954,7 @@ function DraftLogDesktop({
   colorOptions: FilterOption[];
   formatOptions: FilterOption[];
   setEndDate: string | null;
+  playerDisplayName: string;
 }) {
   const sectionRef = useRef<HTMLElement>(null);
   const scrollToTop = () =>
@@ -981,8 +987,8 @@ function DraftLogDesktop({
       </div>
 
       <div
-        className="mt-3 grid gap-x-3 items-stretch"
-        style={{ gridTemplateColumns: "30px 110px max-content 1fr 90px 14px" }}
+        className="mt-3 grid gap-x-2 items-stretch"
+        style={{ gridTemplateColumns: "22px 70px max-content 1fr auto" }}
       >
         {filtered.map((e, i) => {
           const isFB = isFlashbackEvent(e.finishedAt, setEndDate);
@@ -994,7 +1000,7 @@ function DraftLogDesktop({
           return (
             <React.Fragment key={e.eventId}>
               {showBoundary && <FlashbackDivider variant="desktop" />}
-              <EventLogRow event={e} variant="desktop" hideBottomBorder={hideBottomBorder} />
+              <EventLogRow event={e} variant="desktop" hideBottomBorder={hideBottomBorder} playerDisplayName={playerDisplayName} />
             </React.Fragment>
           );
         })}
@@ -1080,24 +1086,74 @@ function FlashbackDivider({ variant }: { variant: "desktop" | "mobile" }) {
   );
 }
 
+function PodEventButton({ size = "md" }: { size?: "sm" | "md" }) {
+  const isSm = size === "sm";
+  const chamfer = "polygon(4px 0, 100% 0, calc(100% - 4px) 100%, 0 100%)";
+  return (
+    <span
+      className="inline-block bg-transparent transition-colors group-hover:[animation:pod-border-pulse_1.4s_ease-in-out_infinite]"
+      style={{ clipPath: chamfer, padding: 1 }}
+    >
+      <span
+        className={cn(
+          "inline-flex items-center gap-1.5 leading-none font-display text-text bg-surface2 whitespace-nowrap",
+          isSm
+            ? "text-[11px] tracking-[0.14em] py-[5px] pl-[8px] pr-[10px]"
+            : "text-[12px] tracking-[0.14em] py-[6px] pl-[10px] pr-[12px]",
+        )}
+        style={{ clipPath: chamfer }}
+      >
+        <GiRoundTable size={isSm ? 14 : 16} className="text-green shrink-0" />
+        <span className="hidden xl:inline">VIEW EVENT</span>
+        <ArrowRight size={isSm ? 10 : 12} className="hidden xl:inline-block" />
+      </span>
+    </span>
+  );
+}
+
 function EventLogRow({
   event: e,
   variant,
   hideBottomBorder = false,
+  playerDisplayName,
 }: {
   event: PlayerDraftEvent;
   variant: "desktop" | "mobile";
   hideBottomBorder?: boolean;
+  playerDisplayName?: string;
 }) {
   const href = e.externalUrl ?? null;
-  const linkClass = href ? "cursor-pointer transition-colors hover:bg-surface2 no-underline text-inherit" : "";
   const isPod = e.format === "PodDraft";
+  const podSlug = isPod ? e.podEventSlug ?? null : null;
+  const podLinkTo = podSlug
+    ? `/pods/${podSlug}${playerDisplayName ? `?player=${encodeURIComponent(playerDisplayName)}` : ""}`
+    : null;
+  const podFullHref = useHref(podLinkTo ?? "/");
+  const podNewTabHref = podLinkTo ? podFullHref : null;
+  const rowInternal = isPod && !!podSlug;
+  const rowExternal = !isPod && !!href;
+  const linkClass = (rowInternal || rowExternal) ? "group cursor-pointer transition-colors hover:bg-surface2 no-underline text-inherit" : "";
   const podWithoutDeck = isPod && !e.colors;
-  const formatLabel = isPod && e.eventName ? e.eventName.toUpperCase() : prettyFormat(e.format).toUpperCase();
+  const formatLabel = eventDisplayLabel(e).toUpperCase();
   const tag = isPod ? null : formatTag(e.format, e.expansion);
   const borderCls = hideBottomBorder ? "" : "border-b border-border";
 
   if (variant === "desktop") {
+    const { name: deckName, splash: deckSplash } = !podWithoutDeck
+      ? deckColorParts(e.colors)
+      : { name: "", splash: "" };
+    const deckContent = (
+      <span className="grid items-center" style={{ gridTemplateColumns: "100px 60px 1fr" }}>
+        <Pips colors={e.colors} size={14} flat />
+        <span
+          className="text-[12px] text-muted"
+          style={deckSplash ? undefined : { gridColumn: "span 2" }}
+        >
+          {deckName}
+        </span>
+        {deckSplash && <span className="text-[12px] text-muted">{deckSplash}</span>}
+      </span>
+    );
     const inner = (
       <>
         <span className="text-right pr-1">
@@ -1108,33 +1164,77 @@ function EventLogRow({
           <span className="font-display text-[16px] tracking-[0.08em] whitespace-nowrap">{formatLabel}</span>
           {tag && <FormatTagPill tag={tag} />}
         </span>
-        {podWithoutDeck ? (
-          <span className="text-[12px] text-muted">Deck not submitted</span>
-        ) : (() => {
-          const { name, splash } = deckColorParts(e.colors);
-          return (
-            <span className="grid items-center" style={{ gridTemplateColumns: "100px 60px 1fr" }}>
-              <Pips colors={e.colors} size={14} flat />
-              <span
-                className="text-[12px] text-muted"
-                style={splash ? undefined : { gridColumn: "span 2" }}
-              >
-                {name}
+        {isPod ? (
+          <span className="grid items-center min-w-0" style={{ gridTemplateColumns: "100px 60px minmax(0, 100px) auto 1fr" }}>
+            {podWithoutDeck ? (
+              <span className="text-[12px] text-muted" style={{ gridColumn: "1 / 4" }}>
+                Deck not submitted
               </span>
-              {splash && <span className="text-[12px] text-muted">{splash}</span>}
+            ) : (
+              <>
+                <Pips colors={e.colors} size={14} flat />
+                <span
+                  className="text-[12px] text-muted"
+                  style={deckSplash ? undefined : { gridColumn: "span 2" }}
+                >
+                  {deckName}
+                </span>
+                {deckSplash && <span className="text-[12px] text-muted">{deckSplash}</span>}
+              </>
+            )}
+            {podSlug && <PodEventButton />}
+          </span>
+        ) : (
+          deckContent
+        )}
+        {isPod ? (
+          podNewTabHref ? (
+            <Tooltip label="Open in new tab">
+              <button
+                type="button"
+                onClick={(ev) => {
+                  ev.preventDefault();
+                  ev.stopPropagation();
+                  window.open(podNewTabHref, "_blank", "noopener,noreferrer");
+                }}
+                aria-label="Open event in new tab"
+                className="inline-flex items-center justify-end gap-3 text-dim group-hover:text-text transition-colors bg-transparent border-none p-0 cursor-pointer"
+              >
+                <Record
+                  mono
+                  wins={e.wins}
+                  losses={e.losses}
+                  color={e.isTrophy ? "#2ee85c" : "#e6ecf5"}
+                  className="text-right font-display text-[22px]"
+                />
+                <ExternalLink size={18} aria-hidden="true" />
+              </button>
+            </Tooltip>
+          ) : (
+            <span className="inline-flex items-center justify-end">
+              <Record
+                mono
+                wins={e.wins}
+                losses={e.losses}
+                color={e.isTrophy ? "#2ee85c" : "#e6ecf5"}
+                className="text-right font-display text-[22px]"
+              />
             </span>
-          );
-        })()}
-        <Record
-          mono
-          wins={e.wins}
-          losses={e.losses}
-          color={e.isTrophy ? "#2ee85c" : "#e6ecf5"}
-          className="text-right font-display text-[22px]"
-        />
-        <span className="flex justify-center text-dim">
-          {href && <ExternalLink size={14} aria-hidden="true" />}
-        </span>
+          )
+        ) : (
+          <Tooltip label="View deck in 17lands">
+            <span className="inline-flex items-center justify-end gap-3 text-dim group-hover:text-text transition-colors">
+              <Record
+                mono
+                wins={e.wins}
+                losses={e.losses}
+                color={e.isTrophy ? "#2ee85c" : "#e6ecf5"}
+                className="text-right font-display text-[22px]"
+              />
+              {href && <ExternalLink size={18} aria-hidden="true" />}
+            </span>
+          </Tooltip>
+        )}
       </>
     );
     const cls = cn(
@@ -1143,13 +1243,21 @@ function EventLogRow({
       linkClass,
     );
     const style = { gridTemplateColumns: "subgrid" };
-    return href ? (
-      <a href={href} target="_blank" rel="noopener noreferrer" className={cls} style={style}>
-        {inner}
-      </a>
-    ) : (
-      <div className={cls} style={style}>{inner}</div>
-    );
+    if (rowInternal && podLinkTo) {
+      return (
+        <Link to={podLinkTo} className={cls} style={style}>
+          {inner}
+        </Link>
+      );
+    }
+    if (rowExternal) {
+      return (
+        <a href={href!} target="_blank" rel="noopener noreferrer" className={cls} style={style}>
+          {inner}
+        </a>
+      );
+    }
+    return <div className={cls} style={style}>{inner}</div>;
   }
 
   // mobile
@@ -1166,23 +1274,68 @@ function EventLogRow({
           </span>
           {tag && <FormatTagPill tag={tag} />}
         </div>
-        <div className="text-[11px] text-muted mt-0.5">
-          {[
-            podWithoutDeck ? "Deck not submitted" : formatDeckColors(e.colors),
-            fmtShortDate(eventDate(e)),
-          ].filter(Boolean).join(" · ")}
+        <div className="flex items-center gap-2 mt-0.5">
+          <span className="text-[11px] text-muted">
+            {[
+              podWithoutDeck ? "Deck not submitted" : formatDeckColors(e.colors),
+              fmtShortDate(eventDate(e)),
+            ].filter(Boolean).join(" · ")}
+          </span>
+          {podSlug && (
+            <span className="flex-1 flex justify-center">
+              <PodEventButton size="sm" />
+            </span>
+          )}
         </div>
       </div>
-      <span className="inline-flex items-center gap-1.5">
-        <Record
-          mono
-          wins={e.wins}
-          losses={e.losses}
-          color={e.isTrophy ? "#2ee85c" : "#e6ecf5"}
-          className="font-display text-[22px]"
-        />
-        {href && <ExternalLink size={13} className="text-dim" aria-hidden="true" />}
-      </span>
+      {isPod ? (
+        podNewTabHref ? (
+          <Tooltip label="Open in new tab">
+            <button
+              type="button"
+              onClick={(ev) => {
+                ev.preventDefault();
+                ev.stopPropagation();
+                window.open(podNewTabHref, "_blank", "noopener,noreferrer");
+              }}
+              aria-label="Open event in new tab"
+              className="inline-flex items-center gap-1.5 text-dim group-hover:text-text transition-colors bg-transparent border-none p-0 cursor-pointer"
+            >
+              <Record
+                mono
+                wins={e.wins}
+                losses={e.losses}
+                color={e.isTrophy ? "#2ee85c" : "#e6ecf5"}
+                className="font-display text-[22px]"
+              />
+              <ExternalLink size={16} aria-hidden="true" />
+            </button>
+          </Tooltip>
+        ) : (
+          <span className="inline-flex items-center">
+            <Record
+              mono
+              wins={e.wins}
+              losses={e.losses}
+              color={e.isTrophy ? "#2ee85c" : "#e6ecf5"}
+              className="font-display text-[22px]"
+            />
+          </span>
+        )
+      ) : (
+        <Tooltip label="View deck in 17lands">
+          <span className="inline-flex items-center gap-1.5 text-dim group-hover:text-text transition-colors">
+            <Record
+              mono
+              wins={e.wins}
+              losses={e.losses}
+              color={e.isTrophy ? "#2ee85c" : "#e6ecf5"}
+              className="font-display text-[22px]"
+            />
+            {href && <ExternalLink size={16} aria-hidden="true" />}
+          </span>
+        </Tooltip>
+      )}
     </>
   );
   const cls = cn(
@@ -1191,13 +1344,21 @@ function EventLogRow({
     linkClass,
   );
   const style = { gridTemplateColumns: "20px 1fr auto" };
-  return href ? (
-    <a href={href} target="_blank" rel="noopener noreferrer" className={cls} style={style}>
-      {inner}
-    </a>
-  ) : (
-    <div className={cls} style={style}>{inner}</div>
-  );
+  if (rowInternal && podLinkTo) {
+    return (
+      <Link to={podLinkTo} className={cls} style={style}>
+        {inner}
+      </Link>
+    );
+  }
+  if (rowExternal) {
+    return (
+      <a href={href!} target="_blank" rel="noopener noreferrer" className={cls} style={style}>
+        {inner}
+      </a>
+    );
+  }
+  return <div className={cls} style={style}>{inner}</div>;
 }
 
 // ─── Mobile ────────────────────────────────────────────────────────────────
@@ -1377,7 +1538,7 @@ function Mobile({
             return (
               <React.Fragment key={e.eventId}>
                 {showBoundary && <FlashbackDivider variant="mobile" />}
-                <EventLogRow event={e} variant="mobile" hideBottomBorder={hideBottomBorder} />
+                <EventLogRow event={e} variant="mobile" hideBottomBorder={hideBottomBorder} playerDisplayName={profile.displayName} />
               </React.Fragment>
             );
           });

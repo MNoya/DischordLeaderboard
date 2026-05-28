@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
+import { Provider as TooltipProvider } from "@radix-ui/react-tooltip";
 import { LeaderboardPage } from "./pages/LeaderboardPage";
 import { PlayerPage } from "./pages/PlayerPage";
 import { PodPage } from "./pages/PodPage";
@@ -22,6 +23,7 @@ export function App() {
     preloadGuildLogos();
   }, []);
   return (
+    <TooltipProvider delayDuration={150} skipDelayDuration={0} disableHoverableContent>
     <Routes>
       <Route path="/" element={<LeaderboardPage />} />
       <Route path="/about" element={<AboutPage />} />
@@ -41,5 +43,6 @@ export function App() {
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </TooltipProvider>
   );
 }

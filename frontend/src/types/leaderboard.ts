@@ -52,6 +52,8 @@ export interface PlayerDraftEvent {
   externalUrl?: string | null;
   // Pod draft event name (e.g. "Pod Draft #3"). Null for 17lands rows
   eventName?: string | null;
+  // Pod draft event slug for /pods/<slug>. Null for 17lands rows
+  podEventSlug?: string | null;
 }
 
 export interface ColorsLeaderboardRow {

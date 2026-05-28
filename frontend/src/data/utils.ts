@@ -172,6 +172,13 @@ export function prettyFormat(format: string): string {
   return FORMAT_DISPLAY[format] ?? format;
 }
 
+export function eventDisplayLabel(event: { format: string; eventName?: string | null; setCode: string }): string {
+  if (event.format === "PodDraft" && event.eventName) {
+    return cleanPodEventName(event.eventName, event.setCode);
+  }
+  return prettyFormat(event.format);
+}
+
 export type FormatTag = { label: string; tone: "midweek" | "open" | "alchemy" };
 
 export function formatTag(format: string, expansion?: string | null): FormatTag | null {

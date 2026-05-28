@@ -111,3 +111,8 @@ button {
   transition: height 300ms ease-out;
 }
 
+@keyframes pod-border-pulse {
+  0%, 100% { background-color: rgba(46, 232, 92, 0.5); }
+  50% { background-color: rgba(46, 232, 92, 1); }
+}
+
