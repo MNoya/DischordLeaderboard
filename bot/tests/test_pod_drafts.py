@@ -270,9 +270,9 @@ def test_finalize_champion_writes_standings_and_marks_complete(session):
     event = record_event(session, _parsed_event(attendees=("Alice", "Bob", "Carl")))
 
     standings = [
-        FinalStanding(draftmancer_name="Alice", placement=1, record="3-0", eliminated_round=None, draft_log_url="u1"),
-        FinalStanding(draftmancer_name="Bob",   placement=2, record="2-1", eliminated_round=3,    draft_log_url="u2"),
-        FinalStanding(draftmancer_name="Carl",  placement=3, record="1-2", eliminated_round=3,    draft_log_url="u3"),
+        FinalStanding(draftmancer_name="Alice", placement=1, record="3-0", eliminated_round=None),
+        FinalStanding(draftmancer_name="Bob",   placement=2, record="2-1", eliminated_round=3),
+        FinalStanding(draftmancer_name="Carl",  placement=3, record="1-2", eliminated_round=3),
     ]
     updated = finalize_champion(session, event.id, standings)
 
@@ -282,7 +282,7 @@ def test_finalize_champion_writes_standings_and_marks_complete(session):
     ).scalars().all()
     by_name = {p.display_name: p for p in rows}
     assert by_name["Alice"].placement == 1
-    assert by_name["Alice"].draft_log_url == "u1"
+    assert by_name["Alice"].record == "3-0"
     assert by_name["Alice"].eliminated_round is None
     assert by_name["Bob"].placement == 2
     assert by_name["Bob"].eliminated_round == 3
@@ -295,7 +295,7 @@ def test_list_champions_returns_filtered_and_ordered_by_date(session):
         event = record_event(session, _parsed_event(set_code=set_code, event_date=ed, attendees=()))
         standing = FinalStanding(
             draftmancer_name=f"Champ-{set_code}-{ed.isoformat()}", placement=1, record="3-0",
-            eliminated_round=None, draft_log_url=None,
+            eliminated_round=None,
         )
         finalize_champion(session, event.id, [standing])
 
@@ -314,11 +314,11 @@ def test_player_pod_stats_aggregates_correctly(session):
 
     e1 = record_event(session, _parsed_event(set_code="SOS", event_date=date(2026, 5, 6), attendees=("Champ",)))
     finalize_champion(session, e1.id, [
-        FinalStanding("Champ", placement=1, record="3-0", eliminated_round=None, draft_log_url=None),
+        FinalStanding("Champ", placement=1, record="3-0", eliminated_round=None),
     ])
     e2 = record_event(session, _parsed_event(set_code="ECL", event_date=date(2026, 4, 1), attendees=("Champ",)))
     finalize_champion(session, e2.id, [
-        FinalStanding("Champ", placement=2, record="2-1", eliminated_round=3, draft_log_url=None),
+        FinalStanding("Champ", placement=2, record="2-1", eliminated_round=3),
     ])
 
     stats = player_pod_stats(session, "777")

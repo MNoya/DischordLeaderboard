@@ -56,7 +56,6 @@ class FinalStanding:
     placement: int
     record: str
     eliminated_round: int | None
-    draft_log_url: str | None
 
 
 def _lookup_set_id(session: Session, set_code: str) -> str | None:
@@ -389,7 +388,7 @@ def finalize_champion(
     event_id: str,
     standings: Sequence[FinalStanding],
 ) -> PodDraftEvent:
-    """Apply placements/records/draft-log URLs to participants and mark socket_status='complete'."""
+    """Apply placements/records to participants and mark socket_status='complete'. Draft-log URLs are written mid-draft by pod_draft_manager and intentionally left untouched here."""
     event = session.get(PodDraftEvent, event_id)
     if event is None:
         raise ValueError(f"pod_draft_event {event_id} not found")
@@ -404,7 +403,6 @@ def finalize_champion(
         participant.placement = standing.placement
         participant.record = standing.record
         participant.eliminated_round = standing.eliminated_round
-        participant.draft_log_url = standing.draft_log_url
 
     event.socket_status = "complete"
     session.flush()

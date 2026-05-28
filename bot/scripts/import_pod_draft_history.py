@@ -184,7 +184,6 @@ def main() -> None:
                     placement=placement,
                     record=record,
                     eliminated_round=None if placement == 1 else 3,
-                    draft_log_url=None,
                 )
                 session.add(participant)
             log.info(f"imported {ev['name']}: {len(ev['participants'])} participants")

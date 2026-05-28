@@ -1403,7 +1403,6 @@ async def finalize_tournament(manager: "PodDraftManager") -> None:
             placement=s.rank,
             record=f"{s.wins}-{s.losses}",
             eliminated_round=None if s.rank == 1 else TOTAL_ROUNDS,
-            draft_log_url=None,
         )
         for s in standings
     ]
