@@ -16,13 +16,13 @@ from typing import TYPE_CHECKING, NamedTuple
 
 import discord
 from discord import ui
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 
 from bot import emojis
 from bot.config import settings
 from bot.slug import slugify
 from bot.database import SessionLocal
-from bot.models import Player as DbPlayer, PodDraftEvent, PodDraftMatch, PodDraftParticipant
+from bot.models import Player as DbPlayer, PodDraftEvent, PodDraftMatch, PodDraftParticipant, PodDraftReplay
 from bot.services import pod_swiss
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_deck_color import (
@@ -2366,5 +2366,6 @@ def _insert_pending_matches(event_id: str, round_num: int, pairings: list[tuple[
         for idx, (a_name, b_name) in enumerate(pairings):
             row = add_pairing(session, event_id, round_num, a_name, b_name, pairing_index=idx)
             out.append((row.id, a_name, b_name))
+        session.execute(update(PodDraftEvent).where(PodDraftEvent.id == event_id).values(current_round=round_num))
         session.commit()
     return out
