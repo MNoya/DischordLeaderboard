@@ -18,7 +18,7 @@ import discord
 import socketio
 from discord.ext import commands
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from bot.config import settings
 from bot.database import SessionLocal
@@ -536,14 +536,16 @@ class PodDraftManager:
             if not url:
                 continue
             try:
-                await asyncio.to_thread(self._store_draft_log_url, user_name, url)
-                stored += 1
-                log.info(f"[DRAFT] mpt_submit.seat_stored event={self.event_id} seat={user_name!r}")
+                wrote = await asyncio.to_thread(self._store_draft_log_url, user_name, url)
             except Exception:
                 log.warning(
                     f"[DRAFT] mpt_submit.store_error event={self.event_id} seat={user_name!r}",
                     exc_info=True,
                 )
+                continue
+            if wrote:
+                stored += 1
+                log.info(f"[DRAFT] mpt_submit.seat_stored event={self.event_id} seat={user_name!r}")
         log.info(f"[DRAFT] mpt_submit.done event={self.event_id} stored={stored}/{len(seats)}")
         if seats and stored == 0:
             await bot_log_mod.get(self.bot).post(
@@ -552,24 +554,26 @@ class PodDraftManager:
                 tag="DRAFT",
             )
 
-    def _store_draft_log_url(self, draftmancer_name: str, url: str) -> None:
+    def _store_draft_log_url(self, draftmancer_name: str, url: str) -> bool:
         try:
             with SessionLocal() as session:
                 rows = session.execute(
                     select(PodDraftParticipant)
                     .where(
                         PodDraftParticipant.event_id == self.event_id,
-                        PodDraftParticipant.draftmancer_name == draftmancer_name,
+                        func.lower(PodDraftParticipant.draftmancer_name) == draftmancer_name.lower(),
                     )
                 ).scalars().all()
                 if not rows:
-                    log.info(f"magicprotools: no participant row matching {draftmancer_name} in {self.event_id}")
-                    return
+                    log.warning(f"[DRAFT] mpt_submit.no_row event={self.event_id} seat={draftmancer_name!r}")
+                    return False
                 for row in rows:
                     row.draft_log_url = url
                 session.commit()
+                return True
         except Exception:
             log.warning(f"magicprotools: store url failed for {draftmancer_name}", exc_info=True)
+            return False
 
     def _persist_draft_log_gz(self, log_payload: dict) -> None:
         try:
