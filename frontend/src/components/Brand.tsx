@@ -130,6 +130,11 @@ export function keyruneClass(code: string): string {
   return KEYRUNE_OVERRIDES[code] ?? code.toLowerCase();
 }
 
+// Custom pod cube formats have no Keyrune glyph of their own; fall back to the generic cube symbol.
+export function setGlyphCode(set: { code: string; custom?: boolean }): string {
+  return set.custom ? "CUBE" : set.code;
+}
+
 export function SetGlyph({ code, size = 18 }: { code: string; size?: number }) {
   return (
     <span

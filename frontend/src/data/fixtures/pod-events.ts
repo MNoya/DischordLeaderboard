@@ -103,17 +103,50 @@ const extraSummaries: PodEventSummary[] = [
   },
 ];
 
-export const podEventsFixture: PodEventSummary[] = [
-  summaryFromFixture(),
-  ...extraSummaries,
+// Peasant Cube preview: a finalized custom-format pod that reuses the SOS-3 roster so its event
+// page renders, plus a scheduled one. set_code "PEASANT" has no row in the sets table.
+const PEASANT_EVENT_ID = "mock-peasant-1";
+const PEASANT_NAME = "Peasant Cube Pod Draft #1";
+
+const peasantSummaries: PodEventSummary[] = [
+  {
+    ...summaryFromFixture(),
+    eventId: PEASANT_EVENT_ID,
+    slug: "peasant-cube-pod-draft-1",
+    name: PEASANT_NAME,
+    setCode: "PEASANT",
+    eventDate: "2026-05-22",
+    eventTime: "2026-05-22T20:00:00Z",
+    formatLabel: "Peasant Cube",
+  },
+  {
+    eventId: "mock-peasant-2",
+    slug: "peasant-cube-pod-draft-2",
+    name: "Peasant Cube Pod Draft #2",
+    setCode: "PEASANT",
+    eventDate: "2026-05-29",
+    eventTime: "2026-05-29T20:00:00Z",
+    formatLabel: "Peasant Cube",
+    totalRounds: 3,
+    championPlayerSlug: null,
+    championDisplayName: null,
+    championAvatarUrl: null,
+    championDeckColors: null,
+    championRecord: null,
+    participantCount: 0,
+    isFinalized: false,
+    discordEventId: null,
+  },
 ];
 
-export const podEventParticipantsFixture: PodEventParticipantRow[] =
-  podSos3Fixture.participants.map(participantToRow);
+const peasantParticipants: PodEventParticipantRow[] = podSos3Fixture.participants.map((p) => ({
+  ...participantToRow(p),
+  eventId: PEASANT_EVENT_ID,
+}));
 
-export const podEventMatchesFixture: PodEventMatchRow[] = podSos3Fixture.matches.map((m) => ({
-  eventId: m.eventId,
-  eventName: podSos3Fixture.name,
+const peasantMatches: PodEventMatchRow[] = podSos3Fixture.matches.map((m) => ({
+  eventId: PEASANT_EVENT_ID,
+  eventName: PEASANT_NAME,
   round: m.round,
   playerAName: m.playerA,
   playerBName: m.playerB,
@@ -121,6 +154,31 @@ export const podEventMatchesFixture: PodEventMatchRow[] = podSos3Fixture.matches
   score: m.score,
   reportedAt: m.reportedAt,
 }));
+
+export const podEventsFixture: PodEventSummary[] = [
+  summaryFromFixture(),
+  ...extraSummaries,
+  ...peasantSummaries,
+];
+
+export const podEventParticipantsFixture: PodEventParticipantRow[] = [
+  ...podSos3Fixture.participants.map(participantToRow),
+  ...peasantParticipants,
+];
+
+export const podEventMatchesFixture: PodEventMatchRow[] = [
+  ...podSos3Fixture.matches.map((m) => ({
+    eventId: m.eventId,
+    eventName: podSos3Fixture.name,
+    round: m.round,
+    playerAName: m.playerA,
+    playerBName: m.playerB,
+    winnerName: m.winner,
+    score: m.score,
+    reportedAt: m.reportedAt,
+  })),
+  ...peasantMatches,
+];
 
 export const podEventReplaysFixture: PodEventReplayRow[] = podSos3Fixture.replays.map((r) => ({
   eventId: r.eventId,
@@ -139,12 +197,12 @@ export const podEventReplaysFixture: PodEventReplayRow[] = podSos3Fixture.replay
   inferredRound: r.inferredRound,
 }));
 
-export const podLeaderboardFixtureRaw: Omit<PodLeaderboardRow, "rank">[] =
-  podSos3Fixture.participants.map((p) => {
+function leaderboardRowsForSet(setCode: string): Omit<PodLeaderboardRow, "rank">[] {
+  return podSos3Fixture.participants.map((p) => {
     const wins = Number(p.record.split("-")[0] || 0);
     const losses = Number(p.record.split("-")[1] || 0);
     return {
-      setCode: podSos3Fixture.setCode,
+      setCode,
       slug: p.slug,
       displayName: p.displayName,
       avatarUrl: null,
@@ -155,5 +213,14 @@ export const podLeaderboardFixtureRaw: Omit<PodLeaderboardRow, "rank">[] =
       lastFinishedAt: `${podSos3Fixture.date}T22:00:00Z`,
     };
   });
+}
 
-export const podSetCodesFixture = ["SOS"];
+export const podLeaderboardFixtureRaw: Omit<PodLeaderboardRow, "rank">[] = [
+  ...leaderboardRowsForSet(podSos3Fixture.setCode),
+  ...leaderboardRowsForSet("PEASANT"),
+];
+
+export const podSetCodesFixture = [
+  { code: "SOS", label: null },
+  { code: "PEASANT", label: "Peasant Cube" },
+];

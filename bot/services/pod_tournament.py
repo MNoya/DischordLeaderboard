@@ -41,7 +41,7 @@ from bot.services.pod_drafts import (
     DM_KIND_SUBMIT_DECK,
     DM_KIND_SUBMIT_DECK_FINAL,
     FinalStanding,
-    _normalize_player_name,
+    normalize_player_name,
     _normalized_column,
     active_event_for_discord_user_in_dm,
     add_pairing,
@@ -52,9 +52,14 @@ from bot.services.pod_drafts import (
     final_submit_deck_dm_for_participant,
     finalize_champion as finalize_db,
     get_participant_deck_state,
+    load_event_id_by_name_sync,
+    load_event_id_by_thread_sync,
+    load_event_name_sync,
+    load_event_thread_id_sync,
     participant_dm_info,
     participant_id_for_discord_user,
     participants_with_discord_for_event,
+    search_event_names_sync,
     seed_event_participants,
     set_match_result,
     set_participant_deck_colors,
@@ -140,14 +145,14 @@ async def _dm_round_pairings(
     """DM each linked participant their opponent for this round, with a single-match dropdown
     so they can report from DM. Persists each DM message ref so later edits can sync."""
     dm_info = await asyncio.to_thread(_load_dm_info_sync, event_id)
-    event_name = await asyncio.to_thread(_load_event_name_sync, event_id)
+    event_name = await asyncio.to_thread(load_event_name_sync, event_id)
     match_states = await asyncio.to_thread(_load_round_states, event_id, round_num)
     _mark_trophy_match(match_states, round_num)
     by_match_id = {m["match_id"]: m for m in match_states}
     for match_id, a_name, b_name in pending_rows:
         match_state = by_match_id.get(match_id)
-        a_key = _normalize_player_name(a_name)
-        b_key = _normalize_player_name(b_name)
+        a_key = normalize_player_name(a_name)
+        b_key = normalize_player_name(b_name)
         await _send_pairing_dm(bot_client, dm_info, a_key, b_key, round_num, pairings_url,
                                event_id=event_id, match_state=match_state, event_name=event_name)
         await _send_pairing_dm(bot_client, dm_info, b_key, a_key, round_num, pairings_url,
@@ -190,7 +195,7 @@ def _load_event_deck_data_sync(event_id: str) -> dict[str, ParticipantDeckData]:
         )
         for src in (dm, dn):
             if src:
-                out[_normalize_player_name(src)] = data
+                out[normalize_player_name(src)] = data
     return out
 
 
@@ -198,49 +203,11 @@ def _colors_only(deck_data: dict[str, ParticipantDeckData]) -> dict[str, str | N
     return {k: v.colors for k, v in deck_data.items()}
 
 
-def _load_event_name_sync(event_id: str) -> str:
-    with SessionLocal() as session:
-        return session.execute(
-            select(PodDraftEvent.name).where(PodDraftEvent.id == event_id)
-        ).scalar_one_or_none() or "Pod Draft"
-
-
 def _load_event_started_at_sync(event_id: str) -> datetime | None:
     with SessionLocal() as session:
         return session.execute(
             select(PodDraftEvent.event_time).where(PodDraftEvent.id == event_id)
         ).scalar_one_or_none()
-
-
-def _load_event_id_by_thread_sync(thread_id: str) -> str | None:
-    with SessionLocal() as session:
-        return session.execute(
-            select(PodDraftEvent.id).where(PodDraftEvent.discord_thread_id == thread_id)
-        ).scalar_one_or_none()
-
-
-def _load_event_id_by_name_sync(name: str) -> str | None:
-    with SessionLocal() as session:
-        return session.execute(
-            select(PodDraftEvent.id).where(PodDraftEvent.name == name)
-        ).scalar_one_or_none()
-
-
-def _load_event_thread_id_sync(event_id: str) -> str | None:
-    with SessionLocal() as session:
-        return session.execute(
-            select(PodDraftEvent.discord_thread_id).where(PodDraftEvent.id == event_id)
-        ).scalar_one_or_none()
-
-
-def _search_event_names_sync(query: str, limit: int = 25) -> list[str]:
-    """Most-recent-first event names matching a case-insensitive substring of `query`. Empty
-    `query` returns the most recent events. Used by the /pod-draft-standings autocomplete."""
-    with SessionLocal() as session:
-        stmt = select(PodDraftEvent.name).order_by(PodDraftEvent.event_date.desc().nulls_last())
-        if query:
-            stmt = stmt.where(PodDraftEvent.name.ilike(f"%{query}%"))
-        return [n for n in session.execute(stmt.limit(limit)).scalars().all() if n]
 
 
 def _load_tournament_players_sync(event_id: str) -> list[pod_swiss.Player]:
@@ -283,7 +250,7 @@ def _build_standings_row(
     `{rank}. {medal} {name}  {wins}-{losses}  {colors}  [Draft Log]({url}) 📜`.
     Set show_review_flag for the in-thread variant to append 🙋 for review opt-ins. Set
     inline_caption to splice an italicized caption between the W-L record and the color glyph."""
-    key = _normalize_player_name(s.player_name)
+    key = normalize_player_name(s.player_name)
     info = displays.get(key, {})
     name = info.get("display_name") or s.player_name
     slug = info.get("slug")
@@ -392,7 +359,7 @@ async def _send_pairing_dm(
     opp_arena = opponent.arena_name if opponent else None
     viewer_is_a = None
     if match_state:
-        viewer_is_a = recipient_key == _normalize_player_name(match_state.get("a_name") or "")
+        viewer_is_a = recipient_key == normalize_player_name(match_state.get("a_name") or "")
     embed = build_pairing_dm_embed(
         round_num=round_num,
         opponent_label=opp_label,
@@ -462,7 +429,7 @@ async def _resolve_event_for_interaction(
         result = await asyncio.to_thread(_load_active_event_for_user_sync, discord_id)
         return result if result else (None, None)
     thread_id = str(interaction.channel_id)
-    event_id = await asyncio.to_thread(_load_event_id_by_thread_sync, thread_id)
+    event_id = await asyncio.to_thread(load_event_id_by_thread_sync, thread_id)
     return event_id, thread_id
 
 
@@ -509,7 +476,7 @@ async def live_deck_color_submit(interaction: discord.Interaction, color: str) -
     if event_id is None:
         log.info(f"{actor} saved deck colors: {color} (from {surface}, no event)")
         return
-    event_name = await asyncio.to_thread(_load_event_name_sync, event_id)
+    event_name = await asyncio.to_thread(load_event_name_sync, event_id)
     log.info(f"[{event_name}] {actor} saved deck colors: {color} (from {surface})")
     manager = ACTIVE_POD_MANAGERS.get(event_id)
     if manager is not None:
@@ -539,7 +506,7 @@ async def live_review_choice_submit(interaction: discord.Interaction, wants_revi
     if event_id is None:
         log.info(f"{actor} set review opt-in: {wants_review} (from {surface}, no event)")
         return
-    event_name = await asyncio.to_thread(_load_event_name_sync, event_id)
+    event_name = await asyncio.to_thread(load_event_name_sync, event_id)
     log.info(f"[{event_name}] {actor} set review opt-in: {wants_review} (from {surface})")
     manager = ACTIVE_POD_MANAGERS.get(event_id)
     if manager is not None:
@@ -630,7 +597,7 @@ async def _send_final_submit_deck_dms_for_match(
     """After an R3 match is reported: DM both players a fresh Submit Deck prompt. Idempotent per
     participant — if the opponent later re-reports, the second call no-ops for already-DMed players."""
     dm_info = await asyncio.to_thread(_load_dm_info_sync, event_id)
-    seat_keys = (_normalize_player_name(a_name), _normalize_player_name(b_name))
+    seat_keys = (normalize_player_name(a_name), normalize_player_name(b_name))
     for seat_key in seat_keys:
         info = dm_info.get(seat_key)
         if info is None or not info.discord_id:
@@ -958,7 +925,7 @@ async def _handle_result_submission(interaction: discord.Interaction, value: str
     match_states = await asyncio.to_thread(_load_round_states, event_id, round_num)
     _mark_trophy_match(match_states, round_num)
     match_state = next((m for m in match_states if m["match_id"] == match_id), None)
-    event_name = await asyncio.to_thread(_load_event_name_sync, event_id)
+    event_name = await asyncio.to_thread(load_event_name_sync, event_id)
     is_dm = isinstance(interaction.channel, discord.DMChannel)
 
     if result.get("cleared"):
@@ -1060,8 +1027,8 @@ def _build_dm_match_view(
     if recipient_key is None:
         return None, None
     recipient = dm_info[recipient_key]
-    viewer_is_a = recipient_key == _normalize_player_name(match_state.get("a_name") or "")
-    opp_key = _normalize_player_name(
+    viewer_is_a = recipient_key == normalize_player_name(match_state.get("a_name") or "")
+    opp_key = normalize_player_name(
         match_state["b_name"] if viewer_is_a else match_state["a_name"]
     )
     opponent = dm_info.get(opp_key)
@@ -1095,7 +1062,7 @@ async def _propagate_match_to_other_surfaces(
     match_state = next((m for m in match_states if m["match_id"] == match_id), None)
     if match_state is None:
         return
-    event_name = await asyncio.to_thread(_load_event_name_sync, event_id)
+    event_name = await asyncio.to_thread(load_event_name_sync, event_id)
     dm_info = await asyncio.to_thread(_load_dm_info_sync, event_id)
     pairings_url = _resolve_pairings_url(event_id, round_num)
 
@@ -1164,8 +1131,8 @@ def _load_round_states(event_id: str, round_num: int) -> list[dict]:
     for r in rows:
         a_s = standings_by_id.get(r.player_a_name)
         b_s = standings_by_id.get(r.player_b_name)
-        a_info = displays.get(_normalize_player_name(r.player_a_name), {})
-        b_info = displays.get(_normalize_player_name(r.player_b_name), {})
+        a_info = displays.get(normalize_player_name(r.player_a_name), {})
+        b_info = displays.get(normalize_player_name(r.player_b_name), {})
         states.append({
             "match_id": r.id,
             "a_name": r.player_a_name,
@@ -1452,7 +1419,7 @@ def _load_participant_slugs(event_id: str) -> dict[str, str]:
             .join(DbPlayer, DbPlayer.id == PodDraftParticipant.player_id)
             .where(PodDraftParticipant.event_id == event_id)
         ).all()
-    return {_normalize_player_name(name): slug for name, slug in rows if name}
+    return {normalize_player_name(name): slug for name, slug in rows if name}
 
 
 def _load_participant_displays(event_id: str) -> dict[str, dict]:
@@ -1478,9 +1445,9 @@ def _load_participant_displays(event_id: str) -> dict[str, dict]:
     for dm, participant_dn, player_dn, slug in rows:
         info = {"display_name": player_dn or participant_dn, "slug": slug}
         if dm:
-            out[_normalize_player_name(dm)] = info
+            out[normalize_player_name(dm)] = info
         if participant_dn:
-            out.setdefault(_normalize_player_name(participant_dn), info)
+            out.setdefault(normalize_player_name(participant_dn), info)
     return out
 
 
@@ -1490,7 +1457,7 @@ async def _resolve_discord_mention(event_id: str, draftmancer_name: str) -> str 
             participant = session.execute(
                 select(PodDraftParticipant).where(
                     PodDraftParticipant.event_id == event_id,
-                    _normalized_column(PodDraftParticipant.draftmancer_name) == _normalize_player_name(draftmancer_name),
+                    _normalized_column(PodDraftParticipant.draftmancer_name) == normalize_player_name(draftmancer_name),
                 )
             ).scalar_one_or_none()
             if participant is None or participant.player_id is None:
@@ -1634,7 +1601,7 @@ def build_champion_announcement_view(
     for s in standings:
         if s.losses != 0:
             continue
-        key = _normalize_player_name(s.player_name)
+        key = normalize_player_name(s.player_name)
         info = displays.get(key, {})
         display = info.get("display_name") or s.player_name
         champs_named.append((display, player_colors.get(key)))
@@ -1642,7 +1609,7 @@ def build_champion_announcement_view(
     # Fall back to crowning rank 1 when nobody finished undefeated; tiebreakers below explain it
     if not champs_named and standings:
         top = standings[0]
-        key = _normalize_player_name(top.player_name)
+        key = normalize_player_name(top.player_name)
         info = displays.get(key, {})
         display = info.get("display_name") or top.player_name
         champs_named.append((display, player_colors.get(key)))
@@ -1673,7 +1640,7 @@ def build_champion_announcement_view(
             deck_data=deck_data, site_root=site_root,
             inline_caption=True,
         )
-        key = _normalize_player_name(s.player_name)
+        key = normalize_player_name(s.player_name)
         data = deck_data.get(key)
         info = displays.get(key, {})
         name = info.get("display_name") or s.player_name
@@ -1707,12 +1674,12 @@ def build_champion_announcement_view(
         tied = [s for s in standings if s.wins == champion.wins]
         if len(tied) > 1:
             name_col = max(
-                len(displays.get(_normalize_player_name(s.player_name), {}).get("display_name") or s.player_name)
+                len(displays.get(normalize_player_name(s.player_name), {}).get("display_name") or s.player_name)
                 for s in tied
             )
             rows = ["```"]
             for s in tied:
-                key = _normalize_player_name(s.player_name)
+                key = normalize_player_name(s.player_name)
                 info = displays.get(key, {})
                 name = info.get("display_name") or s.player_name
                 rows.append(f"{s.rank}. {name:<{name_col}}  {s.omw_pct:.3f}")
@@ -1814,7 +1781,7 @@ async def build_standings_embed_for_event(event_id: str) -> discord.Embed | None
     prior = await asyncio.to_thread(_load_matches, event_id)
     standings = pod_swiss.compute_standings(players, prior)
     displays = await asyncio.to_thread(_load_participant_displays, event_id)
-    event_name = await asyncio.to_thread(_load_event_name_sync, event_id)
+    event_name = await asyncio.to_thread(load_event_name_sync, event_id)
     deck_data = await asyncio.to_thread(_load_event_deck_data_sync, event_id)
     player_colors = _colors_only(deck_data)
     return build_champion_embed(
@@ -1861,9 +1828,9 @@ async def build_champion_announcement_view_for_event(
     displays = await asyncio.to_thread(_load_participant_displays, event_id)
     deck_data = await asyncio.to_thread(_load_event_deck_data_sync, event_id)
     player_colors = _colors_only(deck_data)
-    event_name = await asyncio.to_thread(_load_event_name_sync, event_id)
+    event_name = await asyncio.to_thread(load_event_name_sync, event_id)
     event_started_at = await asyncio.to_thread(_load_event_started_at_sync, event_id)
-    thread_id_str = await asyncio.to_thread(_load_event_thread_id_sync, event_id)
+    thread_id_str = await asyncio.to_thread(load_event_thread_id_sync, event_id)
     thread_id = int(thread_id_str) if thread_id_str else None
     pending_count = sum(1 for m in match_states if not m.get("winner_name"))
 
@@ -2007,20 +1974,20 @@ def _changed_opponent_pairs(
     def _by_player(pairs):
         out: dict[str, str] = {}
         for a, b in pairs:
-            out[_normalize_player_name(a)] = b
-            out[_normalize_player_name(b)] = a
+            out[normalize_player_name(a)] = b
+            out[normalize_player_name(b)] = a
         return out
     prev_map = _by_player(prev)
     new_map = _by_player(new)
     changed: list[tuple[str, str]] = []
     for player_key, new_opp in new_map.items():
         prev_opp = prev_map.get(player_key)
-        if prev_opp is None or _normalize_player_name(prev_opp) != _normalize_player_name(new_opp):
+        if prev_opp is None or normalize_player_name(prev_opp) != normalize_player_name(new_opp):
             for a, b in new:
-                if _normalize_player_name(a) == player_key:
+                if normalize_player_name(a) == player_key:
                     changed.append((a, b))
                     break
-                if _normalize_player_name(b) == player_key:
+                if normalize_player_name(b) == player_key:
                     changed.append((b, a))
                     break
     return changed
@@ -2034,17 +2001,17 @@ async def _dm_changed_opponents(
     pairings_url: str,
 ) -> None:
     dm_info = await asyncio.to_thread(_load_dm_info_sync, event_id)
-    event_name = await asyncio.to_thread(_load_event_name_sync, event_id)
+    event_name = await asyncio.to_thread(load_event_name_sync, event_id)
     seen: set[str] = set()
     for player_name, new_opp in changed:
-        key = _normalize_player_name(player_name)
+        key = normalize_player_name(player_name)
         if key in seen:
             continue
         seen.add(key)
         info = dm_info.get(key)
         if info is None or not info.discord_id:
             continue
-        opp_info = dm_info.get(_normalize_player_name(new_opp))
+        opp_info = dm_info.get(normalize_player_name(new_opp))
         opp_label = (
             f"<@{opp_info.discord_id}>" if opp_info and opp_info.discord_id
             else f"**{opp_info.display_name if opp_info else new_opp}**"
@@ -2095,7 +2062,7 @@ def _incomplete_top_decks(standings, deck_data) -> list[str]:
     colors or a screenshot. Empty list means the championship post is clear to go up."""
     return [
         s.player_name for s in standings[:ANNOUNCEMENT_TOP_N]
-        if not _deck_complete(deck_data.get(_normalize_player_name(s.player_name)))
+        if not _deck_complete(deck_data.get(normalize_player_name(s.player_name)))
     ]
 
 
@@ -2192,7 +2159,7 @@ async def _maybe_post_championship(manager, *, force: bool = False) -> None:
 
     displays = await asyncio.to_thread(_load_participant_displays, event_id)
     champions = [s for s in standings if s.losses == 0] or [standings[0]]
-    champion_keys = {_normalize_player_name(c.player_name) for c in champions}
+    champion_keys = {normalize_player_name(c.player_name) for c in champions}
     dm_info = await asyncio.to_thread(_load_dm_info_sync, event_id)
     manager.champion_discord_ids = {
         info.discord_id for key, info in dm_info.items()
@@ -2203,7 +2170,7 @@ async def _maybe_post_championship(manager, *, force: bool = False) -> None:
 
     view = build_champion_announcement_view(
         standings,
-        event_name=await asyncio.to_thread(_load_event_name_sync, event_id),
+        event_name=await asyncio.to_thread(load_event_name_sync, event_id),
         displays=displays,
         player_colors=_colors_only(deck_data),
         site_root=settings.public_site_url.rstrip("/"),
@@ -2246,7 +2213,7 @@ async def _post_or_update_live_standings(manager) -> None:
     prior = await asyncio.to_thread(_load_matches, event_id)
     standings = pod_swiss.compute_standings(manager.tournament_players, prior)
     displays = await asyncio.to_thread(_load_participant_displays, event_id)
-    event_name = await asyncio.to_thread(_load_event_name_sync, event_id)
+    event_name = await asyncio.to_thread(load_event_name_sync, event_id)
     deck_data = await asyncio.to_thread(_load_event_deck_data_sync, event_id)
     player_colors = _colors_only(deck_data)
     embed = build_champion_embed(
@@ -2344,8 +2311,8 @@ def _state_for_pending(match_id: str, a_name: str, b_name: str, standings_by_id,
     a_s = standings_by_id.get(a_name)
     b_s = standings_by_id.get(b_name)
     displays = displays or {}
-    a_info = displays.get(_normalize_player_name(a_name), {})
-    b_info = displays.get(_normalize_player_name(b_name), {})
+    a_info = displays.get(normalize_player_name(a_name), {})
+    b_info = displays.get(normalize_player_name(b_name), {})
     return {
         "match_id": match_id,
         "a_name": a_name,

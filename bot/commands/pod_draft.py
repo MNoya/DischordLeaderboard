@@ -15,13 +15,18 @@ from bot.database import SessionLocal
 from bot.discord_helpers import extract_avatar_hash
 from bot.models import Player
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
-from bot.services.pod_drafts import _normalize_player_name
+from bot.services.pod_draft_manager import set_event_format
+from bot.services.pod_drafts import (
+    load_event_id_by_name_sync,
+    load_event_id_by_thread_sync,
+    load_event_name_sync,
+    load_event_set_code_sync,
+    load_event_thread_id_sync,
+    normalize_player_name,
+    search_event_names_sync,
+)
+from bot.services.pod_format_select import FormatSelectView
 from bot.services.pod_tournament import (
-    _load_event_id_by_name_sync,
-    _load_event_id_by_thread_sync,
-    _load_event_name_sync,
-    _load_event_thread_id_sync,
-    _search_event_names_sync,
     build_champion_announcement_view_for_event,
     build_live_submit_deck_button,
     build_replays_link_button,
@@ -62,6 +67,29 @@ class PodDraft(commands.Cog):
         else:
             await interaction.followup.send("Ready Check initiated — watch the thread for status.", ephemeral=True)
 
+    @app_commands.command(name="pod-format", description="Change the draft format (set or cube) for this pod")
+    @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def pod_format(self, interaction: discord.Interaction) -> None:
+        thread_id = str(interaction.channel_id) if interaction.channel_id else None
+        event_id = await asyncio.to_thread(load_event_id_by_thread_sync, thread_id) if thread_id else None
+        if event_id is None:
+            await interaction.response.send_message(
+                "Run this inside a pod-draft thread.",
+                ephemeral=True,
+            )
+            return
+        current_code = await asyncio.to_thread(load_event_set_code_sync, event_id)
+
+        async def on_apply(inter: discord.Interaction, code: str) -> str | None:
+            return await set_event_format(event_id, code)
+
+        log.info(f"pod-format: {interaction.user} opened selector for event_id={event_id}")
+        await interaction.response.send_message(
+            view=FormatSelectView(on_apply, current_code=current_code),
+            ephemeral=True,
+        )
+
     @app_commands.command(
         name="pod-link-arena",
         description="Link your MTG Arena handle so pod-draft results recognize you",
@@ -84,7 +112,7 @@ class PodDraft(commands.Cog):
             )
             return
 
-        normalized = _normalize_player_name(arena_name)
+        normalized = normalize_player_name(arena_name)
 
         with SessionLocal() as session:
             collision = session.execute(
@@ -153,14 +181,14 @@ class PodDraft(commands.Cog):
         await interaction.response.defer(thinking=False)
 
         if event:
-            event_id = await asyncio.to_thread(_load_event_id_by_name_sync, event)
+            event_id = await asyncio.to_thread(load_event_id_by_name_sync, event)
             if event_id is None:
                 await interaction.followup.send(f"No pod-draft event named `{event}`.", ephemeral=True)
                 return
         else:
             channel = interaction.channel
             thread_id = str(channel.id) if channel is not None else None
-            event_id = await asyncio.to_thread(_load_event_id_by_thread_sync, thread_id) if thread_id else None
+            event_id = await asyncio.to_thread(load_event_id_by_thread_sync, thread_id) if thread_id else None
             if event_id is None:
                 await interaction.followup.send(
                     "Run this inside a pod-draft thread, or pass an `event` to publish standings for a specific pod.",
@@ -174,9 +202,9 @@ class PodDraft(commands.Cog):
             return
 
         log.info(f"pod-standings: {interaction.user} posted standings for event_id={event_id}")
-        thread_id = await asyncio.to_thread(_load_event_thread_id_sync, event_id)
+        thread_id = await asyncio.to_thread(load_event_thread_id_sync, event_id)
         invoked_outside_thread = thread_id is not None and str(interaction.channel_id) != thread_id
-        event_name = await asyncio.to_thread(_load_event_name_sync, event_id)
+        event_name = await asyncio.to_thread(load_event_name_sync, event_id)
 
         view = discord.ui.View()
         if invoked_outside_thread and interaction.guild_id is not None:
@@ -191,7 +219,7 @@ class PodDraft(commands.Cog):
     async def _pod_draft_standings_event_autocomplete(
         self, interaction: discord.Interaction, current: str,
     ) -> list[app_commands.Choice[str]]:
-        names = await asyncio.to_thread(_search_event_names_sync, current)
+        names = await asyncio.to_thread(search_event_names_sync, current)
         return [app_commands.Choice(name=n, value=n) for n in names]
 
     @app_commands.command(
@@ -204,7 +232,7 @@ class PodDraft(commands.Cog):
     async def pod_champion(self, interaction: discord.Interaction, event: str) -> None:
         await interaction.response.defer(thinking=False)
 
-        event_id = await asyncio.to_thread(_load_event_id_by_name_sync, event)
+        event_id = await asyncio.to_thread(load_event_id_by_name_sync, event)
         if event_id is None:
             await interaction.followup.send(f"No pod-draft event named `{event}`.", ephemeral=True)
             return
@@ -226,7 +254,7 @@ class PodDraft(commands.Cog):
     async def _pod_champion_event_autocomplete(
         self, interaction: discord.Interaction, current: str,
     ) -> list[app_commands.Choice[str]]:
-        names = await asyncio.to_thread(_search_event_names_sync, current)
+        names = await asyncio.to_thread(search_event_names_sync, current)
         return [app_commands.Choice(name=n, value=n) for n in names]
 
     @app_commands.command(name="pod-takeover", description="Take control of the Draftmancer session and disconnect the bot")

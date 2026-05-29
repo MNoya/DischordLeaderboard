@@ -1,29 +1,35 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import {
+  LOCAL_SUPABASE_PUBLISHABLE_KEY,
+  LOCAL_SUPABASE_URL,
   PUBLIC_SUPABASE_PUBLISHABLE_KEY,
   PUBLIC_SUPABASE_URL,
 } from "./public-supabase-config";
 
-// Single Supabase client for the whole app. Always initialized in production
-// using the public defaults from public-supabase-config.ts; in local dev,
-// VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY (e.g. via .env.local)
-// override the defaults for staging projects or fixture-only mode.
-//
-// The "publishable" key hits the anon role server-side and can only SELECT
-// from the curated public_* views (per spec § RLS / grants). It is by design
-// safe to embed in the client bundle.
+// One explicit switch picks the data source — no commenting credentials in/out:
+//   VITE_DATA_MODE=prod   prod Supabase, read-only public_* views (default; deployed builds)
+//   VITE_DATA_MODE=local  bot.scripts.local_supabase_proxy on :3001
+//   VITE_DATA_MODE=mock   fixtures via mockApi, no network (supabase is null)
+// An explicit VITE_SUPABASE_URL + VITE_SUPABASE_PUBLISHABLE_KEY pair overrides prod/local
+// for ad-hoc staging; mock always wins. The publishable key is anon, SELECT-only on the
+// public_* views, and safe to embed in the client bundle.
 
-const url = (import.meta.env.VITE_SUPABASE_URL as string | undefined) ?? PUBLIC_SUPABASE_URL;
-const publishableKey =
-  (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined) ??
-  PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+const mode = (import.meta.env.VITE_DATA_MODE ?? "prod").toLowerCase();
 
-export const supabase: SupabaseClient | null =
-  url && publishableKey
-    ? createClient(url, publishableKey, {
-        auth: { persistSession: false },
-      })
-    : null;
+function resolveConfig(): { url: string; key: string } | null {
+  if (mode === "mock") return null;
+  const overrideUrl = import.meta.env.VITE_SUPABASE_URL;
+  const overrideKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+  if (overrideUrl && overrideKey) return { url: overrideUrl, key: overrideKey };
+  if (mode === "local") return { url: LOCAL_SUPABASE_URL, key: LOCAL_SUPABASE_PUBLISHABLE_KEY };
+  return { url: PUBLIC_SUPABASE_URL, key: PUBLIC_SUPABASE_PUBLISHABLE_KEY };
+}
+
+const config = resolveConfig();
+
+export const supabase: SupabaseClient | null = config
+  ? createClient(config.url, config.key, { auth: { persistSession: false } })
+  : null;
 
 export const useSupabase = supabase !== null;

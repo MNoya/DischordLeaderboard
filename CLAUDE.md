@@ -139,7 +139,7 @@ Every interaction `send_message`/`followup.send` uses `ephemeral=(interaction.gu
 
 ### Frontend swap point — `frontend/src/data/api.ts`
 
-Selects backend at module-load time: if `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` are set, `realApi.ts` runs; otherwise the fixture-backed `mockApi.ts`. The hook layer (`data/hooks.ts`) imports from `api.ts` and never knows which is live.
+Selects backend at module-load time via `useSupabase` from `data/supabase.ts`, driven by **`VITE_DATA_MODE`** (`prod` | `local` | `mock`; default `prod`). `prod`/`local` run `realApi.ts` against the prod public config or the `local_supabase_proxy` on `:3001`; `mock` runs the fixture-backed `mockApi.ts`. An explicit `VITE_SUPABASE_URL` + `VITE_SUPABASE_PUBLISHABLE_KEY` pair overrides prod/local for staging; `mock` always wins. The hook layer (`data/hooks.ts`) imports from `api.ts` and never knows which is live.
 
 Vite `base: "/leaderboard/"` + React Router `basename="/leaderboard"` so the site matches the future LLU subpath today. SPA fallback for CF Pages is **`functions/_middleware.ts`** (a Pages Function), not `_redirects` — `_redirects 200`-rewrites are over-greedy on Cloudflare.
 

@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
+import { keyruneClass } from "../Brand";
 import { LuScrollText, TbCards } from "../Icons";
 import { PlayerShield } from "./PlayerShield";
 import { cn } from "../../lib/utils";
@@ -15,6 +16,7 @@ interface Props {
   onShowDeck?: (p: PodSeat) => void;
   eventLabel: string;
   setCode: string;
+  formatLabel?: string | null;
   date: string;
   maxWidth?: number | string;
 }
@@ -42,6 +44,7 @@ export function PodTable({
   onShowDeck,
   eventLabel,
   setCode,
+  formatLabel,
   date,
   maxWidth = 720,
 }: Props) {
@@ -91,7 +94,7 @@ export function PodTable({
       </div>
 
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <CenterMedallion eventLabel={eventLabel} setCode={setCode} date={date} />
+        <CenterMedallion eventLabel={eventLabel} setCode={setCode} formatLabel={formatLabel} date={date} />
       </div>
 
       <PassDirectionArrows seatCount={sorted.length} />
@@ -334,9 +337,15 @@ function PassDirectionArrows({ seatCount }: { seatCount: number }) {
   );
 }
 
-function CenterMedallion({ eventLabel, setCode, date }: { eventLabel: string; setCode: string; date: string }) {
+function CenterMedallion({
+  eventLabel,
+  setCode,
+  formatLabel,
+  date,
+}: { eventLabel: string; setCode: string; formatLabel?: string | null; date: string }) {
   const dateLabel = formatDate(date);
   const labelFontSize = medallionFontSize(eventLabel);
+  const glyphCode = formatLabel ? "CUBE" : setCode;
   return (
     <div
       className="flex flex-col items-center justify-center text-center select-none"
@@ -350,7 +359,7 @@ function CenterMedallion({ eventLabel, setCode, date }: { eventLabel: string; se
       </div>
       <div className="flex items-center" style={{ gap: "2.2cqw" }}>
         <i
-          className={`ss ss-${setCode.toLowerCase()} text-white`}
+          className={`ss ss-${keyruneClass(glyphCode)} text-white`}
           style={{ fontSize: "8cqw", lineHeight: 1 }}
           aria-hidden="true"
         />
@@ -358,7 +367,7 @@ function CenterMedallion({ eventLabel, setCode, date }: { eventLabel: string; se
           className="font-display text-text"
           style={{ fontSize: "5.2cqw", letterSpacing: "0.24em" }}
         >
-          {setCode}
+          {formatLabel ?? setCode}
         </span>
       </div>
       <div

@@ -17,11 +17,17 @@
 // API → Publishable key, then update the constant below. The previous key
 // continues working for ~5 minutes; the rotation is non-breaking.
 //
-// Local dev with VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY env vars
-// (e.g. .env.local) overrides these defaults, so contributors targeting a
-// staging project don't need to edit this file.
+// Pick the data source with VITE_DATA_MODE (prod | local | mock) — see supabase.ts.
+// An explicit VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY pair still overrides
+// these defaults for ad-hoc staging targets, so contributors don't edit this file.
 
 export const PUBLIC_SUPABASE_URL = "https://yrecdosksgigpceholjl.supabase.co";
 
 export const PUBLIC_SUPABASE_PUBLISHABLE_KEY =
   "sb_publishable_x-W4800MtS_hbFAnLmAk6Q_68P4Nxsf";
+
+// Fixed dev defaults for bot.scripts.local_supabase_proxy, so VITE_DATA_MODE=local
+// needs no credentials. Never used by production builds.
+export const LOCAL_SUPABASE_URL = "http://localhost:3001";
+
+export const LOCAL_SUPABASE_PUBLISHABLE_KEY = "dev-anon-key";

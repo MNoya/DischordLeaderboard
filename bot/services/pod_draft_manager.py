@@ -32,8 +32,14 @@ from bot.services.lobby_embed import (
     render_ready_check_progress,
 )
 from bot.services.magicprotools import submit_to_api as submit_to_magicprotools
+from bot.services import pod_format
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
-from bot.services.pod_drafts import _normalize_player_name, classify_lobby_names, seed_event_participants
+from bot.services.pod_drafts import (
+    normalize_player_name,
+    classify_lobby_names,
+    seed_event_participants,
+    update_event_format,
+)
 from bot.services.pod_tournament import start_tournament
 from bot.slug import disambiguate_slug, slugify
 
@@ -251,7 +257,7 @@ class PodDraftManager:
             )
 
     async def _emit_session_settings(self) -> None:
-        await self.sio.emit("setRestriction", [self.set_code.lower()])
+        await self._emit_format()
         await self.sio.emit("setOwnerIsPlayer", False)
         await self.sio.emit("setMaxPlayers", settings.pod_draft_max_players)
         await self.sio.emit("setPickTimer", settings.pod_draft_pick_timer)
@@ -264,6 +270,58 @@ class PodDraftManager:
             f"max_players={settings.pod_draft_max_players} pick_timer={settings.pod_draft_pick_timer} "
             f"bots={settings.pod_draft_bots}"
         )
+
+    async def _emit_format(self) -> str | None:
+        """
+        Point the session at the current `set_code`: a registered cube → importCube, else a  plain set → setRestriction.
+        Returns an error string on cube-import failure, else None.
+        """
+        cube_id = pod_format.cube_id_for(self.set_code)
+        if cube_id is None:
+            await self.sio.emit("setRestriction", [self.set_code.lower()])
+            return None
+        err = await self._import_cube(cube_id)
+        if err is not None:
+            thread = await self._fetch_thread()
+            if thread is not None:
+                try:
+                    await thread.send(f"⚠️ {err}")
+                except Exception:
+                    log.warning(f"[LIFECYCLE] import_cube.thread_post_error event={self.event_id}", exc_info=True)
+        return err
+
+    async def _import_cube(self, cube_id: str) -> str | None:
+        """Load a CubeCobra cube into the session (owner-only). Ported from Amelas/DraftBot."""
+        payload = {"service": "Cube Cobra", "cubeID": cube_id, "matchVersions": True}
+        result = await self._emit_with_ack("importCube", payload, timeout_s=30.0)
+        error_text = _ack_error_text(result)
+        if error_text is not None:
+            log.warning(
+                f"[LIFECYCLE] import_cube.failed event={self.event_id} cube={cube_id} error={error_text!r}"
+            )
+            await bot_log_mod.get(self.bot).post(
+                f"importCube failed for event `{self.event_id}` (cube `{cube_id}`): {error_text}",
+                fingerprint=f"import_cube_failed:{self.event_id}",
+                tag="LIFECYCLE",
+            )
+            return f"Couldn't load cube `{cube_id}` in Draftmancer: {error_text}"
+        log.info(f"[LIFECYCLE] import_cube.ok event={self.event_id} cube={cube_id}")
+        return None
+
+    async def apply_format(self, code: str) -> str | None:
+        """Switch this pod's format to `code` (a set code or a registered cube code). Pre-draft only.
+        Persists set_code, re-emits to a live session, and refreshes the lobby card."""
+        if self.drafting or self.draft_complete:
+            return pod_format.FORMAT_LOCKED_MSG
+        if not await asyncio.to_thread(_persist_format, self.event_id, code):
+            return pod_format.FORMAT_LOCKED_MSG
+        self.set_code = code
+        if self.sio.connected and self.owner_claimed:
+            err = await self._emit_format()
+            if err is not None:
+                return err
+        await self.refresh_lobby_now()
+        return None
 
     async def _mark_socket_status(self, status: str) -> None:
         with SessionLocal() as session:
@@ -305,6 +363,7 @@ class PodDraftManager:
                 await prior_progress.edit(
                     view=LobbyReadyButtonView(
                         draftmancer_url=self.draftmancer_url, ready_disabled=True,
+                        format_disabled=True,
                     ),
                 )
             except Exception:
@@ -324,6 +383,7 @@ class PodDraftManager:
                 embed=progress_embed,
                 view=LobbyReadyButtonView(
                     draftmancer_url=self.draftmancer_url, ready_disabled=True,
+                    format_disabled=True,
                 ),
             )
         except Exception:
@@ -413,6 +473,7 @@ class PodDraftManager:
             decliner_name=self.last_decliner_name,
             cancel_reason=self.last_cancel_reason,
             display_name_by_mention_id=await self._resolve_rsvp_mentions(thread.guild),
+            format_label=pod_format.label_for(self.set_code),
         )
         has_unrecognized = any(dn is None for _, dn in classified)
         view = (
@@ -420,6 +481,7 @@ class PodDraftManager:
             else LobbyReadyButtonView(
                 draftmancer_url=self.draftmancer_url,
                 ready_disabled=(state == "ready" or has_unrecognized),
+                format_disabled=(state == "ready"),
             )
         )
         async with self._lobby_post_lock:
@@ -450,6 +512,7 @@ class PodDraftManager:
                 progress_view = LobbyReadyButtonView(
                     draftmancer_url=self.draftmancer_url,
                     ready_disabled=(state == "ready" or has_unrecognized),
+                    format_disabled=(state == "ready"),
                 )
             try:
                 await self.ready_check_progress_message.edit(embed=progress_embed, view=progress_view)
@@ -860,9 +923,9 @@ def _apply_mainboards(session, event_id: str, log_payload: dict) -> None:
     by_display: dict[str, PodDraftParticipant] = {}
     for row in rows:
         if row.draftmancer_name:
-            by_dm[_normalize_player_name(row.draftmancer_name)] = row
+            by_dm[normalize_player_name(row.draftmancer_name)] = row
         if row.display_name:
-            by_display[_normalize_player_name(row.display_name)] = row
+            by_display[normalize_player_name(row.display_name)] = row
     matched = 0
     for user in users.values():
         if not isinstance(user, dict) or user.get("isBot"):
@@ -876,7 +939,7 @@ def _apply_mainboards(session, event_id: str, log_payload: dict) -> None:
         main = decklist.get("main")
         if not isinstance(main, list) or not main:
             continue
-        key = _normalize_player_name(name)
+        key = normalize_player_name(name)
         row = by_dm.get(key) or by_display.get(key)
         if row is None:
             log.info(f"mainboard: no participant matching {name!r} in {event_id}")
@@ -896,14 +959,14 @@ def _apply_seat_indexes(session, event_id: str, seats: list[str]) -> None:
     by_display: dict[str, PodDraftParticipant] = {}
     for row in rows:
         if row.draftmancer_name:
-            by_dm[_normalize_player_name(row.draftmancer_name)] = row
+            by_dm[normalize_player_name(row.draftmancer_name)] = row
         if row.display_name:
-            by_display[_normalize_player_name(row.display_name)] = row
+            by_display[normalize_player_name(row.display_name)] = row
     matched = 0
     for i, name in enumerate(seats):
         if not name or name == _BOT_USER_NAME or _AI_BOT_NAME_RE.match(name):
             continue
-        key = _normalize_player_name(name)
+        key = normalize_player_name(name)
         row = by_dm.get(key) or by_display.get(key)
         if row is None:
             log.info(f"seat_index: no participant matching {name!r} in {event_id}")
@@ -972,6 +1035,23 @@ async def start_manager(
     return manager
 
 
+async def set_event_format(event_id: str, code: str) -> str | None:
+    """Change a pod's format by event id; routes to the live manager when one exists, else persists directly.
+    Returns an error string or None."""
+    manager = ACTIVE_POD_MANAGERS.get(event_id)
+    if manager is not None:
+        return await manager.apply_format(code)
+    if not await asyncio.to_thread(_persist_format, event_id, code):
+        return pod_format.FORMAT_LOCKED_MSG
+    return None
+
+
+def _persist_format(event_id: str, code: str) -> bool:
+    with SessionLocal() as session:
+        if update_event_format(session, event_id, code):
+            session.commit()
+            return True
+        return False
 
 
 def _classify_names_sync(names: list[str]) -> list[tuple[str, bool]]:
@@ -998,7 +1078,7 @@ def _ensure_players_for_members_sync(pairs: list[tuple[str, discord.Member]]) ->
         taken_slugs = set(session.execute(select(Player.slug)).scalars().all())
         for arena_name, member in pairs:
             discord_id = str(member.id)
-            normalized = _normalize_player_name(arena_name)
+            normalized = normalize_player_name(arena_name)
             existing = session.execute(
                 select(Player).where(Player.discord_id == discord_id)
             ).scalar_one_or_none()

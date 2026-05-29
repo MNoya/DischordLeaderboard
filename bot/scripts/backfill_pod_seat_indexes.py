@@ -17,7 +17,7 @@ from sqlalchemy import select
 
 from bot.database import SessionLocal
 from bot.models import PodDraftEvent, PodDraftParticipant
-from bot.services.pod_drafts import _normalize_player_name
+from bot.services.pod_drafts import normalize_player_name
 
 
 _BOT_USER_NAME = "DisChordBot"
@@ -33,13 +33,13 @@ def apply_for_event(session, event_id: str) -> tuple[int, int]:
     rows = session.execute(
         select(PodDraftParticipant).where(PodDraftParticipant.event_id == event_id)
     ).scalars().all()
-    by_dm = {_normalize_player_name(r.draftmancer_name): r for r in rows if r.draftmancer_name}
-    by_display = {_normalize_player_name(r.display_name): r for r in rows if r.display_name}
+    by_dm = {normalize_player_name(r.draftmancer_name): r for r in rows if r.draftmancer_name}
+    by_display = {normalize_player_name(r.display_name): r for r in rows if r.display_name}
     matched = 0
     for i, name in enumerate(seats):
         if not name or name == _BOT_USER_NAME or _AI_BOT_RE.match(name):
             continue
-        key = _normalize_player_name(name)
+        key = normalize_player_name(name)
         row = by_dm.get(key) or by_display.get(key)
         if row is None:
             print(f"  {event_id}: no participant matching {name!r} at seat {i}")

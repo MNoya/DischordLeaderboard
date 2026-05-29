@@ -1,0 +1,126 @@
+"""Pod-draft format registry + Draftmancer emit-branch tests."""
+from __future__ import annotations
+
+import asyncio
+from datetime import date, datetime, timezone
+
+from bot.models import PodDraftEvent
+from bot.services import pod_format
+from bot.services.pod_format import PEASANT_CODE, PEASANT_CUBE_ID, PEASANT_LABEL
+from bot.services.pod_draft_manager import PodDraftManager, _persist_format, set_event_format
+from bot.services.pod_drafts import update_event_format
+
+
+def test_cube_id_for_registered_cube():
+    assert pod_format.cube_id_for(PEASANT_CODE) == PEASANT_CUBE_ID
+    assert pod_format.cube_id_for(PEASANT_CODE.lower()) == PEASANT_CUBE_ID
+
+
+def test_cube_id_for_plain_set_is_none():
+    assert pod_format.cube_id_for("SOS") is None
+
+
+def test_label_for_cube_vs_set():
+    assert pod_format.label_for(PEASANT_CODE) == PEASANT_LABEL
+    assert pod_format.label_for("SOS") is None
+
+
+def test_format_applied_message_uses_label_then_code():
+    assert PEASANT_LABEL in pod_format.format_applied_message(PEASANT_CODE)
+    assert "SOS" in pod_format.format_applied_message("SOS")
+
+
+class _FakeSio:
+    """Captures emitted events; invokes ack callbacks with a success payload."""
+
+    def __init__(self):
+        self.connected = True
+        self.calls: list[tuple[str, tuple]] = []
+
+    async def emit(self, event, *args, callback=None):
+        self.calls.append((event, args))
+        if callback is not None:
+            callback({})
+
+    def events(self):
+        return [name for name, _ in self.calls]
+
+
+def _manager(set_code: str) -> PodDraftManager:
+    mgr = PodDraftManager(object(), "evt", "sid", 123, set_code, 8)
+    mgr.sio = _FakeSio()
+    return mgr
+
+
+def test_emit_format_loads_cube_for_registered_code():
+    mgr = _manager(PEASANT_CODE)
+    asyncio.run(mgr._emit_session_settings())
+    assert ("importCube", ({"service": "Cube Cobra", "cubeID": PEASANT_CUBE_ID, "matchVersions": True},)) in mgr.sio.calls
+    assert "setRestriction" not in mgr.sio.events()
+
+
+def test_emit_format_restricts_to_set_for_plain_code():
+    mgr = _manager("SOS")
+    asyncio.run(mgr._emit_session_settings())
+    assert ("setRestriction", (["sos"],)) in mgr.sio.calls
+    assert "importCube" not in mgr.sio.events()
+
+
+# --- persistence + pre-draft guard ---
+
+def _seed_event(session, socket_status="reminded", set_code="SOS"):
+    event = PodDraftEvent(
+        event_date=date(2026, 5, 13),
+        event_time=datetime(2026, 5, 13, tzinfo=timezone.utc),
+        set_code=set_code,
+        name="SOS Pod Draft",
+        draftmancer_session="LLU-SOS-1",
+        draftmancer_url="https://draftmancer.com/?session=LLU-SOS-1",
+        discord_thread_id="thread-1",
+        sesh_message_id="msg-1",
+        socket_status=socket_status,
+    )
+    session.add(event)
+    session.flush()
+    return event
+
+
+def test_update_event_format_repoints_set_code(session):
+    event = _seed_event(session)
+    assert update_event_format(session, event.id, PEASANT_CODE) is True
+    assert event.set_code == PEASANT_CODE
+    assert event.format_label == PEASANT_LABEL
+
+
+def test_update_event_format_blocked_once_finalized(session):
+    event = _seed_event(session, socket_status="complete")
+    assert update_event_format(session, event.id, PEASANT_CODE) is False
+    session.refresh(event)
+    assert event.set_code == "SOS"
+
+
+def test_persist_format_commits(session, monkeypatch):
+    import bot.services.pod_draft_manager as mod
+    event = _seed_event(session)
+    monkeypatch.setattr(mod, "SessionLocal", _session_factory(session))
+    assert _persist_format(event.id, PEASANT_CODE) is True
+    assert session.get(PodDraftEvent, event.id).set_code == PEASANT_CODE
+
+
+def test_set_event_format_rejects_finalized_event(session, monkeypatch):
+    import bot.services.pod_draft_manager as mod
+    event = _seed_event(session, socket_status="draft_done")
+    monkeypatch.setattr(mod, "SessionLocal", _session_factory(session))
+    err = asyncio.run(set_event_format(event.id, PEASANT_CODE))
+    assert err == pod_format.FORMAT_LOCKED_MSG
+
+
+def _session_factory(session):
+    class _Ctx:
+        def __enter__(self):
+            return session
+
+        def __exit__(self, *exc):
+            return False
+
+    return lambda: _Ctx()

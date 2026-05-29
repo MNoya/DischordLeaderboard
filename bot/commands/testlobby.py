@@ -30,7 +30,9 @@ from bot.services.lobby_embed import (
     render_ready_check_progress,
 )
 from bot.services.pod_deck_color import LiveDeckColorSelectView, SubmitDeckView
-from bot.services.pod_drafts import _normalize_player_name as _norm
+from bot.services.pod_drafts import normalize_player_name as _norm
+from bot.services.pod_format import label_for
+from bot.services.pod_format_select import FormatSelectView
 from bot.services.pod_tournament import (
     CHAMPIONSHIP_DEADLINE_SECONDS,
     CLEAR_SENTINEL,
@@ -246,6 +248,7 @@ _LINKED_EIGHT: list[tuple[str, str]] = [
 _VALID_STATES = (
     "empty", "partial", "linked", "unlinked", "ready", "notready", "cancelled",
     "drafting", "complete", "round1", "round3", "champion", "submit", "podbracket",
+    "format",
 )
 
 # Real deck colors from Pod Draft #3 for the top 4; bottom 4 are fake fill so the in-thread
@@ -505,6 +508,7 @@ def _build(state: str) -> tuple[discord.Embed, discord.ui.View | None, dict | No
         else LobbyReadyButtonView(
             draftmancer_url=_DRAFTMANCER_URL,
             ready_disabled=(state == "ready" or has_unrecognized),
+            format_disabled=(state == "ready"),
         )
     )
     return embed, view, None
@@ -1312,9 +1316,21 @@ async def setup(bot: commands.Bot) -> None:
             await ctx.send(view=_submit_deck_view(state=None))
             return
 
+        if state == "format":
+            async def _test_apply(inter: discord.Interaction, code: str) -> str | None:
+                embed = render_lobby_embed(
+                    _THREAD_NAME, _RSVPS_YES, _RSVPS_MAYBE, list(_LINKED_EIGHT),
+                    state="linked", draftmancer_url=_DRAFTMANCER_URL,
+                    format_label=label_for(code),
+                )
+                await inter.channel.send(embed=embed)
+                return None
+            await ctx.send(view=FormatSelectView(_test_apply))
+            return
+
         if state == "":
             for s in _VALID_STATES:
-                if s in ("champion", "submit", "podbracket"):
+                if s in ("champion", "submit", "podbracket", "format"):
                     continue  # each posts a bespoke / live flow handled separately
                 embed, view, bracket = _build(s)
                 msg = await ctx.send(content=_sweep_caption(s, "lobby"), embed=embed, view=view)

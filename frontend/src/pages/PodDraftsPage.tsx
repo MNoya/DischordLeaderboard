@@ -6,7 +6,7 @@ import { AppHeader } from "../components/AppHeader";
 import { Footer } from "../components/Footer";
 import { SectionLabel } from "../components/SectionLabel";
 import { SetSwitcherDesktop, SetSwitcherMobile } from "../components/SetSwitcher";
-import { AAvatar, SetGlyph, Trophy } from "../components/Brand";
+import { AAvatar, setGlyphCode, SetGlyph, Trophy } from "../components/Brand";
 import { ArrowRight, GiRoundTable, LuScrollText, TbCards } from "../components/Icons";
 import { DiscordIcon } from "../components/BrandIcons";
 import { ChamferedButton } from "../components/ChamferedButton";
@@ -114,8 +114,20 @@ export function PodDraftsPage() {
 
   const availableSets = useMemo<SetSummary[]>(() => {
     if (!allSets || !podSetCodes) return [];
-    const codes = new Set(podSetCodes);
-    return allSets.filter((s) => codes.has(s.code));
+    const byCode = new Map(allSets.map((s) => [s.code, s]));
+    // Real sets first (in sets-table order), then pod-only cube formats with no `sets` row.
+    const real = allSets.filter((s) => podSetCodes.some((p) => p.code === s.code));
+    const custom = podSetCodes
+      .filter((p) => !byCode.has(p.code))
+      .map<SetSummary>((p) => ({
+        code: p.code,
+        name: p.label ?? p.code,
+        startDate: "",
+        endDate: "",
+        isActive: false,
+        custom: true,
+      }));
+    return [...real, ...custom];
   }, [allSets, podSetCodes]);
 
   const [activeSet, setActiveSet] = useState<string>(DEFAULT_SET);
@@ -848,7 +860,10 @@ function MobileSetStrip({
   return (
     <div className="px-3 pt-2 pb-1 border-b border-border bg-surface flex items-center gap-3">
       <div className="pl-1 pr-1">
-        <SetGlyph code={activeSet} size={32} />
+        <SetGlyph
+          code={setGlyphCode(availableSets.find((s) => s.code === activeSet) ?? { code: activeSet })}
+          size={32}
+        />
       </div>
       <span className="font-display text-text tracking-[0.04em]" style={{ fontSize: 28, lineHeight: 1 }}>
         {activeSet}
@@ -877,7 +892,7 @@ function SetHero({
   const isActive = setMeta?.isActive ?? false;
   return (
     <div className="relative px-10 py-5 border-b border-border bg-surface flex items-center gap-6">
-      <SetGlyph code={activeSet} size={84} />
+      <SetGlyph code={setMeta ? setGlyphCode(setMeta) : activeSet} size={84} />
       <div>
         <SectionLabel size={13} className={isActive ? "" : "invisible"}>CURRENT SET</SectionLabel>
         <div className="flex items-baseline gap-3.5 mt-0.5">

@@ -11,7 +11,7 @@ from bot import audit
 logger = logging.getLogger(__name__)
 
 
-HELP_TITLE = "🃏 DisChord Leaderboard — Commands"
+HELP_TITLE = "DisChord Leaderboard Commands"
 
 # (section_label, [(command, description), ...])
 HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [

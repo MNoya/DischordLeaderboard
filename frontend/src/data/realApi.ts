@@ -1,6 +1,5 @@
 // Real-Supabase fetchers. Mirror of mockApi.ts function signatures — the hook
-// layer picks one or the other via api.ts based on whether VITE_SUPABASE_URL
-// is set.
+// layer picks one or the other via api.ts based on `useSupabase` (VITE_DATA_MODE).
 //
 // Each function reads from a curated public_* view (frontend-spec.md → Data
 // contract). The adapter converts snake_case rows to camelCase. The anon key
@@ -28,6 +27,7 @@ import type {
   PodEventReplayRow,
   PodEventSummary,
   PodLeaderboardRow,
+  PodSetCode,
   RecentTrophy,
   SetSummary,
 } from "../types/leaderboard";
@@ -720,14 +720,19 @@ export async function fetchPodLeaderboard(setCode: string): Promise<PodLeaderboa
     .map((r, i) => ({ ...r, rank: i + 1 }));
 }
 
-export async function fetchPodSetCodes(): Promise<string[]> {
+export async function fetchPodSetCodes(): Promise<PodSetCode[]> {
   const { data, error } = await client()
     .from("public_pod_draft_events")
-    .select("set_code");
+    .select("set_code, format_label");
   if (error) throw error;
-  const seen = new Set<string>();
-  for (const r of data ?? []) seen.add((r as { set_code: string }).set_code);
-  return Array.from(seen);
+  const byCode = new Map<string, string | null>();
+  for (const r of data ?? []) {
+    const row = r as { set_code: string; format_label: string | null };
+    if (!byCode.has(row.set_code) || byCode.get(row.set_code) == null) {
+      byCode.set(row.set_code, row.format_label ?? null);
+    }
+  }
+  return Array.from(byCode, ([code, label]) => ({ code, label }));
 }
 
 function adaptPodEvent(row: Record<string, unknown>): PodEventSummary {

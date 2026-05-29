@@ -1,5 +1,5 @@
 import React from "react";
-import { keyruneClass, SetGlyph } from "./Brand";
+import { keyruneClass, setGlyphCode, SetGlyph } from "./Brand";
 import { cn } from "../lib/utils";
 import { useSetVisibleCap } from "../lib/use-is-mobile";
 import type { SetSummary } from "../types/leaderboard";
@@ -91,7 +91,7 @@ function SetChip({
         style={{ clipPath: CHAMFER, minHeight: 40 }}
       >
         <i
-          className={`ss ss-${keyruneClass(set.code)}`}
+          className={`ss ss-${keyruneClass(setGlyphCode(set))}`}
           style={{ fontSize: 22, color: active ? "#0a0c10" : "#e6ecf5", lineHeight: 1 }}
           aria-hidden="true"
         />
@@ -165,7 +165,7 @@ function SetOverflow({
                 s.code === activeCode ? "bg-surface2" : "bg-transparent hover:bg-surface2",
               )}
             >
-              <SetGlyph code={s.code} size={22} />
+              <SetGlyph code={setGlyphCode(s)} size={22} />
               <span className="text-[20px] leading-none">{s.code}</span>
               <span className="text-muted text-[13px] tracking-[0.06em] whitespace-nowrap">{s.name}</span>
             </button>
@@ -212,7 +212,7 @@ export function SetSwitcherMobile({
         onClick={() => setOpen((o) => !o)}
         className="w-full py-1.5 px-2.5 flex items-center gap-2 bg-transparent border border-border2 text-text font-display text-[13px] tracking-[0.12em] cursor-pointer"
       >
-        <SetGlyph code={active.code} size={16} />
+        <SetGlyph code={setGlyphCode(active)} size={16} />
         <span>{active.code}</span>
         {active.isActive && (
           <span className="text-muted text-[10px] tracking-[0.18em]">· LIVE</span>
@@ -234,7 +234,7 @@ export function SetSwitcherMobile({
                 s.code === activeCode ? "bg-surface2" : "bg-transparent hover:bg-surface2",
               )}
             >
-              <SetGlyph code={s.code} size={16} />
+              <SetGlyph code={setGlyphCode(s)} size={16} />
               <span>{s.code}</span>
               <span className="text-muted text-[10px] tracking-[0.06em] flex-1">{s.name}</span>
             </button>

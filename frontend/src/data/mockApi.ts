@@ -23,6 +23,7 @@ import type {
   PodEventReplayRow,
   PodEventSummary,
   PodLeaderboardRow,
+  PodSetCode,
   RecentTrophy,
   SetSummary,
 } from "../types/leaderboard";
@@ -388,4 +389,4 @@ export const fetchPodLeaderboard = (setCode: string): Promise<PodLeaderboardRow[
   return wait(rows);
 };
 
-export const fetchPodSetCodes = (): Promise<string[]> => wait(podSetCodesFixture);
+export const fetchPodSetCodes = (): Promise<PodSetCode[]> => wait(podSetCodesFixture);

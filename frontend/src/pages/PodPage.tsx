@@ -313,6 +313,7 @@ export function PodPage() {
           onShowDeck={setDeckTarget}
           eventLabel={eventLabel}
           setCode={event.setCode}
+          formatLabel={event.formatLabel}
         />
         {deckTarget && (
           <DeckScreenshotModal
@@ -365,6 +366,7 @@ export function PodPage() {
               onShowDeck={setDeckTarget}
               eventLabel={eventLabel}
               setCode={event.setCode}
+              formatLabel={event.formatLabel}
               date={event.eventDate}
               maxWidth={`min(${tableMaxPx}px, calc(100vh - ${CHROME_OFFSET}px))`}
             />

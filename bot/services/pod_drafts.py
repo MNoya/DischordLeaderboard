@@ -11,6 +11,7 @@ from sqlalchemy import any_, func, select
 from sqlalchemy.orm import Session
 
 from bot.config import settings
+from bot.database import SessionLocal
 from bot.models import (
     MagicSet,
     Player,
@@ -19,6 +20,7 @@ from bot.models import (
     PodDraftMatch,
     PodDraftParticipant,
 )
+from bot.services import pod_format
 
 
 log = logging.getLogger(__name__)
@@ -98,7 +100,7 @@ _ARENA_ID_SQL = r"#\d+$"
 _NAME_TOKEN_RE = re.compile(r"[\s()/\\,|-]+")
 
 
-def _normalize_player_name(name: str) -> str:
+def normalize_player_name(name: str) -> str:
     """Strip trailing MTG Arena suffix (`#NNNN`) and lowercase for matching."""
     return _ARENA_ID_RE.sub("", name).lower()
 
@@ -127,7 +129,7 @@ def _player_for_name(session: Session, name: str) -> Player | None:
       4. norm is a word token within display_name or discord_username
          (e.g. display "Alice (Wonderland)" matches Draftmancer name "Wonderland#12345").
     """
-    norm = _normalize_player_name(name)
+    norm = normalize_player_name(name)
     if not norm:
         return None
 
@@ -237,6 +239,62 @@ def update_event_time_if_changed(
     return event, True, was_active
 
 
+def update_event_format(session: Session, event_id: str, code: str) -> bool:
+    """Repoint a pre-draft pod event's set_code, set_id and format label; False if missing or already finalized."""
+    event = session.get(PodDraftEvent, event_id)
+    if event is None or event.socket_status in ("draft_done", "complete"):
+        return False
+    event.set_code = code
+    event.set_id = _lookup_set_id(session, code)
+    event.format_label = pod_format.label_for(code)
+    return True
+
+
+def load_event_set_code_sync(event_id: str) -> str | None:
+    """Current set_code (format code) for a pod event, or None when missing."""
+    with SessionLocal() as session:
+        return session.execute(
+            select(PodDraftEvent.set_code).where(PodDraftEvent.id == event_id)
+        ).scalar_one_or_none()
+
+
+def load_event_name_sync(event_id: str) -> str:
+    with SessionLocal() as session:
+        return session.execute(
+            select(PodDraftEvent.name).where(PodDraftEvent.id == event_id)
+        ).scalar_one_or_none() or "Pod Draft"
+
+
+def load_event_id_by_thread_sync(thread_id: str) -> str | None:
+    with SessionLocal() as session:
+        return session.execute(
+            select(PodDraftEvent.id).where(PodDraftEvent.discord_thread_id == thread_id)
+        ).scalar_one_or_none()
+
+
+def load_event_id_by_name_sync(name: str) -> str | None:
+    with SessionLocal() as session:
+        return session.execute(
+            select(PodDraftEvent.id).where(PodDraftEvent.name == name)
+        ).scalar_one_or_none()
+
+
+def load_event_thread_id_sync(event_id: str) -> str | None:
+    with SessionLocal() as session:
+        return session.execute(
+            select(PodDraftEvent.discord_thread_id).where(PodDraftEvent.id == event_id)
+        ).scalar_one_or_none()
+
+
+def search_event_names_sync(query: str, limit: int = 25) -> list[str]:
+    """Most-recent-first event names matching a case-insensitive substring of `query`; empty query returns the most recent."""
+    with SessionLocal() as session:
+        stmt = select(PodDraftEvent.name).order_by(PodDraftEvent.event_date.desc().nulls_last())
+        if query:
+            stmt = stmt.where(PodDraftEvent.name.ilike(f"%{query}%"))
+        return [n for n in session.execute(stmt.limit(limit)).scalars().all() if n]
+
+
 def seed_event_participants(session: Session, event_id: str, roster: list[str]) -> None:
     """Upsert one pod_draft_participants row per Draftmancer userName in `roster`. Idempotent —
     safe to call multiple times on the same event; existing rows get backfilled instead of
@@ -273,23 +331,23 @@ def upsert_participant(
         select(PodDraftParticipant).where(PodDraftParticipant.event_id == event_id)
     ).scalars().all()
 
-    target_dn = _normalize_player_name(display_name)
-    target_dm = _normalize_player_name(draftmancer_name) if draftmancer_name else None
+    target_dn = normalize_player_name(display_name)
+    target_dm = normalize_player_name(draftmancer_name) if draftmancer_name else None
 
     found: PodDraftParticipant | None = None
     if target_dm:
         for row in rows:
-            if row.draftmancer_name and _normalize_player_name(row.draftmancer_name) == target_dm:
+            if row.draftmancer_name and normalize_player_name(row.draftmancer_name) == target_dm:
                 found = row
                 break
         if found is None:
             for row in rows:
-                if _normalize_player_name(row.display_name) == target_dm:
+                if normalize_player_name(row.display_name) == target_dm:
                     found = row
                     break
     if found is None:
         for row in rows:
-            if _normalize_player_name(row.display_name) == target_dn:
+            if normalize_player_name(row.display_name) == target_dn:
                 found = row
                 break
 
@@ -610,7 +668,7 @@ def participant_dm_info(session: Session, event_id: str) -> dict[str, Participan
     ).all()
     info: dict[str, ParticipantDmInfo] = {}
     for participant_id, dm_name, display_name, discord_id in rows:
-        key = _normalize_player_name(dm_name) if dm_name else _normalize_player_name(display_name)
+        key = normalize_player_name(dm_name) if dm_name else normalize_player_name(display_name)
         info[key] = ParticipantDmInfo(
             participant_id=participant_id,
             discord_id=discord_id,

@@ -6,7 +6,7 @@ from datetime import date
 
 from bot.models import Player
 from bot.services.pod_drafts import (
-    _normalize_player_name,
+    normalize_player_name,
     _player_for_name,
     classify_lobby_names,
 )
@@ -25,7 +25,7 @@ def _seed_player(
     active=True,
 ):
     if arena_aliases is None:
-        arena_aliases = [_normalize_player_name(arena_name)] if arena_name else []
+        arena_aliases = [normalize_player_name(arena_name)] if arena_name else []
     p = Player(
         slug=f"{username}-{discord_id}",
         discord_id=discord_id,
@@ -40,27 +40,27 @@ def _seed_player(
     return p
 
 
-# --- _normalize_player_name ---
+# --- normalize_player_name ---
 
 def test_normalize_strips_arena_suffix():
-    assert _normalize_player_name("Noya#12345") == "noya"
+    assert normalize_player_name("Noya#12345") == "noya"
 
 
 def test_normalize_lowercases_bare_name():
-    assert _normalize_player_name("MartinTheGreat") == "martinthegreat"
+    assert normalize_player_name("MartinTheGreat") == "martinthegreat"
 
 
 def test_normalize_hash_with_no_digits_is_not_stripped():
     # `#` alone doesn't match `#\d+$`, so the hash stays
-    assert _normalize_player_name("Name#") == "name#"
+    assert normalize_player_name("Name#") == "name#"
 
 
 def test_normalize_strips_only_trailing_suffix():
-    assert _normalize_player_name("Na#12me#99") == "na#12me"
+    assert normalize_player_name("Na#12me#99") == "na#12me"
 
 
 def test_normalize_empty_string():
-    assert _normalize_player_name("") == ""
+    assert normalize_player_name("") == ""
 
 
 # --- _player_for_name priority ---

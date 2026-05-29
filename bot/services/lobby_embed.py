@@ -18,15 +18,21 @@ from bot.services.pod_tournament import actor_label
 log = logging.getLogger("bot.lobby_embed")
 
 READY_CHECK_CUSTOM_ID = "pod-draft:ready-check"
+CHANGE_FORMAT_CUSTOM_ID = "pod-draft:change-format"
+
+_NO_ACTIVE_POD_MSG = "No active pod-draft session in this thread."
 
 
 class LobbyReadyButtonView(discord.ui.View):
     def __init__(
         self, draftmancer_url: str | None = None, ready_disabled: bool = False,
+        format_disabled: bool = False,
     ) -> None:
         super().__init__(timeout=None)
         if ready_disabled:
             self.ready_check.disabled = True
+        if format_disabled:
+            self.change_format.disabled = True
         if draftmancer_url:
             self.add_item(discord.ui.Button(
                 label="Join Draftmancer",
@@ -53,10 +59,7 @@ class LobbyReadyButtonView(discord.ui.View):
         )
         if manager is None:
             log.info(f"{actor} clicked Ready Check in channel={channel_id} (no active pod)")
-            await interaction.response.send_message(
-                "No active pod-draft session in this thread.",
-                ephemeral=True,
-            )
+            await interaction.response.send_message(_NO_ACTIVE_POD_MSG, ephemeral=True)
             return
         log.info(f"[{manager.event_name}] {actor} clicked Ready Check")
         await interaction.response.defer(ephemeral=True)
@@ -64,6 +67,38 @@ class LobbyReadyButtonView(discord.ui.View):
         err = await manager.initiate_ready_check(thread)
         if err:
             await interaction.followup.send(f"⚠️ {err}", ephemeral=True)
+
+    @discord.ui.button(
+        label="Change Format", style=discord.ButtonStyle.secondary,
+        custom_id=CHANGE_FORMAT_CUSTOM_ID, emoji="⚙️",
+    )
+    async def change_format(
+        self, interaction: discord.Interaction, button: discord.ui.Button,
+    ) -> None:
+        from bot.services.pod_active import ACTIVE_POD_MANAGERS
+        from bot.services.pod_draft_manager import set_event_format
+        from bot.services.pod_format_select import FormatSelectView
+        channel = interaction.channel
+        channel_id = channel.id if channel else None
+        actor = actor_label(interaction)
+        manager = next(
+            (m for m in ACTIVE_POD_MANAGERS.values() if m.thread_id == channel_id),
+            None,
+        )
+        if manager is None:
+            log.info(f"{actor} clicked Change Format in channel={channel_id} (no active pod)")
+            await interaction.response.send_message(_NO_ACTIVE_POD_MSG, ephemeral=True)
+            return
+        log.info(f"[{manager.event_name}] {actor} clicked Change Format")
+        event_id = manager.event_id
+
+        async def on_apply(inter: discord.Interaction, code: str) -> str | None:
+            return await set_event_format(event_id, code)
+
+        await interaction.response.send_message(
+            view=FormatSelectView(on_apply, current_code=manager.set_code),
+            ephemeral=True,
+        )
 
 
 def render(
@@ -78,6 +113,7 @@ def render(
     decliner_name: str | None = None,
     cancel_reason: str | None = None,
     display_name_by_mention_id: dict[int, str] | None = None,
+    format_label: str | None = None,
 ) -> discord.Embed:
     """Lobby embed. `title` is the thread/event name; `rsvps_yes` / `rsvps_maybe` are sesh display
     names by RSVP type; `in_session` is Draftmancer sessionUsers as (arena_name,
@@ -135,6 +171,8 @@ def render(
     header_lines: list[str] = []
     if draftmancer_url:
         header_lines.append(f"### {draftmancer_url}")
+    if format_label:
+        header_lines.append(f"### {format_label}")
     if status:
         header_lines.append(status)
     description = "\n".join(header_lines) if header_lines else None

@@ -8,6 +8,12 @@ export interface SetSummary {
   startDate: string; // ISO date
   endDate: string;
   isActive: boolean;
+  custom?: boolean; // synthesized for pod-only cube formats with no row in `sets`
+}
+
+export interface PodSetCode {
+  code: string;
+  label: string | null; // format_label — non-null only for custom cube formats
 }
 
 export interface LeaderboardRow {

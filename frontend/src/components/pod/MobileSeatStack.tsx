@@ -1,7 +1,7 @@
 import { Fragment, useLayoutEffect, useRef, useState } from "react";
 import { Pips } from "../ManaPips";
 import { Record } from "../Record";
-import { Trophy } from "../Brand";
+import { keyruneClass, Trophy } from "../Brand";
 import { cn } from "../../lib/utils";
 import { HeroSection } from "../HeroSection";
 import { PlayerSeatPanel } from "./PlayerSeatPanel";
@@ -17,6 +17,7 @@ interface Props {
   onShowDeck: (p: PodSeat) => void;
   eventLabel: string;
   setCode: string;
+  formatLabel?: string | null;
 }
 
 const GRID_REF_WIDTH = 380;
@@ -128,6 +129,7 @@ export function MobileSeatStack({
   onShowDeck,
   eventLabel,
   setCode,
+  formatLabel,
 }: Props) {
   const sorted = [...participants].sort((a, b) => a.seatIndex - b.seatIndex);
   const selected = selectedSeat == null
@@ -143,6 +145,7 @@ export function MobileSeatStack({
           onSelect={onSelect}
           eventLabel={eventLabel}
           setCode={setCode}
+          formatLabel={formatLabel}
         />
       </HeroSection>
 
@@ -175,12 +178,14 @@ function TileGrid({
   onSelect,
   eventLabel,
   setCode,
+  formatLabel,
 }: {
   participants: PodSeat[];
   selectedSeat: number | null;
   onSelect: (seat: number | null) => void;
   eventLabel: string;
   setCode: string;
+  formatLabel?: string | null;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
@@ -231,7 +236,7 @@ function TileGrid({
           }}
         >
           <i
-            className={`ss ss-${setCode.toLowerCase()} text-text shrink-0`}
+            className={`ss ss-${keyruneClass(formatLabel ? "CUBE" : setCode)} text-text shrink-0`}
             style={{ fontSize: Math.round(20 * scale), lineHeight: 1 }}
             aria-hidden="true"
           />

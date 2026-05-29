@@ -5,7 +5,7 @@ from bot.services.pod_tournament import (
     ParticipantDeckData,
     _deck_complete,
     _incomplete_top_decks,
-    _normalize_player_name,
+    normalize_player_name,
     build_deck_reminder_text,
 )
 
@@ -19,7 +19,7 @@ def _deck(colors: str | None, screenshot: str | None) -> ParticipantDeckData:
 
 
 def _complete_decks(*names: str) -> dict:
-    return {_normalize_player_name(n): _deck("WU", "http://img/x.png") for n in names}
+    return {normalize_player_name(n): _deck("WU", "http://img/x.png") for n in names}
 
 
 def test_deck_complete_requires_colors_and_screenshot():
@@ -38,7 +38,7 @@ def test_championship_clear_when_top_finishers_all_complete():
 def test_championship_waits_on_missing_top_finisher():
     standings = _standings("Aria", "Bryn", "Caedmon", "Doryn")
     deck_data = _complete_decks("Aria", "Bryn", "Caedmon")
-    deck_data[_normalize_player_name("Doryn")] = _deck("WU", None)
+    deck_data[normalize_player_name("Doryn")] = _deck("WU", None)
     assert _incomplete_top_decks(standings, deck_data) == ["Doryn"]
 
 

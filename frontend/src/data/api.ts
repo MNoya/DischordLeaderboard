@@ -1,7 +1,7 @@
-// Selects the data backend at module-load time. If VITE_SUPABASE_URL +
-// VITE_SUPABASE_ANON_KEY are set, real Supabase fetchers are used; otherwise
-// the fixture-backed mock API runs. The hook layer imports from here so it
-// never knows which one is live.
+// Selects the data backend at module-load time via `useSupabase` (driven by
+// VITE_DATA_MODE in supabase.ts): real Supabase fetchers, or the fixture-backed
+// mock API in mock mode. The hook layer imports from here so it never knows
+// which one is live.
 
 import { useSupabase } from "./supabase";
 
