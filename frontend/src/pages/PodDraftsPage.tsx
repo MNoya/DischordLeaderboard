@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
+
+import { PodPage } from "./PodPage";
 
 import { AppHeader } from "../components/AppHeader";
 import { Footer } from "../components/Footer";
@@ -107,8 +109,26 @@ function toLeaderboardRow(r: PodLeaderboardRow): LeaderboardTableRow {
   };
 }
 
-export function PodDraftsPage() {
+export function PodsRoute() {
+  const { slug } = useParams<{ slug: string }>();
+  const { data: podSetCodes } = usePodSetCodes();
+  if (!slug) return <PodDraftsPage />;
+  if (podSetCodes === undefined) {
+    return (
+      <div className="bg-bg text-text min-h-screen flex flex-col">
+        <AppHeader subtitle="POD DRAFTS" />
+      </div>
+    );
+  }
+  const match = podSetCodes.find((p) => p.code.toLowerCase() === slug.toLowerCase());
+  if (!match) return <PodPage />;
+  if (slug !== match.code) return <Navigate to={`/pods/${match.code}`} replace />;
+  return <PodDraftsPage setCode={match.code} />;
+}
+
+export function PodDraftsPage({ setCode }: { setCode?: string } = {}) {
   const isMobile = useIsMobile(1024);
+  const navigate = useNavigate();
   const { data: allSets } = useSets();
   const { data: podSetCodes } = usePodSetCodes();
 
@@ -130,13 +150,19 @@ export function PodDraftsPage() {
     return [...real, ...custom];
   }, [allSets, podSetCodes]);
 
-  const [activeSet, setActiveSet] = useState<string>(DEFAULT_SET);
-  useEffect(() => {
-    if (availableSets.length === 0) return;
-    if (!availableSets.find((s) => s.code === activeSet)) {
-      setActiveSet(availableSets[0].code);
-    }
-  }, [availableSets, activeSet]);
+  const homeCode = useMemo(() => {
+    if (availableSets.length === 0) return DEFAULT_SET;
+    const active = availableSets.find((s) => s.isActive);
+    if (active) return active.code;
+    if (availableSets.some((s) => s.code === DEFAULT_SET)) return DEFAULT_SET;
+    const realSet = availableSets.find((s) => !s.custom);
+    return (realSet ?? availableSets[0]).code;
+  }, [availableSets]);
+
+  const activeSet = setCode ?? homeCode;
+  const onSelectSet = (code: string) => {
+    navigate(code === homeCode ? "/pods" : `/pods/${code}`);
+  };
 
   const { data: events } = usePodEvents(activeSet);
   const { data: leaderboard } = usePodLeaderboard(activeSet);
@@ -178,14 +204,14 @@ export function PodDraftsPage() {
         <MobileSetStrip
           activeSet={activeSet}
           availableSets={availableSets}
-          onSelectSet={setActiveSet}
+          onSelectSet={onSelectSet}
         />
       ) : (
         <SetHero
           activeSet={activeSet}
           setMeta={setMeta}
           sets={availableSets}
-          onSelectSet={setActiveSet}
+          onSelectSet={onSelectSet}
         />
       )}
 
