@@ -96,7 +96,7 @@ export function LeaderboardPage() {
     });
   };
 
-  const { chips: colorChips, otherCombos } = useColorChips(activeSet);
+  const { chips: colorChips, otherCombos, loading: colorChipsLoading } = useColorChips(activeSet);
   const { data: availableFormatLabels } = useAvailableFormats(activeSet);
   const formatOptions = useMemo(() => {
     if (!availableFormatLabels) return FORMAT_OPTIONS;
@@ -177,7 +177,7 @@ export function LeaderboardPage() {
   useIdlePrefetchOtherSets(activeSet, sets);
   useIdlePrefetchTopPlayers(rows);
 
-  const filterProps: FilterRowProps = { format, setFormat, colors, setColors, colorChips, formatOptions };
+  const filterProps: FilterRowProps = { format, setFormat, colors, setColors, colorChips, colorChipsLoading, formatOptions };
 
   return isMobile ? (
     <Mobile
@@ -233,6 +233,7 @@ interface FilterRowProps {
   colors: string;
   setColors: (v: string) => void;
   colorChips: string[];
+  colorChipsLoading: boolean;
   formatOptions: typeof FORMAT_OPTIONS;
 }
 
@@ -485,6 +486,7 @@ function FilterRow({
   colors,
   setColors,
   colorChips,
+  colorChipsLoading,
   formatOptions,
 }: FilterRowProps) {
   return (
@@ -498,7 +500,7 @@ function FilterRow({
         renderOption={renderFormatOption}
       />
       <SectionLabel size={11}>COLORS</SectionLabel>
-      <ColorsSwitcher activeCode={colors} onChange={setColors} chips={colorChips} />
+      <ColorsSwitcher activeCode={colors} onChange={setColors} chips={colorChips} loading={colorChipsLoading} />
     </div>
   );
 }
@@ -563,6 +565,7 @@ function Mobile({
             activeCode={filters.colors}
             onChange={filters.setColors}
             chips={filters.colorChips}
+            loading={filters.colorChipsLoading}
             variant="mobile"
           />
         </div>

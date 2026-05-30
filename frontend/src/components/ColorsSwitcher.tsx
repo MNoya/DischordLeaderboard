@@ -10,12 +10,14 @@ export function ColorsSwitcher({
   chips,
   includeAll = true,
   variant = "desktop",
+  loading = false,
 }: {
   activeCode: string;
   onChange: (code: string) => void;
   chips: string[];
   includeAll?: boolean;
   variant?: "desktop" | "mobile";
+  loading?: boolean;
 }) {
   const codes: string[] = includeAll ? ["ALL", ...chips] : chips;
   const isMobile = variant === "mobile";
@@ -35,9 +37,19 @@ export function ColorsSwitcher({
           pipSize={isMobile ? 12 : 12}
         />
       ))}
+      {loading && chips.length === 0 && SKELETON_CHIP_WIDTHS.map((w, i) => (
+        <span
+          key={i}
+          className="shrink-0 h-[26px] border border-border2 bg-surface2/40 animate-pulse"
+          style={{ width: w }}
+          aria-hidden="true"
+        />
+      ))}
     </div>
   );
 }
+
+const SKELETON_CHIP_WIDTHS = [44, 60, 60, 44, 44, 60, 44, 52];
 
 function Chip({
   code,

@@ -227,14 +227,14 @@ export function useIdlePrefetchTopPlayers(
 // 3-color combos that pass the 1% threshold, then MULTI and OTHER catchalls.
 // Returns the named chip list and the set of sub-threshold combos that get
 // rolled into "OTHER".
-export function useColorChips(setCode: string): { chips: string[]; otherCombos: string[] } {
-  const { data } = useColorsSummary(setCode);
+export function useColorChips(setCode: string): { chips: string[]; otherCombos: string[]; loading: boolean } {
+  const { data, isLoading } = useColorsSummary(setCode);
   return useMemo(() => {
-    if (!data) return { chips: [], otherCombos: [] };
+    if (!data) return { chips: [], otherCombos: [], loading: isLoading };
     const total = data
       .filter((r) => r.colors !== MULTI && r.colors !== "")
       .reduce((s, r) => s + r.events, 0);
-    if (total === 0) return { chips: [], otherCombos: [] };
+    if (total === 0) return { chips: [], otherCombos: [], loading: false };
     const threshold = total * 0.01;
     const named: string[] = [];
     const otherCombos: string[] = [];
@@ -257,8 +257,8 @@ export function useColorChips(setCode: string): { chips: string[]; otherCombos: 
     const hasMulti = data.some((r) => r.colors === MULTI && r.events > 0);
     if (hasMulti) chips.push(MULTI);
     if (otherCombos.length > 0) chips.push(OTHER);
-    return { chips, otherCombos };
-  }, [data]);
+    return { chips, otherCombos, loading: false };
+  }, [data, isLoading]);
 }
 
 
