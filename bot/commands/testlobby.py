@@ -23,6 +23,13 @@ from bot.commands.testcomponent import (
     _DECK_SCREENSHOT_URL_D,
 )
 
+from uuid import uuid4
+
+from sqlalchemy import delete, select, update
+
+from bot.config import settings
+from bot.database import SessionLocal
+from bot.models import PodDraftEvent, PodDraftParticipant
 from bot.services import pod_bracket, pod_swiss
 from bot.services.lobby_embed import (
     LobbyReadyButtonView,
@@ -30,8 +37,11 @@ from bot.services.lobby_embed import (
     render as render_lobby_embed,
     render_ready_check_progress,
 )
+from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_deck_color import LiveDeckColorSelectView, SubmitDeckView
-from bot.services.pod_drafts import normalize_player_name as _norm
+from bot.services.pod_draft_manager import PodDraftManager
+from bot.services.pod_drafts import normalize_player_name as _norm, seed_event_participants
+from bot.sets import ACTIVE_SET_CODE
 from bot.services.pod_format import label_for
 from bot.services.pod_format_select import FormatSelectView
 from bot.services.pod_settings_view import PodSettingsView
@@ -60,6 +70,7 @@ from bot.services.pod_tournament import (
     format_result_change,
     match_was_played,
     register_test_result_handler,
+    start_tournament,
     surface_label,
 )
 
@@ -75,6 +86,104 @@ _INVOKER_SEAT = "Noya"
 # Module-level scratch store for the SubmitDeck POC; cleared on bot restart.
 _TEST_DECK_COLORS: dict[int, str] = {}
 _TEST_REVIEW_CHOICES: dict[int, bool] = {}
+
+# Fictional 8-player roster for the live-seeded tournament path (`podbracket` / `podswiss`).
+_LIVE_TEST_ROSTER = ["Ava", "Bram", "Cara", "Dex", "Eli", "Fern", "Gus", "Hana"]
+_LIVE_TEST_STATUS = "test"
+
+
+def _looks_like_prod_db() -> bool:
+    url = settings.database_url or ""
+    return "supabase" in url or "pooler" in url
+
+
+def _seed_live_test_pod_sync(channel_id: int, mode: str) -> tuple[str, str]:
+    """Create a throwaway PodDraftEvent + seated participants in the local DB for a live tournament
+    drive. Returns (event_id, session_id). Guarded by `_looks_like_prod_db` at the call site."""
+    now = datetime.now(timezone.utc)
+    event_id = str(uuid4())
+    session_id = f"TESTLOBBY-{channel_id}"
+    with SessionLocal() as session:
+        session.add(PodDraftEvent(
+            id=event_id,
+            event_date=now.date(),
+            event_time=now,
+            set_code=ACTIVE_SET_CODE,
+            name="Testlobby Live Pod",
+            draftmancer_session=session_id,
+            draftmancer_url=f"https://draftmancer.com/?session={session_id}",
+            discord_thread_id=str(channel_id),
+            sesh_message_id=f"testlobby-{channel_id}",
+            socket_status=_LIVE_TEST_STATUS,
+            pairing_mode=mode,
+        ))
+        session.flush()
+        seed_event_participants(session, event_id, _LIVE_TEST_ROSTER)
+        for seat, name in enumerate(_LIVE_TEST_ROSTER):
+            session.execute(
+                update(PodDraftParticipant)
+                .where(
+                    PodDraftParticipant.event_id == event_id,
+                    PodDraftParticipant.draftmancer_name == name,
+                )
+                .values(seat_index=seat)
+            )
+        session.commit()
+    return event_id, session_id
+
+
+def _purge_live_test_pods_sync(channel_id: int) -> list[str]:
+    """Delete prior live-test events for this channel (cascades to participants + matches). Returns
+    the purged event ids so the caller can evict their managers."""
+    with SessionLocal() as session:
+        ids = session.execute(
+            select(PodDraftEvent.id).where(
+                PodDraftEvent.discord_thread_id == str(channel_id),
+                PodDraftEvent.socket_status == _LIVE_TEST_STATUS,
+            )
+        ).scalars().all()
+        if ids:
+            session.execute(delete(PodDraftEvent).where(PodDraftEvent.id.in_(ids)))
+            session.commit()
+    return list(ids)
+
+
+def _build_live_test_manager(bot, event_id: str, session_id: str, channel_id: int, mode: str) -> PodDraftManager:
+    """A socket-less manager wired to drive the real tournament code. Never calls connect()."""
+    manager = PodDraftManager(
+        bot, event_id, session_id, channel_id, ACTIVE_SET_CODE, len(_LIVE_TEST_ROSTER),
+        event_name="Testlobby Live Pod",
+        draftmancer_url=f"https://draftmancer.com/?session={session_id}",
+    )
+    manager.tournament_roster = list(_LIVE_TEST_ROSTER)
+    manager.pairing_mode = mode
+    return manager
+
+
+async def _start_live_test_pod(ctx, mode: str) -> None:
+    """Seed a real event + manager and hand off to the prod start_tournament, so the posted result
+    dropdowns drive the real _handle_result_submission. Local DB only."""
+    if _looks_like_prod_db():
+        await ctx.send(
+            "⚠️ Refusing — `DATABASE_URL` looks like prod. The live testlobby pod only runs against "
+            "the local dev DB."
+        )
+        return
+    channel_id = ctx.channel.id
+    purged = await asyncio.to_thread(_purge_live_test_pods_sync, channel_id)
+    for old_id in purged:
+        old = ACTIVE_POD_MANAGERS.pop(old_id, None)
+        if old is not None:
+            for task in (old.grace_task, old.championship_task):
+                if task is not None and not task.done():
+                    task.cancel()
+    await _reset_podbracket(ctx.channel, ctx.bot.user)
+
+    event_id, session_id = await asyncio.to_thread(_seed_live_test_pod_sync, channel_id, mode)
+    manager = _build_live_test_manager(ctx.bot, event_id, session_id, channel_id, mode)
+    ACTIVE_POD_MANAGERS[event_id] = manager
+    log.info(f"[testlobby] live {mode} pod seeded event={event_id} channel={channel_id}")
+    await start_tournament(manager)
 
 
 def _test_arena_for(seat: str) -> str | None:
@@ -261,7 +370,7 @@ _LINKED_EIGHT: list[tuple[str, str]] = [
 _VALID_STATES = (
     "empty", "partial", "linked", "unlinked", "ready", "notready", "cancelled", "superseded",
     "drafting", "complete", "round1", "round2", "round3", "champion", "submit", "podbracket",
-    "format",
+    "podswiss", "format",
 )
 
 # Real deck colors from Pod Draft #3 for the top 4; bottom 4 are fake fill so the in-thread
@@ -1468,9 +1577,10 @@ async def setup(bot: commands.Bot) -> None:
         """Owner-only. Render the pod-draft lobby embed in this channel.
 
         `state` ∈ empty | partial | linked | unlinked | ready | notready | cancelled | superseded |
-        drafting | complete | round1 | round2 | round3 | champion | submit | podbracket.
+        drafting | complete | round1 | round2 | round3 | champion | submit | podbracket | podswiss.
         No arg → posts every state in sequence. A specific state → edits the last in place.
-        `podbracket` starts a live 8-player fast-advance bracket (per-match round advancing)."""
+        `podbracket` / `podswiss` seed a real 8-player pod in the local DB and hand off to the prod
+        tournament code — the posted result dropdowns drive the actual _handle_result_submission."""
         if state and state not in _VALID_STATES:
             await ctx.send(f"unknown state `{state}`; pick one of: {', '.join(_VALID_STATES)}")
             return
@@ -1533,12 +1643,8 @@ async def setup(bot: commands.Bot) -> None:
                 _BRACKETS[standings_msg.id] = bracket
             return
 
-        if state == "podbracket":
-            await _reset_podbracket(ctx.channel, ctx.bot.user)
-            embed, view, bracket = _build("podbracket")
-            msg = await ctx.send(embed=embed, view=view)
-            if bracket is not None:
-                await _register_bracket(msg, bracket)
+        if state in ("podbracket", "podswiss"):
+            await _start_live_test_pod(ctx, "bracket" if state == "podbracket" else "swiss")
             return
 
         if state == "submit":
@@ -1559,7 +1665,7 @@ async def setup(bot: commands.Bot) -> None:
 
         if state == "":
             for s in _VALID_STATES:
-                if s in ("champion", "submit", "podbracket", "format"):
+                if s in ("champion", "submit", "podbracket", "podswiss", "format"):
                     continue  # each posts a bespoke / live flow handled separately
                 embed, view, bracket = _build(s)
                 msg = await ctx.send(content=_sweep_caption(s, "lobby"), embed=embed, view=view)
