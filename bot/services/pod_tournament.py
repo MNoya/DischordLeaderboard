@@ -949,8 +949,13 @@ async def _handle_result_submission(interaction: discord.Interaction, value: str
         await _test_result_handler(interaction, match_id, winner_name, score)
         return
 
+    try:
+        await interaction.response.defer()
+    except discord.HTTPException:
+        log.warning("could not defer result-submission interaction", exc_info=True)
+
     if await asyncio.to_thread(bracket_edit_blocked, match_id):
-        await interaction.response.send_message(
+        await interaction.followup.send(
             BRACKET_EDIT_BLOCKED_MSG,
             ephemeral=(interaction.guild is not None),
         )
@@ -958,10 +963,6 @@ async def _handle_result_submission(interaction: discord.Interaction, value: str
 
     result = await asyncio.to_thread(_commit_result, match_id, winner_name, score)
     if result == "not_found":
-        try:
-            await interaction.response.defer()
-        except discord.HTTPException:
-            pass
         return
 
     round_num = result["round"]
@@ -990,9 +991,9 @@ async def _handle_result_submission(interaction: discord.Interaction, value: str
                     dm_info, str(interaction.user.id), match_state, round_num, pairings_url, event_name,
                 )
                 if dm_embed is not None:
-                    await interaction.response.edit_message(embed=dm_embed, view=dm_view)
+                    await interaction.edit_original_response(embed=dm_embed, view=dm_view)
             else:
-                await interaction.response.edit_message(
+                await interaction.edit_original_response(
                     content=None,
                     embed=round_embed(round_num, match_states),
                     view=RoundResultsView(match_states),
@@ -1020,9 +1021,9 @@ async def _handle_result_submission(interaction: discord.Interaction, value: str
                 dm_info, str(interaction.user.id), match_state, round_num, pairings_url, event_name,
             )
             if dm_embed is not None:
-                await interaction.response.edit_message(embed=dm_embed, view=dm_view)
+                await interaction.edit_original_response(embed=dm_embed, view=dm_view)
         else:
-            await interaction.response.edit_message(
+            await interaction.edit_original_response(
                 content=None,
                 embed=round_embed(round_num, match_states),
                 view=RoundResultsView(match_states),
