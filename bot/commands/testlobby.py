@@ -1,4 +1,4 @@
-"""Owner-only `!testlobby` — sandbox for previewing the pod-draft lobby embed and live tournament path.
+"""Owner-only `!test` — sandbox for previewing the pod-draft lobby embed and live tournament path.
 
 This entire module is throwaway scaffolding for design iteration. To remove it:
   1. Delete this file.
@@ -389,7 +389,7 @@ async def _settings_preview_noop(interaction: discord.Interaction, value: str) -
 
 
 def _settings_preview_view() -> PodSettingsView:
-    """No-op Settings panel so `!testlobby` can preview the format + pairing dropdowns with no pod."""
+    """No-op Settings panel so `!test` can preview the format + pairing dropdowns with no pod."""
     return PodSettingsView(
         on_format=_settings_preview_noop, on_pairing=_settings_preview_noop,
         current_code=None, current_mode="swiss",
@@ -397,10 +397,10 @@ def _settings_preview_view() -> PodSettingsView:
 
 
 async def setup(bot: commands.Bot) -> None:
-    """Wire the `!testlobby` command and register the settings preview."""
+    """Wire the `!test` command and register the settings preview."""
     register_settings_preview(_settings_preview_view)
 
-    @bot.command(name="testlobby")
+    @bot.command(name="test")
     @commands.is_owner()
     async def test_lobby(ctx: commands.Context, state: str = "") -> None:
         """Owner-only. Render the pod-draft lobby embed in this channel.

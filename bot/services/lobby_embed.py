@@ -1,6 +1,6 @@
 """Lobby embed renderer for pod-draft events.
 
-Shared between `!testlobby` (sandbox) and the live `PodDraftManager` so both produce the same
+Shared between `!test` (sandbox) and the live `PodDraftManager` so both produce the same
 visual. The Ready Check button is a persistent View (stable custom_id) registered once at
 startup; clicks dispatch to the active manager for the thread.
 """

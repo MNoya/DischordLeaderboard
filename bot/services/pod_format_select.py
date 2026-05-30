@@ -1,6 +1,6 @@
 """Discord selector for choosing a pod-draft format.
 
-Shared by `/pod-format`, the lobby "Change Format" button, and the `!testlobby format` preview.
+Shared by `/pod-format`, the lobby "Change Format" button, and the `!test format` preview.
 Persistence is injected via the `on_apply` callback so the same view backs the live DB-write flow
 and the in-memory testlobby sandbox. Format definitions live in the pure `pod_format` registry.
 """
