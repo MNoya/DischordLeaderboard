@@ -58,3 +58,29 @@ def test_ready_progress_in_progress_splits_ready_and_pending():
     )
     assert _field(embed, "✅ Ready").name == "✅ Ready (3)"
     assert _field(embed, "⏳ Pending").name == "⏳ Pending (5)"
+
+
+def test_ready_progress_superseded_collapses_roster_and_keeps_decliner():
+    """A superseded card a newer ready check has replaced shows the decliner header and a single
+    non-split roster — no Ready/Pending columns."""
+    in_session = [(f"P{i}#000{i}", f"Player{i}") for i in range(8)]
+    embed = render_ready_check_progress(
+        "Pod Draft", in_session, state="notready",
+        decliner_name="Player3#0003", superseded=True,
+    )
+    assert _field(embed, "✅ In Draftmancer").name == "✅ In Draftmancer (8)"
+    assert _field(embed, "⏳ Pending") is None
+    assert "Player3#0003` declined" in embed.description
+    assert "retry" not in embed.description
+
+
+def test_ready_progress_shows_initiator_only_during_active_check():
+    in_session = [(f"P{i}#000{i}", f"Player{i}") for i in range(8)]
+    active = render_ready_check_progress(
+        "Pod Draft", in_session, state="ready", ready_arena_names=set(), initiated_by="Noya",
+    )
+    assert "Started by Noya" in active.description
+    declined = render_ready_check_progress(
+        "Pod Draft", in_session, state="notready", decliner_name="x", initiated_by="Noya",
+    )
+    assert "Started by" not in declined.description

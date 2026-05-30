@@ -27,6 +27,7 @@ from bot.services.pod_drafts import (
 )
 from bot.services.pod_format_select import FormatSelectView
 from bot.services.pod_tournament import (
+    actor_label,
     build_champion_announcement_view_for_event,
     build_live_submit_deck_button,
     build_replays_link_button,
@@ -60,12 +61,12 @@ class PodDraft(commands.Cog):
         thread = interaction.channel
         log.info(f"ready-check: {interaction.user} in thread {interaction.channel_id}")
         await interaction.response.defer(ephemeral=True, thinking=False)
-        err = await manager.initiate_ready_check(thread)
+        err = await manager.initiate_ready_check(thread, initiated_by=actor_label(interaction))
         if err is not None:
             log.warning(f"ready-check: failed — {err}")
             await interaction.followup.send(f"⚠️ {err}", ephemeral=True)
         else:
-            await interaction.followup.send("Ready Check initiated — watch the thread for status.", ephemeral=True)
+            await interaction.followup.send("Ready Check initiated, watch the thread for status.", ephemeral=True)
 
     @app_commands.command(name="pod-format", description="Change the draft format (set or cube) for this pod")
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)

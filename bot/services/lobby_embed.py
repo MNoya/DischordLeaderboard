@@ -26,12 +26,10 @@ _NO_ACTIVE_POD_MSG = "No active pod-draft session in this thread."
 class LobbyReadyButtonView(discord.ui.View):
     def __init__(
         self, draftmancer_url: str | None = None, ready_disabled: bool = False,
-        format_disabled: bool = False,
     ) -> None:
         super().__init__(timeout=None)
         if ready_disabled:
             self.ready_check.disabled = True
-        if format_disabled:
             self.change_format.disabled = True
         if draftmancer_url:
             self.add_item(discord.ui.Button(
@@ -64,7 +62,7 @@ class LobbyReadyButtonView(discord.ui.View):
         log.info(f"[{manager.event_name}] {actor} clicked Ready Check")
         await interaction.response.defer(ephemeral=True)
         thread = await interaction.client.fetch_channel(manager.thread_id)
-        err = await manager.initiate_ready_check(thread)
+        err = await manager.initiate_ready_check(thread, initiated_by=actor)
         if err:
             await interaction.followup.send(f"⚠️ {err}", ephemeral=True)
 
@@ -109,16 +107,15 @@ def render(
     *,
     state: str,
     draftmancer_url: str | None = None,
-    ready_count: int | None = None,
     decliner_name: str | None = None,
     cancel_reason: str | None = None,
+    initiated_by: str | None = None,
     display_name_by_mention_id: dict[int, str] | None = None,
     format_label: str | None = None,
 ) -> discord.Embed:
     """Lobby embed. `title` is the thread/event name; `rsvps_yes` / `rsvps_maybe` are sesh display
     names by RSVP type; `in_session` is Draftmancer sessionUsers as (arena_name,
-    linked_display_name_or_None). `draftmancer_url` appears under the header; `ready_count`
-    seeds the notready decliner fallback when an explicit name isn't supplied.
+    linked_display_name_or_None). `draftmancer_url` appears under the header.
 
     Buckets: In Draftmancer (linked + in session), Unrecognized name (in session, no Player row),
     Waiting on (Yes RSVP not in session), Maybe (Maybe RSVP not in session). Waiting + Maybe are
@@ -139,42 +136,20 @@ def render(
     ]
     show_pending = state not in ("ready", "drafting", "complete")
 
-    ready_total = len(in_draftmancer)
-    ready_now = ready_count if ready_count is not None else max(ready_total - 1, 0)
-    if state == "ready":
-        status = "### 🔔 Draftmancer Ready Check in progress!"
-        color = discord.Color.gold()
-    elif state == "notready":
-        if decliner_name is None and cancel_reason is None:
-            # testlobby fallback: pick the trailing in-Draftmancer entry as the decliner
-            decliner_name = (
-                in_draftmancer[ready_now][0] if ready_now < len(in_draftmancer) else "(unknown)"
-            )
-        if decliner_name:
-            status = f"### ❌ `{decliner_name}` is not ready, click Ready Check to retry"
-        else:
-            status = f"### ❌ {cancel_reason}, click Ready Check to retry"
-        color = discord.Color.red()
-    elif state == "drafting":
-        status = "### 🎉 All players ready! Draft started"
-        color = discord.Color.green()
-    elif state == "complete":
-        status = f"### {emojis.get('draftmancer')} Draft complete!"
-        color = discord.Color.green()
-    elif unrecognized:
-        status = "### ⏳ Ready Check on hold until everyone is linked"
-        color = discord.Color.orange()
-    else:
-        status = ""
-        color = discord.Color.blurple()
+    banner_state = state
+    if state not in ("ready", "notready", "drafting", "complete") and unrecognized:
+        banner_state = "onhold"
+    status_lines, color = ready_status_banner(
+        banner_state, decliner_name=decliner_name, cancel_reason=cancel_reason,
+        initiated_by=initiated_by,
+    )
 
     header_lines: list[str] = []
     if draftmancer_url:
         header_lines.append(f"### {draftmancer_url}")
     if format_label:
         header_lines.append(f"### {format_label}")
-    if status:
-        header_lines.append(status)
+    header_lines.extend(status_lines)
     description = "\n".join(header_lines) if header_lines else None
 
     embed = discord.Embed(title=title, description=description, color=color)
@@ -234,6 +209,8 @@ def render_ready_check_progress(
     ready_arena_names: set[str] | None = None,
     decliner_name: str | None = None,
     cancel_reason: str | None = None,
+    superseded: bool = False,
+    initiated_by: str | None = None,
 ) -> discord.Embed:
     """Compact ready-check progress card.
 
@@ -241,33 +218,23 @@ def render_ready_check_progress(
     stays at the bottom of the thread even when the main lobby card has scrolled away.
     `state` mirrors the lobby state machine: 'ready', 'notready', 'drafting', 'complete', and
     falls through to a neutral header otherwise.
+
+    `superseded` marks a stale card that a newer ready check has replaced: it keeps the decliner/
+    cancel header but collapses the roster to a single non-split list, dropping the Ready/Pending columns.
     """
     in_draftmancer = [(arena, dn) for arena, dn in in_session if dn is not None]
 
-    if state == "ready":
-        status = "### 🔔 Ready Check initiated - accept on Draftmancer to start the draft!"
-        color = discord.Color.gold()
-    elif state == "drafting":
-        status = "### 🎉 All players ready! Draft started"
-        color = discord.Color.green()
-    elif state == "complete":
-        status = f"### {emojis.get('draftmancer')} Draft complete!"
-        color = discord.Color.green()
-    elif decliner_name:
-        status = f"### ❌ `{decliner_name}` declined"
-        color = discord.Color.red()
-    elif cancel_reason:
-        status = f"### ❌ Ready Check {cancel_reason}"
-        color = discord.Color.red()
-    else:
-        status = "### Ready Check"
-        color = discord.Color.blurple()
-
+    status_lines, color = ready_status_banner(
+        state, decliner_name=decliner_name, cancel_reason=cancel_reason,
+        initiated_by=initiated_by, retry_hint=not superseded,
+    )
+    if not status_lines:
+        status_lines = ["### Ready Check"]
     header_lines = [f"### {draftmancer_url}"] if draftmancer_url else []
-    header_lines.append(status)
+    header_lines.extend(status_lines)
     embed = discord.Embed(title=title, description="\n".join(header_lines), color=color)
 
-    if state in ("drafting", "complete"):
+    if state in ("drafting", "complete") or superseded:
         ready_players = in_draftmancer
         pending_players = []
     elif ready_arena_names is not None:
@@ -277,12 +244,46 @@ def render_ready_check_progress(
         ready_players = []
         pending_players = in_draftmancer
 
-    ready_label = "Players" if state == "complete" else "Ready"
+    if superseded:
+        ready_label = "In Draftmancer"
+    elif state == "complete":
+        ready_label = "Players"
+    else:
+        ready_label = "Ready"
     two_groups = bool(pending_players) or state == "ready"
     _player_columns(embed, f"✅ {ready_label} ({len(ready_players)})", ready_players, spacer=two_groups)
     if two_groups:
         _player_columns(embed, f"⏳ Pending ({len(pending_players)})", pending_players, spacer=True)
     return embed
+
+
+def ready_status_banner(
+    state: str,
+    *,
+    decliner_name: str | None = None,
+    cancel_reason: str | None = None,
+    initiated_by: str | None = None,
+    retry_hint: bool = True,
+) -> tuple[list[str], discord.Color]:
+    """Status banner lines + color shared by the lobby card and the ready-check progress card so
+    their wording never drifts. `retry_hint` appends the retry tail on a live failed check; pass
+    False on a stale superseded card. Returns ([], blurple) for states with no banner."""
+    if state == "ready":
+        lines = ["### 🔔 Ready Check initiated! Accept on Draftmancer to start the draft"]
+        if initiated_by:
+            lines.append(f"-# Started by {initiated_by}")
+        return lines, discord.Color.gold()
+    if state == "drafting":
+        return ["### 🎉 All players ready! Draft started"], discord.Color.green()
+    if state == "complete":
+        return [f"### {emojis.get('draftmancer')} Draft complete!"], discord.Color.green()
+    if state == "notready":
+        retry = "! Click Ready Check to retry" if retry_hint else ""
+        reason = f"`{decliner_name}` declined" if decliner_name else (cancel_reason or "Ready Check cancelled")
+        return [f"### ❌ {reason}{retry}"], discord.Color.red()
+    if state == "onhold":
+        return ["### ⏳ Ready Check on hold until everyone is linked"], discord.Color.orange()
+    return [], discord.Color.blurple()
 
 
 def _quote_block(lines: list[str], *, trailing: str = "") -> str:

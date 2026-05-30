@@ -246,7 +246,7 @@ _LINKED_EIGHT: list[tuple[str, str]] = [
     ("whalematron#89523", "whalematron"),
 ]
 _VALID_STATES = (
-    "empty", "partial", "linked", "unlinked", "ready", "notready", "cancelled",
+    "empty", "partial", "linked", "unlinked", "ready", "notready", "cancelled", "superseded",
     "drafting", "complete", "round1", "round2", "round3", "champion", "submit", "podbracket",
     "format",
 )
@@ -295,7 +295,7 @@ _CHAMPION_CAPTIONS_BY_SEAT: dict[str, str] = {
 _LAST_MESSAGE: dict[int, discord.Message] = {}
 _LAST_PROGRESS_MESSAGE: dict[int, discord.Message] = {}
 _BRACKETS: dict[int, dict] = {}
-_PROGRESS_STATES = ("ready", "notready", "cancelled", "drafting", "complete")
+_PROGRESS_STATES = ("ready", "notready", "cancelled", "superseded", "drafting", "complete")
 _STATE_NOTES = {
     "empty": "nobody in the Draftmancer session yet",
     "partial": "a couple of players joined, rest still missing",
@@ -304,6 +304,7 @@ _STATE_NOTES = {
     "ready": "ready check running",
     "notready": "a player declined the ready check",
     "cancelled": "ready check invalidated (player list changed)",
+    "superseded": "stale card a newer ready check replaced — decliner header, collapsed roster",
     "drafting": "draft started",
     "complete": "draft finished",
     "round1": "round 1 pairings + results buttons",
@@ -512,21 +513,26 @@ def _build(state: str) -> tuple[discord.Embed, discord.ui.View | None, dict | No
     else:
         in_session = list(_LINKED_EIGHT)
 
-    ready_count = 3 if state in ("ready", "notready") else None
-    render_state = "notready" if state == "cancelled" else state
+    if state == "cancelled":
+        render_state = "notready"
+    elif state == "superseded":
+        render_state = "ready"
+    else:
+        render_state = state
+    decliner_name = _LINKED_EIGHT[3][0] if state == "notready" else None
     cancel_reason = "Player list changed" if state == "cancelled" else None
+    initiated_by = _LINKED_EIGHT[0][1] if render_state == "ready" else None
     embed = render_lobby_embed(
         _THREAD_NAME, _RSVPS_YES, _RSVPS_MAYBE, in_session,
         state=render_state, draftmancer_url=_DRAFTMANCER_URL,
-        ready_count=ready_count, cancel_reason=cancel_reason,
+        decliner_name=decliner_name, cancel_reason=cancel_reason, initiated_by=initiated_by,
     )
     has_unrecognized = any(dn is None for _, dn in in_session)
     view: discord.ui.View | None = (
         None if state in ("drafting", "complete")
         else LobbyReadyButtonView(
             draftmancer_url=_DRAFTMANCER_URL,
-            ready_disabled=(state == "ready" or has_unrecognized),
-            format_disabled=(state == "ready"),
+            ready_disabled=(render_state == "ready" or has_unrecognized),
         )
     )
     return embed, view, None
@@ -554,6 +560,7 @@ def _build_ready_progress(state: str) -> tuple[discord.Embed, discord.ui.View | 
         embed = render_ready_check_progress(
             _THREAD_NAME, in_session, state="ready",
             draftmancer_url=_DRAFTMANCER_URL, ready_arena_names=ready_arena_names,
+            initiated_by=_LINKED_EIGHT[0][1],
         )
     elif state in ("notready", "cancelled"):
         decliner = None if state == "cancelled" else _LINKED_EIGHT[3][0]
@@ -562,13 +569,20 @@ def _build_ready_progress(state: str) -> tuple[discord.Embed, discord.ui.View | 
             _THREAD_NAME, in_session, state="notready", draftmancer_url=_DRAFTMANCER_URL,
             decliner_name=decliner, cancel_reason=cancel_reason,
         )
+    elif state == "superseded":
+        embed = render_ready_check_progress(
+            _THREAD_NAME, in_session, state="notready", draftmancer_url=_DRAFTMANCER_URL,
+            decliner_name=_LINKED_EIGHT[3][0], superseded=True,
+        )
     else:
         embed = render_ready_check_progress(
             _THREAD_NAME, in_session, state=state, draftmancer_url=_DRAFTMANCER_URL,
         )
     view = (
         None if state in ("drafting", "complete")
-        else LobbyReadyButtonView(draftmancer_url=_DRAFTMANCER_URL, ready_disabled=(state == "ready"))
+        else LobbyReadyButtonView(
+            draftmancer_url=_DRAFTMANCER_URL, ready_disabled=(state in ("ready", "superseded")),
+        )
     )
     return embed, view
 
@@ -1264,8 +1278,8 @@ async def setup(bot: commands.Bot) -> None:
     async def test_lobby(ctx: commands.Context, state: str = "") -> None:
         """Owner-only. Render the pod-draft lobby embed in this channel.
 
-        `state` ∈ empty | partial | linked | unlinked | ready | notready | drafting | complete |
-        round1 | round2 | round3 | champion | submit | podbracket.
+        `state` ∈ empty | partial | linked | unlinked | ready | notready | cancelled | superseded |
+        drafting | complete | round1 | round2 | round3 | champion | submit | podbracket.
         No arg → posts every state in sequence. A specific state → edits the last in place.
         `podbracket` starts a live 8-player fast-advance bracket (per-match round advancing)."""
         if state and state not in _VALID_STATES:

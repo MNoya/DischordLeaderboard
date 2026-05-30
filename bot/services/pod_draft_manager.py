@@ -88,6 +88,7 @@ class PodDraftManager:
         self.draft_complete = False
         self.last_decliner_name: str | None = None
         self.last_cancel_reason: str | None = None
+        self.initiated_by: str | None = None
         self.draft_logs: dict[str, dict] = {}
         self.mpt_task: asyncio.Task | None = None
         self.current_round = 0
@@ -330,7 +331,7 @@ class PodDraftManager:
                 event.socket_status = status
                 session.commit()
 
-    async def initiate_ready_check(self, thread) -> str | None:
+    async def initiate_ready_check(self, thread, initiated_by: str | None = None) -> str | None:
         """Start a Draftmancer ready check; returns an error string on failure, None on success."""
         if not self.sio.connected:
             return "Draftmancer session is not connected."
@@ -342,6 +343,9 @@ class PodDraftManager:
         self.expected_user_ids = {u.get("userID") for u in non_bot}
         self.ready_users = set()
         self.ready_check_active = True
+        self.initiated_by = initiated_by
+        prior_decliner = self.last_decliner_name
+        prior_cancel = self.last_cancel_reason
         self.last_decliner_name = None
         self.last_cancel_reason = None
         log.info(
@@ -356,34 +360,44 @@ class PodDraftManager:
             return "Could not start ready check — see logs."
         self._ready_timeout_task = asyncio.create_task(self._ready_timeout())
 
+        non_bot_names = [u.get("userName") for u in non_bot if u.get("userName")]
+        classified = await self._classify_users(non_bot_names) if non_bot_names else []
+
         prior_progress = self.ready_check_progress_message
         self.ready_check_progress_message = None
         if prior_progress is not None:
+            superseded_embed = render_ready_check_progress(
+                title=self.event_name,
+                in_session=classified,
+                state="notready",
+                draftmancer_url=self.draftmancer_url,
+                decliner_name=prior_decliner,
+                cancel_reason=prior_cancel,
+                superseded=True,
+            )
             try:
                 await prior_progress.edit(
+                    embed=superseded_embed,
                     view=LobbyReadyButtonView(
                         draftmancer_url=self.draftmancer_url, ready_disabled=True,
-                        format_disabled=True,
                     ),
                 )
             except Exception:
                 log.warning("could not lock prior ready-check progress card", exc_info=True)
 
-        non_bot_names = [u.get("userName") for u in non_bot if u.get("userName")]
-        classified = await self._classify_users(non_bot_names) if non_bot_names else []
         progress_embed = render_ready_check_progress(
             title=self.event_name,
             in_session=classified,
             state="ready",
             draftmancer_url=self.draftmancer_url,
             ready_arena_names=set(),
+            initiated_by=self.initiated_by,
         )
         try:
             self.ready_check_progress_message = await thread.send(
                 embed=progress_embed,
                 view=LobbyReadyButtonView(
                     draftmancer_url=self.draftmancer_url, ready_disabled=True,
-                    format_disabled=True,
                 ),
             )
         except Exception:
@@ -455,7 +469,6 @@ class PodDraftManager:
         if thread is None:
             return
         state = self._compute_state(classified)
-        ready_now = len(self.ready_users) if state == "ready" else None
         ready_arena_names: set[str] | None = None
         if state == "ready":
             ready_arena_names = {
@@ -469,9 +482,9 @@ class PodDraftManager:
             in_session=classified,
             state=state,
             draftmancer_url=self.draftmancer_url,
-            ready_count=ready_now,
             decliner_name=self.last_decliner_name,
             cancel_reason=self.last_cancel_reason,
+            initiated_by=self.initiated_by,
             display_name_by_mention_id=await self._resolve_rsvp_mentions(thread.guild),
             format_label=pod_format.label_for(self.set_code),
         )
@@ -481,13 +494,16 @@ class PodDraftManager:
             else LobbyReadyButtonView(
                 draftmancer_url=self.draftmancer_url,
                 ready_disabled=(state == "ready" or has_unrecognized),
-                format_disabled=(state == "ready"),
             )
         )
         async with self._lobby_post_lock:
             if self.lobby_status_message is None:
                 try:
                     self.lobby_status_message = await thread.send(embed=embed, view=view)
+                    try:
+                        await self.lobby_status_message.pin()
+                    except Exception:
+                        log.warning(f"could not pin lobby status for {self.session_id}", exc_info=True)
                 except Exception:
                     log.warning(f"could not post lobby status for {self.session_id}", exc_info=True)
             else:
@@ -505,6 +521,7 @@ class PodDraftManager:
                 ready_arena_names=ready_arena_names,
                 decliner_name=self.last_decliner_name,
                 cancel_reason=self.last_cancel_reason,
+                initiated_by=self.initiated_by,
             )
             if state in ("drafting", "complete"):
                 progress_view = None
@@ -512,7 +529,6 @@ class PodDraftManager:
                 progress_view = LobbyReadyButtonView(
                     draftmancer_url=self.draftmancer_url,
                     ready_disabled=(state == "ready" or has_unrecognized),
-                    format_disabled=(state == "ready"),
                 )
             try:
                 await self.ready_check_progress_message.edit(embed=progress_embed, view=progress_view)
