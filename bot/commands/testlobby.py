@@ -18,7 +18,7 @@ from sqlalchemy import delete, select, update
 
 from bot.config import settings
 from bot.database import SessionLocal
-from bot.models import PodDraftEvent, PodDraftParticipant
+from bot.models import Player, PodDraftEvent, PodDraftParticipant
 from bot.services.lobby_embed import (
     LobbyReadyButtonView,
     register_settings_preview,
@@ -27,13 +27,14 @@ from bot.services.lobby_embed import (
 )
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_deck_color import SubmitDeckView
-from bot.services.pod_draft_manager import PodDraftManager
+from bot.services.pod_draft_manager import PodDraftManager, start_manager
 from bot.services.pod_drafts import seed_event_participants
 from bot.sets import ACTIVE_SET_CODE
 from bot.services.pod_format import label_for
 from bot.services.pod_format_select import FormatSelectView
 from bot.services.pod_settings_view import PodSettingsView
 from bot.services.pod_tournament import start_tournament
+from bot.slug import disambiguate_slug, slugify
 
 
 log = logging.getLogger(__name__)
@@ -55,9 +56,33 @@ def _looks_like_prod_db() -> bool:
     return "supabase" in url or "pooler" in url
 
 
-def _seed_live_test_pod_sync(channel_id: int, mode: str) -> tuple[str, str]:
-    """Create a throwaway PodDraftEvent + seated participants in the local DB for a live tournament
-    drive. Returns (event_id, session_id). Guarded by `_looks_like_prod_db` at the call site."""
+def _ensure_invoker_player_sync(session, discord_id: int, display_name: str) -> str:
+    """Find-or-create a local Player for the testlobby invoker so seat 1 receives the real pairing /
+    deck DMs and can report its own matches."""
+    player = session.execute(
+        select(Player).where(Player.discord_id == str(discord_id))
+    ).scalar_one_or_none()
+    if player is None:
+        taken = set(session.execute(select(Player.slug)).scalars().all())
+        player = Player(
+            slug=disambiguate_slug(slugify(display_name), taken),
+            discord_id=str(discord_id),
+            discord_username=display_name,
+            display_name=display_name,
+            active=True,
+        )
+        session.add(player)
+        session.flush()
+    return player.id
+
+
+def _seed_live_test_event_sync(
+    channel_id: int, mode: str, roster: list[str] | None = None,
+    invoker_id: int | None = None,
+) -> tuple[str, str]:
+    """Create a throwaway PodDraftEvent in the local DB. With `roster`, also seed seated participants
+    (seat 0 linked to the invoker so they get the real DMs). With no roster, the event is lobby-only —
+    participants arrive from the live Draftmancer session. Returns (event_id, session_id)."""
     now = datetime.now(timezone.utc)
     event_id = str(uuid4())
     session_id = f"TESTLOBBY-{channel_id}"
@@ -76,16 +101,27 @@ def _seed_live_test_pod_sync(channel_id: int, mode: str) -> tuple[str, str]:
             pairing_mode=mode,
         ))
         session.flush()
-        seed_event_participants(session, event_id, _LIVE_TEST_ROSTER)
-        for seat, name in enumerate(_LIVE_TEST_ROSTER):
-            session.execute(
-                update(PodDraftParticipant)
-                .where(
-                    PodDraftParticipant.event_id == event_id,
-                    PodDraftParticipant.draftmancer_name == name,
+        if roster:
+            seed_event_participants(session, event_id, roster)
+            for seat, name in enumerate(roster):
+                session.execute(
+                    update(PodDraftParticipant)
+                    .where(
+                        PodDraftParticipant.event_id == event_id,
+                        PodDraftParticipant.draftmancer_name == name,
+                    )
+                    .values(seat_index=seat)
                 )
-                .values(seat_index=seat)
-            )
+            if invoker_id is not None:
+                player_id = _ensure_invoker_player_sync(session, invoker_id, roster[0])
+                session.execute(
+                    update(PodDraftParticipant)
+                    .where(
+                        PodDraftParticipant.event_id == event_id,
+                        PodDraftParticipant.draftmancer_name == roster[0],
+                    )
+                    .values(player_id=player_id)
+                )
         session.commit()
     return event_id, session_id
 
@@ -106,42 +142,82 @@ def _purge_live_test_pods_sync(channel_id: int) -> list[str]:
     return list(ids)
 
 
-def _build_live_test_manager(bot, event_id: str, session_id: str, channel_id: int, mode: str) -> PodDraftManager:
+def _build_live_test_manager(
+    bot, event_id: str, session_id: str, channel_id: int, mode: str, roster: list[str],
+) -> PodDraftManager:
     """A socket-less manager wired to drive the real tournament code. Never calls connect()."""
     manager = PodDraftManager(
-        bot, event_id, session_id, channel_id, ACTIVE_SET_CODE, len(_LIVE_TEST_ROSTER),
+        bot, event_id, session_id, channel_id, ACTIVE_SET_CODE, len(roster),
         event_name="Testlobby Live Pod",
         draftmancer_url=f"https://draftmancer.com/?session={session_id}",
     )
-    manager.tournament_roster = list(_LIVE_TEST_ROSTER)
+    manager.tournament_roster = list(roster)
     manager.pairing_mode = mode
     return manager
 
 
-async def _start_live_test_pod(ctx, mode: str) -> None:
-    """Seed a real event + manager and hand off to the prod start_tournament, so the posted result
-    dropdowns drive the real _handle_result_submission. Local DB only."""
+async def _refuse_if_prod(ctx) -> bool:
     if _looks_like_prod_db():
         await ctx.send(
             "⚠️ Refusing — `DATABASE_URL` looks like prod. The live testlobby pod only runs against "
             "the local dev DB."
         )
-        return
-    channel_id = ctx.channel.id
-    purged = await asyncio.to_thread(_purge_live_test_pods_sync, channel_id)
+        return True
+    return False
+
+
+async def _purge_and_reset_test(ctx) -> None:
+    """Delete prior test events for this channel, disconnect/evict their managers, and clear the thread."""
+    purged = await asyncio.to_thread(_purge_live_test_pods_sync, ctx.channel.id)
     for old_id in purged:
-        old = ACTIVE_POD_MANAGERS.pop(old_id, None)
+        old = ACTIVE_POD_MANAGERS.get(old_id)
         if old is not None:
             for task in (old.grace_task, old.championship_task):
                 if task is not None and not task.done():
                     task.cancel()
+            await old.disconnect_safely()
     await _reset_podbracket(ctx.channel, ctx.bot.user)
 
-    event_id, session_id = await asyncio.to_thread(_seed_live_test_pod_sync, channel_id, mode)
-    manager = _build_live_test_manager(ctx.bot, event_id, session_id, channel_id, mode)
+
+async def _start_live_test_pod(ctx, mode: str) -> None:
+    """Seed a real event + socket-less manager and hand off to the prod start_tournament, so the
+    posted result dropdowns drive the real _handle_result_submission. Seat 1 is the invoker so they
+    receive the real pairing / deck DMs. Local DB only."""
+    if await _refuse_if_prod(ctx):
+        return
+    await _purge_and_reset_test(ctx)
+    channel_id = ctx.channel.id
+    roster = [ctx.author.display_name] + _LIVE_TEST_ROSTER[1:]
+    event_id, session_id = await asyncio.to_thread(
+        _seed_live_test_event_sync, channel_id, mode, roster, ctx.author.id,
+    )
+    manager = _build_live_test_manager(ctx.bot, event_id, session_id, channel_id, mode, roster)
     ACTIVE_POD_MANAGERS[event_id] = manager
     log.info(f"[testlobby] live {mode} pod seeded event={event_id} channel={channel_id}")
     await start_tournament(manager)
+
+
+async def _start_live_test_lobby(ctx) -> None:
+    """Seed a lobby-only event and connect a real manager to a live Draftmancer session, so the real
+    lobby + ready-check flow runs. Open the session link in 6+ tabs to drive it. Local DB only."""
+    if await _refuse_if_prod(ctx):
+        return
+    await _purge_and_reset_test(ctx)
+    channel_id = ctx.channel.id
+    event_id, session_id = await asyncio.to_thread(_seed_live_test_event_sync, channel_id, "swiss")
+    url = f"https://draftmancer.com/?session={session_id}"
+    log.info(f"[testlobby] live lobby connecting event={event_id} session={session_id}")
+    manager = await start_manager(
+        ctx.bot, event_id, session_id, channel_id, ACTIVE_SET_CODE, len(_LIVE_TEST_ROSTER),
+        event_name="Testlobby Live Pod", draftmancer_url=url,
+    )
+    if manager is None:
+        await ctx.send("⚠️ Could not connect to Draftmancer — see logs.")
+        return
+    await ctx.send(
+        f"🧪 Connected to Draftmancer `{session_id}`. Open {url} in 6+ tabs with distinct names, "
+        "then use the lobby card's **Ready Check** button. The card appears once players join."
+    )
 
 
 async def _test_submit_deck_color(interaction: discord.Interaction, color: str) -> None:
@@ -184,7 +260,7 @@ _LINKED_EIGHT: list[tuple[str, str]] = [
 ]
 _VALID_STATES = (
     "empty", "partial", "linked", "unlinked", "ready", "notready", "cancelled", "superseded",
-    "drafting", "complete", "submit", "podbracket", "podswiss", "format",
+    "drafting", "complete", "submit", "podbracket", "podswiss", "podlobby", "format",
 )
 
 _LAST_MESSAGE: dict[int, discord.Message] = {}
@@ -330,16 +406,20 @@ async def setup(bot: commands.Bot) -> None:
         """Owner-only. Render the pod-draft lobby embed in this channel.
 
         `state` ∈ empty | partial | linked | unlinked | ready | notready | cancelled | superseded |
-        drafting | complete | submit | podbracket | podswiss | format.
+        drafting | complete | submit | podbracket | podswiss | podlobby | format.
         No arg → posts the beginning lobby state. A specific state → edits the last in place.
-        `podbracket` / `podswiss` seed a real 8-player pod in the local DB and hand off to the prod
-        tournament code — the posted result dropdowns drive the actual _handle_result_submission."""
+        `podbracket` / `podswiss` seed a real 8-player pod (seat 1 = you) and hand off to the prod
+        tournament code. `podlobby` connects to a live Draftmancer session for ready-check testing."""
         if state and state not in _VALID_STATES:
             await ctx.send(f"unknown state `{state}`; pick one of: {', '.join(_VALID_STATES)}")
             return
 
         if state in ("podbracket", "podswiss"):
             await _start_live_test_pod(ctx, "bracket" if state == "podbracket" else "swiss")
+            return
+
+        if state == "podlobby":
+            await _start_live_test_lobby(ctx)
             return
 
         if state == "submit":
