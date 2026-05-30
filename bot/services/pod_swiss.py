@@ -18,6 +18,7 @@ _GAMES_TO_WIN_MATCH = 2  # Bo3
 class Player:
     id: str    # stable per-tournament identifier (we use draftmancer_name)
     name: str  # display name
+    seat: int | None = None  # draft-table seat index (0-based); drives round-1 pairing
 
 
 @dataclass(frozen=True)
@@ -62,12 +63,18 @@ def pair_round(
 ) -> list[tuple[str, str]]:
     """Return pairings for round_num as a list of (player_a_id, player_b_id).
 
-    Round 1 is a random shuffle. Later rounds sort by tiebreaker cascade and greedy-pair from the
-    top, recursing past rematches. Raises ValueError if no valid pairing exists.
+    Round 1 pairs by seat distance — seat N faces seat N+half, so each player meets whoever sat
+    furthest from them at the table. When seats are unknown it falls back to a random shuffle.
+    Later rounds sort by tiebreaker cascade and greedy-pair from the top, never re-pairing two
+    players who have already met. Raises ValueError if no rematch-free pairing exists.
     """
     if len(players) < 2:
         return []
     if round_num == 1:
+        if all(p.seat is not None for p in players):
+            ordered = sorted(players, key=lambda p: p.seat)
+            half = len(ordered) // 2
+            return [(ordered[i].id, ordered[i + half].id) for i in range(half)]
         roster = list(players)
         (rng or random).shuffle(roster)
         return [(roster[i].id, roster[i + 1].id) for i in range(0, len(roster), 2)]

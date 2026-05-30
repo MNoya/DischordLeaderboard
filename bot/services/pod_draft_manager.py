@@ -687,6 +687,22 @@ class PodDraftManager:
             log.warning(f"could not fetch thread {self.thread_id}", exc_info=True)
             return None
 
+    def persist_seat_indexes_from_log(self) -> bool:
+        """Write seat_index from the in-memory draft log to participants so round-1 pairing and every
+        later re-render read the same seating. Idempotent with _persist_draft_log_gz.
+        Returns False when no draft log is in memory yet."""
+        payload = next(iter(self.draft_logs.values()), None)
+        users = payload.get("users") if isinstance(payload, dict) else None
+        if not isinstance(users, dict):
+            return False
+        seats = [u.get("userName") for u in users.values() if isinstance(u, dict)]
+        if not any(seats):
+            return False
+        with SessionLocal() as session:
+            _apply_seat_indexes(session, self.event_id, seats)
+            session.commit()
+        return True
+
     async def _on_set_ready(self, user_id, ready_state) -> None:
         if not self.ready_check_active:
             return

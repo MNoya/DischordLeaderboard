@@ -41,12 +41,12 @@ from bot.services.pod_tournament import (
     RoundResultsView,
     TOTAL_ROUNDS,
     SKIPPED_SENTINEL,
-    _build_final_submit_deck_dm_embed,
-    _deck_complete,
-    _incomplete_top_decks,
-    _mark_trophy_match,
-    _pin_only_this_bot_message,
-    _round_embed,
+    build_final_submit_deck_dm_embed,
+    deck_complete,
+    incomplete_top_decks,
+    mark_trophy_match,
+    pin_only_this_bot_message,
+    round_embed,
     actor_label,
     build_champion_announcement_view,
     build_champion_embed,
@@ -187,7 +187,7 @@ async def _refresh_test_invoker_final_dm(state: dict) -> None:
         return
     deck_colors = _TEST_DECK_COLORS.get(invoker.id)
     wants_review = _TEST_REVIEW_CHOICES.get(invoker.id)
-    embed = _build_final_submit_deck_dm_embed(deck_colors, wants_review)
+    embed = build_final_submit_deck_dm_embed(deck_colors, wants_review)
     try:
         await msg.edit(
             content=None,
@@ -210,7 +210,7 @@ async def _maybe_dm_invoker_final_submit_deck(state: dict, match: dict) -> None:
         return
     deck_colors = _TEST_DECK_COLORS.get(invoker.id)
     wants_review = _TEST_REVIEW_CHOICES.get(invoker.id)
-    embed = _build_final_submit_deck_dm_embed(deck_colors, wants_review)
+    embed = build_final_submit_deck_dm_embed(deck_colors, wants_review)
     try:
         msg = await invoker.send(
             embed=embed,
@@ -247,7 +247,7 @@ _LINKED_EIGHT: list[tuple[str, str]] = [
 ]
 _VALID_STATES = (
     "empty", "partial", "linked", "unlinked", "ready", "notready", "cancelled",
-    "drafting", "complete", "round1", "round3", "champion", "submit", "podbracket",
+    "drafting", "complete", "round1", "round2", "round3", "champion", "submit", "podbracket",
     "format",
 )
 
@@ -307,6 +307,7 @@ _STATE_NOTES = {
     "drafting": "draft started",
     "complete": "draft finished",
     "round1": "round 1 pairings + results buttons",
+    "round2": "round 2 pairings grouped by record + results buttons",
     "round3": "round 3 (final) pairings + results buttons",
 }
 
@@ -350,7 +351,7 @@ def _build_champion_state(invoker) -> dict:
     r3_pairings = [(a, b) for r, a, b, _ in _POD3_OUTCOMES if r == 3]
     pre_r3 = [o for o in outcomes if o.round_num < 3]
     r3_states = _next_round_match_states(3, r3_pairings, pre_r3, players)
-    _mark_trophy_match(r3_states, 3)
+    mark_trophy_match(r3_states, 3)
     r3_winners = {(a, b): w for r, a, b, w in _POD3_OUTCOMES if r == 3}
     for st in r3_states:
         st["winner_name"] = r3_winners.get((st["a_name"], st["b_name"]), st["a_name"])
@@ -414,28 +415,25 @@ def _build_champion_state(invoker) -> dict:
 
 
 def _round1_match_states() -> list[dict]:
-    pairings = [
-        ("Noya", "Bacchus"),
-        ("NiamhIsTired", "maimslap"),
-        ("Waveofshadow", "Elfandor"),
-        ("fullerene60", "whalematron"),
-    ]
+    players = [pod_swiss.Player(id=dn, name=dn, seat=i) for i, (_, dn) in enumerate(_LINKED_EIGHT)]
+    seat_of = {p.id: p.seat for p in players}
     return [
         {
             "match_id": _make_match_id(1, i),
             "a_name": a, "b_name": b,
             "a_record": "0-0", "b_record": "0-0",
+            "a_seat": seat_of[a] + 1, "b_seat": seat_of[b] + 1,
             "winner_name": None, "score": None,
         }
-        for i, (a, b) in enumerate(pairings)
+        for i, (a, b) in enumerate(pod_swiss.pair_round(players, [], 1))
     ]
 
 
 def _build(state: str) -> tuple[discord.Embed, discord.ui.View | None, dict | None]:
-    """Returns (embed, view, bracket_state). bracket_state is non-None for bracket states (round1, round3)."""
+    """Returns (embed, view, bracket_state). bracket_state is non-None for bracket states (round1, round2, round3)."""
     if state == "round1":
         match_states = _round1_match_states()
-        embed = _round_embed(1, match_states)
+        embed = round_embed(1, match_states)
         view = RoundResultsView(match_states)
         bracket = {
             "players": [pod_swiss.Player(id=dn, name=dn) for _, dn in _LINKED_EIGHT],
@@ -449,7 +447,7 @@ def _build(state: str) -> tuple[discord.Embed, discord.ui.View | None, dict | No
         players = [pod_swiss.Player(id=dn, name=dn) for _, dn in _LINKED_EIGHT]
         pairings = [(players[i].id, players[i + 1].id) for i in range(0, len(players), 2)]
         match_states = _next_round_match_states(1, pairings, [], players)
-        embed = _round_embed(1, match_states)
+        embed = round_embed(1, match_states)
         view = RoundResultsView(match_states)
         bracket = {
             "mode": "bracket",
@@ -457,6 +455,26 @@ def _build(state: str) -> tuple[discord.Embed, discord.ui.View | None, dict | No
             "round": 1,
             "matches_by_round": {1: list(match_states)},
             "outcomes": [],
+        }
+        return embed, view, bracket
+
+    if state == "round2":
+        players = [pod_swiss.Player(id=dn, name=dn) for _, dn in _LINKED_EIGHT]
+
+        def _seed(round_num: int, a: str, b: str) -> pod_swiss.MatchOutcome:
+            winner = _INVOKER_SEAT if _INVOKER_SEAT in (a, b) else a
+            return pod_swiss.MatchOutcome(round_num=round_num, player_a_id=a, player_b_id=b,
+                                          winner_id=winner, score="2-1")
+        r1 = [_seed(1, a, b) for a, b in pod_swiss.pair_round(players, [], 1)]
+        r2_pairings = pod_swiss.pair_round(players, r1, 2)
+        r2_states = _next_round_match_states(2, r2_pairings, r1, players)
+        embed = round_embed(2, r2_states)
+        view = RoundResultsView(r2_states)
+        bracket = {
+            "players": players,
+            "round": 2,
+            "matches_by_round": {2: r2_states},
+            "outcomes": r1,
         }
         return embed, view, bracket
 
@@ -474,8 +492,8 @@ def _build(state: str) -> tuple[discord.Embed, discord.ui.View | None, dict | No
         all_outcomes = r1 + r2
         r3_pairings = pod_swiss.pair_round(players, all_outcomes, 3)
         r3_states = _next_round_match_states(3, r3_pairings, all_outcomes, players)
-        _mark_trophy_match(r3_states, 3)
-        embed = _round_embed(3, r3_states)
+        mark_trophy_match(r3_states, 3)
+        embed = round_embed(3, r3_states)
         view = RoundResultsView(r3_states)
         bracket = {
             "players": players,
@@ -520,8 +538,8 @@ def _sweep_caption(state: str, kind: str) -> str:
     note = _STATE_NOTES.get(state, state)
     if kind == "progress":
         return f"**Ready-check progress card** · `render_ready_check_progress()` · `{state}` · {note}"
-    if state in ("round1", "round3"):
-        return f"**Round results card** · `_round_embed()` · `{state}` · {note}"
+    if state in ("round1", "round2", "round3"):
+        return f"**Round results card** · `round_embed()` · `{state}` · {note}"
     return f"**Lobby card** · `render()` · `{state}` · {note}"
 
 
@@ -619,7 +637,7 @@ async def _maybe_post_or_update_test_standings(state: dict, channel) -> None:
     matches = state["matches_by_round"].get(TOTAL_ROUNDS, [])
     if not matches:
         return
-    _mark_trophy_match(matches, TOTAL_ROUNDS)
+    mark_trophy_match(matches, TOTAL_ROUNDS)
     if not any(match_was_played(m) for m in matches):
         return
 
@@ -644,7 +662,7 @@ async def _maybe_post_or_update_test_standings(state: dict, channel) -> None:
         except discord.HTTPException:
             log.warning("could not post testlobby standings", exc_info=True)
             return
-        await _pin_only_this_bot_message(state["standings_message"])
+        await pin_only_this_bot_message(state["standings_message"])
     else:
         try:
             await existing.edit(embed=embed)
@@ -661,7 +679,7 @@ async def _ping_missing_deck_test_participants(state: dict, channel) -> None:
     invoker = state.get("invoker")
     tokens = []
     for p in state["players"]:
-        if _deck_complete(deck_data.get(_norm(p.name))):
+        if deck_complete(deck_data.get(_norm(p.name))):
             continue
         if invoker is not None and _norm(p.name) == _norm(_INVOKER_SEAT):
             tokens.append(f"<@{invoker.id}>")
@@ -688,7 +706,7 @@ async def _test_championship_deadline(state: dict, channel) -> None:
 
 
 async def _maybe_announce_or_update_test_champion(state: dict, channel, *, force: bool = False) -> None:
-    """Mirror of pod_tournament._maybe_post_championship for in-memory testlobby state.
+    """Mirror of pod_tournament.maybe_post_championship for in-memory testlobby state.
 
     One-time post: fires once the top finishers all have colors and a screenshot, or when forced by
     the deadline. Never edits after posting.
@@ -698,7 +716,7 @@ async def _maybe_announce_or_update_test_champion(state: dict, channel, *, force
     matches = state["matches_by_round"].get(TOTAL_ROUNDS, [])
     if not matches:
         return
-    _mark_trophy_match(matches, TOTAL_ROUNDS)
+    mark_trophy_match(matches, TOTAL_ROUNDS)
     if any(not m.get("winner_name") for m in matches):
         return
 
@@ -706,7 +724,7 @@ async def _maybe_announce_or_update_test_champion(state: dict, channel, *, force
     if not standings:
         return
     deck_data = _build_test_deck_data(state)
-    if _incomplete_top_decks(standings, deck_data) and not force:
+    if incomplete_top_decks(standings, deck_data) and not force:
         return
 
     standings_msg = state.get("standings_message")
@@ -782,7 +800,7 @@ async def _propagate_test_result_to_other_surface(
         try:
             await thread_msg.edit(
                 content=None,
-                embed=_round_embed(round_num, render_matches),
+                embed=round_embed(round_num, render_matches),
                 view=RoundResultsView(render_matches),
             )
         except discord.HTTPException:
@@ -860,7 +878,7 @@ async def _handle_test_result(interaction: discord.Interaction, match_id: str,
         m["winner_name"] = winner_name
         m["score"] = score
 
-    _mark_trophy_match(matches, round_num)
+    mark_trophy_match(matches, round_num)
 
     is_dm = isinstance(interaction.channel, discord.DMChannel)
     log.info(format_match_result_log(
@@ -870,7 +888,7 @@ async def _handle_test_result(interaction: discord.Interaction, match_id: str,
 
     is_bracket = state.get("mode") == "bracket"
     render_matches = _bracket_display(state, round_num) if is_bracket else matches
-    thread_embed = _round_embed(round_num, render_matches)
+    thread_embed = round_embed(round_num, render_matches)
     thread_view = RoundResultsView(render_matches)
     try:
         if is_dm:
@@ -924,12 +942,12 @@ async def _handle_test_result(interaction: discord.Interaction, match_id: str,
         return
     next_matches = _next_round_match_states(round_num + 1, pairings,
                                               state["outcomes"], state["players"])
-    _mark_trophy_match(next_matches, round_num + 1)
+    mark_trophy_match(next_matches, round_num + 1)
     state["matches_by_round"][round_num + 1] = next_matches
     state["round"] = round_num + 1
     try:
         new_msg = await interaction.followup.send(
-            embed=_round_embed(round_num + 1, next_matches),
+            embed=round_embed(round_num + 1, next_matches),
             view=RoundResultsView(next_matches),
         )
         _BRACKETS[new_msg.id] = state
@@ -996,7 +1014,7 @@ def _bracket_display(state: dict, round_num: int) -> list[dict]:
     if state.get("mode") != "bracket" or round_num < 2:
         return real
     display = list(real) + _compute_bracket_placeholders(state, round_num)
-    _mark_trophy_match(display, round_num)
+    mark_trophy_match(display, round_num)
     return display
 
 
@@ -1037,7 +1055,7 @@ async def _bracket_advance(state: dict, source_round: int, interaction: discord.
     if not display:
         return
 
-    embed = _round_embed(target, display)
+    embed = round_embed(target, display)
     view = RoundResultsView(display)
     if target_msg is None:
         try:
@@ -1124,13 +1142,13 @@ async def _regenerate_test_next_round(state: dict, next_round: int, channel) -> 
         return
     next_matches = _next_round_match_states(next_round, pairings,
                                               state["outcomes"], state["players"])
-    _mark_trophy_match(next_matches, next_round)
+    mark_trophy_match(next_matches, next_round)
     state["matches_by_round"][next_round] = next_matches
 
     msg = state.get("round_messages", {}).get(next_round)
     if msg is not None:
         try:
-            await msg.edit(embed=_round_embed(next_round, next_matches),
+            await msg.edit(embed=round_embed(next_round, next_matches),
                             view=RoundResultsView(next_matches))
         except discord.HTTPException:
             log.warning(f"could not edit testlobby round {next_round} during regenerate", exc_info=True)
@@ -1247,7 +1265,7 @@ async def setup(bot: commands.Bot) -> None:
         """Owner-only. Render the pod-draft lobby embed in this channel.
 
         `state` ∈ empty | partial | linked | unlinked | ready | notready | drafting | complete |
-        round1 | round3 | champion | submit | podbracket.
+        round1 | round2 | round3 | champion | submit | podbracket.
         No arg → posts every state in sequence. A specific state → edits the last in place.
         `podbracket` starts a live 8-player fast-advance bracket (per-match round advancing)."""
         if state and state not in _VALID_STATES:

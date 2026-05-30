@@ -4,7 +4,7 @@ Active from the moment Draftmancer picks finish (event.current_round becomes non
 Last-image-wins, except a stored caption matching the record-pattern (e.g. "3-0", "2-1",
 "trophy") locks the slot — only another record-pattern image can replace it.
 
-On capture we trigger _maybe_post_championship — once the top finishers all have colors and a
+On capture we trigger maybe_post_championship — once the top finishers all have colors and a
 screenshot the one-time coordination announcement (Components V2 layout) posts to the parent
 channel. If the author is a champion, we also react 🏆 on the message itself.
 """
@@ -23,7 +23,7 @@ from bot.services.pod_drafts import (
     capture_deck_screenshot,
     is_pod_thread_champion,
 )
-from bot.services.pod_tournament import _maybe_post_championship
+from bot.services.pod_tournament import maybe_post_championship
 
 
 log = logging.getLogger(__name__)
@@ -58,7 +58,7 @@ class PodScreenshotListener(commands.Cog):
         if event_id is not None:
             manager = ACTIVE_POD_MANAGERS.get(event_id)
             if manager is not None:
-                await _maybe_post_championship(manager)
+                await maybe_post_championship(manager)
                 is_champion_in_memory = discord_id in manager.champion_discord_ids
 
         is_champion_in_db = await asyncio.to_thread(_is_thread_champion_sync, thread_id, discord_id)

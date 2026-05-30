@@ -26,11 +26,34 @@ def test_round_1_pairs_all_players_once():
     assert sorted(flat) == [p.id for p in roster]
 
 
-def test_round_1_is_random_with_rng():
+def test_round_1_is_random_with_rng_when_seats_unknown():
     roster = _players(6)
     a = pair_round(roster, [], 1, rng=random.Random(1))
     b = pair_round(roster, [], 1, rng=random.Random(2))
     assert a != b  # different seeds → different pairings
+
+
+def test_round_1_pairs_by_seat_distance():
+    roster = [Player(id=f"p{i}", name=f"Player{i}", seat=i) for i in range(8)]
+    shuffled = list(roster)
+    random.Random(3).shuffle(shuffled)  # seat, not list order, must drive pairing
+    pairings = pair_round(shuffled, [], 1)
+    assert {frozenset(p) for p in pairings} == {
+        frozenset({"p0", "p4"}),
+        frozenset({"p1", "p5"}),
+        frozenset({"p2", "p6"}),
+        frozenset({"p3", "p7"}),
+    }
+
+
+def test_round_1_seat_distance_six_players():
+    roster = [Player(id=f"p{i}", name=f"Player{i}", seat=i) for i in range(6)]
+    pairings = pair_round(roster, [], 1)
+    assert {frozenset(p) for p in pairings} == {
+        frozenset({"p0", "p3"}),
+        frozenset({"p1", "p4"}),
+        frozenset({"p2", "p5"}),
+    }
 
 
 def test_round_2_pairs_winners_with_winners_when_possible():

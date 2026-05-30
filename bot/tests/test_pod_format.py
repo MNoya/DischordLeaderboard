@@ -124,3 +124,39 @@ def _session_factory(session):
             return False
 
     return lambda: _Ctx()
+
+
+# --- seat indexes ---
+
+def test_persist_seat_indexes_from_log_writes_table_order(session, monkeypatch):
+    import bot.services.pod_draft_manager as mod
+    from sqlalchemy import select
+    from bot.models import PodDraftParticipant
+    from bot.services.pod_drafts import seed_event_participants
+
+    event = _seed_event(session)
+    seed_event_participants(session, event.id, ["Aria", "Bryn", "Caedmon", "Doryn"])
+    session.flush()
+    monkeypatch.setattr(mod, "SessionLocal", _session_factory(session))
+
+    mgr = _manager("SOS")
+    mgr.event_id = event.id
+    mgr.draft_logs = {"Aria": {"users": {
+        "0": {"userName": "Caedmon"}, "1": {"userName": "Aria"},
+        "2": {"userName": "Doryn"}, "3": {"userName": "Bryn"},
+    }}}
+
+    assert mgr.persist_seat_indexes_from_log() is True
+    seats = {
+        p.draftmancer_name: p.seat_index
+        for p in session.execute(select(PodDraftParticipant)).scalars()
+    }
+    assert seats == {"Caedmon": 0, "Aria": 1, "Doryn": 2, "Bryn": 3}
+
+
+def test_persist_seat_indexes_from_log_noop_without_log(session, monkeypatch):
+    import bot.services.pod_draft_manager as mod
+    monkeypatch.setattr(mod, "SessionLocal", _session_factory(session))
+    mgr = _manager("SOS")
+    mgr.draft_logs = {}
+    assert mgr.persist_seat_indexes_from_log() is False
