@@ -10,18 +10,6 @@ from bot.services.pod_tournament import (
 )
 
 
-def _standings(*names: str) -> list:
-    return [SimpleNamespace(player_name=n) for n in names]
-
-
-def _deck(colors: str | None, screenshot: str | None) -> ParticipantDeckData:
-    return ParticipantDeckData(colors=colors, screenshot_url=screenshot, screenshot_caption=None, draft_log_url=None)
-
-
-def _complete_decks(*names: str) -> dict:
-    return {normalize_player_name(n): _deck("WU", "http://img/x.png") for n in names}
-
-
 def test_deck_complete_requires_colors_and_screenshot():
     assert deck_complete(_deck("WU", "http://img/x.png"))
     assert not deck_complete(_deck("WU", None))
@@ -59,3 +47,15 @@ def test_championship_requires_all_when_pod_smaller_than_top_n():
 def test_deck_reminder_text_carries_mentions():
     text = build_deck_reminder_text("<@1> <@2>")
     assert "<@1>" in text and "<@2>" in text
+
+
+def _standings(*names: str) -> list:
+    return [SimpleNamespace(player_name=n) for n in names]
+
+
+def _deck(colors: str | None, screenshot: str | None) -> ParticipantDeckData:
+    return ParticipantDeckData(colors=colors, screenshot_url=screenshot, screenshot_caption=None, draft_log_url=None)
+
+
+def _complete_decks(*names: str) -> dict:
+    return {normalize_player_name(n): _deck("WU", "http://img/x.png") for n in names}

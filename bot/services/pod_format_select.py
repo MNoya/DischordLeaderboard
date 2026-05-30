@@ -24,6 +24,26 @@ from bot.sets import ACTIVE_SET_CODE
 ApplyFormatCallback = Callable[[discord.Interaction, str], Awaitable[str | None]]
 
 
+def format_options(current_code: str | None) -> list[discord.SelectOption]:
+    """The format dropdown options (current set + custom cubes), with the active one defaulted."""
+    cur = (current_code or "").upper()
+    on_custom = cur in CUSTOM_FORMATS
+    options = [discord.SelectOption(
+        label=LATEST_SET_LABEL,
+        value=ACTIVE_SET_CODE,
+        description=f"Draft the current set ({ACTIVE_SET_CODE})",
+        default=not on_custom,
+    )]
+    for fmt in custom_formats():
+        options.append(discord.SelectOption(
+            label=fmt.label,
+            value=fmt.code,
+            description=f"CubeCobra: {fmt.cube_id}",
+            default=(cur == fmt.code.upper()),
+        ))
+    return options
+
+
 class FormatSelectView(ui.View):
     def __init__(self, on_apply: ApplyFormatCallback, *, current_code: str | None = None) -> None:
         super().__init__(timeout=300)
@@ -32,22 +52,10 @@ class FormatSelectView(ui.View):
 
 class FormatSelect(ui.Select):
     def __init__(self, on_apply: ApplyFormatCallback, current_code: str | None) -> None:
-        cur = (current_code or "").upper()
-        on_custom = cur in CUSTOM_FORMATS
-        options = [discord.SelectOption(
-            label=LATEST_SET_LABEL,
-            value=ACTIVE_SET_CODE,
-            description=f"Draft the current set ({ACTIVE_SET_CODE})",
-            default=not on_custom,
-        )]
-        for fmt in custom_formats():
-            options.append(discord.SelectOption(
-                label=fmt.label,
-                value=fmt.code,
-                description=f"CubeCobra: {fmt.cube_id}",
-                default=(cur == fmt.code.upper()),
-            ))
-        super().__init__(placeholder=SELECT_PLACEHOLDER, options=options, min_values=1, max_values=1)
+        super().__init__(
+            placeholder=SELECT_PLACEHOLDER, options=format_options(current_code),
+            min_values=1, max_values=1,
+        )
         self._on_apply = on_apply
 
     async def callback(self, interaction: discord.Interaction) -> None:

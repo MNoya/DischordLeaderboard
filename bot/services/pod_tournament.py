@@ -24,7 +24,7 @@ from bot.config import settings
 from bot.slug import slugify
 from bot.database import SessionLocal
 from bot.models import Player as DbPlayer, PodDraftEvent, PodDraftMatch, PodDraftParticipant, PodDraftReplay
-from bot.services import pod_swiss
+from bot.services import pod_bracket, pod_swiss
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_deck_color import (
     PAIR_EMOJI_NAME,
@@ -92,6 +92,7 @@ TROPHY = "trophy"
 MIDDLE = "middle"
 LAST_CHANCE = "last_chance"
 GRACE_SECONDS = 60  # window after round completion during which edits regenerate the next round
+BRACKET_EDIT_BLOCKED_MSG = "That result can't be changed now — a later round already reported a result."
 ANNOUNCEMENT_TOP_N = 4  # channel-level announcement shows top performers only; thread keeps full standings
 CHAMPIONSHIP_DEADLINE_SECONDS = 600  # hard cap from R3 end: post the announcement with whatever decks landed
 
@@ -333,7 +334,7 @@ def build_pairing_dm_embed(
 
     if pairings_url:
         link_prefix = emojis.get("manat") or "↳"
-        body_lines.append(f"{link_prefix} [View pairings]({pairings_url})")
+        body_lines.append(f"{link_prefix} [View Pairings]({pairings_url})")
 
     color = discord.Color.yellow() if updated else discord.Color.green()
     if match_state and match_state.get("winner_name"):
@@ -741,10 +742,19 @@ async def start_tournament(manager: "PodDraftManager") -> None:
         return
 
     manager.tournament_players = [Player(id=name, name=name) for name in roster]
+    effective_mode = "bracket" if (manager.pairing_mode == "bracket" and pod_bracket.supports(len(roster))) else "swiss"
+    manager.pairing_mode = effective_mode
+    await asyncio.to_thread(persist_pairing_mode, manager.event_id, effective_mode)
     # Idempotent re-seed — _start_draft already seeded at draft-start time. Kept as a safety net
     # in case that call didn't fire cleanly (bot restart mid-draft, etc).
     await asyncio.to_thread(_seed_participants_sync, manager.event_id, roster)
     await advance_to_round(manager, 1)
+
+
+def persist_pairing_mode(event_id: str, mode: str) -> None:
+    with SessionLocal() as session:
+        session.execute(update(PodDraftEvent).where(PodDraftEvent.id == event_id).values(pairing_mode=mode))
+        session.commit()
 
 
 def _seed_participants_sync(event_id: str, roster: list[str]) -> None:
@@ -769,7 +779,7 @@ async def advance_to_round(manager: "PodDraftManager", round_num: int) -> None:
         log.error("pairing for round %d failed for %s: %s", round_num, manager.event_id, e)
         return
 
-    pending_rows = await asyncio.to_thread(_insert_pending_matches, manager.event_id, round_num, pairings)
+    pending_rows = await asyncio.to_thread(insert_pending_matches, manager.event_id, round_num, pairings)
     manager.current_round = round_num
 
     thread = await manager._fetch_thread()
@@ -780,6 +790,9 @@ async def advance_to_round(manager: "PodDraftManager", round_num: int) -> None:
     displays = await asyncio.to_thread(_load_participant_displays, manager.event_id)
     match_states = [_state_for_pending(match_id, a, b, standings_by_id, displays) for match_id, a, b in pending_rows]
     mark_trophy_match(match_states, round_num)
+    if manager.pairing_mode == "bracket":
+        for m in match_states:
+            m["allow_skip"] = round_num == TOTAL_ROUNDS
     if round_num == 1 and seats:
         _attach_seats(match_states, seats)
     embed = round_embed(round_num, match_states)
@@ -809,8 +822,9 @@ async def _attach_next_round_link(manager: "PodDraftManager", prior_round: int,
     prior_msg = manager.round_messages.get(prior_round)
     if prior_msg is None:
         return
-    prior_states = await asyncio.to_thread(_load_round_states, manager.event_id, prior_round)
-    mark_trophy_match(prior_states, prior_round)
+    prior_states = await asyncio.to_thread(
+        render_round_states, manager.event_id, prior_round, bracket=manager.pairing_mode == "bracket",
+    )
     try:
         await prior_msg.edit(view=RoundResultsView(
             prior_states, next_round_url=next_url, next_round_num=next_round_num,
@@ -826,8 +840,9 @@ class MatchResultSelect(ui.Select):
     def __init__(self, slot: int, match_id: str = "", a_name: str = "", b_name: str = "",
                  a_display: str = "", b_display: str = "",
                  selected_value: str | None = None, winner_name: str | None = None,
-                 is_trophy_match: bool = False, placeholder_text: str = ""):
-        disabled = False
+                 is_trophy_match: bool = False, placeholder_text: str = "", allow_skip: bool = True,
+                 locked: bool = False):
+        disabled = locked
         if placeholder_text:
             disabled = True
             placeholder = placeholder_text[:150]
@@ -842,8 +857,9 @@ class MatchResultSelect(ui.Select):
                 (f"{a_disp} wins: 2-1", f"{a_disp} wins 2-1 vs {b_disp}", f"{match_id}|{a_name}|2-1", True),
                 (f"{b_disp} wins: 2-1", f"{b_disp} wins 2-1 vs {a_disp}", f"{match_id}|{b_name}|2-1", True),
                 (f"{b_disp} wins: 2-0", f"{b_disp} wins 2-0 vs {a_disp}", f"{match_id}|{b_name}|2-0", True),
-                ("No Match Played", None, f"{match_id}|{SKIPPED_SENTINEL}|0-0", False),
             ]
+            if allow_skip:
+                values.append(("No Match Played", None, f"{match_id}|{SKIPPED_SENTINEL}|0-0", False))
             if selected_value:
                 values.insert(0, ("Clear Result", None, f"{match_id}|{CLEAR_SENTINEL}|0-0", False))
             options = []
@@ -884,9 +900,10 @@ class RoundResultsView(ui.View):
             for slot, m in enumerate(match_states):
                 if m.get("placeholder"):
                     trophy = "🏆 " if m.get("is_trophy_match") else ""
+                    text = m.get("dropdown_label") or m.get("label") or ""
                     self.add_item(MatchResultSelect(
                         slot=slot,
-                        placeholder_text=f"⏳ {trophy}{m['label']}",
+                        placeholder_text=f"⏳ {trophy}{text}",
                     ))
                     continue
                 selected = None
@@ -901,6 +918,8 @@ class RoundResultsView(ui.View):
                     b_display=m.get("b_display") or m["b_name"],
                     selected_value=selected,
                     is_trophy_match=bool(m.get("is_trophy_match")),
+                    allow_skip=m.get("allow_skip", True),
+                    locked=m.get("locked", False),
                 ))
             if next_round_url and next_round_num is not None and len(match_states) < MAX_MATCHES_PER_ROUND:
                 self.add_item(discord.ui.Button(
@@ -930,6 +949,13 @@ async def _handle_result_submission(interaction: discord.Interaction, value: str
         await _test_result_handler(interaction, match_id, winner_name, score)
         return
 
+    if await asyncio.to_thread(bracket_edit_blocked, match_id):
+        await interaction.response.send_message(
+            BRACKET_EDIT_BLOCKED_MSG,
+            ephemeral=(interaction.guild is not None),
+        )
+        return
+
     result = await asyncio.to_thread(_commit_result, match_id, winner_name, score)
     if result == "not_found":
         try:
@@ -940,14 +966,14 @@ async def _handle_result_submission(interaction: discord.Interaction, value: str
 
     round_num = result["round"]
     event_id = result["event_id"]
-    match_states = await asyncio.to_thread(_load_round_states, event_id, round_num)
-    mark_trophy_match(match_states, round_num)
-    match_state = next((m for m in match_states if m["match_id"] == match_id), None)
+    manager = ACTIVE_POD_MANAGERS.get(event_id)
+    bracket = manager is not None and manager.pairing_mode == "bracket"
+    match_states = await asyncio.to_thread(render_round_states, event_id, round_num, bracket=bracket)
+    match_state = next((m for m in match_states if m.get("match_id") == match_id), None)
     event_name = await asyncio.to_thread(load_event_name_sync, event_id)
     is_dm = isinstance(interaction.channel, discord.DMChannel)
 
     if result.get("cleared"):
-        manager = ACTIVE_POD_MANAGERS.get(event_id)
         if manager is not None and manager.grace_round == round_num and manager.grace_task is not None:
             manager.grace_task.cancel()
             manager.grace_round = None
@@ -977,6 +1003,9 @@ async def _handle_result_submission(interaction: discord.Interaction, value: str
             interaction.client, event_id, match_id, round_num,
             exclude_channel_id=str(interaction.channel.id) if interaction.channel else None,
         ))
+        if bracket and round_num < TOTAL_ROUNDS and manager is not None and result.get("winner_changed"):
+            phrase = format_result_change(result["a_name"], result["b_name"], None, None)
+            await bracket_regenerate_downstream(manager, round_num, phrase)
         return
 
     log.info(format_match_result_log(
@@ -1006,7 +1035,11 @@ async def _handle_result_submission(interaction: discord.Interaction, value: str
         exclude_channel_id=str(interaction.channel.id) if interaction.channel else None,
     ))
 
-    await _maybe_advance(interaction.client, event_id, round_num)
+    await _maybe_advance(
+        interaction.client, event_id, round_num,
+        is_edit=bool(result.get("was_reported") and result.get("winner_changed")),
+        result_phrase=format_result_change(result["a_name"], result["b_name"], winner_name, score),
+    )
     if round_num >= TOTAL_ROUNDS:
         asyncio.create_task(_fetch_replays_for_match_players(
             event_id, result["a_name"], result["b_name"],
@@ -1075,9 +1108,10 @@ async def _propagate_match_to_other_surfaces(
 ) -> None:
     """Edit every other surface tracking this match (thread + the other player's DM) so they all
     reflect the latest result. The interaction's own message is already edited inline."""
-    match_states = await asyncio.to_thread(_load_round_states, event_id, round_num)
-    mark_trophy_match(match_states, round_num)
-    match_state = next((m for m in match_states if m["match_id"] == match_id), None)
+    manager = ACTIVE_POD_MANAGERS.get(event_id)
+    bracket = manager is not None and manager.pairing_mode == "bracket"
+    match_states = await asyncio.to_thread(render_round_states, event_id, round_num, bracket=bracket)
+    match_state = next((m for m in match_states if m.get("match_id") == match_id), None)
     if match_state is None:
         return
     event_name = await asyncio.to_thread(load_event_name_sync, event_id)
@@ -1107,7 +1141,6 @@ async def _propagate_match_to_other_surfaces(
         except discord.HTTPException:
             log.warning(f"propagate: could not edit DM {row.dm_message_id}", exc_info=True)
 
-    manager = ACTIVE_POD_MANAGERS.get(event_id)
     if manager is None:
         return
     thread_msg = manager.round_messages.get(round_num)
@@ -1139,10 +1172,14 @@ def _load_round_states(event_id: str, round_num: int) -> list[dict]:
             .order_by(PodDraftMatch.pairing_index)
         ).scalars().all()
     prior = _load_matches(event_id)
-    # Build standings as of the start of this round (use only earlier-round results)
+    # Build standings as of the start of this round (use only earlier-round results). Use the full
+    # pod roster, not just this round's rows — a partial bracket round holds a subset of players, and
+    # restricting the standings input would drop their games against everyone else.
     pre_round = [m for m in prior if m.round_num < round_num]
-    distinct_names = {n for r in rows for n in (r.player_a_name, r.player_b_name)}
-    players = [Player(id=n, name=n) for n in sorted(distinct_names)]
+    roster = _load_pod_player_names(event_id) or sorted(
+        {n for r in rows for n in (r.player_a_name, r.player_b_name)}
+    )
+    players = [Player(id=n, name=n) for n in roster]
     standings_by_id = {s.player_id: s for s in pod_swiss.compute_standings(players, pre_round)}
     displays = _load_participant_displays(event_id)
     states = []
@@ -1172,6 +1209,8 @@ def _commit_result(match_id: str, winner_name: str, score: str):
         match = session.get(PodDraftMatch, match_id)
         if match is None:
             return "not_found"
+        was_reported = match.reported_at is not None
+        prev_winner = match.winner_name
         if winner_name == CLEAR_SENTINEL:
             match.winner_name = None
             match.score = None
@@ -1179,6 +1218,8 @@ def _commit_result(match_id: str, winner_name: str, score: str):
             session.commit()
             return {
                 "cleared": True,
+                "was_reported": was_reported,
+                "winner_changed": prev_winner is not None,
                 "loser_name": None,
                 "a_name": match.player_a_name,
                 "b_name": match.player_b_name,
@@ -1190,6 +1231,8 @@ def _commit_result(match_id: str, winner_name: str, score: str):
         session.commit()
         loser = match.player_b_name if winner_name.lower() == match.player_a_name.lower() else match.player_a_name
         return {
+            "was_reported": was_reported,
+            "winner_changed": (prev_winner or "").lower() != (winner_name or "").lower(),
             "loser_name": loser,
             "a_name": match.player_a_name,
             "b_name": match.player_b_name,
@@ -1305,7 +1348,8 @@ def _resolve_match_player_tokens_sync(
     return out
 
 
-async def _maybe_advance(bot_client, event_id: str, round_num: int) -> None:
+async def _maybe_advance(bot_client, event_id: str, round_num: int, is_edit: bool = False,
+                         result_phrase: str | None = None) -> None:
     """Advance, finalize, or regenerate-on-edit, depending on round state.
 
     First time a round completes → advance to N+1 (or for R3 start the finalize grace).
@@ -1313,6 +1357,10 @@ async def _maybe_advance(bot_client, event_id: str, round_num: int) -> None:
     Once the grace timer expires → lock the round-N view and (for R3) finalize.
     """
     manager = ACTIVE_POD_MANAGERS.get(event_id)
+
+    if manager is not None and manager.pairing_mode == "bracket":
+        await _bracket_maybe_advance(manager, round_num, is_edit, result_phrase)
+        return
 
     if round_num == TOTAL_ROUNDS and manager is not None:
         await _post_or_update_live_standings(manager)
@@ -1764,7 +1812,7 @@ def build_champion_embed(
         _build_standings_row(
             s, displays=displays, player_colors=player_colors,
             deck_data=deck_data, site_root=site_root,
-            show_review_flag=True, show_medal=medals_locked,
+            show_review_flag=True, show_medal=medals_locked or (champion_locked and s.rank == 1),
         )
         for s in standings
     ]
@@ -1885,6 +1933,17 @@ def _schedule_grace(manager, round_num: int) -> None:
     manager.grace_task = asyncio.create_task(_grace_expire(manager, round_num))
 
 
+async def _locked_round_view(manager, round_num: int):
+    """View for a round once its grace window passes. Swiss removes the dropdowns; bracket keeps them
+    on screen but disabled, so reported results stay visible at the round's constant height."""
+    if manager.pairing_mode != "bracket":
+        return None
+    states = await asyncio.to_thread(load_bracket_round_states, manager.event_id, round_num)
+    for m in states:
+        m["locked"] = True
+    return RoundResultsView(states)
+
+
 async def _grace_expire(manager, round_num: int) -> None:
     try:
         await asyncio.sleep(GRACE_SECONDS)
@@ -1896,7 +1955,7 @@ async def _grace_expire(manager, round_num: int) -> None:
     msg = manager.round_messages.get(round_num)
     if msg is not None:
         try:
-            await msg.edit(view=None)
+            await msg.edit(view=await _locked_round_view(manager, round_num))
         except Exception:
             log.warning(f"[FINALIZE] grace.lock_view_error round={round_num}", exc_info=True)
 
@@ -1950,7 +2009,7 @@ async def _regenerate_next_round(manager, next_round: int) -> None:
         log.error("regenerate pairings for round %d failed for %s: %s", next_round, event_id, e)
         return
 
-    pending_rows = await asyncio.to_thread(_insert_pending_matches, event_id, next_round, pairings)
+    pending_rows = await asyncio.to_thread(insert_pending_matches, event_id, next_round, pairings)
     standings_by_id = {s.player_id: s for s in pod_swiss.compute_standings(manager.tournament_players, prior)}
     displays = await asyncio.to_thread(_load_participant_displays, event_id)
     match_states = [_state_for_pending(match_id, a, b, standings_by_id, displays) for match_id, a, b in pending_rows]
@@ -2230,7 +2289,12 @@ async def _post_or_update_live_standings(manager) -> None:
 
     trophy = [m for m in match_states if m.get("is_trophy_match")]
     champion_locked = bool(trophy) and all(m.get("winner_name") for m in trophy)
-    pending_count = sum(1 for m in match_states if not m.get("winner_name"))
+    if manager.pairing_mode == "bracket":
+        pending_count = await asyncio.to_thread(
+            bracket_pending_in_round, event_id, TOTAL_ROUNDS, len(manager.tournament_players),
+        )
+    else:
+        pending_count = sum(1 for m in match_states if not m.get("winner_name"))
 
     prior = await asyncio.to_thread(_load_matches, event_id)
     standings = pod_swiss.compute_standings(manager.tournament_players, prior)
@@ -2395,17 +2459,6 @@ def _round1_lines(match_states: list[dict], seated: bool) -> list[str]:
     return lines
 
 
-def _flat_lines(match_states: list[dict]) -> list[str]:
-    lines: list[str] = []
-    for m in match_states:
-        if m.get("placeholder"):
-            trophy = "🏆 " if m.get("is_trophy_match") else ""
-            lines.append(f"⏳ {trophy}{m['label']}")
-        else:
-            lines.append(_match_line(m))
-    return lines
-
-
 def round_groups(round_num: int, match_states: list[dict]) -> list[tuple[str, list[dict]]]:
     """Ordered (group_kind, matches) for a round — the presentation-free data model. Intermediate
     rounds split into WINNERS → PAIR_UP → LOSERS; the final round into TROPHY → MIDDLE → LAST_CHANCE."""
@@ -2465,7 +2518,12 @@ def _grouped_lines(round_num: int, match_states: list[dict]) -> list[str]:
         label = _GROUP_LABEL.get(kind) or "{}-{}".format(*_parse_wl(matches[0]["a_record"]))
         word = "Match" if len(matches) == 1 else "Matches"
         lines.append(f"{_GROUP_EMOJI[kind]}{NBSP}{NBSP}**{label} {word}**")
-        lines.extend(_match_line(m) for m in matches)
+        for m in matches:
+            if m.get("placeholder"):
+                label = m.get("label") or ""
+                lines.append(f"⏳{NBSP}{NBSP}{label}" if label else "⏳")
+            else:
+                lines.append(_match_line(m))
     return lines
 
 
@@ -2475,10 +2533,8 @@ def round_embed(round_num: int, match_states: list[dict]) -> discord.Embed:
         seated = bool(match_states) and all(m.get("a_seat") and m.get("b_seat") for m in match_states)
         title = _round_header(round_num, all_done, seated=seated)
         lines = _round1_lines(match_states, seated)
-    elif any(m.get("placeholder") for m in match_states):
-        title = _round_header(round_num, all_done)
-        lines = _flat_lines(match_states)
     else:
+        # Rounds 2+ group by record (1-0/0-1, then Trophy/1-1/Last Chance), waiting slots included
         title = _round_header(round_num, all_done)
         lines = _grouped_lines(round_num, match_states)
     return discord.Embed(
@@ -2535,12 +2591,297 @@ def _load_matches(event_id: str) -> list[MatchOutcome]:
         ]
 
 
-def _insert_pending_matches(event_id: str, round_num: int, pairings: list[tuple[str, str]]) -> list[tuple[str, str, str]]:
+def insert_pending_matches(
+    event_id: str, round_num: int, pairings: list[tuple[str, str]], start_index: int = 0,
+) -> list[tuple[str, str, str]]:
+    """Insert pending match rows for a round and bump the event's current_round. `start_index` lets
+    the bracket pairer append to a round already partly posted without colliding pairing_index;
+    current_round only ever advances so several open bracket rounds don't make it thrash backwards."""
     out: list[tuple[str, str, str]] = []
     with SessionLocal() as session:
         for idx, (a_name, b_name) in enumerate(pairings):
-            row = add_pairing(session, event_id, round_num, a_name, b_name, pairing_index=idx)
+            row = add_pairing(session, event_id, round_num, a_name, b_name, pairing_index=start_index + idx)
             out.append((row.id, a_name, b_name))
-        session.execute(update(PodDraftEvent).where(PodDraftEvent.id == event_id).values(current_round=round_num))
+        session.execute(
+            update(PodDraftEvent)
+            .where(PodDraftEvent.id == event_id)
+            .values(current_round=func.greatest(func.coalesce(PodDraftEvent.current_round, 0), round_num))
+        )
         session.commit()
     return out
+
+
+def _load_pod_player_names(event_id: str) -> list[str]:
+    """Full roster names, read from round-1 matches where everyone is paired."""
+    with SessionLocal() as session:
+        rows = session.execute(
+            select(PodDraftMatch.player_a_name, PodDraftMatch.player_b_name)
+            .where(PodDraftMatch.event_id == event_id, PodDraftMatch.round == 1)
+        ).all()
+    return sorted({n for a, b in rows for n in (a, b)})
+
+
+def bracket_placeholder_states(event_id: str, round_num: int, real: list[dict] | None = None) -> list[dict]:
+    """Waiting-match states padding a bracket round to its full fixed slate, so the round always
+    renders the same number of dropdowns. A known waiting player is named ('Alice vs 1-0'); a slot
+    with no known side reads 'Pending Round N'. `real` is this round's reportable matches."""
+    if round_num < 2:
+        return []
+    if real is None:
+        real = _load_round_states(event_id, round_num)
+    real_records = [_parse_wl(m["a_record"]) for m in real]
+    paired = [n for m in real for n in (m["a_name"], m["b_name"])]
+    players = [Player(id=n, name=n) for n in _load_pod_player_names(event_id)]
+    completed = _load_matches(event_id)
+    displays = _load_participant_displays(event_id)
+
+    def disp(name: str) -> str:
+        return displays.get(normalize_player_name(name), {}).get("display_name") or name
+
+    out: list[dict] = []
+    for (w, l), a, b in pod_bracket.padding_slots(players, completed, real_records, paired, round_num):
+        rec = f"{w}-{l}"
+        if a and b:
+            label = dropdown_label = f"{disp(a)} vs {disp(b)}"
+        elif a:
+            label = dropdown_label = f"{disp(a)} vs {rec}"
+        else:
+            label = ""
+            dropdown_label = f"{rec} Match"
+        out.append({
+            "placeholder": True,
+            "label": label,
+            "dropdown_label": dropdown_label,
+            "a_record": rec,
+            "b_record": rec,
+            "winner_name": None,
+            "score": None,
+        })
+    return out
+
+
+def load_bracket_round_states(event_id: str, round_num: int) -> list[dict]:
+    """Full ordered slate for a bracket round: reportable matches first, then waiting-on placeholders.
+    Round 1 (and any not-yet-projectable round) is just the real matches."""
+    real = _load_round_states(event_id, round_num)
+    locked = round_num < TOTAL_ROUNDS and _later_round_reported(event_id, round_num)
+    for m in real:
+        m["allow_skip"] = round_num == TOTAL_ROUNDS
+        m["locked"] = locked and bool(m.get("winner_name"))
+    if round_num < 2:
+        return real
+    display = real + bracket_placeholder_states(event_id, round_num, real)
+    mark_trophy_match(display, round_num)
+    return display
+
+
+def _later_round_reported(event_id: str, round_num: int) -> bool:
+    """True if any round after round_num has a reported result — the point at which edits to this
+    round are blocked, so its reported dropdowns should render locked."""
+    with SessionLocal() as session:
+        return session.execute(
+            select(func.count(PodDraftMatch.id)).where(
+                PodDraftMatch.event_id == event_id,
+                PodDraftMatch.round > round_num,
+                PodDraftMatch.winner_name.is_not(None),
+            )
+        ).scalar_one() > 0
+
+
+def render_round_states(event_id: str, round_num: int, *, bracket: bool) -> list[dict]:
+    """Trophy-marked match states for rendering a round message. Bracket mode appends the
+    waiting-on placeholders; Swiss returns just the real matches. The one place mode decides which
+    slate a thread/DM edit shows."""
+    if bracket:
+        return load_bracket_round_states(event_id, round_num)
+    states = _load_round_states(event_id, round_num)
+    mark_trophy_match(states, round_num)
+    return states
+
+
+def bracket_pending_in_round(event_id: str, round_num: int, roster_size: int) -> int:
+    """Outstanding matches in an incrementally-built bracket round: roster/2 minus those reported,
+    rather than the count of rows that happen to exist right now."""
+    with SessionLocal() as session:
+        reported = session.execute(
+            select(func.count(PodDraftMatch.id)).where(
+                PodDraftMatch.event_id == event_id,
+                PodDraftMatch.round == round_num,
+                PodDraftMatch.winner_name.is_not(None),
+            )
+        ).scalar_one()
+    return max(roster_size // 2 - reported, 0)
+
+
+def bracket_edit_blocked(match_id: str) -> bool:
+    """Block editing an already-reported bracket result in a non-final round once a later round has
+    reported a result — regenerating downstream then would void a match someone already played.
+    Swiss matches are never blocked here. Survives a restart (derived from persisted rows)."""
+    with SessionLocal() as session:
+        row = session.execute(
+            select(PodDraftMatch.round, PodDraftMatch.reported_at,
+                   PodDraftMatch.event_id, PodDraftEvent.pairing_mode)
+            .join(PodDraftEvent, PodDraftEvent.id == PodDraftMatch.event_id)
+            .where(PodDraftMatch.id == match_id)
+        ).first()
+        if row is None:
+            return False
+        rnd, reported_at, event_id, mode = row
+        if mode != "bracket" or reported_at is None or rnd >= TOTAL_ROUNDS:
+            return False
+        downstream = session.execute(
+            select(func.count(PodDraftMatch.id)).where(
+                PodDraftMatch.event_id == event_id,
+                PodDraftMatch.round > rnd,
+                PodDraftMatch.winner_name.is_not(None),
+            )
+        ).scalar_one()
+    return downstream > 0
+
+
+async def bracket_advance(manager, source_round: int) -> None:
+    """Fast-advance: after a result in source_round, append whatever target-round pairings the new
+    records now allow and grow the target round's message in place. Posts the target round the first
+    time it has a real pairing — never an all-placeholder slate. The 2-0 trophy match opens the
+    moment both 2-0 players exist. Re-pair-on-edit (the Swiss grace regenerate) isn't supported."""
+    if source_round >= TOTAL_ROUNDS:
+        return
+    event_id = manager.event_id
+    target = source_round + 1
+    players = manager.tournament_players
+
+    outcomes = await asyncio.to_thread(_load_matches, event_id)
+    existing = await asyncio.to_thread(_load_pairings_for_round, event_id, target)
+    source_states = await asyncio.to_thread(_load_round_states, event_id, source_round)
+    source_complete = (
+        len(source_states) == len(players) // 2
+        and all(m["winner_name"] for m in source_states)
+    )
+    new = pod_bracket.incremental_pairings(
+        players, outcomes, existing, target, source_round_complete=source_complete,
+    )
+    new_rows: list[tuple[str, str, str]] = []
+    if new:
+        new_rows = await asyncio.to_thread(insert_pending_matches, event_id, target, new, len(existing))
+        manager.current_round = max(manager.current_round, target)
+
+    target_msg = manager.round_messages.get(target)
+    if target_msg is None and not new_rows and not existing:
+        return
+
+    display = await asyncio.to_thread(load_bracket_round_states, event_id, target)
+    if not display:
+        return
+    embed = round_embed(target, display)
+    view = RoundResultsView(display)
+
+    if target_msg is None:
+        thread = await manager._fetch_thread()
+        if thread is None:
+            return
+        try:
+            target_msg = await thread.send(embed=embed, view=view)
+        except Exception:
+            log.warning(f"could not post bracket round {target}", exc_info=True)
+            return
+        manager.round_messages[target] = target_msg
+        await _pin_round_message(target_msg, target)
+        await _attach_next_round_link(manager, source_round, target_msg.jump_url, target)
+    else:
+        try:
+            await target_msg.edit(content=None, embed=embed, view=view)
+        except Exception:
+            log.warning(f"could not edit bracket round {target}", exc_info=True)
+
+    if new_rows:
+        await _dm_round_pairings(manager.bot, event_id, target, new_rows, target_msg.jump_url)
+
+
+async def _bracket_maybe_advance(manager, round_num: int, is_edit: bool = False,
+                                  result_phrase: str | None = None) -> None:
+    """Bracket counterpart to the Swiss advance branch in _maybe_advance: append the next round after
+    a fresh result, regenerate downstream after an edit, and on the final round refresh standings +
+    schedule the finalize grace once the full slate (roster/2 matches) has reported."""
+    event_id = manager.event_id
+    roster_size = len(manager.tournament_players)
+    if round_num >= TOTAL_ROUNDS:
+        await _post_or_update_live_standings(manager)
+        pending = await asyncio.to_thread(bracket_pending_in_round, event_id, TOTAL_ROUNDS, roster_size)
+        if pending == 0 and not manager.finalized:
+            await manager.share_draft_log()
+            _schedule_grace(manager, round_num)
+    elif is_edit:
+        await bracket_regenerate_downstream(manager, round_num, result_phrase)
+    else:
+        await bracket_advance(manager, round_num)
+    await _relock_prior_rounds(manager, round_num)
+
+
+async def _relock_prior_rounds(manager, current_round: int) -> None:
+    """Re-render the messages of rounds before current_round so their reported dropdowns gray out now
+    that a later round has reported (edits to them are blocked). Keeps each round's next-round link."""
+    for r in range(1, current_round):
+        msg = manager.round_messages.get(r)
+        if msg is None:
+            continue
+        display = await asyncio.to_thread(load_bracket_round_states, manager.event_id, r)
+        next_msg = manager.round_messages.get(r + 1)
+        if next_msg is not None:
+            view = RoundResultsView(display, next_round_url=next_msg.jump_url, next_round_num=r + 1)
+        else:
+            view = RoundResultsView(display)
+        try:
+            await msg.edit(view=view)
+        except discord.HTTPException:
+            log.warning(f"could not relock round {r}", exc_info=True)
+
+
+def format_result_change(a_name: str, b_name: str, winner_name: str | None, score: str | None) -> str:
+    """The corrected result as plain text for the regenerate notice: 'Bob wins 2-1 vs Alice', or a
+    cleared/no-result fallback. Shared by prod and testlobby so both word it identically."""
+    if winner_name and winner_name not in (SKIPPED_SENTINEL, CLEAR_SENTINEL):
+        loser = b_name if winner_name.lower() == a_name.lower() else a_name
+        return f"{winner_name} wins {score} vs {loser}" if score else f"{winner_name} wins vs {loser}"
+    return f"{a_name} vs {b_name} result cleared"
+
+
+def bracket_regen_notice(result_phrase: str | None, round_num: int, pairings_url: str | None) -> str:
+    """The single source of truth for the thread note posted when an edit re-pairs a bracket round."""
+    head = f"**Result corrected:** {result_phrase} - " if result_phrase else ""
+    updated = f"[Pairings Updated]({pairings_url})" if pairings_url else "Pairings Updated"
+    return f"♻️ {head}Round {round_num} {updated} {emojis.get('manat')}".rstrip()
+
+
+async def bracket_regenerate_downstream(manager, edited_round: int, result_phrase: str | None = None) -> None:
+    """An upstream result changed (edit/clear) while no later round had reported yet: discard the
+    downstream rounds and rebuild them from the corrected results, editing the round messages in
+    place. Posts a one-line thread note (the corrected result + a link to the changed round). DMs
+    follow via bracket_advance, which re-DMs every pairing it creates."""
+    event_id = manager.event_id
+    old = {
+        r: await asyncio.to_thread(_load_pairings_for_round, event_id, r)
+        for r in range(edited_round + 1, TOTAL_ROUNDS + 1)
+    }
+    for r in range(edited_round + 1, TOTAL_ROUNDS + 1):
+        await asyncio.to_thread(_delete_round_rows, event_id, r)
+    for src in range(edited_round, TOTAL_ROUNDS):
+        await bracket_advance(manager, src)
+
+    changed_rounds = []
+    for r in range(edited_round + 1, TOTAL_ROUNDS + 1):
+        now = await asyncio.to_thread(_load_pairings_for_round, event_id, r)
+        if {frozenset(p) for p in now} != {frozenset(p) for p in old.get(r, [])}:
+            changed_rounds.append(r)
+    if not changed_rounds:
+        return
+    log.info(f"[BRACKET] event={event_id} regenerate after R{edited_round} edit changed rounds {changed_rounds}")
+    thread = await manager._fetch_thread()
+    if thread is None:
+        return
+    target = changed_rounds[0]
+    target_msg = manager.round_messages.get(target)
+    url = target_msg.jump_url if target_msg is not None else None
+    try:
+        await thread.send(bracket_regen_notice(result_phrase, target, url))
+    except discord.HTTPException:
+        log.warning("could not post bracket regenerate announcement", exc_info=True)

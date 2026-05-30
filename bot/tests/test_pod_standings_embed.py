@@ -2,6 +2,33 @@ from bot.services.pod_swiss import Standing
 from bot.services.pod_tournament import build_champion_embed
 
 
+def test_medals_hidden_while_champion_undecided():
+    embed = build_champion_embed(
+        _standings(), pending_count=1, champion_locked=False, include_submit_cta=False,
+    )
+    assert "Live Standings" in embed.description
+    for medal in ("🥇", "🥈", "🥉"):
+        assert medal not in embed.description
+
+
+def test_champion_medal_shown_once_locked_even_with_matches_pending():
+    embed = build_champion_embed(
+        _standings(), pending_count=1, champion_locked=True, include_submit_cta=False,
+    )
+    assert "Live Standings" in embed.description
+    assert "1. 🥇 Arcyl" in embed.description  # 3-0 champion is uncatchable, medal shows now
+    assert "🥈" not in embed.description  # runner-up medals wait for all results
+    assert "🥉" not in embed.description
+
+
+def test_medals_shown_once_standings_final():
+    embed = build_champion_embed(_standings(), pending_count=0, include_submit_cta=False)
+    assert "Final Standings" in embed.description
+    assert "1. 🥇 Arcyl" in embed.description
+    assert "2. 🥈 Elfandor" in embed.description
+    assert "3. 🥉 Bramblewick" in embed.description
+
+
 def _standing(rank: int, name: str, wins: int, losses: int) -> Standing:
     return Standing(
         rank=rank, player_id=f"p{rank}", player_name=name,
@@ -15,18 +42,3 @@ def _standings() -> list[Standing]:
         _standing(2, "Elfandor", 2, 1),
         _standing(3, "Bramblewick", 2, 1),
     ]
-
-
-def test_medals_hidden_while_matches_pending():
-    embed = build_champion_embed(_standings(), pending_count=1, include_submit_cta=False)
-    assert "Live Standings" in embed.description
-    for medal in ("🥇", "🥈", "🥉"):
-        assert medal not in embed.description
-
-
-def test_medals_shown_once_standings_final():
-    embed = build_champion_embed(_standings(), pending_count=0, include_submit_cta=False)
-    assert "Final Standings" in embed.description
-    assert "1. 🥇 Arcyl" in embed.description
-    assert "2. 🥈 Elfandor" in embed.description
-    assert "3. 🥉 Bramblewick" in embed.description

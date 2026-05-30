@@ -11,8 +11,6 @@ pairings. Pure functions — the orchestration layer handles every side effect.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from bot.services.pod_swiss import MatchOutcome, Player
 
 
@@ -71,41 +69,32 @@ def incremental_pairings(
     return new_pairings
 
 
-@dataclass(frozen=True)
-class Slot:
-    """One side of a projected match: a known 'player', or the 'winner'/'loser' of an undecided
-    source matchup. `label` is the name or matchup; `record` is the prospective W-L."""
-    kind: str
-    label: str
-    record: tuple[int, int]
+ROUND_RECORD_BUCKETS: dict[int, tuple[tuple[tuple[int, int], int], ...]] = {
+    2: (((1, 0), 2), ((0, 1), 2)),
+    3: (((2, 0), 1), ((1, 1), 2), ((0, 2), 1)),
+}
 
 
-def render_placeholder(a: Slot, b: Slot) -> str:
-    """Full label for a projected match, in 'X vs Y' shape: known players by name, undecided sides by
-    their pending record."""
-    token = next((s for s in (a, b) if s.kind != "player"), None)
-    if token is None:
-        return f"{a.label} vs {b.label}"
-    rec = f"{token.record[0]}-{token.record[1]}"
-    player = next((s for s in (a, b) if s.kind == "player"), None)
-    return f"{player.label} vs {rec}" if player else f"{rec} vs {rec}"
-
-
-def projected_placeholders(
+def padding_slots(
     players: list[Player],
     completed: list[MatchOutcome],
-    source_matches: list[tuple[str, str, bool]],
-    target_round: int,
-    created_pairs: list[tuple[str, str]],
-) -> list[tuple[Slot, Slot]]:
-    """Projected (not-yet-reportable) matches that round out target_round's slate, as (Slot, Slot).
+    real_records: list[tuple[int, int]],
+    paired_names: list[str],
+    round_num: int,
+) -> list[tuple[tuple[int, int], str | None, str | None]]:
+    """Waiting-match slots that fill a bracket round to its full fixed slate, so a round always
+    renders the same number of dropdowns. For the 8-player bracket each round's same-record buckets
+    are fixed (R2: two 1-0, two 0-1; R3: one 2-0, two 1-1, one 0-2).
 
-    Unreported `source_matches` (player_a_id, player_b_id, reported) supply undecided opponents;
-    `created_pairs` are excluded. Waiting players pair with a pending winner/loser slot; leftover
-    pending sources pair with each other.
-    """
+    `real_records` is the start-of-round (wins, losses) of each real match already created;
+    `paired_names` are the players already in one. A player who has finished the prior round but
+    isn't paired yet is named into a slot (earliest-ready first) so a partly-known match reads
+    'Alice vs 1-0'; slots with no known side stay anonymous. Returns one (record, name_a, name_b) per
+    missing match, best record first; name_* is None when that side is still unknown."""
+    buckets = ROUND_RECORD_BUCKETS.get(round_num)
+    if not buckets:
+        return []
     ids = {p.id for p in players}
-    name = {p.id: p.name for p in players}
     wins = {pid: 0 for pid in ids}
     losses = {pid: 0 for pid in ids}
     last_index: dict[str, int] = {}
@@ -117,39 +106,27 @@ def projected_placeholders(
         last_index[m.player_a_id] = idx
         last_index[m.player_b_id] = idx
 
-    already = {pid for pair in created_pairs for pid in pair}
-    expected_prior = target_round - 1
+    have: dict[tuple[int, int], int] = {}
+    for rec in real_records:
+        have[rec] = have.get(rec, 0) + 1
+    paired = set(paired_names)
+    expected_prior = round_num - 1
     waiting = sorted(
-        (pid for pid in ids if wins[pid] + losses[pid] == expected_prior and pid not in already),
+        (pid for pid in ids if wins[pid] + losses[pid] == expected_prior and pid not in paired),
         key=lambda pid: last_index.get(pid, -1),
     )
-
-    pool: dict[tuple[int, int], dict[str, list[Slot]]] = {}
-
-    def bucket(rec: tuple[int, int]) -> dict[str, list[Slot]]:
-        return pool.setdefault(rec, {"players": [], "tokens": []})
-
+    queues: dict[tuple[int, int], list[str]] = {}
     for pid in waiting:
-        rec = (wins[pid], losses[pid])
-        bucket(rec)["players"].append(Slot("player", name[pid], rec))
+        queues.setdefault((wins[pid], losses[pid]), []).append(pid)
 
-    for a_id, _b_id, reported in source_matches:
-        if reported:
-            continue
-        w, l = wins.get(a_id, 0), losses.get(a_id, 0)
-        bucket((w + 1, l))["tokens"].append(Slot("winner", "", (w + 1, l)))
-        bucket((w, l + 1))["tokens"].append(Slot("loser", "", (w, l + 1)))
-
-    pairs: list[tuple[Slot, Slot]] = []
-    for rec in sorted(pool, key=lambda r: (-r[0], r[1])):
-        ps, ts = pool[rec]["players"], pool[rec]["tokens"]
-        while ps and ts:
-            pairs.append((ps.pop(0), ts.pop(0)))
-        while len(ts) >= 2:
-            pairs.append((ts.pop(0), ts.pop(0)))
-        while len(ps) >= 2:
-            pairs.append((ps.pop(0), ps.pop(0)))
-    return pairs
+    out: list[tuple[tuple[int, int], str | None, str | None]] = []
+    for rec, expected in buckets:
+        queue = queues.get(rec, [])
+        for _ in range(max(expected - have.get(rec, 0), 0)):
+            a = queue.pop(0) if queue else None
+            b = queue.pop(0) if queue else None
+            out.append((rec, a, b))
+    return out
 
 
 def _pair_group(

@@ -40,7 +40,7 @@ from bot.services.pod_drafts import (
     seed_event_participants,
     update_event_format,
 )
-from bot.services.pod_tournament import start_tournament
+from bot.services.pod_tournament import persist_pairing_mode, start_tournament
 from bot.slug import disambiguate_slug, slugify
 
 
@@ -95,6 +95,7 @@ class PodDraftManager:
         self.finalized = False
         self.tournament_roster: list[str] = []  # draftmancer userNames, set on endDraft
         self.tournament_players: list = []       # pod_swiss.Player list, set by pod_tournament.start_tournament
+        self.pairing_mode = "swiss"              # 'swiss' or 'bracket'; resolved in start_tournament
         self.standings_message = None
         self.round_messages: dict[int, "discord.Message"] = {}
         self.grace_task = None
@@ -1084,6 +1085,20 @@ def _persist_format(event_id: str, code: str) -> bool:
             session.commit()
             return True
         return False
+
+
+async def set_event_pairing_mode(event_id: str, mode: str) -> str | None:
+    """Set a pod's pairing mode by event id; updates the live manager when one exists and persists.
+    Locked once the tournament has started. Returns an error string or None."""
+    if mode not in ("swiss", "bracket"):
+        return "Unknown pairing mode."
+    manager = ACTIVE_POD_MANAGERS.get(event_id)
+    if manager is not None:
+        if manager.current_round and manager.current_round > 0:
+            return "Pairing mode is locked once the tournament has started."
+        manager.pairing_mode = mode
+    await asyncio.to_thread(persist_pairing_mode, event_id, mode)
+    return None
 
 
 def _classify_names_sync(names: list[str]) -> list[tuple[str, bool]]:

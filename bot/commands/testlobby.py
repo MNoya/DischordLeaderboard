@@ -26,6 +26,7 @@ from bot.commands.testcomponent import (
 from bot.services import pod_bracket, pod_swiss
 from bot.services.lobby_embed import (
     LobbyReadyButtonView,
+    register_settings_preview,
     render as render_lobby_embed,
     render_ready_check_progress,
 )
@@ -33,7 +34,9 @@ from bot.services.pod_deck_color import LiveDeckColorSelectView, SubmitDeckView
 from bot.services.pod_drafts import normalize_player_name as _norm
 from bot.services.pod_format import label_for
 from bot.services.pod_format_select import FormatSelectView
+from bot.services.pod_settings_view import PodSettingsView
 from bot.services.pod_tournament import (
+    BRACKET_EDIT_BLOCKED_MSG,
     CHAMPIONSHIP_DEADLINE_SECONDS,
     CLEAR_SENTINEL,
     GRACE_SECONDS,
@@ -52,7 +55,9 @@ from bot.services.pod_tournament import (
     build_champion_embed,
     build_deck_reminder_text,
     build_pairing_dm_embed,
+    bracket_regen_notice,
     format_match_result_log,
+    format_result_change,
     match_was_played,
     register_test_result_handler,
     surface_label,
@@ -91,7 +96,8 @@ async def _dm_invoker_pairing(user: discord.User | discord.Member, round_num: in
                                opponent: str, opponent_arena: str | None,
                                pairings_url: str | None = None,
                                match_state: dict | None = None,
-                               state: dict | None = None) -> None:
+                               state: dict | None = None,
+                               updated: bool = False) -> None:
     viewer_is_a = None
     if match_state:
         viewer_is_a = match_state.get("a_name") == _INVOKER_SEAT
@@ -101,11 +107,18 @@ async def _dm_invoker_pairing(user: discord.User | discord.Member, round_num: in
         opponent_arena=opponent_arena,
         pairings_url=pairings_url,
         event_name=_THREAD_NAME,
-        updated=False,
+        updated=updated,
         match_state=match_state,
         viewer_is_a=viewer_is_a,
     )
     view = RoundResultsView([match_state]) if match_state else None
+    existing = state.get("invoker_dm_messages", {}).get(round_num) if state else None
+    if existing is not None:
+        try:
+            await existing.edit(embed=embed, view=view)
+            return
+        except discord.HTTPException:
+            log.warning("could not edit invoker pairing DM; sending fresh", exc_info=True)
     msg = None
     try:
         msg = await user.send(embed=embed, view=view) if view else await user.send(embed=embed)
@@ -295,6 +308,30 @@ _CHAMPION_CAPTIONS_BY_SEAT: dict[str, str] = {
 _LAST_MESSAGE: dict[int, discord.Message] = {}
 _LAST_PROGRESS_MESSAGE: dict[int, discord.Message] = {}
 _BRACKETS: dict[int, dict] = {}
+
+
+async def _reset_podbracket(channel, bot_user) -> None:
+    """Wipe a prior testlobby run from this thread before starting fresh: cancel its grace timers,
+    drop its in-memory state, and delete the bot's own messages so the new bracket isn't buried under
+    stale rounds/standings/announcements."""
+    for mid, st in list(_BRACKETS.items()):
+        origin = st.get("origin_channel")
+        if origin is not None and origin.id == channel.id:
+            task = st.get("grace_task")
+            if task is not None and not task.done():
+                task.cancel()
+            _BRACKETS.pop(mid, None)
+    _LAST_MESSAGE.pop(channel.id, None)
+    _LAST_PROGRESS_MESSAGE.pop(channel.id, None)
+    try:
+        async for msg in channel.history(limit=200):
+            if msg.author.id == bot_user.id:
+                try:
+                    await msg.delete()
+                except discord.HTTPException:
+                    pass
+    except discord.HTTPException:
+        log.warning("could not sweep testlobby thread history", exc_info=True)
 _PROGRESS_STATES = ("ready", "notready", "cancelled", "superseded", "drafting", "complete")
 _STATE_NOTES = {
     "empty": "nobody in the Draftmancer session yet",
@@ -448,6 +485,8 @@ def _build(state: str) -> tuple[discord.Embed, discord.ui.View | None, dict | No
         players = [pod_swiss.Player(id=dn, name=dn) for _, dn in _LINKED_EIGHT]
         pairings = [(players[i].id, players[i + 1].id) for i in range(0, len(players), 2)]
         match_states = _next_round_match_states(1, pairings, [], players)
+        for m in match_states:
+            m["allow_skip"] = False
         embed = round_embed(1, match_states)
         view = RoundResultsView(match_states)
         bracket = {
@@ -844,6 +883,10 @@ async def _propagate_test_result_to_other_surface(
         log.warning("could not propagate testlobby result to invoker DM", exc_info=True)
 
 
+def _chan_name(channel) -> str:
+    return getattr(channel, "name", None) or str(getattr(channel, "id", "?"))
+
+
 async def _handle_test_result(interaction: discord.Interaction, match_id: str,
                                winner_name: str, score: str) -> None:
     message = interaction.message
@@ -874,6 +917,25 @@ async def _handle_test_result(interaction: discord.Interaction, match_id: str,
         return
 
     m = matches[idx]
+    is_bracket = state.get("mode") == "bracket"
+    was_reported = m.get("winner_name") is not None
+    prev_winner = m.get("winner_name")
+    if is_bracket:
+        chan = _chan_name(state.get("origin_channel") or interaction.channel)
+        log.info(
+            f"[BRACKET {chan}] report R{round_num} m{idx} {m['a_name']} vs {m['b_name']} "
+            f"-> winner={winner_name!r} score={score} edit={was_reported} "
+            f"surface={surface_label(interaction)}"
+        )
+        if was_reported and round_num < TOTAL_ROUNDS and _bracket_downstream_reported(state, round_num):
+            log.info(
+                f"[BRACKET {chan}] blocked edit of R{round_num} m{idx} — a later round already reported"
+            )
+            await interaction.response.send_message(
+                BRACKET_EDIT_BLOCKED_MSG,
+                ephemeral=True,
+            )
+            return
     state["outcomes"] = [
         o for o in state["outcomes"]
         if not (o.round_num == round_num
@@ -900,7 +962,6 @@ async def _handle_test_result(interaction: discord.Interaction, match_id: str,
         match_id=match_id, winner=winner_name, score=score, surface=surface_label(interaction),
     ))
 
-    is_bracket = state.get("mode") == "bracket"
     render_matches = _bracket_display(state, round_num) if is_bracket else matches
     thread_embed = round_embed(round_num, render_matches)
     thread_view = RoundResultsView(render_matches)
@@ -931,7 +992,13 @@ async def _handle_test_result(interaction: discord.Interaction, match_id: str,
         await _maybe_dm_invoker_final_submit_deck(state, m)
 
     if state.get("mode") == "bracket":
-        await _bracket_advance(state, round_num, interaction, bracket_channel)
+        winner_changed = prev_winner != m.get("winner_name")
+        if was_reported and winner_changed and round_num < TOTAL_ROUNDS:
+            phrase = format_result_change(m["a_name"], m["b_name"], m.get("winner_name"), m.get("score"))
+            await _bracket_regenerate_downstream(state, round_num, interaction, bracket_channel, phrase)
+        else:
+            await _bracket_advance(state, round_num, interaction, bracket_channel)
+        await _relock_prior_test_rounds(state, round_num)
         return
 
     if not all(mm["winner_name"] for mm in matches):
@@ -995,41 +1062,130 @@ async def _handle_test_result(interaction: discord.Interaction, match_id: str,
 
 
 def _compute_bracket_placeholders(state: dict, round_num: int) -> list[dict]:
-    """Display-only placeholder match states that round out a bracket round's full slate. Each carries
-    a `label` and prospective records. Empty for round 1 or before the prior round is posted."""
-    source_round = round_num - 1
-    source = state["matches_by_round"].get(source_round, [])
-    if round_num < 2 or not source:
+    """Waiting-match states padding a bracket round to its full fixed slate, so it always renders the
+    same number of dropdowns. A known waiting player is named ('Alice vs 1-0'); a slot with no known
+    side reads 'Pending Round N'."""
+    if round_num < 2:
         return []
-    source_matches = [
-        (m["a_name"], m["b_name"], bool(m["winner_name"]))
-        for m in source if not m.get("placeholder")
-    ]
-    created = [(m["a_name"], m["b_name"]) for m in state["matches_by_round"].get(round_num, [])]
-    pairs = pod_bracket.projected_placeholders(
-        state["players"], state["outcomes"], source_matches, round_num, created,
-    )
-    return [
-        {
+    real = state["matches_by_round"].get(round_num, [])
+    real_records = [tuple(int(x) for x in m["a_record"].split("-")) for m in real]
+    paired = [n for m in real for n in (m["a_name"], m["b_name"])]
+    out: list[dict] = []
+    slots = pod_bracket.padding_slots(state["players"], state["outcomes"], real_records, paired, round_num)
+    for (w, l), a, b in slots:
+        rec = f"{w}-{l}"
+        if a and b:
+            label = dropdown_label = f"{a} vs {b}"
+        elif a:
+            label = dropdown_label = f"{a} vs {rec}"
+        else:
+            label = ""
+            dropdown_label = f"{rec} Match"
+        out.append({
             "placeholder": True,
-            "label": pod_bracket.render_placeholder(a, b),
-            "a_record": f"{a.record[0]}-{a.record[1]}",
-            "b_record": f"{b.record[0]}-{b.record[1]}",
+            "label": label,
+            "dropdown_label": dropdown_label,
+            "a_record": rec,
+            "b_record": rec,
             "winner_name": None, "score": None,
-        }
-        for a, b in pairs
-    ]
+        })
+    return out
 
 
 def _bracket_display(state: dict, round_num: int) -> list[dict]:
     """The full ordered match list to render for a bracket round: real (reportable) matches first,
     then waiting-on placeholders. Swiss mode / round 1 just returns the real matches."""
     real = state["matches_by_round"].get(round_num, [])
-    if state.get("mode") != "bracket" or round_num < 2:
+    if state.get("mode") != "bracket":
+        return real
+    locked = round_num < TOTAL_ROUNDS and _bracket_downstream_reported(state, round_num)
+    for m in real:
+        m["allow_skip"] = round_num == TOTAL_ROUNDS
+        m["locked"] = locked and bool(m.get("winner_name"))
+    if round_num < 2:
         return real
     display = list(real) + _compute_bracket_placeholders(state, round_num)
     mark_trophy_match(display, round_num)
     return display
+
+
+def _bracket_downstream_reported(state: dict, round_num: int) -> bool:
+    """True if any round after round_num already has a reported result — regenerating then would
+    void a match someone already played, so the upstream edit must be blocked instead."""
+    return any(
+        r > round_num and any(mm.get("winner_name") for mm in matches)
+        for r, matches in state["matches_by_round"].items()
+    )
+
+
+async def _bracket_regenerate_downstream(state: dict, edited_round: int,
+                                          interaction: discord.Interaction, channel,
+                                          result_phrase: str) -> None:
+    """An upstream result changed inside the grace window: wipe the (unreported) downstream rounds
+    and rebuild them from the corrected results, editing the existing round messages in place.
+    Posts a one-line thread note naming the corrected result + a link to the changed round, and
+    updates the invoker's existing pairing DM in place (no extra DMs)."""
+    chan = _chan_name(channel)
+    old = {
+        r: {frozenset((mm["a_name"], mm["b_name"])) for mm in state["matches_by_round"].get(r, [])}
+        for r in range(edited_round + 1, TOTAL_ROUNDS + 1)
+    }
+    for r in range(edited_round + 1, TOTAL_ROUNDS + 1):
+        state["matches_by_round"][r] = []
+    for src in range(edited_round, TOTAL_ROUNDS):
+        await _bracket_advance(state, src, interaction, channel)
+
+    changed_rounds = [
+        r for r in range(edited_round + 1, TOTAL_ROUNDS + 1)
+        if {frozenset((mm["a_name"], mm["b_name"])) for mm in state["matches_by_round"].get(r, [])}
+        != old.get(r, set())
+    ]
+    if not changed_rounds:
+        log.info(f"[BRACKET {chan}] regenerate after R{edited_round} edit — no pairing changed")
+        return
+    log.info(f"[BRACKET {chan}] regenerate after R{edited_round} edit — changed rounds {changed_rounds}")
+
+    target = changed_rounds[0]
+    target_msg = state.get("round_messages", {}).get(target)
+    url = target_msg.jump_url if target_msg is not None else None
+    try:
+        await channel.send(bracket_regen_notice(result_phrase, target, url))
+    except discord.HTTPException:
+        log.warning("could not post bracket regenerate announcement", exc_info=True)
+
+    invoker = state.get("invoker")
+    if invoker is None:
+        return
+    for r in changed_rounds:
+        im = _find_invoker_match(state["matches_by_round"].get(r, []), _INVOKER_SEAT)
+        if im is None:
+            continue
+        opp = im["b_name"] if im["a_name"] == _INVOKER_SEAT else im["a_name"]
+        rmsg = state.get("round_messages", {}).get(r)
+        await _dm_invoker_pairing(
+            invoker, r, opp, _test_arena_for(opp),
+            pairings_url=rmsg.jump_url if rmsg is not None else None,
+            match_state=im, state=state, updated=True,
+        )
+
+
+async def _relock_prior_test_rounds(state: dict, current_round: int) -> None:
+    """Re-render rounds before current_round so their reported dropdowns gray out once a later round
+    has reported. Keeps each round's next-round link."""
+    for r in range(1, current_round):
+        msg = state.get("round_messages", {}).get(r)
+        if msg is None:
+            continue
+        display = _bracket_display(state, r)
+        next_msg = state.get("round_messages", {}).get(r + 1)
+        if next_msg is not None:
+            view = RoundResultsView(display, next_round_url=next_msg.jump_url, next_round_num=r + 1)
+        else:
+            view = RoundResultsView(display)
+        try:
+            await msg.edit(view=view)
+        except discord.HTTPException:
+            log.warning(f"could not relock testlobby round {r}", exc_info=True)
 
 
 async def _bracket_advance(state: dict, source_round: int, interaction: discord.Interaction,
@@ -1054,6 +1210,11 @@ async def _bracket_advance(state: dict, source_round: int, interaction: discord.
         state["players"], state["outcomes"], existing_pairs, target,
         source_round_complete=source_complete,
     )
+    chan = _chan_name(bracket_channel)
+    log.info(
+        f"[BRACKET {chan}] advance source=R{source_round} source_complete={source_complete} "
+        f"existing_R{target}={existing_pairs} new_R{target}={new}"
+    )
     appended = _next_round_match_states(
         target, new, state["outcomes"], state["players"], start_idx=len(target_matches),
     ) if new else []
@@ -1068,6 +1229,17 @@ async def _bracket_advance(state: dict, source_round: int, interaction: discord.
     display = _bracket_display(state, target)
     if not display:
         return
+    real_pairs = [(mm["a_name"], mm["b_name"]) for mm in target_matches]
+    placeholders = [d["label"] for d in display if d.get("placeholder")]
+    log.info(f"[BRACKET {chan}] R{target} slate real({len(real_pairs)})={real_pairs} waiting={placeholders}")
+    expected = len(state["players"]) // 2
+    if source_complete and len(target_matches) < expected:
+        seated = {n for mm in target_matches for n in (mm["a_name"], mm["b_name"])}
+        missing = [p.name for p in state["players"] if p.name not in seated]
+        log.warning(
+            f"[BRACKET {chan}] R{target} INCOMPLETE after source complete: {len(target_matches)}/{expected} "
+            f"matches, missing players={missing} (likely a skip or an edited upstream result desynced records)"
+        )
 
     embed = round_embed(target, display)
     view = RoundResultsView(display)
@@ -1122,8 +1294,12 @@ async def _test_grace_expire(state: dict, round_num: int) -> None:
         return
     msg = state.get("round_messages", {}).get(round_num)
     if msg is not None:
+        locked = _bracket_display(state, round_num) if state.get("mode") == "bracket" else None
+        if locked is not None:
+            for m in locked:
+                m["locked"] = True
         try:
-            await msg.edit(view=None)
+            await msg.edit(view=RoundResultsView(locked) if locked is not None else None)
         except discord.HTTPException:
             log.warning(f"could not lock testlobby round {round_num} view", exc_info=True)
     dm_msg = state.get("invoker_dm_messages", {}).get(round_num)
@@ -1268,9 +1444,22 @@ class _TestlobbyScreenshotListener(commands.Cog):
             break
 
 
+async def _settings_preview_noop(interaction: discord.Interaction, value: str) -> str | None:
+    return None
+
+
+def _settings_preview_view() -> PodSettingsView:
+    """No-op Settings panel so `!testlobby` can preview the format + pairing dropdowns with no pod."""
+    return PodSettingsView(
+        on_format=_settings_preview_noop, on_pairing=_settings_preview_noop,
+        current_code=None, current_mode="swiss",
+    )
+
+
 async def setup(bot: commands.Bot) -> None:
     """Wire the `!testlobby` command and register the test bracket handler."""
     register_test_result_handler(TESTLOBBY_MATCH_PREFIX, _handle_test_result)
+    register_settings_preview(_settings_preview_view)
     await bot.add_cog(_TestlobbyScreenshotListener(bot))
 
     @bot.command(name="testlobby")
@@ -1342,6 +1531,14 @@ async def setup(bot: commands.Bot) -> None:
             standings_msg = bracket.get("standings_message")
             if standings_msg is not None:
                 _BRACKETS[standings_msg.id] = bracket
+            return
+
+        if state == "podbracket":
+            await _reset_podbracket(ctx.channel, ctx.bot.user)
+            embed, view, bracket = _build("podbracket")
+            msg = await ctx.send(embed=embed, view=view)
+            if bracket is not None:
+                await _register_bracket(msg, bracket)
             return
 
         if state == "submit":

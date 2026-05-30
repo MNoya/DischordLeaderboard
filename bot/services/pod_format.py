@@ -53,3 +53,8 @@ def label_for(code: str) -> str | None:
 
 def format_applied_message(code: str) -> str:
     return f"Format set to **{label_for(code) or code}**."
+
+
+def format_change_message(actor: str, code: str) -> str:
+    """Public thread notice when the draft format changes."""
+    return f"⚙️ **{actor}** updated Format to **{label_for(code) or code}**"

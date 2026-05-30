@@ -18,7 +18,7 @@ from bot.services.pod_tournament import actor_label
 log = logging.getLogger("bot.lobby_embed")
 
 READY_CHECK_CUSTOM_ID = "pod-draft:ready-check"
-CHANGE_FORMAT_CUSTOM_ID = "pod-draft:change-format"
+SETTINGS_CUSTOM_ID = "pod-draft:settings"
 
 _NO_ACTIVE_POD_MSG = "No active pod-draft session in this thread."
 
@@ -30,7 +30,7 @@ class LobbyReadyButtonView(discord.ui.View):
         super().__init__(timeout=None)
         if ready_disabled:
             self.ready_check.disabled = True
-            self.change_format.disabled = True
+            self.settings.disabled = True
         if draftmancer_url:
             self.add_item(discord.ui.Button(
                 label="Join Draftmancer",
@@ -67,15 +67,15 @@ class LobbyReadyButtonView(discord.ui.View):
             await interaction.followup.send(f"⚠️ {err}", ephemeral=True)
 
     @discord.ui.button(
-        label="Change Format", style=discord.ButtonStyle.secondary,
-        custom_id=CHANGE_FORMAT_CUSTOM_ID, emoji="⚙️",
+        label="Settings", style=discord.ButtonStyle.grey,
+        custom_id=SETTINGS_CUSTOM_ID, emoji="🛠️",
     )
-    async def change_format(
+    async def settings(
         self, interaction: discord.Interaction, button: discord.ui.Button,
     ) -> None:
         from bot.services.pod_active import ACTIVE_POD_MANAGERS
-        from bot.services.pod_draft_manager import set_event_format
-        from bot.services.pod_format_select import FormatSelectView
+        from bot.services.pod_draft_manager import set_event_format, set_event_pairing_mode
+        from bot.services.pod_settings_view import PodSettingsView
         channel = interaction.channel
         channel_id = channel.id if channel else None
         actor = actor_label(interaction)
@@ -84,17 +84,26 @@ class LobbyReadyButtonView(discord.ui.View):
             None,
         )
         if manager is None:
-            log.info(f"{actor} clicked Change Format in channel={channel_id} (no active pod)")
+            if _settings_preview_factory is not None:
+                await interaction.response.send_message(view=_settings_preview_factory(), ephemeral=True)
+                return
+            log.info(f"{actor} clicked Settings in channel={channel_id} (no active pod)")
             await interaction.response.send_message(_NO_ACTIVE_POD_MSG, ephemeral=True)
             return
-        log.info(f"[{manager.event_name}] {actor} clicked Change Format")
+        log.info(f"[{manager.event_name}] {actor} clicked Settings")
         event_id = manager.event_id
 
-        async def on_apply(inter: discord.Interaction, code: str) -> str | None:
+        async def on_format(inter: discord.Interaction, code: str) -> str | None:
             return await set_event_format(event_id, code)
 
+        async def on_pairing(inter: discord.Interaction, mode: str) -> str | None:
+            return await set_event_pairing_mode(event_id, mode)
+
         await interaction.response.send_message(
-            view=FormatSelectView(on_apply, current_code=manager.set_code),
+            view=PodSettingsView(
+                on_format=on_format, on_pairing=on_pairing,
+                current_code=manager.set_code, current_mode=manager.pairing_mode,
+            ),
             ephemeral=True,
         )
 
@@ -318,3 +327,12 @@ def _rsvp_dedup_key(rsvp: str, display_name_by_mention_id: dict[int, str]) -> st
         if resolved:
             return resolved.lower()
     return text.lower()
+
+# testlobby injects a no-op Settings panel factory so the UI is previewable without a live pod
+_settings_preview_factory = None
+
+
+def register_settings_preview(factory) -> None:
+    """Let the testlobby sandbox preview the Settings panel even though it has no live pod manager."""
+    global _settings_preview_factory
+    _settings_preview_factory = factory

@@ -10,33 +10,6 @@ from bot.services.pod_replays import attribute_games_to_rounds
 _POD = "DirectGameTournamentLimited"
 
 
-def _match(round_num: int, player_a: str, player_b: str, winner: str, score: str,
-           reported_at: datetime) -> PodDraftMatch:
-    return PodDraftMatch(
-        id=f"m{round_num}",
-        event_id="evt-1",
-        round=round_num,
-        pairing_index=0,
-        player_a_name=player_a,
-        player_b_name=player_b,
-        winner_name=winner,
-        score=score,
-        reported_at=reported_at,
-    )
-
-
-def _game(ts: datetime, won: bool, turns: int, gid: str, event_name: str = _POD) -> dict:
-    return {
-        "event_name": event_name,
-        "game_time": ts.strftime("%Y-%m-%d %H:%M"),
-        "link": f"/user/game_replay/20260514/{gid}/0",
-        "won": won,
-        "turns": turns,
-        "on_play": True,
-        "account_name": "Noya",
-    }
-
-
 def test_attributes_each_match_when_data_is_clean() -> None:
     base = datetime(2026, 5, 14, 0, 0, tzinfo=timezone.utc)
     matches = [
@@ -158,3 +131,30 @@ def test_real_pod3_noya_data_attributes_r1_and_r3_skips_r2() -> None:
     ]
     out = attribute_games_to_rounds(games, matches, "Noya")
     assert out == {"g0": 1, "g1": 1, "g2": 1, "g5": 3, "g6": 3, "g7": 3}
+
+
+def _match(round_num: int, player_a: str, player_b: str, winner: str, score: str,
+           reported_at: datetime) -> PodDraftMatch:
+    return PodDraftMatch(
+        id=f"m{round_num}",
+        event_id="evt-1",
+        round=round_num,
+        pairing_index=0,
+        player_a_name=player_a,
+        player_b_name=player_b,
+        winner_name=winner,
+        score=score,
+        reported_at=reported_at,
+    )
+
+
+def _game(ts: datetime, won: bool, turns: int, gid: str, event_name: str = _POD) -> dict:
+    return {
+        "event_name": event_name,
+        "game_time": ts.strftime("%Y-%m-%d %H:%M"),
+        "link": f"/user/game_replay/20260514/{gid}/0",
+        "won": won,
+        "turns": turns,
+        "on_play": True,
+        "account_name": "Noya",
+    }

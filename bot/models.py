@@ -168,6 +168,7 @@ class PodDraftEvent(Base):
     discord_thread_id   = Column(String, nullable=False)
     sesh_message_id     = Column(String, nullable=False)
     socket_status       = Column(String, nullable=False)
+    pairing_mode        = Column(String, nullable=False, server_default="swiss")
     current_round       = Column(Integer, nullable=True)
     draft_log_gz        = Column(LargeBinary, nullable=True)
     discord_event_id    = Column(String, nullable=True)

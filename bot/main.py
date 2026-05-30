@@ -21,8 +21,6 @@ from bot.commands.help import setup as setup_help
 from bot.commands.leaderboard import (
     LeaderboardView,
     edit_tracked_messages_for_set,
-    process_leaderboard,
-    render_embed as render_leaderboard_embed,
     setup as setup_leaderboard,
 )
 from bot.commands.pod_draft import setup as setup_pod_draft
@@ -301,15 +299,6 @@ def build_bot(guild_id: int) -> commands.Bot:
         }
 
         await _post_refresh_report(result)
-
-        with SessionLocal() as session:
-            full_data = process_leaderboard(session, viewer_discord_id=None, top_n=10**6)
-        if full_data is not None and full_data.top and bot.owner_id is not None:
-            try:
-                owner = bot.get_user(bot.owner_id) or await bot.fetch_user(bot.owner_id)
-                await owner.send(embed=render_leaderboard_embed(full_data))
-            except discord.HTTPException:
-                log.warning("could not DM owner the full leaderboard preview", exc_info=True)
 
         return result
 

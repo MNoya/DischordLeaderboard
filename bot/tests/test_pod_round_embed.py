@@ -4,6 +4,7 @@ from bot.services.pod_tournament import (
     LAST_CHANCE,
     LOSERS,
     MIDDLE,
+    NBSP,
     PAIR_UP,
     TROPHY,
     WINNERS,
@@ -11,35 +12,6 @@ from bot.services.pod_tournament import (
     round_embed,
     round_groups,
 )
-
-
-def _ms(a: str, b: str, a_record: str = "0-0", b_record: str = "0-0", **extra) -> dict:
-    state = {
-        "match_id": f"{a}-{b}",
-        "a_name": a, "b_name": b,
-        "a_display": a, "b_display": b,
-        "a_record": a_record, "b_record": b_record,
-        "winner_name": None, "score": None,
-    }
-    state.update(extra)
-    return state
-
-
-def _seated(a: str, b: str, a_seat: int, b_seat: int) -> dict:
-    return _ms(a, b, a_seat=a_seat, b_seat=b_seat)
-
-
-def _kinds(groups) -> list[str]:
-    return [kind for kind, _ in groups]
-
-
-def _pairs(matches) -> set[frozenset[str]]:
-    return {frozenset((m["a_name"], m["b_name"])) for m in matches}
-
-
-def _norm(desc: str) -> str:
-    """Collapse NBSP / space runs so render assertions don't pin exact whitespace."""
-    return re.sub(r"[ \u00a0]+", " ", desc)
 
 
 # --- grouping data model (presentation-free; stable across formatting changes) ---
@@ -136,3 +108,32 @@ def test_reported_and_skipped_lines_render():
     desc = _norm(round_embed(2, states).description)
     assert "▫️ Aria wins 2-1 vs Caedmon" in desc
     assert "🚫 Not played: Esk vs Gwyn" in desc
+
+
+def _ms(a: str, b: str, a_record: str = "0-0", b_record: str = "0-0", **extra) -> dict:
+    state = {
+        "match_id": f"{a}-{b}",
+        "a_name": a, "b_name": b,
+        "a_display": a, "b_display": b,
+        "a_record": a_record, "b_record": b_record,
+        "winner_name": None, "score": None,
+    }
+    state.update(extra)
+    return state
+
+
+def _seated(a: str, b: str, a_seat: int, b_seat: int) -> dict:
+    return _ms(a, b, a_seat=a_seat, b_seat=b_seat)
+
+
+def _kinds(groups) -> list[str]:
+    return [kind for kind, _ in groups]
+
+
+def _pairs(matches) -> set[frozenset[str]]:
+    return {frozenset((m["a_name"], m["b_name"])) for m in matches}
+
+
+def _norm(desc: str) -> str:
+    """Collapse NBSP / space runs so render assertions don't pin exact whitespace."""
+    return re.sub(f"[ {NBSP}]+", " ", desc)
