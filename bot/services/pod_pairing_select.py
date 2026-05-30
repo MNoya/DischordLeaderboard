@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import discord
 
+from bot.services.pod_format import settings_change_message
+
 
 PAIRING_MODES = (
     ("swiss", "Swiss Tournament", "Three rounds, each paired after the previous fully finishes."),
@@ -19,7 +21,7 @@ def pairing_change_message(actor: str, mode: str) -> str:
     """Public thread notice when the pairing mode changes, with the mode's description as subtext."""
     label = next((lbl for code, lbl, _ in PAIRING_MODES if code == mode), mode)
     desc = next((d for code, _, d in PAIRING_MODES if code == mode), "")
-    return f"⚙️ **{actor}** set Pairings to **{label}**\n-# {desc}"
+    return settings_change_message(actor, "Pairings", label, subtext=desc)
 
 
 def pairing_options(current_mode: str | None) -> list[discord.SelectOption]:

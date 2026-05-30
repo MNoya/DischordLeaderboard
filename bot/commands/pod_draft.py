@@ -15,18 +15,18 @@ from bot.database import SessionLocal
 from bot.discord_helpers import extract_avatar_hash
 from bot.models import Player
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
-from bot.services.pod_draft_manager import set_event_format
-from bot.services.pod_format import format_change_message
+from bot.services.pod_draft_manager import set_event_format, set_event_pairing_mode
 from bot.services.pod_drafts import (
     load_event_id_by_name_sync,
     load_event_id_by_thread_sync,
     load_event_name_sync,
+    load_event_pairing_mode_sync,
     load_event_set_code_sync,
     load_event_thread_id_sync,
     normalize_player_name,
     search_event_names_sync,
 )
-from bot.services.pod_format_select import FormatSelectView
+from bot.services.pod_settings_view import PodSettingsView
 from bot.services.pod_tournament import (
     actor_label,
     build_champion_announcement_view_for_event,
@@ -69,10 +69,10 @@ class PodDraft(commands.Cog):
         else:
             await interaction.followup.send("Ready Check initiated, watch the thread for status.", ephemeral=True)
 
-    @app_commands.command(name="pod-format", description="Change the draft format (set or cube) for this pod")
+    @app_commands.command(name="pod-settings", description="Change the format and pairing settings for this pod")
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
-    async def pod_format(self, interaction: discord.Interaction) -> None:
+    async def pod_settings(self, interaction: discord.Interaction) -> None:
         thread_id = str(interaction.channel_id) if interaction.channel_id else None
         event_id = await asyncio.to_thread(load_event_id_by_thread_sync, thread_id) if thread_id else None
         if event_id is None:
@@ -82,19 +82,20 @@ class PodDraft(commands.Cog):
             )
             return
         current_code = await asyncio.to_thread(load_event_set_code_sync, event_id)
+        current_mode = await asyncio.to_thread(load_event_pairing_mode_sync, event_id)
 
-        async def on_apply(inter: discord.Interaction, code: str) -> str | None:
-            err = await set_event_format(event_id, code)
-            if err is None and inter.channel is not None:
-                try:
-                    await inter.channel.send(format_change_message(actor_label(inter), code))
-                except discord.HTTPException:
-                    log.warning("could not post pod-format change notice", exc_info=True)
-            return err
+        async def on_format(inter: discord.Interaction, code: str) -> str | None:
+            return await set_event_format(event_id, code)
 
-        log.info(f"pod-format: {interaction.user} opened selector for event_id={event_id}")
+        async def on_pairing(inter: discord.Interaction, mode: str) -> str | None:
+            return await set_event_pairing_mode(event_id, mode)
+
+        log.info(f"pod-settings: {interaction.user} opened panel for event_id={event_id}")
         await interaction.response.send_message(
-            view=FormatSelectView(on_apply, current_code=current_code),
+            view=PodSettingsView(
+                on_format=on_format, on_pairing=on_pairing,
+                current_code=current_code, current_mode=current_mode,
+            ),
             ephemeral=True,
         )
 

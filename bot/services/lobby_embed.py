@@ -68,7 +68,7 @@ class LobbyReadyButtonView(discord.ui.View):
 
     @discord.ui.button(
         label="Settings", style=discord.ButtonStyle.grey,
-        custom_id=SETTINGS_CUSTOM_ID, emoji="🛠️",
+        custom_id=SETTINGS_CUSTOM_ID, emoji="⚙️",
     )
     async def settings(
         self, interaction: discord.Interaction, button: discord.ui.Button,

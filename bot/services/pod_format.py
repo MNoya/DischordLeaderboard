@@ -55,6 +55,12 @@ def format_applied_message(code: str) -> str:
     return f"Format set to **{label_for(code) or code}**."
 
 
+def settings_change_message(actor: str, setting: str, value: str, *, subtext: str | None = None) -> str:
+    """Public thread notice for a lobby Settings change; shared by Format and Pairings."""
+    line = f"⚙️ **{actor}** set {setting} to **{value}**"
+    return f"{line}\n-# {subtext}" if subtext else line
+
+
 def format_change_message(actor: str, code: str) -> str:
     """Public thread notice when the draft format changes."""
-    return f"⚙️ **{actor}** updated Format to **{label_for(code) or code}**"
+    return settings_change_message(actor, "Format", label_for(code) or code)
