@@ -40,14 +40,13 @@ from bot.listeners.sesh_listener import reschedule_pending_events, setup as setu
 from bot.models import LeaderboardMessage, MagicSet, Player, PodDraftEvent
 from bot.services.bot_log import BotLog
 from bot.services.lobby_embed import LobbyReadyButtonView
-from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_tournament import (
     register_persistent_views as register_pod_views,
 )
 from bot.services.refresh import refresh_active_players
 from bot.services.seventeenlands import MinIntervalLimiter, SeventeenLandsClient
 from bot.sets import ACTIVE_SET_CODE
-from bot.tasks.pod_draft_reminder import fire_reminder, init_reminder
+from bot.tasks.pod_draft_reminder import init_reminder
 
 
 log = logging.getLogger("bot.main")
@@ -356,38 +355,6 @@ def build_bot(guild_id: int) -> commands.Bot:
         await _reply_quietly(ctx, "⏳ Refreshing all sets…")
         await run_refresh(trigger="manual")
 
-    @bot.command(name="start")
-    @commands.is_owner()
-    async def start_pod(ctx: commands.Context, identifier: str | None = None) -> None:
-        """Owner-only.
-
-        In a pod-draft thread → force-starts the draft past a stuck ready check.
-        Elsewhere:
-        `!start`            — picks the lone pending pod; lists candidates if there's more than one
-        `!start <id>`       — explicit pick by event UUID, thread ID, or sesh message ID
-        """
-        channel_id = str(ctx.channel.id) if ctx.channel else None
-        if channel_id and identifier is None:
-            manager = next(
-                (m for m in ACTIVE_POD_MANAGERS.values() if str(m.thread_id) == channel_id),
-                None,
-            )
-            if manager is not None:
-                log.info(f"!start force-start: {ctx.author} in thread {channel_id}")
-                await ctx.send("⚙️ Force-starting the draft…")
-                err = await manager.force_start()
-                if err is not None:
-                    await ctx.send(f"⚠️ {err}")
-                return
-
-        target = await asyncio.to_thread(_resolve_pending_pod, identifier)
-        if isinstance(target, str):
-            await _reply_quietly(ctx, target)
-            return
-        await _reply_quietly(ctx, f"⏳ Opening lobby for **{target['name']}**…")
-        await fire_reminder(target["id"], early=True)
-        await _reply_quietly(ctx, f"✅ Lobby opened — bot is joining `{target['session_id']}`.")
-
     @tasks.loop(time=AUTO_REFRESH_TIMES)
     async def auto_refresh_tick() -> None:
         try:
@@ -434,41 +401,6 @@ async def _notify_owner(bot: commands.Bot, header: str, body: str) -> None:
         await owner.send(f"{header}\n```\n{snippet}\n```")
     except discord.HTTPException:
         log.warning("could not DM owner about crash", exc_info=True)
-
-
-def _resolve_pending_pod(identifier: str | None) -> dict | str:
-    """Resolve `identifier` to a single pending PodDraftEvent. Returns a dict with id / name /
-    session_id on success, or a string error message ready to relay to the caller.
-
-    With no identifier, returns the lone pending event if exactly one is queued, otherwise lists
-    all candidates so the caller can be specific. Pending = `socket_status == 'pending'`.
-    """
-    with SessionLocal() as session:
-        pending = session.execute(
-            select(PodDraftEvent).where(PodDraftEvent.socket_status == "pending")
-            .order_by(PodDraftEvent.event_time.asc())
-        ).scalars().all()
-        if identifier:
-            ident = identifier.strip()
-            match = next(
-                (e for e in pending
-                 if e.id == ident or e.discord_thread_id == ident or e.sesh_message_id == ident),
-                None,
-            )
-            if match is None:
-                return f"❌ No pending pod-draft matches `{ident}` (id, thread, or sesh message)."
-            return {"id": match.id, "name": match.name, "session_id": match.draftmancer_session}
-
-        if not pending:
-            return "❌ No pending pod-draft events to open."
-        if len(pending) > 1:
-            lines = [
-                f"- `{e.id}` · {e.name} · {e.event_time:%Y-%m-%d %H:%M %Z} · thread `{e.discord_thread_id}`"
-                for e in pending
-            ]
-            return "⚠️ Multiple pending pods — pick one with `!start <id>`:\n" + "\n".join(lines)
-        e = pending[0]
-        return {"id": e.id, "name": e.name, "session_id": e.draftmancer_session}
 
 
 def _fmt_elapsed(seconds: float) -> str:

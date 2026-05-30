@@ -201,8 +201,9 @@ def render(
         embed.add_field(
             name="🤖 Commands",
             value=(
+                "`/pod-link-arena` — link your MTG Arena handle\n"
                 "`/pod-takeover` — take ownership of the Draftmancer session if required\n"
-                "`/pod-link-arena` — link your MTG Arena handle"
+                "`/pod-start` — start the draft now, skipping the ready check"
             ),
             inline=False,
         )
@@ -228,8 +229,8 @@ def render_ready_check_progress(
     `state` mirrors the lobby state machine: 'ready', 'notready', 'drafting', 'complete', and
     falls through to a neutral header otherwise.
 
-    `superseded` marks a stale card that a newer ready check has replaced: it keeps the decliner/
-    cancel header but collapses the roster to a single non-split list, dropping the Ready/Pending columns.
+    `superseded` marks a stale card that a newer ready check has replaced: it keeps only the
+    decliner/cancel header and drops the roster entirely, so a dead check never repeats the snapshot.
     """
     in_draftmancer = [(arena, dn) for arena, dn in in_session if dn is not None]
 
@@ -243,7 +244,10 @@ def render_ready_check_progress(
     header_lines.extend(status_lines)
     embed = discord.Embed(title=title, description="\n".join(header_lines), color=color)
 
-    if state in ("drafting", "complete") or superseded:
+    if superseded:
+        return embed
+
+    if state in ("drafting", "complete"):
         ready_players = in_draftmancer
         pending_players = []
     elif ready_arena_names is not None:
@@ -253,12 +257,7 @@ def render_ready_check_progress(
         ready_players = []
         pending_players = in_draftmancer
 
-    if superseded:
-        ready_label = "In Draftmancer"
-    elif state == "complete":
-        ready_label = "Players"
-    else:
-        ready_label = "Ready"
+    ready_label = "Players" if state == "complete" else "Ready"
     two_groups = bool(pending_players) or state == "ready"
     _player_columns(embed, f"✅ {ready_label} ({len(ready_players)})", ready_players, spacer=two_groups)
     if two_groups:

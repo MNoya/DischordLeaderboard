@@ -37,6 +37,7 @@ from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_drafts import (
     normalize_player_name,
     classify_lobby_names,
+    load_event_pairing_mode_sync,
     seed_event_participants,
     update_event_format,
 )
@@ -52,6 +53,7 @@ _BACKOFF_MAX_S = 30.0
 _BACKOFF_MAX_RETRIES = 8
 _BOT_USER_NAME = "DisChordBot"
 _READY_TIMEOUT_S = 90
+_READY_DEBOUNCE_S = 2.0
 _ARENA_SUFFIX_RE = re.compile(r"#\d+$")
 _AI_BOT_NAME_RE = re.compile(r"^Bot #\d+$")
 
@@ -80,6 +82,7 @@ class PodDraftManager:
         self.ready_check_active = False
         self.ready_users: set[str] = set()
         self.expected_user_ids: set[str] = set()
+        self._ready_check_started_at = 0.0
         self.lobby_status_message: object | None = None
         self.ready_check_progress_message: object | None = None
         self._lobby_post_lock = asyncio.Lock()
@@ -341,9 +344,16 @@ class PodDraftManager:
         non_bot = [u for u in self.session_users if u.get("userName") != _BOT_USER_NAME]
         if not non_bot:
             return "Nobody in the Draftmancer lobby yet."
+        min_players = settings.pod_draft_min_ready_players
+        if len(non_bot) < min_players:
+            return (
+                f"Ready check is only available with {min_players} or more players. "
+                f"Currently {len(non_bot)} in the Draftmancer lobby."
+            )
         self.expected_user_ids = {u.get("userID") for u in non_bot}
         self.ready_users = set()
         self.ready_check_active = True
+        self._ready_check_started_at = asyncio.get_running_loop().time()
         self.initiated_by = initiated_by
         prior_decliner = self.last_decliner_name
         prior_cancel = self.last_cancel_reason
@@ -728,7 +738,13 @@ class PodDraftManager:
             self.ready_users.add(user_id)
         else:
             self.ready_users.discard(user_id)
-            # Explicit Not Ready: cancel the check immediately
+            elapsed = asyncio.get_running_loop().time() - self._ready_check_started_at
+            if elapsed < _READY_DEBOUNCE_S:
+                log.info(
+                    f"[READY] residual_notready_ignored event={self.event_id} user={user_id} "
+                    f"elapsed_s={elapsed:.2f}"
+                )
+                return
             decliner_name = next(
                 (u.get("userName") for u in self.session_users if u.get("userID") == user_id),
                 None,
@@ -1051,10 +1067,14 @@ async def start_manager(
         event_name=event_name, draftmancer_url=draftmancer_url,
         rsvps_yes=rsvps_yes, rsvps_maybe=rsvps_maybe,
     )
+    persisted_mode = await asyncio.to_thread(load_event_pairing_mode_sync, event_id)
+    if persisted_mode:
+        manager.pairing_mode = persisted_mode
     ACTIVE_POD_MANAGERS[event_id] = manager
     log.info(
         f"[LIFECYCLE] start_manager.registered event={event_id} sid={session_id} "
-        f"thread={thread_id} set={set_code} registry_size={len(ACTIVE_POD_MANAGERS)}"
+        f"thread={thread_id} set={set_code} pairing={manager.pairing_mode} "
+        f"registry_size={len(ACTIVE_POD_MANAGERS)}"
     )
     ok = await manager.connect()
     if not ok:

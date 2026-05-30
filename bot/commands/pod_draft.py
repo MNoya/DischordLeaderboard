@@ -69,6 +69,26 @@ class PodDraft(commands.Cog):
         else:
             await interaction.followup.send("Ready Check initiated, watch the thread for status.", ephemeral=True)
 
+    @app_commands.command(name="pod-start", description="Force-start the draft now, skipping the ready check")
+    @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def pod_start(self, interaction: discord.Interaction) -> None:
+        manager = _find_manager_for_thread(interaction)
+        if manager is None:
+            await interaction.response.send_message(
+                "No active pod draft session right now.",
+                ephemeral=True,
+            )
+            return
+        log.info(f"pod-start: {interaction.user} force-starting in thread {interaction.channel_id}")
+        await interaction.response.defer(ephemeral=True, thinking=False)
+        err = await manager.force_start()
+        if err is not None:
+            log.warning(f"pod-start: failed — {err}")
+            await interaction.followup.send(f"⚠️ {err}", ephemeral=True)
+        else:
+            await interaction.followup.send("Force-starting the draft, watch the thread.", ephemeral=True)
+
     @app_commands.command(name="pod-settings", description="Change the format and pairing settings for this pod")
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)

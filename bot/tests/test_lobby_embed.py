@@ -60,15 +60,15 @@ def test_ready_progress_in_progress_splits_ready_and_pending():
     assert _field(embed, "⏳ Pending").name == "⏳ Pending (5)"
 
 
-def test_ready_progress_superseded_collapses_roster_and_keeps_decliner():
-    """A superseded card a newer ready check has replaced shows the decliner header and a single
-    non-split roster — no Ready/Pending columns."""
+def test_ready_progress_superseded_shows_only_decliner_no_roster():
+    """A superseded card a newer ready check has replaced shows only the decliner header — no roster
+    snapshot at all, so a dead check never repeats the player list."""
     in_session = [(f"P{i}#000{i}", f"Player{i}") for i in range(8)]
     embed = render_ready_check_progress(
         "Pod Draft", in_session, state="notready",
         decliner_name="Player3#0003", superseded=True,
     )
-    assert _field(embed, "✅ In Draftmancer").name == "✅ In Draftmancer (8)"
+    assert _field(embed, "✅ In Draftmancer") is None
     assert _field(embed, "⏳ Pending") is None
     assert "Player3#0003` declined" in embed.description
     assert "retry" not in embed.description
