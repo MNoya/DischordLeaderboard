@@ -207,3 +207,8 @@ export function cleanPodEventName(name: string, setCode: string): string {
     .trim();
 }
 
+// Set codes are uppercase in the data; URLs are case-insensitive.
+export function canonicalSetCode(raw: string, sets: SetSummary[] | undefined): string {
+  const known = sets?.find((s) => s.code.toLowerCase() === raw.toLowerCase());
+  return known?.code ?? raw.toUpperCase();
+}

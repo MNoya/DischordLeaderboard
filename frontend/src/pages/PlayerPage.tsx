@@ -31,7 +31,8 @@ import { Tooltip } from "../components/Tooltip";
 
 import { useAvailableFormats, useColorChips, useDraftEvents, useLeaderboard, usePlayerProfile, useSets } from "../data/hooks";
 import { computeScore, type ScoringStatRow } from "../data/scoring";
-import { colorsOf, effectiveColorCount, eventDate, eventDisplayLabel, fmtShortDate, formatTag, isFlashbackEvent, mainColors, prettyFormat, winPct } from "../data/utils";
+import { canonicalSetCode, colorsOf, effectiveColorCount, eventDate, eventDisplayLabel, fmtShortDate, formatTag, isFlashbackEvent, mainColors, prettyFormat, winPct } from "../data/utils";
+import { ACTIVE_SET_CODE } from "../data/constants";
 import {
   colorsDisplayName,
   deckColorParts,
@@ -114,7 +115,8 @@ export function PlayerPage() {
   const slug = params.slug!;
   const navigate = useNavigate();
   const { data: sets } = useSets();
-  const setCode = params.setCode ?? sets?.find((s) => s.isActive)?.code ?? "SOS";
+  const liveSetCode = sets?.find((s) => s.isActive)?.code;
+  const setCode = (params.setCode ? canonicalSetCode(params.setCode, sets) : undefined) ?? liveSetCode ?? ACTIVE_SET_CODE;
   const { data: profile, isLoading, isFetching, error } = usePlayerProfile(slug, setCode);
   const { data: events, isFetching: isFetchingEvents } = useDraftEvents(slug, setCode);
   const showLoadingBar = (isFetching || isFetchingEvents) && !isLoading;
@@ -128,16 +130,21 @@ export function PlayerPage() {
     window.scrollTo(0, 0);
   }, [slug, setCode]);
 
-  const liveSetCode = sets?.find((s) => s.isActive)?.code;
   const [topSearchParams] = useSearchParams();
   useEffect(() => {
-    if (params.setCode && liveSetCode && params.setCode === liveSetCode) {
+    if (!params.setCode) return;
+    if (setCode === liveSetCode) {
       navigate(
         { pathname: `/player/${slug}`, search: topSearchParams.toString() },
         { replace: true },
       );
+    } else if (setCode !== params.setCode) {
+      navigate(
+        { pathname: `/${setCode}/player/${slug}`, search: topSearchParams.toString() },
+        { replace: true },
+      );
     }
-  }, [params.setCode, liveSetCode, slug, navigate, topSearchParams]);
+  }, [params.setCode, setCode, liveSetCode, slug, navigate, topSearchParams]);
 
   const idx = leaderboardRows?.findIndex((r) => r.slug === slug) ?? -1;
   const prevSlug = idx > 0 ? leaderboardRows![idx - 1].slug : null;

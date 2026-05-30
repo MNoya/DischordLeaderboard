@@ -26,6 +26,7 @@ import {
 import { useIsMobile } from "../lib/use-is-mobile";
 import { cn } from "../lib/utils";
 import { cleanPodEventName, fmtRange, podDiscordName, stripDiscriminator, weekOfSet } from "../data/utils";
+import { ACTIVE_SET_CODE, DISCORD_GUILD_ID } from "../data/constants";
 import {
   usePodEventParticipants,
   usePodEvents,
@@ -40,9 +41,7 @@ import type {
   SetSummary,
 } from "../types/leaderboard";
 
-const DEFAULT_SET = "SOS";
 const MONTHS_CAL = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
-const DISCORD_GUILD_ID = "775371722065051658";
 
 function parseMonthDay(iso: string): { month: string; day: number } {
   const m = parseInt(iso.slice(5, 7), 10);
@@ -151,10 +150,10 @@ export function PodDraftsPage({ setCode }: { setCode?: string } = {}) {
   }, [allSets, podSetCodes]);
 
   const homeCode = useMemo(() => {
-    if (availableSets.length === 0) return DEFAULT_SET;
+    if (availableSets.length === 0) return ACTIVE_SET_CODE;
     const active = availableSets.find((s) => s.isActive);
     if (active) return active.code;
-    if (availableSets.some((s) => s.code === DEFAULT_SET)) return DEFAULT_SET;
+    if (availableSets.some((s) => s.code === ACTIVE_SET_CODE)) return ACTIVE_SET_CODE;
     const realSet = availableSets.find((s) => !s.custom);
     return (realSet ?? availableSets[0]).code;
   }, [availableSets]);

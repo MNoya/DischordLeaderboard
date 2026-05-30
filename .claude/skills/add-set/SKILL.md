@@ -55,6 +55,7 @@ Preserve the column-aligned formatting of surrounding rows in `ALL_SETS` (visual
 2. If that entry's `end_date` is `None` or `>=` the new release date, change it to `(new release date - 1 day)`.
 3. Append a new `SetSeed(...)` row immediately after that entry. Use `end_date=None`.
 4. Change `ACTIVE_SET_CODE = "<NEW CODE>"`.
+5. Bump the frontend mirror `ACTIVE_SET_CODE` in `frontend/src/data/constants.ts` to the new code.
 
 #### Mode OLD (backfill)
 

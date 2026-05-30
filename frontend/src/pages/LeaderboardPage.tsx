@@ -38,10 +38,11 @@ import {
   usePlayerProfile,
   useSets,
 } from "../data/hooks";
-import { colorsOf, effectiveColorCount, eventDate, fmtRange, lastUpdated, prettyFormat, relativeTime, sumEvents, weekOfSet, winPct } from "../data/utils";
+import { canonicalSetCode, colorsOf, effectiveColorCount, eventDate, fmtRange, lastUpdated, prettyFormat, relativeTime, sumEvents, weekOfSet, winPct } from "../data/utils";
 import { colorsDisplayName, FORMAT_LABEL_GROUPS, FORMAT_OPTIONS, matchesFormatFilter, MULTI, OTHER } from "../data/filters";
 import { FMT_COLORS, FMT_DEFAULT_COLOR, renderFormatOption, shortFormat } from "../data/format-display";
 import { guildLogoTransform, guildSvgUrl } from "../data/guild-art";
+import { ACTIVE_SET_CODE } from "../data/constants";
 import { cn } from "../lib/utils";
 import type { LeaderboardRow, PlayerDraftEvent, PlayerFormatBreakdown, SetSummary } from "../types/leaderboard";
 import type { LeaderboardTableRow } from "../components/LeaderboardTable";
@@ -53,19 +54,23 @@ export function LeaderboardPage() {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
   const { data: sets } = useSets();
-  const activeSet = params.setCode ?? sets?.find((s) => s.isActive)?.code ?? "SOS";
+  const liveSetCode = sets?.find((s) => s.isActive)?.code;
+  const requestedSet = params.setCode ? canonicalSetCode(params.setCode, sets) : undefined;
+  const activeSet = requestedSet ?? liveSetCode ?? ACTIVE_SET_CODE;
   const setMeta = sets?.find((s) => s.code === activeSet);
 
-  const liveSetCode = sets?.find((s) => s.isActive)?.code;
   // Filters live in the URL as query params (?format=Premier or ?colors=WR).
   // Per spec they're mutually exclusive, so picking a non-ALL value in one
   // clears the other.
   const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
-    if (params.setCode && liveSetCode && params.setCode === liveSetCode) {
+    if (!params.setCode) return;
+    if (activeSet === liveSetCode) {
       navigate({ pathname: "/", search: searchParams.toString() }, { replace: true });
+    } else if (activeSet !== params.setCode) {
+      navigate({ pathname: `/${activeSet}`, search: searchParams.toString() }, { replace: true });
     }
-  }, [params.setCode, liveSetCode, navigate, searchParams]);
+  }, [params.setCode, activeSet, liveSetCode, navigate, searchParams]);
   const format = searchParams.get("format") ?? "ALL";
   const colors = searchParams.get("colors") ?? "ALL";
   const colorsMode = colors !== "ALL";
