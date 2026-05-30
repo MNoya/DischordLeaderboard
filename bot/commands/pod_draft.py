@@ -16,6 +16,7 @@ from bot.discord_helpers import extract_avatar_hash
 from bot.models import Player
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_draft_manager import set_event_format
+from bot.services.pod_format import format_change_message
 from bot.services.pod_drafts import (
     load_event_id_by_name_sync,
     load_event_id_by_thread_sync,
@@ -83,7 +84,13 @@ class PodDraft(commands.Cog):
         current_code = await asyncio.to_thread(load_event_set_code_sync, event_id)
 
         async def on_apply(inter: discord.Interaction, code: str) -> str | None:
-            return await set_event_format(event_id, code)
+            err = await set_event_format(event_id, code)
+            if err is None and inter.channel is not None:
+                try:
+                    await inter.channel.send(format_change_message(actor_label(inter), code))
+                except discord.HTTPException:
+                    log.warning("could not post pod-format change notice", exc_info=True)
+            return err
 
         log.info(f"pod-format: {interaction.user} opened selector for event_id={event_id}")
         await interaction.response.send_message(
