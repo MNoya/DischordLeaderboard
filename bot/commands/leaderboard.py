@@ -848,7 +848,7 @@ async def broadcast_current_set_update(bot: commands.Bot) -> dict:
             select(MagicSet).where(MagicSet.code == ACTIVE_SET_CODE)
         ).scalar_one_or_none()
         if ms is None:
-            return {"edited": 0, "pruned": 0, "errors": 0}
+            return {"edited": 0, "pruned": 0}
         return await edit_tracked_messages_for_set(bot, ms)
 
 
@@ -859,7 +859,7 @@ async def edit_tracked_messages_for_set(bot: commands.Bot, magic_set: MagicSet) 
     live without requiring users to re-invoke ``/leaderboard``. Stale tracking
     rows (message deleted in Discord) get pruned automatically.
     """
-    summary = {"edited": 0, "pruned": 0, "errors": 0}
+    summary = {"edited": 0, "pruned": 0}
     with SessionLocal() as session:
         rows = session.execute(
             select(LeaderboardMessage).where(LeaderboardMessage.set_id == magic_set.id)
@@ -917,8 +917,13 @@ async def edit_tracked_messages_for_set(bot: commands.Bot, magic_set: MagicSet) 
                     session.commit()
             summary["pruned"] += 1
         except discord.HTTPException as e:
-            logger.warning(f"could not edit leaderboard message {message_id} in channel {channel_id}: {e}")
-            summary["errors"] += 1
+            logger.warning(f"pruning leaderboard message {message_id} in channel {channel_id} after edit failure: {e}")
+            with SessionLocal() as session:
+                tracked = session.get(LeaderboardMessage, row_id)
+                if tracked is not None:
+                    session.delete(tracked)
+                    session.commit()
+            summary["pruned"] += 1
     return summary
 
 

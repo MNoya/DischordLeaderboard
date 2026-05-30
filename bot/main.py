@@ -285,7 +285,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         except Exception:
             log.warning("profile refresh sweep failed", exc_info=True)
 
-        edit_summary = {"edited": 0, "pruned": 0, "errors": 0}
+        edit_summary = {"edited": 0, "pruned": 0}
         with SessionLocal() as session:
             ms = session.execute(
                 select(MagicSet).where(MagicSet.code == ACTIVE_SET_CODE)
@@ -324,7 +324,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         rows: list[str] = [
             f"{trigger} Refresh | {elapsed} | {n_players} Players{avg}",
             f"Updated {summary['updated']} | Invalidated {summary['invalidated']} | Errors {summary['errors']}",
-            f"Messages: {result['edit_summary']['edited']} edited | {result['edit_summary']['pruned']} pruned | {result['edit_summary']['errors']} failed",
+            f"Messages: {result['edit_summary']['edited']} edited | {result['edit_summary']['pruned']} pruned",
         ]
         unknown = summary.get("unknown_formats") or {}
         if unknown:
@@ -337,16 +337,20 @@ def build_bot(guild_id: int) -> commands.Bot:
         for row in rows:
             log.info(row)
 
-        body = (
-            f"🔄 {trigger} refresh complete\n"
-            f"Elapsed: {elapsed} · Players: {n_players} · {avg}\n"
-            f"Updated: {summary['updated']} · "
-            f"Invalidated: {summary['invalidated']} · "
-            f"Errors: {summary['errors']}\n"
-            f"Live messages: {result['edit_summary']['edited']} edited, "
-            f"{result['edit_summary']['pruned']} pruned, "
-            f"{result['edit_summary']['errors']} failed"
-        )
+        body = f"🔄 {trigger} refresh complete · {elapsed} · {n_players} players"
+        if avg:
+            body += f" · {avg}"
+        if summary["errors"]:
+            body += (
+                f"\nUpdated: {summary['updated']} · "
+                f"Invalidated: {summary['invalidated']} · "
+                f"Errors: {summary['errors']}"
+            )
+        edits = result["edit_summary"]
+        msg_line = f"Live messages: {edits['edited']} edited"
+        if edits["pruned"]:
+            msg_line += f" · {edits['pruned']} pruned"
+        body += f"\n{msg_line}"
         if unknown:
             tally = ", ".join(f"`{fmt}` ×{n}" for fmt, n in sorted(unknown.items(), key=lambda kv: (-kv[1], kv[0])))
             body += f"\n⚠️ New format(s) observed (stored, not scoring): {tally}"
