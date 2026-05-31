@@ -70,6 +70,7 @@ def _ensure_invoker_player_sync(session, discord_id: int, display_name: str) -> 
             discord_username=display_name,
             display_name=display_name,
             active=True,
+            leaderboard_opt_in=False,
         )
         session.add(player)
         session.flush()
@@ -264,14 +265,14 @@ _VALID_STATES = (
 )
 
 _LAST_MESSAGE: dict[int, discord.Message] = {}
-_LAST_PROGRESS_MESSAGE: dict[int, discord.Message] = {}
+_LAST_PROGRESS_MESSAGES: dict[int, list[discord.Message]] = {}
 
 
 async def _reset_podbracket(channel, bot_user) -> None:
     """Wipe a prior testlobby run from this thread before starting fresh: drop the tracked preview
     messages and delete the bot's own messages so the new bracket isn't buried under stale rounds."""
     _LAST_MESSAGE.pop(channel.id, None)
-    _LAST_PROGRESS_MESSAGE.pop(channel.id, None)
+    _LAST_PROGRESS_MESSAGES.pop(channel.id, None)
     try:
         async for msg in channel.history(limit=200):
             if msg.author.id == bot_user.id:
@@ -322,66 +323,72 @@ def _build(state: str) -> tuple[discord.Embed, discord.ui.View | None]:
     return embed, view
 
 
-def _build_ready_progress(state: str) -> tuple[discord.Embed, discord.ui.View | None] | None:
-    """Preview the ready-check progress card (embed + view) for the states where one is posted in
-    prod. View mirrors the manager: buttons disabled during `ready`, gone once the draft starts."""
+def _build_ready_progress(state: str) -> list[tuple[discord.Embed, discord.ui.View | None]]:
+    """Preview the ready-check progress card(s) for the states where one is posted in prod. Returns a
+    list: `superseded` mirrors a real retry — the collapsed old receipt plus the fresh active check
+    below it — every other state is a single card. Buttons live only on an active check."""
     if state not in _PROGRESS_STATES:
-        return None
+        return []
     in_session = list(_LINKED_EIGHT)
+    active_view = LobbyReadyButtonView(draftmancer_url=_DRAFTMANCER_URL, ready_disabled=True)
     if state == "ready":
-        ready_arena_names = {arena for arena, _ in _LINKED_EIGHT[:3]}
         embed = render_ready_check_progress(
             _THREAD_NAME, in_session, state="ready",
-            draftmancer_url=_DRAFTMANCER_URL, ready_arena_names=ready_arena_names,
+            draftmancer_url=_DRAFTMANCER_URL, ready_arena_names={arena for arena, _ in _LINKED_EIGHT[:3]},
             initiated_by=_LINKED_EIGHT[0][1],
         )
-    elif state in ("notready", "cancelled"):
+        return [(embed, active_view)]
+    if state in ("notready", "cancelled"):
         decliner = None if state == "cancelled" else _LINKED_EIGHT[3][0]
         cancel_reason = "Player list changed" if state == "cancelled" else None
         embed = render_ready_check_progress(
             _THREAD_NAME, in_session, state="notready", draftmancer_url=_DRAFTMANCER_URL,
-            decliner_name=decliner, cancel_reason=cancel_reason,
+            decliner_name=decliner, cancel_reason=cancel_reason, ready_count=3, total_count=8,
         )
-    elif state == "superseded":
-        embed = render_ready_check_progress(
+        return [(embed, None)]
+    if state == "superseded":
+        collapsed = render_ready_check_progress(
             _THREAD_NAME, in_session, state="notready", draftmancer_url=_DRAFTMANCER_URL,
-            decliner_name=_LINKED_EIGHT[3][0], superseded=True,
+            decliner_name=_LINKED_EIGHT[3][0], superseded=True, ready_count=3, total_count=8,
         )
-    else:
-        embed = render_ready_check_progress(
-            _THREAD_NAME, in_session, state=state, draftmancer_url=_DRAFTMANCER_URL,
+        active = render_ready_check_progress(
+            _THREAD_NAME, in_session, state="ready",
+            draftmancer_url=_DRAFTMANCER_URL, ready_arena_names=set(),
+            initiated_by=_LINKED_EIGHT[0][1],
         )
-    view = (
-        None if state in ("drafting", "complete")
-        else LobbyReadyButtonView(
-            draftmancer_url=_DRAFTMANCER_URL, ready_disabled=(state in ("ready", "superseded")),
-        )
+        return [(collapsed, None), (active, active_view)]
+    embed = render_ready_check_progress(
+        _THREAD_NAME, in_session, state=state, draftmancer_url=_DRAFTMANCER_URL,
     )
-    return embed, view
+    return [(embed, None)]
 
 
-async def _sync_progress_card(
-    channel: discord.abc.Messageable, progress: tuple[discord.Embed, discord.ui.View | None] | None,
+async def _sync_progress_cards(
+    channel: discord.abc.Messageable,
+    cards: list[tuple[discord.Embed, discord.ui.View | None]],
 ) -> None:
-    """Edit the lingering progress card in place, post a fresh one, or clear it — mirroring how the
-    live manager keeps a single progress card updated across a ready check's lifecycle."""
-    existing = _LAST_PROGRESS_MESSAGE.get(channel.id)
-    if progress is None:
-        if existing is not None:
+    """Reconcile the tracked progress messages with `cards`: edit overlapping ones in place, post any
+    extras, delete any surplus — so a single card stays editable while `superseded` shows two."""
+    existing = _LAST_PROGRESS_MESSAGES.get(channel.id, [])
+    kept: list[discord.Message] = []
+    for i, (embed, view) in enumerate(cards):
+        if i < len(existing):
             try:
-                await existing.delete()
+                await existing[i].edit(embed=embed, view=view)
+                kept.append(existing[i])
+                continue
             except discord.HTTPException:
                 pass
-            _LAST_PROGRESS_MESSAGE.pop(channel.id, None)
-        return
-    embed, view = progress
-    if existing is not None:
+        kept.append(await channel.send(embed=embed, view=view))
+    for surplus in existing[len(cards):]:
         try:
-            await existing.edit(embed=embed, view=view)
-            return
+            await surplus.delete()
         except discord.HTTPException:
-            _LAST_PROGRESS_MESSAGE.pop(channel.id, None)
-    _LAST_PROGRESS_MESSAGE[channel.id] = await channel.send(embed=embed, view=view)
+            pass
+    if kept:
+        _LAST_PROGRESS_MESSAGES[channel.id] = kept
+    else:
+        _LAST_PROGRESS_MESSAGES.pop(channel.id, None)
 
 
 async def _settings_preview_noop(interaction: discord.Interaction, value: str) -> str | None:
@@ -447,10 +454,10 @@ async def setup(bot: commands.Bot) -> None:
         if last is not None:
             try:
                 await last.edit(embed=embed, view=view, attachments=[])
-                await _sync_progress_card(ctx.channel, progress)
+                await _sync_progress_cards(ctx.channel, progress)
                 return
             except discord.HTTPException:
                 _LAST_MESSAGE.pop(ctx.channel.id, None)
         msg = await ctx.send(embed=embed, view=view)
         _LAST_MESSAGE[ctx.channel.id] = msg
-        await _sync_progress_card(ctx.channel, progress)
+        await _sync_progress_cards(ctx.channel, progress)

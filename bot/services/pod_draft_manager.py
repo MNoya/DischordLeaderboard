@@ -91,6 +91,7 @@ class PodDraftManager:
         self.draft_complete = False
         self.last_decliner_name: str | None = None
         self.last_cancel_reason: str | None = None
+        self.last_ready_summary: tuple[int, int] | None = None
         self.initiated_by: str | None = None
         self.draft_logs: dict[str, dict] = {}
         self.mpt_task: asyncio.Task | None = None
@@ -210,6 +211,7 @@ class PodDraftManager:
         # Any session change clears the notready banner; lobby reverts to its normal state
         self.last_decliner_name = None
         self.last_cancel_reason = None
+        self.last_ready_summary = None
         if self.bot_user_id is None:
             for u in self.session_users:
                 if u.get("userName") == _BOT_USER_NAME:
@@ -357,8 +359,10 @@ class PodDraftManager:
         self.initiated_by = initiated_by
         prior_decliner = self.last_decliner_name
         prior_cancel = self.last_cancel_reason
+        prior_summary = self.last_ready_summary
         self.last_decliner_name = None
         self.last_cancel_reason = None
+        self.last_ready_summary = None
         log.info(
             f"[READY] start event={self.event_id} expected={len(self.expected_user_ids)} "
             f"timeout_s={_READY_TIMEOUT_S}"
@@ -385,14 +389,11 @@ class PodDraftManager:
                 decliner_name=prior_decliner,
                 cancel_reason=prior_cancel,
                 superseded=True,
+                ready_count=prior_summary[0] if prior_summary else None,
+                total_count=prior_summary[1] if prior_summary else None,
             )
             try:
-                await prior_progress.edit(
-                    embed=superseded_embed,
-                    view=LobbyReadyButtonView(
-                        draftmancer_url=self.draftmancer_url, ready_disabled=True,
-                    ),
-                )
+                await prior_progress.edit(embed=superseded_embed, view=None)
             except Exception:
                 log.warning("could not lock prior ready-check progress card", exc_info=True)
 
@@ -533,8 +534,10 @@ class PodDraftManager:
                 decliner_name=self.last_decliner_name,
                 cancel_reason=self.last_cancel_reason,
                 initiated_by=self.initiated_by,
+                ready_count=self.last_ready_summary[0] if self.last_ready_summary else None,
+                total_count=self.last_ready_summary[1] if self.last_ready_summary else None,
             )
-            if state in ("drafting", "complete"):
+            if state in ("drafting", "complete", "notready"):
                 progress_view = None
             else:
                 progress_view = LobbyReadyButtonView(
@@ -573,14 +576,10 @@ class PodDraftManager:
             self.mpt_task = asyncio.create_task(self._submit_logs_to_magicprotools(payload))
         else:
             log.warning(f"[DRAFT] end_no_payload event={self.event_id}")
-        if settings.pod_draft_test_roster.strip():
-            self.tournament_roster = [n.strip() for n in settings.pod_draft_test_roster.split(",") if n.strip()]
-            log.info(f"[DRAFT] using_test_roster event={self.event_id} roster={self.tournament_roster}")
-        else:
-            self.tournament_roster = [
-                u.get("userName") for u in self.session_users
-                if u.get("userName") and u.get("userName") != _BOT_USER_NAME
-            ]
+        self.tournament_roster = [
+            u.get("userName") for u in self.session_users
+            if u.get("userName") and u.get("userName") != _BOT_USER_NAME
+        ]
         log.info(
             f"[DRAFT] roster_snapshot event={self.event_id} roster_size={len(self.tournament_roster)}"
         )
@@ -926,6 +925,7 @@ class PodDraftManager:
             f"decliner={decliner_name!r}"
         )
         self.ready_check_active = False
+        self.last_ready_summary = (len(self.ready_users), len(self.expected_user_ids))
         self.ready_users = set()
         if self._ready_timeout_task is not None:
             self._ready_timeout_task.cancel()
@@ -1167,6 +1167,7 @@ def _ensure_players_for_members_sync(pairs: list[tuple[str, discord.Member]]) ->
                 arena_name=arena_name,
                 arena_aliases=[normalized] if normalized else [],
                 active=True,
+                leaderboard_opt_in=False,
             ))
             log.info(f"auto-created Player row for guild member {member.display_name} (arena={arena_name})")
         session.commit()

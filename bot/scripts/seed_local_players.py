@@ -48,7 +48,7 @@ def main() -> None:
             taken_slugs.add(slug)
             session.add(Player(
                 slug=slug,
-                discord_id=real_discord_id or f"seed-{slug}",
+                discord_id=real_discord_id or str(800_000_000_000_000_000 + added),
                 display_name=display_name,
                 seventeenlands_token=token,
                 active=True,

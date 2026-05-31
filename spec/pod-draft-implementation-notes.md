@@ -59,7 +59,6 @@ When sessionUsers fills to `max(1, expected_attendee_count)`, the bot fires the 
 - `POD_DRAFT_SKIP_REMINDER_WAIT=true` — fire T-5 reminder 10s after detection instead of at event_time - 5min.
 - `POD_DRAFT_BOTS=7` — pad seats so a solo human can `startDraft`.
 - `POD_DRAFT_PICK_TIMER=1` — 1-second pick timer so the draft auto-resolves quickly.
-- `POD_DRAFT_TEST_ROSTER=name1,name2,...` — override the post-`endDraft` roster used by `start_tournament` for in-memory bracket previews via `!testlobby round1`/`round3`. Accept any even count 2–10.
 - `AUTO_REFRESH_ENABLED=false` — silences the 17lands auto-refresh tick on the test bot.
 
 ### Owner-only debug commands
