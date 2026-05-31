@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -519,7 +520,7 @@ def _format_leaderboard(top: list[LeaderboardEntry], set_code: str | None = None
     works because the underlying ORDER BY in process_leaderboard uses the raw
     float value, not this rendered string.
     """
-    name_width = max(max(len(e.display_name) for e in top), len("Name"))
+    name_width = max(max(_display_width(e.display_name) for e in top), len("Name"))
     rank_col_width = max(max(len(f"{e.rank}.") for e in top), len("#"))
 
     if show_score:
@@ -552,7 +553,7 @@ def _format_leaderboard(top: list[LeaderboardEntry], set_code: str | None = None
             rank = f"{medal:<{rank_col_width - 1}}"
         else:
             rank = f"{e.rank}.".ljust(rank_col_width)
-        name = e.display_name.ljust(name_width)
+        name = e.display_name + " " * max(0, name_width - _display_width(e.display_name))
         trophy = f"{e.trophies:>{trophy_width}}"
         if show_score:
             # Center the integer under the wider 'Points' header — right-bias so
@@ -564,6 +565,11 @@ def _format_leaderboard(top: list[LeaderboardEntry], set_code: str | None = None
             inner = f"{rank} {name}   {drafts_col}  {trophy}"
         lines.append(f"[`{inner}`](<{_player_url(e.slug, set_code, filter_type, filter_value)}>)")
     return "\n".join(lines)
+
+
+def _display_width(s: str) -> int:
+    """Monospace column width, counting emoji and wide CJK glyphs as 2 cells where len() counts 1."""
+    return sum(2 if unicodedata.east_asian_width(ch) == "W" else 1 for ch in s)
 
 
 def _center_right_bias(s: str, width: int) -> str:

@@ -24,7 +24,6 @@ logger = logging.getLogger(__name__)
 DM_TIMEOUT_S = 10 * 60
 
 INSTRUCTIONS = (
-    "**Update your 17lands profile**\n"
     "Reply with your updated **17lands profile URL or token**, e.g.\n"
     "`https://www.17lands.com/user_history/10c0f8918a2b4fa7b230448caee0b2ca`\n"
     "\n"
@@ -124,17 +123,20 @@ class UpdateProfile(commands.Cog):
     async def _run_relink_flow(
         self, interaction: discord.Interaction, user_id: str, username: str,
     ) -> None:
-        # Token entry always happens via DM regardless of where /relink was invoked
+        in_guild = interaction.guild is not None
         try:
             dm = await interaction.user.create_dm()
-            await dm.send(INSTRUCTIONS)
+            if in_guild:
+                await dm.send(INSTRUCTIONS)
+                await interaction.response.send_message(MSG_DM_SENT, ephemeral=True)
+            else:
+                await interaction.response.send_message(INSTRUCTIONS)
         except discord.Forbidden:
             audit.event("update_profile_dms_disabled", user_id=user_id)
             logger.warning(f"relink: {username} DMs blocked")
-            await interaction.response.send_message(MSG_DMS_DISABLED, ephemeral=(interaction.guild is not None))
+            await interaction.response.send_message(MSG_DMS_DISABLED, ephemeral=in_guild)
             return
 
-        await interaction.response.send_message(MSG_DM_SENT, ephemeral=(interaction.guild is not None))
         audit.event("update_profile_dm_sent", user_id=user_id)
 
         def is_user_dm(m: discord.Message) -> bool:
