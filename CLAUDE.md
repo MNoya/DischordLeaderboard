@@ -123,7 +123,7 @@ The formula may diverge per set in the future — `DEFAULT_QUEUE_GROUPS` is glob
 
 ### Slash commands — `bot/commands/`
 
-All commands work in server channels and DMs **except `/exile` which is DM-only**.
+All commands work in server channels and DMs.
 
 | Command | Purpose |
 |---|---|
@@ -132,7 +132,7 @@ All commands work in server channels and DMs **except `/exile` which is DM-only*
 | `/join` | Sign-up DM walkthrough with 17lands token; per-user lock prevents duplicate flows |
 | `/retire` | Pause participation (replies via DM) |
 | `/relink` | Update 17lands token |
-| `/exile` | Permanently delete (DM-only) |
+| `/exile` | Scrub stats + 17lands link, keep the row so pod history still references the player; button-confirm |
 | `/help` | List commands |
 
 Every interaction `send_message`/`followup.send` uses `ephemeral=(interaction.guild is not None)` so DMs don't get the "only you can see this" auto-expire badge.

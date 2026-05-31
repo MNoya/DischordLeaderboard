@@ -1,4 +1,4 @@
-"""Discord-specific helpers shared across signup, relink, and refresh.
+"""Discord-specific helpers shared across signup, linking, and refresh.
 
 Keeping these in one place so the avatar capture logic doesn't drift between
 the three entry points that touch it.

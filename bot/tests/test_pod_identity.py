@@ -162,7 +162,7 @@ def test_classify_preserves_order(session):
     assert [dn for _, dn in result] == ["One", None, "Three", None]
 
 
-# --- /pod-link-arena input format (regex) ---
+# --- /link-arena input format (regex) ---
 
 def test_valid_arena_handle_accepted():
     assert _ARENA_INPUT_RE.match("Noya#12345")

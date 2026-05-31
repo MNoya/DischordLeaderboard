@@ -1,8 +1,9 @@
+from datetime import date, datetime, timezone
+
 from sqlalchemy import select
 
 from bot.commands.delete_account import process_delete_account
-from bot.models import MagicSet, Player, PlayerStats
-from datetime import date
+from bot.models import MagicSet, Player, PlayerStats, PodDraftEvent, PodDraftParticipant
 
 
 def _seed_player(session, discord_id="111"):
@@ -25,7 +26,7 @@ def test_delete_account_not_registered(session):
     assert result.deleted_player_id is None
 
 
-def test_delete_account_removes_player_and_cascades_stats(session):
+def test_delete_account_scrubs_stats_and_keeps_row(session):
     p = _seed_player(session, discord_id="111")
     s = MagicSet(code="ECL", name="ECL", start_date=date(2026, 1, 20))
     session.add(s)
@@ -40,5 +41,29 @@ def test_delete_account_removes_player_and_cascades_stats(session):
 
     assert result.kind == "deleted"
     assert result.deleted_player_id == p.id
-    assert session.execute(select(Player).where(Player.id == p.id)).scalar_one_or_none() is None
+    session.refresh(p)
+    assert p.active is False
+    assert p.leaderboard_opt_in is False
+    assert p.seventeenlands_token is None
     assert session.execute(select(PlayerStats).where(PlayerStats.player_id == p.id)).scalars().all() == []
+
+
+def test_delete_account_preserves_pod_participation(session):
+    p = _seed_player(session, discord_id="111")
+    event = PodDraftEvent(
+        event_date=date(2026, 1, 20), event_time=datetime(2026, 1, 20, tzinfo=timezone.utc),
+        set_code="ECL", name="ECL Pod", draftmancer_session="sess-1",
+        draftmancer_url="https://draftmancer.com/?session=sess-1",
+        discord_thread_id="thread-1", sesh_message_id="msg-1", socket_status="complete",
+    )
+    session.add(event)
+    session.flush()
+    part = PodDraftParticipant(event_id=event.id, player_id=p.id, display_name="Alice")
+    session.add(part)
+    session.commit()
+
+    process_delete_account(session, "111")
+
+    session.refresh(part)
+    assert part.player_id == p.id
+    assert session.execute(select(Player).where(Player.id == p.id)).scalar_one_or_none() is not None

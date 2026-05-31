@@ -1,12 +1,12 @@
 """Auto-link a 17lands URL/token pasted in DM, no slash command required.
 
-Routes the message through the same primitives `/join` and `/relink` use:
+Routes the message through the same primitives `/join` and `/link-17lands` use:
 - no Player row → process_signup,
-- inactive Player → check_signup_eligibility reactivates + process_update_profile swaps token,
-- active Player with different token → process_update_profile (relink),
+- inactive Player → check_signup_eligibility reactivates + link_token swaps token,
+- active Player with different token → link_token (re-link),
 - active Player with same token → silent ack.
 
-Defers to an active /join or /relink wait_for via dm_flows' shared in-flight set.
+Defers to an active /join or /link-17lands wait_for via dm_flows' shared in-flight set.
 """
 from __future__ import annotations
 
@@ -17,24 +17,23 @@ from discord.ext import commands
 from sqlalchemy import select
 
 from bot import audit
+from bot.commands import token_messages as tmsg
 from bot.commands.leaderboard import broadcast_current_set_update
+from bot.commands.link_17lands import updated_message
 from bot.commands.signup import (
-    MSG_INVALID_FORMAT,
-    MSG_REJECTED,
-    MSG_SUCCESS,
-    MSG_TOKEN_IN_USE,
     MSG_WELCOME_BACK,
     check_signup_eligibility,
     process_signup,
 )
-from bot.commands.update_profile import process_update_profile
 from bot.database import SessionLocal
 from bot.discord_helpers import extract_avatar_hash
 from bot.models import Player
 from bot.services import bot_log
 from bot.services.dm_flows import dm_flow, is_in_flight
+from bot.services.leaderboard_visibility import MSG_JOINED_LEADERBOARD
 from bot.services.refresh import refresh_one_player_for_all_sets
 from bot.services.seventeenlands import SeventeenLandsClient, extract_token
+from bot.services.token_link import link_token
 
 log = logging.getLogger(__name__)
 
@@ -129,13 +128,13 @@ class AutoLinkListener(commands.Cog):
             await bot_log.get(self.bot).post_plain(
                 f"🆕 **{message.author.display_name}** joined the leaderboard"
             )
-            await _safe_dm(message.author, MSG_SUCCESS)
+            await _safe_dm(message.author, MSG_JOINED_LEADERBOARD)
         elif result.kind == "token_in_use":
-            await _safe_dm(message.author, MSG_TOKEN_IN_USE)
+            await _safe_dm(message.author, tmsg.TOKEN_IN_USE)
         elif result.kind == "rejected_by_17lands":
-            await _safe_dm(message.author, MSG_REJECTED)
+            await _safe_dm(message.author, tmsg.REJECTED)
         elif result.kind == "invalid_format":
-            await _safe_dm(message.author, MSG_INVALID_FORMAT)
+            await _safe_dm(message.author, tmsg.INVALID_FORMAT)
 
     async def _handle_relink(
         self,
@@ -146,17 +145,14 @@ class AutoLinkListener(commands.Cog):
         was_inactive: bool,
     ) -> None:
         with SessionLocal() as session:
-            result = process_update_profile(
-                session=session,
-                client=self.client,
-                discord_id=user_id,
-                token_input=message.content,
-                avatar_hash=avatar_hash,
+            result = link_token(
+                session, self.client, user_id, username,
+                message.author.display_name, message.content, avatar_hash, opt_in=True,
             )
         log.info(f"auto-link: {username} → relink {result.kind}")
         audit.event("auto_link_relink_result", user_id=user_id, kind=result.kind, player_id=result.player_id)
 
-        if result.kind == "updated":
+        if result.kind == "linked":
             with SessionLocal() as session:
                 refresh_one_player_for_all_sets(session, self.client, result.player_id)
                 session.commit()
@@ -167,11 +163,14 @@ class AutoLinkListener(commands.Cog):
                 )
                 await _safe_dm(message.author, MSG_WELCOME_BACK)
             else:
-                await _safe_dm(message.author, MSG_SUCCESS)
+                with SessionLocal() as session:
+                    player = session.get(Player, result.player_id)
+                    opted_in = bool(player and player.leaderboard_opt_in)
+                await _safe_dm(message.author, updated_message(opted_in))
         elif result.kind == "token_in_use":
-            await _safe_dm(message.author, MSG_TOKEN_IN_USE)
+            await _safe_dm(message.author, tmsg.TOKEN_IN_USE)
         elif result.kind == "rejected_by_17lands":
-            await _safe_dm(message.author, MSG_REJECTED)
+            await _safe_dm(message.author, tmsg.REJECTED)
 
 
 async def _safe_broadcast(bot: commands.Bot) -> None:

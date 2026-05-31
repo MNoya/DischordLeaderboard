@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,22 +11,26 @@ from discord.ext import commands
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from bot import audit
+from bot import audit, emojis
+from bot.commands import descriptions as desc
+from bot.commands import token_messages as tmsg
 from bot.commands.leaderboard import (
-    broadcast_current_set_update,
+    broadcast_current_set_safely,
     process_leaderboard,
     render_embed as render_lb,
     render_view as render_lb_view,
 )
-from bot.commands.stats import process_stats, render_embed as render_stats_embed
+from bot.commands.stats import LeaderboardVisibilityView
+from bot.services.player_stats import process_stats, render_embed as render_stats_embed
 from bot.database import SessionLocal
 from bot.discord_helpers import extract_avatar_hash
 from bot.models import Player
 from bot.services import bot_log
-from bot.services.dm_flows import dm_flow, is_in_flight
+from bot.services.dm_flows import run_latest_flow, wait_for_token_reply
+from bot.services.leaderboard_visibility import MSG_JOINED_LEADERBOARD, MSG_RANKED_AGAIN
 from bot.services.refresh import refresh_one_player_for_all_sets
-from bot.services.seventeenlands import SeventeenLandsClient, classify_token_reply, extract_token
-from bot.slug import disambiguate_slug, slugify
+from bot.services.seventeenlands import SeventeenLandsClient
+from bot.services.token_link import link_token, outcome_log_suffix
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +42,7 @@ DM_TIMEOUT_S = 10 * 60
 INSTRUCTIONS_IMAGE = Path(__file__).resolve().parents[2] / "bot" / "assets" / "signup_event_history.png"
 
 INSTRUCTIONS = (
-    "**Welcome to the LLU Community Leaderboard!**\n"
+    "{hello}**Welcome to the LLU Community Leaderboard!**\n"
     "Join by sharing your **17lands profile link**.\n"
     "1. Go to [17lands.com/history/events](https://www.17lands.com/history/events)\n"
     "2. Click the *event history* link.\n"
@@ -51,21 +54,9 @@ INSTRUCTIONS = (
 )
 
 MSG_DM_SENT = "📬 Check your DMs to join!"
-MSG_ALREADY_IN_PROGRESS = "Your /join is already in progress — check your DMs and reply there."
-MSG_ALREADY_SIGNED_UP = (
-    "You're already in! 🎉 Use `/relink` if you ever need to change your 17lands link."
-)
-MSG_WELCOME_BACK = "👋 Welcome back! Stats refreshed — you're on the leaderboard again."
-MSG_INVALID_FORMAT = "That doesn't look like a valid 17lands token. Please check the URL and try again."
-MSG_REJECTED = "That token couldn't be verified with 17lands. Please double-check your URL and try again."
-MSG_DMS_DISABLED = (
-    "⚠️ DMs are blocked. Please enable DMs from server members in your privacy settings and try again."
-)
-MSG_TIMEOUT = "⏱️ /join timed out. Run `/join` whenever you're ready to try again."
-MSG_SUCCESS = "✅ Joined! Your latest stats are now on the leaderboard."
-# Not in spec — flagged in handoff. Sent when the supplied 17lands token already
-# belongs to a different Discord account
-MSG_TOKEN_IN_USE = "That 17lands token is already linked to another Discord account."
+MSG_ALREADY_SIGNED_UP = "You're already in! 🎉 Run `/help` to see everything you can do."
+MSG_WELCOME_BACK = "👋 Welcome back! You're on the leaderboard again."
+MSG_TIMEOUT = "⏱️ Timed out. Run `/join` again whenever you're ready."
 
 
 SignupKind = Literal[
@@ -76,7 +67,7 @@ SignupKind = Literal[
     "token_in_use",
 ]
 
-SignupCheckKind = Literal["fresh", "reactivated", "already_signed_up"]
+SignupCheckKind = Literal["fresh", "reactivated", "already_signed_up", "needs_token", "opted_in"]
 
 
 @dataclass
@@ -113,7 +104,15 @@ def check_signup_eligibility(
         if avatar_hash is not None and existing.avatar_hash != avatar_hash:
             existing.avatar_hash = avatar_hash
         session.commit()
+        if not existing.seventeenlands_token:
+            return SignupCheck(kind="needs_token", player_id=existing.id)
         return SignupCheck(kind="reactivated", player_id=existing.id)
+    if not existing.seventeenlands_token:
+        return SignupCheck(kind="needs_token", player_id=existing.id)
+    if not existing.leaderboard_opt_in:
+        existing.leaderboard_opt_in = True
+        session.commit()
+        return SignupCheck(kind="opted_in", player_id=existing.id)
     return SignupCheck(kind="already_signed_up", player_id=existing.id)
 
 
@@ -132,35 +131,12 @@ def process_signup(
     if existing_by_discord is not None:
         return SignupResult(kind="already_signed_up", player_id=existing_by_discord.id)
 
-    try:
-        token = extract_token(token_input)
-    except ValueError:
-        return SignupResult(kind="invalid_format")
-
-    if not client.verify_token(token):
-        return SignupResult(kind="rejected_by_17lands")
-
-    by_token = session.execute(
-        select(Player).where(Player.seventeenlands_token == token)
-    ).scalar_one_or_none()
-
-    if by_token is None:
-        slug = _next_available_slug(session, display_name)
-        player = Player(
-            slug=slug,
-            discord_id=discord_id,
-            discord_username=discord_username,
-            display_name=display_name,
-            avatar_hash=avatar_hash,
-            seventeenlands_token=token,
-            active=True,
-            leaderboard_opt_in=True,
-        )
-        session.add(player)
-        session.commit()
-        return SignupResult(kind="created", player_id=player.id)
-
-    return SignupResult(kind="token_in_use", player_id=by_token.id)
+    result = link_token(
+        session, client, discord_id, discord_username, display_name, token_input, avatar_hash, opt_in=True,
+    )
+    if result.kind == "linked":
+        return SignupResult(kind="created", player_id=result.player_id)
+    return SignupResult(kind=result.kind, player_id=result.player_id)
 
 
 class Signup(commands.Cog):
@@ -168,7 +144,7 @@ class Signup(commands.Cog):
         self.bot = bot
         self.client = client or SeventeenLandsClient()
 
-    @app_commands.command(name="join", description="Join the LLU Community Leaderboard")
+    @app_commands.command(name="join", description=desc.JOIN)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
     async def signup(self, interaction: discord.Interaction) -> None:
@@ -177,13 +153,7 @@ class Signup(commands.Cog):
         audit.event("signup_invoked", user_id=user_id, username=username)
 
         logger.info(f"join: {username} invoked")
-        if is_in_flight(user_id):
-            audit.event("signup_concurrent_invocation", user_id=user_id)
-            logger.info(f"join: {username} duplicate flow blocked")
-            await interaction.response.send_message(MSG_ALREADY_IN_PROGRESS, ephemeral=(interaction.guild is not None))
-            return
-        with dm_flow(user_id):
-            await self._run_signup_flow(interaction, user_id, username)
+        await run_latest_flow(user_id, self._run_signup_flow(interaction, user_id, username))
 
     async def _run_signup_flow(
         self, interaction: discord.Interaction, user_id: str, username: str,
@@ -192,96 +162,70 @@ class Signup(commands.Cog):
 
         with SessionLocal() as session:
             check = check_signup_eligibility(session, user_id, avatar_hash=avatar_hash)
-        if check.kind == "reactivated":
-            audit.event("signup_reactivated", user_id=user_id, player_id=check.player_id)
-            logger.info(f"join: {username} reactivated")
+        if check.kind in ("reactivated", "opted_in"):
+            reactivated = check.kind == "reactivated"
+            audit.event(f"signup_{check.kind}", user_id=user_id, player_id=check.player_id)
+            logger.info(f"join: {username} {check.kind}")
             # Defer because the refresh may take a second or two on a cold rate limiter
             await interaction.response.defer(ephemeral=(interaction.guild is not None), thinking=True)
             with SessionLocal() as session:
                 refresh_one_player_for_all_sets(session, self.client, check.player_id)
                 session.commit()
-            await _broadcast_current_set_safely(self.bot)
+            await broadcast_current_set_safely(self.bot)
             await bot_log.get(self.bot).post_plain(
                 f"🔁 **{interaction.user.display_name}** rejoined the leaderboard"
             )
-            # Welcome-back text uses the followup so the deferred interaction resolves;
-            # leaderboard + stats go via dm.send so they render as plain bot messages
-            # rather than threaded replies under the welcome-back message.
-            await interaction.followup.send(MSG_WELCOME_BACK, ephemeral=(interaction.guild is not None))
+            await interaction.followup.send(
+                MSG_WELCOME_BACK if reactivated else MSG_RANKED_AGAIN,
+                ephemeral=(interaction.guild is not None),
+            )
             try:
                 dm = await interaction.user.create_dm()
-                lb_embed, lb_view, stats_embed = await _build_join_preview(user_id)
+                lb_embed, lb_view, stats_embed, stats_view = await _build_join_preview(self.bot, user_id)
                 if lb_embed is not None:
                     await dm.send(embed=lb_embed, view=lb_view)
                 if stats_embed is not None:
-                    await dm.send(embed=stats_embed)
+                    await dm.send(embed=stats_embed, view=stats_view)
             except Exception:
-                logger.warning("post-reactivation preview failed", exc_info=True)
+                logger.warning("post-join preview failed", exc_info=True)
             return
         if check.kind == "already_signed_up":
             audit.event("signup_short_circuit", user_id=user_id, reason="already_signed_up")
             await interaction.response.send_message(MSG_ALREADY_SIGNED_UP, ephemeral=(interaction.guild is not None))
             return
 
-        # Defer first — uploading the walkthrough image attachment can blow past
-        # the 3s interaction-response deadline, which produced the
-        # 'Unknown interaction (10062)' crash users hit on /join after retire
-        await interaction.response.defer(ephemeral=(interaction.guild is not None), thinking=True)
+        # Defer first — uploading the walkthrough image can blow past the 3s response deadline
+        in_guild = interaction.guild is not None
+        await interaction.response.defer(ephemeral=in_guild, thinking=True)
         try:
             dm = await interaction.user.create_dm()
+            if in_guild:
+                await _send_signup_instructions(dm.send)
+                await interaction.followup.send(MSG_DM_SENT, ephemeral=True)
+            else:
+                await _send_signup_instructions(interaction.followup.send)
         except discord.Forbidden:
             audit.event("signup_dms_disabled", user_id=user_id, username=username)
             logger.warning(f"join: {username} DMs blocked")
-            await interaction.followup.send(MSG_DMS_DISABLED, ephemeral=(interaction.guild is not None))
+            await interaction.followup.send(tmsg.DMS_DISABLED, ephemeral=in_guild)
             return
-
-        sent_with_attachment = False
-        if INSTRUCTIONS_IMAGE.exists():
-            try:
-                await dm.send(content=INSTRUCTIONS, file=discord.File(INSTRUCTIONS_IMAGE))
-                sent_with_attachment = True
-            except discord.Forbidden:
-                audit.event("signup_dms_disabled", user_id=user_id, username=username)
-                logger.warning(f"join: {username} DMs blocked on instructions send")
-                await interaction.followup.send(MSG_DMS_DISABLED, ephemeral=(interaction.guild is not None))
-                return
-            except discord.HTTPException as exc:
-                logger.warning(f"join: {username} instructions attachment failed ({exc}); falling back to text-only")
-        if not sent_with_attachment:
-            try:
-                await dm.send(INSTRUCTIONS)
-            except discord.Forbidden:
-                audit.event("signup_dms_disabled", user_id=user_id, username=username)
-                logger.warning(f"join: {username} DMs blocked on instructions send")
-                await interaction.followup.send(MSG_DMS_DISABLED, ephemeral=(interaction.guild is not None))
-                return
-
-        await interaction.followup.send(MSG_DM_SENT, ephemeral=(interaction.guild is not None))
         audit.event("signup_dm_sent", user_id=user_id)
 
-        def is_user_dm(m: discord.Message) -> bool:
-            return m.author.id == interaction.user.id and m.guild is None
-
-        try:
-            reply = await self.bot.wait_for("message", check=is_user_dm, timeout=DM_TIMEOUT_S)
-        except asyncio.TimeoutError:
+        reply_text = await wait_for_token_reply(self.bot, interaction, timeout_s=DM_TIMEOUT_S)
+        if reply_text is None:
             audit.event("signup_timeout", user_id=user_id, username=username)
             logger.info(f"join: {username} timed out")
             await dm.send(MSG_TIMEOUT)
             return
 
         # Length only — never log the raw token content
-        audit.event("signup_dm_reply_received", user_id=user_id, reply_length=len(reply.content))
+        audit.event("signup_dm_reply_received", user_id=user_id, reply_length=len(reply_text))
+        await dm.send(tmsg.CHECKING)
 
         with SessionLocal() as session:
-            result = process_signup(
-                session=session,
-                client=self.client,
-                discord_id=user_id,
-                discord_username=username,
-                display_name=interaction.user.display_name,
-                token_input=reply.content,
-                avatar_hash=avatar_hash,
+            result = link_token(
+                session, self.client, user_id, username,
+                interaction.user.display_name, reply_text, avatar_hash, opt_in=True,
             )
 
         audit.event(
@@ -291,39 +235,36 @@ class Signup(commands.Cog):
             kind=result.kind,
             player_id=result.player_id,
         )
-        logger.info(f"join: {username} → {result.kind} {_outcome_log_suffix(result.kind, reply.content)}")
+        logger.info(f"join: {username} → {result.kind} {outcome_log_suffix(result.kind, reply_text)}")
 
         if result.kind == "invalid_format":
-            await dm.send(MSG_INVALID_FORMAT)
+            await dm.send(tmsg.INVALID_FORMAT)
             return
         if result.kind == "rejected_by_17lands":
-            await dm.send(MSG_REJECTED)
+            await dm.send(tmsg.REJECTED)
             return
         if result.kind == "token_in_use":
-            await dm.send(MSG_TOKEN_IN_USE)
-            return
-        if result.kind == "already_signed_up":
-            await dm.send(MSG_ALREADY_SIGNED_UP)
+            await dm.send(tmsg.TOKEN_IN_USE)
             return
 
-        # created — pull fresh stats so they show up immediately
+        # linked — pull fresh stats so they show up immediately
         with SessionLocal() as session:
             refresh_one_player_for_all_sets(session, self.client, result.player_id)
             session.commit()
-        await _broadcast_current_set_safely(self.bot)
+        await broadcast_current_set_safely(self.bot)
         await bot_log.get(self.bot).post_plain(
             f"🆕 **{interaction.user.display_name}** joined the leaderboard"
         )
-        await dm.send(MSG_SUCCESS)
+        await dm.send(MSG_JOINED_LEADERBOARD)
 
         # Show the leaderboard right here in DM, plus the personal stats
         # breakdown — same pair the /leaderboard command sends to its invoker
         try:
-            lb_embed, lb_view, stats_embed = await _build_join_preview(user_id)
+            lb_embed, lb_view, stats_embed, stats_view = await _build_join_preview(self.bot, user_id)
             if lb_embed is not None:
                 await dm.send(embed=lb_embed, view=lb_view)
             if stats_embed is not None:
-                await dm.send(embed=stats_embed)
+                await dm.send(embed=stats_embed, view=stats_view)
         except Exception:
             logger.warning("post-join leaderboard/stats preview failed", exc_info=True)
 
@@ -332,23 +273,26 @@ async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Signup(bot))
 
 
-async def _broadcast_current_set_safely(bot) -> None:
-    """Trigger a live edit of every tracked leaderboard message for the current set.
+async def _send_signup_instructions(send) -> None:
+    """Send the walkthrough via `send`, attaching the image if present, text-only if the upload fails."""
+    content = INSTRUCTIONS.format(hello=emojis.prefix("chordoHello"))
+    if INSTRUCTIONS_IMAGE.exists():
+        try:
+            await send(content=content, file=discord.File(INSTRUCTIONS_IMAGE))
+            return
+        except discord.Forbidden:
+            raise
+        except discord.HTTPException as exc:
+            logger.warning(f"join: instructions attachment failed ({exc}); text-only")
+    await send(content)
 
-    Wrapped in a broad except so a Discord-side hiccup during the broadcast can't
-    sink the signup flow itself — the join already succeeded by this point.
-    """
-    try:
-        await broadcast_current_set_update(bot)
-    except Exception:
-        logger.warning("post-signup leaderboard broadcast failed", exc_info=True)
 
-
-async def _build_join_preview(user_id: str):
+async def _build_join_preview(bot: commands.Bot, user_id: str):
     """Fetch the leaderboard + stats data for a freshly-joined or reactivated user.
 
-    Returns (leaderboard_embed, leaderboard_view, stats_embed). Any element may
-    be None if there's nothing to show (no current set, no stats yet).
+    Returns (leaderboard_embed, leaderboard_view, stats_embed, stats_view). Any
+    element may be None if there's nothing to show (no current set, no stats yet).
+    The stats view carries the Hide/Show-rank toggle when the player has a token.
     """
     with SessionLocal() as session:
         lb_data = process_leaderboard(session, viewer_discord_id=user_id)
@@ -357,33 +301,8 @@ async def _build_join_preview(user_id: str):
     with SessionLocal() as session:
         stats_data = process_stats(session, player_name=None, viewer_discord_id=user_id)
     stats_embed = render_stats_embed(stats_data) if stats_data is not None else None
+    stats_view = None
+    if stats_data is not None and stats_data.has_token:
+        stats_view = LeaderboardVisibilityView(bot, user_id, opted_in=not stats_data.opted_out)
 
-    return lb_embed, render_lb_view(), stats_embed
-
-
-def _outcome_log_suffix(kind: str, raw_reply: str) -> str:
-    """Return a short bracketed tag with diagnostic context for the result log.
-
-    Token tail on successful extraction, shape label on parse failure. No raw
-    user content ever lands in logs.
-    """
-    if kind == "invalid_format":
-        return f"[shape={classify_token_reply(raw_reply)} len={len(raw_reply or '')}]"
-    try:
-        token = extract_token(raw_reply)
-    except ValueError:
-        return ""
-    return f"[token=…{token[-4:]}]"
-
-
-def _next_available_slug(session: Session, display_name: str) -> str:
-    """Return a unique slug for `display_name`, suffixed -2/-3/... if taken.
-
-    Race-prone in theory (no advisory lock), but signups are rare and the unique
-    constraint will fail-loud if two slugs collide at insert time.
-    """
-    base = slugify(display_name)
-    taken = set(session.execute(
-        select(Player.slug).where(Player.slug.like(f"{base}%"))
-    ).scalars().all())
-    return disambiguate_slug(base, taken)
+    return lb_embed, render_lb_view(), stats_embed, stats_view

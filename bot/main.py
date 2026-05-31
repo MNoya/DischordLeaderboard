@@ -18,6 +18,8 @@ from sqlalchemy import func, select
 
 from bot.commands.delete_account import setup as setup_delete_account
 from bot.commands.help import setup as setup_help
+from bot.commands.link_17lands import setup as setup_link_17lands
+from bot.commands.leaderboard_visibility import setup as setup_leaderboard_visibility
 from bot.commands.leaderboard import (
     LeaderboardView,
     edit_tracked_messages_for_set,
@@ -27,7 +29,6 @@ from bot.commands.pod_draft import setup as setup_pod_draft
 from bot.commands.signout import setup as setup_signout
 from bot.commands.signup import setup as setup_signup
 from bot.commands.stats import setup as setup_stats
-from bot.commands.update_profile import setup as setup_update_profile
 from bot.config import settings
 from bot.database import SessionLocal, run_migrations
 from bot.discord_helpers import refresh_player_profiles
@@ -102,12 +103,20 @@ def configure_logging() -> None:
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
+class LoggingCommandTree(app_commands.CommandTree):
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        command = interaction.command
+        if command is not None:
+            log.info(f"command: /{command.qualified_name} by {interaction.user}")
+        return True
+
+
 def build_bot(guild_id: int) -> commands.Bot:
     intents = discord.Intents.default()
     intents.message_content = True
     intents.dm_messages = True
     intents.members = True
-    bot = commands.Bot(command_prefix="!", intents=intents)
+    bot = commands.Bot(command_prefix="!", intents=intents, tree_cls=LoggingCommandTree)
     guild = discord.Object(id=guild_id)
 
     @bot.event
@@ -130,11 +139,12 @@ def build_bot(guild_id: int) -> commands.Bot:
         # Discord-side sync is handled by the owner-only `!sync` text command, not on startup.
         await setup_signup(bot)
         await setup_signout(bot)
-        await setup_update_profile(bot)
         await setup_delete_account(bot)
         await setup_leaderboard(bot)
         await setup_stats(bot)
         await setup_help(bot)
+        await setup_link_17lands(bot)
+        await setup_leaderboard_visibility(bot)
         await setup_pod_draft(bot)
         await setup_sesh_listener(bot)
         await setup_pod_screenshots(bot)
@@ -186,7 +196,7 @@ def build_bot(guild_id: int) -> commands.Bot:
     async def sync_commands(ctx: commands.Context, scope: str = "all") -> None:
         """Owner-only. Sync slash commands to Discord.
 
-        `!sync`        — full sync: guild gets server-visible commands, global gets only the DM-only ones (relink, exile)
+        `!sync`        — full sync: guild gets server-visible commands, global gets only the DM-only ones (link-17lands, exile)
         `!sync guild`  — guild sync only (skip the global publish)
         `!sync clear`  — wipe every command registration (recovery only)
         """
@@ -200,7 +210,8 @@ def build_bot(guild_id: int) -> commands.Bot:
 
         # Commands registered globally (their allowed_contexts decides where they're visible).
         # Only /refresh is guild-scoped (admin command) — everything else goes global.
-        GLOBAL_COMMANDS = {"leaderboard", "leaderboard-full", "join", "retire", "relink", "exile", "stats", "help"}
+        GLOBAL_COMMANDS = {"leaderboard", "join", "retire", "exile", "stats", "help",
+                           "link-17lands", "link-arena", "opt-out"}
 
         bot.tree.copy_global_to(guild=guild)
         # Strip globally-registered commands from the guild tree to avoid duplicate registration
@@ -234,7 +245,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         """
         msg_invalidated_dm = (
             "⚠️ Your 17lands token appears to be invalid (possibly regenerated). "
-            "Please use `/relink` to provide your new token."
+            "Please use `/link-17lands` to provide your new token."
         )
 
         def _do_db_work() -> dict:

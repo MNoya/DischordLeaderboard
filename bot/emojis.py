@@ -20,6 +20,12 @@ def get_emoji(name: str) -> discord.Emoji | None:
     return _EMOJIS.get(name)
 
 
+def prefix(name: str) -> str:
+    """Custom emoji followed by a space for inlining before text, or '' if not loaded."""
+    e = _EMOJIS.get(name)
+    return f"{e} " if e else ""
+
+
 def mana_number(n: int) -> str:
     """`5` → `:mana5:` glyph if loaded, else `'5'` fallback. Mana font ships 0–20."""
     e = _EMOJIS.get(f"mana{n}")

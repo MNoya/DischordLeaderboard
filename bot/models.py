@@ -196,7 +196,7 @@ class PodDraftParticipant(Base):
 
     id               = Column(String, primary_key=True, default=lambda: str(uuid4()))
     event_id         = Column(String, ForeignKey("pod_draft_events.id", ondelete="CASCADE"), nullable=False)
-    # Null for guests not yet registered; populated retroactively by /join or /pod-link-arena
+    # Null for guests not yet registered; populated retroactively by /join or /link-arena
     player_id        = Column(String, ForeignKey("players.id"), nullable=True)
     display_name     = Column(String, nullable=False)
     draftmancer_name = Column(String, nullable=True)

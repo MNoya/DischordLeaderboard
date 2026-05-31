@@ -172,3 +172,30 @@ def test_check_signup_reactivates_signed_out_player(session):
     assert check.player_id == p.id
     session.refresh(p)
     assert p.active is True
+
+
+def test_check_signup_pod_only_player_needs_token(session):
+    p = _seed(session, "111", token=None, active=True)
+    check = check_signup_eligibility(session, "111")
+    assert check.kind == "needs_token"
+    assert check.player_id == p.id
+
+
+def test_check_signup_exiled_player_reactivates_and_needs_token(session):
+    p = _seed(session, "111", token=None, active=False)
+    check = check_signup_eligibility(session, "111")
+    assert check.kind == "needs_token"
+    assert check.player_id == p.id
+    session.refresh(p)
+    assert p.active is True
+
+
+def test_check_signup_opts_in_a_hidden_token_holder(session):
+    p = _seed(session, "111", VALID_TOKEN, active=True)
+    p.leaderboard_opt_in = False
+    session.commit()
+    check = check_signup_eligibility(session, "111")
+    assert check.kind == "opted_in"
+    assert check.player_id == p.id
+    session.refresh(p)
+    assert p.leaderboard_opt_in is True

@@ -11,6 +11,7 @@ from discord.ext import commands
 from sqlalchemy import any_, select
 
 from bot import audit, emojis
+from bot.commands import descriptions as desc
 from bot.database import SessionLocal
 from bot.discord_helpers import extract_avatar_hash
 from bot.models import Player
@@ -48,7 +49,7 @@ class PodDraft(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    @app_commands.command(name="ready", description="Run a Draftmancer ready check for this pod draft")
+    @app_commands.command(name="pod-ready", description=desc.POD_READY)
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
     async def pod_ready(self, interaction: discord.Interaction) -> None:
@@ -69,7 +70,7 @@ class PodDraft(commands.Cog):
         else:
             await interaction.followup.send("Ready Check initiated, watch the thread for status.", ephemeral=True)
 
-    @app_commands.command(name="pod-start", description="Force-start the draft now, skipping the ready check")
+    @app_commands.command(name="pod-start", description=desc.POD_START)
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
     async def pod_start(self, interaction: discord.Interaction) -> None:
@@ -89,7 +90,7 @@ class PodDraft(commands.Cog):
         else:
             await interaction.followup.send("Force-starting the draft, watch the thread.", ephemeral=True)
 
-    @app_commands.command(name="pod-settings", description="Change the format and pairing settings for this pod")
+    @app_commands.command(name="pod-settings", description=desc.POD_SETTINGS)
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
     async def pod_settings(self, interaction: discord.Interaction) -> None:
@@ -120,8 +121,8 @@ class PodDraft(commands.Cog):
         )
 
     @app_commands.command(
-        name="pod-link-arena",
-        description="Link your MTG Arena handle so pod-draft results recognize you",
+        name="link-arena",
+        description=desc.LINK_ARENA,
     )
     @app_commands.describe(name="Your full MTG Arena handle: ArenaID#12345")
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
@@ -202,7 +203,7 @@ class PodDraft(commands.Cog):
 
     @app_commands.command(
         name="pod-draft-standings",
-        description="Post the standings embed for a pod-draft event",
+        description=desc.POD_DRAFT_STANDINGS,
     )
     @app_commands.describe(event="Pick an event to publish standings for; defaults to the current thread")
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
@@ -254,7 +255,7 @@ class PodDraft(commands.Cog):
 
     @app_commands.command(
         name="pod-champion",
-        description="Re-post the champion announcement for a completed pod-draft event",
+        description=desc.POD_CHAMPION,
     )
     @app_commands.describe(event="Pod-draft event to announce")
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
@@ -287,7 +288,7 @@ class PodDraft(commands.Cog):
         names = await asyncio.to_thread(search_event_names_sync, current)
         return [app_commands.Choice(name=n, value=n) for n in names]
 
-    @app_commands.command(name="pod-takeover", description="Take control of the Draftmancer session and disconnect the bot")
+    @app_commands.command(name="pod-takeover", description=desc.POD_TAKEOVER)
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
     async def pod_takeover(self, interaction: discord.Interaction) -> None:

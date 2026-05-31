@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from bot import audit
+from bot.commands import descriptions as desc
 from bot.database import SessionLocal
 from bot.models import Player
 from bot.services import bot_log
@@ -18,10 +19,8 @@ from bot.services import bot_log
 logger = logging.getLogger(__name__)
 
 MSG_SIGNED_OUT = (
-    "✅ You've retired from the leaderboard. Your stats are saved — run `/join` anytime to return.\n"
-    "If you'd rather wipe your data here entirely, run `/exile` in DM with the bot."
+    "🧎‍♂️ You've retired from the leaderboard. Run `/join` anytime to return. To wipe your data entirely, run `/exile`."
 )
-MSG_SIGNED_OUT_CHANNEL_ACK = "📬 Check your DMs."
 MSG_NOT_REGISTERED = "You're not on the leaderboard."
 MSG_ALREADY_INACTIVE = "You're already retired. Run `/join` to return."
 
@@ -52,7 +51,7 @@ class Signout(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    @app_commands.command(name="retire", description="Pause your participation on the leaderboard")
+    @app_commands.command(name="retire", description=desc.RETIRE)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
     async def signout(self, interaction: discord.Interaction) -> None:
@@ -70,23 +69,7 @@ class Signout(commands.Cog):
             await bot_log.get(self.bot).post_plain(
                 f"🧎‍♂️ **{interaction.user.display_name}** retired from the leaderboard"
             )
-            in_guild = interaction.guild is not None
-            if in_guild:
-                # Guild context — DM the actual confirmation so the user is already
-                # in the DM channel and can immediately follow up with /exile,
-                # plus a brief ephemeral ack in the channel so they know where to look
-                try:
-                    dm = await interaction.user.create_dm()
-                    await dm.send(MSG_SIGNED_OUT)
-                    await interaction.response.send_message(MSG_SIGNED_OUT_CHANNEL_ACK, ephemeral=True)
-                except discord.Forbidden:
-                    # DMs blocked — fall back to in-channel ephemeral
-                    await interaction.response.send_message(MSG_SIGNED_OUT, ephemeral=True)
-            else:
-                # Already in DM — just respond directly. No defer (which would leave
-                # the 'thinking…' spinner stuck), no separate dm.send (which would
-                # duplicate the message into the same channel).
-                await interaction.response.send_message(MSG_SIGNED_OUT)
+            await interaction.response.send_message(MSG_SIGNED_OUT, ephemeral=(interaction.guild is not None))
         elif result.kind == "already_inactive":
             await interaction.response.send_message(MSG_ALREADY_INACTIVE, ephemeral=(interaction.guild is not None))
         else:

@@ -12,6 +12,7 @@ import re
 import discord
 
 from bot import emojis
+from bot.commands import descriptions as desc
 from bot.services.pod_tournament import actor_label
 
 
@@ -187,7 +188,7 @@ def render(
             )
             embed.add_field(
                 name="👉 How to fix",
-                value="Run `/pod-link-arena` from inside this thread\n​",
+                value="Run `/link-arena` with your Arena handle\n​",
                 inline=True,
             )
             embed.add_field(name="​", value="​", inline=True)
@@ -208,9 +209,10 @@ def render(
         embed.add_field(
             name="🤖 Commands",
             value=(
-                "`/pod-link-arena` — link your MTG Arena handle\n"
-                "`/pod-takeover` — take ownership of the Draftmancer session if required\n"
-                "`/pod-start` — start the draft now, skipping the ready check"
+                f"`/link-arena`: {desc.LINK_ARENA_LOBBY}\n"
+                f"`/pod-ready`: {desc.POD_READY}\n"
+                f"`/pod-start`: {desc.POD_START}\n"
+                f"`/pod-takeover`: {desc.POD_TAKEOVER}"
             ),
             inline=False,
         )

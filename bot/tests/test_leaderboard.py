@@ -6,7 +6,7 @@ from bot.commands.leaderboard import (
     process_leaderboard,
     render_public_embed,
 )
-from bot.commands.stats import StatsData, render_embed as render_stats_embed
+from bot.services.player_stats import StatsData, render_embed as render_stats_embed
 from bot.models import MagicSet, Player, PlayerStats
 
 
@@ -149,15 +149,18 @@ def _data(viewer=None, top=None, last_updated=None, drafter_count=0):
     )
 
 
-def test_stats_embed_opted_out_shows_points_and_trophies_without_rank():
+def test_stats_embed_opted_out_hides_rank_and_points_keeps_trophies():
     data = StatsData(
         set_code="SOS", set_name="SOS", player_name="Bob", player_slug="bob",
         rank=None, total_score=42.0, total_trophies=3, opted_out=True,
+        breakdown=[{"label": "Premier", "events": 2, "wins": 7, "losses": 3, "trophies": 3, "score": 42.0}],
     )
-    summary = (render_stats_embed(data).description or "").split("\n", 1)[0]
-    assert "42.0 pts" in summary
+    desc = render_stats_embed(data).description or ""
+    summary = desc.split("\n", 1)[0]
     assert "3 🏆" in summary
     assert "#" not in summary
+    assert "42.0 pts" not in desc
+    assert "pts" not in desc
     assert "Not yet on the leaderboard" not in summary
 
 
@@ -284,3 +287,38 @@ def test_drafter_count_excludes_inactive_players(session):
 
     data = process_leaderboard(session, viewer_discord_id=None, top_n=10)
     assert data.drafter_count == 1
+
+
+# ---------------------------------------------------------------------------
+# historical set override + embed link
+# ---------------------------------------------------------------------------
+
+
+def test_process_leaderboard_renders_non_active_set_via_override(session):
+    # No active (SOS) set seeded — only the historical one
+    stx = _seed_set(session, code="STX")
+    a = _seed_player(session, "Alice", "1", "a")
+    _seed_stats(session, a, stx, trophies=3, events=5)
+    session.commit()
+
+    assert process_leaderboard(session, viewer_discord_id=None) is None
+    data = process_leaderboard(session, viewer_discord_id=None, magic_set=stx)
+    assert data is not None
+    assert data.set_code == "STX"
+    assert [e.display_name for e in data.top] == ["Alice"]
+
+
+def test_embed_link_strips_path_and_points_at_set_for_historical():
+    entry = LeaderboardEntry(rank=1, player_id="p", slug="alice-1", display_name="Alice", score=42.0, trophies=3)
+    data = LeaderboardData(set_code="STX", set_name="STX", top=[entry], viewer=None)
+    embed = render_public_embed(data)
+    assert "[dischord.pages.dev]" in embed.description
+    assert "[dischord.pages.dev/leaderboard]" not in embed.description
+    assert embed.url.endswith("/STX")
+
+
+def test_embed_link_active_set_has_no_set_path():
+    entry = LeaderboardEntry(rank=1, player_id="p", slug="alice-1", display_name="Alice", score=42.0, trophies=3)
+    data = LeaderboardData(set_code="SOS", set_name="SOS", top=[entry], viewer=None)
+    embed = render_public_embed(data)
+    assert not embed.url.rstrip("/").endswith("/SOS")

@@ -12,12 +12,13 @@ from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from bot import audit, emojis
-from bot.commands.stats import _rank_players_for_set, process_stats, render_embed as render_stats_embed
+from bot.commands import descriptions as desc
+from bot.services.player_stats import process_stats, rank_players_for_set, render_embed as render_stats_embed
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.models import DraftEvent, LeaderboardMessage, MagicSet, Player, PlayerStats, PodDraftEvent, PodDraftParticipant
 from bot.scoring import DEFAULT_QUEUE_GROUPS, boxes_for_event, compute_score
-from bot.sets import ACTIVE_SET_CODE
+from bot.sets import ACTIVE_SET_CODE, ALL_SETS
 
 
 # Color archetype label → PlayerArchetypeScore.archetype key
@@ -77,13 +78,14 @@ class LeaderboardData:
 
 def process_leaderboard(
     session: Session, viewer_discord_id: str | None, top_n: int = 10,
-    include_zero_scores: bool = False,
+    include_zero_scores: bool = False, magic_set: MagicSet | None = None,
 ) -> LeaderboardData | None:
-    magic_set = _current_set(session)
+    if magic_set is None:
+        magic_set = _current_set(session)
     if magic_set is None:
         return None
 
-    ranked = _rank_players_for_set(session, magic_set.id)
+    ranked = rank_players_for_set(session, magic_set.id)
 
     # Default view hides players with no points yet — they're "drafting but
     # not on the board". The full-DM view passes include_zero_scores=True
@@ -131,11 +133,13 @@ def process_leaderboard(
 
 def process_leaderboard_for_format(
     session: Session, viewer_discord_id: str | None, format_label: str, top_n: int = 10,
+    magic_set: MagicSet | None = None,
 ) -> LeaderboardData | None:
     """Per-format leaderboard: ranks each player by their score contribution
     in the named queue group (Premier, Quick, Sealed, etc.).
     """
-    magic_set = _current_set(session)
+    if magic_set is None:
+        magic_set = _current_set(session)
     if magic_set is None:
         return None
 
@@ -214,11 +218,13 @@ def process_leaderboard_for_format(
 
 def process_leaderboard_for_archetype(
     session: Session, viewer_discord_id: str | None, archetype: str, top_n: int = 10,
+    magic_set: MagicSet | None = None,
 ) -> LeaderboardData | None:
     """Per-archetype (color combo) leaderboard. Aggregates from draft_events,
     filtering by archetype, then runs compute_score per player.
     """
-    magic_set = _current_set(session)
+    if magic_set is None:
+        magic_set = _current_set(session)
     if magic_set is None:
         return None
 
@@ -298,6 +304,7 @@ def process_leaderboard_for_archetype(
 
 def process_leaderboard_for_direct(
     session: Session, viewer_discord_id: str | None, top_n: int = 10,
+    magic_set: MagicSet | None = None,
 ) -> LeaderboardData | None:
     """Arena Direct Sealed leaderboard: ranks players by boxes won.
 
@@ -305,7 +312,8 @@ def process_leaderboard_for_direct(
     collector-booster-weekend overrides. Per-event rather than aggregate so the
     date-windowed rule can fire.
     """
-    magic_set = _current_set(session)
+    if magic_set is None:
+        magic_set = _current_set(session)
     if magic_set is None:
         return None
 
@@ -377,9 +385,11 @@ def process_leaderboard_for_direct(
 
 def process_leaderboard_for_pod(
     session: Session, viewer_discord_id: str | None, top_n: int = 10,
+    magic_set: MagicSet | None = None,
 ) -> LeaderboardData | None:
     """Pod-draft leaderboard for the active set: ranked by trophies, no score column."""
-    magic_set = _current_set(session)
+    if magic_set is None:
+        magic_set = _current_set(session)
     if magic_set is None:
         return None
 
@@ -500,8 +510,6 @@ class _CycleButton(discord.ui.Button):
             view=render_view(cycle_label=next_label, filter_type=next_ft, filter_value=next_fv),
         )
 
-DISCORD_EMBED_DESC_LIMIT = 4096
-
 
 def _player_url(slug: str, set_code: str | None = None, filter_type: str | None = None, filter_value: str | None = None) -> str:
     base = settings.public_site_url.rstrip("/")
@@ -608,10 +616,11 @@ def _apply_footer(embed: discord.Embed, data: LeaderboardData) -> None:
 
 def render_embed(data: LeaderboardData) -> discord.Embed:
     base_url = settings.public_site_url.rstrip("/")
+    set_base = base_url if data.set_code == ACTIVE_SET_CODE else f"{base_url}/{data.set_code}"
     if data.filter_type == "format" and data.filter_value:
-        site_url = f"{base_url}?format={data.filter_value}"
+        site_url = f"{set_base}?format={data.filter_value}"
     else:
-        site_url = base_url
+        site_url = set_base
     embed = discord.Embed(
         title=f"🏆 Leaderboard — {data.set_code}",
         url=site_url,
@@ -620,10 +629,13 @@ def render_embed(data: LeaderboardData) -> discord.Embed:
     if not data.top:
         embed.description = "_No players have scored yet for this set._"
     else:
-        embed.description = _format_leaderboard(
+        rows = _format_leaderboard(
             data.top, data.set_code, show_score=data.show_score,
             filter_type=data.filter_type, filter_value=data.filter_value,
         )
+        site_display = base_url.split("://", 1)[-1].split("/", 1)[0]
+        link = f"[{site_display}]({site_url})"
+        embed.description = f"{rows}\n\nCheck the full leaderboard at {link}"
     _apply_footer(embed, data)
     return embed
 
@@ -664,12 +676,16 @@ class LeaderboardView(discord.ui.View):
         cycle_label: str = _CYCLE_LABELS[0],
         filter_type: str | None = None,
         filter_value: str | None = None,
+        set_code: str | None = None,
+        include_cycle: bool = True,
     ) -> None:
         super().__init__(timeout=None)
-        self.add_item(_CycleButton(label=cycle_label))
-        stats_url = settings.public_site_url
+        if include_cycle:
+            self.add_item(_CycleButton(label=cycle_label))
+        base = settings.public_site_url.rstrip("/")
+        stats_url = base if set_code is None or set_code == ACTIVE_SET_CODE else f"{base}/{set_code}"
         if filter_type == "format" and filter_value:
-            stats_url = f"{stats_url.rstrip('/')}?format={filter_value}"
+            stats_url = f"{stats_url}?format={filter_value}"
         # URL buttons are exempt from the persistent-view custom_id requirement
         self.add_item(discord.ui.Button(
             label="Stats", url=stats_url,
@@ -708,15 +724,21 @@ def render_view(
     cycle_label: str = _CYCLE_LABELS[0],
     filter_type: str | None = None,
     filter_value: str | None = None,
+    set_code: str | None = None,
+    include_cycle: bool = True,
 ) -> discord.ui.View:
-    return LeaderboardView(cycle_label=cycle_label, filter_type=filter_type, filter_value=filter_value)
+    return LeaderboardView(
+        cycle_label=cycle_label, filter_type=filter_type, filter_value=filter_value,
+        set_code=set_code, include_cycle=include_cycle,
+    )
 
 
 CODE_TO_COLOR_LABEL: dict[str, str] = {code: label for label, code in COLOR_CHOICES.items()}
 
 
-def _drafter_count(session: Session) -> int:
-    magic_set = _current_set(session)
+def _drafter_count(session: Session, magic_set: MagicSet | None = None) -> int:
+    if magic_set is None:
+        magic_set = _current_set(session)
     if magic_set is None:
         return 0
     return session.execute(
@@ -737,36 +759,38 @@ def render_filtered_data(
     filter_type: str | None,
     filter_value: str | None,
     viewer_discord_id: str | None,
+    magic_set: MagicSet | None = None,
 ) -> tuple["LeaderboardData | None", str | None]:
     """Resolve a filter into the matching processor + display suffix.
 
     Returns (data, suffix). suffix is the human label appended to the embed
-    title (e.g. "Premier", "Boros"). Both are None when no active set exists.
+    title (e.g. "Premier", "Boros"). Both are None when no matching set exists.
+    ``magic_set`` overrides the active set so historical boards can be rendered.
     """
     if filter_type == "format" and filter_value == "Pod":
-        data = process_leaderboard_for_pod(session, viewer_discord_id=viewer_discord_id)
+        data = process_leaderboard_for_pod(session, viewer_discord_id=viewer_discord_id, magic_set=magic_set)
         suffix = "Pod"
     elif filter_type == "format" and filter_value == "Direct":
-        data = process_leaderboard_for_direct(session, viewer_discord_id=viewer_discord_id)
+        data = process_leaderboard_for_direct(session, viewer_discord_id=viewer_discord_id, magic_set=magic_set)
         suffix = "Direct"
     elif filter_type == "format":
         assert filter_value is not None
         data = process_leaderboard_for_format(
-            session, viewer_discord_id=viewer_discord_id, format_label=filter_value,
+            session, viewer_discord_id=viewer_discord_id, format_label=filter_value, magic_set=magic_set,
         )
         suffix = filter_value
     elif filter_type == "color":
         assert filter_value is not None
         data = process_leaderboard_for_archetype(
-            session, viewer_discord_id=viewer_discord_id, archetype=filter_value,
+            session, viewer_discord_id=viewer_discord_id, archetype=filter_value, magic_set=magic_set,
         )
         suffix = CODE_TO_COLOR_LABEL.get(filter_value, filter_value)
     else:
-        data = process_leaderboard(session, viewer_discord_id=viewer_discord_id)
+        data = process_leaderboard(session, viewer_discord_id=viewer_discord_id, magic_set=magic_set)
         suffix = None
 
     if data is not None:
-        data.drafter_count = _drafter_count(session)
+        data.drafter_count = _drafter_count(session, magic_set)
         data.filter_type = filter_type
         data.filter_value = filter_value
 
@@ -870,6 +894,14 @@ async def broadcast_current_set_update(bot: commands.Bot) -> dict:
         return await edit_tracked_messages_for_set(bot, ms)
 
 
+async def broadcast_current_set_safely(bot: commands.Bot) -> None:
+    """``broadcast_current_set_update`` wrapped so a Discord hiccup can't sink the calling flow."""
+    try:
+        await broadcast_current_set_update(bot)
+    except Exception:
+        logger.warning("leaderboard broadcast failed", exc_info=True)
+
+
 async def edit_tracked_messages_for_set(bot: commands.Bot, magic_set: MagicSet) -> dict:
     """Refresh the rendered embed of every tracked leaderboard message for ``magic_set``.
 
@@ -949,10 +981,11 @@ class Leaderboard(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    @app_commands.command(name="leaderboard", description="Show the current set leaderboard")
+    @app_commands.command(name="leaderboard", description=desc.LEADERBOARD)
     @app_commands.describe(
         format="Show only one queue (Premier, Quick, Sealed, Traditional)",
         color="Filter by archetype: guilds, shards/wedges, or Soup (4+ colors)",
+        set="Look up an specific set's standings",
     )
     @app_commands.choices(
         format=[
@@ -975,6 +1008,7 @@ class Leaderboard(commands.Cog):
         interaction: discord.Interaction,
         format: app_commands.Choice[str] | None = None,
         color: app_commands.Choice[str] | None = None,
+        set: str | None = None,
     ) -> None:
         user_id = str(interaction.user.id)
         audit.event(
@@ -982,6 +1016,7 @@ class Leaderboard(commands.Cog):
             user_id=user_id,
             format=format.value if format else None,
             color=color.value if color else None,
+            set=set,
         )
 
         if format is not None and color is not None:
@@ -1002,23 +1037,50 @@ class Leaderboard(commands.Cog):
             filter_type, filter_value = None, None
 
         with SessionLocal() as session:
+            if set is not None:
+                magic_set = session.execute(
+                    select(MagicSet).where(func.upper(MagicSet.code) == set.upper())
+                ).scalar_one_or_none()
+            else:
+                magic_set = _current_set(session)
+
+            if magic_set is None:
+                msg = (
+                    f"No leaderboard for `{set}` — it isn't a registered set."
+                    if set is not None else
+                    "No active set is configured. `bot/sets.py::ACTIVE_SET_CODE` doesn't match any registered set."
+                )
+                await interaction.response.send_message(msg, ephemeral=ephemeral)
+                return
+
             data, suffix = render_filtered_data(
                 session,
                 filter_type=filter_type, filter_value=filter_value,
-                viewer_discord_id=user_id,
+                viewer_discord_id=user_id, magic_set=magic_set,
             )
-            magic_set = _current_set(session)
 
-        if data is None or magic_set is None:
+        if data is None:
             await interaction.response.send_message(
-                "No active set is configured. `bot/sets.py::ACTIVE_SET_CODE` doesn't match any registered set.",
-                ephemeral=ephemeral,
+                "Could not render that leaderboard.", ephemeral=ephemeral,
             )
             return
 
         embed = render_public_embed(data)
         if suffix:
             embed.title = f"{embed.title} · {suffix}"
+
+        # A specific past set is a post-and-forget snapshot: send it once, no
+        # tracking row (so !refresh skips it) and no cycle button (cycling needs
+        # the tracking row). The active set keeps the tracked, refreshable path.
+        if magic_set.code != ACTIVE_SET_CODE:
+            await interaction.response.send_message(
+                embed=embed,
+                view=render_view(
+                    filter_type=filter_type, filter_value=filter_value,
+                    set_code=magic_set.code, include_cycle=False,
+                ),
+            )
+            return
 
         # In a guild channel: track the post (filter-aware) so !refresh keeps it
         # current. In a DM: single response, fully personalized.
@@ -1068,57 +1130,17 @@ class Leaderboard(commands.Cog):
             except Exception:
                 logger.warning("/leaderboard DM personal followup failed", exc_info=True)
 
-    @app_commands.command(
-        name="leaderboard-full",
-        description="DM you the entire leaderboard",
-    )
-    @app_commands.allowed_contexts(guilds=False, dms=True, private_channels=False)
-    @app_commands.allowed_installs(guilds=True, users=False)
-    async def leaderboard_full(self, interaction: discord.Interaction) -> None:
-        user_id = str(interaction.user.id)
-        audit.event("leaderboard_full_invoked", user_id=user_id)
-
-        with SessionLocal() as session:
-            data = process_leaderboard(
-                session, viewer_discord_id=user_id,
-                top_n=10**6, include_zero_scores=True,
-            )
-
-        if data is None:
-            await interaction.response.send_message(
-                "No active set is configured. `bot/sets.py::ACTIVE_SET_CODE` doesn't match any registered set.",
-                ephemeral=(interaction.guild is not None),
-            )
-            return
-
-        embed = render_embed(data)
-        site_link = f"Check the full leaderboard at {settings.public_site_url} 🚀"
-        if data.top and embed.description and len(embed.description) > DISCORD_EMBED_DESC_LIMIT:
-            trimmed = list(data.top)
-            while trimmed:
-                body = _format_leaderboard(trimmed, data.set_code, filter_type=data.filter_type, filter_value=data.filter_value)
-                if len(body) + 2 + len(site_link) <= DISCORD_EMBED_DESC_LIMIT:
-                    break
-                trimmed.pop()
-            body = _format_leaderboard(trimmed, data.set_code, filter_type=data.filter_type, filter_value=data.filter_value) if trimmed else ""
-            embed.description = f"{body}\n\n{site_link}" if body else site_link
-
-        # Always deliver via DM, regardless of where the slash was invoked.
-        # `allowed_contexts` only governs visibility, not response routing
-        try:
-            dm = await interaction.user.create_dm()
-            await dm.send(embed=embed, view=render_view())
-        except discord.Forbidden:
-            await interaction.response.send_message(
-                "Couldn't deliver the full leaderboard — open DMs from this server and try again.",
-                ephemeral=(interaction.guild is not None),
-            )
-            return
-
-        await interaction.response.send_message(
-            "Full leaderboard sent to your DMs.",
-            ephemeral=(interaction.guild is not None),
-        )
+    @leaderboard.autocomplete("set")
+    async def _set_autocomplete(
+        self, interaction: discord.Interaction, current: str,
+    ) -> list[app_commands.Choice[str]]:
+        cur = current.upper()
+        matches = [
+            app_commands.Choice(name=f"{s.code} — {s.name}", value=s.code)
+            for s in reversed(ALL_SETS)
+            if cur in s.code.upper() or cur in s.name.upper()
+        ]
+        return matches[:25]
 
 
 async def setup(bot: commands.Bot) -> None:
