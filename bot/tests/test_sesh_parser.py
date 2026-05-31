@@ -37,7 +37,6 @@ def test_parses_real_sesh_embed():
     assert result.set_code == "SOS"
     assert result.event_number == 1
     assert result.event_time == SAMPLE_UTC
-    assert result.format_label is None
     assert result.name == "SOS Pod Draft Test #1"
     assert list(result.attendees) == ["Arcyl", "WaveofShadow", "Chonce"]
 
@@ -159,3 +158,26 @@ def test_title_markdown_stripped_for_name_and_regex():
 def test_embed_without_title_returns_none():
     embed = discord.Embed()
     assert parse_sesh_embed(embed) is None
+
+
+def test_peasant_cube_title_sets_custom_format():
+    embed = _make_embed("Daneelius Peasant Cube 2026 Season Draft 4")
+    result = parse_sesh_embed(embed)
+    assert result is not None
+    assert result.set_code == "PEASANT"
+    assert result.event_number == 4
+
+
+def test_peasant_detection_wins_over_uppercase_word():
+    embed = _make_embed("LLU Peasant Cube Draft 2")
+    result = parse_sesh_embed(embed)
+    assert result is not None
+    assert result.set_code == "PEASANT"
+
+
+def test_draft_number_without_hash_for_plain_set():
+    embed = _make_embed("SOS Pod Draft 7")
+    result = parse_sesh_embed(embed)
+    assert result is not None
+    assert result.set_code == "SOS"
+    assert result.event_number == 7

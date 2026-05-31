@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import discord
 
 from bot.config import settings
+from bot.services import pod_format
 
 
 log = logging.getLogger(__name__)
@@ -27,9 +28,10 @@ log = logging.getLogger(__name__)
 # Discord native timestamp: <t:UNIX[:FORMAT]>, captures the unix-seconds value
 TIMESTAMP_RE = re.compile(r"<t:(\d+)(?::[A-Za-z])?>")
 
-# Title regex: set code is any 2-5 uppercase letters; event number is "#N"
+# Title regex: set code is any 2-5 uppercase letters; event number is "#N" or "Draft N"
 SET_RE = re.compile(r"\b([A-Z]{2,5})\b")
 NUM_RE = re.compile(r"#(\d+)")
+DRAFT_NUM_RE = re.compile(r"\bDraft\s+(\d+)\b", re.IGNORECASE)
 
 # Discord shortcode emoji form, e.g. :calendar_spiral:
 SHORTCODE_RE = re.compile(r":[a-z0-9_+-]+:")
@@ -41,8 +43,7 @@ class ParsedSeshFields:
     event_date: date            # in POD_DRAFT_FALLBACK_TZ
     event_time: datetime        # tz-aware UTC
     set_code: str | None
-    event_number: int | None    # from "#N" in title, used by draftmancer_session naming only
-    format_label: str | None    # always None in Phase 1
+    event_number: int | None    # from "#N" or "Draft N" in title, used by draftmancer_session naming only
     name: str                   # cleaned title, becomes pod_draft_events.name
     attendees: Sequence[str]
     maybe_attendees: Sequence[str]
@@ -57,10 +58,16 @@ def parse_sesh_embed(embed: discord.Embed) -> ParsedSeshFields | None:
 
     clean_title = _strip_markdown(embed.title or "").strip()
 
-    set_match = SET_RE.search(clean_title)
-    set_code = set_match.group(1) if set_match else None
+    custom_code = pod_format.detect_in_title(clean_title)
+    if custom_code is not None:
+        set_code: str | None = custom_code
+    else:
+        set_match = SET_RE.search(clean_title)
+        set_code = set_match.group(1) if set_match else None
+
     num_match = NUM_RE.search(clean_title)
-    event_number = int(num_match.group(1)) if num_match else None
+    draft_match = DRAFT_NUM_RE.search(clean_title)
+    event_number = int(num_match.group(1)) if num_match else (int(draft_match.group(1)) if draft_match else None)
 
     event_time = _parse_event_time(time_field.value or "")
     if event_time is None:
@@ -83,7 +90,6 @@ def parse_sesh_embed(embed: discord.Embed) -> ParsedSeshFields | None:
         event_time=event_time,
         set_code=set_code,
         event_number=event_number,
-        format_label=None,
         name=clean_title,
         attendees=attendees,
         maybe_attendees=maybe_attendees,

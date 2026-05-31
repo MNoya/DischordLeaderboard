@@ -47,7 +47,6 @@ class ParsedSeshEvent:
     event_time: datetime
     set_code: str
     event_number: int | None
-    format_label: str | None
     name: str
     attendees: Sequence[str]
     sesh_message_id: str
@@ -71,13 +70,21 @@ def _lookup_set_id(session: Session, set_code: str) -> str | None:
 
 
 def _build_draftmancer_session(session: Session, parsed: ParsedSeshEvent) -> str:
-    """Compose a stable session id; prefer #N from the title, fall back to Month-Day; suffix collisions A/B/C."""
-    prefix = settings.pod_draft_session_prefix
-    if parsed.event_number is not None:
-        base = f"{prefix}-{parsed.set_code}-{parsed.event_number}"
+    """Compose a stable session id; prefer #N from the title, fall back to Month-Day; suffix collisions A/B/C.
+
+    Custom formats drop the LLU prefix and lead with their own slug instead of a set code.
+    """
+    slug = pod_format.session_slug_for(parsed.set_code)
+    if slug is not None:
+        head = f"{slug}-{parsed.event_date:%y}"
     else:
-        month = parsed.event_date.strftime("%b")
-        base = f"{prefix}-{parsed.set_code}-{month}-{parsed.event_date.day}"
+        head = f"{settings.pod_draft_session_prefix}-{parsed.set_code}"
+
+    if parsed.event_number is not None:
+        suffix = f"D{parsed.event_number}" if slug is not None else str(parsed.event_number)
+        base = f"{head}-{suffix}"
+    else:
+        base = f"{head}-{parsed.event_date:%b}-{parsed.event_date.day}"
 
     taken = set(session.execute(
         select(PodDraftEvent.draftmancer_session).where(PodDraftEvent.draftmancer_session.like(f"{base}%"))
@@ -186,7 +193,7 @@ def record_event(session: Session, parsed: ParsedSeshEvent) -> PodDraftEvent:
         event_time=parsed.event_time,
         set_id=set_id,
         set_code=parsed.set_code,
-        format_label=parsed.format_label,
+        format_label=pod_format.label_for(parsed.set_code),
         name=parsed.name,
         draftmancer_session=session_id,
         draftmancer_url=url,

@@ -116,7 +116,6 @@ class SeshListener(commands.Cog):
             event_time=fields.event_time,
             set_code=fields.set_code or ACTIVE_SET_CODE,
             event_number=fields.event_number,
-            format_label=fields.format_label,
             name=fields.name,
             attendees=fields.attendees,
             sesh_message_id=str(message.id),

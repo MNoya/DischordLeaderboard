@@ -49,7 +49,6 @@ def _parsed_event(set_code="SOS", event_date=date(2026, 5, 13), attendees=("Alic
         event_time=datetime(event_date.year, event_date.month, event_date.day, 0, 0, tzinfo=timezone.utc),
         set_code=set_code,
         event_number=event_number,
-        format_label=None,
         name=f"{set_code} Pod Draft — {event_date:%b %d}",
         attendees=list(attendees),
         sesh_message_id=f"msg-{event_date.isoformat()}-{event_number}",
@@ -95,6 +94,28 @@ def test_record_event_with_event_number_uses_n_in_session(session, monkeypatch):
     e2 = record_event(session, _parsed_event(attendees=(), event_number=10))
     assert e1.draftmancer_session == "LLU-SOS-10"
     assert e2.draftmancer_session == "LLU-SOS-10-A"
+
+
+def test_record_event_custom_format_uses_slug_and_drops_prefix(session, monkeypatch):
+    monkeypatch.setattr(settings, "pod_draft_session_prefix", "LLU")
+    event = record_event(session, _parsed_event(set_code="PEASANT", attendees=(), event_number=4))
+    assert event.draftmancer_session == "Peasant-26-D4"
+    assert event.draftmancer_url == "https://draftmancer.com/?session=Peasant-26-D4"
+    assert event.format_label == "Peasant Cube"
+
+
+def test_record_event_custom_format_falls_back_to_month_day(session, monkeypatch):
+    monkeypatch.setattr(settings, "pod_draft_session_prefix", "LLU")
+    event = record_event(session, _parsed_event(set_code="PEASANT", attendees=()))
+    assert event.draftmancer_session == "Peasant-26-May-13"
+
+
+def test_record_event_custom_format_collision_appends_letter_suffix(session, monkeypatch):
+    monkeypatch.setattr(settings, "pod_draft_session_prefix", "LLU")
+    e1 = record_event(session, _parsed_event(set_code="PEASANT", attendees=(), event_number=4))
+    e2 = record_event(session, _parsed_event(set_code="PEASANT", attendees=(), event_number=4))
+    assert e1.draftmancer_session == "Peasant-26-D4"
+    assert e2.draftmancer_session == "Peasant-26-D4-A"
 
 
 def test_record_event_with_no_matching_set_leaves_set_id_null(session):
@@ -308,7 +329,7 @@ def _seed_linked_event(session, *, discord_id, thread_id, event_time, name="Pod 
     parsed = ParsedSeshEvent(
         event_date=event_time.date(),
         event_time=event_time,
-        set_code="SOS", event_number=None, format_label=None,
+        set_code="SOS", event_number=None,
         name=name,
         attendees=["Alice"],
         sesh_message_id=f"msg-{thread_id}",
@@ -404,7 +425,7 @@ def _seed_pod_for_deck_color_tests(session, thread_id: str = "thread-42") -> tup
     parsed = ParsedSeshEvent(
         event_date=date(2026, 5, 13),
         event_time=datetime(2026, 5, 13, 0, 0, tzinfo=timezone.utc),
-        set_code="SOS", event_number=None, format_label=None,
+        set_code="SOS", event_number=None,
         name="Pod Draft #1",
         attendees=["Alice", "Bob"],
         sesh_message_id="msg-deck-color",
