@@ -201,10 +201,13 @@ export function podDiscordName(p: {
 
 export function cleanPodEventName(name: string, setCode: string): string {
   const escaped = setCode.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return name
+  const cleaned = name
     .replace(new RegExp(`^${escaped}\\s+`, "i"), "")
     .replace(/\s+-\s+.+$/, "")
     .trim();
+  // Cube events lead with an organizer name and the format label; keep only what follows "Cube"
+  const afterCube = cleaned.replace(/^.*\bcube\b\s*/i, "").trim();
+  return afterCube || cleaned;
 }
 
 // Set codes are uppercase in the data; URLs are case-insensitive.
