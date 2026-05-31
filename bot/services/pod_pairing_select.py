@@ -17,6 +17,12 @@ PAIRING_MODES = (
 SELECT_PLACEHOLDER = "Choose pairing mode"
 
 
+def pairing_label(mode: str | None) -> str:
+    """Display label for a pairing mode; defaults to Swiss."""
+    cur = (mode or "swiss").lower()
+    return next((lbl for code, lbl, _ in PAIRING_MODES if code == cur), cur)
+
+
 def pairing_change_message(actor: str, mode: str) -> str:
     """Public thread notice when the pairing mode changes, with the mode's description as subtext."""
     label = next((lbl for code, lbl, _ in PAIRING_MODES if code == mode), mode)

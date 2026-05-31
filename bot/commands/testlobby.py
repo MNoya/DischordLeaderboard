@@ -30,7 +30,8 @@ from bot.services.pod_deck_color import SubmitDeckView
 from bot.services.pod_draft_manager import PodDraftManager, start_manager
 from bot.services.pod_drafts import seed_event_participants
 from bot.sets import ACTIVE_SET_CODE
-from bot.services.pod_format import label_for
+from bot.services.pod_format import format_display
+from bot.services.pod_pairing_select import pairing_label
 from bot.services.pod_format_select import FormatSelectView
 from bot.services.pod_settings_view import PodSettingsView
 from bot.services.pod_tournament import start_tournament
@@ -311,6 +312,7 @@ def _build(state: str) -> tuple[discord.Embed, discord.ui.View | None]:
         _THREAD_NAME, _RSVPS_YES, _RSVPS_MAYBE, in_session,
         state=render_state, draftmancer_url=_DRAFTMANCER_URL,
         decliner_name=decliner_name, cancel_reason=cancel_reason, initiated_by=initiated_by,
+        format_label=format_display(ACTIVE_SET_CODE), pairing_label=pairing_label("swiss"),
     )
     has_unrecognized = any(dn is None for _, dn in in_session)
     view: discord.ui.View | None = (
@@ -438,7 +440,7 @@ async def setup(bot: commands.Bot) -> None:
                 embed = render_lobby_embed(
                     _THREAD_NAME, _RSVPS_YES, _RSVPS_MAYBE, list(_LINKED_EIGHT),
                     state="linked", draftmancer_url=_DRAFTMANCER_URL,
-                    format_label=label_for(code),
+                    format_label=format_display(code), pairing_label=pairing_label("swiss"),
                 )
                 await inter.channel.send(embed=embed)
                 return None

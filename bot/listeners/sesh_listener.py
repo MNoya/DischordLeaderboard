@@ -18,6 +18,7 @@ from sqlalchemy import select
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.models import PodDraftEvent
+from bot.services import pod_format
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_drafts import ParsedSeshEvent, record_event, update_event_time_if_changed
 from bot.services.sesh_parser import ParsedSeshFields, parse_sesh_embed
@@ -134,7 +135,10 @@ class SeshListener(commands.Cog):
         try:
             await thread.send(embed=discord.Embed(
                 title="🤖 Pod Draft registered!",
-                description=f"Draftmancer link will be posted {REMINDER_LEAD_MIN} minutes before the event starts.",
+                description=(
+                    f"Format: **{pod_format.format_display(parsed_event.set_code)}**\n"
+                    f"Draftmancer link will be posted {REMINDER_LEAD_MIN} minutes before the event starts."
+                ),
                 color=discord.Color.green(),
             ))
         except discord.HTTPException:

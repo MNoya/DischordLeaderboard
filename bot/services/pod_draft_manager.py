@@ -34,6 +34,7 @@ from bot.services.lobby_embed import (
 from bot.services.magicprotools import submit_to_api as submit_to_magicprotools
 from bot.services import pod_format
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
+from bot.services.pod_pairing_select import pairing_label
 from bot.services.pod_drafts import (
     normalize_player_name,
     classify_lobby_names,
@@ -498,7 +499,8 @@ class PodDraftManager:
             cancel_reason=self.last_cancel_reason,
             initiated_by=self.initiated_by,
             display_name_by_mention_id=await self._resolve_rsvp_mentions(thread.guild),
-            format_label=pod_format.label_for(self.set_code),
+            format_label=pod_format.format_display(self.set_code),
+            pairing_label=pairing_label(self.pairing_mode),
         )
         has_unrecognized = any(dn is None for _, dn in classified)
         view = (
@@ -1118,6 +1120,8 @@ async def set_event_pairing_mode(event_id: str, mode: str) -> str | None:
             return "Pairing mode is locked once the tournament has started."
         manager.pairing_mode = mode
     await asyncio.to_thread(persist_pairing_mode, event_id, mode)
+    if manager is not None:
+        await manager.refresh_lobby_now()
     return None
 
 

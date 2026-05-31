@@ -121,6 +121,7 @@ def render(
     initiated_by: str | None = None,
     display_name_by_mention_id: dict[int, str] | None = None,
     format_label: str | None = None,
+    pairing_label: str | None = None,
 ) -> discord.Embed:
     """Lobby embed. `title` is the thread/event name; `rsvps_yes` / `rsvps_maybe` are sesh display
     names by RSVP type; `in_session` is Draftmancer sessionUsers as (arena_name,
@@ -156,12 +157,18 @@ def render(
     header_lines: list[str] = []
     if draftmancer_url:
         header_lines.append(f"### {draftmancer_url}")
-    if format_label:
-        header_lines.append(f"### {format_label}")
     header_lines.extend(status_lines)
     description = "\n".join(header_lines) if header_lines else None
 
     embed = discord.Embed(title=title, description=description, color=color)
+
+    footer_parts = []
+    if format_label:
+        footer_parts.append(f"Format: {format_label}")
+    if pairing_label:
+        footer_parts.append(f"Pairings: {pairing_label}")
+    if footer_parts:
+        embed.set_footer(text="  •  ".join(footer_parts))
 
     if in_draftmancer:
         trailing = "\n​" if show_pending else ""
