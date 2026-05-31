@@ -96,10 +96,6 @@ BRACKET_EDIT_BLOCKED_MSG = "That result can't be changed now — a later round a
 ANNOUNCEMENT_TOP_N = 4  # channel-level announcement shows top performers only; thread keeps full standings
 CHAMPIONSHIP_DEADLINE_SECONDS = 600  # hard cap from R3 end: post the announcement with whatever decks landed
 
-# Test-only result handler hook (set by bot/commands/testlobby.py). Always None in prod.
-_test_result_handler = None
-_test_handler_prefix: str | None = None
-
 
 def build_deck_reminder_text(mentions: str) -> str:
     return f"{mentions} drop your deck screenshot and set your colors so the championship post can go up 🏆"
@@ -137,12 +133,11 @@ def build_thread_link_button(guild_id: int | str, thread_id: int | str) -> ui.Bu
 
 
 def build_replays_link_button(event_name: str) -> ui.Button:
-    """🎬 Replays link button pointing to /pods/<slug> on the public site."""
     return ui.Button(
-        label="Replays",
+        label="Replay the Draft",
         style=discord.ButtonStyle.link,
         url=f"{settings.public_site_url.rstrip('/')}/pods/{slugify(event_name)}",
-        emoji="🎬",
+        emoji=emojis.get_emoji("llu") or "🎬",
     )
 
 
@@ -724,13 +719,6 @@ def _load_participant_id_sync(event_id: str, discord_id: str) -> str | None:
         return participant_id_for_discord_user(session, event_id, discord_id)
 
 
-def register_test_result_handler(prefix: str, handler) -> None:
-    """Plug a test handler into the result-submission dispatch (testlobby preview only)."""
-    global _test_result_handler, _test_handler_prefix
-    _test_handler_prefix = prefix
-    _test_result_handler = handler
-
-
 async def start_tournament(manager: "PodDraftManager") -> None:
     """Snapshot the Draftmancer roster, post Round 1 pairings + result dropdowns in the thread."""
     roster = list(manager.tournament_roster)
@@ -942,11 +930,6 @@ async def _handle_result_submission(interaction: discord.Interaction, value: str
         match_id, winner_name, score = value.split("|", 2)
     except ValueError:
         await interaction.response.send_message("Malformed result option.", ephemeral=True)
-        return
-
-    if (_test_result_handler is not None and _test_handler_prefix
-            and match_id.startswith(_test_handler_prefix)):
-        await _test_result_handler(interaction, match_id, winner_name, score)
         return
 
     try:

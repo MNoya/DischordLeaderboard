@@ -1,6 +1,6 @@
 """Lobby embed renderer for pod-draft events.
 
-Shared between `!testlobby` (sandbox) and the live `PodDraftManager` so both produce the same
+Shared between `!test` (sandbox) and the live `PodDraftManager` so both produce the same
 visual. The Ready Check button is a persistent View (stable custom_id) registered once at
 startup; clicks dispatch to the active manager for the thread.
 """
@@ -221,6 +221,8 @@ def render_ready_check_progress(
     cancel_reason: str | None = None,
     superseded: bool = False,
     initiated_by: str | None = None,
+    ready_count: int | None = None,
+    total_count: int | None = None,
 ) -> discord.Embed:
     """Compact ready-check progress card.
 
@@ -229,22 +231,26 @@ def render_ready_check_progress(
     `state` mirrors the lobby state machine: 'ready', 'notready', 'drafting', 'complete', and
     falls through to a neutral header otherwise.
 
-    `superseded` marks a stale card that a newer ready check has replaced: it keeps only the
-    decliner/cancel header and drops the roster entirely, so a dead check never repeats the snapshot.
+    A declined card ('notready', including the `superseded` stale variant) collapses to two lines —
+    `❌ <name> is Not Ready` + `✅ ready_count/total_count Ready` — with no link, buttons, or roster,
+    since the retry controls live on the main lobby card.
     """
     in_draftmancer = [(arena, dn) for arena, dn in in_session if dn is not None]
 
+    declined = state == "notready"
     status_lines, color = ready_status_banner(
         state, decliner_name=decliner_name, cancel_reason=cancel_reason,
-        initiated_by=initiated_by, retry_hint=not superseded,
+        initiated_by=initiated_by, retry_hint=False if declined else not superseded,
     )
     if not status_lines:
         status_lines = ["### Ready Check"]
-    header_lines = [f"### {draftmancer_url}"] if draftmancer_url else []
+    header_lines = [f"### {draftmancer_url}"] if draftmancer_url and not declined else []
     header_lines.extend(status_lines)
+    if declined and ready_count is not None and total_count is not None:
+        header_lines.append(f"### ✅ {ready_count}/{total_count} Ready")
     embed = discord.Embed(title=title, description="\n".join(header_lines), color=color)
 
-    if superseded:
+    if declined or superseded:
         return embed
 
     if state in ("drafting", "complete"):
@@ -287,7 +293,7 @@ def ready_status_banner(
         return [f"### {emojis.get('draftmancer')} Draft complete!"], discord.Color.green()
     if state == "notready":
         retry = "! Click Ready Check to retry" if retry_hint else ""
-        reason = f"`{decliner_name}` declined" if decliner_name else (cancel_reason or "Ready Check cancelled")
+        reason = f"`{decliner_name}` is Not Ready" if decliner_name else (cancel_reason or "Ready Check cancelled")
         return [f"### ❌ {reason}{retry}"], discord.Color.red()
     if state == "onhold":
         return ["### ⏳ Ready Check on hold until everyone is linked"], discord.Color.orange()

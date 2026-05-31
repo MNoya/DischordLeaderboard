@@ -70,8 +70,24 @@ def test_ready_progress_superseded_shows_only_decliner_no_roster():
     )
     assert _field(embed, "✅ In Draftmancer") is None
     assert _field(embed, "⏳ Pending") is None
-    assert "Player3#0003` declined" in embed.description
+    assert "Player3#0003` is Not Ready" in embed.description
     assert "retry" not in embed.description
+
+
+def test_ready_progress_declined_collapses_to_tally():
+    """A declined card collapses to the 'is Not Ready' banner plus an X/N ready tally, dropping the
+    Draftmancer link and the Ready/Pending roster."""
+    in_session = [(f"P{i}#000{i}", f"Player{i}") for i in range(8)]
+    embed = render_ready_check_progress(
+        "Pod Draft", in_session, state="notready",
+        draftmancer_url="https://draftmancer.com/?session=X",
+        decliner_name="Player3#0003", ready_count=3, total_count=8,
+    )
+    assert "Player3#0003` is Not Ready" in embed.description
+    assert "3/8 Ready" in embed.description
+    assert "draftmancer.com" not in embed.description
+    assert _field(embed, "✅ Ready") is None
+    assert _field(embed, "⏳ Pending") is None
 
 
 def test_ready_progress_shows_initiator_only_during_active_check():
