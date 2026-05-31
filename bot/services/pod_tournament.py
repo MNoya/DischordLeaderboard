@@ -12,7 +12,7 @@ import asyncio
 import logging
 import re
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, NamedTuple
 
 import discord
@@ -95,6 +95,7 @@ GRACE_SECONDS = 60  # window after round completion during which edits regenerat
 BRACKET_EDIT_BLOCKED_MSG = "That result can't be changed now — a later round already reported a result."
 ANNOUNCEMENT_TOP_N = 4  # channel-level announcement shows top performers only; thread keeps full standings
 CHAMPIONSHIP_DEADLINE_SECONDS = 600  # hard cap from R3 end: post the announcement with whatever decks landed
+CHAMPIONSHIP_RECONCILE_WINDOW = timedelta(hours=24)  # startup sweep only revisits recently-finalized pods
 
 
 def build_deck_reminder_text(mentions: str) -> str:
@@ -134,7 +135,7 @@ def build_thread_link_button(guild_id: int | str, thread_id: int | str) -> ui.Bu
 
 def build_replays_link_button(event_name: str) -> ui.Button:
     return ui.Button(
-        label="Replay the Draft",
+        label="Draft Recap",
         style=discord.ButtonStyle.link,
         url=f"{settings.public_site_url.rstrip('/')}/pods/{slugify(event_name)}",
         emoji=emojis.get_emoji("llu") or "🎬",
@@ -214,6 +215,23 @@ def _load_event_started_at_sync(event_id: str) -> datetime | None:
         return session.execute(
             select(PodDraftEvent.event_time).where(PodDraftEvent.id == event_id)
         ).scalar_one_or_none()
+
+
+def _championship_posted_at_sync(event_id: str) -> datetime | None:
+    with SessionLocal() as session:
+        return session.execute(
+            select(PodDraftEvent.championship_posted_at).where(PodDraftEvent.id == event_id)
+        ).scalar_one_or_none()
+
+
+def _mark_championship_posted_sync(event_id: str) -> None:
+    with SessionLocal() as session:
+        session.execute(
+            update(PodDraftEvent)
+            .where(PodDraftEvent.id == event_id, PodDraftEvent.championship_posted_at.is_(None))
+            .values(championship_posted_at=datetime.now(timezone.utc))
+        )
+        session.commit()
 
 
 def _load_tournament_players_sync(event_id: str) -> list[pod_swiss.Player]:
@@ -2178,6 +2196,9 @@ async def maybe_post_championship(manager, *, force: bool = False) -> None:
     if manager.champion_announced:
         return
     event_id = manager.event_id
+    if await asyncio.to_thread(_championship_posted_at_sync, event_id) is not None:
+        manager.champion_announced = True
+        return
     if not manager.finalized:
         log.info(f"[FINALIZE] champion.skip event={event_id} reason=not_finalized")
         return
@@ -2248,6 +2269,7 @@ async def maybe_post_championship(manager, *, force: bool = False) -> None:
     manager.champion_announced = True  # claim before the await so concurrent triggers don't double-post
     try:
         manager.champion_announcement_message = await target.send(view=view)
+        await asyncio.to_thread(_mark_championship_posted_sync, event_id)
         log.info(
             f"[FINALIZE] champion.posted event={event_id} rank1={champions[0].player_name!r} "
             f"forced={force} missing={incomplete}"
@@ -2259,6 +2281,63 @@ async def maybe_post_championship(manager, *, force: bool = False) -> None:
     if not force and manager.championship_task is not None and not manager.championship_task.done():
         manager.championship_task.cancel()
     await manager.disconnect_safely()
+
+
+class _RecoveryManager:
+    """Manager-less stand-in so maybe_post_championship can post after a restart, when the live
+    PodDraftManager is gone. Exposes only what maybe_post_championship reads; backed by the DB row."""
+
+    def __init__(self, bot, event_id: str, thread_id: int, tournament_players: list) -> None:
+        self.bot = bot
+        self.event_id = event_id
+        self.thread_id = thread_id
+        self.tournament_players = tournament_players
+        self.finalized = True
+        self.champion_announced = False
+        self.champion_discord_ids: set[str] = set()
+        self.champion_announcement_message = None
+        self.championship_task = None
+        self.mpt_task = None
+
+    async def _fetch_thread(self):
+        try:
+            return await self.bot.fetch_channel(self.thread_id)
+        except Exception:
+            log.warning(f"could not fetch thread {self.thread_id}", exc_info=True)
+            return None
+
+    async def disconnect_safely(self) -> None:
+        return None
+
+
+def _load_unannounced_finalized_sync() -> list[tuple[str, str]]:
+    cutoff = datetime.now(timezone.utc) - CHAMPIONSHIP_RECONCILE_WINDOW
+    with SessionLocal() as session:
+        return [
+            (row[0], row[1])
+            for row in session.execute(
+                select(PodDraftEvent.id, PodDraftEvent.discord_thread_id).where(
+                    PodDraftEvent.finalized_at.is_not(None),
+                    PodDraftEvent.championship_posted_at.is_(None),
+                    PodDraftEvent.finalized_at >= cutoff,
+                )
+            ).all()
+        ]
+
+
+async def reconcile_unannounced_championships(bot) -> None:
+    """Startup sweep: post the championship for any recently-finalized pod whose one-time announcement
+    never went out (e.g. the bot restarted between finalize and post). Idempotent via the DB guard."""
+    rows = await asyncio.to_thread(_load_unannounced_finalized_sync)
+    posted = 0
+    for event_id, thread_id in rows:
+        players = await asyncio.to_thread(_load_tournament_players_sync, event_id)
+        shim = _RecoveryManager(bot, event_id, int(thread_id), players)
+        await maybe_post_championship(shim, force=True)
+        if shim.champion_announced:
+            posted += 1
+    if posted:
+        log.info(f"startup sweep reconciled {posted} unannounced championship(s)")
 
 
 async def _post_or_update_live_standings(manager) -> None:
@@ -2301,10 +2380,10 @@ async def _post_or_update_live_standings(manager) -> None:
         thread = await manager._fetch_thread()
         if thread is None:
             return
+        view = build_live_submit_deck_view()
+        view.add_item(build_replays_link_button(event_name))
         try:
-            manager.standings_message = await thread.send(
-                embed=embed, view=build_live_submit_deck_view(),
-            )
+            manager.standings_message = await thread.send(embed=embed, view=view)
         except Exception:
             log.warning("could not post live standings", exc_info=True)
             return

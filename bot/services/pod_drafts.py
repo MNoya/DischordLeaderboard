@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Sequence
 
 from sqlalchemy import any_, func, select
@@ -475,6 +475,8 @@ def finalize_champion(
         participant.eliminated_round = standing.eliminated_round
 
     event.socket_status = "complete"
+    if event.finalized_at is None:
+        event.finalized_at = datetime.now(timezone.utc)
     session.flush()
     return event
 
@@ -595,19 +597,24 @@ def thread_id_for_event(session: Session, event_id: str) -> str | None:
     ).scalar_one_or_none()
 
 
+DM_SUBMISSION_WINDOW = timedelta(hours=24)
+
+
 def active_event_for_discord_user_in_dm(session: Session, discord_id: str) -> tuple[str, str] | None:
-    """Return (event_id, discord_thread_id) for the most recent unfinished pod-draft this user is in,
-    so the DM image redirect can point them at the correct thread. Picks the latest event_date and
-    only matches events that haven't been finalized (socket_status != 'complete')."""
+    """Return (event_id, discord_thread_id) for the most recent pod-draft this user is in within the
+    DM submission window, so deck-color/screenshot DMs route to the right pod. Window is finalization-
+    agnostic: late deck submissions stay accepted (and stored) after the tournament finalizes; newest
+    pod wins so a stale pod can't shadow a fresh one."""
+    cutoff = datetime.now(timezone.utc) - DM_SUBMISSION_WINDOW
     row = session.execute(
         select(PodDraftEvent.id, PodDraftEvent.discord_thread_id)
         .join(PodDraftParticipant, PodDraftParticipant.event_id == PodDraftEvent.id)
         .join(Player, Player.id == PodDraftParticipant.player_id)
         .where(
             Player.discord_id == discord_id,
-            PodDraftEvent.socket_status != "complete",
+            PodDraftEvent.event_time >= cutoff,
         )
-        .order_by(PodDraftEvent.event_date.desc().nulls_last())
+        .order_by(PodDraftEvent.event_time.desc())
         .limit(1)
     ).first()
     return (row[0], row[1]) if row else None

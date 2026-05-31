@@ -41,6 +41,7 @@ from bot.models import LeaderboardMessage, MagicSet, Player, PodDraftEvent
 from bot.services.bot_log import BotLog
 from bot.services.lobby_embed import LobbyReadyButtonView
 from bot.services.pod_tournament import (
+    reconcile_unannounced_championships,
     register_persistent_views as register_pod_views,
 )
 from bot.services.refresh import refresh_active_players
@@ -380,6 +381,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         if not bot.startup_announced:
             bot.startup_announced = True
             await bot.bot_log.post_plain(_deploy_announcement())
+            await reconcile_unannounced_championships(bot)
         if not settings.auto_refresh_enabled:
             log.info("AUTO_REFRESH_ENABLED=false; skipping the scheduled 17lands refresh tick")
             return

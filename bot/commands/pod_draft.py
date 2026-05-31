@@ -178,6 +178,7 @@ class PodDraft(commands.Cog):
                     arena_name=arena_name,
                     arena_aliases=[normalized],
                     active=True,
+                    leaderboard_opt_in=False,
                 )
                 session.add(player)
             else:

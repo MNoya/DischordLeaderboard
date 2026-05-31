@@ -114,6 +114,7 @@ def process_leaderboard(
             PlayerStats.set_id == magic_set.id,
             PlayerStats.events > 0,
             Player.active.is_(True),
+            Player.leaderboard_opt_in.is_(True),
         )
     ).scalar() or 0
 
@@ -150,6 +151,7 @@ def process_leaderboard_for_format(
         .join(PlayerStats, PlayerStats.player_id == Player.id)
         .where(
             Player.active.is_(True),
+            Player.leaderboard_opt_in.is_(True),
             PlayerStats.set_id == magic_set.id,
             PlayerStats.format.in_(group.formats),
         )
@@ -226,7 +228,11 @@ def process_leaderboard_for_archetype(
             DraftEvent.is_trophy,
         )
         .join(DraftEvent, DraftEvent.player_id == Player.id)
-        .where(Player.active.is_(True), DraftEvent.set_id == magic_set.id)
+        .where(
+            Player.active.is_(True),
+            Player.leaderboard_opt_in.is_(True),
+            DraftEvent.set_id == magic_set.id,
+        )
     ).all()
 
     bucket: dict[str, dict] = {}
@@ -310,6 +316,7 @@ def process_leaderboard_for_direct(
         .join(DraftEvent, DraftEvent.player_id == Player.id)
         .where(
             Player.active.is_(True),
+            Player.leaderboard_opt_in.is_(True),
             DraftEvent.set_id == magic_set.id,
             DraftEvent.format == "ArenaDirect_Sealed",
         )
@@ -709,7 +716,12 @@ def _drafter_count(session: Session) -> int:
     return session.execute(
         select(func.count(func.distinct(PlayerStats.player_id)))
         .join(Player, Player.id == PlayerStats.player_id)
-        .where(PlayerStats.set_id == magic_set.id, PlayerStats.events > 0, Player.active.is_(True))
+        .where(
+            PlayerStats.set_id == magic_set.id,
+            PlayerStats.events > 0,
+            Player.active.is_(True),
+            Player.leaderboard_opt_in.is_(True),
+        )
     ).scalar() or 0
 
 

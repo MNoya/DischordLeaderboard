@@ -154,6 +154,7 @@ def process_signup(
             avatar_hash=avatar_hash,
             seventeenlands_token=token,
             active=True,
+            leaderboard_opt_in=True,
         )
         session.add(player)
         session.commit()

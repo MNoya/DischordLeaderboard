@@ -354,6 +354,29 @@ def test_refresh_active_players_skips_inactive_and_token_invalid(session):
     assert [c[0] for c in client.calls] == [active_ok.seventeenlands_token]
 
 
+def test_refresh_active_players_skips_pod_only_players_without_token(session):
+    _seed_active_set(session)
+    active_ok = _seed_player(session, name="ok", token_suffix="a")
+    pod_only = Player(
+        slug="pod-only",
+        discord_id="refresh-pod-only",
+        display_name="pod-only",
+        seventeenlands_token=None,
+        active=True,
+        leaderboard_opt_in=False,
+    )
+    session.add(pod_only)
+    session.flush()
+
+    client = FakeClient(drafts=[_draft("x", expansion=ACTIVE_SET_CODE, event_wins=7)])
+    summary = refresh_active_players(session, client)
+
+    assert summary["invalidated"] == 0
+    assert [c[0] for c in client.calls] == [active_ok.seventeenlands_token]
+    session.refresh(pod_only)
+    assert pod_only.token_invalid is False
+
+
 def test_refresh_active_players_summary_counts_mixed_statuses(session):
     _seed_active_set(session)
     p_ok = _seed_player(session, name="ok", token_suffix="a")

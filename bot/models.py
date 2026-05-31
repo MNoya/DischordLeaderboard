@@ -41,6 +41,7 @@ class Player(Base):
     joined_at            = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at           = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
     token_invalid        = Column(Boolean, nullable=False, default=False)
+    leaderboard_opt_in   = Column(Boolean, nullable=False, default=True)
 
     stats = relationship(
         "PlayerStats",
@@ -173,6 +174,8 @@ class PodDraftEvent(Base):
     draft_log_gz        = Column(LargeBinary, nullable=True)
     discord_event_id    = Column(String, nullable=True)
     created_at          = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    finalized_at        = Column(DateTime(timezone=True), nullable=True)
+    championship_posted_at = Column(DateTime(timezone=True), nullable=True)
 
     participants = relationship(
         "PodDraftParticipant",

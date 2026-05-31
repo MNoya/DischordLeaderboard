@@ -284,7 +284,11 @@ def refresh_active_players_all_sets(session: Session, client: _DraftClient) -> d
 
 def _refresh_active_with_window(session: Session, client: _DraftClient, fetch_start: date) -> dict:
     players = session.execute(
-        select(Player).where(Player.active.is_(True), Player.token_invalid.is_(False))
+        select(Player).where(
+            Player.active.is_(True),
+            Player.token_invalid.is_(False),
+            Player.seventeenlands_token.isnot(None),
+        )
     ).scalars().all()
 
     summary: dict = {

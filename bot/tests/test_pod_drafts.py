@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select
 
@@ -7,6 +7,7 @@ from bot.models import MagicSet, Player, PodDraftEvent, PodDraftParticipant
 from bot.services.pod_drafts import (
     FinalStanding,
     ParsedSeshEvent,
+    active_event_for_discord_user_in_dm,
     finalize_champion,
     get_participant_deck_state,
     list_champions,
@@ -286,6 +287,69 @@ def test_finalize_champion_writes_standings_and_marks_complete(session):
     assert by_name["Alice"].eliminated_round is None
     assert by_name["Bob"].placement == 2
     assert by_name["Bob"].eliminated_round == 3
+
+
+def test_finalize_champion_stamps_finalized_at_and_preserves_it_on_rerun(session):
+    _seed_set(session)
+    event = record_event(session, _parsed_event(attendees=("Alice", "Bob")))
+    standings = [
+        FinalStanding(draftmancer_name="Alice", placement=1, record="3-0", eliminated_round=None),
+        FinalStanding(draftmancer_name="Bob",   placement=2, record="2-1", eliminated_round=3),
+    ]
+    first = finalize_champion(session, event.id, standings)
+    assert first.finalized_at is not None
+    stamped = first.finalized_at
+
+    again = finalize_champion(session, event.id, standings)
+    assert again.finalized_at == stamped
+
+
+def _seed_linked_event(session, *, discord_id, thread_id, event_time, name="Pod Draft"):
+    parsed = ParsedSeshEvent(
+        event_date=event_time.date(),
+        event_time=event_time,
+        set_code="SOS", event_number=None, format_label=None,
+        name=name,
+        attendees=["Alice"],
+        sesh_message_id=f"msg-{thread_id}",
+        discord_thread_id=thread_id,
+    )
+    return record_event(session, parsed)
+
+
+def test_active_event_resolver_returns_finalized_pod(session):
+    """Regression: a player submitting deck colors after finalization must still resolve to the pod."""
+    _seed_set(session)
+    _seed_player(session, discord_id="42", username="alice", display_name="Alice")
+    now = datetime.now(timezone.utc)
+    event = _seed_linked_event(session, discord_id="42", thread_id="thread-fin", event_time=now)
+    finalize_champion(session, event.id, [
+        FinalStanding(draftmancer_name="Alice", placement=1, record="3-0", eliminated_round=None),
+    ])
+    assert event.socket_status == "complete"
+
+    resolved = active_event_for_discord_user_in_dm(session, "42")
+    assert resolved == (event.id, "thread-fin")
+
+
+def test_active_event_resolver_excludes_pods_outside_window(session):
+    _seed_set(session)
+    _seed_player(session, discord_id="42", username="alice", display_name="Alice")
+    old = datetime.now(timezone.utc) - timedelta(hours=25)
+    _seed_linked_event(session, discord_id="42", thread_id="thread-old", event_time=old)
+
+    assert active_event_for_discord_user_in_dm(session, "42") is None
+
+
+def test_active_event_resolver_returns_newest_within_window(session):
+    _seed_set(session)
+    _seed_player(session, discord_id="42", username="alice", display_name="Alice")
+    now = datetime.now(timezone.utc)
+    _seed_linked_event(session, discord_id="42", thread_id="thread-older", event_time=now - timedelta(hours=6))
+    newer = _seed_linked_event(session, discord_id="42", thread_id="thread-newer", event_time=now - timedelta(hours=1))
+
+    resolved = active_event_for_discord_user_in_dm(session, "42")
+    assert resolved == (newer.id, "thread-newer")
 
 
 def test_list_champions_returns_filtered_and_ordered_by_date(session):

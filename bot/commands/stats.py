@@ -34,6 +34,7 @@ class StatsData:
     last_updated: datetime | None = None
     pod_stats: dict | None = None
     direct_stats: dict | None = None
+    opted_out: bool = False
 
 
 def _resolve_player(session: Session, player_name: str | None, viewer_discord_id: str) -> Player | None:
@@ -115,6 +116,7 @@ def process_stats(
         last_updated=last_updated,
         pod_stats=pod_stats,
         direct_stats=direct_stats,
+        opted_out=not player.leaderboard_opt_in,
     )
 
 
@@ -158,6 +160,8 @@ def render_embed(data: StatsData) -> discord.Embed:
     )
     if data.rank is not None:
         summary = f"Rank **#{data.rank}** • **{data.total_score:.1f} pts** • {data.total_trophies} 🏆"
+    elif data.opted_out:
+        summary = f"**{data.total_score:.1f} pts** • {data.total_trophies} 🏆"
     else:
         summary = "_Not yet on the leaderboard for this set._"
 
@@ -240,7 +244,11 @@ def _rank_players_for_set(
             PlayerStats.losses, PlayerStats.trophies,
         )
         .join(PlayerStats, PlayerStats.player_id == Player.id)
-        .where(Player.active.is_(True), PlayerStats.set_id == set_id)
+        .where(
+            Player.active.is_(True),
+            Player.leaderboard_opt_in.is_(True),
+            PlayerStats.set_id == set_id,
+        )
     ).all()
 
     bucket: dict[str, dict] = {}

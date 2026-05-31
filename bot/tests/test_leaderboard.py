@@ -6,6 +6,7 @@ from bot.commands.leaderboard import (
     process_leaderboard,
     render_public_embed,
 )
+from bot.commands.stats import StatsData, render_embed as render_stats_embed
 from bot.models import MagicSet, Player, PlayerStats
 
 
@@ -16,7 +17,7 @@ def _seed_set(session, code="SOS"):
     return s
 
 
-def _seed_player(session, name, discord_id, token_suffix, active=True):
+def _seed_player(session, name, discord_id, token_suffix, active=True, leaderboard_opt_in=True):
     token = (token_suffix * 32)[:32]
     p = Player(
         slug=f"{name.lower()}-{discord_id}",
@@ -25,6 +26,7 @@ def _seed_player(session, name, discord_id, token_suffix, active=True):
         display_name=name,
         seventeenlands_token=token,
         active=active,
+        leaderboard_opt_in=leaderboard_opt_in,
     )
     session.add(p)
     session.flush()
@@ -70,6 +72,18 @@ def test_leaderboard_excludes_inactive_players(session):
     s = _seed_set(session)
     a = _seed_player(session, "Alice", "1", "a", active=True)
     b = _seed_player(session, "Bob", "2", "b", active=False)
+    _seed_stats(session, a, s, trophies=2, events=4)
+    _seed_stats(session, b, s, trophies=10, events=10)
+    session.commit()
+
+    data = process_leaderboard(session, viewer_discord_id=None, top_n=3)
+    assert [e.display_name for e in data.top] == ["Alice"]
+
+
+def test_leaderboard_excludes_opted_out_players(session):
+    s = _seed_set(session)
+    a = _seed_player(session, "Alice", "1", "a")
+    b = _seed_player(session, "Bob", "2", "b", leaderboard_opt_in=False)
     _seed_stats(session, a, s, trophies=2, events=4)
     _seed_stats(session, b, s, trophies=10, events=10)
     session.commit()
@@ -133,6 +147,26 @@ def _data(viewer=None, top=None, last_updated=None, drafter_count=0):
         last_updated=last_updated,
         drafter_count=drafter_count,
     )
+
+
+def test_stats_embed_opted_out_shows_points_and_trophies_without_rank():
+    data = StatsData(
+        set_code="SOS", set_name="SOS", player_name="Bob", player_slug="bob",
+        rank=None, total_score=42.0, total_trophies=3, opted_out=True,
+    )
+    summary = (render_stats_embed(data).description or "").split("\n", 1)[0]
+    assert "42.0 pts" in summary
+    assert "3 🏆" in summary
+    assert "#" not in summary
+    assert "Not yet on the leaderboard" not in summary
+
+
+def test_stats_embed_not_yet_on_board_when_not_opted_out_and_no_rank():
+    data = StatsData(
+        set_code="SOS", set_name="SOS", player_name="Newcomer", player_slug="new",
+        rank=None, total_score=0.0, total_trophies=0, opted_out=False,
+    )
+    assert "Not yet on the leaderboard" in (render_stats_embed(data).description or "")
 
 
 def test_public_embed_omits_you_are_line_for_outside_viewer():
