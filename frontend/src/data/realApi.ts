@@ -398,7 +398,7 @@ async function aggregateColorsFromEvents(
     .map((r, i) => ({ ...r, rank: i + 1 }));
 }
 
-// ─── public_player_format_breakdown + public_leaderboard composite ─────────
+// ─── public_player_format_breakdown + public_player composite ──────────────
 
 export async function fetchPlayerProfile(
   slug: string,
@@ -406,7 +406,7 @@ export async function fetchPlayerProfile(
 ): Promise<PlayerProfile | null> {
   const [headlineResp, breakdownResp] = await Promise.all([
     client()
-      .from("public_leaderboard")
+      .from("public_player")
       .select("*")
       .eq("set_code", setCode)
       .eq("slug", slug)

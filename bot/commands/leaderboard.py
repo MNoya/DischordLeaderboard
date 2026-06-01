@@ -67,7 +67,6 @@ class LeaderboardEntry:
 @dataclass
 class PersonalStanding:
     set_code: str
-    rank: int | None
     score: float
     trophies: int
 
@@ -77,7 +76,6 @@ class PersonalStandingsData:
     player_name: str
     player_slug: str
     rows: list[PersonalStanding]
-    opted_out: bool = False
 
 
 @dataclass
@@ -464,11 +462,14 @@ def process_leaderboard_for_pod(
     )
 
 
-def process_personal_standings(session: Session, viewer_discord_id: str) -> PersonalStandingsData | None:
-    """Cross-set personal view: the caller's rank, score and trophies in every set they've drafted.
+PERSONAL_STANDINGS_LIMIT = 10
 
-    Sets the player never drafted are omitted; results sort by rank (best first),
-    opted-out players still see their own scores with no public rank.
+
+def process_personal_standings(session: Session, viewer_discord_id: str) -> PersonalStandingsData | None:
+    """The caller's own best sets: score and trophies per set they've drafted, top points first.
+
+    Aggregates the player's PlayerStats per set (alchemy variants bucket under their
+    parent set via set_id), sorts by score then trophies, and caps at the top 10.
     """
     player = session.execute(
         select(Player).where(Player.discord_id == viewer_discord_id)
@@ -476,47 +477,32 @@ def process_personal_standings(session: Session, viewer_discord_id: str) -> Pers
     if player is None:
         return None
 
-    opted_out = not player.leaderboard_opt_in
-    sets_by_code = {s.code: s for s in session.execute(select(MagicSet)).scalars()}
+    stats_rows = session.execute(
+        select(
+            MagicSet.code, PlayerStats.format, PlayerStats.events,
+            PlayerStats.wins, PlayerStats.losses, PlayerStats.trophies,
+        )
+        .join(MagicSet, MagicSet.id == PlayerStats.set_id)
+        .where(PlayerStats.player_id == player.id)
+    ).all()
 
-    rows: list[PersonalStanding] = []
-    for seed in ALL_SETS:
-        magic_set = sets_by_code.get(seed.code)
-        if magic_set is None:
-            continue
+    by_set: dict[str, dict] = {}
+    for r in stats_rows:
+        b = by_set.setdefault(r.code, {"stats": [], "trophies": 0})
+        b["stats"].append({
+            "format": r.format, "events": int(r.events or 0),
+            "wins": int(r.wins or 0), "losses": int(r.losses or 0), "trophies": int(r.trophies or 0),
+        })
+        b["trophies"] += int(r.trophies or 0)
 
-        rank: int | None = None
-        score = 0.0
-        trophies = 0
-        found = False
-        if not opted_out:
-            for entry in rank_players_for_set(session, magic_set.id):
-                if entry[1] == player.id:
-                    rank, score, trophies = entry[0], entry[5], entry[6]
-                    found = True
-                    break
-
-        if not found:
-            stats_rows = session.execute(
-                select(PlayerStats).where(
-                    PlayerStats.player_id == player.id,
-                    PlayerStats.set_id == magic_set.id,
-                )
-            ).scalars().all()
-            if not stats_rows:
-                continue
-            stat_dicts = [
-                {"format": r.format, "events": r.events, "wins": r.wins, "losses": r.losses, "trophies": r.trophies}
-                for r in stats_rows
-            ]
-            score = compute_score(stat_dicts)
-            trophies = sum(int(r.trophies or 0) for r in stats_rows)
-
-        rows.append(PersonalStanding(set_code=magic_set.code, rank=rank, score=score, trophies=trophies))
-
-    rows.sort(key=lambda r: (r.rank is None, r.rank or 0, -r.score))
+    rows = [
+        PersonalStanding(set_code=code, score=compute_score(b["stats"]), trophies=b["trophies"])
+        for code, b in by_set.items()
+    ]
+    rows.sort(key=lambda r: (-r.score, -r.trophies, r.set_code))
     return PersonalStandingsData(
-        player_name=player.display_name, player_slug=player.slug, rows=rows, opted_out=opted_out,
+        player_name=player.display_name, player_slug=player.slug,
+        rows=rows[:PERSONAL_STANDINGS_LIMIT],
     )
 
 
@@ -727,29 +713,26 @@ def render_personal_embed(data: PersonalStandingsData) -> discord.Embed:
         embed.description = "_No scored drafts yet — run `/join` to join, then draft some games._"
         return embed
 
-    rank_strs = {r.set_code: (f"#{r.rank}" if r.rank is not None else "—") for r in data.rows}
+    ord_width = max(len(f"{len(data.rows)}."), len("#"))
     set_width = max(max(len(r.set_code) for r in data.rows), len("Set"))
-    rank_width = max(max(len(v) for v in rank_strs.values()), len("#"))
     score_width = max(max(len(f"{round(r.score)}") for r in data.rows), len("Points"))
     trophy_width = max(max(len(str(r.trophies)) for r in data.rows), 1)
     header_trophy_width = max(trophy_width - 1, 1)
 
     header = (
-        f"{'Set':<{set_width}}  {'#':>{rank_width}}  "
+        f"{'#':<{ord_width}}  {'Set':<{set_width}}  "
         f"{'Points':>{score_width}}  {'🏆':>{header_trophy_width}}"
     )
     lines = [f"`{header}`"]
-    for r in data.rows:
+    for i, r in enumerate(data.rows, start=1):
+        ordinal = f"{i}.".ljust(ord_width)
         set_code = f"{r.set_code:<{set_width}}"
-        rank = f"{rank_strs[r.set_code]:>{rank_width}}"
         score = f"{round(r.score):>{score_width}}"
         trophy = f"{r.trophies:>{trophy_width}}"
-        inner = f"{set_code}  {rank}  {score}  {trophy}"
+        inner = f"{ordinal}  {set_code}  {score}  {trophy}"
         lines.append(f"[`{inner}`](<{_player_url(data.player_slug, r.set_code)}>)")
 
     embed.description = "\n".join(lines)
-    if data.opted_out:
-        embed.set_footer(text="Hidden from public boards · ranks shown are private")
     return embed
 
 
