@@ -381,6 +381,48 @@ def test_personal_standings_format_excludes_sets_without_group_events(session):
     assert data.rows == []
 
 
+def _seed_direct(session, p, s, wins, losses, finished, eid):
+    from bot.models import DraftEvent
+    session.add(DraftEvent(
+        player_id=p.id, set_id=s.id, seventeenlands_event_id=eid,
+        format="ArenaDirect_Sealed", expansion=s.code,
+        wins=wins, losses=losses, is_trophy=wins == 7,
+        finished_at=finished,
+    ))
+
+
+def test_personal_standings_direct_aggregates_boxes_and_ranks(session):
+    # 2026-05-10 sits outside the SOS collector-booster window, so the standard
+    # 7-win=2-box / 6-win=1-box rule applies.
+    s = _seed_set(session)
+    alice = _seed_player(session, "Alice", "1", "a")
+    bob = _seed_player(session, "Bob", "2", "b")
+    _seed_direct(session, alice, s, 7, 2, datetime(2026, 5, 10), "a1")  # 2 boxes, trophy
+    _seed_direct(session, alice, s, 6, 3, datetime(2026, 5, 10), "a2")  # 1 box
+    _seed_direct(session, bob, s, 7, 1, datetime(2026, 5, 10), "b1")    # 2 boxes
+    session.commit()
+
+    data = process_personal_standings(session, "1", format_label="Direct")
+    assert data.format_label == "Direct"
+    assert len(data.rows) == 1
+    row = data.rows[0]
+    assert (row.score, row.trophies, row.events) == (3.0, 1, 2)  # 3 boxes
+    assert (row.wins, row.losses) == (13, 5)
+    assert row.rank == 1  # 3 boxes ahead of Bob's 2
+
+
+def test_personal_standings_direct_collector_window_restricts_boxes(session):
+    # Inside the SOS collector-booster window only a 7-win trophy pays (1 box).
+    s = _seed_set(session)
+    alice = _seed_player(session, "Alice", "1", "a")
+    _seed_direct(session, alice, s, 7, 1, datetime(2026, 5, 1), "a1")  # trophy → 1 box
+    _seed_direct(session, alice, s, 6, 3, datetime(2026, 5, 1), "a2")  # no box
+    session.commit()
+
+    data = process_personal_standings(session, "1", format_label="Direct")
+    assert data.rows[0].score == 1.0
+
+
 def _personal(rows=None, opted_out=False, format_label=None):
     return PersonalStandingsData(
         player_name="Alice", player_slug="alice",
@@ -391,9 +433,15 @@ def _personal(rows=None, opted_out=False, format_label=None):
     )
 
 
-def test_personal_embed_omits_winrate_column():
+def test_personal_embed_omits_winrate_when_unfiltered():
     desc = render_personal_embed(_personal()).description or ""
     assert "Win%" not in desc
+
+
+def test_personal_embed_shows_winrate_when_format_filtered():
+    desc = render_personal_embed(_personal(format_label="Premier")).description or ""
+    assert "Win%" in desc
+    assert "84%" in desc  # 21 wins / 25 games
 
 
 def test_personal_embed_title_appends_format_suffix():
@@ -404,3 +452,11 @@ def test_personal_embed_title_appends_format_suffix():
 def test_personal_embed_title_plain_without_filter():
     embed = render_personal_embed(_personal())
     assert "·" not in embed.title
+
+
+def test_personal_embed_direct_uses_boxes_column_not_points():
+    rows = [PersonalStanding(set_code="SOS", score=4.0, trophies=2, events=6, wins=38, losses=12, rank=1)]
+    desc = render_personal_embed(_personal(rows=rows, format_label="Direct")).description or ""
+    assert "📦" in desc
+    assert "Pts" not in desc
+    assert "Win%" in desc

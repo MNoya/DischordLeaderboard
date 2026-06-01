@@ -54,7 +54,19 @@ class CollectorBoosterWindow:
     end_date: date
 
 
+# Arena Direct's box payout changed across three eras.
+# 2024 sets capped at 6 wins, where the 6-win trophy paid 2 Play Booster boxes.
+# DFT's premiere instead paid 1 Collector box at its 6-win trophy.
+# From April 2025 the ladder extended to 7 wins, paying 2 boxes at 7 and 1 at 6.
+# Collector Booster premiere weekends instead pay 1 box at 7 wins and nothing at 6.
+SIX_WIN_PLAY_DIRECT_SETS = frozenset({"OTJ", "FDN", "BLB", "DSK"})
+SIX_WIN_COLLECTOR_DIRECT_SETS = frozenset({"DFT"})
+
 COLLECTOR_BOOSTER_WINDOWS: tuple[CollectorBoosterWindow, ...] = (
+    CollectorBoosterWindow("TDM", date(2025, 4, 18), date(2025, 4, 21)),
+    CollectorBoosterWindow("FIN", date(2025, 6, 20), date(2025, 6, 22)),
+    CollectorBoosterWindow("EOE", date(2025, 8, 8), date(2025, 8, 11)),
+    CollectorBoosterWindow("ECL", date(2026, 1, 30), date(2026, 2, 1)),
     CollectorBoosterWindow("SOS", date(2026, 4, 30), date(2026, 5, 4)),
 )
 

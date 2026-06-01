@@ -20,7 +20,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Sequence
 
-from bot.sets import is_collector_booster_window
+from bot.sets import (
+    SIX_WIN_COLLECTOR_DIRECT_SETS,
+    SIX_WIN_PLAY_DIRECT_SETS,
+    is_collector_booster_window,
+)
 
 
 @dataclass(frozen=True)
@@ -123,12 +127,11 @@ def compute_score(
 
 
 def boxes_for_event(set_code: str, wins: int, finished_at: datetime | None) -> int:
-    """Boxes awarded for a single Arena Direct Sealed event.
-
-    Standard reward is 6 wins → 1 box, 7 wins → 2 boxes. Collector-booster
-    weekends pay a single premium box at 7 wins only — no consolation at 6.
-    Events with no finished_at fall through to the standard rule.
-    """
+    """Boxes awarded for a single Arena Direct Sealed event, per the era rules in bot.sets."""
+    if set_code in SIX_WIN_PLAY_DIRECT_SETS:
+        return 2 if wins >= 6 else 0
+    if set_code in SIX_WIN_COLLECTOR_DIRECT_SETS:
+        return 1 if wins >= 6 else 0
     if wins < 6:
         return 0
     if finished_at is not None and is_collector_booster_window(set_code, finished_at.date()):

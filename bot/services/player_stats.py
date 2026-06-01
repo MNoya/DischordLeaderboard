@@ -70,7 +70,8 @@ def process_stats(
                 break
 
     pod = player_pod_stats(session, player.discord_id)
-    pod_stats = pod if pod and pod["events_played"] > 0 else None
+    pod_bucket = pod["by_set"].get(magic_set.code) if pod else None
+    pod_stats = pod if pod_bucket and pod_bucket["events"] > 0 else None
 
     direct_rows = session.execute(
         select(DraftEvent.wins, DraftEvent.losses, DraftEvent.finished_at).where(
@@ -123,21 +124,18 @@ def render_embed(data: StatsData) -> discord.Embed:
     embed.description = f"{summary}\n\n{_format_breakdown(data.breakdown, data.direct_stats, data.opted_out)}"
 
     if data.pod_stats:
-        sets_with_events = [(code, b) for code, b in sorted(data.pod_stats["by_set"].items()) if b["events"]]
-        pod_lines = []
-        for code, b in sets_with_events:
+        b = data.pod_stats["by_set"].get(data.set_code)
+        if b and b["events"]:
             games = b["wins"] + b["losses"]
             wr = b["wins"] / games if games else 0.0
             events_word = "event" if b["events"] == 1 else "events"
             trophy_word = "trophy" if b["trophies"] == 1 else "trophies"
-            label = "Pod" if len(sets_with_events) == 1 else f"Pod {code}"
-            pod_lines.append(
-                f"**{label}** — {b['events']} {events_word}, "
+            embed.description = (
+                f"{embed.description}\n"
+                f"**Pod** — {b['events']} {events_word}, "
                 f"{b['wins']}-{b['losses']} ({wr:.0%}), "
                 f"{b['trophies']} {trophy_word}"
             )
-        if pod_lines:
-            embed.description = f"{embed.description}\n" + "\n".join(pod_lines)
 
     if data.last_updated is not None:
         embed.timestamp = data.last_updated

@@ -4,6 +4,7 @@ import logging
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Callable
 
 import discord
 from discord import app_commands
@@ -348,44 +349,9 @@ def process_leaderboard_for_direct(
     if magic_set is None:
         return None
 
-    rows = session.execute(
-        select(
-            Player.id, Player.slug, Player.display_name, Player.discord_id,
-            DraftEvent.wins, DraftEvent.finished_at,
-        )
-        .join(DraftEvent, DraftEvent.player_id == Player.id)
-        .where(
-            Player.active.is_(True),
-            Player.leaderboard_opt_in.is_(True),
-            DraftEvent.set_id == magic_set.id,
-            DraftEvent.format == "ArenaDirect_Sealed",
-        )
-    ).all()
-
-    bucket: dict[str, dict] = {}
-    for r in rows:
-        b = bucket.setdefault(r.id, {
-            "slug": r.slug, "display_name": r.display_name, "discord_id": r.discord_id,
-            "boxes": 0, "trophies": 0,
-        })
-        wins = int(r.wins or 0)
-        b["boxes"] += boxes_for_event(magic_set.code, wins, r.finished_at)
-        if wins == 7:
-            b["trophies"] += 1
-
-    scored = [
-        (b["boxes"], b["trophies"], pid, b["slug"], b["display_name"], b["discord_id"])
-        for pid, b in bucket.items()
-        if b["boxes"] > 0
-    ]
-    scored.sort(key=lambda x: (-x[0], -x[1], x[4].lower()))
-
-    ranked = [
-        (idx + 1, pid, slug, name, did, boxes, trophies)
-        for idx, (boxes, trophies, pid, slug, name, did) in enumerate(scored)
-    ]
+    ranked = _ranked_for_direct(session, magic_set.code, magic_set.id)
     top = [
-        LeaderboardEntry(rank=rank, player_id=pid, slug=slug, display_name=name, score=float(boxes), trophies=trophies, events=boxes)
+        LeaderboardEntry(rank=rank, player_id=pid, slug=slug, display_name=name, score=boxes, trophies=trophies, events=round(boxes))
         for rank, pid, slug, name, _did, boxes, trophies in ranked[:top_n]
     ]
     viewer_entry: LeaderboardEntry | None = None
@@ -394,7 +360,7 @@ def process_leaderboard_for_direct(
             if did == viewer_discord_id:
                 viewer_entry = LeaderboardEntry(
                     rank=rank, player_id=pid, slug=slug, display_name=name,
-                    score=float(boxes), trophies=trophies, events=boxes,
+                    score=boxes, trophies=trophies, events=round(boxes),
                 )
                 break
 
@@ -409,9 +375,54 @@ def process_leaderboard_for_direct(
         top=top,
         viewer=viewer_entry,
         last_updated=last_updated,
-        drafter_count=len(scored),
+        drafter_count=len(ranked),
         show_score=False,
     )
+
+
+def _ranked_for_direct(
+    session: Session, set_code: str, set_id: str,
+) -> list[tuple[int, str, str, str, str | None, float, int]]:
+    """Rank active, opted-in players by Arena Direct Sealed boxes won for a set.
+
+    Returns (rank, player_id, slug, display_name, discord_id, boxes, trophies); trophies
+    are 7-win events. Shared by the public Direct board and the personal standings rank.
+    """
+    rows = session.execute(
+        select(
+            Player.id, Player.slug, Player.display_name, Player.discord_id,
+            DraftEvent.wins, DraftEvent.finished_at,
+        )
+        .join(DraftEvent, DraftEvent.player_id == Player.id)
+        .where(
+            Player.active.is_(True),
+            Player.leaderboard_opt_in.is_(True),
+            DraftEvent.set_id == set_id,
+            DraftEvent.format == "ArenaDirect_Sealed",
+        )
+    ).all()
+
+    bucket: dict[str, dict] = {}
+    for r in rows:
+        b = bucket.setdefault(r.id, {
+            "slug": r.slug, "display_name": r.display_name, "discord_id": r.discord_id,
+            "boxes": 0, "trophies": 0,
+        })
+        wins = int(r.wins or 0)
+        b["boxes"] += boxes_for_event(set_code, wins, r.finished_at)
+        if wins == 7:
+            b["trophies"] += 1
+
+    scored = [
+        (b["boxes"], b["trophies"], pid, b["slug"], b["display_name"], b["discord_id"])
+        for pid, b in bucket.items()
+        if b["boxes"] > 0
+    ]
+    scored.sort(key=lambda x: (-x[0], -x[1], x[4].lower()))
+    return [
+        (idx + 1, pid, slug, name, did, float(boxes), trophies)
+        for idx, (boxes, trophies, pid, slug, name, did) in enumerate(scored)
+    ]
 
 
 def process_leaderboard_for_pod(
@@ -479,6 +490,7 @@ def process_leaderboard_for_pod(
 
 
 PERSONAL_STANDINGS_LIMIT = 10
+DIRECT_FILTER = "Direct"
 
 
 def process_personal_standings(
@@ -497,14 +509,17 @@ def process_personal_standings(
     if player is None:
         return None
 
+    opted_out = not player.leaderboard_opt_in
+
+    if format_label == DIRECT_FILTER:
+        return _personal_direct_standings(session, player, opted_out)
+
     group: QueueGroup | None = None
     if format_label is not None:
         group = next((g for g in DEFAULT_QUEUE_GROUPS if g.label == format_label), None)
         if group is None:
             return None
     allowed = set(group.formats) if group is not None else None
-
-    opted_out = not player.leaderboard_opt_in
 
     stats_rows = session.execute(
         select(
@@ -570,6 +585,62 @@ def _set_rank_for_format(
     """The player's standing on a set's per-format board, same opted-out fallback as _set_rank."""
     ranked = _ranked_for_format(session, group, set_id)
     return _rank_of(ranked, player_id, score)
+
+
+def _set_rank_for_direct(
+    session: Session, set_code: str, set_id: str, player_id: str, boxes: float,
+) -> int | None:
+    """The player's standing on a set's Direct board, same opted-out fallback as _set_rank."""
+    ranked = _ranked_for_direct(session, set_code, set_id)
+    return _rank_of(ranked, player_id, boxes)
+
+
+def _personal_direct_standings(
+    session: Session, player: Player, opted_out: bool,
+) -> PersonalStandingsData:
+    """Per-set Arena Direct Sealed standings for one player, ranked by boxes won.
+
+    Mirrors the public Direct board: ``score`` carries boxes (the headline metric, no
+    points), trophies are 7-win events, ranked against each set's Direct board.
+    """
+    rows_q = session.execute(
+        select(
+            MagicSet.id, MagicSet.code,
+            DraftEvent.wins, DraftEvent.losses, DraftEvent.finished_at,
+        )
+        .join(MagicSet, MagicSet.id == DraftEvent.set_id)
+        .where(
+            DraftEvent.player_id == player.id,
+            DraftEvent.format == "ArenaDirect_Sealed",
+        )
+    ).all()
+
+    by_set: dict[str, dict] = {}
+    for r in rows_q:
+        b = by_set.setdefault(r.id, {
+            "code": r.code, "events": 0, "wins": 0, "losses": 0, "boxes": 0, "trophies": 0,
+        })
+        wins = int(r.wins or 0)
+        b["events"] += 1
+        b["wins"] += wins
+        b["losses"] += int(r.losses or 0)
+        b["boxes"] += boxes_for_event(r.code, wins, r.finished_at)
+        if wins == 7:
+            b["trophies"] += 1
+
+    rows: list[PersonalStanding] = []
+    for set_id, b in by_set.items():
+        boxes = float(b["boxes"])
+        rank = None if opted_out else _set_rank_for_direct(session, b["code"], set_id, player.id, boxes)
+        rows.append(PersonalStanding(
+            set_code=b["code"], score=boxes, trophies=b["trophies"],
+            events=b["events"], wins=b["wins"], losses=b["losses"], rank=rank,
+        ))
+    rows.sort(key=lambda r: (-r.score, -r.trophies, r.set_code))
+    return PersonalStandingsData(
+        player_name=player.display_name, player_slug=player.slug,
+        rows=rows[:PERSONAL_STANDINGS_LIMIT], opted_out=opted_out, format_label=DIRECT_FILTER,
+    )
 
 
 def _rank_of(
@@ -781,6 +852,37 @@ def render_embed(data: LeaderboardData) -> discord.Embed:
 render_public_embed = render_embed
 
 
+@dataclass(frozen=True)
+class _Column:
+    header: str
+    align: str
+    cell: Callable[[PersonalStanding], str]
+
+
+def _winrate(r: PersonalStanding) -> str:
+    games = r.wins + r.losses
+    return f"{round(r.wins / games * 100)}%" if games else "—"
+
+
+def _personal_columns(data: PersonalStandingsData) -> list[_Column]:
+    """Ordered column specs for the standings table. Opted-out players are excluded
+    from public rank sequences, so Rnk and the ranking metric (Pts, or 📦 boxes for
+    Direct) are dropped; Win% only reads cleanly under a single format filter.
+    """
+    cols = [_Column("Set", "l", lambda r: r.set_code)]
+    if not data.opted_out:
+        cols.append(_Column("Rnk", "r", lambda r: f"#{r.rank}" if r.rank is not None else "—"))
+    cols.append(_Column("Ev", "r", lambda r: str(r.events)))
+    if data.format_label is not None:
+        cols.append(_Column("Win%", "r", _winrate))
+    if data.format_label == DIRECT_FILTER:
+        cols.append(_Column("📦", "r", lambda r: str(round(r.score))))
+    elif not data.opted_out:
+        cols.append(_Column("Pts", "c", lambda r: str(round(r.score))))
+    cols.append(_Column("🏆", "r", lambda r: str(r.trophies)))
+    return cols
+
+
 def render_personal_embed(data: PersonalStandingsData) -> discord.Embed:
     title = f"🏆 Lifetime Sets — {data.player_name}"
     if data.format_label:
@@ -791,16 +893,7 @@ def render_personal_embed(data: PersonalStandingsData) -> discord.Embed:
         return embed
 
     rows = data.rows
-
-    # Columns after the leading ordinal, two-space separated. Opted-out players are
-    # excluded from public rank sequences, so Rnk/Pts are dropped to match the site.
-    group: list[tuple[str, str, list[str]]] = [("Set", "l", [r.set_code for r in rows])]
-    if not data.opted_out:
-        group.append(("Rnk", "r", [f"#{r.rank}" if r.rank is not None else "—" for r in rows]))
-    group.append(("Ev", "r", [str(r.events) for r in rows]))
-    if not data.opted_out:
-        group.append(("Pts", "c", [str(round(r.score)) for r in rows]))
-    group.append(("🏆", "r", [str(r.trophies) for r in rows]))
+    cols = _personal_columns(data)
 
     def _fmt(value: str, width: int, align: str) -> str:
         if align == "l":
@@ -812,13 +905,14 @@ def render_personal_embed(data: PersonalStandingsData) -> discord.Embed:
     ord_width = max(len(f"{len(rows)}."), len("#"))
     header_cells: list[str] = []
     row_cells: list[list[str]] = [[] for _ in rows]
-    for header, align, values in group:
-        is_trophy = header == "🏆"
-        width = max(max(len(v) for v in values), 1 if is_trophy else len(header))
-        # 🏆 renders ~1 col wider than a digit, so pad its header one less
-        header_cells.append(_fmt(header, width - 1 if is_trophy else width, "l" if align == "l" else "r"))
+    for col in cols:
+        values = [col.cell(r) for r in rows]
+        is_wide = col.header in ("🏆", "📦")
+        width = max(max(len(v) for v in values), 1 if is_wide else len(col.header))
+        # emoji headers render ~1 col wider than a digit, so pad them one less
+        header_cells.append(_fmt(col.header, width - 1 if is_wide else width, "l" if col.align == "l" else "r"))
         for i, v in enumerate(values):
-            row_cells[i].append(_fmt(v, width, align))
+            row_cells[i].append(_fmt(v, width, col.align))
 
     link_filter_type = "format" if data.format_label else None
     lines = [f"`{'#':<{ord_width}} " + "  ".join(header_cells) + "`"]
@@ -1219,9 +1313,9 @@ class Leaderboard(commands.Cog):
                     ephemeral=(interaction.guild is not None),
                 )
                 return
-            if fmt_value in ("Pod", "Direct"):
+            if fmt_value == "Pod":
                 await interaction.response.send_message(
-                    f"`scope:Me` doesn't cover {fmt_value} standings yet.",
+                    "`scope:Me` doesn't cover Pod standings yet.",
                     ephemeral=(interaction.guild is not None),
                 )
                 return

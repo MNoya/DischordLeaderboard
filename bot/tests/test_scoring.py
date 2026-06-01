@@ -1,4 +1,35 @@
-from bot.scoring import QueueGroup, compute_score, compute_score_breakdown, supported_formats
+from datetime import datetime
+
+from bot.scoring import QueueGroup, boxes_for_event, compute_score, compute_score_breakdown, supported_formats
+
+
+def test_boxes_2024_six_win_play_sets_pay_two_at_trophy():
+    for code in ("OTJ", "FDN", "BLB", "DSK"):
+        assert boxes_for_event(code, 6, datetime(2024, 11, 23)) == 2
+        assert boxes_for_event(code, 5, datetime(2024, 11, 23)) == 0
+
+
+def test_boxes_aetherdrift_premiere_pays_one_at_trophy():
+    assert boxes_for_event("DFT", 6, datetime(2025, 2, 22)) == 1
+    assert boxes_for_event("DFT", 5, datetime(2025, 2, 22)) == 0
+
+
+def test_boxes_collector_weekend_pays_one_at_seven_only():
+    inside = datetime(2026, 4, 30)  # SOS collector premiere
+    assert boxes_for_event("SOS", 7, inside) == 1
+    assert boxes_for_event("SOS", 6, inside) == 0
+
+
+def test_boxes_default_play_booster_ladder_for_later_weekends():
+    later = datetime(2026, 5, 20)  # SOS, past the collector window
+    assert boxes_for_event("SOS", 7, later) == 2
+    assert boxes_for_event("SOS", 6, later) == 1
+    assert boxes_for_event("SOS", 5, later) == 0
+
+
+def test_boxes_play_booster_set_never_collector():
+    assert boxes_for_event("TLA", 7, datetime(2025, 12, 1)) == 2
+    assert boxes_for_event("TLA", 6, datetime(2025, 12, 1)) == 1
 
 
 def test_supported_formats_includes_all_bucket_formats():

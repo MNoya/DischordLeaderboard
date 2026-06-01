@@ -419,6 +419,23 @@ def test_player_pod_stats_returns_none_for_unknown_discord_id(session):
     assert player_pod_stats(session, "ghost") is None
 
 
+def test_stats_embed_pod_line_scoped_to_requested_set(session):
+    from bot.services.player_stats import process_stats, render_embed
+
+    _seed_set(session, "SOS")
+    _seed_set(session, "ECL")
+    _seed_player(session, discord_id="777", username="champ", display_name="Champ")
+    e = record_event(session, _parsed_event(set_code="SOS", event_date=date(2026, 5, 6), attendees=("Champ",)))
+    finalize_champion(session, e.id, [FinalStanding("Champ", placement=1, record="3-0", eliminated_round=None)])
+    session.commit()
+
+    sos = render_embed(process_stats(session, player_name=None, viewer_discord_id="777", set_code="SOS"))
+    assert "**Pod**" in (sos.description or "")
+
+    ecl = render_embed(process_stats(session, player_name=None, viewer_discord_id="777", set_code="ECL"))
+    assert "Pod" not in (ecl.description or "")
+
+
 def _seed_pod_for_deck_color_tests(session, thread_id: str = "thread-42") -> tuple[str, str]:
     _seed_set(session, "SOS")
     player = _seed_player(session, discord_id="42", username="alice", display_name="Alice")
