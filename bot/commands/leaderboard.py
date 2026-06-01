@@ -80,6 +80,7 @@ class PersonalStandingsData:
     player_name: str
     player_slug: str
     rows: list[PersonalStanding]
+    opted_out: bool = False
 
 
 @dataclass
@@ -481,6 +482,8 @@ def process_personal_standings(session: Session, viewer_discord_id: str) -> Pers
     if player is None:
         return None
 
+    opted_out = not player.leaderboard_opt_in
+
     stats_rows = session.execute(
         select(
             MagicSet.id, MagicSet.code, PlayerStats.format, PlayerStats.events,
@@ -510,12 +513,15 @@ def process_personal_standings(session: Session, viewer_discord_id: str) -> Pers
         rows.append(PersonalStanding(
             set_code=b["code"], score=score, trophies=b["trophies"],
             events=b["events"], wins=b["wins"], losses=b["losses"],
-            rank=_set_rank(session, set_id, player.id, score),
+            rank=None if opted_out else _set_rank(session, set_id, player.id, score),
         ))
-    rows.sort(key=lambda r: (-r.score, -r.trophies, r.set_code))
+    if opted_out:
+        rows.sort(key=lambda r: (-r.trophies, -r.score, r.set_code))
+    else:
+        rows.sort(key=lambda r: (-r.score, -r.trophies, r.set_code))
     return PersonalStandingsData(
         player_name=player.display_name, player_slug=player.slug,
-        rows=rows[:PERSONAL_STANDINGS_LIMIT],
+        rows=rows[:PERSONAL_STANDINGS_LIMIT], opted_out=opted_out,
     )
 
 
@@ -739,35 +745,44 @@ def render_personal_embed(data: PersonalStandingsData) -> discord.Embed:
         embed.description = "_No scored drafts yet_"
         return embed
 
-    rank_vals = [f"#{r.rank}" if r.rank is not None else "—" for r in data.rows]
-    win_vals = [
-        f"{round(r.wins / (r.wins + r.losses) * 100)}%" if (r.wins + r.losses) else "—"
-        for r in data.rows
-    ]
-    ord_width = max(len(f"{len(data.rows)}."), len("#"))
-    set_width = max(max(len(r.set_code) for r in data.rows), len("Set"))
-    rank_width = max(max(len(v) for v in rank_vals), len("Rnk"))
-    ev_width = max(max(len(str(r.events)) for r in data.rows), len("Ev"))
-    win_width = max(max(len(v) for v in win_vals), len("Win%"))
-    score_width = max(max(len(f"{round(r.score)}") for r in data.rows), len("Pts"))
-    trophy_width = max(max(len(str(r.trophies)) for r in data.rows), 1)
-    header_trophy_width = max(trophy_width - 1, 1)
+    rows = data.rows
 
-    header = (
-        f"{'#':<{ord_width}} {'Set':<{set_width}}  {'Rnk':>{rank_width}}  "
-        f"{'Ev':>{ev_width}}  {'Win%':>{win_width}}  "
-        f"{'Pts':>{score_width}}  {'🏆':>{header_trophy_width}}"
-    )
-    lines = [f"`{header}`"]
-    for i, r in enumerate(data.rows, start=1):
-        ordinal = f"{i}.".ljust(ord_width)
-        set_code = f"{r.set_code:<{set_width}}"
-        rank = f"{rank_vals[i - 1]:>{rank_width}}"
-        ev = f"{r.events:>{ev_width}}"
-        win = f"{win_vals[i - 1]:>{win_width}}"
-        score = _center_right_bias(str(round(r.score)), score_width)
-        trophy = f"{r.trophies:>{trophy_width}}"
-        inner = f"{ordinal} {set_code}  {rank}  {ev}  {win}  {score}  {trophy}"
+    def _winrate(r: PersonalStanding) -> str:
+        games = r.wins + r.losses
+        return f"{round(r.wins / games * 100)}%" if games else "—"
+
+    # Columns after the leading ordinal, two-space separated. Opted-out players are
+    # excluded from public rank sequences, so Rnk/Pts are dropped to match the site.
+    group: list[tuple[str, str, list[str]]] = [("Set", "l", [r.set_code for r in rows])]
+    if not data.opted_out:
+        group.append(("Rnk", "r", [f"#{r.rank}" if r.rank is not None else "—" for r in rows]))
+    group.append(("Ev", "r", [str(r.events) for r in rows]))
+    group.append(("Win%", "r", [_winrate(r) for r in rows]))
+    if not data.opted_out:
+        group.append(("Pts", "c", [str(round(r.score)) for r in rows]))
+    group.append(("🏆", "r", [str(r.trophies) for r in rows]))
+
+    def _fmt(value: str, width: int, align: str) -> str:
+        if align == "l":
+            return f"{value:<{width}}"
+        if align == "c":
+            return _center_right_bias(value, width)
+        return f"{value:>{width}}"
+
+    ord_width = max(len(f"{len(rows)}."), len("#"))
+    header_cells: list[str] = []
+    row_cells: list[list[str]] = [[] for _ in rows]
+    for header, align, values in group:
+        is_trophy = header == "🏆"
+        width = max(max(len(v) for v in values), 1 if is_trophy else len(header))
+        # 🏆 renders ~1 col wider than a digit, so pad its header one less
+        header_cells.append(_fmt(header, width - 1 if is_trophy else width, "l" if align == "l" else "r"))
+        for i, v in enumerate(values):
+            row_cells[i].append(_fmt(v, width, align))
+
+    lines = [f"`{'#':<{ord_width}} " + "  ".join(header_cells) + "`"]
+    for i, r in enumerate(rows):
+        inner = f"{f'{i + 1}.':<{ord_width}} " + "  ".join(row_cells[i])
         lines.append(f"[`{inner}`](<{_player_url(data.player_slug, r.set_code)}>)")
 
     embed.description = "\n".join(lines)
