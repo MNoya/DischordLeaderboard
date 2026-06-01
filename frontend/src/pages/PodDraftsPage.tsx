@@ -699,7 +699,7 @@ function StandingRow({
         <Link
           to={profileHref}
           onClick={(e) => e.stopPropagation()}
-          className="group/name flex items-center gap-2 lg:gap-2.5 min-w-0 no-underline text-text hover:text-green transition-colors"
+          className="group/name peer/name flex items-center gap-2 lg:gap-2.5 min-w-0 no-underline text-text hover:text-green transition-colors"
         >
           <AAvatar displayName={name} avatarUrl={p.avatarUrl} size={28} />
           <span
@@ -735,11 +735,11 @@ function StandingRow({
             e.stopPropagation();
             onShowDeck?.();
           }}
-          className="group/action inline-flex items-center justify-center gap-2 bg-bg border border-border hover:border-green/60 hover:bg-green/10 group-hover/row:border-green/60 group-hover/row:bg-green/10 transition-colors px-1.5 lg:px-3 cursor-pointer whitespace-nowrap"
+          className="group/action inline-flex items-center justify-center gap-2 bg-bg border border-border hover:border-green/60 hover:bg-green/10 group-hover/row:border-green/60 group-hover/row:bg-green/10 peer-hover/name:!border-border peer-hover/name:!bg-bg transition-colors px-1.5 lg:px-3 cursor-pointer whitespace-nowrap"
           style={{ height: 34 }}
         >
           <span
-            className="hidden lg:inline font-display tracking-[0.16em] text-text group-hover/action:text-green group-hover/row:text-green transition-colors leading-none"
+            className="hidden lg:inline font-display tracking-[0.16em] text-text group-hover/action:text-green group-hover/row:text-green peer-hover/name:!text-text transition-colors leading-none"
             style={{ fontSize: 14 }}
           >
             VIEW DECK
@@ -747,7 +747,7 @@ function StandingRow({
           <TbCards
             size={17}
             aria-hidden="true"
-            className="text-text group-hover/action:text-green group-hover/row:text-green transition-colors"
+            className="text-text group-hover/action:text-green group-hover/row:text-green peer-hover/name:!text-text transition-colors"
           />
         </button>
       ) : draftLogUrl ? (
@@ -756,11 +756,11 @@ function StandingRow({
           target="_blank"
           rel="noreferrer noopener"
           onClick={(e) => e.stopPropagation()}
-          className="group/action inline-flex items-center justify-center gap-2 bg-bg border border-border hover:border-green/60 hover:bg-green/10 group-hover/row:border-green/60 group-hover/row:bg-green/10 transition-colors px-1.5 lg:px-3 no-underline whitespace-nowrap"
+          className="group/action inline-flex items-center justify-center gap-2 bg-bg border border-border hover:border-green/60 hover:bg-green/10 group-hover/row:border-green/60 group-hover/row:bg-green/10 peer-hover/name:!border-border peer-hover/name:!bg-bg transition-colors px-1.5 lg:px-3 no-underline whitespace-nowrap"
           style={{ height: 34 }}
         >
           <span
-            className="hidden lg:inline font-display tracking-[0.16em] text-text group-hover/action:text-green group-hover/row:text-green transition-colors leading-none"
+            className="hidden lg:inline font-display tracking-[0.16em] text-text group-hover/action:text-green group-hover/row:text-green peer-hover/name:!text-text transition-colors leading-none"
             style={{ fontSize: 14 }}
           >
             DRAFT LOG
@@ -768,7 +768,7 @@ function StandingRow({
           <LuScrollText
             size={16}
             aria-hidden="true"
-            className="text-text group-hover/action:text-green group-hover/row:text-green transition-colors"
+            className="text-text group-hover/action:text-green group-hover/row:text-green peer-hover/name:!text-text transition-colors"
           />
         </a>
       ) : (

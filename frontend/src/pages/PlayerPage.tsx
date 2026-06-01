@@ -155,6 +155,10 @@ export function PlayerPage() {
 
   const topQs = topSearchParams.toString();
 
+  const onChangeSet = (newCode: string) => {
+    navigate({ pathname: `/${newCode}/player/${slug}`, search: topQs });
+  };
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
@@ -187,7 +191,7 @@ export function PlayerPage() {
     );
   }
 
-  if (isLoading || !profile) {
+  if (isLoading) {
     return (
       <div className="bg-bg text-text min-h-screen animate-fadeIn">
         {isMobile ? (
@@ -195,20 +199,24 @@ export function PlayerPage() {
         ) : (
           <AppHeader subtitle="PLAYER PROFILE" />
         )}
-        {isLoading ? (
-          isMobile ? <MobileSkeleton /> : <DesktopSkeleton />
-        ) : (
-          <div className="p-20 text-center text-muted font-display tracking-[0.2em]">
-            PLAYER NOT FOUND
-          </div>
-        )}
+        {isMobile ? <MobileSkeleton /> : <DesktopSkeleton />}
       </div>
     );
   }
 
-  const onChangeSet = (newCode: string) => {
-    navigate({ pathname: `/${newCode}/player/${slug}`, search: topQs });
-  };
+  if (!profile) {
+    return (
+      <NoSetData
+        sets={sets}
+        setCode={setCode}
+        onChangeSet={onChangeSet}
+        sibling={sibling}
+        navigate={navigate}
+        qs={topQs}
+        isMobile={isMobile}
+      />
+    );
+  }
 
   return (
     <>
@@ -279,6 +287,55 @@ function MobilePlayerHeader({
       prevAriaLabel="Previous player"
       nextAriaLabel="Next player"
     />
+  );
+}
+
+function NoSetData({
+  sets,
+  setCode,
+  onChangeSet,
+  sibling,
+  navigate,
+  qs,
+  isMobile,
+}: {
+  sets: SetSummary[] | undefined;
+  setCode: string;
+  onChangeSet: (code: string) => void;
+  sibling: SiblingNav;
+  navigate: ReturnType<typeof useNavigate>;
+  qs: string;
+  isMobile: boolean;
+}) {
+  return (
+    <div className="bg-bg text-text min-h-screen animate-fadeIn">
+      {isMobile ? (
+        <MobilePlayerHeader sibling={sibling} navigate={navigate} qs={qs} />
+      ) : (
+        <AppHeader subtitle="PLAYER PROFILE" />
+      )}
+      <section
+        className={cn("border-b border-border", isMobile ? "px-[18px] pt-5 pb-8" : "px-10 pt-5 pb-[30px]")}
+        style={{ background: "linear-gradient(180deg, #14181f 0%, #0a0c10 100%)" }}
+      >
+        {!isMobile && (
+          <div className="flex items-center justify-between mb-4">
+            <BackButton onClick={() => navigate({ pathname: `/${setCode}`, search: qs })} inline />
+            <SiblingNavButtons sibling={sibling} qs={qs} />
+          </div>
+        )}
+        <div className="flex items-center gap-3 font-display tracking-[0.18em]">
+          {sets ? (
+            <SetCodeDropdown sets={sets} activeCode={setCode} onChange={onChangeSet} size={isMobile ? "sm" : "md"} />
+          ) : (
+            <span className="text-[22px]">{setCode}</span>
+          )}
+        </div>
+      </section>
+      <div className="p-20 text-center text-muted font-display tracking-[0.2em]">
+        NO {setCode} DATA FOR THIS PLAYER
+      </div>
+    </div>
   );
 }
 
