@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from bot import audit, emojis
 from bot.commands import descriptions as desc
 from bot.commands.messages import MSG_NOT_REGISTERED
-from bot.services.player_stats import process_stats, rank_players_for_set, render_embed as render_stats_embed
+from bot.services.player_stats import process_stats, rank_players_for_set, render_embed as render_stats_embed, resolve_player
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.models import DraftEvent, LeaderboardMessage, MagicSet, Player, PlayerStats, PodDraftEvent, PodDraftParticipant
@@ -84,6 +84,7 @@ class PersonalStandingsData:
     rows: list[PersonalStanding]
     opted_out: bool = False
     format_label: str | None = None
+    last_updated: datetime | None = None
 
 
 @dataclass
@@ -251,16 +252,19 @@ def process_leaderboard_for_format(
 
 def process_leaderboard_for_archetype(
     session: Session, viewer_discord_id: str | None, archetype: str, top_n: int = 10,
-    magic_set: MagicSet | None = None,
+    magic_set: MagicSet | None = None, group: QueueGroup | None = None,
 ) -> LeaderboardData | None:
     """Per-archetype (color combo) leaderboard. Aggregates from draft_events,
-    filtering by archetype, then runs compute_score per player.
+    filtering by archetype, then runs compute_score per player. When ``group`` is
+    given the board is scoped to that queue group's formats and scored within it,
+    so format + color combine.
     """
     if magic_set is None:
         magic_set = _current_set(session)
     if magic_set is None:
         return None
 
+    allowed = set(group.formats) if group is not None else None
     events = session.execute(
         select(
             Player.id, Player.slug, Player.display_name, Player.discord_id,
@@ -277,6 +281,8 @@ def process_leaderboard_for_archetype(
 
     bucket: dict[str, dict] = {}
     for r in events:
+        if allowed is not None and r.format not in allowed:
+            continue
         if not _archetype_matches(r.colors, archetype):
             continue
         b = bucket.setdefault(r.id, {
@@ -294,9 +300,11 @@ def process_leaderboard_for_archetype(
             f["trophies"] += 1
             b["trophies"] += 1
 
+    groups = (group,) if group is not None else None
     scored: list[tuple[float, int, str, str, str, str | None]] = []
     for pid, b in bucket.items():
-        score = compute_score(list(b["stats_by_format"].values()))
+        score = compute_score(list(b["stats_by_format"].values()), groups=groups) if groups \
+            else compute_score(list(b["stats_by_format"].values()))
         if score <= 0:
             continue
         scored.append((score, b["trophies"], pid, b["slug"], b["display_name"], b["discord_id"]))
@@ -386,13 +394,14 @@ def _ranked_for_direct(
 ) -> list[tuple[int, str, str, str, str | None, float, int]]:
     """Rank active, opted-in players by Arena Direct Sealed boxes won for a set.
 
-    Returns (rank, player_id, slug, display_name, discord_id, boxes, trophies); trophies
-    are 7-win events. Shared by the public Direct board and the personal standings rank.
+    Returns (rank, player_id, slug, display_name, discord_id, boxes, trophies); a trophy is
+    17lands' event win, so the 6-win-era ladders count too. Shared by the public Direct
+    board and the personal standings rank.
     """
     rows = session.execute(
         select(
             Player.id, Player.slug, Player.display_name, Player.discord_id,
-            DraftEvent.wins, DraftEvent.finished_at,
+            DraftEvent.wins, DraftEvent.finished_at, DraftEvent.is_trophy,
         )
         .join(DraftEvent, DraftEvent.player_id == Player.id)
         .where(
@@ -410,8 +419,8 @@ def _ranked_for_direct(
             "boxes": 0, "trophies": 0,
         })
         wins = int(r.wins or 0)
-        b["boxes"] += boxes_for_event(set_code, wins, r.finished_at)
-        if wins == 7:
+        b["boxes"] += boxes_for_event(set_code, wins, r.finished_at, bool(r.is_trophy))
+        if r.is_trophy:
             b["trophies"] += 1
 
     scored = [
@@ -492,28 +501,32 @@ def process_leaderboard_for_pod(
 
 PERSONAL_STANDINGS_LIMIT = 10
 DIRECT_FILTER = "Direct"
+LIFETIME_SET = "ALL"
 
 
 def process_personal_standings(
-    session: Session, viewer_discord_id: str, *, format_label: str | None = None,
+    session: Session, viewer_discord_id: str, *, player_name: str | None = None,
+    format_label: str | None = None,
 ) -> PersonalStandingsData | None:
-    """The caller's own best sets: score and trophies per set they've drafted, top points first.
+    """A player's best sets: score and trophies per set they've drafted, top points first.
 
-    Aggregates the player's PlayerStats per set (alchemy variants bucket under their
-    parent set via set_id), sorts by score then trophies, and caps at the top 10.
-    When ``format_label`` names a queue group, each row is scoped to that group's
-    formats and ranked against that set's per-format board.
+    Subject is ``player_name`` when given, else the caller. Aggregates the player's
+    PlayerStats per set (alchemy variants bucket under their parent set via set_id),
+    sorts by score then trophies, and caps at the top 10. When ``format_label`` names a
+    queue group, each row is scoped to that group's formats and ranked against that
+    set's per-format board.
     """
-    player = session.execute(
-        select(Player).where(Player.discord_id == viewer_discord_id)
-    ).scalar_one_or_none()
+    player = resolve_player(session, player_name, viewer_discord_id)
     if player is None:
         return None
 
     opted_out = not player.leaderboard_opt_in
+    last_updated = session.execute(
+        select(func.max(PlayerStats.last_fetched_at)).where(PlayerStats.player_id == player.id)
+    ).scalar()
 
     if format_label == DIRECT_FILTER:
-        return _personal_direct_standings(session, player, opted_out)
+        return _personal_direct_standings(session, player, opted_out, last_updated)
 
     group: QueueGroup | None = None
     if format_label is not None:
@@ -569,6 +582,7 @@ def process_personal_standings(
         player_name=player.display_name, player_slug=player.slug,
         rows=rows[:PERSONAL_STANDINGS_LIMIT], opted_out=opted_out,
         format_label=group.label if group is not None else None,
+        last_updated=last_updated,
     )
 
 
@@ -597,17 +611,18 @@ def _set_rank_for_direct(
 
 
 def _personal_direct_standings(
-    session: Session, player: Player, opted_out: bool,
+    session: Session, player: Player, opted_out: bool, last_updated: datetime | None = None,
 ) -> PersonalStandingsData:
     """Per-set Arena Direct Sealed standings for one player, ranked by boxes won.
 
     Mirrors the public Direct board: ``score`` carries boxes (the headline metric, no
-    points), trophies are 7-win events, ranked against each set's Direct board.
+    points), a trophy is 17lands' event win so the 6-win-era ladders count too, ranked
+    against each set's Direct board.
     """
     rows_q = session.execute(
         select(
             MagicSet.id, MagicSet.code,
-            DraftEvent.wins, DraftEvent.losses, DraftEvent.finished_at,
+            DraftEvent.wins, DraftEvent.losses, DraftEvent.finished_at, DraftEvent.is_trophy,
         )
         .join(MagicSet, MagicSet.id == DraftEvent.set_id)
         .where(
@@ -625,8 +640,8 @@ def _personal_direct_standings(
         b["events"] += 1
         b["wins"] += wins
         b["losses"] += int(r.losses or 0)
-        b["boxes"] += boxes_for_event(r.code, wins, r.finished_at)
-        if wins == 7:
+        b["boxes"] += boxes_for_event(r.code, wins, r.finished_at, bool(r.is_trophy))
+        if r.is_trophy:
             b["trophies"] += 1
 
     rows: list[PersonalStanding] = []
@@ -641,6 +656,7 @@ def _personal_direct_standings(
     return PersonalStandingsData(
         player_name=player.display_name, player_slug=player.slug,
         rows=rows[:PERSONAL_STANDINGS_LIMIT], opted_out=opted_out, format_label=DIRECT_FILTER,
+        last_updated=last_updated,
     )
 
 
@@ -702,13 +718,15 @@ def _archetype_emoji(code: str) -> discord.Emoji | None:
 
 
 async def _apply_tracked_filter(
-    interaction: discord.Interaction, message_id: str, set_code: str, filter_type: str | None, filter_value: str | None,
+    interaction: discord.Interaction, message_id: str, set_code: str,
+    format_value: str | None, color_value: str | None,
 ) -> str | None:
     """Re-render the shared tracked leaderboard message in place for a new set/filter.
 
     Updates the tracking row so !refresh keeps rendering the chosen view, then edits
     the public message via REST. Returns the resolved set code, or None on failure.
     """
+    filter_type, filter_value = encode_filter(format_value, color_value)
     with SessionLocal() as session:
         magic_set = session.execute(
             select(MagicSet).where(func.upper(MagicSet.code) == set_code.upper())
@@ -761,14 +779,11 @@ class _SetSelect(discord.ui.Select):
 
 
 class _FormatSelect(discord.ui.Select):
-    def __init__(self, filter_type: str | None, filter_value: str | None) -> None:
+    def __init__(self, format_value: str | None) -> None:
         options = [
             discord.SelectOption(
                 label=label, value=value or ALL_FORMATS_VALUE,
-                default=(
-                    (filter_type is None and value is None)
-                    or (filter_type == "format" and filter_value == value)
-                ),
+                default=(format_value == value),
             )
             for label, value in _FORMAT_FILTERS
         ]
@@ -776,21 +791,18 @@ class _FormatSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         value = self.values[0]
-        if value == ALL_FORMATS_VALUE:
-            await self.view.apply(interaction, filter_type=None, filter_value=None)
-        else:
-            await self.view.apply(interaction, filter_type="format", filter_value=value)
+        await self.view.apply(interaction, format_value=None if value == ALL_FORMATS_VALUE else value)
 
 
 class _ColorSelect(discord.ui.Select):
-    def __init__(self, filter_type: str | None, filter_value: str | None, with_emoji: bool = True) -> None:
+    def __init__(self, color_value: str | None, with_emoji: bool = True) -> None:
         options = [discord.SelectOption(label="All colors", value=ALL_COLORS_VALUE)]
         options += [
             discord.SelectOption(
                 label="Soup (4+ color)" if code == "MULTI" else f"{label} ({code})",
                 value=code,
                 emoji=_archetype_emoji(code) if with_emoji else None,
-                default=(filter_type == "color" and filter_value == code),
+                default=(color_value == code),
             )
             for label, code in COLOR_CHOICES.items()
         ]
@@ -798,53 +810,50 @@ class _ColorSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         value = self.values[0]
-        if value == ALL_COLORS_VALUE:
-            await self.view.apply(interaction, filter_type=None, filter_value=None)
-        else:
-            await self.view.apply(interaction, filter_type="color", filter_value=value)
+        await self.view.apply(interaction, color_value=None if value == ALL_COLORS_VALUE else value)
 
 
 class _FilterPanel(discord.ui.View):
     """Ephemeral control panel that re-renders the shared leaderboard message.
 
-    Set picks which board; format and color are mutually-exclusive filters within it.
-    Each pick edits the public message in place and rebuilds the panel to reflect the
-    new selection.
+    Set picks which board; format and color combine (Pod/Direct stay standalone, so
+    selecting one clears the color). Each pick edits the public message in place and
+    rebuilds the panel to reflect the new selection.
     """
 
     def __init__(
-        self, message_id: str, set_code: str, filter_type: str | None, filter_value: str | None,
+        self, message_id: str, set_code: str, format_value: str | None, color_value: str | None,
         with_emoji: bool = True,
     ) -> None:
         super().__init__(timeout=180)
         self.message_id = message_id
         self.set_code = set_code
-        self.filter_type = filter_type
-        self.filter_value = filter_value
+        self.format_value = format_value
+        self.color_value = color_value
         self.with_emoji = with_emoji
         self.add_item(_SetSelect(set_code))
-        self.add_item(_FormatSelect(filter_type, filter_value))
-        self.add_item(_ColorSelect(filter_type, filter_value, with_emoji))
+        self.add_item(_FormatSelect(format_value))
+        self.add_item(_ColorSelect(color_value, with_emoji))
 
-    async def apply(self, interaction: discord.Interaction, *, set_code=_UNSET, filter_type=_UNSET, filter_value=_UNSET) -> None:
+    async def apply(self, interaction: discord.Interaction, *, set_code=_UNSET, format_value=_UNSET, color_value=_UNSET) -> None:
         new_set = self.set_code if set_code is _UNSET else set_code
-        if filter_type is _UNSET:
-            new_ft, new_fv = self.filter_type, self.filter_value
-        else:
-            new_ft, new_fv = filter_type, filter_value
+        new_fmt = self.format_value if format_value is _UNSET else format_value
+        new_color = self.color_value if color_value is _UNSET else color_value
+        if new_fmt in SPECIAL_FORMATS:
+            new_color = None
 
         await interaction.response.defer()
-        resolved = await _apply_tracked_filter(interaction, self.message_id, new_set, new_ft, new_fv)
+        resolved = await _apply_tracked_filter(interaction, self.message_id, new_set, new_fmt, new_color)
         if resolved is None:
             await interaction.followup.send("Could not update that leaderboard.", ephemeral=True)
             return
         try:
             await interaction.edit_original_response(
-                view=_FilterPanel(self.message_id, resolved, new_ft, new_fv, self.with_emoji),
+                view=_FilterPanel(self.message_id, resolved, new_fmt, new_color, self.with_emoji),
             )
         except discord.HTTPException:
             await interaction.edit_original_response(
-                view=_FilterPanel(self.message_id, resolved, new_ft, new_fv, with_emoji=False),
+                view=_FilterPanel(self.message_id, resolved, new_fmt, new_color, with_emoji=False),
             )
 
 
@@ -886,18 +895,18 @@ class _FilterButton(discord.ui.Button):
                 ms = session.get(MagicSet, tracked.set_id)
                 if ms is not None:
                     set_code = ms.code
-            filter_type, filter_value = tracked.filter_type, tracked.filter_value
+            format_value, color_value = decode_filter(tracked.filter_type, tracked.filter_value)
 
         try:
             await interaction.response.send_message(
                 "Filter the leaderboard:",
-                view=_FilterPanel(msg_id, set_code, filter_type, filter_value),
+                view=_FilterPanel(msg_id, set_code, format_value, color_value),
                 ephemeral=True,
             )
         except discord.HTTPException:
             await interaction.response.send_message(
                 "Filter the leaderboard:",
-                view=_FilterPanel(msg_id, set_code, filter_type, filter_value, with_emoji=False),
+                view=_FilterPanel(msg_id, set_code, format_value, color_value, with_emoji=False),
                 ephemeral=True,
             )
         await _clear_prev_ephemeral(interaction.user.id)
@@ -910,9 +919,7 @@ class _FilterButton(discord.ui.Button):
 def _player_url(slug: str, set_code: str | None = None, filter_type: str | None = None, filter_value: str | None = None) -> str:
     base = settings.public_site_url.rstrip("/")
     url = f"{base}/{set_code}/player/{slug}" if set_code else f"{base}/player/{slug}"
-    if filter_type == "format" and filter_value:
-        url += f"?format={filter_value}"
-    return url
+    return url + _site_query(filter_type, filter_value)
 
 
 def _format_leaderboard(top: list[LeaderboardEntry], set_code: str | None = None, show_score: bool = True, filter_type: str | None = None, filter_value: str | None = None) -> str:
@@ -1013,10 +1020,7 @@ def _apply_footer(embed: discord.Embed, data: LeaderboardData) -> None:
 def render_embed(data: LeaderboardData) -> discord.Embed:
     base_url = settings.public_site_url.rstrip("/")
     set_base = base_url if data.set_code == ACTIVE_SET_CODE else f"{base_url}/{data.set_code}"
-    if data.filter_type == "format" and data.filter_value:
-        site_url = f"{set_base}?format={data.filter_value}"
-    else:
-        site_url = set_base
+    site_url = set_base + _site_query(data.filter_type, data.filter_value)
     embed = discord.Embed(
         title=f"🏆 Leaderboard — {data.set_code}",
         url=site_url,
@@ -1077,6 +1081,9 @@ def render_personal_embed(data: PersonalStandingsData) -> discord.Embed:
     if data.format_label:
         title = f"{title} · {data.format_label}"
     embed = discord.Embed(title=title, color=discord.Color.gold())
+    if data.last_updated is not None:
+        embed.timestamp = data.last_updated
+        embed.set_footer(text="Last updated")
     if not data.rows:
         embed.description = "_No scored drafts yet_"
         return embed
@@ -1097,7 +1104,7 @@ def render_personal_embed(data: PersonalStandingsData) -> discord.Embed:
     for col in cols:
         values = [col.cell(r) for r in rows]
         is_wide = col.header in ("🏆", "📦")
-        width = max(max(len(v) for v in values), 1 if is_wide else len(col.header))
+        width = max(max(len(v) for v in values), 2 if is_wide else len(col.header))
         # emoji headers render ~1 col wider than a digit, so pad them one less
         header_cells.append(_fmt(col.header, width - 1 if is_wide else width, "l" if col.align == "l" else "r"))
         for i, v in enumerate(values):
@@ -1158,8 +1165,7 @@ class LeaderboardView(discord.ui.View):
             self.add_item(_FilterButton())
         base = settings.public_site_url.rstrip("/")
         stats_url = base if set_code is None or set_code == ACTIVE_SET_CODE else f"{base}/{set_code}"
-        if filter_type == "format" and filter_value:
-            stats_url = f"{stats_url}?format={filter_value}"
+        stats_url = stats_url + _site_query(filter_type, filter_value)
         # URL buttons are exempt from the persistent-view custom_id requirement
         self.add_item(discord.ui.Button(
             label="Stats", url=stats_url,
@@ -1208,21 +1214,93 @@ def render_view(
 
 CODE_TO_COLOR_LABEL: dict[str, str] = {code: label for label, code in COLOR_CHOICES.items()}
 
+FORMAT_COLOR_FILTER = "format+color"
+SPECIAL_FORMATS = ("Pod", "Direct")
 
-def _drafter_count(session: Session, magic_set: MagicSet | None = None) -> int:
+
+def encode_filter(format_value: str | None, color_value: str | None) -> tuple[str | None, str | None]:
+    """(format, color) → the (filter_type, filter_value) pair stored on tracked messages.
+    Color is dropped for Pod/Direct, which are standalone boards.
+    """
+    if format_value in SPECIAL_FORMATS:
+        color_value = None
+    if format_value and color_value:
+        return FORMAT_COLOR_FILTER, f"{format_value}|{color_value}"
+    if format_value:
+        return "format", format_value
+    if color_value:
+        return "color", color_value
+    return None, None
+
+
+def decode_filter(filter_type: str | None, filter_value: str | None) -> tuple[str | None, str | None]:
+    """(filter_type, filter_value) → (format, color)."""
+    if filter_type == FORMAT_COLOR_FILTER and filter_value:
+        fmt, _, color = filter_value.partition("|")
+        return fmt or None, color or None
+    if filter_type == "format":
+        return filter_value, None
+    if filter_type == "color":
+        return None, filter_value
+    return None, None
+
+
+def _site_query(filter_type: str | None, filter_value: str | None) -> str:
+    """Query string mirroring the active filter on the public site (?format=&colors=)."""
+    format_value, color_value = decode_filter(filter_type, filter_value)
+    params = []
+    if format_value:
+        params.append(f"format={format_value}")
+    if color_value:
+        params.append(f"colors={color_value}")
+    return ("?" + "&".join(params)) if params else ""
+
+
+def _drafter_count(
+    session: Session, magic_set: MagicSet | None = None,
+    *, format_value: str | None = None, color_value: str | None = None,
+) -> int:
+    """Distinct opted-in players whose drafts match the active filter for the set.
+    Color matching needs per-row archetype logic, so it scans draft_events directly.
+    """
     if magic_set is None:
         magic_set = _current_set(session)
     if magic_set is None:
         return 0
+
+    group = None
+    if format_value and format_value not in SPECIAL_FORMATS:
+        group = next((g for g in DEFAULT_QUEUE_GROUPS if g.label == format_value), None)
+
+    if color_value is not None:
+        allowed = set(group.formats) if group is not None else None
+        rows = session.execute(
+            select(DraftEvent.player_id, DraftEvent.format, DraftEvent.colors)
+            .join(Player, Player.id == DraftEvent.player_id)
+            .where(
+                DraftEvent.set_id == magic_set.id,
+                Player.active.is_(True),
+                Player.leaderboard_opt_in.is_(True),
+            )
+        ).all()
+        players = {
+            r.player_id for r in rows
+            if (allowed is None or r.format in allowed) and _archetype_matches(r.colors, color_value)
+        }
+        return len(players)
+
+    conditions = [
+        PlayerStats.set_id == magic_set.id,
+        PlayerStats.events > 0,
+        Player.active.is_(True),
+        Player.leaderboard_opt_in.is_(True),
+    ]
+    if group is not None:
+        conditions.append(PlayerStats.format.in_(group.formats))
     return session.execute(
         select(func.count(func.distinct(PlayerStats.player_id)))
         .join(Player, Player.id == PlayerStats.player_id)
-        .where(
-            PlayerStats.set_id == magic_set.id,
-            PlayerStats.events > 0,
-            Player.active.is_(True),
-            Player.leaderboard_opt_in.is_(True),
-        )
+        .where(*conditions)
     ).scalar() or 0
 
 
@@ -1237,35 +1315,40 @@ def render_filtered_data(
     """Resolve a filter into the matching processor + display suffix.
 
     Returns (data, suffix). suffix is the human label appended to the embed
-    title (e.g. "Premier", "Boros"). Both are None when no matching set exists.
-    ``magic_set`` overrides the active set so historical boards can be rendered.
+    title (e.g. "Premier", "Boros", "Premier · Simic"). Both are None when no
+    matching set exists. ``magic_set`` overrides the active set so historical
+    boards can be rendered. Format and color combine; Pod/Direct stay standalone.
     """
-    if filter_type == "format" and filter_value == "Pod":
+    format_value, color_value = decode_filter(filter_type, filter_value)
+    group = None
+    if format_value and format_value not in SPECIAL_FORMATS:
+        group = next((g for g in DEFAULT_QUEUE_GROUPS if g.label == format_value), None)
+
+    if format_value == "Pod":
         data = process_leaderboard_for_pod(session, viewer_discord_id=viewer_discord_id, magic_set=magic_set)
         suffix = "Pod"
-    elif filter_type == "format" and filter_value == "Direct":
+    elif format_value == DIRECT_FILTER:
         data = process_leaderboard_for_direct(session, viewer_discord_id=viewer_discord_id, magic_set=magic_set)
         suffix = "Direct"
-    elif filter_type == "format":
-        assert filter_value is not None
-        data = process_leaderboard_for_format(
-            session, viewer_discord_id=viewer_discord_id, format_label=filter_value, magic_set=magic_set,
-        )
-        suffix = filter_value
-    elif filter_type == "color":
-        assert filter_value is not None
+    elif color_value is not None:
         data = process_leaderboard_for_archetype(
-            session, viewer_discord_id=viewer_discord_id, archetype=filter_value, magic_set=magic_set,
+            session, viewer_discord_id=viewer_discord_id, archetype=color_value, magic_set=magic_set, group=group,
         )
-        label = CODE_TO_COLOR_LABEL.get(filter_value, filter_value)
-        emoji = _archetype_emoji(filter_value)
-        suffix = f"{label} {emoji}" if emoji else label
+        label = CODE_TO_COLOR_LABEL.get(color_value, color_value)
+        emoji = _archetype_emoji(color_value)
+        color_suffix = f"{label} {emoji}" if emoji else label
+        suffix = f"{format_value} · {color_suffix}" if format_value else color_suffix
+    elif format_value:
+        data = process_leaderboard_for_format(
+            session, viewer_discord_id=viewer_discord_id, format_label=format_value, magic_set=magic_set,
+        )
+        suffix = format_value
     else:
         data = process_leaderboard(session, viewer_discord_id=viewer_discord_id, magic_set=magic_set)
         suffix = None
 
     if data is not None:
-        data.drafter_count = _drafter_count(session, magic_set)
+        data.drafter_count = _drafter_count(session, magic_set, format_value=format_value, color_value=color_value)
         data.filter_type = filter_type
         data.filter_value = filter_value
 
@@ -1459,13 +1542,9 @@ class Leaderboard(commands.Cog):
     @app_commands.describe(
         format="Show only one queue (Premier, Trad, Pod, Direct)",
         color="Filter by archetype: guilds, shards/wedges, or Soup (4+ colors)",
-        set="Look up an specific set's standings",
-        scope="Me — your own rank across every set you've drafted",
+        set="A set code, or ALL for your lifetime standings across every set",
     )
     @app_commands.choices(
-        scope=[
-            app_commands.Choice(name="Me", value="me"),
-        ],
         format=[
             app_commands.Choice(name="Premier",     value="Premier"),
             app_commands.Choice(name="Traditional", value="Trad"),
@@ -1490,7 +1569,6 @@ class Leaderboard(commands.Cog):
         format: app_commands.Choice[str] | None = None,
         color: app_commands.Choice[str] | None = None,
         set: str | None = None,
-        scope: app_commands.Choice[str] | None = None,
     ) -> None:
         user_id = str(interaction.user.id)
         audit.event(
@@ -1499,50 +1577,42 @@ class Leaderboard(commands.Cog):
             format=format.value if format else None,
             color=color.value if color else None,
             set=set,
-            scope=scope.value if scope else None,
         )
 
-        if scope is not None and scope.value == "me":
+        # set:ALL → your lifetime standings across every set
+        if set is not None and set.upper() == LIFETIME_SET:
+            ephemeral = interaction.guild is not None
             fmt_value = format.value if format is not None else None
             if color is not None:
                 await interaction.response.send_message(
-                    "`scope:Me` supports the `format` filter, not `color` yet.",
-                    ephemeral=(interaction.guild is not None),
+                    "Lifetime standings support the `format` filter, not `color` yet.", ephemeral=ephemeral,
                 )
                 return
             if fmt_value == "Pod":
                 await interaction.response.send_message(
-                    "`scope:Me` doesn't cover Pod standings yet.",
-                    ephemeral=(interaction.guild is not None),
+                    "Lifetime standings don't cover Pod yet.", ephemeral=ephemeral,
                 )
                 return
             await interaction.response.defer()
             with SessionLocal() as session:
                 data = process_personal_standings(session, user_id, format_label=fmt_value)
             if data is None:
-                await interaction.followup.send(
-                    MSG_NOT_REGISTERED, ephemeral=(interaction.guild is not None),
-                )
+                await interaction.followup.send(MSG_NOT_REGISTERED, ephemeral=ephemeral)
                 return
             await interaction.followup.send(embed=render_personal_embed(data))
-            return
-
-        if format is not None and color is not None:
-            await interaction.response.send_message(
-                "Pick one filter — `format` or `color`, not both.",
-                ephemeral=(interaction.guild is not None),
-            )
             return
 
         in_guild = interaction.guild is not None
         ephemeral = in_guild
 
-        if format is not None:
-            filter_type, filter_value = "format", format.value
-        elif color is not None:
-            filter_type, filter_value = "color", color.value
-        else:
-            filter_type, filter_value = None, None
+        format_value = format.value if format is not None else None
+        color_value = color.value if color is not None else None
+        if format_value in SPECIAL_FORMATS and color_value is not None:
+            await interaction.response.send_message(
+                f"Color filtering isn't available for `{format_value}` yet.", ephemeral=ephemeral,
+            )
+            return
+        filter_type, filter_value = encode_filter(format_value, color_value)
 
         await interaction.response.defer()
 
@@ -1643,12 +1713,44 @@ class Leaderboard(commands.Cog):
         self, interaction: discord.Interaction, current: str,
     ) -> list[app_commands.Choice[str]]:
         cur = current.upper()
-        matches = [
+        matches: list[app_commands.Choice[str]] = []
+        if cur in LIFETIME_SET:
+            matches.append(app_commands.Choice(name="ALL — Lifetime Sets", value=LIFETIME_SET))
+        matches += [
             app_commands.Choice(name=f"{s.code} — {s.name}", value=s.code)
             for s in reversed(ALL_SETS)
             if cur in s.code.upper() or cur in s.name.upper()
         ]
         return matches[:25]
+
+    @commands.command(name="lifetime")
+    @commands.is_owner()
+    async def lifetime_cmd(self, ctx: commands.Context, *, args: str | None = None) -> None:
+        """Owner-only. Print a player's Lifetime Sets embed — any player, for testing.
+
+        `!lifetime` → your own, `!lifetime <name>` → that player's. A trailing format
+        token scopes it, e.g. `!lifetime Elfandor Direct` or `!lifetime Premier`.
+        """
+        try:
+            await ctx.message.delete()
+        except discord.HTTPException:
+            pass
+        name: str | None = None
+        fmt: str | None = None
+        if args:
+            valid = {g.label.lower(): g.label for g in DEFAULT_QUEUE_GROUPS}
+            valid["traditional"] = "Trad"
+            valid[DIRECT_FILTER.lower()] = DIRECT_FILTER
+            tokens = args.split()
+            if tokens[-1].lower() in valid:
+                fmt = valid[tokens.pop().lower()]
+            name = " ".join(tokens) or None
+        with SessionLocal() as session:
+            data = process_personal_standings(session, str(ctx.author.id), player_name=name, format_label=fmt)
+        if data is None:
+            await ctx.send(f"No player named `{name}`." if name else MSG_NOT_REGISTERED)
+            return
+        await ctx.send(embed=render_personal_embed(data))
 
 
 async def setup(bot: commands.Bot) -> None:

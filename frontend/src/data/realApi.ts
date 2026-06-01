@@ -38,6 +38,8 @@ function client() {
   return supabase;
 }
 
+const ARENA_DIRECT_FORMAT = "ArenaDirect_Sealed";
+
 // ─── public_sets ───────────────────────────────────────────────────────────
 
 export async function fetchSets(): Promise<SetSummary[]> {
@@ -61,18 +63,16 @@ export async function fetchFormatColorsLeaderboard(
   const archs = Array.isArray(archetypes) ? archetypes : [archetypes];
   if (archs.length === 0) return [];
   const archSet = new Set(archs);
-  const matcher = archSet.has(MULTI) && archs.length === 1
-    ? (c: string) => effectiveColorCount(c) >= 4
-    : (c: string) => {
-        if (effectiveColorCount(c) >= 4) return archSet.has(MULTI);
-        return archSet.has(colorsOf(c));
-      };
+  // A deck matches its main-color archetype regardless of splashes, and Soup (MULTI)
+  // when it plays 4+ effective colors — so a 2-main + 2-splash deck lands in both.
+  const matcher = (c: string) =>
+    archSet.has(colorsOf(c)) || (archSet.has(MULTI) && effectiveColorCount(c) >= 4);
   const bucketLabel = archs.length === 1 ? archs[0] : archs.join(",");
   return aggregateColorsFromEvents(setCode, bucketLabel, matcher, format);
 }
 
 export async function fetchAvailableFormats(setCode: string): Promise<string[]> {
-  const [breakdown, pod] = await Promise.all([
+  const [breakdown, pod, direct] = await Promise.all([
     client()
       .from("public_player_format_breakdown")
       .select("format_label")
@@ -81,13 +81,22 @@ export async function fetchAvailableFormats(setCode: string): Promise<string[]> 
       .from("public_player_pod_stats")
       .select("set_code", { count: "exact", head: true })
       .eq("set_code", setCode),
+    client()
+      .from("public_player_draft_events")
+      .select("set_code", { count: "exact", head: true })
+      .eq("set_code", setCode)
+      .eq("format", ARENA_DIRECT_FORMAT),
   ]);
   if (breakdown.error) throw breakdown.error;
   if (pod.error) throw pod.error;
+  if (direct.error) throw direct.error;
   const labels = new Set(
     (breakdown.data ?? []).map((r) => (r as { format_label: string }).format_label),
   );
   if ((pod.count ?? 0) > 0) labels.add("Pod");
+  // Arena Direct buckets under the Sealed format_label, so surface it as its own
+  // option only when the set actually has Direct events.
+  if ((direct.count ?? 0) > 0) labels.add("Direct");
   return Array.from(labels);
 }
 
@@ -168,6 +177,7 @@ export async function fetchFormatLeaderboard(
       lastCalculatedAt: r.lastFinishedAt ?? new Date(0).toISOString(),
     }));
   }
+  if (format === "Direct") return fetchDirectLeaderboard(setCode);
   const labels = FORMAT_LABEL_GROUPS[format] ?? [format];
   const [breakdown, leaderboard] = await Promise.all([
     client()
@@ -236,6 +246,82 @@ export async function fetchFormatLeaderboard(
     .map((r, i) => ({ ...r, rank: i + 1 }));
 }
 
+// Arena Direct has no precomputed board (boxes are a discord-only metric); rank by
+// event-win trophies aggregated from the raw event log, mirroring the no-score Pod board.
+async function fetchDirectLeaderboard(setCode: string): Promise<LeaderboardRow[]> {
+  const events: Array<Record<string, unknown>> = [];
+  const pageSize = 1000;
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await client()
+      .from("public_player_draft_events")
+      .select("slug, wins, losses, is_trophy, finished_at")
+      .eq("set_code", setCode)
+      .eq("format", ARENA_DIRECT_FORMAT)
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    const batch = (data ?? []) as Array<Record<string, unknown>>;
+    events.push(...batch);
+    if (batch.length < pageSize) break;
+  }
+
+  const meta = await client()
+    .from("public_leaderboard")
+    .select("slug, display_name, avatar_url, last_calculated_at")
+    .eq("set_code", setCode);
+  if (meta.error) throw meta.error;
+  const metaBySlug = new Map<string, Record<string, unknown>>();
+  for (const m of (meta.data ?? []) as Array<Record<string, unknown>>) {
+    metaBySlug.set(m.slug as string, m);
+  }
+
+  interface Agg { trophies: number; events: number; wins: number; losses: number; lastFinishedAt: string }
+  const perSlug = new Map<string, Agg>();
+  for (const raw of events) {
+    const slug = raw.slug as string;
+    let agg = perSlug.get(slug);
+    if (!agg) {
+      agg = { trophies: 0, events: 0, wins: 0, losses: 0, lastFinishedAt: "" };
+      perSlug.set(slug, agg);
+    }
+    agg.events += 1;
+    agg.wins += (raw.wins as number) ?? 0;
+    agg.losses += (raw.losses as number) ?? 0;
+    if (raw.is_trophy) agg.trophies += 1;
+    const finishedAt = (raw.finished_at as string) ?? "";
+    if (finishedAt > agg.lastFinishedAt) agg.lastFinishedAt = finishedAt;
+  }
+
+  const rows: LeaderboardRow[] = [];
+  for (const [slug, agg] of perSlug) {
+    if (agg.events === 0) continue;
+    const m = metaBySlug.get(slug);
+    rows.push({
+      setCode,
+      slug,
+      displayName: (m?.display_name as string) ?? slug,
+      avatarUrl: (m?.avatar_url as string | null) ?? null,
+      rank: 0,
+      score: 0,
+      trophies: agg.trophies,
+      events: agg.events,
+      wins: agg.wins,
+      losses: agg.losses,
+      lastCalculatedAt:
+        agg.lastFinishedAt || ((m?.last_calculated_at as string | undefined) ?? new Date(0).toISOString()),
+    });
+  }
+
+  return rows
+    .sort((a, b) => {
+      if (b.trophies !== a.trophies) return b.trophies - a.trophies;
+      const wpA = a.wins / Math.max(1, a.wins + a.losses);
+      const wpB = b.wins / Math.max(1, b.wins + b.losses);
+      if (wpB !== wpA) return wpB - wpA;
+      return a.slug.localeCompare(b.slug);
+    })
+    .map((r, i) => ({ ...r, rank: i + 1 }));
+}
+
 export async function fetchColorsSummary(setCode: string): Promise<ColorsSummary[]> {
   const allEvents: Array<Record<string, unknown>> = [];
   const pageSize = 1000;
@@ -255,13 +341,19 @@ export async function fetchColorsSummary(setCode: string): Promise<ColorsSummary
   for (const raw of allEvents) {
     const colors = (raw.colors as string | null) ?? "";
     const slug = raw.slug as string;
-    const key = effectiveColorCount(colors) >= 4 ? MULTI : colorsOf(colors);
-    if (!key) continue;
-    const cur = agg.get(key) ?? { trophies: 0, events: 0, players: new Set<string>() };
-    cur.events += 1;
-    if (raw.is_trophy) cur.trophies += 1;
-    cur.players.add(slug);
-    agg.set(key, cur);
+    // Overlapping tally: a deck counts toward its main-color archetype and, when it
+    // plays 4+ effective colors, also toward Soup — matching the boards' filters.
+    const keys: string[] = [];
+    const main = colorsOf(colors);
+    if (main) keys.push(main);
+    if (effectiveColorCount(colors) >= 4) keys.push(MULTI);
+    for (const key of keys) {
+      const cur = agg.get(key) ?? { trophies: 0, events: 0, players: new Set<string>() };
+      cur.events += 1;
+      if (raw.is_trophy) cur.trophies += 1;
+      cur.players.add(slug);
+      agg.set(key, cur);
+    }
   }
   return Array.from(agg.entries())
     .map(([colors, v]) => ({ setCode, colors, trophies: v.trophies, events: v.events, players: v.players.size }))
@@ -274,7 +366,7 @@ export async function fetchColorsLeaderboard(
 ): Promise<ColorsLeaderboardRow[]> {
   const matcher = colors === MULTI
     ? (c: string) => effectiveColorCount(c) >= 4
-    : (c: string) => effectiveColorCount(c) < 4 && colorsOf(c) === colors;
+    : (c: string) => colorsOf(c) === colors;
   return aggregateColorsFromEvents(setCode, colors, matcher, null);
 }
 
@@ -288,7 +380,7 @@ export async function fetchOtherColorsLeaderboard(
     return fetchPodColorsLeaderboard(setCode, OTHER, otherCombos);
   }
   const otherSet = new Set(otherCombos);
-  const matcher = (c: string) => effectiveColorCount(c) < 4 && otherSet.has(colorsOf(c));
+  const matcher = (c: string) => otherSet.has(colorsOf(c));
   return aggregateColorsFromEvents(setCode, OTHER, matcher, formatFilter);
 }
 

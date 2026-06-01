@@ -5,7 +5,10 @@ from bot.commands.leaderboard import (
     LeaderboardEntry,
     PersonalStanding,
     PersonalStandingsData,
+    decode_filter,
+    encode_filter,
     process_leaderboard,
+    process_leaderboard_for_archetype,
     process_personal_standings,
     render_personal_embed,
     render_public_embed,
@@ -460,3 +463,76 @@ def test_personal_embed_direct_uses_boxes_column_not_points():
     assert "📦" in desc
     assert "Pts" not in desc
     assert "Win%" in desc
+
+
+def _seed_draft(session, p, s, fmt, colors, eid, trophy=False):
+    from bot.models import DraftEvent
+    session.add(DraftEvent(
+        player_id=p.id, set_id=s.id, seventeenlands_event_id=eid,
+        format=fmt, expansion=s.code, colors=colors,
+        wins=7 if trophy else 3, losses=2, is_trophy=trophy,
+        finished_at=datetime(2026, 5, 10),
+    ))
+
+
+def test_encode_decode_filter_roundtrip():
+    assert encode_filter(None, None) == (None, None)
+    assert encode_filter("Premier", None) == ("format", "Premier")
+    assert encode_filter(None, "WU") == ("color", "WU")
+    assert encode_filter("Premier", "WU") == ("format+color", "Premier|WU")
+    # Pod/Direct are standalone boards — color is dropped
+    assert encode_filter("Pod", "WU") == ("format", "Pod")
+    assert encode_filter("Direct", "UG") == ("format", "Direct")
+    assert decode_filter("format+color", "Premier|WU") == ("Premier", "WU")
+    assert decode_filter("format", "Premier") == ("Premier", None)
+    assert decode_filter("color", "WU") == (None, "WU")
+    assert decode_filter(None, None) == (None, None)
+
+
+def test_archetype_board_combines_format_and_color(session):
+    from bot.scoring import DEFAULT_QUEUE_GROUPS
+    s = _seed_set(session)
+    alice = _seed_player(session, "Alice", "1", "a")
+    bob = _seed_player(session, "Bob", "2", "b")
+    _seed_draft(session, alice, s, "PremierDraft", "UG", "a1", trophy=True)
+    _seed_draft(session, alice, s, "PremierDraft", "UGbr", "a2", trophy=True)  # 2 main + 2 splash → still Simic
+    _seed_draft(session, alice, s, "QuickDraft", "UG", "a3", trophy=True)      # Simic but wrong format
+    _seed_draft(session, bob, s, "PremierDraft", "WU", "b1", trophy=True)      # Premier but wrong color
+    session.commit()
+
+    premier = next(g for g in DEFAULT_QUEUE_GROUPS if g.label == "Premier")
+    combined = process_leaderboard_for_archetype(session, viewer_discord_id=None, archetype="UG", group=premier)
+    assert [(e.display_name, e.trophies) for e in combined.top] == [("Alice", 2)]  # a1 + a2, Quick excluded
+
+    color_only = process_leaderboard_for_archetype(session, viewer_discord_id=None, archetype="UG")
+    assert [(e.display_name, e.trophies) for e in color_only.top] == [("Alice", 3)]  # all Simic across formats
+
+
+def test_personal_standings_resolves_named_player(session):
+    s = _seed_set(session)
+    _seed_player(session, "Alice", "1", "a")
+    bob = _seed_player(session, "Bob", "2", "b")
+    _seed_stats(session, bob, s, trophies=4, events=5)
+    session.commit()
+    # caller is Alice but player_name=Bob → Bob's lifetime standings
+    data = process_personal_standings(session, "1", player_name="Bob")
+    assert data.player_name == "Bob"
+    assert data.rows[0].trophies == 4
+    assert process_personal_standings(session, "1", player_name="Nobody") is None
+
+
+def test_drafter_count_narrows_by_filter(session):
+    from bot.commands.leaderboard import _drafter_count
+    s = _seed_set(session)
+    a = _seed_player(session, "Alice", "1", "a")
+    b = _seed_player(session, "Bob", "2", "b")
+    _seed_stats(session, a, s, trophies=1, events=2, fmt="PremierDraft")
+    _seed_stats(session, b, s, trophies=1, events=2, fmt="QuickDraft")
+    _seed_draft(session, a, s, "PremierDraft", "UG", "a1", trophy=True)  # Simic in Premier
+    _seed_draft(session, b, s, "QuickDraft", "WU", "b1", trophy=True)    # Azorius in Quick
+    session.commit()
+    assert _drafter_count(session, s) == 2
+    assert _drafter_count(session, s, format_value="Premier") == 1
+    assert _drafter_count(session, s, color_value="UG") == 1
+    assert _drafter_count(session, s, format_value="Premier", color_value="UG") == 1
+    assert _drafter_count(session, s, format_value="Quick", color_value="UG") == 0

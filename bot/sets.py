@@ -11,7 +11,7 @@ a real ``end_date`` is filled in when a successor set is added.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 
 
 @dataclass(frozen=True)
@@ -54,26 +54,35 @@ class CollectorBoosterWindow:
     end_date: date
 
 
-# Arena Direct's box payout changed across three eras.
-# 2024 sets capped at 6 wins, where the 6-win trophy paid 2 Play Booster boxes.
-# DFT's premiere instead paid 1 Collector box at its 6-win trophy.
-# From April 2025 the ladder extended to 7 wins, paying 2 boxes at 7 and 1 at 6.
-# Collector Booster premiere weekends instead pay 1 box at 7 wins and nothing at 6.
+# Arena Direct box payouts. Current (7-win format):
+# - play booster direct: the trophy pays 2 boxes, a 6-win finish pays 1
+# - collector booster direct: 1 box for the trophy
+# History:
+# - 2024 sets: play booster directs on a 6-win format, the trophy pays 2 boxes
+# - DFT: collector booster direct on a 6-win format, 1 box for the trophy
+# - TDM: the 7-win format rolled out mid-set, so its collector booster direct stayed at 6 wins
+# boxes_for_event keys off 17lands is_trophy, so the win cap is never hardcoded.
 SIX_WIN_PLAY_DIRECT_SETS = frozenset({"OTJ", "FDN", "BLB", "DSK"})
 SIX_WIN_COLLECTOR_DIRECT_SETS = frozenset({"DFT"})
 
 COLLECTOR_BOOSTER_WINDOWS: tuple[CollectorBoosterWindow, ...] = (
-    CollectorBoosterWindow("TDM", date(2025, 4, 18), date(2025, 4, 21)),
+    CollectorBoosterWindow("TDM", date(2025, 4, 18), date(2025, 4, 20)),
     CollectorBoosterWindow("FIN", date(2025, 6, 20), date(2025, 6, 22)),
     CollectorBoosterWindow("EOE", date(2025, 8, 8), date(2025, 8, 11)),
+    CollectorBoosterWindow("TLA", date(2025, 11, 28), date(2025, 11, 30)),
     CollectorBoosterWindow("ECL", date(2026, 1, 30), date(2026, 2, 1)),
+    CollectorBoosterWindow("TMT", date(2026, 3, 13), date(2026, 3, 15)),
     CollectorBoosterWindow("SOS", date(2026, 4, 30), date(2026, 5, 4)),
 )
+
+# Windows widen by a day each side so a draft finished just before/after the
+# scheduled weekend still resolves to the collector payout.
+COLLECTOR_WINDOW_SLACK = timedelta(days=1)
 
 
 def is_collector_booster_window(set_code: str, when: date) -> bool:
     for w in COLLECTOR_BOOSTER_WINDOWS:
-        if w.set_code == set_code and w.start_date <= when <= w.end_date:
+        if w.set_code == set_code and w.start_date - COLLECTOR_WINDOW_SLACK <= when <= w.end_date + COLLECTOR_WINDOW_SLACK:
             return True
     return False
 

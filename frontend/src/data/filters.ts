@@ -14,6 +14,9 @@ export const FORMAT_OPTIONS: FilterOption[] = [
   { value: "Trad", label: "TRADITIONAL DRAFT" },
   { value: "Quick", label: "QUICK DRAFT" },
   { value: "Sealed", label: "SEALED" },
+  // Arena Direct buckets under Sealed for scoring; surfaced as a sibling filter only
+  // for sets that actually have Direct events (see fetchAvailableFormats).
+  { value: "Direct", label: "SEALED - DIRECT" },
   { value: "LCQ", label: "CHAMPIONSHIP QUALIFIER" },
   { value: "Pod", label: "POD DRAFT" },
 ];
@@ -29,6 +32,7 @@ export const FORMAT_RAW_GROUPS: Record<string, string[]> = {
   Quick: [...formatsForBucket("Quick"), "MidWeekQuickDraft"],
   LCQ: [...formatsForBucket("LCQ Draft 1"), ...formatsForBucket("LCQ Draft 2")],
   Pod: ["PodDraft"],
+  Direct: ["ArenaDirect_Sealed"],
 };
 
 export function matchesFormatFilter(rawFormat: string, filter: string): boolean {

@@ -146,10 +146,10 @@ export function LeaderboardPage() {
   const isLoading = active.isLoading;
   const error = active.error as Error | null;
 
-  const isPodMode = format === "Pod";
-  const effectiveDefaultSort: SortState = isPodMode ? DEFAULT_SORT_NOSCORE : DEFAULT_SORT;
+  const noScoreMode = format === "Pod" || format === "Direct";
+  const effectiveDefaultSort: SortState = noScoreMode ? DEFAULT_SORT_NOSCORE : DEFAULT_SORT;
   const rawSort = readSortFromParams(searchParams);
-  const sort: SortState = isPodMode && rawSort.key === "score" ? DEFAULT_SORT_NOSCORE : rawSort;
+  const sort: SortState = noScoreMode && rawSort.key === "score" ? DEFAULT_SORT_NOSCORE : rawSort;
   const rows = useMemo(
     () => (baseRows ? sortRows(baseRows, sort) : baseRows),
     [baseRows, sort.key, sort.dir],
@@ -286,7 +286,7 @@ function Desktop({
           variant="desktop"
           loading={isLoading}
           error={error}
-          showScore={filters.format !== "Pod"}
+          showScore={filters.format !== "Pod" && filters.format !== "Direct"}
           sort={sort}
           onSort={onSort}
           renderExpanded={(r) => (
@@ -571,7 +571,7 @@ function Mobile({
         </div>
         {/* Column header is part of the sticky chrome so it stays pinned with the
             rest of the page chrome as rows scroll under it. */}
-        <LeaderboardColumnHeader variant="mobile" showScore={filters.format !== "Pod"} sort={sort} onSort={onSort} />
+        <LeaderboardColumnHeader variant="mobile" showScore={filters.format !== "Pod" && filters.format !== "Direct"} sort={sort} onSort={onSort} />
       </div>
 
       <LeaderboardTable
@@ -580,7 +580,7 @@ function Mobile({
         loading={isLoading}
         error={error}
         showHeader={false}
-        showScore={filters.format !== "Pod"}
+        showScore={filters.format !== "Pod" && filters.format !== "Direct"}
         renderExpanded={(r) => (
           <MobileExpandedRow
             row={r}

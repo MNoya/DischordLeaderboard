@@ -126,17 +126,21 @@ def compute_score(
     return round(total, 2)
 
 
-def boxes_for_event(set_code: str, wins: int, finished_at: datetime | None) -> int:
-    """Boxes awarded for a single Arena Direct Sealed event, per the era rules in bot.sets."""
+def boxes_for_event(set_code: str, wins: int, finished_at: datetime | None, is_trophy: bool) -> int:
+    """Boxes awarded for a single Arena Direct Sealed event, per the era rules in bot.sets.
+
+    A collector premiere always pays one box for winning the event, and a 2024 play set
+    pays two — both keyed on ``is_trophy`` so the per-era win cap (6 vs 7, including the
+    mid-TDM rollout) comes straight from 17lands rather than a hardcoded threshold. Only
+    the default 7-win play ladder needs raw wins, for its 1-box consolation at six.
+    """
     if set_code in SIX_WIN_PLAY_DIRECT_SETS:
-        return 2 if wins >= 6 else 0
+        return 2 if is_trophy else 0
     if set_code in SIX_WIN_COLLECTOR_DIRECT_SETS:
-        return 1 if wins >= 6 else 0
-    if wins < 6:
-        return 0
+        return 1 if is_trophy else 0
     if finished_at is not None and is_collector_booster_window(set_code, finished_at.date()):
-        return 1 if wins == 7 else 0
-    return 2 if wins == 7 else 1
+        return 1 if is_trophy else 0
+    return 2 if wins >= 7 else (1 if wins == 6 else 0)
 
 
 def _group_for_format(groups: Iterable[QueueGroup], fmt: str) -> QueueGroup | None:

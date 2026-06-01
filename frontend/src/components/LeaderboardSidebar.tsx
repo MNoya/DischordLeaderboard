@@ -22,12 +22,16 @@ import type { ColorsSummary, RecentTrophy } from "../types/leaderboard";
 function topColorsFromTrophies(setCode: string, trophies: RecentTrophy[]): ColorsSummary[] {
   const counts = new Map<string, { trophies: number; players: Set<string> }>();
   for (const t of trophies) {
-    const key = effectiveColorCount(t.colors) >= 4 ? MULTI : colorsOf(t.colors);
-    if (!key) continue;
-    const cur = counts.get(key) ?? { trophies: 0, players: new Set<string>() };
-    cur.trophies += 1;
-    cur.players.add(t.slug);
-    counts.set(key, cur);
+    const keys: string[] = [];
+    const main = colorsOf(t.colors);
+    if (main) keys.push(main);
+    if (effectiveColorCount(t.colors) >= 4) keys.push(MULTI);
+    for (const key of keys) {
+      const cur = counts.get(key) ?? { trophies: 0, players: new Set<string>() };
+      cur.trophies += 1;
+      cur.players.add(t.slug);
+      counts.set(key, cur);
+    }
   }
   return [...counts.entries()]
     .map(([colors, v]) => ({
@@ -82,10 +86,7 @@ export function LeaderboardSidebar({
     : (recentSource ?? [])
         .filter((t) => {
           if (colors === MULTI) return effectiveColorCount(t.colors) >= 4;
-          if (colors === OTHER) {
-            if (effectiveColorCount(t.colors) >= 4) return false;
-            return otherCombos.includes(colorsOf(t.colors));
-          }
+          if (colors === OTHER) return otherCombos.includes(colorsOf(t.colors));
           return colorsOf(t.colors) === colors;
         })
         .slice(0, 10);

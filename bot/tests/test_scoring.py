@@ -5,31 +5,50 @@ from bot.scoring import QueueGroup, boxes_for_event, compute_score, compute_scor
 
 def test_boxes_2024_six_win_play_sets_pay_two_at_trophy():
     for code in ("OTJ", "FDN", "BLB", "DSK"):
-        assert boxes_for_event(code, 6, datetime(2024, 11, 23)) == 2
-        assert boxes_for_event(code, 5, datetime(2024, 11, 23)) == 0
+        assert boxes_for_event(code, 6, datetime(2024, 11, 23), is_trophy=True) == 2
+        assert boxes_for_event(code, 5, datetime(2024, 11, 23), is_trophy=False) == 0
 
 
 def test_boxes_aetherdrift_premiere_pays_one_at_trophy():
-    assert boxes_for_event("DFT", 6, datetime(2025, 2, 22)) == 1
-    assert boxes_for_event("DFT", 5, datetime(2025, 2, 22)) == 0
+    assert boxes_for_event("DFT", 6, datetime(2025, 2, 22), is_trophy=True) == 1
+    assert boxes_for_event("DFT", 5, datetime(2025, 2, 22), is_trophy=False) == 0
 
 
-def test_boxes_collector_weekend_pays_one_at_seven_only():
-    inside = datetime(2026, 4, 30)  # SOS collector premiere
-    assert boxes_for_event("SOS", 7, inside) == 1
-    assert boxes_for_event("SOS", 6, inside) == 0
+def test_boxes_tdm_collector_premiere_was_six_win():
+    premiere = datetime(2025, 4, 19)  # 6-win ladder, so a 6-win trophy pays 1 box
+    assert boxes_for_event("TDM", 6, premiere, is_trophy=True) == 1
+    assert boxes_for_event("TDM", 5, premiere, is_trophy=False) == 0
+    later = datetime(2025, 5, 10)  # after the mid-set 7-win rollout → standard play ladder
+    assert boxes_for_event("TDM", 7, later, is_trophy=True) == 2
+    assert boxes_for_event("TDM", 6, later, is_trophy=False) == 1
+
+
+def test_boxes_collector_weekend_pays_one_for_the_win():
+    inside = datetime(2026, 4, 30)  # SOS collector premiere (7-win era)
+    assert boxes_for_event("SOS", 7, inside, is_trophy=True) == 1
+    assert boxes_for_event("SOS", 6, inside, is_trophy=False) == 0
 
 
 def test_boxes_default_play_booster_ladder_for_later_weekends():
     later = datetime(2026, 5, 20)  # SOS, past the collector window
-    assert boxes_for_event("SOS", 7, later) == 2
-    assert boxes_for_event("SOS", 6, later) == 1
-    assert boxes_for_event("SOS", 5, later) == 0
+    assert boxes_for_event("SOS", 7, later, is_trophy=True) == 2
+    assert boxes_for_event("SOS", 6, later, is_trophy=False) == 1
+    assert boxes_for_event("SOS", 5, later, is_trophy=False) == 0
 
 
-def test_boxes_play_booster_set_never_collector():
-    assert boxes_for_event("TLA", 7, datetime(2025, 12, 1)) == 2
-    assert boxes_for_event("TLA", 6, datetime(2025, 12, 1)) == 1
+def test_boxes_tla_collector_weekend_then_play_ladder():
+    inside = datetime(2025, 11, 29)  # TLA collector premiere
+    assert boxes_for_event("TLA", 7, inside, is_trophy=True) == 1
+    assert boxes_for_event("TLA", 6, inside, is_trophy=False) == 0
+    later = datetime(2025, 12, 15)  # past the TLA window → standard play ladder
+    assert boxes_for_event("TLA", 7, later, is_trophy=True) == 2
+    assert boxes_for_event("TLA", 6, later, is_trophy=False) == 1
+
+
+def test_boxes_collector_window_one_day_slack():
+    assert boxes_for_event("SOS", 7, datetime(2026, 4, 29), is_trophy=True) == 1  # day before
+    assert boxes_for_event("SOS", 7, datetime(2026, 5, 5), is_trophy=True) == 1   # day after
+    assert boxes_for_event("SOS", 7, datetime(2026, 5, 6), is_trophy=True) == 2   # two days out
 
 
 def test_supported_formats_includes_all_bucket_formats():

@@ -8,6 +8,7 @@ export const FMT_COLORS: Record<string, string> = {
   Trad: "#5c8aff",
   Quick: "#ffc63a",
   Sealed: "#ff5d8c",
+  Direct: "#ff5d8c",
   LCQ: "#ff7700",
   "LCQ Draft 1": "#ff7700",
   "LCQ Draft 2": "#ff7700",

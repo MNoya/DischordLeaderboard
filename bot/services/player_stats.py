@@ -37,7 +37,7 @@ def process_stats(
     viewer_discord_id: str,
     set_code: str = ACTIVE_SET_CODE,
 ) -> StatsData | None:
-    player = _resolve_player(session, player_name, viewer_discord_id)
+    player = resolve_player(session, player_name, viewer_discord_id)
     if player is None:
         return None
 
@@ -191,7 +191,7 @@ def rank_players_for_set(
     ]
 
 
-def _resolve_player(session: Session, player_name: str | None, viewer_discord_id: str) -> Player | None:
+def resolve_player(session: Session, player_name: str | None, viewer_discord_id: str) -> Player | None:
     if player_name:
         return session.execute(
             select(Player).where(
