@@ -17,6 +17,7 @@ import type {
   LeaderboardRow,
   PlayerDraftEvent,
   PlayerFormatBreakdown,
+  PlayerIdentity,
   PlayerProfile,
   PodEventMatchRow,
   PodEventParticipantRow,
@@ -235,6 +236,13 @@ export const fetchPlayerProfile = (
     losses: headline.losses,
     formatBreakdown: breakdown,
   });
+};
+
+// ─── public_player (identity, set-independent) ───────────────────────────────
+export const fetchPlayerIdentity = (slug: string): Promise<PlayerIdentity | null> => {
+  const row = leaderboardSosFixture.find((r) => r.slug === slug);
+  if (!row) return wait(null);
+  return wait({ slug: row.slug, displayName: row.displayName, avatarUrl: row.avatarUrl });
 };
 
 // ─── public_player_draft_events ──────────────────────────────────────────────

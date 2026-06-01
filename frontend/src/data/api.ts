@@ -17,6 +17,7 @@ export const fetchColorsLeaderboard = impl.fetchColorsLeaderboard;
 export const fetchOtherColorsLeaderboard = impl.fetchOtherColorsLeaderboard;
 export const fetchColorsSummary = impl.fetchColorsSummary;
 export const fetchPlayerProfile = impl.fetchPlayerProfile;
+export const fetchPlayerIdentity = impl.fetchPlayerIdentity;
 export const fetchAvailableFormats = impl.fetchAvailableFormats;
 export const fetchFormatColorsLeaderboard = impl.fetchFormatColorsLeaderboard;
 export const fetchPlayerDraftEvents = impl.fetchPlayerDraftEvents;

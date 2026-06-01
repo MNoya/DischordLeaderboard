@@ -21,6 +21,7 @@ import type {
   LeaderboardRow,
   PlayerDraftEvent,
   PlayerFormatBreakdown,
+  PlayerIdentity,
   PlayerProfile,
   PodEventMatchRow,
   PodEventParticipantRow,
@@ -439,6 +440,25 @@ export async function fetchPlayerProfile(
     wins: headline.wins,
     losses: headline.losses,
     formatBreakdown: breakdown,
+  };
+}
+
+// ─── public_player (identity, set-independent) ─────────────────────────────
+
+export async function fetchPlayerIdentity(slug: string): Promise<PlayerIdentity | null> {
+  const { data, error } = await client()
+    .from("public_player")
+    .select("slug, display_name, avatar_url")
+    .eq("slug", slug)
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  const row = data as Record<string, unknown>;
+  return {
+    slug: row.slug as string,
+    displayName: row.display_name as string,
+    avatarUrl: (row.avatar_url as string | null) ?? null,
   };
 }
 

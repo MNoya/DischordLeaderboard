@@ -29,7 +29,7 @@ import { MobilePageHeader } from "../components/PageNav";
 import { RankBadge } from "../components/RankBadge";
 import { Tooltip } from "../components/Tooltip";
 
-import { useAvailableFormats, useColorChips, useDraftEvents, useLeaderboard, usePlayerProfile, useSets } from "../data/hooks";
+import { useAvailableFormats, useColorChips, useDraftEvents, useLeaderboard, usePlayerIdentity, usePlayerProfile, useSets } from "../data/hooks";
 import { computeScore, type ScoringStatRow } from "../data/scoring";
 import { canonicalSetCode, colorsOf, effectiveColorCount, eventDate, eventDisplayLabel, fmtShortDate, formatTag, isFlashbackEvent, mainColors, prettyFormat, winPct } from "../data/utils";
 import { ACTIVE_SET_CODE } from "../data/constants";
@@ -49,6 +49,7 @@ import { cn } from "../lib/utils";
 import type {
   PlayerDraftEvent,
   PlayerFormatBreakdown,
+  PlayerIdentity,
   PlayerProfile,
   SetSummary,
 } from "../types/leaderboard";
@@ -112,13 +113,14 @@ const renderColorOption = (opt: FilterOption) => {
 
 export function PlayerPage() {
   const params = useParams<{ slug: string; setCode?: string }>();
-  const slug = params.slug!;
+  const slug = params.slug!.toLowerCase();
   const navigate = useNavigate();
   const { data: sets } = useSets();
   const liveSetCode = sets?.find((s) => s.isActive)?.code;
   const setCode = (params.setCode ? canonicalSetCode(params.setCode, sets) : undefined) ?? liveSetCode ?? ACTIVE_SET_CODE;
   const { data: profile, isLoading, isFetching, error } = usePlayerProfile(slug, setCode);
   const { data: events, isFetching: isFetchingEvents } = useDraftEvents(slug, setCode);
+  const { data: identity } = usePlayerIdentity(slug, !isLoading && !profile);
   const showLoadingBar = (isFetching || isFetchingEvents) && !isLoading;
   // Sibling navigation needs the leaderboard rows so we know who's adjacent
   // by rank. Cached behind TanStack Query — same fetch as the leaderboard
@@ -147,10 +149,18 @@ export function PlayerPage() {
   }, [params.setCode, setCode, liveSetCode, slug, navigate, topSearchParams]);
 
   const idx = leaderboardRows?.findIndex((r) => r.slug === slug) ?? -1;
-  const prevSlug = idx > 0 ? leaderboardRows![idx - 1].slug : null;
-  const nextSlug = idx >= 0 && leaderboardRows && idx < leaderboardRows.length - 1
-    ? leaderboardRows[idx + 1].slug
-    : null;
+  let prevSlug: string | null = null;
+  let nextSlug: string | null = null;
+  if (leaderboardRows && leaderboardRows.length > 0) {
+    if (idx === -1) {
+      // No data on this set, so the player sits off the board — bracket the ends
+      prevSlug = leaderboardRows[leaderboardRows.length - 1].slug;
+      nextSlug = leaderboardRows[0].slug;
+    } else {
+      prevSlug = idx > 0 ? leaderboardRows[idx - 1].slug : null;
+      nextSlug = idx < leaderboardRows.length - 1 ? leaderboardRows[idx + 1].slug : null;
+    }
+  }
   const sibling: SiblingNav = { setCode, prevSlug, nextSlug };
 
   const topQs = topSearchParams.toString();
@@ -214,6 +224,7 @@ export function PlayerPage() {
         navigate={navigate}
         qs={topQs}
         isMobile={isMobile}
+        identity={identity ?? null}
       />
     );
   }
@@ -298,6 +309,7 @@ function NoSetData({
   navigate,
   qs,
   isMobile,
+  identity,
 }: {
   sets: SetSummary[] | undefined;
   setCode: string;
@@ -306,7 +318,13 @@ function NoSetData({
   navigate: ReturnType<typeof useNavigate>;
   qs: string;
   isMobile: boolean;
+  identity: PlayerIdentity | null;
 }) {
+  const setSwitcher = sets ? (
+    <SetCodeDropdown sets={sets} activeCode={setCode} onChange={onChangeSet} size={isMobile ? "sm" : "md"} />
+  ) : (
+    <span className="text-[22px]">{setCode}</span>
+  );
   return (
     <div className="bg-bg text-text min-h-screen animate-fadeIn">
       {isMobile ? (
@@ -324,13 +342,43 @@ function NoSetData({
             <SiblingNavButtons sibling={sibling} qs={qs} />
           </div>
         )}
-        <div className="flex items-center gap-3 font-display tracking-[0.18em]">
-          {sets ? (
-            <SetCodeDropdown sets={sets} activeCode={setCode} onChange={onChangeSet} size={isMobile ? "sm" : "md"} />
-          ) : (
-            <span className="text-[22px]">{setCode}</span>
-          )}
-        </div>
+        {isMobile ? (
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-4 min-w-0">
+              {identity && (
+                <AAvatar displayName={identity.displayName} avatarUrl={identity.avatarUrl} size={64} green />
+              )}
+              {identity && (
+                <h1
+                  className="font-display tracking-[0.03em] m-0 truncate pl-[5px]"
+                  style={{ fontSize: "clamp(20px, 7vw, 44px)", lineHeight: 0.95 }}
+                >
+                  {identity.displayName.toUpperCase()}
+                </h1>
+              )}
+            </div>
+            <div className="shrink-0 flex items-center gap-3 font-display tracking-[0.18em]">{setSwitcher}</div>
+          </div>
+        ) : (
+          <div className="flex items-end gap-7">
+            {identity && (
+              <AAvatar displayName={identity.displayName} avatarUrl={identity.avatarUrl} size={120} green />
+            )}
+            <div className="shrink-0">
+              {identity && (
+                <h1
+                  className="font-display tracking-[0.03em] m-0 whitespace-nowrap pl-[5px]"
+                  style={{ fontSize: 64, lineHeight: 0.95 }}
+                >
+                  {identity.displayName.toUpperCase()}
+                </h1>
+              )}
+              <div className={cn("flex items-center gap-3 font-display tracking-[0.18em]", identity && "mt-2")}>
+                {setSwitcher}
+              </div>
+            </div>
+          </div>
+        )}
       </section>
       <div className="p-20 text-center text-muted font-display tracking-[0.2em]">
         NO {setCode} DATA FOR THIS PLAYER

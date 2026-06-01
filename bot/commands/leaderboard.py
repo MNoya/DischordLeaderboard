@@ -18,7 +18,7 @@ from bot.services.player_stats import process_stats, rank_players_for_set, rende
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.models import DraftEvent, LeaderboardMessage, MagicSet, Player, PlayerStats, PodDraftEvent, PodDraftParticipant
-from bot.scoring import DEFAULT_QUEUE_GROUPS, boxes_for_event, compute_score
+from bot.scoring import DEFAULT_QUEUE_GROUPS, QueueGroup, boxes_for_event, compute_score
 from bot.sets import ACTIVE_SET_CODE, ALL_SETS
 
 
@@ -81,6 +81,7 @@ class PersonalStandingsData:
     player_slug: str
     rows: list[PersonalStanding]
     opted_out: bool = False
+    format_label: str | None = None
 
 
 @dataclass
@@ -151,22 +152,14 @@ def process_leaderboard(
     )
 
 
-def process_leaderboard_for_format(
-    session: Session, viewer_discord_id: str | None, format_label: str, top_n: int = 10,
-    magic_set: MagicSet | None = None,
-) -> LeaderboardData | None:
-    """Per-format leaderboard: ranks each player by their score contribution
-    in the named queue group (Premier, Quick, Sealed, etc.).
+def _ranked_for_format(
+    session: Session, group: QueueGroup, set_id: str,
+) -> list[tuple[int, str, str, str, str | None, float, int]]:
+    """Rank active, opted-in players by their score in one queue group for a set.
+
+    Returns (rank, player_id, slug, display_name, discord_id, score, trophies) per
+    scoring player. Shared by the public format board and the personal standings rank.
     """
-    if magic_set is None:
-        magic_set = _current_set(session)
-    if magic_set is None:
-        return None
-
-    group = next((g for g in DEFAULT_QUEUE_GROUPS if g.label == format_label), None)
-    if group is None:
-        return None
-
     rows = session.execute(
         select(
             Player.id, Player.slug, Player.display_name, Player.discord_id,
@@ -177,7 +170,7 @@ def process_leaderboard_for_format(
         .where(
             Player.active.is_(True),
             Player.leaderboard_opt_in.is_(True),
-            PlayerStats.set_id == magic_set.id,
+            PlayerStats.set_id == set_id,
             PlayerStats.format.in_(group.formats),
         )
     ).all()
@@ -203,11 +196,29 @@ def process_leaderboard_for_format(
         scored.append((score, b["trophies"], pid, b["slug"], b["display_name"], b["discord_id"]))
 
     scored.sort(key=lambda x: (-x[0], x[4].lower()))
-
-    ranked = [
+    return [
         (idx + 1, pid, slug, name, did, score, trophies)
         for idx, (score, trophies, pid, slug, name, did) in enumerate(scored)
     ]
+
+
+def process_leaderboard_for_format(
+    session: Session, viewer_discord_id: str | None, format_label: str, top_n: int = 10,
+    magic_set: MagicSet | None = None,
+) -> LeaderboardData | None:
+    """Per-format leaderboard: ranks each player by their score contribution
+    in the named queue group (Premier, Quick, Sealed, etc.).
+    """
+    if magic_set is None:
+        magic_set = _current_set(session)
+    if magic_set is None:
+        return None
+
+    group = next((g for g in DEFAULT_QUEUE_GROUPS if g.label == format_label), None)
+    if group is None:
+        return None
+
+    ranked = _ranked_for_format(session, group, magic_set.id)
     top = [
         LeaderboardEntry(rank=rank, player_id=pid, slug=slug, display_name=name, score=score, trophies=trophies)
         for rank, pid, slug, name, _did, score, trophies in ranked[:top_n]
@@ -232,7 +243,7 @@ def process_leaderboard_for_format(
         top=top,
         viewer=viewer_entry,
         last_updated=last_updated,
-        drafter_count=len(scored),
+        drafter_count=len(ranked),
     )
 
 
@@ -470,17 +481,28 @@ def process_leaderboard_for_pod(
 PERSONAL_STANDINGS_LIMIT = 10
 
 
-def process_personal_standings(session: Session, viewer_discord_id: str) -> PersonalStandingsData | None:
+def process_personal_standings(
+    session: Session, viewer_discord_id: str, *, format_label: str | None = None,
+) -> PersonalStandingsData | None:
     """The caller's own best sets: score and trophies per set they've drafted, top points first.
 
     Aggregates the player's PlayerStats per set (alchemy variants bucket under their
     parent set via set_id), sorts by score then trophies, and caps at the top 10.
+    When ``format_label`` names a queue group, each row is scoped to that group's
+    formats and ranked against that set's per-format board.
     """
     player = session.execute(
         select(Player).where(Player.discord_id == viewer_discord_id)
     ).scalar_one_or_none()
     if player is None:
         return None
+
+    group: QueueGroup | None = None
+    if format_label is not None:
+        group = next((g for g in DEFAULT_QUEUE_GROUPS if g.label == format_label), None)
+        if group is None:
+            return None
+    allowed = set(group.formats) if group is not None else None
 
     opted_out = not player.leaderboard_opt_in
 
@@ -495,6 +517,8 @@ def process_personal_standings(session: Session, viewer_discord_id: str) -> Pers
 
     by_set: dict[str, dict] = {}
     for r in stats_rows:
+        if allowed is not None and r.format not in allowed:
+            continue
         b = by_set.setdefault(r.id, {
             "code": r.code, "stats": [], "trophies": 0, "events": 0, "wins": 0, "losses": 0,
         })
@@ -509,11 +533,17 @@ def process_personal_standings(session: Session, viewer_discord_id: str) -> Pers
 
     rows: list[PersonalStanding] = []
     for set_id, b in by_set.items():
-        score = compute_score(b["stats"])
+        if group is not None:
+            if b["events"] == 0:
+                continue
+            score = compute_score(b["stats"], groups=(group,))
+            rank = None if opted_out else _set_rank_for_format(session, group, set_id, player.id, score)
+        else:
+            score = compute_score(b["stats"])
+            rank = None if opted_out else _set_rank(session, set_id, player.id, score)
         rows.append(PersonalStanding(
             set_code=b["code"], score=score, trophies=b["trophies"],
-            events=b["events"], wins=b["wins"], losses=b["losses"],
-            rank=None if opted_out else _set_rank(session, set_id, player.id, score),
+            events=b["events"], wins=b["wins"], losses=b["losses"], rank=rank,
         ))
     if opted_out:
         rows.sort(key=lambda r: (-r.trophies, -r.score, r.set_code))
@@ -522,6 +552,7 @@ def process_personal_standings(session: Session, viewer_discord_id: str) -> Pers
     return PersonalStandingsData(
         player_name=player.display_name, player_slug=player.slug,
         rows=rows[:PERSONAL_STANDINGS_LIMIT], opted_out=opted_out,
+        format_label=group.label if group is not None else None,
     )
 
 
@@ -530,6 +561,20 @@ def _set_rank(session: Session, set_id: str, player_id: str, score: float) -> in
     from rank_players_for_set; an opted-out viewer gets the slot their score would take.
     """
     ranked = rank_players_for_set(session, set_id)
+    return _rank_of(ranked, player_id, score)
+
+
+def _set_rank_for_format(
+    session: Session, group: QueueGroup, set_id: str, player_id: str, score: float,
+) -> int | None:
+    """The player's standing on a set's per-format board, same opted-out fallback as _set_rank."""
+    ranked = _ranked_for_format(session, group, set_id)
+    return _rank_of(ranked, player_id, score)
+
+
+def _rank_of(
+    ranked: list[tuple[int, str, str, str, str | None, float, int]], player_id: str, score: float,
+) -> int | None:
     for entry in ranked:
         if entry[1] == player_id:
             return entry[0]
@@ -737,19 +782,15 @@ render_public_embed = render_embed
 
 
 def render_personal_embed(data: PersonalStandingsData) -> discord.Embed:
-    embed = discord.Embed(
-        title=f"🏆 Lifetime Sets — {data.player_name}",
-        color=discord.Color.gold(),
-    )
+    title = f"🏆 Lifetime Sets — {data.player_name}"
+    if data.format_label:
+        title = f"{title} · {data.format_label}"
+    embed = discord.Embed(title=title, color=discord.Color.gold())
     if not data.rows:
         embed.description = "_No scored drafts yet_"
         return embed
 
     rows = data.rows
-
-    def _winrate(r: PersonalStanding) -> str:
-        games = r.wins + r.losses
-        return f"{round(r.wins / games * 100)}%" if games else "—"
 
     # Columns after the leading ordinal, two-space separated. Opted-out players are
     # excluded from public rank sequences, so Rnk/Pts are dropped to match the site.
@@ -757,7 +798,6 @@ def render_personal_embed(data: PersonalStandingsData) -> discord.Embed:
     if not data.opted_out:
         group.append(("Rnk", "r", [f"#{r.rank}" if r.rank is not None else "—" for r in rows]))
     group.append(("Ev", "r", [str(r.events) for r in rows]))
-    group.append(("Win%", "r", [_winrate(r) for r in rows]))
     if not data.opted_out:
         group.append(("Pts", "c", [str(round(r.score)) for r in rows]))
     group.append(("🏆", "r", [str(r.trophies) for r in rows]))
@@ -780,10 +820,12 @@ def render_personal_embed(data: PersonalStandingsData) -> discord.Embed:
         for i, v in enumerate(values):
             row_cells[i].append(_fmt(v, width, align))
 
+    link_filter_type = "format" if data.format_label else None
     lines = [f"`{'#':<{ord_width}} " + "  ".join(header_cells) + "`"]
     for i, r in enumerate(rows):
         inner = f"{f'{i + 1}.':<{ord_width}} " + "  ".join(row_cells[i])
-        lines.append(f"[`{inner}`](<{_player_url(data.player_slug, r.set_code)}>)")
+        url = _player_url(data.player_slug, r.set_code, link_filter_type, data.format_label)
+        lines.append(f"[`{inner}`](<{url}>)")
 
     embed.description = "\n".join(lines)
     return embed
@@ -1170,8 +1212,21 @@ class Leaderboard(commands.Cog):
         )
 
         if scope is not None and scope.value == "me":
+            fmt_value = format.value if format is not None else None
+            if color is not None:
+                await interaction.response.send_message(
+                    "`scope:Me` supports the `format` filter, not `color` yet.",
+                    ephemeral=(interaction.guild is not None),
+                )
+                return
+            if fmt_value in ("Pod", "Direct"):
+                await interaction.response.send_message(
+                    f"`scope:Me` doesn't cover {fmt_value} standings yet.",
+                    ephemeral=(interaction.guild is not None),
+                )
+                return
             with SessionLocal() as session:
-                data = process_personal_standings(session, user_id)
+                data = process_personal_standings(session, user_id, format_label=fmt_value)
             if data is None:
                 await interaction.response.send_message(
                     MSG_NOT_REGISTERED, ephemeral=(interaction.guild is not None),

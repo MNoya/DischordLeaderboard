@@ -17,6 +17,7 @@ import {
   fetchLeaderboard,
   fetchOtherColorsLeaderboard,
   fetchPlayerDraftEvents,
+  fetchPlayerIdentity,
   fetchPlayerProfile,
   fetchPodEventBySlug,
   fetchPodEventMatches,
@@ -121,6 +122,15 @@ export function usePlayerProfile(slug: string | undefined, setCode: string) {
     enabled: !!slug,
     staleTime: FIVE_MINUTES,
     placeholderData: keepPreviousData,
+  });
+}
+
+export function usePlayerIdentity(slug: string | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: ["player-identity", slug],
+    queryFn: () => fetchPlayerIdentity(slug!),
+    enabled: !!slug && enabled,
+    staleTime: FIVE_MINUTES,
   });
 }
 

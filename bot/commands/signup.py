@@ -303,6 +303,6 @@ async def _build_join_preview(bot: commands.Bot, user_id: str):
     stats_embed = render_stats_embed(stats_data) if stats_data is not None else None
     stats_view = None
     if stats_data is not None and stats_data.has_token:
-        stats_view = LeaderboardVisibilityView(bot, user_id, opted_in=not stats_data.opted_out)
+        stats_view = LeaderboardVisibilityView(bot, user_id, stats_data)
 
     return lb_embed, render_lb_view(), stats_embed, stats_view

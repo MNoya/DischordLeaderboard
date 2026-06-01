@@ -3,7 +3,11 @@ from datetime import date, datetime
 from bot.commands.leaderboard import (
     LeaderboardData,
     LeaderboardEntry,
+    PersonalStanding,
+    PersonalStandingsData,
     process_leaderboard,
+    process_personal_standings,
+    render_personal_embed,
     render_public_embed,
 )
 from bot.services.player_stats import StatsData, render_embed as render_stats_embed
@@ -322,3 +326,81 @@ def test_embed_link_active_set_has_no_set_path():
     data = LeaderboardData(set_code="SOS", set_name="SOS", top=[entry], viewer=None)
     embed = render_public_embed(data)
     assert not embed.url.rstrip("/").endswith("/SOS")
+
+
+# ---------------------------------------------------------------------------
+# personal standings (scope:Me)
+# ---------------------------------------------------------------------------
+
+
+def test_personal_standings_unfiltered_aggregates_all_formats(session):
+    s = _seed_set(session)
+    alice = _seed_player(session, "Alice", "1", "a")
+    _seed_stats(session, alice, s, trophies=2, events=4, fmt="PremierDraft")
+    _seed_stats(session, alice, s, trophies=1, events=2, fmt="QuickDraft")
+    session.commit()
+
+    data = process_personal_standings(session, "1")
+    assert data.format_label is None
+    assert len(data.rows) == 1
+    assert (data.rows[0].events, data.rows[0].trophies) == (6, 3)
+
+
+def test_personal_standings_format_filter_scopes_to_group(session):
+    s = _seed_set(session)
+    alice = _seed_player(session, "Alice", "1", "a")
+    _seed_stats(session, alice, s, trophies=2, events=4, fmt="PremierDraft")
+    _seed_stats(session, alice, s, trophies=1, events=2, fmt="QuickDraft")
+    session.commit()
+
+    data = process_personal_standings(session, "1", format_label="Premier")
+    assert data.format_label == "Premier"
+    assert len(data.rows) == 1
+    assert (data.rows[0].events, data.rows[0].trophies) == (4, 2)
+
+
+def test_personal_standings_format_rank_uses_format_board(session):
+    s = _seed_set(session)
+    alice = _seed_player(session, "Alice", "1", "a")
+    bob = _seed_player(session, "Bob", "2", "b")
+    _seed_stats(session, alice, s, trophies=2, events=3, fmt="PremierDraft")
+    _seed_stats(session, bob, s, trophies=5, events=6, fmt="PremierDraft")
+    session.commit()
+
+    data = process_personal_standings(session, "1", format_label="Premier")
+    assert data.rows[0].rank == 2
+
+
+def test_personal_standings_format_excludes_sets_without_group_events(session):
+    s = _seed_set(session)
+    alice = _seed_player(session, "Alice", "1", "a")
+    _seed_stats(session, alice, s, trophies=1, events=2, fmt="QuickDraft")
+    session.commit()
+
+    data = process_personal_standings(session, "1", format_label="Premier")
+    assert data.rows == []
+
+
+def _personal(rows=None, opted_out=False, format_label=None):
+    return PersonalStandingsData(
+        player_name="Alice", player_slug="alice",
+        rows=rows if rows is not None else [
+            PersonalStanding(set_code="SOS", score=42.0, trophies=3, events=5, wins=21, losses=4, rank=1),
+        ],
+        opted_out=opted_out, format_label=format_label,
+    )
+
+
+def test_personal_embed_omits_winrate_column():
+    desc = render_personal_embed(_personal()).description or ""
+    assert "Win%" not in desc
+
+
+def test_personal_embed_title_appends_format_suffix():
+    embed = render_personal_embed(_personal(format_label="Premier"))
+    assert embed.title.endswith("· Premier")
+
+
+def test_personal_embed_title_plain_without_filter():
+    embed = render_personal_embed(_personal())
+    assert "·" not in embed.title

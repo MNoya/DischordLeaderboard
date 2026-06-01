@@ -182,6 +182,12 @@ export interface PodLeaderboardRow {
 }
 
 // View-shape composite used by the player profile page.
+export interface PlayerIdentity {
+  slug: string;
+  displayName: string;
+  avatarUrl: string | null;
+}
+
 export interface PlayerProfile {
   slug: string;
   displayName: string;

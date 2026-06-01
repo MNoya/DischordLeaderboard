@@ -35,13 +35,14 @@ def process_stats(
     session: Session,
     player_name: str | None,
     viewer_discord_id: str,
+    set_code: str = ACTIVE_SET_CODE,
 ) -> StatsData | None:
     player = _resolve_player(session, player_name, viewer_discord_id)
     if player is None:
         return None
 
     magic_set = session.execute(
-        select(MagicSet).where(MagicSet.code == ACTIVE_SET_CODE)
+        select(MagicSet).where(MagicSet.code == set_code)
     ).scalar_one_or_none()
     if magic_set is None:
         return None
@@ -102,11 +103,14 @@ def process_stats(
     )
 
 
+def profile_url(data: StatsData) -> str:
+    return f"{settings.public_site_url.rstrip('/')}/{data.set_code}/player/{data.player_slug}"
+
+
 def render_embed(data: StatsData) -> discord.Embed:
-    profile_url = f"{settings.public_site_url.rstrip('/')}/{data.set_code}/player/{data.player_slug}"
     embed = discord.Embed(
-        title=f"📊 Stats — {data.player_name}",
-        url=profile_url,
+        title=f"📊 Stats — {data.player_name} — {data.set_code}",
+        url=profile_url(data),
         color=discord.Color.blurple(),
     )
     if data.opted_out:
