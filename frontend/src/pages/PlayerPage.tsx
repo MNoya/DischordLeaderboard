@@ -553,6 +553,7 @@ function Desktop({
     [filtersActive, filtered, profile.trophies, profile.events, profile.wins, profile.losses, profile.score],
   );
   const wp = winPct(stats.wins, stats.losses);
+  const ranked = profile.rank > 0;
   const [pointsModalOpen, setPointsModalOpen] = useState(false);
   const pointsBtnRef = useRef<HTMLButtonElement>(null);
 
@@ -583,12 +584,13 @@ function Desktop({
               ) : (
                 <span className="text-[22px]">{profile.setCode}</span>
               )}
-              <RankBadge rank={profile.rank} size="lg" />
+              {ranked && <RankBadge rank={profile.rank} size="lg" />}
             </div>
           </div>
           <StatStrip
             stats={stats}
             wp={wp}
+            showPoints={ranked}
             onPointsClick={() => setPointsModalOpen((o) => !o)}
             pointsBtnRef={pointsBtnRef}
           />
@@ -596,7 +598,7 @@ function Desktop({
       </section>
 
       <div className="grid" style={{ gridTemplateColumns: "440px 1fr" }}>
-        <BreakdownPanel profile={profile} events={events} />
+        <BreakdownPanel profile={profile} events={events} showPoints={ranked} />
         <DraftLogDesktop
           events={events}
           filtered={filtered}
@@ -624,11 +626,13 @@ function Desktop({
 function StatStrip({
   stats,
   wp,
+  showPoints = true,
   onPointsClick,
   pointsBtnRef,
 }: {
   stats: StatStripStats;
   wp: string;
+  showPoints?: boolean;
   onPointsClick?: () => void;
   pointsBtnRef?: React.RefObject<HTMLButtonElement>;
 }) {
@@ -674,18 +678,25 @@ function StatStrip({
         </span>
       ),
     },
-    {
-      label: "POINTS",
-      value: <span className={cn(valueCls, "text-green")}>{fmtPts(stats.score)}</span>,
-      accent: true,
-      onClick: onPointsClick,
-      btnRef: pointsBtnRef,
-    },
+    ...(showPoints
+      ? [
+          {
+            label: "POINTS",
+            value: <span className={cn(valueCls, "text-green")}>{fmtPts(stats.score)}</span>,
+            accent: true,
+            onClick: onPointsClick,
+            btnRef: pointsBtnRef,
+          },
+        ]
+      : []),
   ];
   return (
     <div
       className="grid border border-border2 bg-bg self-stretch min-w-0 ml-auto"
-      style={{ flex: "0 1 720px", gridTemplateColumns: "1fr 1fr 1.3fr 1fr 0.9fr" }}
+      style={{
+        flex: "0 1 720px",
+        gridTemplateColumns: showPoints ? "1fr 1fr 1.3fr 1fr 0.9fr" : "1fr 1fr 1.3fr 1fr",
+      }}
     >
       {tiles.map((t, i) => {
         const tileCls = cn(
@@ -740,7 +751,15 @@ function StatStrip({
   );
 }
 
-function BreakdownPanel({ profile, events }: { profile: PlayerProfile; events: PlayerDraftEvent[] }) {
+function BreakdownPanel({
+  profile,
+  events,
+  showPoints,
+}: {
+  profile: PlayerProfile;
+  events: PlayerDraftEvent[];
+  showPoints: boolean;
+}) {
   const formatBreakdown = useMemo(
     () => [...profile.formatBreakdown].sort((a, b) => b.scoreContribution - a.scoreContribution),
     [profile.formatBreakdown],
@@ -764,30 +783,34 @@ function BreakdownPanel({ profile, events }: { profile: PlayerProfile; events: P
 
   return (
     <section className="py-6 pl-10 pr-8 border-r border-border">
-      <SectionLabel size={13} className="mb-3.5 text-center" style={{ width: 148 }}>POINTS BY FORMAT</SectionLabel>
-      <div className="flex items-center gap-5 mb-4">
-        <DonutChart
-          pieHole={0.5}
-          entries={formatBreakdown.map((f) => ({
-            key: f.formatLabel,
-            value: f.scoreContribution / total,
-            color: FMT_COLORS[f.formatLabel] ?? "#5c8aff",
-          }))}
-          radius={56}
-          strokeWidth={18}
-          size={148}
-          activeKey={fmtHover}
-          onHoverEntry={setFmtHover}
-        />
-        <FormatLegend
-          breakdown={formatBreakdown}
-          totalScore={profile.score}
-          hoveredKey={fmtHover}
-          onHover={setFmtHover}
-        />
-      </div>
+      {showPoints && (
+        <>
+          <SectionLabel size={13} className="mb-3.5 text-center" style={{ width: 148 }}>POINTS BY FORMAT</SectionLabel>
+          <div className="flex items-center gap-5 mb-4">
+            <DonutChart
+              pieHole={0.5}
+              entries={formatBreakdown.map((f) => ({
+                key: f.formatLabel,
+                value: f.scoreContribution / total,
+                color: FMT_COLORS[f.formatLabel] ?? "#5c8aff",
+              }))}
+              radius={56}
+              strokeWidth={18}
+              size={148}
+              activeKey={fmtHover}
+              onHoverEntry={setFmtHover}
+            />
+            <FormatLegend
+              breakdown={formatBreakdown}
+              totalScore={profile.score}
+              hoveredKey={fmtHover}
+              onHover={setFmtHover}
+            />
+          </div>
+        </>
+      )}
 
-      <SectionLabel size={13} className="mt-6 mb-3 text-center" style={{ width: 148 }}>DECK COLORS</SectionLabel>
+      <SectionLabel size={13} className={cn("mb-3 text-center", showPoints && "mt-6")} style={{ width: 148 }}>DECK COLORS</SectionLabel>
       <div className="flex items-center gap-5">
         <DonutChart
           pieHole={0.5}
@@ -1436,6 +1459,7 @@ function Mobile({
     [filtersActive, filtered, profile.trophies, profile.events, profile.wins, profile.losses, profile.score],
   );
   const wp = winPct(stats.wins, stats.losses);
+  const ranked = profile.rank > 0;
   const [pointsModalOpen, setPointsModalOpen] = useState(false);
   const pointsBtnRef = useRef<HTMLButtonElement>(null);
 
@@ -1467,9 +1491,11 @@ function Mobile({
             </h1>
           </div>
           <div className="flex flex-col items-end gap-1.5 font-display tracking-[0.18em] shrink-0">
-            <span style={{ marginRight: -8 }}>
-              <RankBadge rank={profile.rank} size="md" />
-            </span>
+            {ranked && (
+              <span style={{ marginRight: -8 }}>
+                <RankBadge rank={profile.rank} size="md" />
+              </span>
+            )}
             {sets ? (
               <SetCodeDropdown sets={sets} activeCode={profile.setCode} onChange={onChangeSet} size="sm" />
             ) : (
@@ -1478,7 +1504,7 @@ function Mobile({
           </div>
         </div>
 
-        <div className="mt-[18px] grid grid-cols-5 gap-[5px]">
+        <div className={cn("mt-[18px] grid gap-[5px]", ranked ? "grid-cols-5" : "grid-cols-4")}>
           <StatChip
             label="TROPHIES"
             value={
@@ -1491,17 +1517,19 @@ function Mobile({
           <StatChip label="EVENTS" value={stats.events} />
           <StatChip label="RECORD" value={`${stats.wins}–${stats.losses}`} />
           <StatChip label="WIN %" value={`${wp}%`} />
-          <StatChip
-            label="POINTS"
-            value={fmtPts(stats.score)}
-            accent
-            onClick={() => setPointsModalOpen((o) => !o)}
-            buttonRef={pointsBtnRef}
-          />
+          {ranked && (
+            <StatChip
+              label="POINTS"
+              value={fmtPts(stats.score)}
+              accent
+              onClick={() => setPointsModalOpen((o) => !o)}
+              buttonRef={pointsBtnRef}
+            />
+          )}
         </div>
       </section>
 
-      <MobileBreakdown profile={profile} events={events} />
+      <MobileBreakdown profile={profile} events={events} showPoints={ranked} />
 
       <section ref={eventLogRef} className="py-4 px-[18px]">
         <div className="flex items-center justify-between mb-2.5 gap-2">
@@ -1581,9 +1609,11 @@ function isBreakdownTab(v: unknown): v is BreakdownTab {
 function MobileBreakdown({
   profile,
   events,
+  showPoints,
 }: {
   profile: PlayerProfile;
   events: PlayerDraftEvent[];
+  showPoints: boolean;
 }) {
   const [tab, setTab] = useState<BreakdownTab>(() => {
     if (typeof window === "undefined") return "deckColors";
@@ -1593,23 +1623,26 @@ function MobileBreakdown({
   useEffect(() => {
     window.localStorage.setItem(BREAKDOWN_TAB_STORAGE_KEY, tab);
   }, [tab]);
+  const activeTab = tab === "format" && !showPoints ? "deckColors" : tab;
   return (
     <section className="border-b border-border">
       <div className="flex border-b border-border">
-        <BreakdownTabButton active={tab === "format"} onClick={() => setTab("format")}>
-          POINTS BY FORMAT
-        </BreakdownTabButton>
-        <BreakdownTabButton active={tab === "deckColors"} onClick={() => setTab("deckColors")}>
+        {showPoints && (
+          <BreakdownTabButton active={activeTab === "format"} onClick={() => setTab("format")}>
+            POINTS BY FORMAT
+          </BreakdownTabButton>
+        )}
+        <BreakdownTabButton active={activeTab === "deckColors"} onClick={() => setTab("deckColors")}>
           DECK COLORS
         </BreakdownTabButton>
-        <BreakdownTabButton active={tab === "manaPips"} onClick={() => setTab("manaPips")}>
+        <BreakdownTabButton active={activeTab === "manaPips"} onClick={() => setTab("manaPips")}>
           COLORS PLAYED
         </BreakdownTabButton>
       </div>
       <div className="px-[18px] py-4">
-        {tab === "format" && <MobileFormatTab profile={profile} />}
-        {tab === "deckColors" && <MobileDeckColorsTab events={events} />}
-        {tab === "manaPips" && <MobileManaPipsTab events={events} />}
+        {activeTab === "format" && <MobileFormatTab profile={profile} />}
+        {activeTab === "deckColors" && <MobileDeckColorsTab events={events} />}
+        {activeTab === "manaPips" && <MobileManaPipsTab events={events} />}
       </div>
     </section>
   );
