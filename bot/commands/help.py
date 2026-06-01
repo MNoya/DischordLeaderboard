@@ -12,7 +12,7 @@ from bot.commands import descriptions as desc
 logger = logging.getLogger(__name__)
 
 
-HELP_TITLE = "DisChord Bot Commands"
+HELP_TITLE = "❔ Commands"
 
 # (section_label, [(command, description), ...])
 HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [

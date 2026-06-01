@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from bot import audit, emojis
 from bot.commands import descriptions as desc
+from bot.commands.messages import MSG_NOT_REGISTERED
 from bot.services.player_stats import process_stats, rank_players_for_set, render_embed as render_stats_embed
 from bot.config import settings
 from bot.database import SessionLocal
@@ -61,6 +62,22 @@ class LeaderboardEntry:
     score: float
     trophies: int
     events: int = 0
+
+
+@dataclass
+class PersonalStanding:
+    set_code: str
+    rank: int | None
+    score: float
+    trophies: int
+
+
+@dataclass
+class PersonalStandingsData:
+    player_name: str
+    player_slug: str
+    rows: list[PersonalStanding]
+    opted_out: bool = False
 
 
 @dataclass
@@ -447,6 +464,62 @@ def process_leaderboard_for_pod(
     )
 
 
+def process_personal_standings(session: Session, viewer_discord_id: str) -> PersonalStandingsData | None:
+    """Cross-set personal view: the caller's rank, score and trophies in every set they've drafted.
+
+    Sets the player never drafted are omitted; results sort by rank (best first),
+    opted-out players still see their own scores with no public rank.
+    """
+    player = session.execute(
+        select(Player).where(Player.discord_id == viewer_discord_id)
+    ).scalar_one_or_none()
+    if player is None:
+        return None
+
+    opted_out = not player.leaderboard_opt_in
+    sets_by_code = {s.code: s for s in session.execute(select(MagicSet)).scalars()}
+
+    rows: list[PersonalStanding] = []
+    for seed in ALL_SETS:
+        magic_set = sets_by_code.get(seed.code)
+        if magic_set is None:
+            continue
+
+        rank: int | None = None
+        score = 0.0
+        trophies = 0
+        found = False
+        if not opted_out:
+            for entry in rank_players_for_set(session, magic_set.id):
+                if entry[1] == player.id:
+                    rank, score, trophies = entry[0], entry[5], entry[6]
+                    found = True
+                    break
+
+        if not found:
+            stats_rows = session.execute(
+                select(PlayerStats).where(
+                    PlayerStats.player_id == player.id,
+                    PlayerStats.set_id == magic_set.id,
+                )
+            ).scalars().all()
+            if not stats_rows:
+                continue
+            stat_dicts = [
+                {"format": r.format, "events": r.events, "wins": r.wins, "losses": r.losses, "trophies": r.trophies}
+                for r in stats_rows
+            ]
+            score = compute_score(stat_dicts)
+            trophies = sum(int(r.trophies or 0) for r in stats_rows)
+
+        rows.append(PersonalStanding(set_code=magic_set.code, rank=rank, score=score, trophies=trophies))
+
+    rows.sort(key=lambda r: (r.rank is None, r.rank or 0, -r.score))
+    return PersonalStandingsData(
+        player_name=player.display_name, player_slug=player.slug, rows=rows, opted_out=opted_out,
+    )
+
+
 MEDAL_EMOJIS = {1: "🥇", 2: "🥈", 3: "🥉"}
 
 _CYCLE: list[tuple[str | None, str | None]] = [
@@ -645,6 +718,41 @@ def render_embed(data: LeaderboardData) -> discord.Embed:
 render_public_embed = render_embed
 
 
+def render_personal_embed(data: PersonalStandingsData) -> discord.Embed:
+    embed = discord.Embed(
+        title=f"🏆 Lifetime Sets — {data.player_name}",
+        color=discord.Color.gold(),
+    )
+    if not data.rows:
+        embed.description = "_No scored drafts yet — run `/join` to join, then draft some games._"
+        return embed
+
+    rank_strs = {r.set_code: (f"#{r.rank}" if r.rank is not None else "—") for r in data.rows}
+    set_width = max(max(len(r.set_code) for r in data.rows), len("Set"))
+    rank_width = max(max(len(v) for v in rank_strs.values()), len("#"))
+    score_width = max(max(len(f"{round(r.score)}") for r in data.rows), len("Points"))
+    trophy_width = max(max(len(str(r.trophies)) for r in data.rows), 1)
+    header_trophy_width = max(trophy_width - 1, 1)
+
+    header = (
+        f"{'Set':<{set_width}}  {'#':>{rank_width}}  "
+        f"{'Points':>{score_width}}  {'🏆':>{header_trophy_width}}"
+    )
+    lines = [f"`{header}`"]
+    for r in data.rows:
+        set_code = f"{r.set_code:<{set_width}}"
+        rank = f"{rank_strs[r.set_code]:>{rank_width}}"
+        score = f"{round(r.score):>{score_width}}"
+        trophy = f"{r.trophies:>{trophy_width}}"
+        inner = f"{set_code}  {rank}  {score}  {trophy}"
+        lines.append(f"[`{inner}`](<{_player_url(data.player_slug, r.set_code)}>)")
+
+    embed.description = "\n".join(lines)
+    if data.opted_out:
+        embed.set_footer(text="Hidden from public boards · ranks shown are private")
+    return embed
+
+
 async def _send_personal_followup(
     interaction: discord.Interaction, viewer_discord_id: str, viewer_registered: bool,
 ) -> None:
@@ -653,7 +761,7 @@ async def _send_personal_followup(
     visually consistent."""
     if not viewer_registered:
         await interaction.followup.send(
-            content="You're not on the leaderboard — run `/join` to join.",
+            content=MSG_NOT_REGISTERED,
             ephemeral=(interaction.guild is not None),
         )
         return
@@ -983,11 +1091,15 @@ class Leaderboard(commands.Cog):
 
     @app_commands.command(name="leaderboard", description=desc.LEADERBOARD)
     @app_commands.describe(
-        format="Show only one queue (Premier, Quick, Sealed, Traditional)",
+        format="Show only one queue (Premier, Trad, Pod, Direct)",
         color="Filter by archetype: guilds, shards/wedges, or Soup (4+ colors)",
         set="Look up an specific set's standings",
+        scope="Me — your own rank across every set you've drafted",
     )
     @app_commands.choices(
+        scope=[
+            app_commands.Choice(name="Me", value="me"),
+        ],
         format=[
             app_commands.Choice(name="Premier",     value="Premier"),
             app_commands.Choice(name="Traditional", value="Trad"),
@@ -1009,6 +1121,7 @@ class Leaderboard(commands.Cog):
         format: app_commands.Choice[str] | None = None,
         color: app_commands.Choice[str] | None = None,
         set: str | None = None,
+        scope: app_commands.Choice[str] | None = None,
     ) -> None:
         user_id = str(interaction.user.id)
         audit.event(
@@ -1017,7 +1130,19 @@ class Leaderboard(commands.Cog):
             format=format.value if format else None,
             color=color.value if color else None,
             set=set,
+            scope=scope.value if scope else None,
         )
+
+        if scope is not None and scope.value == "me":
+            with SessionLocal() as session:
+                data = process_personal_standings(session, user_id)
+            if data is None:
+                await interaction.response.send_message(
+                    MSG_NOT_REGISTERED, ephemeral=(interaction.guild is not None),
+                )
+                return
+            await interaction.response.send_message(embed=render_personal_embed(data))
+            return
 
         if format is not None and color is not None:
             await interaction.response.send_message(
@@ -1112,8 +1237,8 @@ class Leaderboard(commands.Cog):
             await interaction.response.send_message(
                 embed=embed,
                 view=render_view(
-                    cycle_label=_cycle_label_for(filter_type, filter_value),
                     filter_type=filter_type, filter_value=filter_value,
+                    include_cycle=False,
                 ),
             )
             if filter_type is not None:
@@ -1126,7 +1251,7 @@ class Leaderboard(commands.Cog):
                     if stats_data is not None:
                         await dm.send(embed=render_stats_embed(stats_data))
                 else:
-                    await dm.send("You're not on the leaderboard — run `/join` to join.")
+                    await dm.send(MSG_NOT_REGISTERED)
             except Exception:
                 logger.warning("/leaderboard DM personal followup failed", exc_info=True)
 

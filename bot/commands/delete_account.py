@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from bot import audit
 from bot.commands import descriptions as desc
+from bot.commands.messages import MSG_NOT_ON_BOARD
 from bot.database import SessionLocal
 from bot.models import DraftEvent, Player, PlayerStats
 from bot.services import bot_log
@@ -26,7 +27,6 @@ MSG_CONFIRM = (
 )
 MSG_DELETED = "You've been removed from the LLU leaderboard. Run `/join` anytime to come back."
 MSG_CANCELLED = "Deletion cancelled."
-MSG_NOT_REGISTERED = "You're not on the leaderboard."
 
 
 DeleteAccountKind = Literal["deleted", "not_registered"]
@@ -80,7 +80,7 @@ class ConfirmExileView(discord.ui.View):
                 f"🚪 **{interaction.user.display_name}** exiled from the leaderboard"
             )
         await interaction.response.edit_message(
-            content=MSG_DELETED if result.kind == "deleted" else MSG_NOT_REGISTERED, view=None,
+            content=MSG_DELETED if result.kind == "deleted" else MSG_NOT_ON_BOARD, view=None,
         )
         self.stop()
 
@@ -111,7 +111,7 @@ class DeleteAccount(commands.Cog):
         if existing is None:
             audit.event("delete_account_short_circuit", user_id=user_id, reason="not_registered")
             logger.info(f"exile: {username} not registered")
-            await interaction.response.send_message(MSG_NOT_REGISTERED, ephemeral=(interaction.guild is not None))
+            await interaction.response.send_message(MSG_NOT_ON_BOARD, ephemeral=(interaction.guild is not None))
             return
 
         await interaction.response.send_message(

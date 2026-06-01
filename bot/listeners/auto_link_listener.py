@@ -20,6 +20,7 @@ from bot import audit
 from bot.commands import token_messages as tmsg
 from bot.commands.leaderboard import broadcast_current_set_update
 from bot.commands.link_17lands import updated_message
+from bot.commands.messages import MSG_JOINED_LEADERBOARD
 from bot.commands.signup import (
     MSG_WELCOME_BACK,
     check_signup_eligibility,
@@ -30,7 +31,6 @@ from bot.discord_helpers import extract_avatar_hash
 from bot.models import Player
 from bot.services import bot_log
 from bot.services.dm_flows import dm_flow, is_in_flight
-from bot.services.leaderboard_visibility import MSG_JOINED_LEADERBOARD
 from bot.services.refresh import refresh_one_player_for_all_sets
 from bot.services.seventeenlands import SeventeenLandsClient, extract_token
 from bot.services.token_link import link_token

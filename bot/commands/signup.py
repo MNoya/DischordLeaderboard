@@ -20,6 +20,7 @@ from bot.commands.leaderboard import (
     render_embed as render_lb,
     render_view as render_lb_view,
 )
+from bot.commands.messages import MSG_JOINED_LEADERBOARD, MSG_RANKED_AGAIN
 from bot.commands.stats import LeaderboardVisibilityView
 from bot.services.player_stats import process_stats, render_embed as render_stats_embed
 from bot.database import SessionLocal
@@ -27,7 +28,6 @@ from bot.discord_helpers import extract_avatar_hash
 from bot.models import Player
 from bot.services import bot_log
 from bot.services.dm_flows import run_latest_flow, wait_for_token_reply
-from bot.services.leaderboard_visibility import MSG_JOINED_LEADERBOARD, MSG_RANKED_AGAIN
 from bot.services.refresh import refresh_one_player_for_all_sets
 from bot.services.seventeenlands import SeventeenLandsClient
 from bot.services.token_link import link_token, outcome_log_suffix

@@ -1,7 +1,7 @@
 """Single source of truth for slash-command descriptions, shared by the decorators and /help."""
 
 LEADERBOARD = "Check the current standings"
-STATS = "Check your stats, or another player's"
+STATS = "Check your stats or a player by name"
 JOIN = "Join the leaderboard with your 17lands profile"
 OPT_OUT = "Hide your rank, keep your profile and trophies"
 RETIRE = "Pause and hide everything until you come back"

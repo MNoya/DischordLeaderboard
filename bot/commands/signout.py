@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from bot import audit
 from bot.commands import descriptions as desc
+from bot.commands.messages import MSG_NOT_ON_BOARD
 from bot.database import SessionLocal
 from bot.models import Player
 from bot.services import bot_log
@@ -21,7 +22,6 @@ logger = logging.getLogger(__name__)
 MSG_SIGNED_OUT = (
     "🧎‍♂️ You've retired from the leaderboard. Run `/join` anytime to return. To wipe your data entirely, run `/exile`."
 )
-MSG_NOT_REGISTERED = "You're not on the leaderboard."
 MSG_ALREADY_INACTIVE = "You're already retired. Run `/join` to return."
 
 
@@ -73,7 +73,7 @@ class Signout(commands.Cog):
         elif result.kind == "already_inactive":
             await interaction.response.send_message(MSG_ALREADY_INACTIVE, ephemeral=(interaction.guild is not None))
         else:
-            await interaction.response.send_message(MSG_NOT_REGISTERED, ephemeral=(interaction.guild is not None))
+            await interaction.response.send_message(MSG_NOT_ON_BOARD, ephemeral=(interaction.guild is not None))
 
 
 async def setup(bot: commands.Bot) -> None:

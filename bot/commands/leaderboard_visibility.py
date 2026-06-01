@@ -9,9 +9,9 @@ from sqlalchemy import select
 from bot import audit
 from bot.commands import descriptions as desc
 from bot.commands.leaderboard import broadcast_current_set_safely
+from bot.commands.messages import MSG_ALREADY_HIDDEN, MSG_NOT_REGISTERED, MSG_NOW_HIDDEN
 from bot.database import SessionLocal
 from bot.models import Player
-from bot.services.leaderboard_visibility import MSG_ALREADY_HIDDEN, MSG_NOT_REGISTERED, MSG_NOW_HIDDEN
 
 
 class LeaderboardVisibility(commands.Cog):
