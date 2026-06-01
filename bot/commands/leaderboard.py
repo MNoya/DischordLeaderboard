@@ -727,7 +727,7 @@ def render_personal_embed(data: PersonalStandingsData) -> discord.Embed:
     for i, r in enumerate(data.rows, start=1):
         ordinal = f"{i}.".ljust(ord_width)
         set_code = f"{r.set_code:<{set_width}}"
-        score = f"{round(r.score):>{score_width}}"
+        score = _center_right_bias(str(round(r.score)), score_width)
         trophy = f"{r.trophies:>{trophy_width}}"
         inner = f"{ordinal}  {set_code}  {score}  {trophy}"
         lines.append(f"[`{inner}`](<{_player_url(data.player_slug, r.set_code)}>)")
