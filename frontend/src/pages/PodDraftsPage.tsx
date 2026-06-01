@@ -28,6 +28,7 @@ import { cn } from "../lib/utils";
 import { cleanPodEventName, fmtRange, podDiscordName, stripDiscriminator, weekOfSet } from "../data/utils";
 import { ACTIVE_SET_CODE, DISCORD_GUILD_ID } from "../data/constants";
 import {
+  useLeaderboard,
   usePodEventParticipants,
   usePodEvents,
   usePodLeaderboard,
@@ -165,6 +166,11 @@ export function PodDraftsPage({ setCode }: { setCode?: string } = {}) {
 
   const { data: events } = usePodEvents(activeSet);
   const { data: leaderboard } = usePodLeaderboard(activeSet);
+  const { data: profileBoard } = useLeaderboard(activeSet);
+  const linkableSlugs = useMemo(
+    () => new Set((profileBoard ?? []).map((r) => r.slug)),
+    [profileBoard],
+  );
   const setMeta = availableSets.find((s) => s.code === activeSet);
 
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT_NOSCORE);
@@ -241,6 +247,9 @@ export function PodDraftsPage({ setCode }: { setCode?: string } = {}) {
               sort={sort}
               onSort={onSort}
               emptyMessage={`No player stats yet for ${activeSet}.`}
+              playerHref={(row) =>
+                linkableSlugs.has(row.slug) ? `/${activeSet}/player/${row.slug}` : null
+              }
             />
           </section>
 
@@ -594,6 +603,11 @@ const STANDING_COLS_CLASS =
 
 function EventStandings({ event }: { event: PodEventSummary }) {
   const { data: rows, isLoading } = usePodEventParticipants(event.eventId);
+  const { data: profileBoard } = useLeaderboard(event.setCode);
+  const linkableSlugs = useMemo(
+    () => new Set((profileBoard ?? []).map((r) => r.slug)),
+    [profileBoard],
+  );
   const [deckTarget, setDeckTarget] = useState<PodEventParticipantRow | null>(null);
   const sorted = useMemo(() => {
     if (!rows) return [];
@@ -609,6 +623,11 @@ function EventStandings({ event }: { event: PodEventSummary }) {
                 <StandingRow
                   key={`${p.eventId}-${p.displayName}`}
                   p={p}
+                  profileHref={
+                    p.playerSlug && linkableSlugs.has(p.playerSlug)
+                      ? `/${event.setCode}/player/${p.playerSlug}`
+                      : null
+                  }
                   onShowDeck={p.deckScreenshotUrl ? () => setDeckTarget(p) : undefined}
                 />
               ))}
@@ -649,9 +668,11 @@ function EventStandings({ event }: { event: PodEventSummary }) {
 
 function StandingRow({
   p,
+  profileHref,
   onShowDeck,
 }: {
   p: PodEventParticipantRow;
+  profileHref?: string | null;
   onShowDeck?: () => void;
 }) {
   const wins = p.record ? Number(p.record.split("-")[0] || 0) : 0;
@@ -674,15 +695,31 @@ function StandingRow({
       )}
     >
       <span className="mono text-[13px] text-muted text-center">{p.placement ?? ""}</span>
-      <div className="flex items-center gap-2 lg:gap-2.5 min-w-0">
-        <AAvatar displayName={name} avatarUrl={p.avatarUrl} size={28} />
-        <span
-          className="font-display text-text leading-none tracking-[0.04em] whitespace-nowrap overflow-hidden text-ellipsis"
-          style={{ fontSize: 16 }}
+      {profileHref ? (
+        <Link
+          to={profileHref}
+          onClick={(e) => e.stopPropagation()}
+          className="group/name flex items-center gap-2 lg:gap-2.5 min-w-0 no-underline text-text hover:text-green transition-colors"
         >
-          {name.toUpperCase()}
-        </span>
-      </div>
+          <AAvatar displayName={name} avatarUrl={p.avatarUrl} size={28} />
+          <span
+            className="font-display leading-none tracking-[0.04em] whitespace-nowrap overflow-hidden text-ellipsis"
+            style={{ fontSize: 16 }}
+          >
+            {name.toUpperCase()}
+          </span>
+        </Link>
+      ) : (
+        <div className="flex items-center gap-2 lg:gap-2.5 min-w-0">
+          <AAvatar displayName={name} avatarUrl={p.avatarUrl} size={28} />
+          <span
+            className="font-display text-text leading-none tracking-[0.04em] whitespace-nowrap overflow-hidden text-ellipsis"
+            style={{ fontSize: 16 }}
+          >
+            {name.toUpperCase()}
+          </span>
+        </div>
+      )}
       <div className="flex items-center">
         {p.deckColors ? (
           <Pips colors={p.deckColors} size={14} />
@@ -806,7 +843,7 @@ function MobileEventsBlock({
   const list = useMemo<PodEventSummary[]>(() => {
     if (tab === "last") return played[0] ? [played[0]] : [];
     if (tab === "upcoming") return upcoming;
-    return played.slice(1);
+    return played;
   }, [tab, played, upcoming]);
   return (
     <div>

@@ -146,7 +146,7 @@ function ringColor(selected: boolean, outcome: RoundOutcome | null): string {
   const RED = "#ff5e5e";
   const MUTED = "#7a849a";
   if (outcome == null) return WHITE;
-  if (outcome === "skip") return MUTED;
+  if (outcome === "skip" || outcome === "pending") return MUTED;
   const won = outcome === "win";
   if (selected) return won ? GREEN : RED;
   return won ? RED : GREEN;

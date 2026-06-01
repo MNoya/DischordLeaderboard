@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { AAvatar, Trophy, fmtPts } from "./Brand";
 import { Record } from "./Record";
@@ -77,6 +78,7 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
   showScore = true,
   sort,
   onSort,
+  playerHref,
 }: {
   rows: T[] | undefined;
   variant: "desktop" | "mobile";
@@ -88,6 +90,7 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
   showScore?: boolean;
   sort?: SortState;
   onSort?: (key: SortKey) => void;
+  playerHref?: (row: T) => string | null;
 }) {
   const [openSlug, setOpenSlug] = useState<string | null>(null);
   const [renderedSlug, setRenderedSlug] = useState<string | null>(null);
@@ -115,6 +118,7 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
         {rows.map((r) => {
           const open = openSlug === r.slug;
           const clickable = !!renderExpanded;
+          const href = playerHref?.(r) ?? null;
           return (
             <div
               key={r.slug}
@@ -122,19 +126,21 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
                 "transition-colors",
                 isMobile && "border-b border-border",
                 open ? "bg-surface2" : isMobile ? "bg-transparent" : "bg-surface",
-                clickable && !isMobile && "hover:bg-surface2",
+                (clickable || href) && !isMobile && "hover:bg-surface2",
               )}
             >
               {isMobile ? (
                 <MobileRow
                   row={r}
                   showScore={showScore}
+                  href={href}
                   onToggle={clickable ? () => setOpenSlug(open ? null : r.slug) : undefined}
                 />
               ) : (
                 <DesktopRow
                   row={r}
                   showScore={showScore}
+                  href={href}
                   onToggle={clickable ? () => setOpenSlug(open ? null : r.slug) : undefined}
                 />
               )}
@@ -259,12 +265,37 @@ function DesktopRow({
   row,
   showScore,
   onToggle,
+  href,
 }: {
   row: LeaderboardTableRow;
   showScore: boolean;
   onToggle?: () => void;
+  href?: string | null;
 }) {
   const cols = showScore ? COLS_DESKTOP_WITH_SCORE : COLS_DESKTOP_NO_SCORE;
+  const rowLinked = !!href && !onToggle;
+  const body = (
+    <>
+      <span className="mono text-[13px] text-muted text-center">{row.rank}</span>
+      <PlayerCell row={row} avatarSize={30} nameSize={18} linked={rowLinked} />
+      <TrophyCell trophies={row.trophies} compact={false} large={!showScore} />
+      <span className="mono text-right text-[13px] text-muted">{row.events}</span>
+      <Record className="mono text-right text-[13px]" wins={row.wins} losses={row.losses} />
+      <span className="mono text-right text-[13px] text-muted">{winPct(row.wins, row.losses)}%</span>
+      {showScore && <ScoreCell score={row.score ?? 0} large />}
+    </>
+  );
+  if (rowLinked) {
+    return (
+      <Link
+        to={href!}
+        className="group/row grid items-center gap-x-3 py-2.5 pl-2 pr-5 cursor-pointer no-underline text-inherit"
+        style={{ gridTemplateColumns: cols }}
+      >
+        {body}
+      </Link>
+    );
+  }
   return (
     <div
       onClick={onToggle}
@@ -274,13 +305,7 @@ function DesktopRow({
       )}
       style={{ gridTemplateColumns: cols }}
     >
-      <span className="mono text-[13px] text-muted text-center">{row.rank}</span>
-      <PlayerCell row={row} avatarSize={30} nameSize={18} />
-      <TrophyCell trophies={row.trophies} compact={false} large={!showScore} />
-      <span className="mono text-right text-[13px] text-muted">{row.events}</span>
-      <Record className="mono text-right text-[13px]" wins={row.wins} losses={row.losses} />
-      <span className="mono text-right text-[13px] text-muted">{winPct(row.wins, row.losses)}%</span>
-      {showScore && <ScoreCell score={row.score ?? 0} large />}
+      {body}
     </div>
   );
 }
@@ -289,23 +314,19 @@ function MobileRow({
   row,
   showScore,
   onToggle,
+  href,
 }: {
   row: LeaderboardTableRow;
   showScore: boolean;
   onToggle?: () => void;
+  href?: string | null;
 }) {
   const cols = showScore ? COLS_MOBILE_WITH_SCORE : COLS_MOBILE_NO_SCORE;
-  return (
-    <div
-      onClick={onToggle}
-      className={cn(
-        "py-[9px] pl-2 pr-3.5 grid gap-3 items-center",
-        onToggle && "cursor-pointer",
-      )}
-      style={{ gridTemplateColumns: cols }}
-    >
+  const rowLinked = !!href && !onToggle;
+  const body = (
+    <>
       <span className="mono text-[12px] text-muted text-center">{row.rank}</span>
-      <PlayerCell row={row} avatarSize={26} nameSize={17} />
+      <PlayerCell row={row} avatarSize={26} nameSize={17} linked={rowLinked} />
       <TrophyCell trophies={row.trophies} compact large={!showScore} />
       {showScore ? (
         <span className="font-display text-right text-[18px] tracking-[0.02em] tabular-nums leading-none">
@@ -317,6 +338,29 @@ function MobileRow({
           <Record className="mono text-right text-[13px]" wins={row.wins} losses={row.losses} />
         </>
       )}
+    </>
+  );
+  if (rowLinked) {
+    return (
+      <Link
+        to={href!}
+        className="group/row py-[9px] pl-2 pr-3.5 grid gap-3 items-center cursor-pointer no-underline text-inherit"
+        style={{ gridTemplateColumns: cols }}
+      >
+        {body}
+      </Link>
+    );
+  }
+  return (
+    <div
+      onClick={onToggle}
+      className={cn(
+        "py-[9px] pl-2 pr-3.5 grid gap-3 items-center",
+        onToggle && "cursor-pointer",
+      )}
+      style={{ gridTemplateColumns: cols }}
+    >
+      {body}
     </div>
   );
 }
@@ -327,16 +371,21 @@ function PlayerCell({
   row,
   avatarSize,
   nameSize,
+  linked = false,
 }: {
   row: LeaderboardTableRow;
   avatarSize: number;
   nameSize: number;
+  linked?: boolean;
 }) {
   return (
     <div className="flex items-center gap-2.5 min-w-0">
       <AAvatar displayName={row.displayName} avatarUrl={row.avatarUrl} size={avatarSize} />
       <div
-        className="font-display leading-none tracking-[0.04em] whitespace-nowrap overflow-hidden text-ellipsis"
+        className={cn(
+          "font-display leading-none tracking-[0.04em] whitespace-nowrap overflow-hidden text-ellipsis",
+          linked && "transition-colors group-hover/row:text-green",
+        )}
         style={{ fontSize: nameSize }}
       >
         {row.displayName.toUpperCase()}

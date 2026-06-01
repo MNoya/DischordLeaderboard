@@ -11,6 +11,7 @@ import type { RoundOutcome } from "../components/pod/PlayerSeatPanel";
 import { MobileSeatStack, MobileSeatStackSkeleton } from "../components/pod/MobileSeatStack";
 import { DeckScreenshotModal } from "../components/pod/DeckScreenshotModal";
 import {
+  useLeaderboard,
   usePodEventBySlug,
   usePodEventMatches,
   usePodEventParticipants,
@@ -100,6 +101,11 @@ export function PodPage() {
   const { data: matches, isLoading: matchesLoading } = usePodEventMatches(eventId);
   const { data: replays, isLoading: replaysLoading } = usePodEventReplays(eventId);
   const { data: setEvents } = usePodEvents(event?.setCode);
+  const { data: profileBoard } = useLeaderboard(event?.setCode);
+  const linkableSlugs = useMemo(
+    () => new Set((profileBoard ?? []).map((r) => r.slug)),
+    [profileBoard],
+  );
 
   const { prevSlug, nextSlug } = useMemo(() => {
     if (!setEvents || !event) return { prevSlug: null, nextSlug: null };
@@ -313,6 +319,7 @@ export function PodPage() {
           onShowDeck={setDeckTarget}
           eventLabel={eventLabel}
           setCode={event.setCode}
+          linkableSlugs={linkableSlugs}
           formatLabel={event.formatLabel}
         />
         {deckTarget && (
@@ -393,6 +400,8 @@ export function PodPage() {
                     participantsBySeatName={participantsBySeatName}
                     matches={loadedMatches}
                     replays={loadedReplays}
+                    setCode={event.setCode}
+                    linkableSlugs={linkableSlugs}
                     onRoundHover={handleRoundHover}
                     onShowDeck={setDeckTarget}
                   />

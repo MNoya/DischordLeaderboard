@@ -39,6 +39,7 @@ function CardsLayout({ rows }: { rows: BreakdownRow[] }) {
       {rows.map((r) => {
         const color = FMT_COLORS[r.label] ?? FMT_DEFAULT_COLOR;
         const isLcqD2 = r.confidence === null;
+        const earned = r.count > 0;
         return (
           <div
             key={r.label}
@@ -73,8 +74,12 @@ function CardsLayout({ rows }: { rows: BreakdownRow[] }) {
                       {r.count}
                       <span className="ml-0.5">wins</span>
                     </span>
-                    <span className="text-dim">×</span>
-                    <span className="mono">{pct(r.rate)} win rate</span>
+                    {earned && (
+                      <>
+                        <span className="text-dim">×</span>
+                        <span className="mono">{pct(r.rate)} win rate</span>
+                      </>
+                    )}
                     <span className="text-dim">×</span>
                     <span className="mono">{r.points} pts</span>
                   </>
@@ -86,16 +91,20 @@ function CardsLayout({ rows }: { rows: BreakdownRow[] }) {
                     </span>
                     <span className="text-dim">×</span>
                     <span className="mono">{r.points} pts</span>
-                    <span className="text-dim">×</span>
-                    <span className="mono">{pct(r.rate)} trophy rate</span>
-                    <span className="text-dim">×</span>
-                    <span className="mono">{pct(r.confidence ?? 0)} confidence</span>
+                    {earned && (
+                      <>
+                        <span className="text-dim">×</span>
+                        <span className="mono">{pct(r.rate)} trophy rate</span>
+                        <span className="text-dim">×</span>
+                        <span className="mono">{pct(r.confidence ?? 0)} confidence</span>
+                      </>
+                    )}
                   </>
                 )}
               </div>
             </div>
             <span className="font-display text-text tabular-nums shrink-0 self-center leading-none text-[20px]">
-              {r.score.toFixed(2)}
+              {earned ? r.score.toFixed(2) : <span className="text-dim">—</span>}
             </span>
           </div>
         );

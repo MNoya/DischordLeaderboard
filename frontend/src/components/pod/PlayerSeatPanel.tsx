@@ -15,13 +15,15 @@ import type { PodEventMatchRow, PodEventReplayRow, PodSeat } from "../../types/l
 
 const SKIPPED_SENTINEL = "(skipped)";
 
-export type RoundOutcome = "win" | "loss" | "skip";
+export type RoundOutcome = "win" | "loss" | "skip" | "pending";
 
 interface Props {
   participant: PodSeat;
   participantsBySeatName: Map<string, PodSeat>;
   matches: PodEventMatchRow[];
   replays: PodEventReplayRow[];
+  setCode: string;
+  linkableSlugs: Set<string>;
   onRoundHover?: (opponentSeatIndex: number | null, round: number | null, outcome: RoundOutcome | null) => void;
   onShowDeck: (p: PodSeat) => void;
 }
@@ -31,6 +33,8 @@ export function PlayerSeatPanel({
   participantsBySeatName,
   matches,
   replays,
+  setCode,
+  linkableSlugs,
   onRoundHover,
   onShowDeck,
 }: Props) {
@@ -40,9 +44,12 @@ export function PlayerSeatPanel({
     )
     .sort((a, b) => a.round - b.round);
 
+  const profileHref = (slug: string | null | undefined): string | null =>
+    slug && linkableSlugs.has(slug) ? `/${setCode}/player/${slug}` : null;
+
   return (
     <div>
-      <SeatHeader participant={participant} onViewDeck={() => onShowDeck(participant)} />
+      <SeatHeader participant={participant} profileHref={profileHref(participant.playerSlug)} onViewDeck={() => onShowDeck(participant)} />
       <div className="flex flex-col">
         {playerMatches.map((match) => {
           const opponentName =
@@ -55,6 +62,7 @@ export function PlayerSeatPanel({
               participant={participant}
               opponentName={opponentName}
               opponent={opponent}
+              opponentHref={profileHref(opponent?.playerSlug)}
               replays={replays}
               onHover={onRoundHover}
               onViewDeck={onShowDeck}
@@ -68,9 +76,11 @@ export function PlayerSeatPanel({
 
 function SeatHeader({
   participant,
+  profileHref,
   onViewDeck,
 }: {
   participant: PodSeat;
+  profileHref: string | null;
   onViewDeck: () => void;
 }) {
   const isMobile = useIsMobile();
@@ -80,9 +90,9 @@ function SeatHeader({
   const losses = Number(rec.split("-")[1] || 0);
   const hasDeck = participant.deckScreenshotUrl !== null;
 
-  const nameLink = participant.playerSlug ? (
+  const nameLink = profileHref ? (
     <Link
-      to={`/player/${participant.playerSlug}`}
+      to={profileHref}
       target="_blank"
       rel="noreferrer noopener"
       className="self-start max-w-full no-underline font-display leading-none truncate text-text hover:text-green transition-colors"
@@ -258,6 +268,7 @@ function RoundRow({
   participant,
   opponentName,
   opponent,
+  opponentHref,
   replays,
   onHover,
   onViewDeck,
@@ -266,17 +277,19 @@ function RoundRow({
   participant: PodSeat;
   opponentName: string;
   opponent: PodSeat | undefined;
+  opponentHref: string | null;
   replays: PodEventReplayRow[];
   onHover?: (opponentSeatIndex: number | null, round: number | null, outcome: RoundOutcome | null) => void;
   onViewDeck: (participant: PodSeat) => void;
 }) {
   const isMobile = useIsMobile();
   const isSkipped = match.winnerName === SKIPPED_SENTINEL;
-  const won = !isSkipped && match.winnerName === participant.displayName;
-  const outcome: RoundOutcome = isSkipped ? "skip" : won ? "win" : "loss";
-  const score = match.score ?? "0-0";
-  const yourScore = won ? score.split("-")[0] : score.split("-")[1];
-  const oppScore = won ? score.split("-")[1] : score.split("-")[0];
+  const isPending = !isSkipped && match.winnerName == null;
+  const won = !isSkipped && !isPending && match.winnerName === participant.displayName;
+  const outcome: RoundOutcome = isSkipped ? "skip" : isPending ? "pending" : won ? "win" : "loss";
+  const score = match.score ?? null;
+  const yourScore = score ? (won ? score.split("-")[0] : score.split("-")[1]) : null;
+  const oppScore = score ? (won ? score.split("-")[1] : score.split("-")[0]) : null;
 
   const participantSlug = participant.playerSlug;
   const opponentSlug = opponent?.playerSlug ?? null;
@@ -305,9 +318,9 @@ function RoundRow({
     onHover?.(null, null, null);
   };
 
-  const opponentNameNode = opponent && opponent.playerSlug ? (
+  const opponentNameNode = opponent && opponentHref ? (
     <Link
-      to={`/player/${opponent.playerSlug}`}
+      to={opponentHref}
       target="_blank"
       rel="noreferrer noopener"
       className="font-display text-text hover:text-green transition-colors no-underline truncate"
@@ -442,11 +455,11 @@ function ResultBadge({
   oppScore,
 }: {
   outcome: RoundOutcome;
-  yourScore: string;
-  oppScore: string;
+  yourScore: string | null;
+  oppScore: string | null;
 }) {
   const isMobile = useIsMobile();
-  if (outcome === "skip") {
+  if (outcome === "skip" || outcome === "pending") {
     return (
       <span
         className={cn(
@@ -460,11 +473,12 @@ function ResultBadge({
           letterSpacing: "0.08em",
         }}
       >
-        <span style={{ fontSize: isMobile ? 14 : 18 }}>DROP</span>
+        <span style={{ fontSize: isMobile ? 14 : 18 }}>{outcome === "skip" ? "DROP" : "TBD"}</span>
       </span>
     );
   }
   const won = outcome === "win";
+  const hasScore = yourScore != null && oppScore != null;
   return (
     <span
       className={cn(
@@ -475,12 +489,14 @@ function ResultBadge({
       style={{ minWidth: isMobile ? 52 : 72, letterSpacing: "0.08em" }}
     >
       <span style={{ fontSize: isMobile ? 16 : 20 }}>{won ? "WIN" : "LOSS"}</span>
-      <span
-        className="tabular-nums opacity-90 mt-1.5"
-        style={{ fontSize: isMobile ? 13 : 16 }}
-      >
-        {yourScore}–{oppScore}
-      </span>
+      {hasScore && (
+        <span
+          className="tabular-nums opacity-90 mt-1.5"
+          style={{ fontSize: isMobile ? 13 : 16 }}
+        >
+          {yourScore}–{oppScore}
+        </span>
+      )}
     </span>
   );
 }

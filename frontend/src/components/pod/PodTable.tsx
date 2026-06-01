@@ -243,9 +243,9 @@ function PairingLine({
   const b = project(toSeat);
   const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
   const tone =
-    outcome === "skip" ? "text-muted" : outcome === "loss" ? "text-red" : "text-green";
+    outcome === "skip" || outcome === "pending" ? "text-muted" : outcome === "loss" ? "text-red" : "text-green";
   const pillBorder =
-    outcome === "skip" ? "border-border" : outcome === "loss" ? "border-red/60" : "border-green/60";
+    outcome === "skip" || outcome === "pending" ? "border-border" : outcome === "loss" ? "border-red/60" : "border-green/60";
   return (
     <>
       <svg

@@ -17,6 +17,7 @@ interface Props {
   onShowDeck: (p: PodSeat) => void;
   eventLabel: string;
   setCode: string;
+  linkableSlugs: Set<string>;
   formatLabel?: string | null;
 }
 
@@ -129,6 +130,7 @@ export function MobileSeatStack({
   onShowDeck,
   eventLabel,
   setCode,
+  linkableSlugs,
   formatLabel,
 }: Props) {
   const sorted = [...participants].sort((a, b) => a.seatIndex - b.seatIndex);
@@ -162,6 +164,8 @@ export function MobileSeatStack({
                 participantsBySeatName={participantsBySeatName}
                 matches={matches}
                 replays={replays}
+                setCode={setCode}
+                linkableSlugs={linkableSlugs}
                 onShowDeck={onShowDeck}
               />
             </div>
