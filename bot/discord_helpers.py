@@ -8,6 +8,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Iterable
 
+from bot.config import settings
+
 
 if TYPE_CHECKING:
     import discord
@@ -60,7 +62,7 @@ async def refresh_player_profiles(
         if player.avatar_hash != new_hash:
             player.avatar_hash = new_hash
             changed = True
-        new_display_name = user.display_name
+        new_display_name = await resolve_display_name(bot, user)
         if player.display_name != new_display_name:
             player.display_name = new_display_name
             changed = True
@@ -72,3 +74,25 @@ async def refresh_player_profiles(
             summary["updated"] += 1
     session.commit()
     return summary
+
+
+async def resolve_display_name(bot: "commands.Bot", user: "discord.User") -> str:
+    """Prefer the LLU guild nickname, falling back to the user's global display name.
+
+    `bot.fetch_user` only knows the global account, so `User.display_name` is the
+    global name. The server-specific nickname lives on the guild `Member`, which we
+    resolve from the configured guild and fall back off of when the player has left.
+    """
+    guild_id = settings.discord_guild_id
+    if guild_id:
+        guild = bot.get_guild(guild_id)
+        if guild is not None:
+            member = guild.get_member(user.id)
+            if member is None:
+                try:
+                    member = await guild.fetch_member(user.id)
+                except Exception:  # noqa: BLE001 - not in guild, or Discord hiccup
+                    member = None
+            if member is not None:
+                return member.display_name
+    return user.display_name
