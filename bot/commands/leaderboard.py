@@ -20,6 +20,7 @@ from bot.config import settings
 from bot.database import SessionLocal
 from bot.models import DraftEvent, LeaderboardMessage, MagicSet, Player, PlayerStats, PodDraftEvent, PodDraftParticipant
 from bot.scoring import DEFAULT_QUEUE_GROUPS, QueueGroup, boxes_for_event, compute_score
+from bot.services.pod_deck_color import PAIR_EMOJI_NAME
 from bot.sets import ACTIVE_SET_CODE, ALL_SETS
 
 
@@ -656,28 +657,217 @@ def _rank_of(
 
 MEDAL_EMOJIS = {1: "🥇", 2: "🥈", 3: "🥉"}
 
-_CYCLE: list[tuple[str | None, str | None]] = [
-    (None, None),
-    ("format", "Premier"),
-    ("format", "Trad"),
-    ("format", "Pod"),
-    ("format", "Direct"),
+ALL_FORMATS_VALUE = "__all__"
+ALL_COLORS_VALUE = "__all__"
+
+_FORMAT_FILTERS: list[tuple[str, str | None]] = [
+    ("All Formats", None),
+    ("Premier", "Premier"),
+    ("Traditional", "Trad"),
+    ("Sealed", "Sealed"),
+    ("Quick", "Quick"),
+    ("Pod", "Pod"),
+    ("Direct", "Direct"),
 ]
-_CYCLE_DISPLAY = ["All", "Premier", "Trad", "Pod", "Direct"]
-_CYCLE_LABELS = [f"{_CYCLE_DISPLAY[(i + 1) % len(_CYCLE_DISPLAY)]} ▶️" for i in range(len(_CYCLE_DISPLAY))]
+
+_UNSET = object()
+
+# 3-color emoji names are WUBRG-canonical; the assets may not be uploaded yet, in which
+# case get_emoji returns None and the option renders without an icon.
+TRI_EMOJI_NAME: dict[frozenset[str], str] = {
+    frozenset("WUB"): "manawub",
+    frozenset("WUR"): "manawur",
+    frozenset("WUG"): "manawug",
+    frozenset("WBR"): "manawbr",
+    frozenset("WBG"): "manawbg",
+    frozenset("WRG"): "manawrg",
+    frozenset("UBR"): "manaubr",
+    frozenset("UBG"): "manaubg",
+    frozenset("URG"): "manaurg",
+    frozenset("BRG"): "manabrg",
+}
+SOUP_EMOJI_NAME = "manawubrg"
 
 
-def _cycle_label_for(filter_type: str | None, filter_value: str | None) -> str:
-    key = (filter_type, filter_value)
-    for i, c in enumerate(_CYCLE):
-        if c == key:
-            return _CYCLE_LABELS[i]
-    return _CYCLE_LABELS[0]
+def _archetype_emoji(code: str) -> discord.Emoji | None:
+    if code == "MULTI":
+        name = SOUP_EMOJI_NAME
+    elif len(code) == 2:
+        name = PAIR_EMOJI_NAME.get(frozenset(code))
+    elif len(code) == 3:
+        name = TRI_EMOJI_NAME.get(frozenset(code))
+    else:
+        name = None
+    return emojis.get_emoji(name) if name else None
 
 
-class _CycleButton(discord.ui.Button):
-    def __init__(self, label: str) -> None:
-        super().__init__(label=label, style=discord.ButtonStyle.primary, custom_id="leaderboard:cycle")
+async def _apply_tracked_filter(
+    interaction: discord.Interaction, message_id: str, set_code: str, filter_type: str | None, filter_value: str | None,
+) -> str | None:
+    """Re-render the shared tracked leaderboard message in place for a new set/filter.
+
+    Updates the tracking row so !refresh keeps rendering the chosen view, then edits
+    the public message via REST. Returns the resolved set code, or None on failure.
+    """
+    with SessionLocal() as session:
+        magic_set = session.execute(
+            select(MagicSet).where(func.upper(MagicSet.code) == set_code.upper())
+        ).scalar_one_or_none()
+        if magic_set is None:
+            return None
+        data, suffix = render_filtered_data(
+            session, filter_type=filter_type, filter_value=filter_value, viewer_discord_id=None, magic_set=magic_set,
+        )
+        if data is None:
+            return None
+        tracked = session.execute(
+            select(LeaderboardMessage).where(LeaderboardMessage.message_id == message_id)
+        ).scalar_one_or_none()
+        if tracked is not None:
+            tracked.set_id = magic_set.id
+            tracked.filter_type = filter_type
+            tracked.filter_value = filter_value
+            tracked.last_rendered_at = datetime.now(timezone.utc)
+            session.commit()
+        set_code = magic_set.code
+
+    embed = render_public_embed(data)
+    if suffix:
+        embed.title = f"{embed.title} · {suffix}"
+    try:
+        msg = await interaction.channel.fetch_message(int(message_id))
+        await msg.edit(content=None, embed=embed, view=render_view(
+            filter_type=filter_type, filter_value=filter_value, set_code=set_code,
+        ))
+    except discord.HTTPException:
+        logger.warning(f"could not edit tracked leaderboard message {message_id}", exc_info=True)
+        return None
+    return set_code
+
+
+class _SetSelect(discord.ui.Select):
+    def __init__(self, current_code: str) -> None:
+        options = [
+            discord.SelectOption(
+                label=s.code, description=s.name[:100], value=s.code,
+                default=(s.code == current_code),
+            )
+            for s in reversed(ALL_SETS)
+        ]
+        super().__init__(placeholder="Set", min_values=1, max_values=1, options=options, row=0)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await self.view.apply(interaction, set_code=self.values[0])
+
+
+class _FormatSelect(discord.ui.Select):
+    def __init__(self, filter_type: str | None, filter_value: str | None) -> None:
+        options = [
+            discord.SelectOption(
+                label=label, value=value or ALL_FORMATS_VALUE,
+                default=(
+                    (filter_type is None and value is None)
+                    or (filter_type == "format" and filter_value == value)
+                ),
+            )
+            for label, value in _FORMAT_FILTERS
+        ]
+        super().__init__(placeholder="Format", min_values=1, max_values=1, options=options, row=1)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        value = self.values[0]
+        if value == ALL_FORMATS_VALUE:
+            await self.view.apply(interaction, filter_type=None, filter_value=None)
+        else:
+            await self.view.apply(interaction, filter_type="format", filter_value=value)
+
+
+class _ColorSelect(discord.ui.Select):
+    def __init__(self, filter_type: str | None, filter_value: str | None, with_emoji: bool = True) -> None:
+        options = [discord.SelectOption(label="All colors", value=ALL_COLORS_VALUE)]
+        options += [
+            discord.SelectOption(
+                label="Soup (4+ color)" if code == "MULTI" else f"{label} ({code})",
+                value=code,
+                emoji=_archetype_emoji(code) if with_emoji else None,
+                default=(filter_type == "color" and filter_value == code),
+            )
+            for label, code in COLOR_CHOICES.items()
+        ]
+        super().__init__(placeholder="Color", min_values=1, max_values=1, options=options, row=2)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        value = self.values[0]
+        if value == ALL_COLORS_VALUE:
+            await self.view.apply(interaction, filter_type=None, filter_value=None)
+        else:
+            await self.view.apply(interaction, filter_type="color", filter_value=value)
+
+
+class _FilterPanel(discord.ui.View):
+    """Ephemeral control panel that re-renders the shared leaderboard message.
+
+    Set picks which board; format and color are mutually-exclusive filters within it.
+    Each pick edits the public message in place and rebuilds the panel to reflect the
+    new selection.
+    """
+
+    def __init__(
+        self, message_id: str, set_code: str, filter_type: str | None, filter_value: str | None,
+        with_emoji: bool = True,
+    ) -> None:
+        super().__init__(timeout=180)
+        self.message_id = message_id
+        self.set_code = set_code
+        self.filter_type = filter_type
+        self.filter_value = filter_value
+        self.with_emoji = with_emoji
+        self.add_item(_SetSelect(set_code))
+        self.add_item(_FormatSelect(filter_type, filter_value))
+        self.add_item(_ColorSelect(filter_type, filter_value, with_emoji))
+
+    async def apply(self, interaction: discord.Interaction, *, set_code=_UNSET, filter_type=_UNSET, filter_value=_UNSET) -> None:
+        new_set = self.set_code if set_code is _UNSET else set_code
+        if filter_type is _UNSET:
+            new_ft, new_fv = self.filter_type, self.filter_value
+        else:
+            new_ft, new_fv = filter_type, filter_value
+
+        await interaction.response.defer()
+        resolved = await _apply_tracked_filter(interaction, self.message_id, new_set, new_ft, new_fv)
+        if resolved is None:
+            await interaction.followup.send("Could not update that leaderboard.", ephemeral=True)
+            return
+        try:
+            await interaction.edit_original_response(
+                view=_FilterPanel(self.message_id, resolved, new_ft, new_fv, self.with_emoji),
+            )
+        except discord.HTTPException:
+            await interaction.edit_original_response(
+                view=_FilterPanel(self.message_id, resolved, new_ft, new_fv, with_emoji=False),
+            )
+
+
+# Most recent leaderboard ephemeral per user (personal stats card / filter panel) so
+# opening a new one clears the prior, avoiding a confusing ephemeral stack.
+_LAST_EPHEMERAL: dict[int, discord.Message] = {}
+
+
+async def _clear_prev_ephemeral(user_id: int) -> None:
+    prev = _LAST_EPHEMERAL.pop(user_id, None)
+    if prev is not None:
+        try:
+            await prev.delete()
+        except discord.HTTPException:
+            pass
+
+
+class _FilterButton(discord.ui.Button):
+    def __init__(self) -> None:
+        super().__init__(
+            label="Filter", style=discord.ButtonStyle.primary,
+            custom_id="leaderboard:filter", emoji="🔎",
+        )
 
     async def callback(self, interaction: discord.Interaction) -> None:
         msg_id = str(interaction.message.id)
@@ -687,35 +877,34 @@ class _CycleButton(discord.ui.Button):
             ).scalar_one_or_none()
             if tracked is None:
                 await interaction.response.send_message(
-                    "Post a fresh leaderboard with /leaderboard to enable cycling.",
+                    "Post a fresh leaderboard with /leaderboard to enable filtering.",
                     ephemeral=True,
                 )
                 return
-            key = (tracked.filter_type, tracked.filter_value)
-            try:
-                idx = next(i for i, c in enumerate(_CYCLE) if c == key)
-            except StopIteration:
-                idx = 0
-            next_idx = (idx + 1) % len(_CYCLE)
-            next_ft, next_fv = _CYCLE[next_idx]
-            next_label = _CYCLE_LABELS[next_idx]
-            data, suffix = render_filtered_data(
-                session, filter_type=next_ft, filter_value=next_fv, viewer_discord_id=None,
-            )
-            tracked.filter_type = next_ft
-            tracked.filter_value = next_fv
-            session.commit()
+            set_code = ACTIVE_SET_CODE
+            if tracked.set_id is not None:
+                ms = session.get(MagicSet, tracked.set_id)
+                if ms is not None:
+                    set_code = ms.code
+            filter_type, filter_value = tracked.filter_type, tracked.filter_value
 
-        if data is None:
-            await interaction.response.send_message("Could not render leaderboard.", ephemeral=True)
-            return
-        embed = render_public_embed(data)
-        if suffix:
-            embed.title = f"{embed.title} · {suffix}"
-        await interaction.response.edit_message(
-            embed=embed,
-            view=render_view(cycle_label=next_label, filter_type=next_ft, filter_value=next_fv),
-        )
+        try:
+            await interaction.response.send_message(
+                "Filter the leaderboard:",
+                view=_FilterPanel(msg_id, set_code, filter_type, filter_value),
+                ephemeral=True,
+            )
+        except discord.HTTPException:
+            await interaction.response.send_message(
+                "Filter the leaderboard:",
+                view=_FilterPanel(msg_id, set_code, filter_type, filter_value, with_emoji=False),
+                ephemeral=True,
+            )
+        await _clear_prev_ephemeral(interaction.user.id)
+        try:
+            _LAST_EPHEMERAL[interaction.user.id] = await interaction.original_response()
+        except discord.HTTPException:
+            pass
 
 
 def _player_url(slug: str, set_code: str | None = None, filter_type: str | None = None, filter_value: str | None = None) -> str:
@@ -932,15 +1121,21 @@ async def _send_personal_followup(
     /join prompt otherwise. Re-uses the /stats embed so the two commands stay
     visually consistent."""
     if not viewer_registered:
-        await interaction.followup.send(
+        msg = await interaction.followup.send(
             content=MSG_NOT_REGISTERED,
             ephemeral=(interaction.guild is not None),
         )
+        await _clear_prev_ephemeral(interaction.user.id)
+        _LAST_EPHEMERAL[interaction.user.id] = msg
         return
     with SessionLocal() as session:
         stats_data = process_stats(session, player_name=None, viewer_discord_id=viewer_discord_id)
     if stats_data is not None:
-        await interaction.followup.send(embed=render_stats_embed(stats_data), ephemeral=(interaction.guild is not None))
+        msg = await interaction.followup.send(
+            embed=render_stats_embed(stats_data), ephemeral=(interaction.guild is not None),
+        )
+        await _clear_prev_ephemeral(interaction.user.id)
+        _LAST_EPHEMERAL[interaction.user.id] = msg
 
 
 class LeaderboardView(discord.ui.View):
@@ -953,15 +1148,14 @@ class LeaderboardView(discord.ui.View):
 
     def __init__(
         self,
-        cycle_label: str = _CYCLE_LABELS[0],
         filter_type: str | None = None,
         filter_value: str | None = None,
         set_code: str | None = None,
-        include_cycle: bool = True,
+        include_filter: bool = True,
     ) -> None:
         super().__init__(timeout=None)
-        if include_cycle:
-            self.add_item(_CycleButton(label=cycle_label))
+        if include_filter:
+            self.add_item(_FilterButton())
         base = settings.public_site_url.rstrip("/")
         stats_url = base if set_code is None or set_code == ACTIVE_SET_CODE else f"{base}/{set_code}"
         if filter_type == "format" and filter_value:
@@ -1001,15 +1195,14 @@ class LeaderboardView(discord.ui.View):
 
 
 def render_view(
-    cycle_label: str = _CYCLE_LABELS[0],
     filter_type: str | None = None,
     filter_value: str | None = None,
     set_code: str | None = None,
-    include_cycle: bool = True,
+    include_filter: bool = True,
 ) -> discord.ui.View:
     return LeaderboardView(
-        cycle_label=cycle_label, filter_type=filter_type, filter_value=filter_value,
-        set_code=set_code, include_cycle=include_cycle,
+        filter_type=filter_type, filter_value=filter_value,
+        set_code=set_code, include_filter=include_filter,
     )
 
 
@@ -1064,7 +1257,9 @@ def render_filtered_data(
         data = process_leaderboard_for_archetype(
             session, viewer_discord_id=viewer_discord_id, archetype=filter_value, magic_set=magic_set,
         )
-        suffix = CODE_TO_COLOR_LABEL.get(filter_value, filter_value)
+        label = CODE_TO_COLOR_LABEL.get(filter_value, filter_value)
+        emoji = _archetype_emoji(filter_value)
+        suffix = f"{label} {emoji}" if emoji else label
     else:
         data = process_leaderboard(session, viewer_discord_id=viewer_discord_id, magic_set=magic_set)
         suffix = None
@@ -1230,8 +1425,7 @@ async def edit_tracked_messages_for_set(bot: commands.Bot, magic_set: MagicSet) 
             msg = await channel.fetch_message(int(message_id))
             # Pass content=None to strip any prior message-content variant (transient format)
             await msg.edit(content=None, embed=embed, view=render_view(
-                cycle_label=_cycle_label_for(filter_type, filter_value),
-                filter_type=filter_type, filter_value=filter_value,
+                filter_type=filter_type, filter_value=filter_value, set_code=magic_set.code,
             ))
             with SessionLocal() as session:
                 tracked = session.get(LeaderboardMessage, row_id)
@@ -1281,7 +1475,10 @@ class Leaderboard(commands.Cog):
             app_commands.Choice(name="Direct",      value="Direct"),
         ],
         color=[
-            app_commands.Choice(name=label, value=code)
+            app_commands.Choice(
+                name="Soup (4+ color)" if code == "MULTI" else f"{label} ({code})",
+                value=code,
+            )
             for label, code in COLOR_CHOICES.items()
         ],
     )
@@ -1390,7 +1587,7 @@ class Leaderboard(commands.Cog):
                 embed=embed,
                 view=render_view(
                     filter_type=filter_type, filter_value=filter_value,
-                    set_code=magic_set.code, include_cycle=False,
+                    set_code=magic_set.code, include_filter=False,
                 ),
             )
             return
@@ -1404,8 +1601,7 @@ class Leaderboard(commands.Cog):
                 set_id=magic_set.id,
                 embed=embed,
                 view=render_view(
-                    cycle_label=_cycle_label_for(filter_type, filter_value),
-                    filter_type=filter_type, filter_value=filter_value,
+                    filter_type=filter_type, filter_value=filter_value, set_code=magic_set.code,
                 ),
                 filter_type=filter_type,
                 filter_value=filter_value,
@@ -1425,7 +1621,7 @@ class Leaderboard(commands.Cog):
                 embed=embed,
                 view=render_view(
                     filter_type=filter_type, filter_value=filter_value,
-                    include_cycle=False,
+                    include_filter=False,
                 ),
             )
             if filter_type is not None:
