@@ -69,6 +69,10 @@ class PersonalStanding:
     set_code: str
     score: float
     trophies: int
+    events: int
+    wins: int
+    losses: int
+    rank: int | None
 
 
 @dataclass
@@ -479,7 +483,7 @@ def process_personal_standings(session: Session, viewer_discord_id: str) -> Pers
 
     stats_rows = session.execute(
         select(
-            MagicSet.code, PlayerStats.format, PlayerStats.events,
+            MagicSet.id, MagicSet.code, PlayerStats.format, PlayerStats.events,
             PlayerStats.wins, PlayerStats.losses, PlayerStats.trophies,
         )
         .join(MagicSet, MagicSet.id == PlayerStats.set_id)
@@ -488,22 +492,44 @@ def process_personal_standings(session: Session, viewer_discord_id: str) -> Pers
 
     by_set: dict[str, dict] = {}
     for r in stats_rows:
-        b = by_set.setdefault(r.code, {"stats": [], "trophies": 0})
+        b = by_set.setdefault(r.id, {
+            "code": r.code, "stats": [], "trophies": 0, "events": 0, "wins": 0, "losses": 0,
+        })
         b["stats"].append({
             "format": r.format, "events": int(r.events or 0),
             "wins": int(r.wins or 0), "losses": int(r.losses or 0), "trophies": int(r.trophies or 0),
         })
         b["trophies"] += int(r.trophies or 0)
+        b["events"] += int(r.events or 0)
+        b["wins"] += int(r.wins or 0)
+        b["losses"] += int(r.losses or 0)
 
-    rows = [
-        PersonalStanding(set_code=code, score=compute_score(b["stats"]), trophies=b["trophies"])
-        for code, b in by_set.items()
-    ]
+    rows: list[PersonalStanding] = []
+    for set_id, b in by_set.items():
+        score = compute_score(b["stats"])
+        rows.append(PersonalStanding(
+            set_code=b["code"], score=score, trophies=b["trophies"],
+            events=b["events"], wins=b["wins"], losses=b["losses"],
+            rank=_set_rank(session, set_id, player.id, score),
+        ))
     rows.sort(key=lambda r: (-r.score, -r.trophies, r.set_code))
     return PersonalStandingsData(
         player_name=player.display_name, player_slug=player.slug,
         rows=rows[:PERSONAL_STANDINGS_LIMIT],
     )
+
+
+def _set_rank(session: Session, set_id: str, player_id: str, score: float) -> int | None:
+    """The player's standing on a set's public board. Opted-in players read straight
+    from rank_players_for_set; an opted-out viewer gets the slot their score would take.
+    """
+    ranked = rank_players_for_set(session, set_id)
+    for entry in ranked:
+        if entry[1] == player_id:
+            return entry[0]
+    if score <= 0:
+        return None
+    return sum(1 for e in ranked if e[5] > score) + 1
 
 
 MEDAL_EMOJIS = {1: "🥇", 2: "🥈", 3: "🥉"}
@@ -710,26 +736,38 @@ def render_personal_embed(data: PersonalStandingsData) -> discord.Embed:
         color=discord.Color.gold(),
     )
     if not data.rows:
-        embed.description = "_No scored drafts yet — run `/join` to join, then draft some games._"
+        embed.description = "_No scored drafts yet_"
         return embed
 
+    rank_vals = [f"#{r.rank}" if r.rank is not None else "—" for r in data.rows]
+    win_vals = [
+        f"{round(r.wins / (r.wins + r.losses) * 100)}%" if (r.wins + r.losses) else "—"
+        for r in data.rows
+    ]
     ord_width = max(len(f"{len(data.rows)}."), len("#"))
     set_width = max(max(len(r.set_code) for r in data.rows), len("Set"))
-    score_width = max(max(len(f"{round(r.score)}") for r in data.rows), len("Points"))
+    rank_width = max(max(len(v) for v in rank_vals), len("Rnk"))
+    ev_width = max(max(len(str(r.events)) for r in data.rows), len("Ev"))
+    win_width = max(max(len(v) for v in win_vals), len("Win%"))
+    score_width = max(max(len(f"{round(r.score)}") for r in data.rows), len("Pts"))
     trophy_width = max(max(len(str(r.trophies)) for r in data.rows), 1)
     header_trophy_width = max(trophy_width - 1, 1)
 
     header = (
-        f"{'#':<{ord_width}}  {'Set':<{set_width}}  "
-        f"{'Points':>{score_width}}  {'🏆':>{header_trophy_width}}"
+        f"{'#':<{ord_width}} {'Set':<{set_width}}  {'Rnk':>{rank_width}}  "
+        f"{'Ev':>{ev_width}}  {'Win%':>{win_width}}  "
+        f"{'Pts':>{score_width}}  {'🏆':>{header_trophy_width}}"
     )
     lines = [f"`{header}`"]
     for i, r in enumerate(data.rows, start=1):
         ordinal = f"{i}.".ljust(ord_width)
         set_code = f"{r.set_code:<{set_width}}"
+        rank = f"{rank_vals[i - 1]:>{rank_width}}"
+        ev = f"{r.events:>{ev_width}}"
+        win = f"{win_vals[i - 1]:>{win_width}}"
         score = _center_right_bias(str(round(r.score)), score_width)
         trophy = f"{r.trophies:>{trophy_width}}"
-        inner = f"{ordinal}  {set_code}  {score}  {trophy}"
+        inner = f"{ordinal} {set_code}  {rank}  {ev}  {win}  {score}  {trophy}"
         lines.append(f"[`{inner}`](<{_player_url(data.player_slug, r.set_code)}>)")
 
     embed.description = "\n".join(lines)
