@@ -1319,14 +1319,15 @@ class Leaderboard(commands.Cog):
                     ephemeral=(interaction.guild is not None),
                 )
                 return
+            await interaction.response.defer()
             with SessionLocal() as session:
                 data = process_personal_standings(session, user_id, format_label=fmt_value)
             if data is None:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     MSG_NOT_REGISTERED, ephemeral=(interaction.guild is not None),
                 )
                 return
-            await interaction.response.send_message(embed=render_personal_embed(data))
+            await interaction.followup.send(embed=render_personal_embed(data))
             return
 
         if format is not None and color is not None:
@@ -1346,6 +1347,8 @@ class Leaderboard(commands.Cog):
         else:
             filter_type, filter_value = None, None
 
+        await interaction.response.defer()
+
         with SessionLocal() as session:
             if set is not None:
                 magic_set = session.execute(
@@ -1360,7 +1363,7 @@ class Leaderboard(commands.Cog):
                     if set is not None else
                     "No active set is configured. `bot/sets.py::ACTIVE_SET_CODE` doesn't match any registered set."
                 )
-                await interaction.response.send_message(msg, ephemeral=ephemeral)
+                await interaction.followup.send(msg, ephemeral=ephemeral)
                 return
 
             data, suffix = render_filtered_data(
@@ -1370,7 +1373,7 @@ class Leaderboard(commands.Cog):
             )
 
         if data is None:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "Could not render that leaderboard.", ephemeral=ephemeral,
             )
             return
@@ -1383,7 +1386,7 @@ class Leaderboard(commands.Cog):
         # tracking row (so !refresh skips it) and no cycle button (cycling needs
         # the tracking row). The active set keeps the tracked, refreshable path.
         if magic_set.code != ACTIVE_SET_CODE:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 embed=embed,
                 view=render_view(
                     filter_type=filter_type, filter_value=filter_value,
@@ -1395,7 +1398,6 @@ class Leaderboard(commands.Cog):
         # In a guild channel: track the post (filter-aware) so !refresh keeps it
         # current. In a DM: single response, fully personalized.
         if in_guild:
-            await interaction.response.defer()
             await _replace_tracked_message(
                 interaction,
                 channel_id=str(interaction.channel_id),
@@ -1415,11 +1417,11 @@ class Leaderboard(commands.Cog):
                     viewer_registered=data.viewer is not None,
                 )
         else:
-            # In DM: send the (already filter-aware) embed as the interaction response,
+            # In DM: send the (already filter-aware) embed as a followup,
             # then the stats embed (or /join prompt) via dm.send so it doesn't visually
             # thread as a reply under the leaderboard message. Personal followup only
             # makes sense for the unfiltered overall leaderboard.
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 embed=embed,
                 view=render_view(
                     filter_type=filter_type, filter_value=filter_value,

@@ -184,8 +184,9 @@ def build_bot(guild_id: int) -> commands.Bot:
 
         cmd_name = interaction.command.qualified_name if interaction.command else "unknown"
         invoker = f"{interaction.user} (`{interaction.user.id}`)"
+        opts = ", ".join(f"{k}={v!r}" for k, v in interaction.namespace) or "no args"
         tb = "".join(traceback.format_exception(type(original), original, original.__traceback__))
-        await _notify_owner(bot, f"⚠️ `/{cmd_name}` crashed (invoked by {invoker}):", tb)
+        await _notify_owner(bot, f"⚠️ `/{cmd_name}` crashed (invoked by {invoker}, args: {opts}):", tb)
 
     async def _reply_quietly(ctx: commands.Context, message: str) -> None:
         """Reply via DM. Invoke `!sync` from a DM with the bot to keep everything private."""
