@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from bot.config import settings
 from bot.models import DraftEvent, MagicSet, Player, PlayerStats
 from bot.scoring import boxes_for_event, compute_score, compute_score_breakdown, pod_points
-from bot.services.pod_drafts import PodSetSummary, pod_scoring_counts, pod_summary_by_set_for_player
+from bot.services.pod_drafts import PodSetSummary, players_for_names, pod_scoring_counts, pod_summary_by_set_for_player
 from bot.sets import ACTIVE_SET_CODE
 
 
@@ -192,8 +192,7 @@ def rank_players_for_set(session: Session, set_id: str) -> list[RankedPlayer]:
 class SeededAttendee:
     """One pod RSVP placed against the active leaderboard. rank/score/trophies are None for
     anyone not on the board (unlinked, opted out, or no score yet). slug is None when the
-    reactor has no Player row, so their row links nowhere."""
-    discord_id: str
+    sesh name matches no Player row, so their row links nowhere."""
     slug: str | None
     display_name: str
     rank: int | None
@@ -205,36 +204,32 @@ class SeededAttendee:
         return self.rank is not None
 
 
-def seed_attendees(session: Session, attendees: Sequence[tuple[str, str]]) -> list[SeededAttendee]:
-    """Place pod RSVPs against the active-set leaderboard, ordered by standing.
+def seed_attendees(session: Session, names: Sequence[str]) -> list[SeededAttendee]:
+    """Place sesh RSVP names against the active-set leaderboard, ordered by standing.
 
-    attendees is (discord_id, fallback_name) pairs — fallback_name covers reactors with no
-    Player row. Ranked players sort by leaderboard rank; everyone else falls to the bottom
-    by display name. The fallback_name is only used when no Player matches the Discord id.
+    Each name is resolved to a Player by the same matching the pod pipeline uses; ranked players
+    sort by leaderboard rank, everyone else falls to the bottom by display name. The raw sesh name
+    is shown when no Player matches.
     """
     set_id = session.execute(
         select(MagicSet.id).where(MagicSet.code == ACTIVE_SET_CODE)
     ).scalar_one_or_none()
-    ranked = {r.discord_id: r for r in rank_players_for_set(session, set_id) if r.discord_id} if set_id else {}
-
-    discord_ids = [did for did, _ in attendees]
-    known = {
-        p.discord_id: p
-        for p in session.execute(
-            select(Player).where(Player.discord_id.in_(discord_ids))
-        ).scalars()
-    }
+    ranked = {r.player_id: r for r in rank_players_for_set(session, set_id)} if set_id else {}
 
     seeded: list[SeededAttendee] = []
-    for discord_id, fallback_name in attendees:
-        rp = ranked.get(discord_id)
+    seen: set[str] = set()
+    for name, player in players_for_names(session, names):
+        if player is not None:
+            if player.id in seen:
+                continue
+            seen.add(player.id)
+        rp = ranked.get(player.id) if player is not None else None
         if rp is not None:
-            seeded.append(SeededAttendee(discord_id, rp.slug, rp.display_name, rp.rank, rp.score, rp.trophies))
+            seeded.append(SeededAttendee(rp.slug, rp.display_name, rp.rank, rp.score, rp.trophies))
         else:
-            p = known.get(discord_id)
-            slug = p.slug if p else None
-            name = p.display_name if p else fallback_name
-            seeded.append(SeededAttendee(discord_id, slug, name, None, None, None))
+            slug = player.slug if player is not None else None
+            display = player.display_name if player is not None else name
+            seeded.append(SeededAttendee(slug, display, None, None, None))
 
     seeded.sort(key=lambda a: (a.rank is None, a.rank or 0, a.display_name.lower()))
     return seeded

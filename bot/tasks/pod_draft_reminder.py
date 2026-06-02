@@ -127,16 +127,22 @@ async def fetch_sesh_message(bot: commands.Bot, sesh_message_id: int | str) -> d
         return None
 
 
-async def _refetch_attendees(sesh_message_id: int) -> tuple[list[str], list[str]]:
-    """Re-fetch the sesh embed for the latest Yes / Maybe RSVPs. Returns (yes, maybe)."""
-    message = await fetch_sesh_message(_bot, sesh_message_id)
+async def fetch_sesh_rsvps(bot: commands.Bot, sesh_message_id: int | str) -> tuple[list[str], list[str]] | None:
+    """Fetch the parent sesh message and parse its Yes / Maybe attendee lists from the embed.
+    Returns None when the message can't be fetched; ([], []) when it has no parseable sesh embed."""
+    message = await fetch_sesh_message(bot, sesh_message_id)
     if message is None:
-        return [], []
+        return None
     for embed in message.embeds:
         parsed = parse_sesh_embed(embed)
         if parsed is not None:
             return list(parsed.attendees), list(parsed.maybe_attendees)
     return [], []
+
+
+async def _refetch_attendees(sesh_message_id: int) -> tuple[list[str], list[str]]:
+    """Re-fetch the sesh embed for the latest Yes / Maybe RSVPs. Returns (yes, maybe)."""
+    return await fetch_sesh_rsvps(_bot, sesh_message_id) or ([], [])
 
 
 async def _resolve_mentions(guild: discord.Guild | None, attendees: list[str]) -> str:

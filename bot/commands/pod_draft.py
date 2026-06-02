@@ -30,7 +30,7 @@ from bot.services.pod_drafts import (
 )
 from bot.services.player_stats import SeededAttendee, seed_attendees
 from bot.sets import ACTIVE_SET_CODE
-from bot.tasks.pod_draft_reminder import fetch_sesh_message
+from bot.tasks.pod_draft_reminder import fetch_sesh_rsvps
 from bot.services.pod_settings_view import PodSettingsView
 from bot.services.pod_tournament import (
     actor_label,
@@ -234,12 +234,14 @@ class PodDraft(commands.Cog):
 
         await interaction.response.defer(thinking=False)
         sesh_message_id = await asyncio.to_thread(load_event_sesh_message_id_sync, event_id)
-        rsvps = await self._read_rsvp_reactions(sesh_message_id) if sesh_message_id else None
+        rsvps = await fetch_sesh_rsvps(self.bot, sesh_message_id) if sesh_message_id else None
         if rsvps is None:
             await interaction.followup.send(MSG_SEEDING_NO_SESH, ephemeral=True)
             return
 
         yes, maybe = rsvps
+        seen = {n.casefold() for n in yes}
+        maybe = [n for n in maybe if n.casefold() not in seen]
         if not yes and not maybe:
             await interaction.followup.send(MSG_SEEDING_NO_RSVPS, ephemeral=True)
             return
@@ -248,43 +250,6 @@ class PodDraft(commands.Cog):
 
         log.info(f"pod-seeding: {interaction.user} for event_id={event_id} ({len(yes)} yes, {len(maybe)} maybe)")
         await interaction.followup.send(embed=_build_seeding_embed(yes_seeded, maybe_seeded))
-
-    async def _read_rsvp_reactions(
-        self, sesh_message_id: str,
-    ) -> tuple[list[tuple[str, str]], list[tuple[str, str]]] | None:
-        """Read the parent sesh message's ✅/🤷 reactions as (discord_id, display_name) pairs.
-
-        Returns None when the message can't be fetched. Bots are skipped (sesh seeds the
-        reactions), and a Yes reactor is dropped from Maybe so nobody is double-counted.
-        """
-        message = await fetch_sesh_message(self.bot, sesh_message_id)
-        if message is None:
-            return None
-
-        log.info(
-            f"pod-seeding: sesh msg {message.id} reactions="
-            f"{[(str(r.emoji), r.count) for r in message.reactions]}"
-        )
-        guild = message.guild
-        yes: list[tuple[str, str]] = []
-        maybe: list[tuple[str, str]] = []
-        for reaction in message.reactions:
-            emoji = str(reaction.emoji)
-            if emoji == YES_EMOJI:
-                bucket = yes
-            elif emoji.startswith(MAYBE_EMOJI):
-                bucket = maybe
-            else:
-                continue
-            async for user in reaction.users():
-                if user.bot:
-                    continue
-                member = guild.get_member(user.id) if guild else None
-                bucket.append((str(user.id), member.display_name if member else user.display_name))
-
-        yes_ids = {did for did, _ in yes}
-        maybe = [entry for entry in maybe if entry[0] not in yes_ids]
-        return yes, maybe
 
     @app_commands.command(
         name="pod-draft-standings",
@@ -405,7 +370,7 @@ class PodDraft(commands.Cog):
 
 
 def _seed_rsvps(
-    yes: list[tuple[str, str]], maybe: list[tuple[str, str]],
+    yes: list[str], maybe: list[str],
 ) -> tuple[list[SeededAttendee], list[SeededAttendee]]:
     with SessionLocal() as session:
         return seed_attendees(session, yes), seed_attendees(session, maybe)

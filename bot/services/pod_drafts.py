@@ -126,6 +126,11 @@ def classify_lobby_names(session: Session, names: Sequence[str]) -> list[tuple[s
     return result
 
 
+def players_for_names(session: Session, names: Sequence[str]) -> list[tuple[str, Player | None]]:
+    """Resolve each sesh attendee name to its Player (or None if unmatched), preserving order."""
+    return [(n, _player_for_name(session, n)) for n in names]
+
+
 def _player_for_name(session: Session, name: str) -> Player | None:
     """Resolve a Draftmancer/Discord name to a Player.
 

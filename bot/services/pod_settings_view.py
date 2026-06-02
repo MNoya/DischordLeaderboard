@@ -13,12 +13,14 @@ import discord
 from discord import ui
 
 from bot.services.pod_format import format_change_message
+from bot.services.pod_registration_embed import update_registered_embed
 from bot.services.pod_format_select import SELECT_PLACEHOLDER as FORMAT_PLACEHOLDER
 from bot.services.pod_format_select import format_options
 from bot.services.pod_pairing_select import SELECT_PLACEHOLDER as PAIRING_PLACEHOLDER
 from bot.services.pod_pairing_select import pairing_change_message, pairing_options
 from bot.services.pod_seating_select import SeatingApply, SeatOrderButton, SeatOrderProvider
 from bot.services.pod_tournament import actor_label
+from bot.sets import ACTIVE_SET_CODE
 
 log = logging.getLogger("bot.pod_settings_view")
 
@@ -61,6 +63,12 @@ class PodSettingsView(ui.View):
                 await interaction.channel.send(notice)
             except discord.HTTPException:
                 log.warning("could not post settings-change notice", exc_info=True)
+        await update_registered_embed(
+            interaction.channel,
+            client_user=interaction.client.user,
+            set_code=self.current_code or ACTIVE_SET_CODE,
+            pairing_mode=self.current_mode,
+        )
 
 
 class _FormatSetting(ui.Select):

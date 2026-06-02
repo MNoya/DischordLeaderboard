@@ -46,10 +46,10 @@ def test_seed_attendees_orders_ranked_by_standing_unranked_at_bottom(session):
     session.commit()
 
     seeded = seed_attendees(session, [
-        ("1", "ignored"),    # Alice, ranked
-        ("2", "ignored"),    # Bob, ranked higher
-        ("3", "ignored"),    # Carol, opted out -> unranked despite trophies
-        ("999", "Ghost"),    # no Player row -> unranked, uses fallback
+        "Alice",    # ranked
+        "Bob",      # ranked higher
+        "Carol",    # opted out -> unranked despite trophies
+        "Ghost",    # no Player row -> unranked, raw sesh name
     ])
 
     assert [(a.display_name, a.rank) for a in seeded] == [
@@ -61,21 +61,20 @@ def test_seed_attendees_orders_ranked_by_standing_unranked_at_bottom(session):
     assert seeded[2].score is None and seeded[2].trophies is None
 
 
-def test_seed_attendees_known_player_name_overrides_fallback(session):
+def test_seed_attendees_uses_canonical_player_name(session):
     s = _seed_set(session)
     alice = _seed_player(session, "Alice", "1", "a")
     _seed_stats(session, alice, s, trophies=1, events=3)
     session.commit()
 
-    seeded = seed_attendees(session, [("1", "wrong-fallback")])
+    # sesh lists the lowercase username; the embed name resolves to the player's display name
+    seeded = seed_attendees(session, ["alice"])
     assert seeded[0].display_name == "Alice"
     assert seeded[0].rank == 1
 
 
 def _attendee(name, rank=None, score=None, trophies=None, slug=None):
-    return SeededAttendee(
-        discord_id=name, slug=slug, display_name=name, rank=rank, score=score, trophies=trophies,
-    )
+    return SeededAttendee(slug=slug, display_name=name, rank=rank, score=score, trophies=trophies)
 
 
 def _is_divider(line):
