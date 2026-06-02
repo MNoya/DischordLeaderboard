@@ -54,6 +54,23 @@ def test_round_2_pairs_winners_with_winners_when_possible():
     assert frozenset({"p1", "p3"}) in pair_set
 
 
+def test_round_2_pairs_winners_by_seat_not_game_margin():
+    roster = [Player(id=f"p{i}", name=f"Player{i}", seat=i) for i in range(8)]
+    r1 = [
+        match(1, "p0", "p4", "p0", "2-1"),  # seat-0 winner, scrappy 2-1
+        match(1, "p1", "p5", "p1", "2-0"),
+        match(1, "p2", "p6", "p2", "2-0"),
+        match(1, "p3", "p7", "p3", "2-1"),  # seat-3 winner, scrappy 2-1
+    ]
+    pair_set = pairset(pair_round(roster, r1, 2))
+    # Four 1-0 winners ordered by seat → p0-p1 and p2-p3, regardless of 2-0 vs 2-1
+    assert frozenset({"p0", "p1"}) in pair_set
+    assert frozenset({"p2", "p3"}) in pair_set
+    # Four 0-1 losers ordered by seat → p4-p5 and p6-p7
+    assert frozenset({"p4", "p5"}) in pair_set
+    assert frozenset({"p6", "p7"}) in pair_set
+
+
 def test_no_rematch_constraint():
     roster = players(4)
     r1 = [match(1, "p0", "p1", "p0"), match(1, "p2", "p3", "p2")]

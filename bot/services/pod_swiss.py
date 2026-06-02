@@ -2,6 +2,7 @@
 
 Inputs: roster of Player records + chronological list of MatchOutcome records.
 Outputs: pairings as `[(player_a_id, player_b_id), ...]` and Standings sorted by wins → OMW% → GW% → OGW% → name.
+Pairing order is separate: same record, then draft seat.
 Tiebreakers follow MTR §1.6: per-opponent terms in OMW%/OGW% are floored at 1/3.
 """
 from __future__ import annotations
@@ -65,8 +66,8 @@ def pair_round(
 
     Round 1 pairs by seat distance — seat N faces seat N+half, so each player meets whoever sat
     furthest from them at the table. When seats are unknown it falls back to a random shuffle.
-    Later rounds sort by tiebreaker cascade and greedy-pair from the top, never re-pairing two
-    players who have already met. Raises ValueError if no rematch-free pairing exists.
+    Later rounds greedy-pair down _pairing_order, never re-pairing two players who have already met.
+    Raises ValueError if no rematch-free pairing exists.
     """
     if len(players) < 2:
         return []
@@ -79,8 +80,7 @@ def pair_round(
         (rng or random).shuffle(roster)
         return [(roster[i].id, roster[i + 1].id) for i in range(0, len(roster), 2)]
 
-    standings = compute_standings(players, prior_matches)
-    sorted_ids = [s.player_id for s in standings]
+    sorted_ids = _pairing_order(players, prior_matches)
     played: set[frozenset[str]] = {frozenset((m.player_a_id, m.player_b_id)) for m in prior_matches}
 
     result = _pair_recursive(sorted_ids, played)
@@ -106,6 +106,15 @@ def _pair_recursive(
         if sub is not None:
             return [(a, b)] + sub
     return None
+
+
+def _pairing_order(players: list[Player], prior_matches: list[MatchOutcome]) -> list[str]:
+    """Pairing order for round 2+: same record first, draft seat within it. Game margin is ignored."""
+    wins: dict[str, int] = {p.id: 0 for p in players}
+    for m in prior_matches:
+        if m.winner_id in wins:
+            wins[m.winner_id] += 1
+    return [p.id for p in sorted(players, key=lambda p: (-wins[p.id], _seat_key(p)))]
 
 
 def compute_standings(
@@ -154,10 +163,10 @@ def compute_standings(
         omw[pid] = sum(mw_pct[o] for o in opps) / len(opps) if opps else 0.0
         ogw[pid] = sum(gw_pct[o] for o in opps) / len(opps) if opps else 0.0
 
-    ranked = sorted(
-        players,
-        key=lambda p: (-wins[p.id], -omw[p.id], -gw_pct[p.id], -ogw[p.id], p.name.lower()),
-    )
+    def rank_key(p: Player) -> tuple:
+        return (-wins[p.id], -omw[p.id], -gw_pct[p.id], -ogw[p.id], p.name.lower())
+
+    ranked = sorted(players, key=rank_key)
     return [
         Standing(
             rank=i + 1,
@@ -171,3 +180,10 @@ def compute_standings(
         )
         for i, p in enumerate(ranked)
     ]
+
+
+_UNSEEDED = 1_000_000  # players without a known draft seat sort after every seated player
+
+
+def _seat_key(p: Player) -> int:
+    return p.seat if p.seat is not None else _UNSEEDED

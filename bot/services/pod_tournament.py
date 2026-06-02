@@ -773,12 +773,12 @@ async def advance_to_round(manager: "PodDraftManager", round_num: int) -> None:
     """Compute pairings for round_num via pod_swiss, persist pending rows, post pairings + views."""
     players = manager.tournament_players
     prior = await asyncio.to_thread(_load_matches, manager.event_id)
-    pairing_players = players
     if round_num == 1:
         await asyncio.to_thread(manager.persist_seat_indexes_from_log)
-        seats = await asyncio.to_thread(_load_seat_indexes, manager.event_id)
-        if seats:
-            pairing_players = [replace(p, seat=seats.get(normalize_player_name(p.id))) for p in players]
+    seats = await asyncio.to_thread(_load_seat_indexes, manager.event_id)
+    pairing_players = players
+    if seats:
+        pairing_players = [replace(p, seat=seats.get(normalize_player_name(p.id))) for p in players]
     try:
         pairings = pod_swiss.pair_round(pairing_players, prior, round_num)
     except ValueError as e:
