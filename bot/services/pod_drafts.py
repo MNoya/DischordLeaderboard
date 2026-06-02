@@ -280,6 +280,14 @@ def load_event_name_sync(event_id: str) -> str:
         ).scalar_one_or_none() or "Pod Draft"
 
 
+def load_event_sesh_message_id_sync(event_id: str) -> str | None:
+    """sesh message id whose RSVP reactions drive a pod event, or None when missing."""
+    with SessionLocal() as session:
+        return session.execute(
+            select(PodDraftEvent.sesh_message_id).where(PodDraftEvent.id == event_id)
+        ).scalar_one_or_none()
+
+
 def load_event_id_by_thread_sync(thread_id: str) -> str | None:
     with SessionLocal() as session:
         return session.execute(

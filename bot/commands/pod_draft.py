@@ -12,8 +12,9 @@ from sqlalchemy import any_, select
 
 from bot import audit, emojis
 from bot.commands import descriptions as desc
+from bot.config import settings
 from bot.database import SessionLocal
-from bot.discord_helpers import extract_avatar_hash
+from bot.discord_helpers import display_width, extract_avatar_hash, player_url
 from bot.models import Player
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_draft_manager import set_event_format, set_event_pairing_mode, set_event_seating
@@ -22,11 +23,14 @@ from bot.services.pod_drafts import (
     load_event_id_by_thread_sync,
     load_event_name_sync,
     load_event_pairing_mode_sync,
+    load_event_sesh_message_id_sync,
     load_event_set_code_sync,
     load_event_thread_id_sync,
     normalize_player_name,
     search_event_names_sync,
 )
+from bot.services.player_stats import SeededAttendee, seed_attendees
+from bot.sets import ACTIVE_SET_CODE
 from bot.services.pod_settings_view import PodSettingsView
 from bot.services.pod_tournament import (
     actor_label,
@@ -42,6 +46,14 @@ from bot.slug import disambiguate_slug, slugify
 log = logging.getLogger(__name__)
 
 _ARENA_INPUT_RE = re.compile(r"^.+#\d+$")
+
+YES_EMOJI = "✅"
+MAYBE_EMOJI = "🤷"
+CHAMPIONSHIP_CUT = 8
+
+MSG_SEEDING_NOT_POD_THREAD = "Run this inside a pod-draft thread."
+MSG_SEEDING_NO_SESH = "Couldn't read the sesh post for this pod — it may have been deleted."
+MSG_SEEDING_NO_RSVPS = f"No {YES_EMOJI} or {MAYBE_EMOJI} RSVPs on this pod yet."
 
 
 
@@ -210,6 +222,67 @@ class PodDraft(commands.Cog):
         for manager in list(ACTIVE_POD_MANAGERS.values()):
             asyncio.create_task(manager.refresh_lobby_now())
 
+    @app_commands.command(name="pod-seeding", description=desc.POD_SEEDING)
+    @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def pod_seeding(self, interaction: discord.Interaction) -> None:
+        thread_id = str(interaction.channel_id) if interaction.channel_id else None
+        event_id = await asyncio.to_thread(load_event_id_by_thread_sync, thread_id) if thread_id else None
+        if event_id is None:
+            await interaction.response.send_message(MSG_SEEDING_NOT_POD_THREAD, ephemeral=True)
+            return
+
+        await interaction.response.defer(thinking=False)
+        sesh_message_id = await asyncio.to_thread(load_event_sesh_message_id_sync, event_id)
+        rsvps = await self._read_rsvp_reactions(sesh_message_id) if sesh_message_id else None
+        if rsvps is None:
+            await interaction.followup.send(MSG_SEEDING_NO_SESH, ephemeral=True)
+            return
+
+        yes, maybe = rsvps
+        if not yes and not maybe:
+            await interaction.followup.send(MSG_SEEDING_NO_RSVPS, ephemeral=True)
+            return
+
+        yes_seeded, maybe_seeded = await asyncio.to_thread(_seed_rsvps, yes, maybe)
+
+        log.info(f"pod-seeding: {interaction.user} for event_id={event_id} ({len(yes)} yes, {len(maybe)} maybe)")
+        await interaction.followup.send(embed=_build_seeding_embed(yes_seeded, maybe_seeded))
+
+    async def _read_rsvp_reactions(self, sesh_message_id: str) -> tuple[list[tuple[str, str]], list[tuple[str, str]]] | None:
+        """Fetch the sesh post and return (yes, maybe) reactor lists as (discord_id, display_name) pairs.
+
+        Returns None if the message can't be fetched. Bots are skipped (sesh seeds the reactions),
+        and a Yes reactor is dropped from Maybe so nobody is double-counted.
+        """
+        try:
+            channel = await self.bot.fetch_channel(settings.pod_draft_channel_id)
+            message = await channel.fetch_message(int(sesh_message_id))
+        except (discord.HTTPException, ValueError):
+            log.warning(f"pod-seeding: could not fetch sesh message {sesh_message_id}", exc_info=True)
+            return None
+
+        guild = message.guild
+        yes: list[tuple[str, str]] = []
+        maybe: list[tuple[str, str]] = []
+        for reaction in message.reactions:
+            emoji = str(reaction.emoji)
+            if emoji == YES_EMOJI:
+                bucket = yes
+            elif emoji.startswith(MAYBE_EMOJI):
+                bucket = maybe
+            else:
+                continue
+            async for user in reaction.users():
+                if user.bot:
+                    continue
+                member = guild.get_member(user.id) if guild else None
+                bucket.append((str(user.id), member.display_name if member else user.display_name))
+
+        yes_ids = {did for did, _ in yes}
+        maybe = [entry for entry in maybe if entry[0] not in yes_ids]
+        return yes, maybe
+
     @app_commands.command(
         name="pod-draft-standings",
         description=desc.POD_DRAFT_STANDINGS,
@@ -326,6 +399,81 @@ class PodDraft(commands.Cog):
         await interaction.followup.send(
             f"👑 {interaction.user.mention} is now in control of the Draftmancer session. Bot disconnected."
         )
+
+
+def _seed_rsvps(
+    yes: list[tuple[str, str]], maybe: list[tuple[str, str]],
+) -> tuple[list[SeededAttendee], list[SeededAttendee]]:
+    with SessionLocal() as session:
+        return seed_attendees(session, yes), seed_attendees(session, maybe)
+
+
+def _build_seeding_embed(yes: list[SeededAttendee], maybe: list[SeededAttendee]) -> discord.Embed:
+    parts: list[str] = []
+    if yes:
+        cut = CHAMPIONSHIP_CUT if len(yes) > CHAMPIONSHIP_CUT else None
+        parts.append(f"**{YES_EMOJI} Yes ({len(yes)})**\n" + _seeding_block(yes, numbered=True, cut_after=cut))
+    if maybe:
+        parts.append(f"**{MAYBE_EMOJI} Maybe ({len(maybe)})**\n" + _seeding_block(maybe, numbered=False))
+    return discord.Embed(
+        title=f"🏆 Pod Seeding · {ACTIVE_SET_CODE}",
+        description="\n\n".join(parts),
+        color=discord.Color.gold(),
+    )
+
+
+def _seeding_block(attendees: list[SeededAttendee], *, numbered: bool, cut_after: int | None = None) -> str:
+    """Inline-code rows (monospace) linked to each player's page, same trick /leaderboard uses.
+
+    Columns: ordinal # (Yes only, drives the cut), Player, Rnk (#N global rank), Pts, 🏆.
+    Unranked attendees show — and link nowhere.
+    """
+    def rnk(a: SeededAttendee) -> str:
+        return f"#{a.rank}" if a.rank is not None else "—"
+
+    def pts(a: SeededAttendee) -> str:
+        return "—" if a.score is None else str(round(a.score))
+
+    def trophies(a: SeededAttendee) -> str:
+        return "—" if a.trophies is None else str(a.trophies)
+
+    cols = (
+        ("Player", "l", lambda a: a.display_name),
+        ("Rnk", "r", rnk),
+        ("Pts", "r", pts),
+        ("🏆", "r", trophies),
+    )
+
+    def fmt(value: str, width: int, align: str) -> str:
+        pad = max(0, width - display_width(value))
+        return value + " " * pad if align == "l" else " " * pad + value
+
+    ord_w = len(f"{len(attendees)}.")
+    header_cells: list[str] = []
+    row_cells: list[list[str]] = [[] for _ in attendees]
+    for header, align, cell in cols:
+        values = [cell(a) for a in attendees]
+        is_wide = header == "🏆"
+        width = max(max(display_width(v) for v in values), 2 if is_wide else len(header))
+        header_cells.append(fmt(header, width - 1 if is_wide else width, "l" if align == "l" else "r"))
+        for i, v in enumerate(values):
+            row_cells[i].append(fmt(v, width, align))
+
+    def line(lead: str, cells: list[str]) -> str:
+        prefix = f"{lead:<{ord_w}} " if numbered else ""
+        return prefix + "  ".join(cells)
+
+    header_line = line("#", header_cells)
+    lines = [f"`{header_line}`"]
+    for i, a in enumerate(attendees):
+        if cut_after is not None and i == cut_after:
+            lines.append(f"`{'─' * display_width(header_line)}`")
+        inner = line(f"{i + 1}.", row_cells[i])
+        if a.slug:
+            lines.append(f"[`{inner}`](<{player_url(a.slug, ACTIVE_SET_CODE)}>)")
+        else:
+            lines.append(f"`{inner}`")
+    return "\n".join(lines)
 
 
 def _pick_takeover_target(manager, invoker_display_name: str):

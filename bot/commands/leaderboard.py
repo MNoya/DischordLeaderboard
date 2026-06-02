@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable
@@ -18,6 +17,7 @@ from bot.commands.messages import MSG_NOT_REGISTERED
 from bot.services.player_stats import process_stats, rank_players_for_set, render_embed as render_stats_embed, resolve_player
 from bot.config import settings
 from bot.database import SessionLocal
+from bot.discord_helpers import display_width, player_url
 from bot.models import DraftEvent, LeaderboardMessage, MagicSet, Player, PlayerStats, PodDraftEvent, PodDraftParticipant
 from bot.scoring import DEFAULT_QUEUE_GROUPS, QueueGroup, boxes_for_event, compute_score, pod_points
 from bot.services.pod_deck_color import PAIR_EMOJI_NAME
@@ -930,9 +930,7 @@ class _FilterButton(discord.ui.Button):
 
 
 def _player_url(slug: str, set_code: str | None = None, filter_type: str | None = None, filter_value: str | None = None) -> str:
-    base = settings.public_site_url.rstrip("/")
-    url = f"{base}/{set_code}/player/{slug}" if set_code else f"{base}/player/{slug}"
-    return url + _site_query(filter_type, filter_value)
+    return player_url(slug, set_code) + _site_query(filter_type, filter_value)
 
 
 def _format_leaderboard(top: list[LeaderboardEntry], set_code: str | None = None, show_score: bool = True, filter_type: str | None = None, filter_value: str | None = None) -> str:
@@ -944,7 +942,7 @@ def _format_leaderboard(top: list[LeaderboardEntry], set_code: str | None = None
     works because the underlying ORDER BY in process_leaderboard uses the raw
     float value, not this rendered string.
     """
-    name_width = max(max(_display_width(e.display_name) for e in top), len("Name"))
+    name_width = max(max(display_width(e.display_name) for e in top), len("Name"))
     rank_col_width = max(max(len(f"{e.rank}.") for e in top), len("#"))
 
     if show_score:
@@ -977,7 +975,7 @@ def _format_leaderboard(top: list[LeaderboardEntry], set_code: str | None = None
             rank = f"{medal:<{rank_col_width - 1}}"
         else:
             rank = f"{e.rank}.".ljust(rank_col_width)
-        name = e.display_name + " " * max(0, name_width - _display_width(e.display_name))
+        name = e.display_name + " " * max(0, name_width - display_width(e.display_name))
         trophy = f"{e.trophies:>{trophy_width}}"
         if show_score:
             # Center the integer under the wider 'Points' header — right-bias so
@@ -989,11 +987,6 @@ def _format_leaderboard(top: list[LeaderboardEntry], set_code: str | None = None
             inner = f"{rank} {name}   {drafts_col}  {trophy}"
         lines.append(f"[`{inner}`](<{_player_url(e.slug, set_code, filter_type, filter_value)}>)")
     return "\n".join(lines)
-
-
-def _display_width(s: str) -> int:
-    """Monospace column width, counting emoji and wide CJK glyphs as 2 cells where len() counts 1."""
-    return sum(2 if unicodedata.east_asian_width(ch) == "W" else 1 for ch in s)
 
 
 def _center_right_bias(s: str, width: int) -> str:

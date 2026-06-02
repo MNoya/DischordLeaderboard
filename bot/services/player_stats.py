@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import NamedTuple
+from typing import NamedTuple, Sequence
 
 import discord
 from sqlalchemy import func, select
@@ -186,6 +186,58 @@ def rank_players_for_set(session: Session, set_id: str) -> list[RankedPlayer]:
 
     standings.sort(key=lambda p: (-p.score, p.display_name.lower()))
     return [p._replace(rank=rank) for rank, p in enumerate(standings, start=1)]
+
+
+@dataclass
+class SeededAttendee:
+    """One pod RSVP placed against the active leaderboard. rank/score/trophies are None for
+    anyone not on the board (unlinked, opted out, or no score yet). slug is None when the
+    reactor has no Player row, so their row links nowhere."""
+    discord_id: str
+    slug: str | None
+    display_name: str
+    rank: int | None
+    score: float | None
+    trophies: int | None
+
+    @property
+    def is_ranked(self) -> bool:
+        return self.rank is not None
+
+
+def seed_attendees(session: Session, attendees: Sequence[tuple[str, str]]) -> list[SeededAttendee]:
+    """Place pod RSVPs against the active-set leaderboard, ordered by standing.
+
+    attendees is (discord_id, fallback_name) pairs — fallback_name covers reactors with no
+    Player row. Ranked players sort by leaderboard rank; everyone else falls to the bottom
+    by display name. The fallback_name is only used when no Player matches the Discord id.
+    """
+    set_id = session.execute(
+        select(MagicSet.id).where(MagicSet.code == ACTIVE_SET_CODE)
+    ).scalar_one_or_none()
+    ranked = {r.discord_id: r for r in rank_players_for_set(session, set_id) if r.discord_id} if set_id else {}
+
+    discord_ids = [did for did, _ in attendees]
+    known = {
+        p.discord_id: p
+        for p in session.execute(
+            select(Player).where(Player.discord_id.in_(discord_ids))
+        ).scalars()
+    }
+
+    seeded: list[SeededAttendee] = []
+    for discord_id, fallback_name in attendees:
+        rp = ranked.get(discord_id)
+        if rp is not None:
+            seeded.append(SeededAttendee(discord_id, rp.slug, rp.display_name, rp.rank, rp.score, rp.trophies))
+        else:
+            p = known.get(discord_id)
+            slug = p.slug if p else None
+            name = p.display_name if p else fallback_name
+            seeded.append(SeededAttendee(discord_id, slug, name, None, None, None))
+
+    seeded.sort(key=lambda a: (a.rank is None, a.rank or 0, a.display_name.lower()))
+    return seeded
 
 
 def _stats_by_player(session: Session, set_id: str) -> dict[str, list[dict]]:

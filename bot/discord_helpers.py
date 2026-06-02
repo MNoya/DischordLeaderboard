@@ -6,6 +6,7 @@ the three entry points that touch it.
 from __future__ import annotations
 
 import logging
+import unicodedata
 from typing import TYPE_CHECKING, Iterable
 
 from bot.config import settings
@@ -74,6 +75,17 @@ async def refresh_player_profiles(
             summary["updated"] += 1
     session.commit()
     return summary
+
+
+def display_width(s: str) -> int:
+    """Monospace column width, counting wide CJK glyphs as 2 cells where len() counts 1."""
+    return sum(2 if unicodedata.east_asian_width(ch) == "W" else 1 for ch in s)
+
+
+def player_url(slug: str, set_code: str | None = None) -> str:
+    """Public site URL for a player's page, set-scoped when set_code is given."""
+    base = settings.public_site_url.rstrip("/")
+    return f"{base}/{set_code}/player/{slug}" if set_code else f"{base}/player/{slug}"
 
 
 async def resolve_display_name(bot: "commands.Bot", user: "discord.User") -> str:
