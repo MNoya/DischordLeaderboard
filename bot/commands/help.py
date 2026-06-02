@@ -32,6 +32,16 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
 ]
 
 
+# command → blockquote usage examples, each kept to one line
+HELP_EXAMPLES: dict[str, list[list[str]]] = {
+    "/leaderboard": [
+        ["/leaderboard", "format: Premier"],
+        ["/leaderboard", "color: Boros", "set: FIN"],
+        ["/leaderboard", "set: ALL"],
+    ],
+}
+
+
 FEEDBACK_CHANNEL_ID = 1504825374188507156
 
 
@@ -48,8 +58,12 @@ class HelpView(discord.ui.View):
 def render_help_embed() -> discord.Embed:
     embed = discord.Embed(title=HELP_TITLE, color=discord.Color.blurple())
     for section_label, items in HELP_SECTIONS:
-        value = "\n".join(f"`{cmd}`: {desc}" for cmd, desc in items)
-        embed.add_field(name=section_label, value=value, inline=False)
+        lines = []
+        for cmd, desc in items:
+            lines.append(f"`{cmd}`: {desc}")
+            for example in HELP_EXAMPLES.get(cmd, []):
+                lines.append("> " + " ".join(f"`{chip}`" for chip in example))
+        embed.add_field(name=section_label, value="\n".join(lines), inline=False)
     embed.add_field(
         name="💬 Found a bug or have any ideas?",
         value=f"Post in <#{FEEDBACK_CHANNEL_ID}>",

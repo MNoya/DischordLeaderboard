@@ -12,7 +12,6 @@ from sqlalchemy import any_, select
 
 from bot import audit, emojis
 from bot.commands import descriptions as desc
-from bot.config import settings
 from bot.database import SessionLocal
 from bot.discord_helpers import display_width, extract_avatar_hash, player_url
 from bot.models import Player
@@ -31,6 +30,7 @@ from bot.services.pod_drafts import (
 )
 from bot.services.player_stats import SeededAttendee, seed_attendees
 from bot.sets import ACTIVE_SET_CODE
+from bot.tasks.pod_draft_reminder import fetch_sesh_message
 from bot.services.pod_settings_view import PodSettingsView
 from bot.services.pod_tournament import (
     actor_label,
@@ -249,19 +249,22 @@ class PodDraft(commands.Cog):
         log.info(f"pod-seeding: {interaction.user} for event_id={event_id} ({len(yes)} yes, {len(maybe)} maybe)")
         await interaction.followup.send(embed=_build_seeding_embed(yes_seeded, maybe_seeded))
 
-    async def _read_rsvp_reactions(self, sesh_message_id: str) -> tuple[list[tuple[str, str]], list[tuple[str, str]]] | None:
-        """Fetch the sesh post and return (yes, maybe) reactor lists as (discord_id, display_name) pairs.
+    async def _read_rsvp_reactions(
+        self, sesh_message_id: str,
+    ) -> tuple[list[tuple[str, str]], list[tuple[str, str]]] | None:
+        """Read the parent sesh message's ✅/🤷 reactions as (discord_id, display_name) pairs.
 
-        Returns None if the message can't be fetched. Bots are skipped (sesh seeds the reactions),
-        and a Yes reactor is dropped from Maybe so nobody is double-counted.
+        Returns None when the message can't be fetched. Bots are skipped (sesh seeds the
+        reactions), and a Yes reactor is dropped from Maybe so nobody is double-counted.
         """
-        try:
-            channel = await self.bot.fetch_channel(settings.pod_draft_channel_id)
-            message = await channel.fetch_message(int(sesh_message_id))
-        except (discord.HTTPException, ValueError):
-            log.warning(f"pod-seeding: could not fetch sesh message {sesh_message_id}", exc_info=True)
+        message = await fetch_sesh_message(self.bot, sesh_message_id)
+        if message is None:
             return None
 
+        log.info(
+            f"pod-seeding: sesh msg {message.id} reactions="
+            f"{[(str(r.emoji), r.count) for r in message.reactions]}"
+        )
         guild = message.guild
         yes: list[tuple[str, str]] = []
         maybe: list[tuple[str, str]] = []

@@ -115,13 +115,22 @@ async def _fetch_thread(thread_id: int) -> discord.Thread | None:
     return channel if isinstance(channel, discord.Thread) else None
 
 
+async def fetch_sesh_message(bot: commands.Bot, sesh_message_id: int | str) -> discord.Message | None:
+    """Fetch the parent sesh RSVP message from the pod-draft coordination channel — the message
+    that carries both the ✅/🤷 reactions and the attendee embed. The thread's starter copy does
+    not hold the reactions, so always read from this channel."""
+    try:
+        channel = await bot.fetch_channel(settings.pod_draft_channel_id)
+        return await channel.fetch_message(int(sesh_message_id))
+    except (discord.HTTPException, ValueError) as e:
+        log.warning(f"could not fetch sesh message {sesh_message_id}: {e}")
+        return None
+
+
 async def _refetch_attendees(sesh_message_id: int) -> tuple[list[str], list[str]]:
     """Re-fetch the sesh embed for the latest Yes / Maybe RSVPs. Returns (yes, maybe)."""
-    try:
-        channel = await _bot.fetch_channel(settings.pod_draft_channel_id)
-        message = await channel.fetch_message(sesh_message_id)
-    except discord.HTTPException as e:
-        log.warning(f"could not re-fetch sesh message {sesh_message_id}: {e}")
+    message = await fetch_sesh_message(_bot, sesh_message_id)
+    if message is None:
         return [], []
     for embed in message.embeds:
         parsed = parse_sesh_embed(embed)
