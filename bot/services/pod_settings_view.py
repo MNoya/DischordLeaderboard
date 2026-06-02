@@ -17,6 +17,7 @@ from bot.services.pod_format_select import SELECT_PLACEHOLDER as FORMAT_PLACEHOL
 from bot.services.pod_format_select import format_options
 from bot.services.pod_pairing_select import SELECT_PLACEHOLDER as PAIRING_PLACEHOLDER
 from bot.services.pod_pairing_select import pairing_change_message, pairing_options
+from bot.services.pod_seating_select import SeatingApply, SeatOrderButton, SeatOrderProvider
 from bot.services.pod_tournament import actor_label
 
 log = logging.getLogger("bot.pod_settings_view")
@@ -26,14 +27,21 @@ Apply = Callable[[discord.Interaction, str], Awaitable[str | None]]
 
 class PodSettingsView(ui.View):
     def __init__(self, *, on_format: Apply, on_pairing: Apply,
-                 current_code: str | None, current_mode: str | None) -> None:
+                 current_code: str | None, current_mode: str | None,
+                 on_seating: SeatingApply | None = None,
+                 seat_order_provider: SeatOrderProvider | None = None) -> None:
         super().__init__(timeout=300)
         self.on_format = on_format
         self.on_pairing = on_pairing
         self.current_code = current_code
         self.current_mode = current_mode
+        self.on_seating = on_seating
+        self.seat_order_provider = seat_order_provider
         self.add_item(_FormatSetting(current_code))
         self.add_item(_PairingSetting(current_mode))
+        if on_seating is not None and seat_order_provider is not None:
+            self.add_item(SeatOrderButton(
+                seat_order_provider=seat_order_provider, on_seating=on_seating, row=2))
 
     async def apply(self, interaction: discord.Interaction, *, on_apply: Apply,
                     value: str, attr: str, notice: str) -> None:
@@ -46,6 +54,7 @@ class PodSettingsView(ui.View):
         await interaction.edit_original_response(view=PodSettingsView(
             on_format=self.on_format, on_pairing=self.on_pairing,
             current_code=self.current_code, current_mode=self.current_mode,
+            on_seating=self.on_seating, seat_order_provider=self.seat_order_provider,
         ))
         if interaction.channel is not None:
             try:

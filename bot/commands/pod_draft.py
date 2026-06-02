@@ -16,7 +16,7 @@ from bot.database import SessionLocal
 from bot.discord_helpers import extract_avatar_hash
 from bot.models import Player
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
-from bot.services.pod_draft_manager import set_event_format, set_event_pairing_mode
+from bot.services.pod_draft_manager import set_event_format, set_event_pairing_mode, set_event_seating
 from bot.services.pod_drafts import (
     load_event_id_by_name_sync,
     load_event_id_by_thread_sync,
@@ -111,11 +111,20 @@ class PodDraft(commands.Cog):
         async def on_pairing(inter: discord.Interaction, mode: str) -> str | None:
             return await set_event_pairing_mode(event_id, mode)
 
+        manager = ACTIVE_POD_MANAGERS.get(event_id)
+        on_seating = None
+        seat_order_provider = None
+        if manager is not None:
+            async def on_seating(inter: discord.Interaction, ordered_user_names: list[str]) -> str | None:
+                return await set_event_seating(event_id, ordered_user_names)
+            seat_order_provider = manager.seating_lobby_order
+
         log.info(f"pod-settings: {interaction.user} opened panel for event_id={event_id}")
         await interaction.response.send_message(
             view=PodSettingsView(
                 on_format=on_format, on_pairing=on_pairing,
                 current_code=current_code, current_mode=current_mode,
+                on_seating=on_seating, seat_order_provider=seat_order_provider,
             ),
             ephemeral=True,
         )

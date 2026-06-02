@@ -77,6 +77,7 @@ class PodDraftManager:
         self.rsvps_yes: list[str] = list(rsvps_yes or [])
         self.rsvps_maybe: list[str] = list(rsvps_maybe or [])
         self.session_users: list[dict] = []
+        self.desired_seating: list[str] | None = None 
         self.bot_user_id: str | None = None
         self.owner_claimed = False
         self._closed = False
@@ -784,6 +785,7 @@ class PodDraftManager:
         return None
 
     async def _start_draft(self) -> None:
+        await self._reapply_seating_if_set()
         result = await self._emit_with_ack("startDraft")
         log.info(f"[DRAFT] start_ack event={self.event_id} ack={result!r}")
         error_text = _ack_error_text(result)
@@ -834,6 +836,48 @@ class PodDraftManager:
             log.info(f"[DRAFT] seeded_participants event={self.event_id} count={len(roster)}")
         except Exception:
             log.warning(f"[DRAFT] seed_participants.error event={self.event_id}", exc_info=True)
+
+    async def seating_lobby_order(self) -> list[tuple[str, str]]:
+        """Current non-bot lobby users in Draftmancer order, as (userName, display_label)."""
+        names = [
+            u.get("userName") for u in self.session_users
+            if u.get("userName") and u.get("userName") != _BOT_USER_NAME and u.get("userID")
+        ]
+        classified = await asyncio.to_thread(_classify_names_sync, names)
+        return [(name, display or name) for name, display in classified]
+
+    async def set_seating_order(self, ordered_user_names: list[str]) -> str | None:
+        """Force the Draftmancer table order (owner-only, pre-draft). Returns an error string or None."""
+        if not self.sio.connected:
+            return "Draftmancer session is not connected."
+        if self.drafting or self.draft_complete:
+            return "Seating can't be changed once the draft has started."
+        name_to_id = {
+            u.get("userName"): u.get("userID")
+            for u in self.session_users
+            if u.get("userName") and u.get("userName") != _BOT_USER_NAME and u.get("userID")
+        }
+        if set(ordered_user_names) != set(name_to_id):
+            return "Lobby changed since the panel opened — reopen Settings and set the seating again."
+        user_id_order = [name_to_id[name] for name in ordered_user_names]
+        try:
+            await self.sio.emit("setRandomizeSeatingOrder", False)
+            await self.sio.emit("setSeating", user_id_order)
+        except Exception:
+            log.exception(f"[SEATING] emit_failed event={self.event_id}")
+            return "Could not update the seating order."
+        self.desired_seating = list(ordered_user_names)
+        log.info(f"[SEATING] applied event={self.event_id} order={ordered_user_names}")
+        return None
+
+    async def _reapply_seating_if_set(self) -> None:
+        """Re-emit the organizer's seating right before startDraft so late joins/leaves can't leave a
+        stale order in place. Best-effort: skipped (logged) when the order no longer matches the lobby."""
+        if not self.desired_seating:
+            return
+        err = await self.set_seating_order(self.desired_seating)
+        if err is not None:
+            log.info(f"[SEATING] reapply_skipped event={self.event_id} reason={err!r}")
 
     async def _emit_with_ack(self, event: str, *args, timeout_s: float = 5.0):
         """Emit a socket.io event and wait for the server's ack callback."""
@@ -1125,7 +1169,16 @@ async def set_event_pairing_mode(event_id: str, mode: str) -> str | None:
     return None
 
 
-def _classify_names_sync(names: list[str]) -> list[tuple[str, bool]]:
+async def set_event_seating(event_id: str, ordered_user_names: list[str]) -> str | None:
+    """Apply a manual Draftmancer seating order by event id. Live-only — needs the socket session.
+    Returns an error string or None."""
+    manager = ACTIVE_POD_MANAGERS.get(event_id)
+    if manager is None:
+        return "No active Draftmancer session for this pod."
+    return await manager.set_seating_order(ordered_user_names)
+
+
+def _classify_names_sync(names: list[str]) -> list[tuple[str, str | None]]:
     with SessionLocal() as session:
         return classify_lobby_names(session, names)
 

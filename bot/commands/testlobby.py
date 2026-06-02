@@ -397,11 +397,22 @@ async def _settings_preview_noop(interaction: discord.Interaction, value: str) -
     return None
 
 
+async def _settings_preview_seating_noop(
+    interaction: discord.Interaction, ordered_user_names: list[str],
+) -> str | None:
+    return None
+
+
+async def _settings_preview_seat_order() -> list[tuple[str, str]]:
+    return [(arena, display or arena) for arena, display in _LINKED_EIGHT]
+
+
 def _settings_preview_view() -> PodSettingsView:
-    """No-op Settings panel so `!test` can preview the format + pairing dropdowns with no pod."""
+    """No-op Settings panel so `!test` can preview the format + pairing dropdowns + seat-order modal with no pod."""
     return PodSettingsView(
         on_format=_settings_preview_noop, on_pairing=_settings_preview_noop,
         current_code=None, current_mode="swiss",
+        on_seating=_settings_preview_seating_noop, seat_order_provider=_settings_preview_seat_order,
     )
 
 

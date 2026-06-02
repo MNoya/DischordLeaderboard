@@ -75,7 +75,9 @@ class LobbyReadyButtonView(discord.ui.View):
         self, interaction: discord.Interaction, button: discord.ui.Button,
     ) -> None:
         from bot.services.pod_active import ACTIVE_POD_MANAGERS
-        from bot.services.pod_draft_manager import set_event_format, set_event_pairing_mode
+        from bot.services.pod_draft_manager import (
+            set_event_format, set_event_pairing_mode, set_event_seating,
+        )
         from bot.services.pod_settings_view import PodSettingsView
         channel = interaction.channel
         channel_id = channel.id if channel else None
@@ -100,10 +102,14 @@ class LobbyReadyButtonView(discord.ui.View):
         async def on_pairing(inter: discord.Interaction, mode: str) -> str | None:
             return await set_event_pairing_mode(event_id, mode)
 
+        async def on_seating(inter: discord.Interaction, ordered_user_names: list[str]) -> str | None:
+            return await set_event_seating(event_id, ordered_user_names)
+
         await interaction.response.send_message(
             view=PodSettingsView(
                 on_format=on_format, on_pairing=on_pairing,
                 current_code=manager.set_code, current_mode=manager.pairing_mode,
+                on_seating=on_seating, seat_order_provider=manager.seating_lobby_order,
             ),
             ephemeral=True,
         )
