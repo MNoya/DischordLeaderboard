@@ -375,18 +375,35 @@ async function fetchDirectLeaderboard(setCode: string): Promise<LeaderboardRow[]
 }
 
 export async function fetchColorsSummary(setCode: string): Promise<ColorsSummary[]> {
-  const allEvents: Array<Record<string, unknown>> = [];
+  // First page carries an exact count; the rest fetch in parallel so the color
+  // pills wait on one round-trip of latency, not N stacked ones (the page can be
+  // far from the DB region — sequential pagination was the slowest thing on load).
   const pageSize = 1000;
-  for (let from = 0; ; from += pageSize) {
-    const { data, error } = await client()
+  const page = (from: number) =>
+    client()
       .from("public_player_draft_events")
       .select("slug, colors, is_trophy")
       .eq("set_code", setCode)
       .range(from, from + pageSize - 1);
-    if (error) throw error;
-    const batch = (data ?? []) as Array<Record<string, unknown>>;
-    allEvents.push(...batch);
-    if (batch.length < pageSize) break;
+
+  const first = await client()
+    .from("public_player_draft_events")
+    .select("slug, colors, is_trophy", { count: "exact" })
+    .eq("set_code", setCode)
+    .range(0, pageSize - 1);
+  if (first.error) throw first.error;
+
+  const allEvents = [...((first.data ?? []) as Array<Record<string, unknown>>)];
+  const total = first.count ?? allEvents.length;
+  const restPages = Math.max(0, Math.ceil(total / pageSize) - 1);
+  if (restPages > 0) {
+    const results = await Promise.all(
+      Array.from({ length: restPages }, (_, i) => page((i + 1) * pageSize)),
+    );
+    for (const r of results) {
+      if (r.error) throw r.error;
+      allEvents.push(...((r.data ?? []) as Array<Record<string, unknown>>));
+    }
   }
 
   const agg = new Map<string, { trophies: number; events: number; players: Set<string> }>();

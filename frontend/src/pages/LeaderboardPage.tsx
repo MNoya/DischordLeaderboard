@@ -31,11 +31,10 @@ import {
   useDraftEvents,
   useFormatColorsLeaderboard,
   useFormatLeaderboard,
-  useIdlePrefetchOtherSets,
-  useIdlePrefetchTopPlayers,
   useLeaderboard,
   useOtherColorsLeaderboard,
   usePlayerProfile,
+  usePrefetchers,
   useSets,
 } from "../data/hooks";
 import { canonicalSetCode, colorsOf, effectiveColorCount, eventDate, fmtRange, lastUpdated, prettyFormat, relativeTime, sumEvents, weekOfSet, winPct } from "../data/utils";
@@ -174,9 +173,6 @@ export function LeaderboardPage() {
     });
   };
 
-  useIdlePrefetchOtherSets(activeSet, sets);
-  useIdlePrefetchTopPlayers(rows);
-
   const filterProps: FilterRowProps = { format, setFormat, colors, setColors, colorChips, colorChipsLoading, formatOptions };
 
   return isMobile ? (
@@ -267,6 +263,7 @@ function Desktop({
   onSort: (key: SortKey) => void;
 }) {
   const navigate = useNavigate();
+  const { prefetchSet, prefetchPlayer } = usePrefetchers();
   return (
     <div className="bg-bg text-text min-h-screen flex flex-col animate-fadeIn">
       <AppHeader subtitle="LEADERBOARD" />
@@ -275,6 +272,7 @@ function Desktop({
         setMeta={setMeta}
         sets={sets}
         onSelectSet={(c) => goToSet(navigate, c, sets, searchParams)}
+        onPrefetchSet={prefetchSet}
         format={filters.format}
         colors={filters.colors}
       />
@@ -286,9 +284,10 @@ function Desktop({
           variant="desktop"
           loading={isLoading}
           error={error}
-          showScore={filters.format !== "Pod" && filters.format !== "Direct"}
+          showScore={filters.format !== "Direct"}
           sort={sort}
           onSort={onSort}
+          onRowPrefetch={(r) => prefetchPlayer(r.slug, r.setCode)}
           renderExpanded={(r) => (
             <DesktopExpandedRow
               row={r}
@@ -328,6 +327,7 @@ function SetHero({
   setMeta,
   sets,
   onSelectSet,
+  onPrefetchSet,
   format,
   colors,
 }: {
@@ -335,6 +335,7 @@ function SetHero({
   setMeta: SetSummary | undefined;
   sets: SetSummary[] | undefined;
   onSelectSet: (code: string) => void;
+  onPrefetchSet?: (code: string) => void;
   format: string;
   colors: string;
 }) {
@@ -365,6 +366,7 @@ function SetHero({
           sets={sets}
           activeCode={activeSet}
           onChange={onSelectSet}
+          onPrefetch={onPrefetchSet}
           extraHide={filterActive ? 2 : 0}
         />
       )}
@@ -533,6 +535,7 @@ function Mobile({
   onSort: (key: SortKey) => void;
 }) {
   const navigate = useNavigate();
+  const { prefetchSet, prefetchPlayer } = usePrefetchers();
   return (
     <div className="bg-bg text-text min-h-screen flex flex-col overflow-x-hidden animate-fadeIn">
       <div className="sticky top-0 z-10 bg-bg">
@@ -556,6 +559,7 @@ function Mobile({
                 sets={sets}
                 activeCode={activeSet}
                 onChange={(code) => goToSet(navigate, code, sets, searchParams)}
+                onPrefetch={prefetchSet}
               />
             </div>
           )}
@@ -571,7 +575,7 @@ function Mobile({
         </div>
         {/* Column header is part of the sticky chrome so it stays pinned with the
             rest of the page chrome as rows scroll under it. */}
-        <LeaderboardColumnHeader variant="mobile" showScore={filters.format !== "Pod" && filters.format !== "Direct"} sort={sort} onSort={onSort} />
+        <LeaderboardColumnHeader variant="mobile" showScore={filters.format !== "Direct"} sort={sort} onSort={onSort} />
       </div>
 
       <LeaderboardTable
@@ -580,7 +584,8 @@ function Mobile({
         loading={isLoading}
         error={error}
         showHeader={false}
-        showScore={filters.format !== "Pod" && filters.format !== "Direct"}
+        showScore={filters.format !== "Direct"}
+        onRowPrefetch={(r) => prefetchPlayer(r.slug, r.setCode)}
         renderExpanded={(r) => (
           <MobileExpandedRow
             row={r}

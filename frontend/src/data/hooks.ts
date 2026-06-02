@@ -5,7 +5,7 @@
 // keys, stale-time, and idle prefetch sit in one place.
 
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo } from "react";
+import { useCallback, useMemo } from "react";
 
 import {
   fetchAvailableFormats,
@@ -177,60 +177,40 @@ export function useFormatScopedTrophies(
   });
 }
 
-// Spec §6 — idle-time prefetch of non-active sets after first paint.
-export function useIdlePrefetchOtherSets(
-  activeSetCode: string | undefined,
-  allSets: Array<{ code: string }> | undefined
-) {
+// On-demand prefetch (spec §6): warm a set board or a player's profile+events on
+// intent (hover/focus) rather than eagerly for every set and player on load.
+// prefetchQuery dedupes by key, so repeated hovers don't refetch fresh data.
+export function usePrefetchers() {
   const qc = useQueryClient();
-  useEffect(() => {
-    if (!activeSetCode || !allSets) return;
-    const handle = (window.requestIdleCallback ?? window.setTimeout)(() => {
-      for (const s of allSets) {
-        if (s.code === activeSetCode) continue;
-        qc.prefetchQuery({
-          queryKey: ["leaderboard", s.code],
-          queryFn: () => fetchLeaderboard(s.code),
-          staleTime: FIVE_MINUTES,
-        });
-      }
-    });
-    return () => {
-      if (typeof handle === "number") clearTimeout(handle);
-      else window.cancelIdleCallback?.(handle as number);
-    };
-  }, [activeSetCode, allSets, qc]);
-}
 
-// Warm the cache for the top N players' profile + draft events. When a row is
-// later expanded (or its profile page is opened), it renders instantly.
-export function useIdlePrefetchTopPlayers(
-  rows: ReadonlyArray<{ slug: string; setCode: string }> | undefined,
-  limit = 25,
-) {
-  const qc = useQueryClient();
-  useEffect(() => {
-    if (!rows || rows.length === 0) return;
-    const top = rows.slice(0, limit);
-    const handle = (window.requestIdleCallback ?? window.setTimeout)(() => {
-      for (const r of top) {
-        qc.prefetchQuery({
-          queryKey: ["player-profile", r.slug, r.setCode],
-          queryFn: () => fetchPlayerProfile(r.slug, r.setCode),
-          staleTime: FIVE_MINUTES,
-        });
-        qc.prefetchQuery({
-          queryKey: ["draft-events", r.slug, r.setCode],
-          queryFn: () => fetchPlayerDraftEvents(r.slug, r.setCode),
-          staleTime: FIVE_MINUTES,
-        });
-      }
-    });
-    return () => {
-      if (typeof handle === "number") clearTimeout(handle);
-      else window.cancelIdleCallback?.(handle as number);
-    };
-  }, [rows, qc, limit]);
+  const prefetchSet = useCallback(
+    (code: string) => {
+      qc.prefetchQuery({
+        queryKey: ["leaderboard", code],
+        queryFn: () => fetchLeaderboard(code),
+        staleTime: FIVE_MINUTES,
+      });
+    },
+    [qc],
+  );
+
+  const prefetchPlayer = useCallback(
+    (slug: string, setCode: string) => {
+      qc.prefetchQuery({
+        queryKey: ["player-profile", slug, setCode],
+        queryFn: () => fetchPlayerProfile(slug, setCode),
+        staleTime: FIVE_MINUTES,
+      });
+      qc.prefetchQuery({
+        queryKey: ["draft-events", slug, setCode],
+        queryFn: () => fetchPlayerDraftEvents(slug, setCode),
+        staleTime: FIVE_MINUTES,
+      });
+    },
+    [qc],
+  );
+
+  return { prefetchSet, prefetchPlayer };
 }
 
 // Builds the dynamic chip list for the colors filter: 2-color guilds + popular

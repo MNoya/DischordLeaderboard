@@ -40,11 +40,13 @@ export function SetSwitcherDesktop({
   sets,
   activeCode,
   onChange,
+  onPrefetch,
   extraHide = 0,
 }: {
   sets: SetSummary[];
   activeCode: string;
   onChange: (code: string) => void;
+  onPrefetch?: (code: string) => void;
   extraHide?: number;
 }) {
   const cap = useSetVisibleCap(sets.length, extraHide);
@@ -52,10 +54,16 @@ export function SetSwitcherDesktop({
   return (
     <div className="flex gap-1.5">
       {visible.map((s) => (
-        <SetChip key={s.code} set={s} active={s.code === activeCode} onClick={() => onChange(s.code)} />
+        <SetChip
+          key={s.code}
+          set={s}
+          active={s.code === activeCode}
+          onClick={() => onChange(s.code)}
+          onHover={onPrefetch ? () => onPrefetch(s.code) : undefined}
+        />
       ))}
       {overflow.length > 0 && (
-        <SetOverflow sets={overflow} activeCode={activeCode} onChange={onChange} />
+        <SetOverflow sets={overflow} activeCode={activeCode} onChange={onChange} onPrefetch={onPrefetch} />
       )}
     </div>
   );
@@ -67,14 +75,18 @@ function SetChip({
   set,
   active,
   onClick,
+  onHover,
 }: {
   set: SetSummary;
   active: boolean;
   onClick: () => void;
+  onHover?: () => void;
 }) {
   return (
     <button
       onClick={onClick}
+      onMouseEnter={onHover}
+      onFocus={onHover}
       className="group block cursor-pointer transition-colors"
       style={{
         clipPath: CHAMFER,
@@ -105,10 +117,12 @@ function SetOverflow({
   sets,
   activeCode,
   onChange,
+  onPrefetch,
 }: {
   sets: SetSummary[];
   activeCode: string;
   onChange: (code: string) => void;
+  onPrefetch?: (code: string) => void;
 }) {
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef<HTMLDivElement>(null);
@@ -160,6 +174,8 @@ function SetOverflow({
                 onChange(s.code);
                 setOpen(false);
               }}
+              onMouseEnter={onPrefetch ? () => onPrefetch(s.code) : undefined}
+              onFocus={onPrefetch ? () => onPrefetch(s.code) : undefined}
               className={cn(
                 "w-full py-[11px] px-3.5 flex items-center gap-3 border-b border-border text-text font-display tracking-[0.06em] cursor-pointer text-left transition-colors",
                 s.code === activeCode ? "bg-surface2" : "bg-transparent hover:bg-surface2",
@@ -181,10 +197,12 @@ export function SetSwitcherMobile({
   sets,
   activeCode,
   onChange,
+  onPrefetch,
 }: {
   sets: SetSummary[];
   activeCode: string;
   onChange: (code: string) => void;
+  onPrefetch?: (code: string) => void;
 }) {
   const [open, setOpen] = React.useState(false);
   const active = sets.find((s) => s.code === activeCode) ?? sets[0];
@@ -229,6 +247,8 @@ export function SetSwitcherMobile({
                 onChange(s.code);
                 setOpen(false);
               }}
+              onTouchStart={onPrefetch ? () => onPrefetch(s.code) : undefined}
+              onFocus={onPrefetch ? () => onPrefetch(s.code) : undefined}
               className={cn(
                 "w-full py-[9px] px-2.5 flex items-center gap-2 border-none border-b border-border text-text font-display text-[13px] tracking-[0.1em] cursor-pointer text-left transition-colors",
                 s.code === activeCode ? "bg-surface2" : "bg-transparent hover:bg-surface2",

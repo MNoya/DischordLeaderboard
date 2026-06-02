@@ -79,6 +79,7 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
   sort,
   onSort,
   playerHref,
+  onRowPrefetch,
 }: {
   rows: T[] | undefined;
   variant: "desktop" | "mobile";
@@ -91,6 +92,8 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
   sort?: SortState;
   onSort?: (key: SortKey) => void;
   playerHref?: (row: T) => string | null;
+  /** Fired on row hover/focus to warm that player's cache on intent. */
+  onRowPrefetch?: (row: T) => void;
 }) {
   const [openSlug, setOpenSlug] = useState<string | null>(null);
   const [renderedSlug, setRenderedSlug] = useState<string | null>(null);
@@ -122,6 +125,8 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
           return (
             <div
               key={r.slug}
+              onMouseEnter={onRowPrefetch ? () => onRowPrefetch(r) : undefined}
+              onFocus={onRowPrefetch ? () => onRowPrefetch(r) : undefined}
               className={cn(
                 "transition-colors",
                 isMobile && "border-b border-border",
