@@ -12,7 +12,14 @@ import {
   adaptLeaderboardRow,
   adaptSet,
 } from "./adapter";
-import { bucketScoreContribution, computeScore, type ScoringStatRow } from "./scoring";
+import {
+  aggregate,
+  computeScore,
+  podPoints,
+  scoreFromGroups,
+  type GroupTotals,
+  type ScoringStatRow,
+} from "./scoring";
 import { colorsOf, effectiveColorCount } from "./utils";
 import { FORMAT_LABEL_GROUPS, FORMAT_RAW_GROUPS, MULTI, OTHER } from "./filters";
 import type {
@@ -103,38 +110,42 @@ export async function fetchAvailableFormats(setCode: string): Promise<string[]> 
 // ─── public_leaderboard ────────────────────────────────────────────────────
 
 export async function fetchLeaderboard(setCode: string): Promise<LeaderboardRow[]> {
-  const [leaderboard, breakdown] = await Promise.all([
+  const [leaderboard, breakdown, pod] = await Promise.all([
     client().from("public_leaderboard").select("*").eq("set_code", setCode),
     client().from("public_player_format_breakdown").select("*").eq("set_code", setCode),
+    client().from("public_pod_scoring").select("*").eq("set_code", setCode),
   ]);
   if (leaderboard.error) throw leaderboard.error;
   if (breakdown.error) throw breakdown.error;
+  if (pod.error) throw pod.error;
 
-  const scoreBySlug = new Map<string, number>();
+  // 17lands score: group every breakdown row per slug, then aggregate (confidence is aggregate)
+  const groupsBySlug = new Map<string, GroupTotals[]>();
   for (const raw of breakdown.data ?? []) {
     const r = raw as Record<string, unknown>;
     const slug = r.slug as string;
-    const contribution = bucketScoreContribution(
-      r.format_label as string,
-      (r.events as number) ?? 0,
-      (r.wins as number) ?? 0,
-      (r.losses as number) ?? 0,
-      (r.trophies as number) ?? 0,
-    );
-    scoreBySlug.set(slug, (scoreBySlug.get(slug) ?? 0) + contribution);
+    const list = groupsBySlug.get(slug) ?? [];
+    list.push({
+      label: r.format_label as string,
+      events: (r.events as number) ?? 0,
+      wins: (r.wins as number) ?? 0,
+      losses: (r.losses as number) ?? 0,
+      trophies: (r.trophies as number) ?? 0,
+    });
+    groupsBySlug.set(slug, list);
   }
 
-  const rows: LeaderboardRow[] = [];
+  const bySlug = new Map<string, LeaderboardRow>();
   for (const raw of leaderboard.data ?? []) {
     const r = raw as Record<string, unknown>;
     const slug = r.slug as string;
-    rows.push({
+    bySlug.set(slug, {
       setCode,
       slug,
       displayName: r.display_name as string,
       avatarUrl: (r.avatar_url ?? null) as string | null,
       rank: 0,
-      score: Math.round((scoreBySlug.get(slug) ?? 0) * 100) / 100,
+      score: scoreFromGroups(groupsBySlug.get(slug) ?? []),
       trophies: (r.trophies as number) ?? 0,
       events: (r.events as number) ?? 0,
       wins: (r.wins as number) ?? 0,
@@ -143,7 +154,33 @@ export async function fetchLeaderboard(setCode: string): Promise<LeaderboardRow[
     });
   }
 
-  return rows
+  // Pod points: add to existing rows, or admit pod-only players as entrants (always public)
+  for (const raw of pod.data ?? []) {
+    const r = raw as Record<string, unknown>;
+    const bonus = podPoints((r.trophies as number) ?? 0, (r.wins_2_1 as number) ?? 0);
+    if (bonus === 0) continue;
+    const slug = r.slug as string;
+    const existing = bySlug.get(slug);
+    if (existing) {
+      existing.score = Math.round((existing.score + bonus) * 100) / 100;
+    } else {
+      bySlug.set(slug, {
+        setCode,
+        slug,
+        displayName: (r.display_name as string) ?? slug,
+        avatarUrl: (r.avatar_url ?? null) as string | null,
+        rank: 0,
+        score: bonus,
+        trophies: 0,
+        events: 0,
+        wins: 0,
+        losses: 0,
+        lastCalculatedAt: new Date(0).toISOString(),
+      });
+    }
+  }
+
+  return [...bySlug.values()]
     .sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;
       return a.displayName.localeCompare(b.displayName);
@@ -162,20 +199,34 @@ export async function fetchFormatLeaderboard(
   format: string,
 ): Promise<LeaderboardRow[]> {
   if (format === "Pod") {
-    const rows = await fetchPodLeaderboard(setCode);
-    return rows.map((r) => ({
-      setCode: r.setCode,
-      slug: r.slug,
-      displayName: r.displayName,
-      avatarUrl: r.avatarUrl,
-      rank: r.rank,
-      score: 0,
-      trophies: r.trophies,
-      events: r.events,
-      wins: r.wins,
-      losses: r.losses,
-      lastCalculatedAt: r.lastFinishedAt ?? new Date(0).toISOString(),
-    }));
+    const { data, error } = await client()
+      .from("public_pod_scoring")
+      .select("*")
+      .eq("set_code", setCode);
+    if (error) throw error;
+    return (data ?? [])
+      .map((raw) => {
+        const r = raw as Record<string, unknown>;
+        const trophies = (r.trophies as number) ?? 0;
+        const wins21 = (r.wins_2_1 as number) ?? 0;
+        return {
+          setCode,
+          slug: r.slug as string,
+          displayName: (r.display_name as string) ?? (r.slug as string),
+          avatarUrl: (r.avatar_url ?? null) as string | null,
+          rank: 0,
+          score: podPoints(trophies, wins21),
+          trophies,
+          events: (r.events as number) ?? 0,
+          wins: (r.wins as number) ?? 0,
+          losses: (r.losses as number) ?? 0,
+          lastCalculatedAt: new Date(0).toISOString(),
+        } as LeaderboardRow;
+      })
+      .sort((a, b) =>
+        b.score !== a.score ? b.score - a.score : a.displayName.localeCompare(b.displayName),
+      )
+      .map((r, i) => ({ ...r, rank: i + 1 }));
   }
   if (format === "Direct") return fetchDirectLeaderboard(setCode);
   const labels = FORMAT_LABEL_GROUPS[format] ?? [format];
@@ -200,48 +251,49 @@ export async function fetchFormatLeaderboard(
     ]),
   );
 
-  const agg = new Map<string, LeaderboardRow>();
+  const groupsBySlug = new Map<string, GroupTotals[]>();
+  const totalsBySlug = new Map<string, { trophies: number; events: number; wins: number; losses: number }>();
   for (const raw of breakdown.data ?? []) {
     const r = raw as Record<string, unknown>;
     const slug = r.slug as string;
     const events = (r.events as number) ?? 0;
     if (events <= 0 || !info.has(slug)) continue;
-    const inf = info.get(slug)!;
     const wins = (r.wins as number) ?? 0;
     const losses = (r.losses as number) ?? 0;
     const trophies = (r.trophies as number) ?? 0;
-    const contribution = bucketScoreContribution(
-      r.format_label as string,
-      events,
-      wins,
-      losses,
-      trophies,
-    );
-    const cur = agg.get(slug);
-    if (!cur) {
-      agg.set(slug, {
-        setCode,
-        slug,
-        displayName: inf.display_name as string,
-        avatarUrl: (inf.avatar_url ?? null) as string | null,
-        rank: 0,
-        score: contribution,
-        trophies,
-        events,
-        wins,
-        losses,
-        lastCalculatedAt: inf.last_calculated_at as string,
-      });
-    } else {
-      cur.score += contribution;
-      cur.trophies += trophies;
-      cur.events += events;
-      cur.wins += wins;
-      cur.losses += losses;
-    }
+
+    const list = groupsBySlug.get(slug) ?? [];
+    list.push({ label: r.format_label as string, events, wins, losses, trophies });
+    groupsBySlug.set(slug, list);
+
+    const t = totalsBySlug.get(slug) ?? { trophies: 0, events: 0, wins: 0, losses: 0 };
+    t.trophies += trophies;
+    t.events += events;
+    t.wins += wins;
+    t.losses += losses;
+    totalsBySlug.set(slug, t);
   }
 
-  return Array.from(agg.values())
+  const rows: LeaderboardRow[] = [];
+  for (const [slug, groups] of groupsBySlug) {
+    const inf = info.get(slug)!;
+    const t = totalsBySlug.get(slug)!;
+    rows.push({
+      setCode,
+      slug,
+      displayName: inf.display_name as string,
+      avatarUrl: (inf.avatar_url ?? null) as string | null,
+      rank: 0,
+      score: scoreFromGroups(groups),
+      trophies: t.trophies,
+      events: t.events,
+      wins: t.wins,
+      losses: t.losses,
+      lastCalculatedAt: inf.last_calculated_at as string,
+    });
+  }
+
+  return rows
     .sort((a, b) => b.score - a.score)
     .map((r, i) => ({ ...r, rank: i + 1 }));
 }
@@ -497,7 +549,7 @@ export async function fetchPlayerProfile(
   slug: string,
   setCode: string,
 ): Promise<PlayerProfile | null> {
-  const [headlineResp, breakdownResp] = await Promise.all([
+  const [headlineResp, breakdownResp, podResp] = await Promise.all([
     client()
       .from("public_player")
       .select("*")
@@ -509,15 +561,56 @@ export async function fetchPlayerProfile(
       .select("*")
       .eq("set_code", setCode)
       .eq("slug", slug),
+    client()
+      .from("public_pod_scoring")
+      .select("*")
+      .eq("set_code", setCode)
+      .eq("slug", slug)
+      .maybeSingle(),
   ]);
   if (headlineResp.error) throw headlineResp.error;
   if (breakdownResp.error) throw breakdownResp.error;
+  if (podResp.error) throw podResp.error;
   if (!headlineResp.data) return null;
 
   const headline = adaptLeaderboardRow(headlineResp.data as Record<string, unknown>);
   const breakdown = (breakdownResp.data ?? []).map((r) =>
     adaptFormatBreakdown(r as Record<string, unknown>),
   );
+  // scoreContribution is aggregate-dependent (one confidence over total trophies), so it
+  // can't be computed per row — derive each row's share from the full breakdown here.
+  const agg = aggregate(
+    breakdown.map((b) => ({
+      label: b.formatLabel,
+      events: b.events,
+      wins: b.wins,
+      losses: b.losses,
+      trophies: b.trophies,
+    })),
+  );
+  for (const b of breakdown) {
+    b.scoreContribution = Math.round((agg.contributionByLabel.get(b.formatLabel) ?? 0) * 100) / 100;
+  }
+  // Pods score flat (no weight/rate/confidence) — append as its own breakdown row
+  if (podResp.data) {
+    const p = podResp.data as Record<string, unknown>;
+    const trophies = (p.trophies as number) ?? 0;
+    const wins21 = (p.wins_2_1 as number) ?? 0;
+    const pts = podPoints(trophies, wins21);
+    if (pts > 0) {
+      breakdown.push({
+        setCode,
+        slug,
+        formatLabel: "Pod",
+        events: (p.events as number) ?? 0,
+        wins: (p.wins as number) ?? 0,
+        losses: (p.losses as number) ?? 0,
+        trophies,
+        wins21,
+        scoreContribution: pts,
+      });
+    }
+  }
   const board = await fetchLeaderboard(setCode);
   const inBoard = board.find((r) => r.slug === slug);
   return {

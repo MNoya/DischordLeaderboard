@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import NamedTuple
 
 import discord
 from sqlalchemy import func, select
@@ -9,8 +10,8 @@ from sqlalchemy.orm import Session
 
 from bot.config import settings
 from bot.models import DraftEvent, MagicSet, Player, PlayerStats
-from bot.scoring import boxes_for_event, compute_score, compute_score_breakdown
-from bot.services.pod_drafts import player_pod_stats
+from bot.scoring import boxes_for_event, compute_score, compute_score_breakdown, pod_points
+from bot.services.pod_drafts import PodSetSummary, pod_scoring_counts, pod_summary_by_set_for_player
 from bot.sets import ACTIVE_SET_CODE
 
 
@@ -25,10 +26,20 @@ class StatsData:
     total_trophies: int
     breakdown: list[dict] = field(default_factory=list)
     last_updated: datetime | None = None
-    pod_stats: dict | None = None
+    pod: PodSetSummary | None = None
     direct_stats: dict | None = None
     opted_out: bool = False
     has_token: bool = False
+
+
+class RankedPlayer(NamedTuple):
+    rank: int
+    player_id: str
+    slug: str
+    display_name: str
+    discord_id: str | None
+    score: float
+    trophies: int
 
 
 def process_stats(
@@ -58,20 +69,18 @@ def process_stats(
         for r in stats_rows
     ]
     breakdown = compute_score_breakdown(stat_dicts)
-    total_score = compute_score(stat_dicts)
+    pod = pod_summary_by_set_for_player(session, player.id).get(magic_set.code)
+    pod_pts = pod_points(pod.trophies, pod.wins_2_1) if pod else 0
+    total_score = compute_score(stat_dicts) + pod_pts
     total_trophies = sum(int(r.trophies or 0) for r in stats_rows)
     last_updated = max((r.last_fetched_at for r in stats_rows if r.last_fetched_at), default=None)
 
     rank: int | None = None
     if total_score > 0:
         for entry in rank_players_for_set(session, magic_set.id):
-            if entry[1] == player.id:
-                rank = entry[0]
+            if entry.player_id == player.id:
+                rank = entry.rank
                 break
-
-    pod = player_pod_stats(session, player.discord_id)
-    pod_bucket = pod["by_set"].get(magic_set.code) if pod else None
-    pod_stats = pod if pod_bucket and pod_bucket["events"] > 0 else None
 
     direct_rows = session.execute(
         select(DraftEvent.wins, DraftEvent.losses, DraftEvent.finished_at).where(
@@ -97,7 +106,7 @@ def process_stats(
         total_trophies=total_trophies,
         breakdown=breakdown,
         last_updated=last_updated,
-        pod_stats=pod_stats,
+        pod=pod,
         direct_stats=direct_stats,
         opted_out=not player.leaderboard_opt_in,
         has_token=player.seventeenlands_token is not None,
@@ -123,19 +132,20 @@ def render_embed(data: StatsData) -> discord.Embed:
 
     embed.description = f"{summary}\n\n{_format_breakdown(data.breakdown, data.direct_stats, data.opted_out)}"
 
-    if data.pod_stats:
-        b = data.pod_stats["by_set"].get(data.set_code)
-        if b and b["events"]:
-            games = b["wins"] + b["losses"]
-            wr = b["wins"] / games if games else 0.0
-            events_word = "event" if b["events"] == 1 else "events"
-            trophy_word = "trophy" if b["trophies"] == 1 else "trophies"
-            embed.description = (
-                f"{embed.description}\n"
-                f"**Pod** — {b['events']} {events_word}, "
-                f"{b['wins']}-{b['losses']} ({wr:.0%}), "
-                f"{b['trophies']} {trophy_word}"
-            )
+    if data.pod and data.pod.events:
+        p = data.pod
+        games = p.wins + p.losses
+        wr = p.wins / games if games else 0.0
+        events_word = "event" if p.events == 1 else "events"
+        trophy_word = "trophy" if p.trophies == 1 else "trophies"
+        points = pod_points(p.trophies, p.wins_2_1)
+        pod_suffix = f" · **+{points:.0f} pts**" if points else ""
+        embed.description = (
+            f"{embed.description}\n"
+            f"**Pod** — {p.events} {events_word}, "
+            f"{p.wins}-{p.losses} ({wr:.0%}), "
+            f"{p.trophies} {trophy_word}{pod_suffix}"
+        )
 
     if data.last_updated is not None:
         embed.timestamp = data.last_updated
@@ -145,50 +155,61 @@ def render_embed(data: StatsData) -> discord.Embed:
     return embed
 
 
-def rank_players_for_set(
-    session: Session, set_id: str,
-) -> list[tuple[int, str, str, str, str | None, float, int]]:
-    """Compute every active, opted-in player's score for the set from PlayerStats; sort and rank.
+def rank_players_for_set(session: Session, set_id: str) -> list[RankedPlayer]:
+    """Compute every active, opted-in player's score for the set; sort and rank.
 
-    Returns (rank, player_id, slug, display_name, discord_id, score, trophies) per player.
+    Score is the 17lands total (PlayerStats) plus the flat pod-draft bonus. Pod-only
+    players (no 17lands drafts this set) enter the board on pod points alone.
     Shared by the /stats and /leaderboard surfaces.
     """
+    stats_by_player = _stats_by_player(session, set_id)
+    set_code = session.execute(select(MagicSet.code).where(MagicSet.id == set_id)).scalar_one_or_none()
+    pod_counts = pod_scoring_counts(session, set_code) if set_code else {}
+
+    identities = {
+        p.id: (p.slug, p.display_name, p.discord_id)
+        for p in session.execute(
+            select(Player.id, Player.slug, Player.display_name, Player.discord_id)
+            .where(Player.id.in_(set(stats_by_player) | set(pod_counts)))
+        ).all()
+    }
+
+    standings: list[RankedPlayer] = []
+    for pid, (slug, name, did) in identities.items():
+        rows = stats_by_player.get(pid, [])
+        standings.append(RankedPlayer(
+            rank=0,
+            player_id=pid, slug=slug, display_name=name, discord_id=did,
+            score=compute_score(rows) + pod_points(*pod_counts.get(pid, (0, 0))),
+            trophies=sum(r["trophies"] for r in rows),
+        ))
+
+    standings.sort(key=lambda p: (-p.score, p.display_name.lower()))
+    return [p._replace(rank=rank) for rank, p in enumerate(standings, start=1)]
+
+
+def _stats_by_player(session: Session, set_id: str) -> dict[str, list[dict]]:
+    """17lands stat rows per active, opted-in player for the set, keyed by player_id."""
     rows = session.execute(
         select(
-            Player.id, Player.slug, Player.display_name, Player.discord_id,
-            PlayerStats.format, PlayerStats.events, PlayerStats.wins,
-            PlayerStats.losses, PlayerStats.trophies,
+            PlayerStats.player_id, PlayerStats.format, PlayerStats.events,
+            PlayerStats.wins, PlayerStats.losses, PlayerStats.trophies,
         )
-        .join(PlayerStats, PlayerStats.player_id == Player.id)
+        .join(Player, Player.id == PlayerStats.player_id)
         .where(
             Player.active.is_(True),
             Player.leaderboard_opt_in.is_(True),
             PlayerStats.set_id == set_id,
         )
     ).all()
-
-    bucket: dict[str, dict] = {}
+    by_player: dict[str, list[dict]] = {}
     for r in rows:
-        b = bucket.setdefault(r.id, {
-            "slug": r.slug, "display_name": r.display_name, "discord_id": r.discord_id,
-            "stats": [], "trophies": 0,
-        })
-        b["stats"].append({
+        by_player.setdefault(r.player_id, []).append({
             "format": r.format, "events": int(r.events or 0),
             "wins": int(r.wins or 0), "losses": int(r.losses or 0),
             "trophies": int(r.trophies or 0),
         })
-        b["trophies"] += int(r.trophies or 0)
-
-    scored = [
-        (compute_score(b["stats"]), b["trophies"], pid, b["slug"], b["display_name"], b["discord_id"])
-        for pid, b in bucket.items()
-    ]
-    scored.sort(key=lambda x: (-x[0], x[4].lower()))
-    return [
-        (idx + 1, pid, slug, name, did, score, trophies)
-        for idx, (score, trophies, pid, slug, name, did) in enumerate(scored)
-    ]
+    return by_player
 
 
 def resolve_player(session: Session, player_name: str | None, viewer_discord_id: str) -> Player | None:

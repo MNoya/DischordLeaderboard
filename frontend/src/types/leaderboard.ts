@@ -39,6 +39,7 @@ export interface PlayerFormatBreakdown {
   losses: number;
   trophies: number;
   scoreContribution: number;
+  wins21?: number;
 }
 
 export interface PlayerDraftEvent {

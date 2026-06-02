@@ -16,7 +16,6 @@ import type {
   PlayerFormatBreakdown,
   SetSummary,
 } from "../types/leaderboard";
-import { bucketScoreContribution } from "./scoring";
 
 type SnakeRow = Record<string, unknown>;
 
@@ -34,13 +33,9 @@ export const adaptLeaderboardRow = (row: SnakeRow): LeaderboardRow =>
   camelify(row);
 export const adaptFormatBreakdown = (row: SnakeRow): PlayerFormatBreakdown => {
   const camel = camelify<PlayerFormatBreakdown>(row);
-  camel.scoreContribution = bucketScoreContribution(
-    camel.formatLabel,
-    camel.events,
-    camel.wins,
-    camel.losses,
-    camel.trophies,
-  );
+  // Aggregate confidence makes a row's contribution depend on the player's total
+  // trophies, so the caller assigns scoreContribution from the full breakdown.
+  camel.scoreContribution = 0;
   return camel;
 };
 export const adaptDraftEvent = (row: SnakeRow): PlayerDraftEvent =>

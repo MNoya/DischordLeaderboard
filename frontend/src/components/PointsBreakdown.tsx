@@ -33,12 +33,12 @@ const TARGET_WIDTH = 540;
 const SIDE_MARGIN = 8;
 const GAP = 10;
 
-function CardsLayout({ rows }: { rows: BreakdownRow[] }) {
+function CardsLayout({ rows, confidence = 0 }: { rows: BreakdownRow[]; confidence?: number }) {
   return (
     <>
       {rows.map((r) => {
         const color = FMT_COLORS[r.label] ?? FMT_DEFAULT_COLOR;
-        const isLcqD2 = r.confidence === null;
+        const isLcqD2 = r.isLcq;
         const earned = r.count > 0;
         return (
           <div
@@ -68,7 +68,24 @@ function CardsLayout({ rows }: { rows: BreakdownRow[] }) {
                 />
               </div>
               <div className="mt-1 text-[10.5px] text-muted tabular-nums tracking-tight flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-                {isLcqD2 ? (
+                {r.isPod ? (
+                  <>
+                    <span className="mono inline-flex items-center gap-1">
+                      {r.count}
+                      <Trophy size={11} color="#ffc63a" />
+                    </span>
+                    <span className="text-dim">×</span>
+                    <span className="mono">5 pts</span>
+                    {r.wins21 > 0 && (
+                      <>
+                        <span className="text-dim">+</span>
+                        <span className="mono">{r.wins21} × 2-1</span>
+                        <span className="text-dim">×</span>
+                        <span className="mono">2 pts</span>
+                      </>
+                    )}
+                  </>
+                ) : isLcqD2 ? (
                   <>
                     <span className="mono inline-flex items-center gap-0.5">
                       {r.count}
@@ -95,8 +112,12 @@ function CardsLayout({ rows }: { rows: BreakdownRow[] }) {
                       <>
                         <span className="text-dim">×</span>
                         <span className="mono">{pct(r.rate)} trophy rate</span>
+                      </>
+                    )}
+                    {earned && confidence > 0 && (
+                      <>
                         <span className="text-dim">×</span>
-                        <span className="mono">{pct(r.confidence ?? 0)} confidence</span>
+                        <span className="mono">{pct(confidence)} confidence</span>
                       </>
                     )}
                   </>
@@ -173,8 +194,11 @@ export function PointsBreakdown({ open, onClose, breakdown, anchorRef }: Props) 
 
   if (!open || !pos) return null;
 
-  const rows = [...computeRows(breakdown)].sort((a, b) => b.score - a.score);
-  const rounded = Math.round(rows.reduce((s, r) => s + r.score, 0));
+  const { rows: allRows, confidence } = computeRows(breakdown);
+  const sorted = [...allRows].sort((a, b) => b.score - a.score);
+  const queueRows = sorted.filter((r) => !r.isPod);
+  const podRows = sorted.filter((r) => r.isPod);
+  const rounded = Math.round(allRows.reduce((s, r) => s + r.score, 0));
 
   return createPortal(
     <div
@@ -219,9 +243,15 @@ export function PointsBreakdown({ open, onClose, breakdown, anchorRef }: Props) 
         </button>
       </header>
 
-      <div className="pt-1 pb-1">
-        <CardsLayout rows={rows} />
+      <div className="pt-1">
+        <CardsLayout rows={queueRows} confidence={confidence} />
       </div>
+
+      {podRows.length > 0 && (
+        <div className="border-t border-border">
+          <CardsLayout rows={podRows} />
+        </div>
+      )}
 
       <footer className="px-4 py-2.5 border-t border-border flex items-center justify-between gap-3">
         <Link

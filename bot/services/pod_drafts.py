@@ -5,7 +5,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from typing import Sequence
+from typing import NamedTuple, Sequence
 
 from sqlalchemy import any_, func, select
 from sqlalchemy.orm import Session
@@ -826,51 +826,72 @@ def set_participant_review_choice(
 
 
 
-def player_pod_stats(session: Session, discord_id: str) -> dict | None:
-    """Lifetime + per-set pod stats for a registered player; None if the discord_id isn't registered."""
-    player = session.execute(
-        select(Player).where(Player.discord_id == discord_id)
-    ).scalar_one_or_none()
-    if player is None:
-        return None
+class PodSetSummary(NamedTuple):
+    """A player's pod results for one set. ``trophies`` counts a 3-0 record OR a pod win
+    (placement 1) — multiple per large pod, and a small pod's 2-1 winner still earns one.
+    A 2-1 that won the pod is a trophy, not a ``wins_2_1``."""
+    events: int
+    wins: int
+    losses: int
+    trophies: int
+    wins_2_1: int
 
+
+def pod_scoring_counts(session: Session, set_code: str) -> dict[str, tuple[int, int]]:
+    """Per active player: (trophy count, 2-1 count) for the set, keyed by player_id. 
+    Pods are always public, no opt-in gate."""
     rows = session.execute(
-        select(PodDraftEvent, PodDraftParticipant)
-        .join(PodDraftParticipant, PodDraftParticipant.event_id == PodDraftEvent.id)
-        .where(PodDraftParticipant.player_id == player.id)
+        select(PodDraftParticipant.player_id, PodDraftParticipant.record, PodDraftParticipant.placement)
+        .join(PodDraftEvent, PodDraftEvent.id == PodDraftParticipant.event_id)
+        .join(Player, Player.id == PodDraftParticipant.player_id)
+        .where(
+            PodDraftEvent.set_code == set_code,
+            Player.active.is_(True),
+            PodDraftParticipant.placement.isnot(None),
+        )
     ).all()
+    by_player: dict[str, list[tuple[str | None, int | None]]] = {}
+    for player_id, record, placement in rows:
+        by_player.setdefault(player_id, []).append((record, placement))
+    summaries = {pid: _summarize_pod_records(finishes) for pid, finishes in by_player.items()}
+    return {pid: (s.trophies, s.wins_2_1) for pid, s in summaries.items()}
 
-    by_set: dict[str, dict] = {}
-    lifetime_trophies = 0
-    events_played = 0
-    wins = 0
-    losses = 0
-    for event, participant in rows:
-        if participant.placement is None:
-            continue
-        events_played += 1
-        bucket = by_set.setdefault(event.set_code, {"events": 0, "wins": 0, "losses": 0, "trophies": 0})
-        bucket["events"] += 1
-        if participant.placement == 1:
-            lifetime_trophies += 1
-            bucket["trophies"] += 1
-        if participant.record and "-" in participant.record:
-            try:
-                w_str, l_str = participant.record.split("-", 1)
-                w, l = int(w_str), int(l_str)
-                wins += w
-                losses += l
-                bucket["wins"] += w
-                bucket["losses"] += l
-            except ValueError:
-                pass
 
-    return {
-        "player": player,
-        "lifetime_trophies": lifetime_trophies,
-        "trophies_by_set": {code: b["trophies"] for code, b in by_set.items() if b["trophies"]},
-        "by_set": by_set,
-        "events_played": events_played,
-        "wins": wins,
-        "losses": losses,
-    }
+def pod_summary_by_set_for_player(session: Session, player_id: str) -> dict[str, PodSetSummary]:
+    """One player's pod summary per set_code; no opt-in filter since it's their own stats."""
+    rows = session.execute(
+        select(PodDraftEvent.set_code, PodDraftParticipant.record, PodDraftParticipant.placement)
+        .join(PodDraftParticipant, PodDraftParticipant.event_id == PodDraftEvent.id)
+        .where(
+            PodDraftParticipant.player_id == player_id,
+            PodDraftParticipant.placement.isnot(None),
+        )
+    ).all()
+    by_set: dict[str, list[tuple[str | None, int | None]]] = {}
+    for set_code, record, placement in rows:
+        by_set.setdefault(set_code, []).append((record, placement))
+    return {sc: _summarize_pod_records(finishes) for sc, finishes in by_set.items()}
+
+
+def _summarize_pod_records(finishes: list[tuple[str | None, int | None]]) -> PodSetSummary:
+    """A trophy is a 3-0 record or a pod win (placement 1); a 2-1 that won is a trophy, not a 2-1."""
+    wins = losses = trophies = wins_2_1 = 0
+    for record, placement in finishes:
+        w, l = _parse_record(record)
+        wins += w
+        losses += l
+        if record == "3-0" or placement == 1:
+            trophies += 1
+        elif record == "2-1":
+            wins_2_1 += 1
+    return PodSetSummary(len(finishes), wins, losses, trophies, wins_2_1)
+
+
+def _parse_record(record: str | None) -> tuple[int, int]:
+    if not record or "-" not in record:
+        return 0, 0
+    w_str, l_str = record.split("-", 1)
+    try:
+        return int(w_str), int(l_str)
+    except ValueError:
+        return 0, 0

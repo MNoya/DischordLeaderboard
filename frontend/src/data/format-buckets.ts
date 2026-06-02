@@ -7,7 +7,14 @@ interface BucketGroup {
   rule?: string;
 }
 
-const GROUPS: readonly BucketGroup[] = (bucketsConfig as { groups: BucketGroup[] }).groups;
+const config = bucketsConfig as {
+  groups: BucketGroup[];
+  pod?: { trophy_points?: number; win_2_1_points?: number };
+};
+const GROUPS: readonly BucketGroup[] = config.groups;
+
+export const POD_TROPHY_POINTS = config.pod?.trophy_points ?? 5;
+export const POD_WIN_2_1_POINTS = config.pod?.win_2_1_points ?? 2;
 
 export const FORMAT_BUCKETS: Record<string, string> = Object.fromEntries(
   GROUPS.flatMap((g) => g.formats.map((fmt) => [fmt, g.label] as const)),

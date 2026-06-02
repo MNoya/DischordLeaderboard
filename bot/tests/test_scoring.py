@@ -97,10 +97,34 @@ def test_compute_score_sums_across_groups():
         {"format": "PremierDraft", "events": 10, "wins": 50, "losses": 30, "trophies": 4},
         {"format": "Sealed", "events": 6, "wins": 18, "losses": 8, "trophies": 3},
     ]
-    expected = round(4 * 10 * 0.4 * (4 / 6), 2) + round(3 * 8 * 0.5 * (3 / 5), 2)
-    # compute_score does the round at the end, so allow small discrepancy
-    score = compute_score(rows)
-    assert abs(score - expected) < 0.05
+    premier_raw = 4 * 10 * (4 / 10)
+    sealed_raw = 3 * 8 * (3 / 6)
+    total_trophies = 4 + 3
+    aggregate_confidence = total_trophies / (total_trophies + 2)
+    assert compute_score(rows) == round((premier_raw + sealed_raw) * aggregate_confidence, 2)
+
+
+def test_aggregate_confidence_beats_sum_of_per_group():
+    rows = [
+        {"format": "PremierDraft", "events": 1, "wins": 7, "losses": 0, "trophies": 1},
+        {"format": "QuickDraft", "events": 1, "wins": 7, "losses": 0, "trophies": 1},
+    ]
+    premier_raw = 1 * 10 * 1
+    quick_raw = 1 * 4 * 1
+    aggregate_confidence = 2 / (2 + 2)
+    per_group_confidence = 1 / (1 + 2)
+    aggregate = round((premier_raw + quick_raw) * aggregate_confidence, 2)
+    summed_per_group = round(premier_raw * per_group_confidence + quick_raw * per_group_confidence, 2)
+    assert compute_score(rows) == aggregate
+    assert aggregate > summed_per_group
+
+
+def test_single_group_unchanged_by_aggregation():
+    rows = [{"format": "PremierDraft", "events": 5, "wins": 30, "losses": 10, "trophies": 2}]
+    trophies = 2
+    raw = trophies * 10 * (trophies / 5)
+    confidence = trophies / (trophies + 2)
+    assert compute_score(rows) == round(raw * confidence, 2)
 
 
 def test_compute_score_ignores_unknown_formats():
@@ -160,18 +184,23 @@ def test_compute_score_breakdown_returns_per_group():
     assert "Premier" in by_label
     assert by_label["Premier"]["events"] == 10
     assert by_label["Premier"]["trophies"] == 4
-    # Premier score: 4 × 10 × 0.4 × (4/6) = 10.67
-    assert by_label["Premier"]["score"] == round(4 * 10 * 0.4 * (4 / 6), 2)
+    premier_raw = 4 * 10 * (4 / 10)
+    total_trophies = 4 + 3
+    aggregate_confidence = total_trophies / (total_trophies + 2)
+    assert by_label["Premier"]["score"] == round(premier_raw * aggregate_confidence, 2)
 
     assert "Sealed" in by_label
-    # Combined Sealed + TradSealed: trophies=3, events=6, wins=18
+    sealed_and_trad_sealed_trophies = 1 + 2
     assert by_label["Sealed"]["events"] == 6
-    assert by_label["Sealed"]["trophies"] == 3
+    assert by_label["Sealed"]["trophies"] == sealed_and_trad_sealed_trophies
     assert by_label["Sealed"]["wins"] == 18
 
-    # Groups with no rows are skipped
-    assert "Trad" not in by_label
-    assert "Quick" not in by_label
+    parts_total = round(sum(b["score"] for b in breakdown), 2)
+    rounding_drift = round(abs(parts_total - compute_score(rows)), 2)
+    assert rounding_drift <= 0.01
+
+    groups_with_no_rows_are_skipped = "Trad" not in by_label and "Quick" not in by_label
+    assert groups_with_no_rows_are_skipped
 
 
 def test_compute_score_breakdown_empty():

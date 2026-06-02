@@ -19,8 +19,9 @@ from bot.services.player_stats import process_stats, rank_players_for_set, rende
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.models import DraftEvent, LeaderboardMessage, MagicSet, Player, PlayerStats, PodDraftEvent, PodDraftParticipant
-from bot.scoring import DEFAULT_QUEUE_GROUPS, QueueGroup, boxes_for_event, compute_score
+from bot.scoring import DEFAULT_QUEUE_GROUPS, QueueGroup, boxes_for_event, compute_score, pod_points
 from bot.services.pod_deck_color import PAIR_EMOJI_NAME
+from bot.services.pod_drafts import pod_summary_by_set_for_player
 from bot.sets import ACTIVE_SET_CODE, ALL_SETS
 
 
@@ -560,6 +561,16 @@ def process_personal_standings(
         b["wins"] += int(r.wins or 0)
         b["losses"] += int(r.losses or 0)
 
+    pod_by_set = pod_summary_by_set_for_player(session, player.id) if group is None else {}
+    missing_pod_codes = [code for code in pod_by_set if code not in {b["code"] for b in by_set.values()}]
+    if missing_pod_codes:
+        for s in session.execute(
+            select(MagicSet.id, MagicSet.code).where(MagicSet.code.in_(missing_pod_codes))
+        ).all():
+            by_set.setdefault(s.id, {
+                "code": s.code, "stats": [], "trophies": 0, "events": 0, "wins": 0, "losses": 0,
+            })
+
     rows: list[PersonalStanding] = []
     for set_id, b in by_set.items():
         if group is not None:
@@ -568,7 +579,9 @@ def process_personal_standings(
             score = compute_score(b["stats"], groups=(group,))
             rank = None if opted_out else _set_rank_for_format(session, group, set_id, player.id, score)
         else:
-            score = compute_score(b["stats"])
+            pod = pod_by_set.get(b["code"])
+            pod_pts = pod_points(pod.trophies, pod.wins_2_1) if pod else 0
+            score = compute_score(b["stats"]) + pod_pts
             rank = None if opted_out else _set_rank(session, set_id, player.id, score)
         rows.append(PersonalStanding(
             set_code=b["code"], score=score, trophies=b["trophies"],

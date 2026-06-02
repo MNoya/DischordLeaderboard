@@ -12,7 +12,7 @@ from bot.services.pod_drafts import (
     get_participant_deck_state,
     list_champions,
     participant_dm_info,
-    player_pod_stats,
+    pod_summary_by_set_for_player,
     record_event,
     record_match,
     set_participant_deck_colors,
@@ -392,7 +392,7 @@ def test_list_champions_returns_filtered_and_ordered_by_date(session):
     assert len(sos_only) == 2
 
 
-def test_player_pod_stats_aggregates_correctly(session):
+def test_pod_summary_by_set_aggregates_per_set(session):
     _seed_set(session, "SOS")
     _seed_set(session, "ECL")
     player = _seed_player(session, discord_id="777", username="champ", display_name="Champ")
@@ -406,17 +406,27 @@ def test_player_pod_stats_aggregates_correctly(session):
         FinalStanding("Champ", placement=2, record="2-1", eliminated_round=3),
     ])
 
-    stats = player_pod_stats(session, "777")
-    assert stats is not None
-    assert stats["lifetime_trophies"] == 1
-    assert stats["trophies_by_set"] == {"SOS": 1}
-    assert stats["events_played"] == 2
-    assert stats["wins"] == 5
-    assert stats["losses"] == 1
+    summary = pod_summary_by_set_for_player(session, player.id)
+    assert summary["SOS"] == (1, 3, 0, 1, 0)   # events, wins, losses, trophies, wins_2_1
+    assert summary["ECL"] == (1, 2, 1, 0, 1)
 
 
-def test_player_pod_stats_returns_none_for_unknown_discord_id(session):
-    assert player_pod_stats(session, "ghost") is None
+def test_pod_summary_trophy_from_pod_win_without_3_0(session):
+    _seed_set(session, "SOS")
+    player = _seed_player(session, discord_id="778", username="smallpod", display_name="SmallPod")
+
+    event = record_event(session, _parsed_event(set_code="SOS", event_date=date(2026, 5, 6), attendees=("SmallPod",)))
+    finalize_champion(session, event.id, [
+        FinalStanding("SmallPod", placement=1, record="2-1", eliminated_round=None),
+    ])
+
+    summary = pod_summary_by_set_for_player(session, player.id)
+    assert summary["SOS"].trophies == 1   # 2-1 that won the pod counts as a trophy
+    assert summary["SOS"].wins_2_1 == 0   # not also a 2-1 finish
+
+
+def test_pod_summary_empty_for_unknown_player(session):
+    assert pod_summary_by_set_for_player(session, "ghost") == {}
 
 
 def test_stats_embed_pod_line_scoped_to_requested_set(session):

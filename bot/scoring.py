@@ -1,11 +1,16 @@
 """Format groups and scoring formula for player rating.
 
-Carries forward the legacy ECL formula:
+    raw_group   = trophies × group_points × trophy_rate
+    confidence  = T / (T + 2)        # T = total trophies across all groups
+    total       = (Σ raw_group) × confidence
 
-    group_score = trophies × group_points × trophy_rate × t/(t+2)
-    total = sum across groups
+with a special case for LCQ Draft 2 (counts wins instead of trophies, uses
+winrate, and is exempt from the confidence multiplier).
 
-with a special case for LCQ Draft 2 (counts wins instead of trophies, uses winrate).
+Confidence is an aggregate: it shrinks the whole resume by one factor built
+from total trophy count, rather than penalising each queue group on its own
+small sample. Pod-draft points are a separate flat term (see ``pod_points``),
+added to the leaderboard total outside this module.
 
 A ``QueueGroup`` collects raw 17lands ``format`` strings under a single label
 that shares a points weight. The ``Sealed`` group rolls best-of-1 and
@@ -37,6 +42,7 @@ class QueueGroup:
 
 
 BUCKETS_JSON = Path(__file__).resolve().parents[1] / "scoring_buckets.json"
+_BUCKETS = json.loads(BUCKETS_JSON.read_text())
 
 DEFAULT_QUEUE_GROUPS: tuple[QueueGroup, ...] = tuple(
     QueueGroup(
@@ -45,29 +51,92 @@ DEFAULT_QUEUE_GROUPS: tuple[QueueGroup, ...] = tuple(
         formats=tuple(g["formats"]),
         rule=g.get("rule"),
     )
-    for g in json.loads(BUCKETS_JSON.read_text())["groups"]
+    for g in _BUCKETS["groups"]
 )
 
+POD_TROPHY_POINTS = int(_BUCKETS.get("pod", {}).get("trophy_points", 5))
+POD_WIN_2_1_POINTS = int(_BUCKETS.get("pod", {}).get("win_2_1_points", 2))
+
 ARENA_DIRECT_SEALED_FORMAT = "ArenaDirect_Sealed"
+
+
+def pod_points(trophies_3_0: int, wins_2_1: int) -> int:
+    """Flat pod-draft contribution: a 3-0 record is a trophy, a 2-1 a strong finish.
+
+    Added to the leaderboard total alongside ``compute_score`` — pods are not a
+    17lands queue group and are exempt from trophy_rate / confidence.
+    """
+    return trophies_3_0 * POD_TROPHY_POINTS + wins_2_1 * POD_WIN_2_1_POINTS
 
 
 def supported_formats(groups: Iterable[QueueGroup] = DEFAULT_QUEUE_GROUPS) -> tuple[str, ...]:
     return tuple(fmt for g in groups for fmt in g.formats)
 
 
+def confidence_factor(total_trophies: int) -> float:
+    """Aggregate shrinkage prior: T/(T+2) over the player's whole trophy count."""
+    return total_trophies / (total_trophies + 2) if total_trophies > 0 else 0.0
+
+
+def _aggregate(
+    stats_rows: Sequence[dict],
+    groups: Iterable[QueueGroup],
+) -> tuple[dict[str, float], float]:
+    """Per-group score contribution (by label) and the aggregate confidence factor.
+
+    Non-LCQ groups contribute ``raw_group × confidence`` where confidence is built
+    from total trophies across all non-LCQ groups, so the parts sum to the total.
+    LCQ Draft 2 keeps its wins×winrate×points rule and is exempt from confidence.
+    """
+    groups = list(groups)
+    grouped: dict[str, list[dict]] = {}
+    for row in stats_rows:
+        g = _group_for_format(groups, row["format"])
+        if g is not None:
+            grouped.setdefault(g.label, []).append(row)
+
+    raw_by_label: dict[str, float] = {}
+    lcq_by_label: dict[str, float] = {}
+    total_trophies = 0
+    for g in groups:
+        rows = grouped.get(g.label)
+        if not rows:
+            continue
+        if g.rule == "lcq_draft_2":
+            wins = sum(r.get("wins", 0) for r in rows)
+            losses = sum(r.get("losses", 0) for r in rows)
+            games = wins + losses
+            if games and wins:
+                lcq_by_label[g.label] = wins * (wins / games) * g.points
+            continue
+        trophies = sum(r.get("trophies", 0) for r in rows)
+        events = sum(r.get("events", 0) for r in rows)
+        if trophies == 0 or events == 0:
+            continue
+        raw_by_label[g.label] = trophies * g.points * (trophies / events)
+        total_trophies += trophies
+
+    confidence = confidence_factor(total_trophies)
+    contrib = {label: raw * confidence for label, raw in raw_by_label.items()}
+    contrib.update(lcq_by_label)
+    return contrib, confidence
+
+
 def compute_score_breakdown(
     stats_rows: Sequence[dict],
     groups: Iterable[QueueGroup] = DEFAULT_QUEUE_GROUPS,
 ) -> list[dict]:
-    """Per-group totals + score contribution. Skips groups with no matching rows."""
-    grouped: dict[str, list[dict]] = {}
+    """Per-group totals + score contribution, derived from the aggregate so the
+    contributions sum to ``compute_score``. Skips groups with no matching rows.
+    """
     groups_list = list(groups)
+    grouped: dict[str, list[dict]] = {}
     for row in stats_rows:
         g = _group_for_format(groups_list, row["format"])
-        if g is None:
-            continue
-        grouped.setdefault(g.label, []).append(row)
+        if g is not None:
+            grouped.setdefault(g.label, []).append(row)
 
+    contrib, _ = _aggregate(stats_rows, groups_list)
     breakdown: list[dict] = []
     for g in groups_list:
         rows = grouped.get(g.label)
@@ -79,7 +148,7 @@ def compute_score_breakdown(
             "wins": sum(r.get("wins", 0) for r in rows),
             "losses": sum(r.get("losses", 0) for r in rows),
             "trophies": sum(r.get("trophies", 0) for r in rows),
-            "score": compute_score(rows, groups=(g,)),
+            "score": round(contrib.get(g.label, 0.0), 2),
         })
     return breakdown
 
@@ -88,42 +157,14 @@ def compute_score(
     stats_rows: Sequence[dict],
     groups: Iterable[QueueGroup] = DEFAULT_QUEUE_GROUPS,
 ) -> float:
-    """Total score for one player across all their group-rolled stats.
+    """Total 17lands score for one player across all their group-rolled stats.
 
     ``stats_rows`` items are dicts with keys: format, wins, losses, trophies, events.
-    Rows whose format isn't in any group are ignored.
+    Rows whose format isn't in any group are ignored. Pod points are added by the
+    caller via ``pod_points``.
     """
-    grouped: dict[str, list[dict]] = {}
-    for row in stats_rows:
-        g = _group_for_format(groups, row["format"])
-        if g is None:
-            continue
-        grouped.setdefault(g.label, []).append(row)
-
-    total = 0.0
-    for g in groups:
-        rows = grouped.get(g.label)
-        if not rows:
-            continue
-        if g.rule == "lcq_draft_2":
-            wins = sum(r.get("wins", 0) for r in rows)
-            losses = sum(r.get("losses", 0) for r in rows)
-            games = wins + losses
-            if games == 0 or wins == 0:
-                continue
-            winrate = wins / games
-            total += wins * winrate * g.points
-            continue
-
-        trophies = sum(r.get("trophies", 0) for r in rows)
-        events = sum(r.get("events", 0) for r in rows)
-        if trophies == 0 or events == 0:
-            continue
-        trophy_rate = trophies / events
-        shrinkage = trophies / (trophies + 2)
-        total += trophies * g.points * trophy_rate * shrinkage
-
-    return round(total, 2)
+    contrib, _ = _aggregate(stats_rows, groups)
+    return round(sum(contrib.values()), 2)
 
 
 def boxes_for_event(set_code: str, wins: int, finished_at: datetime | None, is_trophy: bool) -> int:

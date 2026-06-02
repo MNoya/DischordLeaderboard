@@ -1,6 +1,19 @@
-// Formula port of bot/scoring.py — must stay in sync. Buckets + points come
-// from the shared scoring_buckets.json (same file the Python side loads).
-import { BUCKET_DEFS, formatsForBucket } from "./format-buckets";
+// Formula port of bot/scoring.py — must stay in sync. Buckets, weights, and pod
+// point values come from the shared scoring_buckets.json (same file Python loads).
+//
+//   raw_group  = trophies × weight × trophy_rate
+//   confidence = T / (T + 2)        // T = total trophies across all groups
+//   total      = (Σ raw_group) × confidence
+//
+// Confidence is aggregate (one factor over total trophies), and LCQ Draft 2 keeps
+// its wins×winrate×weight rule, exempt from confidence. Pod points are a separate
+// flat term added by callers via podPoints().
+import {
+  BUCKET_DEFS,
+  formatsForBucket,
+  POD_TROPHY_POINTS,
+  POD_WIN_2_1_POINTS,
+} from "./format-buckets";
 
 interface QueueGroup {
   label: string;
@@ -22,66 +35,97 @@ export interface ScoringStatRow {
   events: number;
 }
 
-function groupFor(format: string): QueueGroup | undefined {
-  for (const g of DEFAULT_QUEUE_GROUPS) {
-    if (g.formats.includes(format)) return g;
+export interface GroupTotals {
+  label: string;
+  events: number;
+  wins: number;
+  losses: number;
+  trophies: number;
+}
+
+export interface Aggregate {
+  total: number;
+  confidence: number;
+  contributionByLabel: Map<string, number>;
+}
+
+export function podPoints(trophies: number, wins21: number): number {
+  return trophies * POD_TROPHY_POINTS + wins21 * POD_WIN_2_1_POINTS;
+}
+
+export function confidenceFactor(totalTrophies: number): number {
+  return totalTrophies > 0 ? totalTrophies / (totalTrophies + 2) : 0;
+}
+
+function defFor(label: string): QueueGroup | undefined {
+  return DEFAULT_QUEUE_GROUPS.find((g) => g.label === label);
+}
+
+// Per-group contribution (already × aggregate confidence) + the confidence factor.
+// Input is per-group totals; rows for the same label are summed first.
+export function aggregate(groups: GroupTotals[]): Aggregate {
+  const byLabel = new Map<string, GroupTotals>();
+  for (const g of groups) {
+    if (!defFor(g.label)) continue;
+    const cur = byLabel.get(g.label);
+    if (cur) {
+      cur.events += g.events;
+      cur.wins += g.wins;
+      cur.losses += g.losses;
+      cur.trophies += g.trophies;
+    } else {
+      byLabel.set(g.label, { ...g });
+    }
   }
-  return undefined;
+
+  const rawByLabel = new Map<string, number>();
+  const lcqByLabel = new Map<string, number>();
+  let totalTrophies = 0;
+  for (const def of DEFAULT_QUEUE_GROUPS) {
+    const g = byLabel.get(def.label);
+    if (!g) continue;
+    if (def.rule === "lcq_draft_2") {
+      const games = g.wins + g.losses;
+      if (games > 0 && g.wins > 0) {
+        lcqByLabel.set(def.label, g.wins * (g.wins / games) * def.points);
+      }
+      continue;
+    }
+    if (g.trophies === 0 || g.events === 0) continue;
+    rawByLabel.set(def.label, g.trophies * def.points * (g.trophies / g.events));
+    totalTrophies += g.trophies;
+  }
+
+  const confidence = confidenceFactor(totalTrophies);
+  const contributionByLabel = new Map<string, number>();
+  for (const [label, raw] of rawByLabel) contributionByLabel.set(label, raw * confidence);
+  for (const [label, score] of lcqByLabel) contributionByLabel.set(label, score);
+
+  let total = 0;
+  for (const v of contributionByLabel.values()) total += v;
+  return { total, confidence, contributionByLabel };
+}
+
+function groupTotalsFromRows(rows: ScoringStatRow[]): GroupTotals[] {
+  const byLabel = new Map<string, GroupTotals>();
+  for (const row of rows) {
+    const def = DEFAULT_QUEUE_GROUPS.find((g) => g.formats.includes(row.format));
+    if (!def) continue;
+    const cur =
+      byLabel.get(def.label) ?? { label: def.label, events: 0, wins: 0, losses: 0, trophies: 0 };
+    cur.events += row.events;
+    cur.wins += row.wins;
+    cur.losses += row.losses;
+    cur.trophies += row.trophies;
+    byLabel.set(def.label, cur);
+  }
+  return [...byLabel.values()];
 }
 
 export function computeScore(rows: ScoringStatRow[]): number {
-  const grouped = new Map<string, ScoringStatRow[]>();
-  for (const row of rows) {
-    const g = groupFor(row.format);
-    if (!g) continue;
-    const list = grouped.get(g.label) ?? [];
-    list.push(row);
-    grouped.set(g.label, list);
-  }
-
-  let total = 0;
-  for (const g of DEFAULT_QUEUE_GROUPS) {
-    const rs = grouped.get(g.label);
-    if (!rs || rs.length === 0) continue;
-
-    if (g.rule === "lcq_draft_2") {
-      const wins = rs.reduce((s, r) => s + r.wins, 0);
-      const losses = rs.reduce((s, r) => s + r.losses, 0);
-      const games = wins + losses;
-      if (games === 0 || wins === 0) continue;
-      total += wins * (wins / games) * g.points;
-      continue;
-    }
-
-    const trophies = rs.reduce((s, r) => s + r.trophies, 0);
-    const events = rs.reduce((s, r) => s + r.events, 0);
-    if (trophies === 0 || events === 0) continue;
-    const trophyRate = trophies / events;
-    const shrinkage = trophies / (trophies + 2);
-    total += trophies * g.points * trophyRate * shrinkage;
-  }
-
-  return Math.round(total * 100) / 100;
+  return Math.round(aggregate(groupTotalsFromRows(rows)).total * 100) / 100;
 }
 
-export function bucketScoreContribution(
-  label: string,
-  events: number,
-  wins: number,
-  losses: number,
-  trophies: number,
-): number {
-  const g = DEFAULT_QUEUE_GROUPS.find(g => g.label === label);
-  if (!g) return 0;
-
-  if (g.rule === "lcq_draft_2") {
-    const games = wins + losses;
-    if (games === 0 || wins === 0) return 0;
-    return Math.round(wins * (wins / games) * g.points * 100) / 100;
-  }
-
-  if (trophies === 0 || events === 0) return 0;
-  const trophyRate = trophies / events;
-  const shrinkage = trophies / (trophies + 2);
-  return Math.round(trophies * g.points * trophyRate * shrinkage * 100) / 100;
+export function scoreFromGroups(groups: GroupTotals[]): number {
+  return Math.round(aggregate(groups).total * 100) / 100;
 }

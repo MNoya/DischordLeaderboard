@@ -75,14 +75,16 @@ docker exec dischord-pg psql -U postgres -d dischord -c 'DROP SCHEMA public CASC
                                                        ↓
                                        draft_events (source of truth, additive)
                                                        ↓
-                            player_stats + score tables (derived, rebuilt per refresh)
+                            player_stats (derived aggregates, rebuilt per refresh)
                                                        ↓
-                                       Postgres (public_* curated views)
+                          Postgres (public_* views — raw aggregates only)
                                                        ↓
                               Frontend (supabase-js, anon key, browser-direct)
 ```
 
-`draft_events` is keyed on `(player_id, seventeenlands_event_id)` and only grows — never wiped. `player_stats` and the score tables are recomputed from `draft_events` after every refresh, so a partial-window fetch is safe (writes only the events it returned; aggregates rebuild from the full history already on disk).
+`draft_events` is keyed on `(player_id, seventeenlands_event_id)` and only grows — never wiped. `player_stats` is recomputed from `draft_events` after every refresh, so a partial-window fetch is safe (writes only the events it returned; aggregates rebuild from the full history already on disk).
+
+There are **no precomputed score tables** — score and rank are computed live from the raw aggregates on every read. The bot reads `player_stats` directly and scores in Python (`bot/scoring.py`); the frontend reads the `public_*` views and scores in JS (`frontend/src/data/scoring.ts`). Both pull bucket labels and point weights from the shared `scoring_buckets.json`, but the formula itself is implemented twice and must stay in sync.
 
 The bot is the only writer. The frontend reads through curated `public_*` Postgres views (no service-role key in the client). View row shapes are mirrored as camelCase TS types in `frontend/src/types/leaderboard.ts`; `frontend/src/data/adapter.ts` converts snake_case → camelCase.
 
@@ -99,15 +101,17 @@ There is **no `is_current` flag on `sets`** and **no env var** for the active se
 
 Per queue group (Premier / Traditional / Sealed / Quick / LCQ Draft 1 / LCQ Draft 2):
 ```
-group_score = trophies × group_points × trophy_rate × t/(t+2)
+raw_group = trophies × group_points × trophy_rate          (trophy_rate = trophies / events)
+total     = (Σ raw_group) × T/(T+2) + pod_points            (T = total trophies across groups)
 ```
-- `trophy_rate = trophies / events`
-- `t/(t+2)` is a shrinkage prior (1 trophy in 1 event ≈ 33%, not 100%)
-- LCQ Draft 2 is a special case: `wins × winrate × points`
-- Total = sum across groups
+- **Confidence `T/(T+2)` is aggregate** — one shrinkage from total trophy count scales the summed raw, not a per-group penalty. `compute_score` / `compute_score_breakdown` both derive from one `_aggregate()`; breakdown contributions are `raw_group × T/(T+2)` so they sum to the total.
+- LCQ Draft 2 is a special case: `wins × winrate × points` (exempt from confidence).
+- **Pod points** are a separate flat term: 5 per trophy (a 3-0 record OR a pod win by placement), 2 per 2-1; added to the leaderboard total outside `compute_score`. Pods are always public (active-only, never opt-in gated) — pod-only players enter the board on pod points alone.
 
-After editing `DEFAULT_QUEUE_GROUPS`:
-- Formula/weights only → `python -m bot.scripts.recompute_scores` (no 17L fetch)
+`DEFAULT_QUEUE_GROUPS` + pod point values are built from `scoring_buckets.json`. The formula is implemented twice — bot (`bot/scoring.py`) and frontend (`frontend/src/data/scoring.ts`) — plus the frontend reads pod aggregates from the `public_pod_scoring` view. Keep both in sync when either changes.
+
+After editing `scoring_buckets.json`:
+- Formula/weights/pod points only → nothing to run; scores recompute on the next read. Deploy and the bot picks it up.
 - New format strings added → `python -m bot.scripts.rebuild_player_stats` (re-aggregates from existing `draft_events`, no 17L fetch)
 
 The formula may diverge per set in the future — `DEFAULT_QUEUE_GROUPS` is global today but plausibly becomes per-set.
@@ -116,8 +120,7 @@ The formula may diverge per set in the future — `DEFAULT_QUEUE_GROUPS` is glob
 
 - **All `DateTime` columns are `DateTime(timezone=True)` (TIMESTAMPTZ).** Naive UTC was misinterpreted as local time by `discord.py`, shifting embed timestamps. Don't reintroduce naive datetimes.
 - `players.seventeenlands_token` is nullable so `/pod-link-arena` can create lightweight pod-draft-only players without a 17lands profile.
-- `player_stats` is unique per `(player, set, format, expansion)` and **fully derived** from `draft_events` — rebuilt via `DELETE + INSERT … SELECT GROUP BY` per touched (player, set) on every refresh. Alchemy variants like `Y26ECL` get their own row but bucket under `ECL` for scoring.
-- `player_set_scores.last_calculated_at` is force-bumped every refresh (not just on score change) so the "Last updated" footer reflects refresh time.
+- `player_stats` is unique per `(player, set, format, expansion)` and **fully derived** from `draft_events` — rebuilt via `DELETE + INSERT … SELECT GROUP BY` per touched (player, set) on every refresh. Alchemy variants like `Y26ECL` get their own row but bucket under `ECL` for scoring. `last_fetched_at` is set on every rebuild (not just on data change); the "Last updated" footer is the max `last_fetched_at` across a player's rows.
 - `draft_events` is the additive event log — one row per individual 17lands draft, keyed on `(player_id, seventeenlands_event_id)`. `set_id` is nullable so drafts in not-yet-registered expansions still persist; `/add-set` claims orphans by matching `expansion` to the new set's `code`. 17lands' case-encoded color string (`WBg` = WB main + green splash) is preserved verbatim in `colors`.
 - `leaderboard_messages` tracks the bot's posted leaderboard per `(channel, set)` so `/leaderboard` delete-and-reposts (instead of duplicating) and `!refresh` edits in place. Stale rows get pruned on next edit attempt.
 

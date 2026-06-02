@@ -15,8 +15,18 @@ from sqlalchemy import create_engine, text
 log = logging.getLogger(__name__)
 
 _ALLOWED_VIEWS = {
-    "public_pod_draft_replays",
+    "public_leaderboard",
+    "public_player",
+    "public_player_draft_events",
+    "public_player_format_breakdown",
+    "public_player_pod_stats",
     "public_pod_draft_event_matches",
+    "public_pod_draft_event_participants",
+    "public_pod_draft_events",
+    "public_pod_draft_replays",
+    "public_pod_scoring",
+    "public_recent_trophies",
+    "public_sets",
 }
 
 _OP_PATTERN = re.compile(r"^(eq|neq|lt|lte|gt|gte|like|ilike)\.(.+)$")
