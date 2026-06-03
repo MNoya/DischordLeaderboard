@@ -63,12 +63,12 @@ def test_round_2_pairs_winners_by_seat_not_game_margin():
         match(1, "p3", "p7", "p3", "2-1"),  # seat-3 winner, scrappy 2-1
     ]
     pair_set = pairset(pair_round(roster, r1, 2))
-    # Four 1-0 winners ordered by seat → p0-p1 and p2-p3, regardless of 2-0 vs 2-1
-    assert frozenset({"p0", "p1"}) in pair_set
-    assert frozenset({"p2", "p3"}) in pair_set
-    # Four 0-1 losers ordered by seat → p4-p5 and p6-p7
-    assert frozenset({"p4", "p5"}) in pair_set
-    assert frozenset({"p6", "p7"}) in pair_set
+    # Four 1-0 winners at seats 0-3 pair by distance (half away), regardless of 2-0 vs 2-1
+    assert frozenset({"p0", "p2"}) in pair_set
+    assert frozenset({"p1", "p3"}) in pair_set
+    # Four 0-1 losers at seats 4-7 pair the same way
+    assert frozenset({"p4", "p6"}) in pair_set
+    assert frozenset({"p5", "p7"}) in pair_set
 
 
 def test_no_rematch_constraint():
@@ -179,6 +179,65 @@ def test_8_player_round_1_yields_4_pairings():
     assert len(pairings) == 4
     flat = sorted(pid for pair in pairings for pid in pair)
     assert flat == [p.id for p in roster]
+
+
+def _seeded_layout() -> list[Player]:
+    """The 8-seat leaderboard layout: top half in order, bottom reversed, 3<->4 / 5<->6 swapped.
+
+    Seat:  0   1   2   3   4   5   6   7
+    Rank: #1  #2  #4  #3  #8  #7  #5  #6
+    """
+    ranks = ["r1", "r2", "r4", "r3", "r8", "r7", "r5", "r6"]
+    return [Player(id=rid, name=rid, seat=seat) for seat, rid in enumerate(ranks)]
+
+
+def test_round_2_splits_top_seeds_and_draws_cross_table_winner():
+    roster = _seeded_layout()
+    # R1 across the table (seat i vs i+4): 1v8, 2v7, 4v5, 3v6 — top seeds hold
+    r1 = [
+        match(1, "r1", "r8", "r1"),
+        match(1, "r2", "r7", "r2"),
+        match(1, "r4", "r5", "r4"),
+        match(1, "r3", "r6", "r3"),
+    ]
+    pair_set = pairset(pair_round(roster, r1, 2))
+    # #1 draws the 4*5 winner (#4), #2 draws the 3*6 winner (#3) — #1 and #2 land in opposite halves
+    assert frozenset({"r1", "r4"}) in pair_set
+    assert frozenset({"r2", "r3"}) in pair_set
+    assert frozenset({"r1", "r2"}) not in pair_set
+
+
+def test_round_3_is_the_adjacent_trophy_match():
+    roster = _seeded_layout()
+    r1 = [
+        match(1, "r1", "r8", "r1"),
+        match(1, "r2", "r7", "r2"),
+        match(1, "r4", "r5", "r4"),
+        match(1, "r3", "r6", "r3"),
+    ]
+    r2 = [
+        match(2, "r1", "r4", "r1"),  # 2-0: r1, r2 at adjacent seats 0,1
+        match(2, "r2", "r3", "r2"),
+        match(2, "r8", "r5", "r5"),
+        match(2, "r7", "r6", "r6"),
+    ]
+    pair_set = pairset(pair_round(roster, r1 + r2, 3))
+    # The two undefeated seeds at adjacent seats meet for the trophy
+    assert frozenset({"r1", "r2"}) in pair_set
+    # No round repeats a prior matchup
+    played = pairset((m.player_a_id, m.player_b_id) for m in r1 + r2)
+    assert pair_set.isdisjoint(played)
+
+
+def test_round_2_pairs_by_distance_at_non_eight_sizes():
+    # Six seated players, three winners hold across-table R1 (seat i vs i+3)
+    roster = [Player(id=f"p{i}", name=f"p{i}", seat=i) for i in range(6)]
+    r1 = [match(1, "p0", "p3", "p0"), match(1, "p1", "p4", "p1"), match(1, "p2", "p5", "p2")]
+    pair_set = pairset(pair_round(roster, r1, 2))
+    # Winners p0,p1,p2 (seats 0-2): top seed faces the half-away winner, the third pairs down
+    assert frozenset({"p0", "p1"}) in pair_set
+    cross = sum(1 for p in pair_set if len(p & {"p0", "p1", "p2"}) == 1)
+    assert cross == 1  # exactly one winner pairs down to a loser
 
 
 def test_8_player_round_2_pairs_within_brackets():

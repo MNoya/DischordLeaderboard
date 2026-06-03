@@ -132,7 +132,8 @@ class SeshListener(commands.Cog):
         self._schedule_reminder(event_row.id, event_row.event_time)
 
         try:
-            await thread.send(embed=build_registered_embed(event_row.set_code, event_row.pairing_mode))
+            await thread.send(embed=build_registered_embed(
+                event_row.set_code, event_row.pairing_mode, event_row.seating_mode))
         except discord.HTTPException:
             log.warning(f"could not post confirmation in pod draft thread {thread.id}", exc_info=True)
 

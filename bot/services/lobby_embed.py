@@ -76,7 +76,7 @@ class LobbyReadyButtonView(discord.ui.View):
     ) -> None:
         from bot.services.pod_active import ACTIVE_POD_MANAGERS
         from bot.services.pod_draft_manager import (
-            set_event_format, set_event_pairing_mode, set_event_seating,
+            set_event_format, set_event_pairing_mode, set_event_seating, set_event_seating_mode,
         )
         from bot.services.pod_settings_view import PodSettingsView
         channel = interaction.channel
@@ -105,11 +105,27 @@ class LobbyReadyButtonView(discord.ui.View):
         async def on_seating(inter: discord.Interaction, ordered_user_names: list[str]) -> str | None:
             return await set_event_seating(event_id, ordered_user_names)
 
+        async def on_seating_mode(inter: discord.Interaction, mode: str) -> str | None:
+            return await set_event_seating_mode(event_id, mode)
+
+        from bot.commands.pod_draft import seating_message_for_event
+
+        async def on_seating_table(inter: discord.Interaction) -> None:
+            file, embed = await seating_message_for_event(inter.client, event_id)
+            if embed is None or inter.channel is None:
+                return
+            if file is not None:
+                await inter.channel.send(embed=embed, file=file)
+            else:
+                await inter.channel.send(embed=embed)
+
         await interaction.response.send_message(
             view=PodSettingsView(
                 on_format=on_format, on_pairing=on_pairing,
                 current_code=manager.set_code, current_mode=manager.pairing_mode,
+                on_seating_mode=on_seating_mode, current_seating=manager.seating_mode,
                 on_seating=on_seating, seat_order_provider=manager.seating_lobby_order,
+                on_seating_table=on_seating_table,
             ),
             ephemeral=True,
         )
@@ -129,6 +145,7 @@ def render(
     display_name_by_mention_id: dict[int, str] | None = None,
     format_label: str | None = None,
     pairing_label: str | None = None,
+    seating_label: str | None = None,
 ) -> discord.Embed:
     """Lobby embed. `title` is the thread/event name; `rsvps_yes` / `rsvps_maybe` are sesh display
     names by RSVP type; `in_session` is Draftmancer sessionUsers as (arena_name,
@@ -168,14 +185,7 @@ def render(
     description = "\n".join(header_lines) if header_lines else None
 
     embed = discord.Embed(title=title, description=description, color=color)
-
-    footer_parts = []
-    if format_label:
-        footer_parts.append(f"Format: {format_label}")
-    if pairing_label:
-        footer_parts.append(f"Pairings: {pairing_label}")
-    if footer_parts:
-        embed.set_footer(text="  •  ".join(footer_parts))
+    _set_settings_footer(embed, format_label, pairing_label, seating_label)
 
     if in_draftmancer:
         trailing = "\n​" if show_pending else ""
@@ -225,6 +235,25 @@ def render(
     return embed
 
 
+def _set_settings_footer(
+    embed: discord.Embed,
+    format_label: str | None,
+    pairing_label: str | None,
+    seating_label: str | None,
+) -> None:
+    """Sticky Format / Pairings / Seats footer shared by the lobby card and the ready-check progress
+    card so the pod's settings stay visible through every state."""
+    parts = []
+    if format_label:
+        parts.append(f"Format: {format_label}")
+    if pairing_label:
+        parts.append(f"Pairings: {pairing_label}")
+    if seating_label:
+        parts.append(f"Seats: {seating_label}")
+    if parts:
+        embed.set_footer(text="  •  ".join(parts))
+
+
 def render_ready_check_progress(
     title: str,
     in_session: list[tuple[str, str | None]],
@@ -238,6 +267,9 @@ def render_ready_check_progress(
     initiated_by: str | None = None,
     ready_count: int | None = None,
     total_count: int | None = None,
+    format_label: str | None = None,
+    pairing_label: str | None = None,
+    seating_label: str | None = None,
 ) -> discord.Embed:
     """Compact ready-check progress card.
 
@@ -264,6 +296,7 @@ def render_ready_check_progress(
     if declined and ready_count is not None and total_count is not None:
         header_lines.append(f"### ✅ {ready_count}/{total_count} Ready")
     embed = discord.Embed(title=title, description="\n".join(header_lines), color=color)
+    _set_settings_footer(embed, format_label, pairing_label, seating_label)
 
     if declined or superseded:
         return embed

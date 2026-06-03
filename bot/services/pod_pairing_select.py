@@ -1,7 +1,8 @@
-"""Pod-draft pairing-mode options: Swiss Tournament or Fast Bracket.
+"""Pod-draft pairing-mode options: Swiss Tournament, Fast Bracket, or Random.
 
 Surfaced through the lobby Settings panel (pod_settings_view). Fast Bracket is honored at start only
-when the roster is exactly 8; other sizes fall back to Swiss.
+when the roster is exactly 8; other sizes fall back to Swiss. Random pairs round 1 at random (seats
+ignored), later rounds by record.
 """
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ from bot.services.pod_format import settings_change_message
 PAIRING_MODES = (
     ("swiss", "Swiss Tournament", "Three rounds, each paired after the previous fully finishes."),
     ("bracket", "Fast Bracket", "Pairs players the moment two reach the same record. 8p only"),
+    ("random", "Random", "Round 1 randomized ignoring seats. Later rounds by record."),
 )
 SELECT_PLACEHOLDER = "Choose pairing mode"
 
@@ -31,9 +33,11 @@ def pairing_change_message(actor: str, mode: str) -> str:
 
 
 def pairing_options(current_mode: str | None) -> list[discord.SelectOption]:
-    """The pairing-mode dropdown options, with the current mode defaulted."""
+    """The pairing-mode dropdown options, with the current mode defaulted. Labels are prefixed with
+    'Pairings:' so the collapsed dropdown reads e.g. 'Pairings: Swiss Tournament', matching the Set and
+    Seats dropdowns and disambiguating its Random option from the Seats one."""
     cur = (current_mode or "swiss").lower()
     return [
-        discord.SelectOption(label=label, value=code, description=desc, default=(cur == code))
+        discord.SelectOption(label=f"Pairings: {label}", value=code, description=desc, default=(cur == code))
         for code, label, desc in PAIRING_MODES
     ]

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import re
 
@@ -16,19 +17,26 @@ from bot.database import SessionLocal
 from bot.discord_helpers import display_width, extract_avatar_hash, player_url
 from bot.models import Player
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
-from bot.services.pod_draft_manager import set_event_format, set_event_pairing_mode, set_event_seating
+from bot.services.pod_draft_manager import (
+    set_event_format,
+    set_event_pairing_mode,
+    set_event_seating,
+    set_event_seating_mode,
+)
 from bot.services.pod_drafts import (
     load_event_id_by_name_sync,
     load_event_id_by_thread_sync,
     load_event_name_sync,
     load_event_pairing_mode_sync,
+    load_event_seating_mode_sync,
     load_event_sesh_message_id_sync,
     load_event_set_code_sync,
     load_event_thread_id_sync,
     normalize_player_name,
     search_event_names_sync,
 )
-from bot.services.player_stats import SeededAttendee, seed_attendees
+from bot.services.player_stats import SeededAttendee, seed_attendees, seated_ring_order
+from bot.services.pod_seating_image import render_octagon_png
 from bot.sets import ACTIVE_SET_CODE
 from bot.tasks.pod_draft_reminder import fetch_sesh_rsvps
 from bot.services.pod_settings_view import PodSettingsView
@@ -116,12 +124,25 @@ class PodDraft(commands.Cog):
             return
         current_code = await asyncio.to_thread(load_event_set_code_sync, event_id)
         current_mode = await asyncio.to_thread(load_event_pairing_mode_sync, event_id)
+        current_seating = await asyncio.to_thread(load_event_seating_mode_sync, event_id)
 
         async def on_format(inter: discord.Interaction, code: str) -> str | None:
             return await set_event_format(event_id, code)
 
         async def on_pairing(inter: discord.Interaction, mode: str) -> str | None:
             return await set_event_pairing_mode(event_id, mode)
+
+        async def on_seating_mode(inter: discord.Interaction, mode: str) -> str | None:
+            return await set_event_seating_mode(event_id, mode)
+
+        async def on_seating_table(inter: discord.Interaction) -> None:
+            file, embed = await seating_message_for_event(self.bot, event_id)
+            if embed is None or inter.channel is None:
+                return
+            if file is not None:
+                await inter.channel.send(embed=embed, file=file)
+            else:
+                await inter.channel.send(embed=embed)
 
         manager = ACTIVE_POD_MANAGERS.get(event_id)
         on_seating = None
@@ -136,7 +157,9 @@ class PodDraft(commands.Cog):
             view=PodSettingsView(
                 on_format=on_format, on_pairing=on_pairing,
                 current_code=current_code, current_mode=current_mode,
+                on_seating_mode=on_seating_mode, current_seating=current_seating,
                 on_seating=on_seating, seat_order_provider=seat_order_provider,
+                on_seating_table=on_seating_table,
             ),
             ephemeral=True,
         )
@@ -246,10 +269,12 @@ class PodDraft(commands.Cog):
             await interaction.followup.send(MSG_SEEDING_NO_RSVPS, ephemeral=True)
             return
 
-        yes_seeded, maybe_seeded = await asyncio.to_thread(_seed_rsvps, yes, maybe)
-
+        file, embed = await asyncio.to_thread(build_seeding_image_message_from_names, yes, maybe)
         log.info(f"pod-seeding: {interaction.user} for event_id={event_id} ({len(yes)} yes, {len(maybe)} maybe)")
-        await interaction.followup.send(embed=_build_seeding_embed(yes_seeded, maybe_seeded))
+        if file is not None:
+            await interaction.followup.send(embed=embed, file=file)
+        else:
+            await interaction.followup.send(embed=embed)
 
     @app_commands.command(
         name="pod-draft-standings",
@@ -376,13 +401,41 @@ def _seed_rsvps(
         return seed_attendees(session, yes), seed_attendees(session, maybe)
 
 
+def build_seeding_image_message_from_names(
+    yes: list[str], maybe: list[str] | None = None,
+) -> tuple[discord.File | None, discord.Embed]:
+    """Seed RSVP-style name lists and render the seeding message: the table embed with the round-table
+    octagon as a PNG inside it. Shared by /pod-seeding, the Leaderboard-seats trigger, and the testlobby
+    preview. File is None for non-8 pods (the embed still stands alone)."""
+    yes_seeded, maybe_seeded = _seed_rsvps(yes, list(maybe or []))
+    embed = _build_seeding_embed(yes_seeded, maybe_seeded)
+    file = _build_seeding_image(yes_seeded, embed)
+    return file, embed
+
+
+def _build_seeding_image(yes: list[SeededAttendee], embed: discord.Embed) -> discord.File | None:
+    """Render the octagon as a monospace PNG for a clean 8-pod and attach it to the embed; None otherwise."""
+    seated = seated_ring_order(yes[:CHAMPIONSHIP_CUT])
+    if len(seated) != 8:
+        return None
+    png = render_octagon_png(_seating_octagon(seated))
+    embed.set_image(url="attachment://seating.png")
+    return discord.File(io.BytesIO(png), "seating.png")
+
+
 def _build_seeding_embed(yes: list[SeededAttendee], maybe: list[SeededAttendee]) -> discord.Embed:
+    """Seeding embed shared by /pod-seeding and the Leaderboard-seats trigger. The Yes list is seated by
+    rank (the top-8 fill the ring); Maybe is listed without seats. The round-table octagon is attached as
+    a PNG image (see _build_seeding_image) — embed code blocks wrap too narrowly for the text version."""
     parts: list[str] = []
     if yes:
         cut = CHAMPIONSHIP_CUT if len(yes) > CHAMPIONSHIP_CUT else None
-        parts.append(f"**{YES_EMOJI} Yes ({len(yes)})**\n" + _seeding_block(yes, numbered=True, cut_after=cut))
+        ring = seated_ring_order(yes[:CHAMPIONSHIP_CUT])
+        seat_of = {id(a): i + 1 for i, a in enumerate(ring)}
+        yes_seats = [seat_of.get(id(a)) for a in yes]
+        parts.append(f"**{YES_EMOJI} Yes ({len(yes)})**\n" + _seeding_block(yes, seats=yes_seats, cut_after=cut))
     if maybe:
-        parts.append(f"**{MAYBE_EMOJI} Maybe ({len(maybe)})**\n" + _seeding_block(maybe, numbered=False))
+        parts.append(f"**{MAYBE_EMOJI} Maybe ({len(maybe)})**\n" + _seeding_block(maybe))
     return discord.Embed(
         title=f"🏆 Pod Seeding · {ACTIVE_SET_CODE}",
         description="\n\n".join(parts),
@@ -390,36 +443,45 @@ def _build_seeding_embed(yes: list[SeededAttendee], maybe: list[SeededAttendee])
     )
 
 
-def _seeding_block(attendees: list[SeededAttendee], *, numbered: bool, cut_after: int | None = None) -> str:
-    """Inline-code rows (monospace) linked to each player's page, same trick /leaderboard uses.
+def _attendee_rnk(a: SeededAttendee) -> str:
+    return f"#{a.rank}" if a.rank is not None else "—"
 
-    Columns: ordinal # (Yes only, drives the cut), Player, Rnk (#N global rank), Pts, 🏆.
-    Unranked attendees show — and link nowhere.
+
+def _attendee_pts(a: SeededAttendee) -> str:
+    return "—" if a.score is None else str(round(a.score))
+
+
+def _attendee_trophies(a: SeededAttendee) -> str:
+    return "—" if a.trophies is None else str(a.trophies)
+
+
+SEEDING_COLS = (
+    ("Rnk", "r", _attendee_rnk),
+    ("Player", "l", lambda a: a.display_name),
+    ("Pts", "r", _attendee_pts),
+    ("🏆", "r", _attendee_trophies),
+)
+
+
+def _seeding_block(
+    attendees: list[SeededAttendee], *, seats: list[int | None] | None = None,
+    cut_after: int | None = None, lead_label: str = "🪑",
+) -> str:
+    """Inline-code rows (monospace) linked to each player's page, same trick /leaderboard uses. With
+    `seats` (aligned with `attendees`) a leading seat column is shown, blank for anyone past the pod
+    cut; pass None for an unseated list. Unranked attendees show — and link nowhere.
     """
-    def rnk(a: SeededAttendee) -> str:
-        return f"#{a.rank}" if a.rank is not None else "—"
-
-    def pts(a: SeededAttendee) -> str:
-        return "—" if a.score is None else str(round(a.score))
-
-    def trophies(a: SeededAttendee) -> str:
-        return "—" if a.trophies is None else str(a.trophies)
-
-    cols = (
-        ("Player", "l", lambda a: a.display_name),
-        ("Rnk", "r", rnk),
-        ("Pts", "r", pts),
-        ("🏆", "r", trophies),
-    )
+    numbered = seats is not None
+    leads = [f"{s}." if s is not None else "" for s in (seats or [])]
+    lead_w = max([display_width(lead_label), *(display_width(lead) for lead in leads)]) if numbered else 0
 
     def fmt(value: str, width: int, align: str) -> str:
         pad = max(0, width - display_width(value))
         return value + " " * pad if align == "l" else " " * pad + value
 
-    ord_w = len(f"{len(attendees)}.")
     header_cells: list[str] = []
     row_cells: list[list[str]] = [[] for _ in attendees]
-    for header, align, cell in cols:
+    for header, align, cell in SEEDING_COLS:
         values = [cell(a) for a in attendees]
         is_wide = header == "🏆"
         width = max(max(display_width(v) for v in values), 2 if is_wide else len(header))
@@ -428,20 +490,104 @@ def _seeding_block(attendees: list[SeededAttendee], *, numbered: bool, cut_after
             row_cells[i].append(fmt(v, width, align))
 
     def line(lead: str, cells: list[str]) -> str:
-        prefix = f"{lead:<{ord_w}} " if numbered else ""
+        prefix = fmt(lead, lead_w, "l") + " " if numbered else ""
         return prefix + "  ".join(cells)
 
-    header_line = line("#", header_cells)
+    header_line = line(lead_label, header_cells)
     lines = [f"`{header_line}`"]
     for i, a in enumerate(attendees):
         if cut_after is not None and i == cut_after:
             lines.append(f"`{'─' * display_width(header_line)}`")
-        inner = line(f"{i + 1}.", row_cells[i])
+        inner = line(leads[i] if numbered else "", row_cells[i])
         if a.slug:
             lines.append(f"[`{inner}`](<{player_url(a.slug, ACTIVE_SET_CODE)}>)")
         else:
             lines.append(f"`{inner}`")
     return "\n".join(lines)
+
+
+def _ring_trunc(text: str, width: int) -> str:
+    return text if len(text) <= width else text[: width - 1] + "…"
+
+
+def _seating_octagon(seated: list[SeededAttendee]) -> str:
+    """8-seat octagon — the round table itself, with arrows tracing the seat order clockwise from 1.
+    Box-less text art; `render_octagon_png` rasterizes it and draws the border, so it ships as an image.
+
+    Width-driven: the right column is anchored just `GAP` past the widest left label. Top/bottom seats
+    inset by `TAPER` to give the octagon shape; horizontal arrows sit in the middle of the real centre
+    gap, so they never collide with a long name.
+    """
+    GAP = 4  # spacing between the left and right name columns
+    TAPER = 2  # how far the top/bottom seats pull in from the vertical seats
+    SHOW_NUMBERS = False  # seat numbers on the outer edges; False shows names only
+    # left column (seats 1,6,7,8) leads with the seat number; right column (2,3,4,5) trails it, so the
+    # numbers sit on the outer edges of the table
+    def _label(i: int, a: SeededAttendee) -> str:
+        name = _ring_trunc(a.display_name, 12)
+        if not SHOW_NUMBERS:
+            return name
+        return f"{name} {i + 1}" if (i + 1) in (2, 3, 4, 5) else f"{i + 1} {name}"
+
+    labels = [_label(i, a) for i, a in enumerate(seated)]
+    # the right column must clear GAP on both the vertical rows (seats 8/7 vs 3/4) and the inset
+    # top/bottom rows (seats 1/6 vs 2/5, which lose 2*TAPER of usable width)
+    vertical = max(len(labels[7]), len(labels[6])) + GAP + max(len(labels[2]), len(labels[3]))
+    horizontal = max(len(labels[0]), len(labels[5])) + GAP + max(len(labels[1]), len(labels[4])) + 2 * TAPER
+    right = max(vertical, horizontal)
+    rows = [""] * 7
+
+    def place(r: int, c: int, text: str) -> None:
+        line = rows[r].ljust(c)
+        rows[r] = line[:c] + text + line[c + len(text):]
+
+    def place_right(r: int, end: int, text: str) -> None:
+        place(r, max(0, end - len(text)), text)
+
+    place(0, TAPER, labels[0])           # seat 1
+    place_right(0, right - TAPER, labels[1])  # seat 2
+    place(1, TAPER - 1, "↗")
+    place_right(1, right - TAPER + 1, "↘")
+    place(2, 0, labels[7])               # seat 8
+    place_right(2, right, labels[2])     # seat 3
+    place(3, 0, "↑")
+    place_right(3, right, "↓")
+    place(4, 0, labels[6])               # seat 7
+    place_right(4, right, labels[3])     # seat 4
+    place(5, TAPER - 1, "↖")
+    place_right(5, right - TAPER + 1, "↙")
+    place(6, TAPER, labels[5])           # seat 6
+    place_right(6, right - TAPER, labels[4])  # seat 5
+
+    # horizontal arrows on the table's centre column so → and ← line up vertically; skipped on a row
+    # whose labels would reach the centre (the diagonals still trace the ring)
+    centre = right // 2
+
+    def place_centre(r: int, left_label: str, right_label: str, arrow: str) -> None:
+        left_end = TAPER + len(left_label)
+        right_start = (right - TAPER) - len(right_label)
+        if left_end < centre < right_start:
+            place(r, centre, arrow)
+
+    place_centre(0, labels[0], labels[1], "→")
+    place_centre(6, labels[5], labels[4], "←")
+
+    return "\n".join(line.rstrip() for line in rows)
+
+
+async def seating_message_for_event(bot, event_id: str) -> tuple[discord.File | None, discord.Embed | None]:
+    """The Leaderboard-seats message — the seeding table embed with the round-table octagon as a PNG
+    inside it, built from the pod's sesh RSVPs. Returns (file, embed); (None, None) on no data."""
+    sesh_message_id = await asyncio.to_thread(load_event_sesh_message_id_sync, event_id)
+    rsvps = await fetch_sesh_rsvps(bot, sesh_message_id) if sesh_message_id else None
+    if not rsvps:
+        return None, None
+    yes, maybe = rsvps
+    seen = {n.casefold() for n in yes}
+    maybe = [n for n in maybe if n.casefold() not in seen]
+    if not yes and not maybe:
+        return None, None
+    return await asyncio.to_thread(build_seeding_image_message_from_names, yes, maybe)
 
 
 def _pick_takeover_target(manager, invoker_display_name: str):

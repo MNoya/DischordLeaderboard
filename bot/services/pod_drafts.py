@@ -278,6 +278,14 @@ def load_event_pairing_mode_sync(event_id: str) -> str | None:
         ).scalar_one_or_none()
 
 
+def load_event_seating_mode_sync(event_id: str) -> str | None:
+    """Current seating_mode for a pod event, or None when missing."""
+    with SessionLocal() as session:
+        return session.execute(
+            select(PodDraftEvent.seating_mode).where(PodDraftEvent.id == event_id)
+        ).scalar_one_or_none()
+
+
 def load_event_name_sync(event_id: str) -> str:
     with SessionLocal() as session:
         return session.execute(

@@ -83,7 +83,7 @@ def _is_divider(line):
 
 def test_seeding_block_draws_cut_after_eighth_when_over_eight():
     attendees = [_attendee(f"P{i}", rank=i, score=100 - i, trophies=0) for i in range(1, 11)]
-    block = _seeding_block(attendees, numbered=True, cut_after=8)
+    block = _seeding_block(attendees, seats=list(range(1, 11)), cut_after=8)
     lines = block.splitlines()
 
     divider_idx = next(i for i, line in enumerate(lines) if _is_divider(line))
@@ -94,18 +94,18 @@ def test_seeding_block_draws_cut_after_eighth_when_over_eight():
 
 def test_seeding_block_no_divider_when_eight_or_fewer():
     attendees = [_attendee(f"P{i}", rank=i, score=100 - i, trophies=0) for i in range(1, 6)]
-    block = _seeding_block(attendees, numbered=True, cut_after=None)
+    block = _seeding_block(attendees, seats=list(range(1, 6)), cut_after=None)
     assert not any(_is_divider(line) for line in block.splitlines())
 
 
 def test_seeding_block_shows_rnk_and_links_ranked_players():
-    block = _seeding_block([_attendee("Alice", rank=4, score=50, trophies=1, slug="alice-1")], numbered=True)
+    block = _seeding_block([_attendee("Alice", rank=4, score=50, trophies=1, slug="alice-1")], seats=[1])
     assert "#4" in block
     assert "/player/alice-1" in block
 
 
 def test_seeding_block_unranked_renders_dash_and_no_link():
-    block = _seeding_block([_attendee("Ghost")], numbered=False)
+    block = _seeding_block([_attendee("Ghost")])
     assert "—" in block
     assert "/player/" not in block
 

@@ -35,14 +35,17 @@ from bot.services.magicprotools import submit_to_api as submit_to_magicprotools
 from bot.services import pod_format
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_pairing_select import pairing_label
+from bot.services.pod_seating_select import seating_mode_label
 from bot.services.pod_drafts import (
     normalize_player_name,
     classify_lobby_names,
     load_event_pairing_mode_sync,
+    load_event_seating_mode_sync,
     seed_event_participants,
     update_event_format,
 )
-from bot.services.pod_tournament import persist_pairing_mode, start_tournament
+from bot.services.pod_tournament import persist_pairing_mode, persist_seating_mode, start_tournament
+from bot.services.player_stats import leaderboard_seat_order
 from bot.slug import disambiguate_slug, slugify
 
 
@@ -101,7 +104,9 @@ class PodDraftManager:
         self.finalized = False
         self.tournament_roster: list[str] = []  # draftmancer userNames, set on endDraft
         self.tournament_players: list = []       # pod_swiss.Player list, set by pod_tournament.start_tournament
-        self.pairing_mode = "swiss"              # 'swiss' or 'bracket'; resolved in start_tournament
+        self.pairing_mode = "swiss"              # 'swiss', 'bracket', or 'random'; resolved in start_tournament
+        self.seating_mode = "random"             # 'random', 'manual', or 'leaderboard'; hydrated on connect
+        self._last_seating_signature: tuple[str, ...] | None = None
         self.standings_message = None
         self.round_messages: dict[int, "discord.Message"] = {}
         self.grace_task = None
@@ -228,6 +233,9 @@ class PodDraftManager:
         classified = await self._classify_users(non_bot_names) if non_bot_names else []
         await self._refresh_lobby_status(classified)
 
+        if self.seating_mode == "leaderboard" and self.owner_claimed:
+            asyncio.create_task(self._apply_leaderboard_seating())
+
         if self.ready_check_active:
             current = {u.get("userID") for u in self.session_users if u.get("userName") != _BOT_USER_NAME}
             if current != self.expected_user_ids:
@@ -256,6 +264,7 @@ class PodDraftManager:
             await self.sio.emit("setSessionOwner", self.bot_user_id)
             await asyncio.sleep(0.3)
             await self._emit_session_settings()
+            await self.apply_seating_mode()
             log.info(f"[LIFECYCLE] ownership_applied event={self.event_id} bot_user={self.bot_user_id}")
         except Exception:
             log.exception(f"[LIFECYCLE] ownership_failed event={self.event_id}")
@@ -393,6 +402,7 @@ class PodDraftManager:
                 superseded=True,
                 ready_count=prior_summary[0] if prior_summary else None,
                 total_count=prior_summary[1] if prior_summary else None,
+                **self._settings_labels(),
             )
             try:
                 await prior_progress.edit(embed=superseded_embed, view=None)
@@ -406,6 +416,7 @@ class PodDraftManager:
             draftmancer_url=self.draftmancer_url,
             ready_arena_names=set(),
             initiated_by=self.initiated_by,
+            **self._settings_labels(),
         )
         try:
             self.ready_check_progress_message = await thread.send(
@@ -478,6 +489,14 @@ class PodDraftManager:
             out[mid] = member.display_name
         return out
 
+    def _settings_labels(self) -> dict[str, str]:
+        """Format / Pairings / Seats labels for the sticky lobby + progress-card footer."""
+        return {
+            "format_label": pod_format.format_display(self.set_code),
+            "pairing_label": pairing_label(self.pairing_mode),
+            "seating_label": seating_mode_label(self.seating_mode),
+        }
+
     async def _refresh_lobby_status(self, classified: list[tuple[str, str | None]]) -> None:
         thread = await self._fetch_thread()
         if thread is None:
@@ -500,8 +519,7 @@ class PodDraftManager:
             cancel_reason=self.last_cancel_reason,
             initiated_by=self.initiated_by,
             display_name_by_mention_id=await self._resolve_rsvp_mentions(thread.guild),
-            format_label=pod_format.format_display(self.set_code),
-            pairing_label=pairing_label(self.pairing_mode),
+            **self._settings_labels(),
         )
         has_unrecognized = any(dn is None for _, dn in classified)
         view = (
@@ -539,6 +557,7 @@ class PodDraftManager:
                 initiated_by=self.initiated_by,
                 ready_count=self.last_ready_summary[0] if self.last_ready_summary else None,
                 total_count=self.last_ready_summary[1] if self.last_ready_summary else None,
+                **self._settings_labels(),
             )
             if state in ("drafting", "complete", "notready"):
                 progress_view = None
@@ -870,9 +889,54 @@ class PodDraftManager:
         log.info(f"[SEATING] applied event={self.event_id} order={ordered_user_names}")
         return None
 
+    async def apply_seating_mode(self) -> None:
+        """Push the current seating_mode to the live table. Leaderboard recomputes the seeded order
+        from the present lobby; random asserts the shuffle flag; manual is driven by the Seat Order
+        button + the pre-startDraft re-assert, so nothing is pushed here. Pre-draft only."""
+        if not self.sio.connected or self.drafting or self.draft_complete:
+            return
+        if self.seating_mode == "leaderboard":
+            await self._apply_leaderboard_seating()
+        elif self.seating_mode == "random":
+            try:
+                await self.sio.emit("setRandomizeSeatingOrder", True)
+            except Exception:
+                log.exception(f"[SEATING] randomize_emit_failed event={self.event_id}")
+
+    async def _apply_leaderboard_seating(self) -> None:
+        """Compute the seeded ring from the present lobby and emit setSeating. Idempotent: skips the
+        emit when the computed order matches what was last applied, so the sessionUsers broadcast that
+        setSeating itself triggers can't drive a re-seat loop."""
+        name_to_id = {
+            u.get("userName"): u.get("userID")
+            for u in self.session_users
+            if u.get("userName") and u.get("userName") != _BOT_USER_NAME and u.get("userID")
+        }
+        if len(name_to_id) < 2:
+            return
+        ordered_names = await asyncio.to_thread(_leaderboard_seat_order_sync, list(name_to_id))
+        user_id_order = tuple(name_to_id[name] for name in ordered_names if name in name_to_id)
+        if len(user_id_order) != len(name_to_id):
+            log.warning(f"[SEATING] leaderboard_order_mismatch event={self.event_id} names={ordered_names}")
+            return
+        if user_id_order == self._last_seating_signature:
+            return
+        try:
+            await self.sio.emit("setRandomizeSeatingOrder", False)
+            await self.sio.emit("setSeating", list(user_id_order))
+        except Exception:
+            log.exception(f"[SEATING] leaderboard_emit_failed event={self.event_id}")
+            return
+        self._last_seating_signature = user_id_order
+        log.info(f"[SEATING] leaderboard_applied event={self.event_id} order={ordered_names}")
+
     async def _reapply_seating_if_set(self) -> None:
-        """Re-emit the organizer's seating right before startDraft so late joins/leaves can't leave a
-        stale order in place. Best-effort: skipped (logged) when the order no longer matches the lobby."""
+        """Re-assert seating right before startDraft so late joins/leaves can't leave a stale order in
+        place. Leaderboard recomputes from the final roster; random re-asserts the shuffle; manual
+        re-emits the organizer's frozen order. Best-effort: skipped (logged) on lobby mismatch."""
+        if self.seating_mode in ("leaderboard", "random"):
+            await self.apply_seating_mode()
+            return
         if not self.desired_seating:
             return
         err = await self.set_seating_order(self.desired_seating)
@@ -1116,6 +1180,9 @@ async def start_manager(
     persisted_mode = await asyncio.to_thread(load_event_pairing_mode_sync, event_id)
     if persisted_mode:
         manager.pairing_mode = persisted_mode
+    persisted_seating = await asyncio.to_thread(load_event_seating_mode_sync, event_id)
+    if persisted_seating:
+        manager.seating_mode = persisted_seating
     ACTIVE_POD_MANAGERS[event_id] = manager
     log.info(
         f"[LIFECYCLE] start_manager.registered event={event_id} sid={session_id} "
@@ -1156,7 +1223,7 @@ def _persist_format(event_id: str, code: str) -> bool:
 async def set_event_pairing_mode(event_id: str, mode: str) -> str | None:
     """Set a pod's pairing mode by event id; updates the live manager when one exists and persists.
     Locked once the tournament has started. Returns an error string or None."""
-    if mode not in ("swiss", "bracket"):
+    if mode not in ("swiss", "bracket", "random"):
         return "Unknown pairing mode."
     manager = ACTIVE_POD_MANAGERS.get(event_id)
     if manager is not None:
@@ -1165,6 +1232,23 @@ async def set_event_pairing_mode(event_id: str, mode: str) -> str | None:
         manager.pairing_mode = mode
     await asyncio.to_thread(persist_pairing_mode, event_id, mode)
     if manager is not None:
+        await manager.refresh_lobby_now()
+    return None
+
+
+async def set_event_seating_mode(event_id: str, mode: str) -> str | None:
+    """Set a pod's seating mode by event id; updates the live manager when one exists and persists.
+    Locked once the draft is underway. Returns an error string or None."""
+    if mode not in ("random", "manual", "leaderboard"):
+        return "Unknown seating mode."
+    manager = ACTIVE_POD_MANAGERS.get(event_id)
+    if manager is not None:
+        if manager.drafting or manager.draft_complete:
+            return "Seating mode is locked once the draft has started."
+        manager.seating_mode = mode
+    await asyncio.to_thread(persist_seating_mode, event_id, mode)
+    if manager is not None:
+        await manager.apply_seating_mode()
         await manager.refresh_lobby_now()
     return None
 
@@ -1181,6 +1265,11 @@ async def set_event_seating(event_id: str, ordered_user_names: list[str]) -> str
 def _classify_names_sync(names: list[str]) -> list[tuple[str, str | None]]:
     with SessionLocal() as session:
         return classify_lobby_names(session, names)
+
+
+def _leaderboard_seat_order_sync(names: list[str]) -> list[str]:
+    with SessionLocal() as session:
+        return leaderboard_seat_order(session, names)
 
 
 def _find_guild_member_for_arena(guild: discord.Guild, arena_name: str) -> discord.Member | None:

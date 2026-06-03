@@ -56,6 +56,7 @@ from bot.services.pod_drafts import (
     load_event_id_by_name_sync,
     load_event_id_by_thread_sync,
     load_event_name_sync,
+    load_event_pairing_mode_sync,
     load_event_thread_id_sync,
     participant_dm_info,
     participant_id_for_discord_user,
@@ -748,7 +749,9 @@ async def start_tournament(manager: "PodDraftManager") -> None:
         return
 
     manager.tournament_players = [Player(id=name, name=name) for name in roster]
-    effective_mode = "bracket" if (manager.pairing_mode == "bracket" and pod_bracket.supports(len(roster))) else "swiss"
+    effective_mode = manager.pairing_mode or "swiss"
+    if effective_mode == "bracket" and not pod_bracket.supports(len(roster)):
+        effective_mode = "swiss"
     manager.pairing_mode = effective_mode
     await asyncio.to_thread(persist_pairing_mode, manager.event_id, effective_mode)
     # Idempotent re-seed — _start_draft already seeded at draft-start time. Kept as a safety net
@@ -760,6 +763,12 @@ async def start_tournament(manager: "PodDraftManager") -> None:
 def persist_pairing_mode(event_id: str, mode: str) -> None:
     with SessionLocal() as session:
         session.execute(update(PodDraftEvent).where(PodDraftEvent.id == event_id).values(pairing_mode=mode))
+        session.commit()
+
+
+def persist_seating_mode(event_id: str, mode: str) -> None:
+    with SessionLocal() as session:
+        session.execute(update(PodDraftEvent).where(PodDraftEvent.id == event_id).values(seating_mode=mode))
         session.commit()
 
 
@@ -777,7 +786,7 @@ async def advance_to_round(manager: "PodDraftManager", round_num: int) -> None:
         await asyncio.to_thread(manager.persist_seat_indexes_from_log)
     seats = await asyncio.to_thread(_load_seat_indexes, manager.event_id)
     pairing_players = players
-    if seats:
+    if seats and manager.pairing_mode != "random":
         pairing_players = [replace(p, seat=seats.get(normalize_player_name(p.id))) for p in players]
     try:
         pairings = pod_swiss.pair_round(pairing_players, prior, round_num)
@@ -799,7 +808,7 @@ async def advance_to_round(manager: "PodDraftManager", round_num: int) -> None:
     if manager.pairing_mode == "bracket":
         for m in match_states:
             m["allow_skip"] = round_num == TOTAL_ROUNDS
-    if round_num == 1 and seats:
+    if round_num == 1 and seats and manager.pairing_mode != "random":
         _attach_seats(match_states, seats)
     embed = round_embed(round_num, match_states)
     view = RoundResultsView(match_states)
@@ -1201,7 +1210,7 @@ def _load_round_states(event_id: str, round_num: int) -> list[dict]:
             "winner_name": r.winner_name,
             "score": r.score,
         })
-    if round_num == 1:
+    if round_num == 1 and load_event_pairing_mode_sync(event_id) != "random":
         _attach_seats(states, _load_seat_indexes(event_id))
     return states
 

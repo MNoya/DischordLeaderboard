@@ -18,7 +18,7 @@ from sqlalchemy import delete, select, update
 
 from bot.config import settings
 from bot.database import SessionLocal
-from bot.models import Player, PodDraftEvent, PodDraftParticipant
+from bot.models import MagicSet, Player, PodDraftEvent, PodDraftParticipant
 from bot.services.lobby_embed import (
     LobbyReadyButtonView,
     register_settings_preview,
@@ -32,6 +32,9 @@ from bot.services.pod_drafts import seed_event_participants
 from bot.sets import ACTIVE_SET_CODE
 from bot.services.pod_format import format_display
 from bot.services.pod_pairing_select import pairing_label
+from bot.services.pod_seating_select import seating_mode_label
+from bot.services.player_stats import rank_players_for_set
+from bot.commands.pod_draft import build_seeding_image_message_from_names
 from bot.services.pod_format_select import FormatSelectView
 from bot.services.pod_settings_view import PodSettingsView
 from bot.services.pod_tournament import start_tournament
@@ -168,6 +171,18 @@ async def _refuse_if_prod(ctx) -> bool:
     return False
 
 
+async def _evict_test_managers_for_channel(channel_id: int) -> None:
+    """Drop any lingering manager for this channel so a fresh `!test` preview isn't intercepted by a
+    prior podX run's manager — otherwise its current_round>0 trips the pairing-lock guard on the
+    preview's Settings panel."""
+    stale = [m for m in ACTIVE_POD_MANAGERS.values() if m.thread_id == channel_id]
+    for mgr in stale:
+        for task in (mgr.grace_task, mgr.championship_task):
+            if task is not None and not task.done():
+                task.cancel()
+        await mgr.disconnect_safely()
+
+
 async def _purge_and_reset_test(ctx) -> None:
     """Delete prior test events for this channel, disconnect/evict their managers, and clear the thread."""
     purged = await asyncio.to_thread(_purge_live_test_pods_sync, ctx.channel.id)
@@ -179,6 +194,32 @@ async def _purge_and_reset_test(ctx) -> None:
                     task.cancel()
             await old.disconnect_safely()
     await _reset_podbracket(ctx.channel, ctx.bot.user)
+
+
+def _top_ranked_names_sync(n: int) -> list[str]:
+    with SessionLocal() as session:
+        set_id = session.execute(
+            select(MagicSet.id).where(MagicSet.code == ACTIVE_SET_CODE)
+        ).scalar_one_or_none()
+        if not set_id:
+            return []
+        return [r.display_name for r in rank_players_for_set(session, set_id)[:n]]
+
+
+async def _post_test_seeding(ctx) -> None:
+    """Render the /pod-seeding embed (seat-column table + the round-table PNG) from the local top-8
+    leaderboard, bypassing the sesh fetch. Two fictional names go in as Maybe so the second section
+    shows too. Local DB only."""
+    yes = await asyncio.to_thread(_top_ranked_names_sync, 8)
+    if not yes:
+        await ctx.send("No ranked players in the local DB — run seed_local_players + refresh_stats first.")
+        return
+    maybe = ["Maybe McMaybeface", "Tentative Tabitha"]
+    file, embed = await asyncio.to_thread(build_seeding_image_message_from_names, yes, maybe)
+    if file is not None:
+        await ctx.send(embed=embed, file=file)
+    else:
+        await ctx.send(embed=embed)
 
 
 async def _start_live_test_pod(ctx, mode: str) -> None:
@@ -262,8 +303,11 @@ _LINKED_EIGHT: list[tuple[str, str]] = [
 ]
 _VALID_STATES = (
     "empty", "partial", "linked", "unlinked", "ready", "notready", "cancelled", "superseded",
-    "drafting", "complete", "submit", "podbracket", "podswiss", "podlobby", "format",
+    "drafting", "complete", "submit", "podbracket", "podswiss", "podrandom", "podlobby", "format",
+    "seeding",
 )
+
+_LIVE_POD_MODES = {"podbracket": "bracket", "podswiss": "swiss", "podrandom": "random"}
 
 _LAST_MESSAGE: dict[int, discord.Message] = {}
 _LAST_PROGRESS_MESSAGES: dict[int, list[discord.Message]] = {}
@@ -286,6 +330,12 @@ async def _reset_podbracket(channel, bot_user) -> None:
 
 
 _PROGRESS_STATES = ("ready", "notready", "cancelled", "superseded", "drafting", "complete")
+
+_PREVIEW_SETTINGS_LABELS = dict(
+    format_label=format_display(ACTIVE_SET_CODE),
+    pairing_label=pairing_label("swiss"),
+    seating_label=seating_mode_label("random"),
+)
 
 
 def _build(state: str) -> tuple[discord.Embed, discord.ui.View | None]:
@@ -313,6 +363,7 @@ def _build(state: str) -> tuple[discord.Embed, discord.ui.View | None]:
         state=render_state, draftmancer_url=_DRAFTMANCER_URL,
         decliner_name=decliner_name, cancel_reason=cancel_reason, initiated_by=initiated_by,
         format_label=format_display(ACTIVE_SET_CODE), pairing_label=pairing_label("swiss"),
+        seating_label=seating_mode_label("random"),
     )
     has_unrecognized = any(dn is None for _, dn in in_session)
     view: discord.ui.View | None = (
@@ -337,7 +388,7 @@ def _build_ready_progress(state: str) -> list[tuple[discord.Embed, discord.ui.Vi
         embed = render_ready_check_progress(
             _THREAD_NAME, in_session, state="ready",
             draftmancer_url=_DRAFTMANCER_URL, ready_arena_names={arena for arena, _ in _LINKED_EIGHT[:3]},
-            initiated_by=_LINKED_EIGHT[0][1],
+            initiated_by=_LINKED_EIGHT[0][1], **_PREVIEW_SETTINGS_LABELS,
         )
         return [(embed, active_view)]
     if state in ("notready", "cancelled"):
@@ -346,21 +397,24 @@ def _build_ready_progress(state: str) -> list[tuple[discord.Embed, discord.ui.Vi
         embed = render_ready_check_progress(
             _THREAD_NAME, in_session, state="notready", draftmancer_url=_DRAFTMANCER_URL,
             decliner_name=decliner, cancel_reason=cancel_reason, ready_count=3, total_count=8,
+            **_PREVIEW_SETTINGS_LABELS,
         )
         return [(embed, None)]
     if state == "superseded":
         collapsed = render_ready_check_progress(
             _THREAD_NAME, in_session, state="notready", draftmancer_url=_DRAFTMANCER_URL,
             decliner_name=_LINKED_EIGHT[3][0], superseded=True, ready_count=3, total_count=8,
+            **_PREVIEW_SETTINGS_LABELS,
         )
         active = render_ready_check_progress(
             _THREAD_NAME, in_session, state="ready",
             draftmancer_url=_DRAFTMANCER_URL, ready_arena_names=set(),
-            initiated_by=_LINKED_EIGHT[0][1],
+            initiated_by=_LINKED_EIGHT[0][1], **_PREVIEW_SETTINGS_LABELS,
         )
         return [(collapsed, None), (active, active_view)]
     embed = render_ready_check_progress(
         _THREAD_NAME, in_session, state=state, draftmancer_url=_DRAFTMANCER_URL,
+        **_PREVIEW_SETTINGS_LABELS,
     )
     return [(embed, None)]
 
@@ -408,10 +462,12 @@ async def _settings_preview_seat_order() -> list[tuple[str, str]]:
 
 
 def _settings_preview_view() -> PodSettingsView:
-    """No-op Settings panel so `!test` can preview the format + pairing dropdowns + seat-order modal with no pod."""
+    """No-op Settings panel so `!test` can preview the format + pairing + seats dropdowns with no pod.
+    Defaults to Seats: Random (like a fresh pod); pick Manual in the dropdown to reveal the Seat Order button."""
     return PodSettingsView(
         on_format=_settings_preview_noop, on_pairing=_settings_preview_noop,
         current_code=None, current_mode="swiss",
+        on_seating_mode=_settings_preview_noop, current_seating="random",
         on_seating=_settings_preview_seating_noop, seat_order_provider=_settings_preview_seat_order,
     )
 
@@ -426,20 +482,26 @@ async def setup(bot: commands.Bot) -> None:
         """Owner-only. Render the pod-draft lobby embed in this channel.
 
         `state` ∈ empty | partial | linked | unlinked | ready | notready | cancelled | superseded |
-        drafting | complete | submit | podbracket | podswiss | podlobby | format.
+        drafting | complete | submit | podbracket | podswiss | podrandom | podlobby | format | seeding.
         No arg → posts the beginning lobby state. A specific state → edits the last in place.
-        `podbracket` / `podswiss` seed a real 8-player pod (seat 1 = you) and hand off to the prod
-        tournament code. `podlobby` connects to a live Draftmancer session for ready-check testing."""
+        `podbracket` / `podswiss` / `podrandom` seed a real 8-player pod (seat 1 = you) and hand off to
+        the prod tournament code. `podlobby` connects to a live Draftmancer session for ready-check
+        testing. `seeding` posts the /pod-seeding embed (table + round-table PNG) from the local top-8
+        leaderboard, no sesh needed."""
         if state and state not in _VALID_STATES:
             await ctx.send(f"unknown state `{state}`; pick one of: {', '.join(_VALID_STATES)}")
             return
 
-        if state in ("podbracket", "podswiss"):
-            await _start_live_test_pod(ctx, "bracket" if state == "podbracket" else "swiss")
+        if state in _LIVE_POD_MODES:
+            await _start_live_test_pod(ctx, _LIVE_POD_MODES[state])
             return
 
         if state == "podlobby":
             await _start_live_test_lobby(ctx)
+            return
+
+        if state == "seeding":
+            await _post_test_seeding(ctx)
             return
 
         if state == "submit":
@@ -452,6 +514,7 @@ async def setup(bot: commands.Bot) -> None:
                     _THREAD_NAME, _RSVPS_YES, _RSVPS_MAYBE, list(_LINKED_EIGHT),
                     state="linked", draftmancer_url=_DRAFTMANCER_URL,
                     format_label=format_display(code), pairing_label=pairing_label("swiss"),
+                    seating_label=seating_mode_label("random"),
                 )
                 await inter.channel.send(embed=embed)
                 return None
@@ -461,6 +524,7 @@ async def setup(bot: commands.Bot) -> None:
         if state == "":
             state = "empty"
 
+        await _evict_test_managers_for_channel(ctx.channel.id)
         embed, view = _build(state)
         progress = _build_ready_progress(state)
         last = _LAST_MESSAGE.get(ctx.channel.id)

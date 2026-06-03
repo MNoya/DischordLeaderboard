@@ -2,13 +2,17 @@
 
 Inputs: roster of Player records + chronological list of MatchOutcome records.
 Outputs: pairings as `[(player_a_id, player_b_id), ...]` and Standings sorted by wins → OMW% → GW% → OGW% → name.
-Pairing order is separate: same record, then draft seat.
+Round 1 pairs across the table (seat i vs i+half). Rounds 2+ pair by seat *distance* within each record
+group — a seeded proximity bracket where the top seed faces the player half the group away (furthest), never
+the neighbour, keeping top seeds apart until the final. Pairing down to the next group when a group is odd,
+always rematch-free.
 Tiebreakers follow MTR §1.6: per-opponent terms in OMW%/OGW% are floored at 1/3.
 """
 from __future__ import annotations
 
 import random
 from dataclasses import dataclass
+from itertools import groupby
 
 
 _MIN_PCT = 1.0 / 3.0  # MTR floor for OMW% / OGW% per-opponent terms
@@ -66,7 +70,9 @@ def pair_round(
 
     Round 1 pairs by seat distance — seat N faces seat N+half, so each player meets whoever sat
     furthest from them at the table. When seats are unknown it falls back to a random shuffle.
-    Later rounds greedy-pair down _pairing_order, never re-pairing two players who have already met.
+    Later rounds pair within each record group by seat distance (top seed vs the player half the group
+    away, furthest from the neighbour), pairing down across groups and never re-pairing two players who
+    have already met.
     Raises ValueError if no rematch-free pairing exists.
     """
     if len(players) < 2:
@@ -80,41 +86,45 @@ def pair_round(
         (rng or random).shuffle(roster)
         return [(roster[i].id, roster[i + 1].id) for i in range(0, len(roster), 2)]
 
-    sorted_ids = _pairing_order(players, prior_matches)
+    wins: dict[str, int] = {p.id: 0 for p in players}
+    for m in prior_matches:
+        if m.winner_id in wins:
+            wins[m.winner_id] += 1
+    ordered = sorted(players, key=lambda p: (-wins[p.id], _seat_key(p)))
     played: set[frozenset[str]] = {frozenset((m.player_a_id, m.player_b_id)) for m in prior_matches}
 
-    result = _pair_recursive(sorted_ids, played)
+    result = _pair_proximity(ordered, wins, played)
     if result is None:
         raise ValueError(f"no valid pairing for round {round_num}")
     return result
 
 
-def _pair_recursive(
-    queue: list[str], played: set[frozenset[str]],
+def _pair_proximity(
+    queue: list[Player], wins: dict[str, int], played: set[frozenset[str]],
 ) -> list[tuple[str, str]] | None:
+    """Pair queue[0] within its record group by seat distance — top seed vs the player half the group
+    away — then pair down to the next group, backtracking to stay rematch-free. queue stays sorted by
+    record then seat across the recursion, so each call re-derives the leading record group from it."""
     if not queue:
         return []
     if len(queue) % 2 != 0:
         return None
     a = queue[0]
-    for i in range(1, len(queue)):
+    group_size = 1
+    while group_size < len(queue) and wins[queue[group_size].id] == wins[a.id]:
+        group_size += 1
+    half = group_size // 2
+    same_record = sorted(range(1, group_size), key=lambda i: (abs(i - half), -i))
+    pair_down = list(range(group_size, len(queue)))
+    for i in same_record + pair_down:
         b = queue[i]
-        if frozenset((a, b)) in played:
+        if frozenset((a.id, b.id)) in played:
             continue
         remaining = queue[1:i] + queue[i + 1:]
-        sub = _pair_recursive(remaining, played)
+        sub = _pair_proximity(remaining, wins, played)
         if sub is not None:
-            return [(a, b)] + sub
+            return [(a.id, b.id)] + sub
     return None
-
-
-def _pairing_order(players: list[Player], prior_matches: list[MatchOutcome]) -> list[str]:
-    """Pairing order for round 2+: same record first, draft seat within it. Game margin is ignored."""
-    wins: dict[str, int] = {p.id: 0 for p in players}
-    for m in prior_matches:
-        if m.winner_id in wins:
-            wins[m.winner_id] += 1
-    return [p.id for p in sorted(players, key=lambda p: (-wins[p.id], _seat_key(p)))]
 
 
 def compute_standings(

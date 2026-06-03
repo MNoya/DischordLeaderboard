@@ -13,7 +13,6 @@ from discord import ui
 
 from bot.services.pod_format import (
     CUSTOM_FORMATS,
-    LATEST_SET_LABEL,
     SELECT_PLACEHOLDER,
     custom_formats,
     format_applied_message,
@@ -25,18 +24,20 @@ ApplyFormatCallback = Callable[[discord.Interaction, str], Awaitable[str | None]
 
 
 def format_options(current_code: str | None) -> list[discord.SelectOption]:
-    """The format dropdown options (current set + custom cubes), with the active one defaulted."""
+    """The format dropdown options (current set + custom cubes), with the active one defaulted. Labels
+    are prefixed with 'Format:' so the collapsed dropdown reads e.g. 'Format: SOS', matching the
+    Pairings and Seats dropdowns and the lobby footer."""
     cur = (current_code or "").upper()
     on_custom = cur in CUSTOM_FORMATS
     options = [discord.SelectOption(
-        label=LATEST_SET_LABEL,
+        label=f"Format: {ACTIVE_SET_CODE}",
         value=ACTIVE_SET_CODE,
-        description=f"Draft the current set ({ACTIVE_SET_CODE})",
+        description=f"Draft the latest set ({ACTIVE_SET_CODE})",
         default=not on_custom,
     )]
     for fmt in custom_formats():
         options.append(discord.SelectOption(
-            label=fmt.label,
+            label=f"Format: {fmt.label}",
             value=fmt.code,
             description=f"CubeCobra: {fmt.cube_id}",
             default=(cur == fmt.code.upper()),

@@ -12,11 +12,44 @@ from typing import Awaitable, Callable
 import discord
 from discord import ui
 
+from bot.services.pod_format import settings_change_message
+
 log = logging.getLogger("bot.pod_seating_select")
 
 SEAT_BUTTON_LABEL = "Seat Order"
 SEAT_BUTTON_EMOJI = "🪑"
 _LEADING_NUM_PREFIX_RE = re.compile(r"^\s*#?\d+(?=$|[\s.):\-])[.):\-]*\s*")
+
+SEATING_MODES = (
+    ("random", "Random", "Draftmancer shuffles the table, R1 follows Pairings mode."),
+    ("manual", "Manual", "Arrange the table by hand with the Seat Order button."),
+    ("leaderboard", "Leaderboard", "Seed the table by leaderboard rank."),
+)
+SEATING_SELECT_PLACEHOLDER = "Choose seating mode"
+
+
+def seating_mode_label(mode: str | None) -> str:
+    """Display label for a seating mode; defaults to Random."""
+    cur = (mode or "random").lower()
+    return next((lbl for code, lbl, _ in SEATING_MODES if code == cur), cur)
+
+
+def seating_mode_change_message(actor: str, mode: str) -> str:
+    """Public thread notice when the seating mode changes, with the mode's description as subtext."""
+    label = next((lbl for code, lbl, _ in SEATING_MODES if code == mode), mode)
+    desc = next((d for code, _, d in SEATING_MODES if code == mode), "")
+    return settings_change_message(actor, "Seats", label, subtext=desc)
+
+
+def seating_mode_options(current_mode: str | None) -> list[discord.SelectOption]:
+    """The seating-mode dropdown options, with the current mode defaulted. Labels are prefixed with
+    'Seats:' so the collapsed dropdown reads e.g. 'Seats: Random' — disambiguating it from the
+    Pairings dropdown, which also offers a Random option."""
+    cur = (current_mode or "random").lower()
+    return [
+        discord.SelectOption(label=f"Seats: {label}", value=code, description=desc, default=(cur == code))
+        for code, label, desc in SEATING_MODES
+    ]
 
 SeatingApply = Callable[[discord.Interaction, list[str]], Awaitable[str | None]]
 SeatOrderProvider = Callable[[], Awaitable[list[tuple[str, str]]]]

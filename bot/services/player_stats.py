@@ -235,6 +235,43 @@ def seed_attendees(session: Session, names: Sequence[str]) -> list[SeededAttende
     return seeded
 
 
+def seated_ring_order(ranked: Sequence) -> list:
+    """Map a rank-ordered sequence (best first, unranked already trailing) onto the seeded ring: top
+    half in seat order, bottom half reversed. For an 8-pod also swap seats 3<->4 and 5<->6 so the top
+    seed's round-2 bracket is the weakest (4*5), the conventional seeded reward. Returns items in seat
+    order (seat 0 first). Sizes other than 8 get top-in-order + bottom-reversed with no swap. Works on
+    any list (Draftmancer userNames for setSeating, or seeded attendees for the seating embed)."""
+    items = list(ranked)
+    half = len(items) // 2
+    ring = items[:half] + items[half:][::-1]
+    if len(items) == 8:
+        ring[2], ring[3] = ring[3], ring[2]
+        ring[6], ring[7] = ring[7], ring[6]
+    return ring
+
+
+def leaderboard_seat_order(session: Session, names: Sequence[str]) -> list[str]:
+    """Order the present Draftmancer userNames into the seeded ring by active-set leaderboard rank.
+
+    Ranked players sort by standing; unranked ones (unlinked, opted out, no score, or an unresolvable
+    handle) fall to the bottom seeds, tie-broken by name — same treatment as `/pod-seeding`. Returns the
+    original userNames in seat order (seat 0 first), ready to map to Draftmancer userIDs for setSeating.
+    """
+    set_id = session.execute(
+        select(MagicSet.id).where(MagicSet.code == ACTIVE_SET_CODE)
+    ).scalar_one_or_none()
+    ranks = {r.player_id: r.rank for r in rank_players_for_set(session, set_id)} if set_id else {}
+    resolved = players_for_names(session, names)
+
+    def sort_key(item: tuple[str, Player | None]) -> tuple:
+        name, player = item
+        rank = ranks.get(player.id) if player is not None else None
+        return (rank is None, rank or 0, name.lower())
+
+    ordered = sorted(resolved, key=sort_key)
+    return seated_ring_order([name for name, _ in ordered])
+
+
 def _stats_by_player(session: Session, set_id: str) -> dict[str, list[dict]]:
     """17lands stat rows per active, opted-in player for the set, keyed by player_id."""
     rows = session.execute(

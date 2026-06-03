@@ -1,8 +1,8 @@
-"""Combined pod-draft lobby Settings panel: draft format + pairing mode in one ephemeral view.
+"""Combined pod-draft lobby Settings panel: draft format + pairing mode + seats in one ephemeral view.
 
-Picking an option applies it, re-renders the panel (both dropdowns kept, the changed one defaulted),
+Picking an option applies it, re-renders the panel (all dropdowns kept, the changed one defaulted),
 and posts a public thread notice — so the confirmation everyone sees lives in the channel, not in the
-private ephemeral.
+private ephemeral. The Seat Order button is contextual to Manual seats + a live lobby.
 """
 from __future__ import annotations
 
@@ -18,7 +18,14 @@ from bot.services.pod_format_select import SELECT_PLACEHOLDER as FORMAT_PLACEHOL
 from bot.services.pod_format_select import format_options
 from bot.services.pod_pairing_select import SELECT_PLACEHOLDER as PAIRING_PLACEHOLDER
 from bot.services.pod_pairing_select import pairing_change_message, pairing_options
-from bot.services.pod_seating_select import SeatingApply, SeatOrderButton, SeatOrderProvider
+from bot.services.pod_seating_select import (
+    SEATING_SELECT_PLACEHOLDER,
+    SeatingApply,
+    SeatOrderButton,
+    SeatOrderProvider,
+    seating_mode_change_message,
+    seating_mode_options,
+)
 from bot.services.pod_tournament import actor_label
 from bot.sets import ACTIVE_SET_CODE
 
@@ -30,20 +37,28 @@ Apply = Callable[[discord.Interaction, str], Awaitable[str | None]]
 class PodSettingsView(ui.View):
     def __init__(self, *, on_format: Apply, on_pairing: Apply,
                  current_code: str | None, current_mode: str | None,
+                 on_seating_mode: Apply | None = None, current_seating: str | None = None,
                  on_seating: SeatingApply | None = None,
-                 seat_order_provider: SeatOrderProvider | None = None) -> None:
+                 seat_order_provider: SeatOrderProvider | None = None,
+                 on_seating_table: Callable[[discord.Interaction], Awaitable[None]] | None = None) -> None:
         super().__init__(timeout=300)
         self.on_format = on_format
         self.on_pairing = on_pairing
         self.current_code = current_code
         self.current_mode = current_mode
+        self.on_seating_mode = on_seating_mode
+        self.current_seating = current_seating
         self.on_seating = on_seating
         self.seat_order_provider = seat_order_provider
+        self.on_seating_table = on_seating_table
         self.add_item(_FormatSetting(current_code))
         self.add_item(_PairingSetting(current_mode))
-        if on_seating is not None and seat_order_provider is not None:
+        if on_seating_mode is not None:
+            self.add_item(_SeatingSetting(current_seating))
+        if (on_seating is not None and seat_order_provider is not None
+                and (current_seating or "random") == "manual"):
             self.add_item(SeatOrderButton(
-                seat_order_provider=seat_order_provider, on_seating=on_seating, row=2))
+                seat_order_provider=seat_order_provider, on_seating=on_seating, row=3))
 
     async def apply(self, interaction: discord.Interaction, *, on_apply: Apply,
                     value: str, attr: str, notice: str) -> None:
@@ -56,7 +71,9 @@ class PodSettingsView(ui.View):
         await interaction.edit_original_response(view=PodSettingsView(
             on_format=self.on_format, on_pairing=self.on_pairing,
             current_code=self.current_code, current_mode=self.current_mode,
+            on_seating_mode=self.on_seating_mode, current_seating=self.current_seating,
             on_seating=self.on_seating, seat_order_provider=self.seat_order_provider,
+            on_seating_table=self.on_seating_table,
         ))
         if interaction.channel is not None:
             try:
@@ -68,6 +85,7 @@ class PodSettingsView(ui.View):
             client_user=interaction.client.user,
             set_code=self.current_code or ACTIVE_SET_CODE,
             pairing_mode=self.current_mode,
+            seating_mode=self.current_seating,
         )
 
 
@@ -93,3 +111,17 @@ class _PairingSetting(ui.Select):
         mode = self.values[0]
         await view.apply(interaction, on_apply=view.on_pairing, value=mode, attr="current_mode",
                          notice=pairing_change_message(actor_label(interaction), mode))
+
+
+class _SeatingSetting(ui.Select):
+    def __init__(self, current_seating: str | None) -> None:
+        super().__init__(placeholder=SEATING_SELECT_PLACEHOLDER, options=seating_mode_options(current_seating),
+                         min_values=1, max_values=1)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view: PodSettingsView = self.view
+        mode = self.values[0]
+        await view.apply(interaction, on_apply=view.on_seating_mode, value=mode, attr="current_seating",
+                         notice=seating_mode_change_message(actor_label(interaction), mode))
+        if mode == "leaderboard" and view.on_seating_table is not None:
+            await view.on_seating_table(interaction)

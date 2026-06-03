@@ -32,7 +32,6 @@ CUSTOM_FORMATS: dict[str, PodFormat] = {
     PEASANT_CODE: PodFormat(PEASANT_CODE, PEASANT_LABEL, PEASANT_CUBE_ID, PEASANT_SESSION_SLUG),
 }
 
-LATEST_SET_LABEL = "Latest Set"
 SELECT_PLACEHOLDER = "Select a format"
 FORMAT_LOCKED_MSG = "The draft has already started — the format can't be changed now."
 EVENT_MISSING_MSG = "Pod-draft event not found."
