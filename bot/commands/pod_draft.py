@@ -38,7 +38,7 @@ from bot.services.pod_drafts import (
 )
 from bot.services.player_stats import SeededAttendee, seed_attendees, seated_ring_order
 from bot.services.pod_seating_select import SEATING_ORDER_MARKER, seating_change_message
-from bot.services.pod_seating_image import render_octagon_png
+from bot.services.pod_seating_image import drop_unrenderable, render_octagon_png
 from bot.sets import ACTIVE_SET_CODE
 from bot.tasks.pod_draft_reminder import fetch_sesh_rsvps
 from bot.services.pod_settings_view import PodSettingsView
@@ -541,7 +541,7 @@ def _seating_octagon(seated: list[SeededAttendee]) -> str:
     left_col = {0, bottom_left, *left_side}      # these seats put the number on the left (outer) edge
 
     def _label(i: int) -> str:
-        name = _ring_trunc(seated[i].display_name, 12)
+        name = _ring_trunc(drop_unrenderable(seated[i].display_name) or "?", 12)
         if not SHOW_NUMBERS:
             return name
         return f"{i + 1} {name}" if i in left_col else f"{name} {i + 1}"

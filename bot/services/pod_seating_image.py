@@ -26,9 +26,16 @@ BORDER = (94, 99, 108)  # square box outline, drawn (not ASCII) so it can't misa
 ARROWS = frozenset("→←↑↓↗↘↙↖")
 
 
-@lru_cache(maxsize=4)
-def _font(size: int) -> ImageFont.FreeTypeFont:
-    return ImageFont.truetype(str(FONT_MONO), round(size * SCALE))
+def drop_unrenderable(text: str) -> str:
+    """Strip characters the bundled mono font can't draw on the one-column grid — emoji and
+    zero-width joiners in Discord names would otherwise render as tofu or skew the alignment."""
+    font = _font(FONT_SIZE)
+    mono_width = font.getlength("M")
+    notdef = _glyph_mask(font, "\ufffe")
+    return "".join(
+        ch for ch in text
+        if font.getlength(ch) == mono_width and _glyph_mask(font, ch) != notdef
+    ).strip()
 
 
 def render_octagon_png(text: str) -> bytes:
@@ -65,3 +72,13 @@ def render_octagon_png(text: str) -> bytes:
     buffer = io.BytesIO()
     img.save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+@lru_cache(maxsize=4)
+def _font(size: int) -> ImageFont.FreeTypeFont:
+    return ImageFont.truetype(str(FONT_MONO), round(size * SCALE))
+
+
+def _glyph_mask(font: ImageFont.FreeTypeFont, ch: str) -> tuple:
+    mask = font.getmask(ch)
+    return (mask.size, bytes(mask))

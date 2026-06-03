@@ -200,6 +200,13 @@ function Scoring() {
           <Leader label="2-1 Record" value="2" />
         </div>
       </div>
+
+      <p
+        className="text-dim italic leading-[1.6] text-right whitespace-nowrap -my-2 md:-my-3"
+        style={{ fontSize: "clamp(10px, 3.2vw, 13px)" }}
+      >
+        Scoring may change based on community feedback.
+      </p>
     </div>
   );
 }
