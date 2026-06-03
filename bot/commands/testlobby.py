@@ -206,16 +206,20 @@ def _top_ranked_names_sync(n: int) -> list[str]:
         return [r.display_name for r in rank_players_for_set(session, set_id)[:n]]
 
 
-async def _post_test_seeding(ctx) -> None:
-    """Render the /pod-seeding embed (seat-column table + the round-table PNG) from the local top-8
-    leaderboard, bypassing the sesh fetch. Two fictional names go in as Maybe so the second section
-    shows too. Local DB only."""
-    yes = await asyncio.to_thread(_top_ranked_names_sync, 8)
-    if not yes:
+_SEEDING_FILLERS = ["Marina", "Quill", "Ridley", "Sable", "Tovo", "Umbra"]
+
+
+async def _post_test_seeding(ctx, count: int = 8) -> None:
+    """Render the /pod-seeding embed (seat-column table + the round-table PNG) for `count` players from
+    the local leaderboard, padding with fictional fillers when the DB has fewer. Bypasses the sesh fetch;
+    local DB only."""
+    ranked = await asyncio.to_thread(_top_ranked_names_sync, count)
+    if not ranked:
         await ctx.send("No ranked players in the local DB — run seed_local_players + refresh_stats first.")
         return
-    maybe = ["Maybe McMaybeface", "Tentative Tabitha"]
-    file, embed = await asyncio.to_thread(build_seeding_image_message_from_names, yes, maybe)
+    yes = ranked[:count]
+    yes += [f for f in _SEEDING_FILLERS if f not in yes][: max(0, count - len(yes))]
+    file, embed = await asyncio.to_thread(build_seeding_image_message_from_names, yes)
     if file is not None:
         await ctx.send(embed=embed, file=file)
     else:
@@ -478,7 +482,7 @@ async def setup(bot: commands.Bot) -> None:
 
     @bot.command(name="test")
     @commands.is_owner()
-    async def test_lobby(ctx: commands.Context, state: str = "") -> None:
+    async def test_lobby(ctx: commands.Context, state: str = "", extra: str = "") -> None:
         """Owner-only. Render the pod-draft lobby embed in this channel.
 
         `state` ∈ empty | partial | linked | unlinked | ready | notready | cancelled | superseded |
@@ -486,8 +490,8 @@ async def setup(bot: commands.Bot) -> None:
         No arg → posts the beginning lobby state. A specific state → edits the last in place.
         `podbracket` / `podswiss` / `podrandom` seed a real 8-player pod (seat 1 = you) and hand off to
         the prod tournament code. `podlobby` connects to a live Draftmancer session for ready-check
-        testing. `seeding` posts the /pod-seeding embed (table + round-table PNG) from the local top-8
-        leaderboard, no sesh needed."""
+        testing. `seeding [count]` posts the /pod-seeding embed (table + round-table PNG) for `count`
+        players (default 8; ranked players padded with fillers), no sesh needed."""
         if state and state not in _VALID_STATES:
             await ctx.send(f"unknown state `{state}`; pick one of: {', '.join(_VALID_STATES)}")
             return
@@ -501,7 +505,7 @@ async def setup(bot: commands.Bot) -> None:
             return
 
         if state == "seeding":
-            await _post_test_seeding(ctx)
+            await _post_test_seeding(ctx, int(extra) if extra.isdigit() else 8)
             return
 
         if state == "submit":

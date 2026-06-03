@@ -13,6 +13,7 @@ from sqlalchemy import any_, select
 
 from bot import audit, emojis
 from bot.commands import descriptions as desc
+from bot.config import settings
 from bot.database import SessionLocal
 from bot.discord_helpers import display_width, extract_avatar_hash, player_url
 from bot.models import Player
@@ -413,10 +414,24 @@ def build_seeding_image_message_from_names(
     return file, embed
 
 
+_OPEN_SEAT = SeededAttendee(slug=None, display_name="(open)", rank=None, score=None, trophies=None)
+
+
+def _pod_ring(yes: list[SeededAttendee]) -> list[SeededAttendee] | None:
+    """Seat the pod (capped at pod_draft_max_players) into the ring for the image, padding an odd count
+    to even with an open seat. Returns the seated ring for 6-10 players, else None (no ring drawn)."""
+    pool = list(yes[:settings.pod_draft_max_players])
+    if len(pool) % 2:
+        pool.append(_OPEN_SEAT)
+    if not 6 <= len(pool) <= 10:
+        return None
+    return seated_ring_order(pool)
+
+
 def _build_seeding_image(yes: list[SeededAttendee], embed: discord.Embed) -> discord.File | None:
-    """Render the octagon as a monospace PNG for a clean 8-pod and attach it to the embed; None otherwise."""
-    seated = seated_ring_order(yes[:CHAMPIONSHIP_CUT])
-    if len(seated) != 8:
+    """Render the seated ring as a monospace PNG (6-10 players) and attach it to the embed; None otherwise."""
+    seated = _pod_ring(yes)
+    if seated is None:
         return None
     png = render_octagon_png(_seating_octagon(seated))
     embed.set_image(url="attachment://seating.png")
@@ -511,31 +526,36 @@ def _ring_trunc(text: str, width: int) -> str:
 
 
 def _seating_octagon(seated: list[SeededAttendee]) -> str:
-    """8-seat octagon — the round table itself, with arrows tracing the seat order clockwise from 1.
-    Box-less text art; `render_octagon_png` rasterizes it and draws the border, so it ships as an image.
-
-    Width-driven: the right column is anchored just `GAP` past the widest left label. Top/bottom seats
-    inset by `TAPER` to give the octagon shape; horizontal arrows sit in the middle of the real centre
-    gap, so they never collide with a long name.
+    """Round-table ring for an even pod (6, 8, or 10 seats), arrows tracing the seat order clockwise
+    from 1. Box-less text art; `render_octagon_png` rasterizes it and draws the border, so it ships as an
+    image. Two seats on top and bottom; the rest split into `s = (n-4)/2` side-row pairs (6 → 1, 8 → 2,
+    10 → 3). Width-driven: the right column is anchored `GAP` past the widest left label; top/bottom seats
+    inset by `TAPER` for the polygon shape; horizontal arrows sit in the centre gap, clear of long names.
     """
     GAP = 4  # spacing between the left and right name columns
     TAPER = 2  # how far the top/bottom seats pull in from the vertical seats
     SHOW_NUMBERS = False  # seat numbers on the outer edges; False shows names only
-    # left column (seats 1,6,7,8) leads with the seat number; right column (2,3,4,5) trails it, so the
-    # numbers sit on the outer edges of the table
-    def _label(i: int, a: SeededAttendee) -> str:
-        name = _ring_trunc(a.display_name, 12)
+    n = len(seated)
+    s = (n - 4) // 2  # side-row pairs
+    right_side = list(range(2, 2 + s))           # seats 3..  down the right, top -> bottom
+    left_side = list(range(n - 1, 3 + s, -1))    # seats ..N up the left, rendered top -> bottom
+    bottom_left, bottom_right = 3 + s, 2 + s
+    left_col = {0, bottom_left, *left_side}      # these seats put the number on the left (outer) edge
+
+    def _label(i: int) -> str:
+        name = _ring_trunc(seated[i].display_name, 12)
         if not SHOW_NUMBERS:
             return name
-        return f"{name} {i + 1}" if (i + 1) in (2, 3, 4, 5) else f"{i + 1} {name}"
+        return f"{i + 1} {name}" if i in left_col else f"{name} {i + 1}"
 
-    labels = [_label(i, a) for i, a in enumerate(seated)]
-    # the right column must clear GAP on both the vertical rows (seats 8/7 vs 3/4) and the inset
-    # top/bottom rows (seats 1/6 vs 2/5, which lose 2*TAPER of usable width)
-    vertical = max(len(labels[7]), len(labels[6])) + GAP + max(len(labels[2]), len(labels[3]))
-    horizontal = max(len(labels[0]), len(labels[5])) + GAP + max(len(labels[1]), len(labels[4])) + 2 * TAPER
+    labels = [_label(i) for i in range(n)]
+    # the right column must clear GAP on both the side rows (flush to the edges) and the inset top/bottom
+    # rows (which lose 2*TAPER of usable width)
+    vertical = max(len(labels[i]) for i in left_side) + GAP + max(len(labels[i]) for i in right_side)
+    horizontal = (max(len(labels[0]), len(labels[bottom_left])) + GAP
+                  + max(len(labels[1]), len(labels[bottom_right])) + 2 * TAPER)
     right = max(vertical, horizontal)
-    rows = [""] * 7
+    rows = [""] * (2 * s + 3)
 
     def place(r: int, c: int, text: str) -> None:
         line = rows[r].ljust(c)
@@ -544,33 +564,39 @@ def _seating_octagon(seated: list[SeededAttendee]) -> str:
     def place_right(r: int, end: int, text: str) -> None:
         place(r, max(0, end - len(text)), text)
 
-    place(0, TAPER, labels[0])           # seat 1
-    place_right(0, right - TAPER, labels[1])  # seat 2
-    place(1, TAPER - 1, "↗")
-    place_right(1, right - TAPER + 1, "↘")
-    place(2, 0, labels[7])               # seat 8
-    place_right(2, right, labels[2])     # seat 3
-    place(3, 0, "↑")
-    place_right(3, right, "↓")
-    place(4, 0, labels[6])               # seat 7
-    place_right(4, right, labels[3])     # seat 4
-    place(5, TAPER - 1, "↖")
-    place_right(5, right - TAPER + 1, "↙")
-    place(6, TAPER, labels[5])           # seat 6
-    place_right(6, right - TAPER, labels[4])  # seat 5
+    r = 0
+    place(r, TAPER, labels[0])
+    place_right(r, right - TAPER, labels[1])
+    top_row = r
+    r += 1
+    place(r, TAPER - 1, "↗")
+    place_right(r, right - TAPER + 1, "↘")
+    r += 1
+    for k in range(s):
+        place(r, 0, labels[left_side[k]])
+        place_right(r, right, labels[right_side[k]])
+        r += 1
+        if k < s - 1:
+            place(r, 0, "↑")
+            place_right(r, right, "↓")
+            r += 1
+    place(r, TAPER - 1, "↖")
+    place_right(r, right - TAPER + 1, "↙")
+    r += 1
+    place(r, TAPER, labels[bottom_left])
+    place_right(r, right - TAPER, labels[bottom_right])
+    bottom_row = r
 
     # horizontal arrows on the table's centre column so → and ← line up vertically; skipped on a row
     # whose labels would reach the centre (the diagonals still trace the ring)
     centre = right // 2
 
     def place_centre(r: int, left_label: str, right_label: str, arrow: str) -> None:
-        left_end = TAPER + len(left_label)
-        right_start = (right - TAPER) - len(right_label)
-        if left_end < centre < right_start:
+        if TAPER + len(left_label) < centre < (right - TAPER) - len(right_label):
             place(r, centre, arrow)
 
-    place_centre(0, labels[0], labels[1], "→")
-    place_centre(6, labels[5], labels[4], "←")
+    place_centre(top_row, labels[0], labels[1], "→")
+    place_centre(bottom_row, labels[bottom_left], labels[bottom_right], "←")
 
     return "\n".join(line.rstrip() for line in rows)
 
