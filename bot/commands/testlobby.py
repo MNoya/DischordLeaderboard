@@ -34,10 +34,10 @@ from bot.services.pod_format import format_display
 from bot.services.pod_pairing_select import pairing_label
 from bot.services.pod_seating_select import seating_mode_label
 from bot.services.player_stats import rank_players_for_set
-from bot.commands.pod_draft import build_seeding_image_message_from_names
+from bot.commands.pod_draft import build_seeding_image_message_from_names, post_manual_seating_table, post_table
 from bot.services.pod_format_select import FormatSelectView
 from bot.services.pod_settings_view import PodSettingsView
-from bot.services.pod_tournament import start_tournament
+from bot.services.pod_tournament import actor_label, start_tournament
 from bot.slug import disambiguate_slug, slugify
 
 
@@ -220,10 +220,7 @@ async def _post_test_seeding(ctx, count: int = 8) -> None:
     yes = ranked[:count]
     yes += [f for f in _SEEDING_FILLERS if f not in yes][: max(0, count - len(yes))]
     file, embed = await asyncio.to_thread(build_seeding_image_message_from_names, yes)
-    if file is not None:
-        await ctx.send(embed=embed, file=file)
-    else:
-        await ctx.send(embed=embed)
+    await post_table(ctx.bot, ctx.channel, file, embed)
 
 
 async def _start_live_test_pod(ctx, mode: str) -> None:
@@ -465,6 +462,10 @@ async def _settings_preview_seat_order() -> list[tuple[str, str]]:
     return [(arena, display or arena) for arena, display in _LINKED_EIGHT]
 
 
+async def _settings_preview_on_seated(interaction: discord.Interaction, labels: list[str]) -> None:
+    await post_manual_seating_table(interaction.client, interaction.channel, labels, actor_label(interaction))
+
+
 def _settings_preview_view() -> PodSettingsView:
     """No-op Settings panel so `!test` can preview the format + pairing + seats dropdowns with no pod.
     Defaults to Seats: Random (like a fresh pod); pick Manual in the dropdown to reveal the Seat Order button."""
@@ -473,6 +474,7 @@ def _settings_preview_view() -> PodSettingsView:
         current_code=None, current_mode="swiss",
         on_seating_mode=_settings_preview_noop, current_seating="random",
         on_seating=_settings_preview_seating_noop, seat_order_provider=_settings_preview_seat_order,
+        on_seated=_settings_preview_on_seated,
     )
 
 

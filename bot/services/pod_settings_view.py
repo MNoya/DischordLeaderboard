@@ -6,13 +6,13 @@ private ephemeral. The Seat Order button is contextual to Manual seats + a live 
 """
 from __future__ import annotations
 
-import logging
 from typing import Awaitable, Callable
 
 import discord
 from discord import ui
 
-from bot.services.pod_format import format_change_message
+from bot.services.pod_format import format_change_message, settings_notice_marker
+from bot.services.pod_notices import send_settings_notice
 from bot.services.pod_registration_embed import update_registered_embed
 from bot.services.pod_format_select import SELECT_PLACEHOLDER as FORMAT_PLACEHOLDER
 from bot.services.pod_format_select import format_options
@@ -20,6 +20,7 @@ from bot.services.pod_pairing_select import SELECT_PLACEHOLDER as PAIRING_PLACEH
 from bot.services.pod_pairing_select import pairing_change_message, pairing_options
 from bot.services.pod_seating_select import (
     SEATING_SELECT_PLACEHOLDER,
+    SeatedNotify,
     SeatingApply,
     SeatOrderButton,
     SeatOrderProvider,
@@ -29,7 +30,6 @@ from bot.services.pod_seating_select import (
 from bot.services.pod_tournament import actor_label
 from bot.sets import ACTIVE_SET_CODE
 
-log = logging.getLogger("bot.pod_settings_view")
 
 Apply = Callable[[discord.Interaction, str], Awaitable[str | None]]
 
@@ -40,7 +40,8 @@ class PodSettingsView(ui.View):
                  on_seating_mode: Apply | None = None, current_seating: str | None = None,
                  on_seating: SeatingApply | None = None,
                  seat_order_provider: SeatOrderProvider | None = None,
-                 on_seating_table: Callable[[discord.Interaction], Awaitable[None]] | None = None) -> None:
+                 on_seating_table: Callable[[discord.Interaction], Awaitable[None]] | None = None,
+                 on_seated: SeatedNotify | None = None) -> None:
         super().__init__(timeout=300)
         self.on_format = on_format
         self.on_pairing = on_pairing
@@ -51,6 +52,7 @@ class PodSettingsView(ui.View):
         self.on_seating = on_seating
         self.seat_order_provider = seat_order_provider
         self.on_seating_table = on_seating_table
+        self.on_seated = on_seated
         self.add_item(_FormatSetting(current_code))
         self.add_item(_PairingSetting(current_mode))
         if on_seating_mode is not None:
@@ -58,10 +60,10 @@ class PodSettingsView(ui.View):
         if (on_seating is not None and seat_order_provider is not None
                 and (current_seating or "random") == "manual"):
             self.add_item(SeatOrderButton(
-                seat_order_provider=seat_order_provider, on_seating=on_seating, row=3))
+                seat_order_provider=seat_order_provider, on_seating=on_seating, on_seated=on_seated, row=3))
 
     async def apply(self, interaction: discord.Interaction, *, on_apply: Apply,
-                    value: str, attr: str, notice: str) -> None:
+                    value: str, attr: str, notice: str, marker: str) -> None:
         await interaction.response.defer()
         err = await on_apply(interaction, value)
         if err:
@@ -73,13 +75,10 @@ class PodSettingsView(ui.View):
             current_code=self.current_code, current_mode=self.current_mode,
             on_seating_mode=self.on_seating_mode, current_seating=self.current_seating,
             on_seating=self.on_seating, seat_order_provider=self.seat_order_provider,
-            on_seating_table=self.on_seating_table,
+            on_seating_table=self.on_seating_table, on_seated=self.on_seated,
         ))
         if interaction.channel is not None:
-            try:
-                await interaction.channel.send(notice)
-            except discord.HTTPException:
-                log.warning("could not post settings-change notice", exc_info=True)
+            await send_settings_notice(interaction.channel, interaction.client.user, notice, marker=marker)
         await update_registered_embed(
             interaction.channel,
             client_user=interaction.client.user,
@@ -98,7 +97,8 @@ class _FormatSetting(ui.Select):
         view: PodSettingsView = self.view
         code = self.values[0]
         await view.apply(interaction, on_apply=view.on_format, value=code, attr="current_code",
-                         notice=format_change_message(actor_label(interaction), code))
+                         notice=format_change_message(actor_label(interaction), code),
+                         marker=settings_notice_marker("Format"))
 
 
 class _PairingSetting(ui.Select):
@@ -110,7 +110,8 @@ class _PairingSetting(ui.Select):
         view: PodSettingsView = self.view
         mode = self.values[0]
         await view.apply(interaction, on_apply=view.on_pairing, value=mode, attr="current_mode",
-                         notice=pairing_change_message(actor_label(interaction), mode))
+                         notice=pairing_change_message(actor_label(interaction), mode),
+                         marker=settings_notice_marker("Pairings"))
 
 
 class _SeatingSetting(ui.Select):
@@ -122,6 +123,7 @@ class _SeatingSetting(ui.Select):
         view: PodSettingsView = self.view
         mode = self.values[0]
         await view.apply(interaction, on_apply=view.on_seating_mode, value=mode, attr="current_seating",
-                         notice=seating_mode_change_message(actor_label(interaction), mode))
+                         notice=seating_mode_change_message(actor_label(interaction), mode),
+                         marker=settings_notice_marker("Seats"))
         if mode == "leaderboard" and view.on_seating_table is not None:
             await view.on_seating_table(interaction)

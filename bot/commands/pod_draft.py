@@ -37,6 +37,7 @@ from bot.services.pod_drafts import (
     search_event_names_sync,
 )
 from bot.services.player_stats import SeededAttendee, seed_attendees, seated_ring_order
+from bot.services.pod_seating_select import SEATING_ORDER_MARKER, seating_change_message
 from bot.services.pod_seating_image import render_octagon_png
 from bot.sets import ACTIVE_SET_CODE
 from bot.tasks.pod_draft_reminder import fetch_sesh_rsvps
@@ -59,6 +60,8 @@ _ARENA_INPUT_RE = re.compile(r"^.+#\d+$")
 YES_EMOJI = "✅"
 MAYBE_EMOJI = "🤷"
 CHAMPIONSHIP_CUT = 8
+SEEDING_YES_HEADER = f"**{YES_EMOJI} Yes ("
+SEEDING_MAYBE_HEADER = f"**{MAYBE_EMOJI} Maybe ("
 
 MSG_SEEDING_NOT_POD_THREAD = "Run this inside a pod-draft thread."
 MSG_SEEDING_NO_SESH = "Couldn't read the sesh post for this pod — it may have been deleted."
@@ -137,13 +140,10 @@ class PodDraft(commands.Cog):
             return await set_event_seating_mode(event_id, mode)
 
         async def on_seating_table(inter: discord.Interaction) -> None:
-            file, embed = await seating_message_for_event(self.bot, event_id)
-            if embed is None or inter.channel is None:
-                return
-            if file is not None:
-                await inter.channel.send(embed=embed, file=file)
-            else:
-                await inter.channel.send(embed=embed)
+            await post_seeding_table(self.bot, event_id, inter.channel)
+
+        async def on_seated(inter: discord.Interaction, labels: list[str]) -> None:
+            await post_manual_seating_table(self.bot, inter.channel, labels, actor_label(inter))
 
         manager = ACTIVE_POD_MANAGERS.get(event_id)
         on_seating = None
@@ -160,7 +160,7 @@ class PodDraft(commands.Cog):
                 current_code=current_code, current_mode=current_mode,
                 on_seating_mode=on_seating_mode, current_seating=current_seating,
                 on_seating=on_seating, seat_order_provider=seat_order_provider,
-                on_seating_table=on_seating_table,
+                on_seating_table=on_seating_table, on_seated=on_seated,
             ),
             ephemeral=True,
         )
@@ -273,9 +273,11 @@ class PodDraft(commands.Cog):
         file, embed = await asyncio.to_thread(build_seeding_image_message_from_names, yes, maybe)
         log.info(f"pod-seeding: {interaction.user} for event_id={event_id} ({len(yes)} yes, {len(maybe)} maybe)")
         if file is not None:
-            await interaction.followup.send(embed=embed, file=file)
+            posted = await interaction.followup.send(embed=embed, file=file, wait=True)
         else:
-            await interaction.followup.send(embed=embed)
+            posted = await interaction.followup.send(embed=embed, wait=True)
+        if isinstance(interaction.channel, discord.Thread) and self.bot.user:
+            await delete_stale_seeding_messages(interaction.channel, self.bot.user, keep_message_id=posted.id)
 
     @app_commands.command(
         name="pod-draft-standings",
@@ -448,14 +450,10 @@ def _build_seeding_embed(yes: list[SeededAttendee], maybe: list[SeededAttendee])
         ring = seated_ring_order(yes[:CHAMPIONSHIP_CUT])
         seat_of = {id(a): i + 1 for i, a in enumerate(ring)}
         yes_seats = [seat_of.get(id(a)) for a in yes]
-        parts.append(f"**{YES_EMOJI} Yes ({len(yes)})**\n" + _seeding_block(yes, seats=yes_seats, cut_after=cut))
+        parts.append(f"{SEEDING_YES_HEADER}{len(yes)})**\n" + _seeding_block(yes, seats=yes_seats, cut_after=cut))
     if maybe:
-        parts.append(f"**{MAYBE_EMOJI} Maybe ({len(maybe)})**\n" + _seeding_block(maybe))
-    return discord.Embed(
-        title=f"🏆 Pod Seeding · {ACTIVE_SET_CODE}",
-        description="\n\n".join(parts),
-        color=discord.Color.gold(),
-    )
+        parts.append(f"{SEEDING_MAYBE_HEADER}{len(maybe)})**\n" + _seeding_block(maybe))
+    return discord.Embed(description="\n\n".join(parts), color=discord.Color.gold())
 
 
 def _attendee_rnk(a: SeededAttendee) -> str:
@@ -587,18 +585,41 @@ def _seating_octagon(seated: list[SeededAttendee]) -> str:
     place_right(r, right - TAPER, labels[bottom_right])
     bottom_row = r
 
-    # horizontal arrows on the table's centre column so → and ← line up vertically; skipped on a row
-    # whose labels would reach the centre (the diagonals still trace the ring)
+    # horizontal arrows aim for the table's centre column so → and ← line up vertically, but slide
+    # toward the row's free gap when a long label covers the centre; skipped only when the gap can't
+    # fit an arrow with a space on each side (the diagonals still trace the ring)
     centre = right // 2
 
     def place_centre(r: int, left_label: str, right_label: str, arrow: str) -> None:
-        if TAPER + len(left_label) < centre < (right - TAPER) - len(right_label):
-            place(r, centre, arrow)
+        lo = TAPER + len(left_label) + 1
+        hi = (right - TAPER) - len(right_label) - 2
+        if lo <= hi:
+            place(r, min(max(centre, lo), hi), arrow)
 
     place_centre(top_row, labels[0], labels[1], "→")
     place_centre(bottom_row, labels[bottom_left], labels[bottom_right], "←")
 
     return "\n".join(line.rstrip() for line in rows)
+
+
+async def delete_stale_seeding_messages(
+    channel: discord.Thread | discord.TextChannel, bot_user: discord.ClientUser, *,
+    keep_message_id: int | None = None,
+) -> None:
+    def stale(message: discord.Message) -> bool:
+        if message.id == keep_message_id or message.author.id != bot_user.id:
+            return False
+        if SEATING_ORDER_MARKER in message.content:
+            return True
+        return any(
+            SEEDING_YES_HEADER in (e.description or "") or SEEDING_MAYBE_HEADER in (e.description or "")
+            for e in message.embeds
+        )
+
+    try:
+        await channel.purge(limit=None, check=stale, reason="Stale pod-seeding table")
+    except discord.HTTPException as exc:
+        log.warning(f"pod-seeding: could not purge stale seeding messages: {exc}")
 
 
 async def seating_message_for_event(bot, event_id: str) -> tuple[discord.File | None, discord.Embed | None]:
@@ -614,6 +635,42 @@ async def seating_message_for_event(bot, event_id: str) -> tuple[discord.File | 
     if not yes and not maybe:
         return None, None
     return await asyncio.to_thread(build_seeding_image_message_from_names, yes, maybe)
+
+
+async def post_seeding_table(bot, event_id: str, channel) -> None:
+    file, embed = await seating_message_for_event(bot, event_id)
+    if embed is None or channel is None:
+        return
+    await post_table(bot, channel, file, embed)
+
+
+def build_manual_seating_image(labels: list[str]) -> discord.File | None:
+    """The manual seat order rendered verbatim around the octagon (no leaderboard seeding), as a bare
+    attachment — the notice's arrow chain carries the order in text. None outside 6-10 seats."""
+    seated = [SeededAttendee(slug=None, display_name=lbl, rank=None, score=None, trophies=None) for lbl in labels]
+    if len(seated) % 2:
+        seated.append(_OPEN_SEAT)
+    if not 6 <= len(seated) <= 10:
+        return None
+    png = render_octagon_png(_seating_octagon(seated))
+    return discord.File(io.BytesIO(png), "seating.png")
+
+
+async def post_manual_seating_table(bot, channel, labels: list[str], actor: str) -> None:
+    if channel is None:
+        return
+    file = await asyncio.to_thread(build_manual_seating_image, labels)
+    await post_table(bot, channel, file, None, content=seating_change_message(actor, labels))
+
+
+async def post_table(bot, channel, file: discord.File | None, embed: discord.Embed | None,
+                     content: str | None = None) -> None:
+    if file is not None:
+        posted = await channel.send(content=content, embed=embed, file=file)
+    else:
+        posted = await channel.send(content=content, embed=embed)
+    if isinstance(channel, (discord.Thread, discord.TextChannel)) and bot.user:
+        await delete_stale_seeding_messages(channel, bot.user, keep_message_id=posted.id)
 
 
 def _pick_takeover_target(manager, invoker_display_name: str):

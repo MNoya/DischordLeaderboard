@@ -108,16 +108,13 @@ class LobbyReadyButtonView(discord.ui.View):
         async def on_seating_mode(inter: discord.Interaction, mode: str) -> str | None:
             return await set_event_seating_mode(event_id, mode)
 
-        from bot.commands.pod_draft import seating_message_for_event
+        from bot.commands.pod_draft import post_manual_seating_table, post_seeding_table
 
         async def on_seating_table(inter: discord.Interaction) -> None:
-            file, embed = await seating_message_for_event(inter.client, event_id)
-            if embed is None or inter.channel is None:
-                return
-            if file is not None:
-                await inter.channel.send(embed=embed, file=file)
-            else:
-                await inter.channel.send(embed=embed)
+            await post_seeding_table(inter.client, event_id, inter.channel)
+
+        async def on_seated(inter: discord.Interaction, labels: list[str]) -> None:
+            await post_manual_seating_table(inter.client, inter.channel, labels, actor_label(inter))
 
         await interaction.response.send_message(
             view=PodSettingsView(
@@ -125,7 +122,7 @@ class LobbyReadyButtonView(discord.ui.View):
                 current_code=manager.set_code, current_mode=manager.pairing_mode,
                 on_seating_mode=on_seating_mode, current_seating=manager.seating_mode,
                 on_seating=on_seating, seat_order_provider=manager.seating_lobby_order,
-                on_seating_table=on_seating_table,
+                on_seating_table=on_seating_table, on_seated=on_seated,
             ),
             ephemeral=True,
         )

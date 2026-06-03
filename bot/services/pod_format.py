@@ -80,9 +80,14 @@ def format_applied_message(code: str) -> str:
     return f"Format set to **{label_for(code) or code}**."
 
 
+def settings_notice_marker(setting: str) -> str:
+    """Substring identifying a setting's change notices, so a new notice can replace stale ones."""
+    return f"set {setting} to"
+
+
 def settings_change_message(actor: str, setting: str, value: str, *, subtext: str | None = None) -> str:
     """Public thread notice for a lobby Settings change; shared by Format and Pairings."""
-    line = f"⚙️ **{actor}** set {setting} to **{value}**"
+    line = f"⚙️ **{actor}** {settings_notice_marker(setting)} **{value}**"
     return f"{line}\n-# {subtext}" if subtext else line
 
 
