@@ -215,6 +215,8 @@ class PodDraftManager:
         self.session_users = list(users) if isinstance(users, list) else []
         names = [u.get("userName") for u in self.session_users]
         log.info(f"draftmancer sessionUsers for {self.session_id}: {names}")
+        if self.draft_complete:
+            return
         # Any session change clears the notready banner; lobby reverts to its normal state
         self.last_decliner_name = None
         self.last_cancel_reason = None
@@ -254,7 +256,8 @@ class PodDraftManager:
                 break
         if "userName" in updates:
             log.info(f"draftmancer updateUser rename for {self.session_id}: {user_id} → {updates['userName']}")
-            await self.refresh_lobby_now()
+            if not self.draft_complete:
+                await self.refresh_lobby_now()
 
     async def _claim_ownership_and_apply_settings(self) -> None:
         if self.bot_user_id is None or self.owner_claimed:
@@ -460,11 +463,15 @@ class PodDraftManager:
         return out
 
     async def refresh_lobby_now(self) -> None:
-        """Re-run classification with current sessionUsers and edit the lobby card.
-        External hook for /pod-link-arena so the lobby reflects the new link immediately."""
-        non_bot_names = [u.get("userName") for u in self.session_users
-                         if u.get("userName") and u.get("userName") != _BOT_USER_NAME]
-        classified = await self._classify_users(non_bot_names) if non_bot_names else []
+        """Re-run classification and edit the lobby card. External hook for /pod-link-arena so the
+        lobby reflects the new link immediately. Once the draft completes the roster is frozen:
+        renders the endDraft snapshot, not whoever is in the session now."""
+        if self.draft_complete and self.tournament_roster:
+            names = list(self.tournament_roster)
+        else:
+            names = [u.get("userName") for u in self.session_users
+                     if u.get("userName") and u.get("userName") != _BOT_USER_NAME]
+        classified = await self._classify_users(names) if names else []
         await self._refresh_lobby_status(classified)
 
     async def _resolve_rsvp_mentions(self, guild: discord.Guild | None) -> dict[int, str]:
@@ -592,20 +599,32 @@ class PodDraftManager:
         self.draft_complete = True
         self._cancel_end_watchdog()
         await self._mark_socket_status("draft_done")
+        self.tournament_roster = self._snapshot_tournament_roster()
+        log.info(
+            f"[DRAFT] roster_snapshot event={self.event_id} roster_size={len(self.tournament_roster)}"
+        )
         await self.refresh_lobby_now()
         payload = next(iter(self.draft_logs.values()), None)
         if payload is not None:
             self.mpt_task = asyncio.create_task(self._submit_logs_to_magicprotools(payload))
         else:
             log.warning(f"[DRAFT] end_no_payload event={self.event_id}")
-        self.tournament_roster = [
+        asyncio.create_task(start_tournament(self))
+
+    def _snapshot_tournament_roster(self) -> list[str]:
+        """The locked drafter list, frozen at endDraft. Prefers the draft log's seated users — immune
+        to players closing their tab at draft end or spectators joining after — and falls back to
+        whoever is in the session right now."""
+        payload = next(iter(self.draft_logs.values()), None)
+        users = payload.get("users") if isinstance(payload, dict) else None
+        if isinstance(users, dict):
+            seated = [u.get("userName") for u in users.values() if isinstance(u, dict) and u.get("userName")]
+            if seated:
+                return seated
+        return [
             u.get("userName") for u in self.session_users
             if u.get("userName") and u.get("userName") != _BOT_USER_NAME
         ]
-        log.info(
-            f"[DRAFT] roster_snapshot event={self.event_id} roster_size={len(self.tournament_roster)}"
-        )
-        asyncio.create_task(start_tournament(self))
 
     async def _on_draft_log(self, log_payload) -> None:
         if not isinstance(log_payload, dict):
