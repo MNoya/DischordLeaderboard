@@ -47,9 +47,9 @@ def test_handles_2_0_match_with_two_games() -> None:
     assert out == {"g1": 1, "g2": 1}
 
 
-def test_skips_round_when_a_game_is_missing_but_attributes_later_rounds() -> None:
-    """R1 has only 2 of 3 expected games (G3 dropped by 17lands). R1 should NOT attribute.
-    R2 has clean 2-0 data after R1's reported_at — should still attribute correctly."""
+def test_attributes_partial_round_when_a_game_is_missing() -> None:
+    """R1 has only 2 of 3 expected games (G3 dropped by 17lands). The window still bounds them to
+    R1, so both attribute; R2's clean 2-0 data attributes as usual."""
     base = datetime(2026, 5, 14, 0, 0, tzinfo=timezone.utc)
     matches = [
         _match(1, "Noya", "Niamh", "Noya", "2-1", reported_at=base + timedelta(minutes=35)),
@@ -63,9 +63,55 @@ def test_skips_round_when_a_game_is_missing_but_attributes_later_rounds() -> Non
         _game(base + timedelta(minutes=60), won=True, turns=8, gid="r2g2"),
     ]
     out = attribute_games_to_rounds(games, matches, "Noya")
-    assert "r1g1" not in out
-    assert "r1g2" not in out
-    assert out == {"r2g1": 2, "r2g2": 2}
+    assert out == {"r1g1": 1, "r1g2": 1, "r2g1": 2, "r2g2": 2}
+
+
+def test_late_report_files_overflow_games_under_the_earlier_round() -> None:
+    """R1 was reported only after R2's first game, so its window swallows that game — the accepted
+    best-effort trade: a game filed under the prior round beats dropping the window entirely."""
+    base = datetime(2026, 5, 14, 0, 0, tzinfo=timezone.utc)
+    matches = [
+        _match(1, "Noya", "Niamh", "Noya", "2-1", reported_at=base + timedelta(minutes=50)),
+        _match(2, "Noya", "Bacchus", "Noya", "2-0", reported_at=base + timedelta(minutes=80)),
+    ]
+    games = [
+        _game(base + timedelta(minutes=10), won=True, turns=9, gid="r1g1"),
+        _game(base + timedelta(minutes=20), won=False, turns=10, gid="r1g2"),
+        _game(base + timedelta(minutes=30), won=True, turns=12, gid="r1g3"),
+        _game(base + timedelta(minutes=45), won=True, turns=8, gid="r2g1"),
+        _game(base + timedelta(minutes=70), won=True, turns=11, gid="r2g2"),
+    ]
+    out = attribute_games_to_rounds(games, matches, "Noya")
+    assert out == {"r1g1": 1, "r1g2": 1, "r1g3": 1, "r2g1": 1, "r2g2": 2}
+
+
+def test_attributes_regardless_of_reported_score() -> None:
+    """Two observed wins inside a window reported as a 1-2 loss still attribute — players misreport
+    scores, the window is what counts."""
+    base = datetime(2026, 5, 14, 0, 0, tzinfo=timezone.utc)
+    matches = [_match(1, "Noya", "X", "X", "2-1", reported_at=base + timedelta(minutes=35))]
+    games = [
+        _game(base + timedelta(minutes=10), won=True, turns=9, gid="g1"),
+        _game(base + timedelta(minutes=20), won=True, turns=10, gid="g2"),
+    ]
+    out = attribute_games_to_rounds(games, matches, "Noya")
+    assert out == {"g1": 1, "g2": 1}
+
+
+def test_skipped_match_forms_no_window() -> None:
+    """A 'No Match Played' result (0-0) is invisible to attribution: games around it flow into the
+    next real match's window."""
+    base = datetime(2026, 5, 14, 0, 0, tzinfo=timezone.utc)
+    matches = [
+        _match(1, "Noya", "Niamh", "(skipped)", "0-0", reported_at=base + timedelta(minutes=15)),
+        _match(2, "Noya", "Bacchus", "Noya", "2-0", reported_at=base + timedelta(minutes=40)),
+    ]
+    games = [
+        _game(base + timedelta(minutes=10), won=True, turns=9, gid="g1"),
+        _game(base + timedelta(minutes=30), won=True, turns=8, gid="g2"),
+    ]
+    out = attribute_games_to_rounds(games, matches, "Noya")
+    assert out == {"g1": 2, "g2": 2}
 
 
 def test_filters_out_misload_restarts() -> None:
@@ -105,10 +151,10 @@ def test_player_perspective_when_seat_is_loser() -> None:
     assert out == {"g1": 1, "g2": 1, "g3": 1}
 
 
-def test_real_pod3_noya_data_attributes_r1_and_r3_skips_r2() -> None:
+def test_real_pod3_noya_data_attributes_r2_partially() -> None:
     """Empirical Pod #3 data for Noya: 8 games captured by 17lands, but R2's third game is
-    missing. The algorithm should attribute R1 (W L L = 1-2 loss to Niamh) and R3 (W L L =
-    1-2 loss to Wave) while skipping R2 (only L W observed, can't satisfy 2-1 win)."""
+    missing. R1 (W L L = 1-2 loss to Niamh) and R3 (W L L = 1-2 loss to Wave) attribute cleanly;
+    R2's two observed games (L W within a 2-1 win) attribute partially."""
     def t(hhmm: str) -> datetime:
         h, m = hhmm.split(":")
         return datetime(2026, 5, 14, int(h), int(m), tzinfo=timezone.utc)
@@ -130,7 +176,7 @@ def test_real_pod3_noya_data_attributes_r1_and_r3_skips_r2() -> None:
         _game(t("02:01"), won=False, turns=7, gid="g7"),
     ]
     out = attribute_games_to_rounds(games, matches, "Noya")
-    assert out == {"g0": 1, "g1": 1, "g2": 1, "g5": 3, "g6": 3, "g7": 3}
+    assert out == {"g0": 1, "g1": 1, "g2": 1, "g3": 2, "g4": 2, "g5": 3, "g6": 3, "g7": 3}
 
 
 def _match(round_num: int, player_a: str, player_b: str, winner: str, score: str,

@@ -52,32 +52,31 @@ def attribute_games_to_rounds(
     player_matches: Sequence[PodDraftMatch],
     player_seat_name: str,
 ) -> dict[str, int]:
+    """Assign each 17lands game to the round whose report window it falls in: after the player's
+    previous reported result, up to this one plus a minute of grace. Best-effort, window-only — a
+    player can't be paired into their next match until the previous result is reported (Swiss and
+    bracket alike), so the window is decisive. Reported scores aren't consulted: 17lands drops games
+    and players misreport 2-0 as 2-1, and missing replays cost more than a result reported late
+    enough to file a game under the prior round. Skipped matches (score 0-0) form no window."""
     usable = _filter_and_sort_games(games)
     matches_in_round_order = sorted(player_matches, key=lambda m: m.round)
 
     out: dict[str, int] = {}
     prev_reported_at: datetime | None = None
     for m in matches_in_round_order:
-        if not m.score or not m.winner_name or m.reported_at is None:
-            continue
-        total_games, expected_wins = _parse_score_for_player(m.score, m.winner_name, player_seat_name)
-        if total_games is None:
+        if m.reported_at is None or not m.winner_name or not m.score or m.score == "0-0":
             continue
         lower = prev_reported_at
-        upper = m.reported_at
-        prev_reported_at = upper
-        upper_with_grace = upper + timedelta(minutes=1)
+        upper_with_grace = m.reported_at + timedelta(minutes=1)
+        prev_reported_at = upper_with_grace
         eligible = [
             g for g in usable
             if (lower is None or _parse_game_time(g.get("game_time")) > lower)
             and _parse_game_time(g.get("game_time")) <= upper_with_grace
         ]
-        if len(eligible) != total_games:
+        if not eligible:
+            log.info(f"[REPLAYS] attribute.empty_window round={m.round} player={player_seat_name!r}")
             continue
-        wins_in_window = sum(1 for g in eligible if g.get("won"))
-        if wins_in_window != expected_wins:
-            continue
-        prev_reported_at = upper_with_grace
         for g in eligible:
             gid = _extract_game_id(g)
             if gid:
@@ -176,18 +175,6 @@ def _is_in_event_window(game: dict, event_time: datetime | None) -> bool:
         return False
     delta = abs((gt - event_time).total_seconds()) / 3600.0
     return delta <= _EVENT_WINDOW_HOURS
-
-
-def _parse_score_for_player(
-    score: str, winner_name: str, player_seat_name: str,
-) -> tuple[int | None, int | None]:
-    try:
-        winner_games, loser_games = (int(s) for s in score.split("-"))
-    except (ValueError, AttributeError):
-        return None, None
-    is_winner = winner_name.lower() == player_seat_name.lower()
-    total = winner_games + loser_games
-    return total, (winner_games if is_winner else loser_games)
 
 
 def _extract_game_id(game: dict) -> str | None:
