@@ -23,7 +23,7 @@ from bot import emojis
 from bot.config import settings
 from bot.slug import slugify
 from bot.database import SessionLocal
-from bot.models import Player as DbPlayer, PodDraftEvent, PodDraftMatch, PodDraftParticipant, PodDraftReplay
+from bot.models import Player as DbPlayer, PodDraftEvent, PodDraftMatch, PodDraftParticipant
 from bot.services import pod_bracket, pod_swiss
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_deck_color import (
@@ -53,7 +53,6 @@ from bot.services.pod_drafts import (
     final_submit_deck_dm_for_participant,
     finalize_champion as finalize_db,
     get_participant_deck_state,
-    load_event_id_by_name_sync,
     load_event_id_by_thread_sync,
     load_event_name_sync,
     load_event_pairing_mode_sync,
@@ -61,7 +60,6 @@ from bot.services.pod_drafts import (
     participant_dm_info,
     participant_id_for_discord_user,
     participants_with_discord_for_event,
-    search_event_names_sync,
     seed_event_participants,
     set_match_result,
     set_participant_deck_colors,
@@ -2334,6 +2332,7 @@ async def maybe_post_championship(manager, *, force: bool = False) -> None:
         log.warning(f"[FINALIZE] champion.post_error event={event_id}", exc_info=True)
         return
     await _send_champion_thread_ping(manager, champions, player_colors, event_name)
+    await _react_trophy_on_champion_screenshots(manager, deck_data, dm_info)
     await _post_trophy_hype(
         manager, target, champions,
         event_name=event_name, displays=displays,
@@ -2342,6 +2341,44 @@ async def maybe_post_championship(manager, *, force: bool = False) -> None:
     if not force and manager.championship_task is not None and not manager.championship_task.done():
         manager.championship_task.cancel()
     await manager.disconnect_safely()
+
+
+SCREENSHOT_BACKFILL_HISTORY_LIMIT = 200
+
+
+async def _react_trophy_on_champion_screenshots(manager, deck_data, dm_info) -> None:
+    """Back-fill the 🏆 react on each champion's stored deck screenshot. It usually lands before the
+    champion is known, so the live listener can't have reacted to it. Attachment URLs are compared
+    without their query string — the CDN signature params rotate between fetches."""
+    if not manager.champion_discord_ids:
+        return
+    thread = await manager._fetch_thread()
+    if thread is None:
+        return
+    wanted_by_author: dict[str, str] = {}
+    for key, info in dm_info.items():
+        if info.discord_id not in manager.champion_discord_ids:
+            continue
+        data = deck_data.get(key)
+        if data and data.screenshot_url:
+            wanted_by_author[str(info.discord_id)] = data.screenshot_url.split("?")[0]
+    if not wanted_by_author:
+        return
+    try:
+        async for msg in thread.history(limit=SCREENSHOT_BACKFILL_HISTORY_LIMIT):
+            wanted = wanted_by_author.get(str(msg.author.id))
+            if wanted is None or wanted not in {att.url.split("?")[0] for att in msg.attachments}:
+                continue
+            try:
+                await msg.add_reaction("🏆")
+                log.info(f"[DECK] champion_screenshot_backfill event={manager.event_id} message={msg.id}")
+            except discord.HTTPException:
+                log.info("could not back-fill 🏆 reaction", exc_info=True)
+            wanted_by_author.pop(str(msg.author.id))
+            if not wanted_by_author:
+                break
+    except discord.HTTPException:
+        log.warning(f"[FINALIZE] screenshot_backfill.scan_error event={manager.event_id}", exc_info=True)
 
 
 async def _send_champion_thread_ping(manager, champions, player_colors, event_name: str) -> None:

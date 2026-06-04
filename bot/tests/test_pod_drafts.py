@@ -1,5 +1,6 @@
 from datetime import date, datetime, timedelta, timezone
 
+import pytest
 from sqlalchemy import select
 
 from bot.config import settings
@@ -8,6 +9,7 @@ from bot.services.pod_drafts import (
     FinalStanding,
     ParsedSeshEvent,
     active_event_for_discord_user_in_dm,
+    capture_deck_screenshot,
     finalize_champion,
     get_participant_deck_state,
     list_champions,
@@ -585,3 +587,54 @@ def test_apply_mainboards_writes_when_decklist_present_and_skips_others(session)
     assert by_name["Bob"].mainboard_card_ids is None
     assert by_name["Carl"].mainboard_card_ids is None
     assert by_name["Dee"].mainboard_card_ids == ["c-d1", "c-d2"]
+
+
+@pytest.mark.parametrize(
+    "current_round, championship_posted, existing_url, existing_caption, new_caption, captured",
+    [
+        (None, False, None, None, None, False),
+        (3, False, None, None, None, True),
+        (3, False, "https://cdn.test/old.png", None, None, True),
+        (3, False, "https://cdn.test/old.png", "3-0 trophy", None, False),
+        (3, False, "https://cdn.test/old.png", "3-0 trophy", "went 2-1 actually", True),
+        (3, True, "https://cdn.test/old.png", None, None, False),
+        (3, True, "https://cdn.test/old.png", None, "3-0", True),
+        (3, True, None, None, None, True),
+    ],
+    ids=[
+        "too-early", "first-capture", "last-wins", "record-locks-slot", "record-replaces-record",
+        "post-championship-ignored", "post-championship-record-overrides", "post-championship-fills-missing",
+    ],
+)
+def test_capture_deck_screenshot_gating(
+    session, current_round, championship_posted, existing_url, existing_caption, new_caption, captured,
+):
+    player = _seed_player(session, discord_id="901", username="cap", display_name="Cap")
+    event = PodDraftEvent(
+        event_date=date(2026, 6, 3), event_time=datetime(2026, 6, 3, tzinfo=timezone.utc),
+        set_code="SOS", name="SOS Pod Capture", draftmancer_session="cap-sess",
+        draftmancer_url="https://draftmancer.com/?session=cap-sess",
+        discord_thread_id="cap-thread", sesh_message_id="cap-msg", socket_status="complete",
+        current_round=current_round,
+        championship_posted_at=datetime(2026, 6, 3, 23, tzinfo=timezone.utc) if championship_posted else None,
+    )
+    session.add(event)
+    session.flush()
+    session.add(PodDraftParticipant(
+        event_id=event.id, player_id=player.id, display_name="Cap",
+        deck_screenshot_url=existing_url, deck_screenshot_caption=existing_caption,
+    ))
+    session.flush()
+
+    result = capture_deck_screenshot(session, "cap-thread", "901", "https://cdn.test/new.png", new_caption)
+
+    stored = session.execute(
+        select(PodDraftParticipant).where(PodDraftParticipant.event_id == event.id)
+    ).scalar_one()
+    if captured:
+        assert result == event.id
+        assert stored.deck_screenshot_url == "https://cdn.test/new.png"
+        assert stored.deck_screenshot_caption == new_caption
+    else:
+        assert result is None
+        assert stored.deck_screenshot_url == existing_url

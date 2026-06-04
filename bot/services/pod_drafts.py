@@ -765,10 +765,17 @@ def capture_deck_screenshot(
       - A stored caption that already matches the record-pattern locks the slot; a new image with
         no record-pattern is ignored. A new image WITH a record-pattern overwrites unconditionally
         (latest-record-wins).
+      - Once the championship has posted, a participant with a deck already on file is done — new
+        images are ignored unless the caption carries a record pattern (intentional replacement).
       - Otherwise last-wins.
     """
     row = session.execute(
-        select(PodDraftParticipant, PodDraftEvent.id, PodDraftEvent.current_round)
+        select(
+            PodDraftParticipant,
+            PodDraftEvent.id,
+            PodDraftEvent.current_round,
+            PodDraftEvent.championship_posted_at,
+        )
         .join(Player, Player.id == PodDraftParticipant.player_id)
         .join(PodDraftEvent, PodDraftEvent.id == PodDraftParticipant.event_id)
         .where(
@@ -778,7 +785,7 @@ def capture_deck_screenshot(
     ).first()
     if row is None:
         return None
-    participant, event_id, current_round = row
+    participant, event_id, current_round, championship_posted_at = row
     if current_round is None:
         log.info(f"[DECK] screenshot.too_early event={event_id} discord_id={discord_id} caption={caption!r}")
         return None
@@ -788,6 +795,12 @@ def capture_deck_screenshot(
         log.info(
             f"[DECK] screenshot.locked_ignored event={event_id} discord_id={discord_id} "
             f"locked_caption={participant.deck_screenshot_caption!r} new_caption={caption!r}"
+        )
+        return None
+    if not new_has_record and championship_posted_at is not None and participant.deck_screenshot_url is not None:
+        log.info(
+            f"[DECK] screenshot.post_championship_ignored event={event_id} discord_id={discord_id} "
+            f"caption={caption!r}"
         )
         return None
     replaced = participant.deck_screenshot_url is not None

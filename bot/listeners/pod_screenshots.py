@@ -1,12 +1,14 @@
 """Capture images a participant posts in a pod-draft thread → stash on participant row.
 
 Active from the moment Draftmancer picks finish (event.current_round becomes non-null).
-Last-image-wins, except a stored caption matching the record-pattern (e.g. "3-0", "2-1",
-"trophy") locks the slot — only another record-pattern image can replace it.
+Last-image-wins, except a stored caption matching the record-pattern (e.g. "3-0", "2-1")
+locks the slot — only another record-pattern image can replace it. Once the championship
+has posted, participants with a deck on file are done: their later images are ignored
+unless record-captioned.
 
 On capture we trigger maybe_post_championship — once the top finishers all have colors and a
 screenshot the one-time coordination announcement (Components V2 layout) posts to the parent
-channel. If the author is a champion, we also react 🏆 on the message itself.
+channel. A captured screenshot from a champion gets a 🏆 react on the message itself.
 """
 from __future__ import annotations
 
@@ -53,13 +55,14 @@ class PodScreenshotListener(commands.Cog):
         caption = (message.content or "").strip() or None
 
         event_id = await asyncio.to_thread(_capture_sync, thread_id, discord_id, image_url, caption)
+        if event_id is None:
+            return
 
         is_champion_in_memory = False
-        if event_id is not None:
-            manager = ACTIVE_POD_MANAGERS.get(event_id)
-            if manager is not None:
-                await maybe_post_championship(manager)
-                is_champion_in_memory = discord_id in manager.champion_discord_ids
+        manager = ACTIVE_POD_MANAGERS.get(event_id)
+        if manager is not None:
+            await maybe_post_championship(manager)
+            is_champion_in_memory = discord_id in manager.champion_discord_ids
 
         is_champion_in_db = await asyncio.to_thread(_is_thread_champion_sync, thread_id, discord_id)
         if is_champion_in_memory or is_champion_in_db:
