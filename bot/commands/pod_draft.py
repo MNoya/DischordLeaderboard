@@ -257,24 +257,30 @@ class PodDraft(commands.Cog):
             return
 
         await interaction.response.defer(thinking=False)
-        sesh_message_id = await asyncio.to_thread(load_event_sesh_message_id_sync, event_id)
-        rsvps = await fetch_sesh_rsvps(self.bot, sesh_message_id) if sesh_message_id else None
-        if rsvps is None:
-            await interaction.followup.send(MSG_SEEDING_NO_SESH, ephemeral=True)
-            return
+        seating_mode = await asyncio.to_thread(load_event_seating_mode_sync, event_id)
+        if seating_mode == "leaderboard":
+            file, embed = await seating_message_for_event(self.bot, event_id)
+            if embed is None:
+                await interaction.followup.send(MSG_SEEDING_NO_RSVPS, ephemeral=True)
+                return
+        else:
+            sesh_message_id = await asyncio.to_thread(load_event_sesh_message_id_sync, event_id)
+            rsvps = await fetch_sesh_rsvps(self.bot, sesh_message_id) if sesh_message_id else None
+            if rsvps is None:
+                await interaction.followup.send(MSG_SEEDING_NO_SESH, ephemeral=True)
+                return
 
-        yes, maybe = rsvps
-        seen = {n.casefold() for n in yes}
-        maybe = [n for n in maybe if n.casefold() not in seen]
-        if not yes and not maybe:
-            await interaction.followup.send(MSG_SEEDING_NO_RSVPS, ephemeral=True)
-            return
+            yes, maybe = rsvps
+            seen = {n.casefold() for n in yes}
+            maybe = [n for n in maybe if n.casefold() not in seen]
+            if not yes and not maybe:
+                await interaction.followup.send(MSG_SEEDING_NO_RSVPS, ephemeral=True)
+                return
 
-        seat_cap = await _seat_cap_for_event(event_id)
-        file, embed = await asyncio.to_thread(
-            build_seeding_image_message_from_names, yes, maybe, seat_cap=seat_cap,
-        )
-        log.info(f"pod-seeding: {interaction.user} for event_id={event_id} ({len(yes)} yes, {len(maybe)} maybe)")
+            file, embed = await asyncio.to_thread(
+                build_seeding_image_message_from_names, yes, maybe, seat_cap=settings.pod_draft_max_players,
+            )
+        log.info(f"pod-seeding: {interaction.user} for event_id={event_id} (mode={seating_mode})")
         if file is not None:
             posted = await interaction.followup.send(embed=embed, file=file, wait=True)
         else:
@@ -420,10 +426,19 @@ def build_seeding_image_message_from_names(
     return file, embed
 
 
-async def _seat_cap_for_event(event_id: str) -> int:
-    """Top-8 when Leaderboard seats decide the pod; the pod maximum otherwise."""
-    seating_mode = await asyncio.to_thread(load_event_seating_mode_sync, event_id)
-    return CHAMPIONSHIP_CUT if seating_mode == "leaderboard" else settings.pod_draft_max_players
+def build_seeding_image_message_for_pool(
+    pool: list[str], overflow: list[str], maybe: list[str],
+) -> tuple[discord.File | None, discord.Embed]:
+    """Seeding message where `pool` holds the table regardless of rank: pool and overflow are seeded
+    separately so a high seed who only RSVP'd can't displace a locked Draftmancer player."""
+    with SessionLocal() as session:
+        pool_seeded = seed_attendees(session, pool)
+        overflow_seeded = seed_attendees(session, overflow)
+        maybe_seeded = seed_attendees(session, maybe)
+    yes_seeded = pool_seeded + overflow_seeded
+    embed = _build_seeding_embed(yes_seeded, maybe_seeded, seat_cap=CHAMPIONSHIP_CUT)
+    file = _build_seeding_image(yes_seeded, embed, seat_cap=CHAMPIONSHIP_CUT)
+    return file, embed
 
 
 _OPEN_SEAT = SeededAttendee(slug=None, display_name="(open)", rank=None, score=None, trophies=None)
@@ -639,17 +654,50 @@ async def delete_stale_seeding_messages(
 
 async def seating_message_for_event(bot, event_id: str) -> tuple[discord.File | None, discord.Embed | None]:
     """The Leaderboard-seats message — the seeding table embed with the round-table octagon as a PNG
-    inside it, built from the pod's sesh RSVPs. Returns (file, embed); (None, None) on no data."""
+    inside it. Draftmancer session members are locked at the table; Yes RSVPs only fill the seats
+    left under the cut and later ones list below it. Returns (file, embed); (None, None) on no data."""
     sesh_message_id = await asyncio.to_thread(load_event_sesh_message_id_sync, event_id)
     rsvps = await fetch_sesh_rsvps(bot, sesh_message_id) if sesh_message_id else None
-    if not rsvps:
+    yes, maybe = rsvps if rsvps else ([], [])
+    locked, locked_keys = await _locked_table_names(event_id)
+    pool, overflow = _seating_pool(locked, locked_keys, yes)
+    if not pool and not maybe:
         return None, None
-    yes, maybe = rsvps
-    seen = {n.casefold() for n in yes}
-    maybe = [n for n in maybe if n.casefold() not in seen]
-    if not yes and not maybe:
-        return None, None
-    return await asyncio.to_thread(build_seeding_image_message_from_names, yes, maybe)
+    pooled = {n.casefold() for n in pool} | {n.casefold() for n in overflow} | locked_keys
+    maybe = [n for n in maybe if n.casefold() not in pooled]
+    return await asyncio.to_thread(build_seeding_image_message_for_pool, pool, overflow, maybe)
+
+
+async def _locked_table_names(event_id: str) -> tuple[list[str], set[str]]:
+    """Display names of everyone in the live Draftmancer session, plus the casefolded keys (display
+    and arena names) used to dedup RSVPs against them. Empty when no manager is connected."""
+    manager = ACTIVE_POD_MANAGERS.get(event_id)
+    if manager is None:
+        return [], set()
+    classified = await manager.classified_session_users()
+    if not classified:
+        return [], set()
+    locked = [display or arena for arena, display in classified]
+    keys = {arena.casefold() for arena, _ in classified} | {n.casefold() for n in locked}
+    return locked, keys
+
+
+def _seating_pool(locked: list[str], locked_keys: set[str], yes: list[str]) -> tuple[list[str], list[str]]:
+    """Locked session players take the table first; Yes RSVPs fill the seats left up to
+    CHAMPIONSHIP_CUT; everyone after that overflows below the cut."""
+    pool = list(locked)
+    overflow: list[str] = []
+    taken = set(locked_keys)
+    for name in yes:
+        key = name.casefold()
+        if key in taken:
+            continue
+        taken.add(key)
+        if len(pool) < CHAMPIONSHIP_CUT:
+            pool.append(name)
+        else:
+            overflow.append(name)
+    return pool, overflow
 
 
 async def post_seeding_table(bot, event_id: str, channel) -> None:

@@ -230,8 +230,7 @@ class PodDraftManager:
                         asyncio.create_task(self._claim_ownership_and_apply_settings())
                     break
 
-        non_bot_names = [u.get("userName") for u in self.session_users
-                         if u.get("userName") and u.get("userName") != _BOT_USER_NAME]
+        non_bot_names = self.non_bot_session_names()
         classified = await self._classify_users(non_bot_names) if non_bot_names else []
         await self._refresh_lobby_status(classified)
 
@@ -462,6 +461,15 @@ class PodDraftManager:
             await asyncio.to_thread(_ensure_players_for_members_sync, unresolved)
         return out
 
+    def non_bot_session_names(self) -> list[str]:
+        return [u.get("userName") for u in self.session_users
+                if u.get("userName") and u.get("userName") != _BOT_USER_NAME]
+
+    async def classified_session_users(self) -> list[tuple[str, str | None]]:
+        """Current non-bot session users as (arena_name, linked_display_name_or_None)."""
+        names = self.non_bot_session_names()
+        return await self._classify_users(names) if names else []
+
     async def refresh_lobby_now(self) -> None:
         """Re-run classification and edit the lobby card. External hook for /pod-link-arena so the
         lobby reflects the new link immediately. Once the draft completes the roster is frozen:
@@ -469,8 +477,7 @@ class PodDraftManager:
         if self.draft_complete and self.tournament_roster:
             names = list(self.tournament_roster)
         else:
-            names = [u.get("userName") for u in self.session_users
-                     if u.get("userName") and u.get("userName") != _BOT_USER_NAME]
+            names = self.non_bot_session_names()
         classified = await self._classify_users(names) if names else []
         await self._refresh_lobby_status(classified)
 
@@ -621,10 +628,7 @@ class PodDraftManager:
             seated = [u.get("userName") for u in users.values() if isinstance(u, dict) and u.get("userName")]
             if seated:
                 return seated
-        return [
-            u.get("userName") for u in self.session_users
-            if u.get("userName") and u.get("userName") != _BOT_USER_NAME
-        ]
+        return self.non_bot_session_names()
 
     async def _on_draft_log(self, log_payload) -> None:
         if not isinstance(log_payload, dict):

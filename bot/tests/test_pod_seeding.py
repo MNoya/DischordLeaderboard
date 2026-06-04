@@ -1,6 +1,8 @@
 from datetime import date
 
-from bot.commands.pod_draft import CHAMPIONSHIP_CUT, _build_seeding_embed, _seeding_block
+import pytest
+
+from bot.commands.pod_draft import CHAMPIONSHIP_CUT, _build_seeding_embed, _seating_pool, _seeding_block
 from bot.models import MagicSet, Player, PlayerStats
 from bot.services.player_stats import SeededAttendee, seed_attendees
 
@@ -116,3 +118,26 @@ def test_build_seeding_embed_includes_both_sections():
     embed = _build_seeding_embed(yes, maybe, seat_cap=CHAMPIONSHIP_CUT)
     assert "✅ Yes (1)" in embed.description
     assert "🤷 Maybe (1)" in embed.description
+
+
+_FILLERS = ["R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8"]
+
+
+@pytest.mark.parametrize(
+    "locked, locked_keys, yes, expected_pool, expected_overflow",
+    [
+        ([], set(), ["Ava", "Bram"], ["Ava", "Bram"], []),
+        ([], set(), _FILLERS + ["R9", "R10"], _FILLERS, ["R9", "R10"]),
+        (["Ava", "Bram"], {"ava", "bram", "ava#123"}, ["Ava#123", "Cara"], ["Ava", "Bram", "Cara"], []),
+        (["Ava"], {"ava"}, _FILLERS, ["Ava"] + _FILLERS[:7], _FILLERS[7:]),
+        (_FILLERS, {n.casefold() for n in _FILLERS}, ["Ava", "Bram"], _FILLERS, ["Ava", "Bram"]),
+        ([], set(), ["Ava", "ava", "Bram"], ["Ava", "Bram"], []),
+    ],
+    ids=["rsvps-only", "rsvp-overflow", "locked-deduped-by-arena", "locked-plus-fillers", "full-table-all-overflow",
+         "duplicate-rsvp-dropped"],
+)
+def test_seating_pool_locks_session_players_first(locked, locked_keys, yes, expected_pool, expected_overflow):
+    pool, overflow = _seating_pool(locked, locked_keys, yes)
+
+    assert pool == expected_pool
+    assert overflow == expected_overflow
