@@ -93,7 +93,8 @@ LAST_CHANCE = "last_chance"
 GRACE_SECONDS = 60  # window after round completion during which edits regenerate the next round
 BRACKET_EDIT_BLOCKED_MSG = "That result can't be changed now — a later round already reported a result."
 ANNOUNCEMENT_TOP_N = 4  # channel-level announcement shows top performers only; thread keeps full standings
-TROPHY_HYPE_CHANNEL_NAME = "trophy-hype"
+TROPHY_HYPE_CHANNEL_ID = 775804000905461781  # 🏆-trophy-hype
+TROPHY_HYPE_HISTORY_LIMIT = 100  # messages scanned for a champion's own trophy post before the bot posts
 CHAMPIONSHIP_DEADLINE_SECONDS = 600  # hard cap from R3 end: post the announcement with whatever decks landed
 CHAMPIONSHIP_RECONCILE_WINDOW = timedelta(hours=24)  # startup sweep only revisits recently-finalized pods
 
@@ -1657,15 +1658,29 @@ def _format_champion_title(names_with_colors: list[tuple[str, str | None]], shor
         suffix = f" with {emoji_run}" if emoji_run else ""
         return f"🏆 {name} takes {short_event}{suffix}"
 
+    return f"🏆 {_join_champion_names(names_with_colors)} share {short_event}"
+
+
+def _format_champion_thread_callout(names_with_colors: list[tuple[str, str | None]]) -> str:
+    """Thread-side phrasing of the champion headline — no trophy glyph and no event name, since it
+    posts inside the event's own thread right under the championship post."""
+    if len(names_with_colors) == 1:
+        name, color = names_with_colors[0]
+        emoji_run = _format_deck_color_emojis(color)
+        suffix = f" with {emoji_run}" if emoji_run else ""
+        return f"{name} wins the draft{suffix}"
+
+    return f"{_join_champion_names(names_with_colors)} share the draft"
+
+
+def _join_champion_names(names_with_colors: list[tuple[str, str | None]]) -> str:
     chunks = []
     for name, color in names_with_colors:
         emoji_run = _format_deck_color_emojis(color)
         chunks.append(f"{name} {emoji_run}" if emoji_run else name)
     if len(chunks) == 2:
-        joined = f"{chunks[0]} and {chunks[1]}"
-    else:
-        joined = ", ".join(chunks[:-1]) + f", and {chunks[-1]}"
-    return f"🏆 {joined} share {short_event}"
+        return f"{chunks[0]} and {chunks[1]}"
+    return ", ".join(chunks[:-1]) + f", and {chunks[-1]}"
 
 
 def build_champion_announcement_view(
@@ -2333,12 +2348,12 @@ async def maybe_post_championship(manager, *, force: bool = False) -> None:
         manager.champion_announced = False
         log.warning(f"[FINALIZE] champion.post_error event={event_id}", exc_info=True)
         return
-    await _send_champion_thread_ping(manager, champions, player_colors, event_name)
+    await _send_champion_thread_ping(manager, champions, player_colors)
     await _react_trophy_on_champion_screenshots(manager, deck_data, dm_info)
     await _post_trophy_hype(
         manager, target, champions,
         event_name=event_name, displays=displays,
-        player_colors=player_colors, deck_data=deck_data,
+        player_colors=player_colors, deck_data=deck_data, dm_info=dm_info,
     )
     if not force and manager.championship_task is not None and not manager.championship_task.done():
         manager.championship_task.cancel()
@@ -2383,9 +2398,9 @@ async def _react_trophy_on_champion_screenshots(manager, deck_data, dm_info) -> 
         log.warning(f"[FINALIZE] screenshot_backfill.scan_error event={manager.event_id}", exc_info=True)
 
 
-async def _send_champion_thread_ping(manager, champions, player_colors, event_name: str) -> None:
-    """Thread-side champion callout once the championship post is up: the same headline as the post,
-    in mention form, with a jump button to it."""
+async def _send_champion_thread_ping(manager, champions, player_colors) -> None:
+    """Thread-side champion callout once the championship post is up: the headline in mention form
+    (without notifying anyone) with a jump button to the post."""
     thread = await manager._fetch_thread()
     announcement = manager.champion_announcement_message
     if thread is None or announcement is None:
@@ -2398,7 +2413,6 @@ async def _send_champion_thread_ping(manager, champions, player_colors, event_na
         named.append((mention, player_colors.get(normalize_player_name(s.player_name))))
     if not named:
         return
-    short = _short_event_name(event_name) or event_name
     view = ui.View(timeout=None)
     view.add_item(ui.Button(
         label="Championship Post",
@@ -2408,8 +2422,8 @@ async def _send_champion_thread_ping(manager, champions, player_colors, event_na
     ))
     try:
         await thread.send(
-            content=_format_champion_title(named, short),
-            allowed_mentions=discord.AllowedMentions(users=True),
+            content=_format_champion_thread_callout(named),
+            allowed_mentions=discord.AllowedMentions.none(),
             view=view,
         )
     except Exception:
@@ -2458,15 +2472,32 @@ async def _post_trophy_hype(
     displays: dict[str, dict],
     player_colors: dict[str, str | None],
     deck_data: dict[str, "ParticipantDeckData"],
+    dm_info: dict,
 ) -> None:
     guild = getattr(target, "guild", None)
     channel = _find_trophy_hype_channel(guild)
     if channel is None:
         log.info(f"[FINALIZE] trophy_hype.skip event={manager.event_id} reason=no_channel")
         return
+    started_at = await asyncio.to_thread(_load_event_started_at_sync, manager.event_id)
+    self_post_authors = await _trophy_hype_image_authors(channel, started_at)
+    remaining = []
+    for standing in champions:
+        info = dm_info.get(normalize_player_name(standing.player_name))
+        discord_id = info.discord_id if info else None
+        if discord_id and discord_id in self_post_authors:
+            log.info(
+                f"[FINALIZE] trophy_hype.skip_champion event={manager.event_id} "
+                f"champion={standing.player_name!r} reason=already_posted"
+            )
+            continue
+        remaining.append(standing)
+    if not remaining:
+        log.info(f"[FINALIZE] trophy_hype.skip event={manager.event_id} reason=champions_already_posted")
+        return
     thread_id = int(manager.thread_id) if isinstance(manager.thread_id, (int, str)) else None
     hype_view = build_trophy_hype_view(
-        champions, event_name=event_name, displays=displays,
+        remaining, event_name=event_name, displays=displays,
         player_colors=player_colors, deck_data=deck_data,
         guild_id=getattr(guild, "id", None), thread_id=thread_id,
     )
@@ -2480,7 +2511,20 @@ async def _post_trophy_hype(
 def _find_trophy_hype_channel(guild: discord.Guild | None) -> discord.TextChannel | None:
     if guild is None:
         return None
-    return discord.utils.get(guild.text_channels, name=TROPHY_HYPE_CHANNEL_NAME)
+    return guild.get_channel(TROPHY_HYPE_CHANNEL_ID)
+
+
+async def _trophy_hype_image_authors(channel: discord.TextChannel, after) -> set[str]:
+    """Discord ids of everyone who posted an image in the hype channel since the event started, so a
+    champion who already shared their own trophy shot doesn't get a duplicate bot post."""
+    authors: set[str] = set()
+    try:
+        async for message in channel.history(limit=TROPHY_HYPE_HISTORY_LIMIT, after=after):
+            if message.attachments or message.embeds:
+                authors.add(str(message.author.id))
+    except Exception:
+        log.warning("could not scan trophy hype channel history", exc_info=True)
+    return authors
 
 
 class _RecoveryManager:
