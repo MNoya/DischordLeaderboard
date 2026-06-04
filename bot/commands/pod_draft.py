@@ -270,7 +270,10 @@ class PodDraft(commands.Cog):
             await interaction.followup.send(MSG_SEEDING_NO_RSVPS, ephemeral=True)
             return
 
-        file, embed = await asyncio.to_thread(build_seeding_image_message_from_names, yes, maybe)
+        seat_cap = await _seat_cap_for_event(event_id)
+        file, embed = await asyncio.to_thread(
+            build_seeding_image_message_from_names, yes, maybe, seat_cap=seat_cap,
+        )
         log.info(f"pod-seeding: {interaction.user} for event_id={event_id} ({len(yes)} yes, {len(maybe)} maybe)")
         if file is not None:
             posted = await interaction.followup.send(embed=embed, file=file, wait=True)
@@ -405,24 +408,31 @@ def _seed_rsvps(
 
 
 def build_seeding_image_message_from_names(
-    yes: list[str], maybe: list[str] | None = None,
+    yes: list[str], maybe: list[str] | None = None, *, seat_cap: int = CHAMPIONSHIP_CUT,
 ) -> tuple[discord.File | None, discord.Embed]:
     """Seed RSVP-style name lists and render the seeding message: the table embed with the round-table
     octagon as a PNG inside it. Shared by /pod-seeding, the Leaderboard-seats trigger, and the testlobby
-    preview. File is None for non-8 pods (the embed still stands alone)."""
+    preview. `seat_cap` bounds how many seeds fill the seats: top-8 when Leaderboard seats decide the
+    pod, the pod maximum otherwise. File is None for non-8 pods (the embed still stands alone)."""
     yes_seeded, maybe_seeded = _seed_rsvps(yes, list(maybe or []))
-    embed = _build_seeding_embed(yes_seeded, maybe_seeded)
-    file = _build_seeding_image(yes_seeded, embed)
+    embed = _build_seeding_embed(yes_seeded, maybe_seeded, seat_cap=seat_cap)
+    file = _build_seeding_image(yes_seeded, embed, seat_cap=seat_cap)
     return file, embed
+
+
+async def _seat_cap_for_event(event_id: str) -> int:
+    """Top-8 when Leaderboard seats decide the pod; the pod maximum otherwise."""
+    seating_mode = await asyncio.to_thread(load_event_seating_mode_sync, event_id)
+    return CHAMPIONSHIP_CUT if seating_mode == "leaderboard" else settings.pod_draft_max_players
 
 
 _OPEN_SEAT = SeededAttendee(slug=None, display_name="(open)", rank=None, score=None, trophies=None)
 
 
-def _pod_ring(yes: list[SeededAttendee]) -> list[SeededAttendee] | None:
-    """Seat the pod (capped at pod_draft_max_players) into the ring for the image, padding an odd count
-    to even with an open seat. Returns the seated ring for 6-10 players, else None (no ring drawn)."""
-    pool = list(yes[:settings.pod_draft_max_players])
+def _pod_ring(yes: list[SeededAttendee], seat_cap: int) -> list[SeededAttendee] | None:
+    """Seat the pod (capped at seat_cap) into the ring for the image, padding an odd count to even
+    with an open seat. Returns the seated ring for 6-10 players, else None (no ring drawn)."""
+    pool = list(yes[:seat_cap])
     if len(pool) % 2:
         pool.append(_OPEN_SEAT)
     if not 6 <= len(pool) <= 10:
@@ -430,9 +440,11 @@ def _pod_ring(yes: list[SeededAttendee]) -> list[SeededAttendee] | None:
     return seated_ring_order(pool)
 
 
-def _build_seeding_image(yes: list[SeededAttendee], embed: discord.Embed) -> discord.File | None:
+def _build_seeding_image(
+    yes: list[SeededAttendee], embed: discord.Embed, *, seat_cap: int,
+) -> discord.File | None:
     """Render the seated ring as a monospace PNG (6-10 players) and attach it to the embed; None otherwise."""
-    seated = _pod_ring(yes)
+    seated = _pod_ring(yes, seat_cap)
     if seated is None:
         return None
     png = render_octagon_png(_seating_octagon(seated))
@@ -440,14 +452,17 @@ def _build_seeding_image(yes: list[SeededAttendee], embed: discord.Embed) -> dis
     return discord.File(io.BytesIO(png), "seating.png")
 
 
-def _build_seeding_embed(yes: list[SeededAttendee], maybe: list[SeededAttendee]) -> discord.Embed:
+def _build_seeding_embed(
+    yes: list[SeededAttendee], maybe: list[SeededAttendee], *, seat_cap: int,
+) -> discord.Embed:
     """Seeding embed shared by /pod-seeding and the Leaderboard-seats trigger. The Yes list is seated by
-    rank (the top-8 fill the ring); Maybe is listed without seats. The round-table octagon is attached as
-    a PNG image (see _build_seeding_image) — embed code blocks wrap too narrowly for the text version."""
+    rank (the top seat_cap fill the ring); Maybe is listed without seats. The round-table octagon is
+    attached as a PNG image (see _build_seeding_image) — embed code blocks wrap too narrowly for the
+    text version."""
     parts: list[str] = []
     if yes:
-        cut = CHAMPIONSHIP_CUT if len(yes) > CHAMPIONSHIP_CUT else None
-        ring = seated_ring_order(yes[:CHAMPIONSHIP_CUT])
+        cut = seat_cap if len(yes) > seat_cap else None
+        ring = seated_ring_order(yes[:seat_cap])
         seat_of = {id(a): i + 1 for i, a in enumerate(ring)}
         yes_seats = [seat_of.get(id(a)) for a in yes]
         parts.append(f"{SEEDING_YES_HEADER}{len(yes)})**\n" + _seeding_block(yes, seats=yes_seats, cut_after=cut))

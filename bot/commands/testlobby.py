@@ -37,7 +37,9 @@ from bot.services.player_stats import rank_players_for_set
 from bot.commands.pod_draft import build_seeding_image_message_from_names, post_manual_seating_table, post_table
 from bot.services.pod_format_select import FormatSelectView
 from bot.services.pod_settings_view import PodSettingsView
-from bot.services.pod_tournament import actor_label, start_tournament
+from bot.services.pod_drafts import normalize_player_name
+from bot.services.pod_swiss import Standing
+from bot.services.pod_tournament import ParticipantDeckData, actor_label, build_trophy_hype_view, start_tournament
 from bot.slug import disambiguate_slug, slugify
 
 
@@ -283,6 +285,32 @@ def _submit_deck_view() -> SubmitDeckView:
     return SubmitDeckView(_test_submit_deck_color, _test_lookup_deck_state, _test_review_toggle)
 
 
+_TEST_DECK_SCREENSHOT_URL = "https://placehold.co/1280x720/2b2d31/ffffff/png?text=Deck+Screenshot"
+
+
+def _trophy_hype_preview() -> discord.ui.LayoutView:
+    """The #trophy-hype champion card rendered from fixture data via the prod builder."""
+    champion = Standing(
+        rank=1, player_id="Ava", player_name="Ava", wins=3, losses=0,
+        omw_pct=0.0, gw_pct=0.0, ogw_pct=0.0,
+    )
+    key = normalize_player_name(champion.player_name)
+    return build_trophy_hype_view(
+        [champion],
+        event_name="SOS Pod Draft #6 - Jun 3",
+        displays={key: {"display_name": "Ava"}},
+        player_colors={key: "URg"},
+        deck_data={key: ParticipantDeckData(
+            colors="URg",
+            screenshot_url=_TEST_DECK_SCREENSHOT_URL,
+            screenshot_caption="Izzet spells with a green splash for the bombs",
+            draft_log_url=None,
+        )},
+        guild_id=1,
+        thread_id=1,
+    )
+
+
 _THREAD_NAME = "SOS Pod Draft #3 - May 15"
 _DRAFTMANCER_URL = "https://draftmancer.com/?session=LLUT-SOS-May-15-D"
 _RSVPS_YES = [
@@ -305,7 +333,7 @@ _LINKED_EIGHT: list[tuple[str, str]] = [
 _VALID_STATES = (
     "empty", "partial", "linked", "unlinked", "ready", "notready", "cancelled", "superseded",
     "drafting", "complete", "submit", "podbracket", "podswiss", "podrandom", "podlobby", "format",
-    "seeding",
+    "seeding", "trophyhype",
 )
 
 _LIVE_POD_MODES = {"podbracket": "bracket", "podswiss": "swiss", "podrandom": "random"}
@@ -488,7 +516,8 @@ async def setup(bot: commands.Bot) -> None:
         """Owner-only. Render the pod-draft lobby embed in this channel.
 
         `state` ∈ empty | partial | linked | unlinked | ready | notready | cancelled | superseded |
-        drafting | complete | submit | podbracket | podswiss | podrandom | podlobby | format | seeding.
+        drafting | complete | submit | podbracket | podswiss | podrandom | podlobby | format |
+        seeding | trophyhype.
         No arg → posts the beginning lobby state. A specific state → edits the last in place.
         `podbracket` / `podswiss` / `podrandom` seed a real 8-player pod (seat 1 = you) and hand off to
         the prod tournament code. `podlobby` connects to a live Draftmancer session for ready-check
@@ -512,6 +541,10 @@ async def setup(bot: commands.Bot) -> None:
 
         if state == "submit":
             await ctx.send(view=_submit_deck_view())
+            return
+
+        if state == "trophyhype":
+            await ctx.send(view=_trophy_hype_preview())
             return
 
         if state == "format":

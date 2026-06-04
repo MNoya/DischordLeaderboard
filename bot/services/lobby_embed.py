@@ -31,14 +31,12 @@ class LobbyReadyButtonView(discord.ui.View):
         super().__init__(timeout=None)
         if ready_disabled:
             self.ready_check.disabled = True
-            self.settings.disabled = True
         if draftmancer_url:
             self.add_item(discord.ui.Button(
                 label="Join Draftmancer",
                 style=discord.ButtonStyle.link,
                 url=draftmancer_url,
                 emoji=emojis.get_emoji("draftmancer"),
-                disabled=ready_disabled,
             ))
 
     @discord.ui.button(

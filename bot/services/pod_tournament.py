@@ -95,12 +95,17 @@ LAST_CHANCE = "last_chance"
 GRACE_SECONDS = 60  # window after round completion during which edits regenerate the next round
 BRACKET_EDIT_BLOCKED_MSG = "That result can't be changed now — a later round already reported a result."
 ANNOUNCEMENT_TOP_N = 4  # channel-level announcement shows top performers only; thread keeps full standings
+TROPHY_HYPE_CHANNEL_NAME = "trophy-hype"
 CHAMPIONSHIP_DEADLINE_SECONDS = 600  # hard cap from R3 end: post the announcement with whatever decks landed
 CHAMPIONSHIP_RECONCILE_WINDOW = timedelta(hours=24)  # startup sweep only revisits recently-finalized pods
 
 
 def build_deck_reminder_text(mentions: str) -> str:
     return f"{mentions} drop your deck screenshot and set your colors so the championship post can go up 🏆"
+
+
+def build_deck_request_text(mentions: str) -> str:
+    return f"{mentions} share your deck screenshot and set your colors too 🎨"
 
 
 def match_was_played(match: dict) -> bool:
@@ -824,28 +829,43 @@ async def advance_to_round(manager: "PodDraftManager", round_num: int) -> None:
         await _dm_round_pairings(manager.bot, manager.event_id, round_num, pending_rows, posted.jump_url)
         if round_num == 1:
             asyncio.create_task(_send_submit_deck_dms(manager.bot, manager.event_id))
-        await _attach_next_round_link(manager, round_num - 1, posted.jump_url, round_num)
+        await _attach_round_link(manager, round_num - 1)
 
 
-async def _attach_next_round_link(manager: "PodDraftManager", prior_round: int,
-                                   next_url: str, next_round_num: int) -> None:
-    """Edit prior round's thread message to add a 'Go to Round N' link button pointing to `next_url`.
-    No-op when there's no prior round, no tracked prior message, or the prior view has no ActionRow
-    room (5-match pods)."""
-    if prior_round < 1:
+def _round_nav_link(manager, round_num: int) -> tuple[str | None, str | None]:
+    """(url, label) for the jump link shown under a round's dropdowns: the next round's message once
+    it exists, or the standings message after the final round. (None, None) when no target yet."""
+    if manager is None:
+        return None, None
+    if round_num < TOTAL_ROUNDS:
+        next_msg = manager.round_messages.get(round_num + 1)
+        if next_msg is None:
+            return None, None
+        return next_msg.jump_url, f"Go to Round {round_num + 1}"
+    standings_msg = manager.standings_message
+    if standings_msg is None:
+        return None, None
+    return standings_msg.jump_url, "Go to Standings"
+
+
+async def _attach_round_link(manager: "PodDraftManager", round_num: int) -> None:
+    """Edit round_num's thread message to append its nav link (next round / standings). No-op when
+    there's no tracked message, no link target yet, or the view has no ActionRow room (5-match pods)."""
+    if round_num < 1:
         return
-    prior_msg = manager.round_messages.get(prior_round)
-    if prior_msg is None:
+    msg = manager.round_messages.get(round_num)
+    if msg is None:
         return
-    prior_states = await asyncio.to_thread(
-        render_round_states, manager.event_id, prior_round, bracket=manager.pairing_mode == "bracket",
+    url, label = _round_nav_link(manager, round_num)
+    if url is None:
+        return
+    states = await asyncio.to_thread(
+        render_round_states, manager.event_id, round_num, bracket=manager.pairing_mode == "bracket",
     )
     try:
-        await prior_msg.edit(view=RoundResultsView(
-            prior_states, next_round_url=next_url, next_round_num=next_round_num,
-        ))
+        await msg.edit(view=RoundResultsView(states, link_url=url, link_label=label))
     except discord.HTTPException:
-        log.warning(f"could not attach next-round link to round {prior_round}", exc_info=True)
+        log.warning(f"could not attach nav link to round {round_num}", exc_info=True)
 
 
 class MatchResultSelect(ui.Select):
@@ -856,8 +876,8 @@ class MatchResultSelect(ui.Select):
                  a_display: str = "", b_display: str = "",
                  selected_value: str | None = None, winner_name: str | None = None,
                  is_trophy_match: bool = False, placeholder_text: str = "", allow_skip: bool = True,
-                 locked: bool = False):
-        disabled = locked
+                 row: int | None = None):
+        disabled = False
         if placeholder_text:
             disabled = True
             placeholder = placeholder_text[:150]
@@ -893,7 +913,7 @@ class MatchResultSelect(ui.Select):
             options=options,
             min_values=1,
             max_values=1,
-            row=slot,
+            row=slot if row is None else row,
             disabled=disabled,
         )
 
@@ -902,24 +922,30 @@ class MatchResultSelect(ui.Select):
 
 
 class RoundResultsView(ui.View):
-    """One View per round; holds up to MAX_MATCHES_PER_ROUND Selects, one per match.
+    """One View per round; holds up to MAX_MATCHES_PER_ROUND Selects, one per match. Locked matches
+    render no dropdown — their result already shows in the round embed.
 
-    When `next_round_url` is provided AND there's an ActionRow free (matches < MAX_MATCHES_PER_ROUND),
-    a 'Next Round' link button is appended so players can jump to the next round's message.
+    When `link_url` is provided AND there's an ActionRow free, a link button labelled `link_label`
+    is appended so players can jump to the next round's message or the standings.
     """
 
     def __init__(self, match_states: list[dict] | None = None, *,
-                 next_round_url: str | None = None, next_round_num: int | None = None):
+                 link_url: str | None = None, link_label: str | None = None):
         super().__init__(timeout=None)
         if match_states:
+            next_row = 0
             for slot, m in enumerate(match_states):
+                if m.get("locked"):
+                    continue
                 if m.get("placeholder"):
                     trophy = "🏆 " if m.get("is_trophy_match") else ""
                     text = m.get("dropdown_label") or m.get("label") or ""
                     self.add_item(MatchResultSelect(
                         slot=slot,
                         placeholder_text=f"⏳ {trophy}{text}",
+                        row=next_row,
                     ))
+                    next_row += 1
                     continue
                 selected = None
                 if m.get("winner_name") and m.get("score"):
@@ -934,14 +960,16 @@ class RoundResultsView(ui.View):
                     selected_value=selected,
                     is_trophy_match=bool(m.get("is_trophy_match")),
                     allow_skip=m.get("allow_skip", True),
-                    locked=m.get("locked", False),
+                    row=next_row,
                 ))
-            if next_round_url and next_round_num is not None and len(match_states) < MAX_MATCHES_PER_ROUND:
+                next_row += 1
+            if link_url and link_label and next_row < MAX_MATCHES_PER_ROUND:
                 self.add_item(discord.ui.Button(
                     style=discord.ButtonStyle.link,
-                    url=next_round_url,
-                    label=f"Go to Round {next_round_num}",
+                    url=link_url,
+                    label=link_label,
                     emoji=emojis.get_emoji("manat"),
+                    row=next_row,
                 ))
         else:
             # Persistent template covering all possible slots; real messages will only render the slots they need
@@ -1003,10 +1031,11 @@ async def _handle_result_submission(interaction: discord.Interaction, value: str
                 if dm_embed is not None:
                     await interaction.edit_original_response(embed=dm_embed, view=dm_view)
             else:
+                url, label = _round_nav_link(manager, round_num)
                 await interaction.edit_original_response(
                     content=None,
                     embed=round_embed(round_num, match_states),
-                    view=RoundResultsView(match_states),
+                    view=RoundResultsView(match_states, link_url=url, link_label=label),
                 )
         except Exception:
             log.warning("could not edit interaction message after clear", exc_info=True)
@@ -1033,10 +1062,11 @@ async def _handle_result_submission(interaction: discord.Interaction, value: str
             if dm_embed is not None:
                 await interaction.edit_original_response(embed=dm_embed, view=dm_view)
         else:
+            url, label = _round_nav_link(manager, round_num)
             await interaction.edit_original_response(
                 content=None,
                 embed=round_embed(round_num, match_states),
-                view=RoundResultsView(match_states),
+                view=RoundResultsView(match_states, link_url=url, link_label=label),
             )
     except Exception:
         log.warning("could not edit interaction message", exc_info=True)
@@ -1157,11 +1187,12 @@ async def _propagate_match_to_other_surfaces(
     thread_msg = manager.round_messages.get(round_num)
     if thread_msg is None or str(thread_msg.channel.id) == exclude_channel_id:
         return
+    url, label = _round_nav_link(manager, round_num)
     try:
         await thread_msg.edit(
             content=None,
             embed=round_embed(round_num, match_states),
-            view=RoundResultsView(match_states),
+            view=RoundResultsView(match_states, link_url=url, link_label=label),
         )
     except discord.HTTPException:
         log.warning(f"propagate: could not edit thread message {thread_msg.id}", exc_info=True)
@@ -1476,18 +1507,7 @@ async def finalize_tournament(manager: "PodDraftManager") -> None:
     if hasattr(manager, "share_draft_log"):
         await manager.share_draft_log()
 
-    champion_mention = await _resolve_discord_mention(manager.event_id, standings[0].player_name)
-    thread = await manager._fetch_thread()
-    if thread is not None and champion_mention:
-        try:
-            await thread.send(
-                content=f"Congrats {champion_mention}! 🏆",
-                allowed_mentions=discord.AllowedMentions(users=True),
-            )
-        except Exception:
-            log.warning("could not send champion ping", exc_info=True)
-
-    # disconnect is deferred to the championship post so the manager stays reachable while top-4 finish
+    # thread champion callout + disconnect happen alongside the championship post
 
 
 def _load_participant_slugs(event_id: str) -> dict[str, str]:
@@ -1945,14 +1965,16 @@ def _schedule_grace(manager, round_num: int) -> None:
 
 
 async def _locked_round_view(manager, round_num: int):
-    """View for a round once its grace window passes. Swiss removes the dropdowns; bracket keeps them
-    on screen but disabled, so reported results stay visible at the round's constant height."""
-    if manager.pairing_mode != "bracket":
-        return None
-    states = await asyncio.to_thread(load_bracket_round_states, manager.event_id, round_num)
+    """View for a round once its grace window passes: reported dropdowns are hidden (results stay
+    visible in the round embed) and only the nav link survives."""
+    states = await asyncio.to_thread(
+        render_round_states, manager.event_id, round_num, bracket=manager.pairing_mode == "bracket",
+    )
     for m in states:
-        m["locked"] = True
-    return RoundResultsView(states)
+        if m.get("winner_name"):
+            m["locked"] = True
+    url, label = _round_nav_link(manager, round_num)
+    return RoundResultsView(states, link_url=url, link_label=label)
 
 
 async def _grace_expire(manager, round_num: int) -> None:
@@ -2026,7 +2048,8 @@ async def _regenerate_next_round(manager, next_round: int) -> None:
     match_states = [_state_for_pending(match_id, a, b, standings_by_id, displays) for match_id, a, b in pending_rows]
     mark_trophy_match(match_states, next_round)
     embed = round_embed(next_round, match_states)
-    view = RoundResultsView(match_states)
+    url, label = _round_nav_link(manager, next_round)
+    view = RoundResultsView(match_states, link_url=url, link_label=label)
 
     posted = manager.round_messages.get(next_round)
     if posted is not None:
@@ -2159,30 +2182,51 @@ def incomplete_top_decks(standings, deck_data) -> list[str]:
 
 
 async def _ping_missing_deck_participants(manager) -> None:
-    """At R3 end, @ping every linked participant still missing colors or a deck screenshot."""
+    """At R3 end, @ping every linked participant still missing colors or a deck screenshot. Only the
+    top finishers gate the championship post, so they get the blocking wording; everyone else gets a
+    plain ask."""
     event_id = manager.event_id
     deck_data = await asyncio.to_thread(_load_event_deck_data_sync, event_id)
     dm_info = await asyncio.to_thread(_load_dm_info_sync, event_id)
-    missing_ids = [
-        info.discord_id for key, info in dm_info.items()
-        if info.discord_id and not deck_complete(deck_data.get(key))
-    ]
-    if not missing_ids:
+    prior = await asyncio.to_thread(_load_matches, event_id)
+    standings = pod_swiss.compute_standings(manager.tournament_players, prior)
+    blocking_keys = {normalize_player_name(n) for n in incomplete_top_decks(standings, deck_data)}
+    blocking_ids: list[str] = []
+    other_ids: list[str] = []
+    for key, info in dm_info.items():
+        if not info.discord_id or deck_complete(deck_data.get(key)):
+            continue
+        bucket = blocking_ids if key in blocking_keys else other_ids
+        bucket.append(info.discord_id)
+    if not blocking_ids and not other_ids:
         log.info(f"[FINALIZE] deck_ping.skip event={event_id} reason=all_complete")
         return
     thread = await manager._fetch_thread()
     if thread is None:
         log.info(f"[FINALIZE] deck_ping.skip event={event_id} reason=no_thread")
         return
-    mentions = " ".join(f"<@{i}>" for i in missing_ids)
+    lines = []
+    if blocking_ids:
+        lines.append(build_deck_reminder_text(_mention_run(blocking_ids)))
+    if other_ids:
+        lines.append(build_deck_request_text(_mention_run(other_ids)))
+    view = ui.View(timeout=None)
+    view.add_item(build_live_submit_deck_button())
     try:
         await thread.send(
-            content=build_deck_reminder_text(mentions),
+            content="\n".join(lines),
             allowed_mentions=discord.AllowedMentions(users=True),
+            view=view,
         )
-        log.info(f"[FINALIZE] deck_ping.sent event={event_id} count={len(missing_ids)}")
+        log.info(
+            f"[FINALIZE] deck_ping.sent event={event_id} blocking={len(blocking_ids)} other={len(other_ids)}"
+        )
     except Exception:
         log.warning(f"[FINALIZE] deck_ping.error event={event_id}", exc_info=True)
+
+
+def _mention_run(discord_ids: list[str]) -> str:
+    return " ".join(f"<@{i}>" for i in discord_ids)
 
 
 async def _championship_deadline(manager) -> None:
@@ -2262,12 +2306,14 @@ async def maybe_post_championship(manager, *, force: bool = False) -> None:
     }
     thread_id = int(manager.thread_id) if isinstance(manager.thread_id, (int, str)) else None
     guild_id = getattr(getattr(target, "guild", None), "id", None)
+    event_name = await asyncio.to_thread(load_event_name_sync, event_id)
+    player_colors = _colors_only(deck_data)
 
     view = build_champion_announcement_view(
         standings,
-        event_name=await asyncio.to_thread(load_event_name_sync, event_id),
+        event_name=event_name,
         displays=displays,
-        player_colors=_colors_only(deck_data),
+        player_colors=player_colors,
         site_root=settings.public_site_url.rstrip("/"),
         pending_count=0,
         deck_data=deck_data,
@@ -2287,9 +2333,115 @@ async def maybe_post_championship(manager, *, force: bool = False) -> None:
         manager.champion_announced = False
         log.warning(f"[FINALIZE] champion.post_error event={event_id}", exc_info=True)
         return
+    await _send_champion_thread_ping(manager, champions, player_colors, event_name)
+    await _post_trophy_hype(
+        manager, target, champions,
+        event_name=event_name, displays=displays,
+        player_colors=player_colors, deck_data=deck_data,
+    )
     if not force and manager.championship_task is not None and not manager.championship_task.done():
         manager.championship_task.cancel()
     await manager.disconnect_safely()
+
+
+async def _send_champion_thread_ping(manager, champions, player_colors, event_name: str) -> None:
+    """Thread-side champion callout once the championship post is up: the same headline as the post,
+    in mention form, with a jump button to it."""
+    thread = await manager._fetch_thread()
+    announcement = manager.champion_announcement_message
+    if thread is None or announcement is None:
+        return
+    named: list[tuple[str, str | None]] = []
+    for s in champions:
+        mention = await _resolve_discord_mention(manager.event_id, s.player_name)
+        if not mention:
+            continue
+        named.append((mention, player_colors.get(normalize_player_name(s.player_name))))
+    if not named:
+        return
+    short = _short_event_name(event_name) or event_name
+    view = ui.View(timeout=None)
+    view.add_item(ui.Button(
+        label="Championship Post",
+        style=discord.ButtonStyle.link,
+        url=announcement.jump_url,
+        emoji="🏆",
+    ))
+    try:
+        await thread.send(
+            content=_format_champion_title(named, short),
+            allowed_mentions=discord.AllowedMentions(users=True),
+            view=view,
+        )
+    except Exception:
+        log.warning("could not send champion ping", exc_info=True)
+
+
+def build_trophy_hype_view(
+    champions, *,
+    event_name: str,
+    displays: dict[str, dict],
+    player_colors: dict[str, str | None],
+    deck_data: dict[str, "ParticipantDeckData"],
+    guild_id: int | None = None,
+    thread_id: int | None = None,
+) -> ui.LayoutView:
+    """Champion-only announcement for #trophy-hype: headline, italic deck caption, and the deck
+    shot, with Thread + Draft Recap link buttons. A simplified take on the championship post,
+    sized to the channel's trophy-screenshot pattern."""
+    short = _short_event_name(event_name) or event_name
+    view = ui.LayoutView()
+    container = ui.Container(accent_colour=discord.Color.gold())
+    for s in champions:
+        key = normalize_player_name(s.player_name)
+        data = deck_data.get(key)
+        name = (displays.get(key) or {}).get("display_name") or s.player_name
+        lines = [f"### {_format_champion_title([(name, player_colors.get(key))], short)}"]
+        if data and data.screenshot_caption:
+            lines.append(f"*{data.screenshot_caption}*")
+        container.add_item(ui.TextDisplay("\n".join(lines)))
+        if data and data.screenshot_url:
+            container.add_item(ui.MediaGallery(
+                discord.MediaGalleryItem(media=data.screenshot_url, description=f"{name}'s deck"),
+            ))
+    view.add_item(container)
+    actions = ui.ActionRow()
+    if guild_id and thread_id:
+        actions.add_item(build_thread_link_button(guild_id, thread_id))
+    actions.add_item(build_replays_link_button(event_name))
+    view.add_item(actions)
+    return view
+
+
+async def _post_trophy_hype(
+    manager, target, champions, *,
+    event_name: str,
+    displays: dict[str, dict],
+    player_colors: dict[str, str | None],
+    deck_data: dict[str, "ParticipantDeckData"],
+) -> None:
+    guild = getattr(target, "guild", None)
+    channel = _find_trophy_hype_channel(guild)
+    if channel is None:
+        log.info(f"[FINALIZE] trophy_hype.skip event={manager.event_id} reason=no_channel")
+        return
+    thread_id = int(manager.thread_id) if isinstance(manager.thread_id, (int, str)) else None
+    hype_view = build_trophy_hype_view(
+        champions, event_name=event_name, displays=displays,
+        player_colors=player_colors, deck_data=deck_data,
+        guild_id=getattr(guild, "id", None), thread_id=thread_id,
+    )
+    try:
+        await channel.send(view=hype_view)
+        log.info(f"[FINALIZE] trophy_hype.posted event={manager.event_id} channel={channel.id}")
+    except Exception:
+        log.warning(f"[FINALIZE] trophy_hype.post_error event={manager.event_id}", exc_info=True)
+
+
+def _find_trophy_hype_channel(guild: discord.Guild | None) -> discord.TextChannel | None:
+    if guild is None:
+        return None
+    return discord.utils.get(guild.text_channels, name=TROPHY_HYPE_CHANNEL_NAME)
 
 
 class _RecoveryManager:
@@ -2389,22 +2541,45 @@ async def _post_or_update_live_standings(manager) -> None:
         thread = await manager._fetch_thread()
         if thread is None:
             return
-        view = build_live_submit_deck_view()
-        view.add_item(build_replays_link_button(event_name))
-        try:
-            manager.standings_message = await thread.send(embed=embed, view=view)
-        except Exception:
-            log.warning("could not post live standings", exc_info=True)
+        adopted = await _find_pinned_standings(thread, manager.bot.user, event_name)
+        if adopted is not None:
+            manager.standings_message = adopted
+        else:
+            view = build_live_submit_deck_view()
+            view.add_item(build_replays_link_button(event_name))
+            try:
+                manager.standings_message = await thread.send(embed=embed, view=view)
+            except Exception:
+                log.warning("could not post live standings", exc_info=True)
+                return
+            try:
+                await manager.standings_message.pin(reason="pod-draft live standings")
+            except discord.HTTPException:
+                log.warning(f"could not pin standings message {manager.standings_message.id}", exc_info=True)
+        await _attach_round_link(manager, TOTAL_ROUNDS)
+        if adopted is None:
             return
-        try:
-            await manager.standings_message.pin(reason="pod-draft live standings")
-        except discord.HTTPException:
-            log.warning(f"could not pin standings message {manager.standings_message.id}", exc_info=True)
-    else:
-        try:
-            await manager.standings_message.edit(embed=embed)
-        except Exception:
-            log.warning("could not edit live standings", exc_info=True)
+    try:
+        await manager.standings_message.edit(embed=embed)
+    except Exception:
+        log.warning("could not edit live standings", exc_info=True)
+
+
+async def _find_pinned_standings(thread, bot_user, event_name: str) -> discord.Message | None:
+    """Rediscover a standings message pinned by an earlier manager (pre-restart) so the embed is
+    edited in place instead of posting — and pinning — a duplicate."""
+    try:
+        pins = await thread.pins()
+    except discord.HTTPException:
+        log.warning("could not fetch pins to rediscover standings", exc_info=True)
+        return None
+    for msg in pins:
+        if bot_user is not None and msg.author.id != bot_user.id:
+            continue
+        for pinned_embed in msg.embeds:
+            if (pinned_embed.title or "").endswith(event_name) and "Standings" in (pinned_embed.description or ""):
+                return msg
+    return None
 
 
 async def _pin_round_message(message: discord.Message, round_num: int) -> None:
@@ -2845,7 +3020,8 @@ async def bracket_advance(manager, source_round: int) -> None:
     if not display:
         return
     embed = round_embed(target, display)
-    view = RoundResultsView(display)
+    url, label = _round_nav_link(manager, target)
+    view = RoundResultsView(display, link_url=url, link_label=label)
 
     if target_msg is None:
         thread = await manager._fetch_thread()
@@ -2858,7 +3034,7 @@ async def bracket_advance(manager, source_round: int) -> None:
             return
         manager.round_messages[target] = target_msg
         await _pin_round_message(target_msg, target)
-        await _attach_next_round_link(manager, source_round, target_msg.jump_url, target)
+        await _attach_round_link(manager, source_round)
     else:
         try:
             await target_msg.edit(content=None, embed=embed, view=view)
@@ -2890,20 +3066,16 @@ async def _bracket_maybe_advance(manager, round_num: int, is_edit: bool = False,
 
 
 async def _relock_prior_rounds(manager, current_round: int) -> None:
-    """Re-render the messages of rounds before current_round so their reported dropdowns gray out now
-    that a later round has reported (edits to them are blocked). Keeps each round's next-round link."""
+    """Re-render the messages of rounds before current_round so their reported dropdowns disappear now
+    that a later round has reported (edits to them are blocked). Keeps each round's nav link."""
     for r in range(1, current_round):
         msg = manager.round_messages.get(r)
         if msg is None:
             continue
         display = await asyncio.to_thread(load_bracket_round_states, manager.event_id, r)
-        next_msg = manager.round_messages.get(r + 1)
-        if next_msg is not None:
-            view = RoundResultsView(display, next_round_url=next_msg.jump_url, next_round_num=r + 1)
-        else:
-            view = RoundResultsView(display)
+        url, label = _round_nav_link(manager, r)
         try:
-            await msg.edit(view=view)
+            await msg.edit(view=RoundResultsView(display, link_url=url, link_label=label))
         except discord.HTTPException:
             log.warning(f"could not relock round {r}", exc_info=True)
 
