@@ -70,7 +70,7 @@ async def fire_reminder(event_id: str, *, early: bool = False) -> None:
     )
     body = (
         f"{emojis.get('draftmancer')} {headline}\n"
-        f"**Join the Draftmancer session:** {draftmancer_url}\n"
+        f"**Join the Draftmancer session:** <{draftmancer_url}>\n"
         "Set your Arena Name (e.g., `ArenaID#12345`) as your name in Draftmancer so pairings work smoothly."
         + (f"\n\n{mention_block}" if mention_block else "")
     )
