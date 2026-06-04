@@ -32,6 +32,17 @@ from bot.sets import ACTIVE_SET_CODE
 
 
 Apply = Callable[[discord.Interaction, str], Awaitable[str | None]]
+KickApply = Callable[[discord.Interaction, str], Awaitable[str | None]]
+KickTargetsProvider = Callable[[], list[tuple[str, str]]]
+CancelApply = Callable[[discord.Interaction], Awaitable[str | None]]
+
+
+def kick_notice(actor: str, name: str) -> str:
+    return f"🔨 **{name}** was removed by {actor}"
+
+
+def cancel_notice(actor: str) -> str:
+    return f"{actor} canceled the draft 🥀"
 
 
 class PodSettingsView(ui.View):
@@ -41,7 +52,11 @@ class PodSettingsView(ui.View):
                  on_seating: SeatingApply | None = None,
                  seat_order_provider: SeatOrderProvider | None = None,
                  on_seating_table: Callable[[discord.Interaction], Awaitable[None]] | None = None,
-                 on_seated: SeatedNotify | None = None) -> None:
+                 on_seated: SeatedNotify | None = None,
+                 kick_targets_provider: KickTargetsProvider | None = None,
+                 on_kick: KickApply | None = None,
+                 on_cancel: CancelApply | None = None,
+                 event_name: str | None = None) -> None:
         super().__init__(timeout=300)
         self.on_format = on_format
         self.on_pairing = on_pairing
@@ -53,6 +68,10 @@ class PodSettingsView(ui.View):
         self.seat_order_provider = seat_order_provider
         self.on_seating_table = on_seating_table
         self.on_seated = on_seated
+        self.kick_targets_provider = kick_targets_provider
+        self.on_kick = on_kick
+        self.on_cancel = on_cancel
+        self.event_name = event_name
         self.add_item(_FormatSetting(current_code))
         self.add_item(_PairingSetting(current_mode))
         if on_seating_mode is not None:
@@ -61,6 +80,10 @@ class PodSettingsView(ui.View):
                 and (current_seating or "random") == "manual"):
             self.add_item(SeatOrderButton(
                 seat_order_provider=seat_order_provider, on_seating=on_seating, on_seated=on_seated, row=3))
+        if kick_targets_provider is not None and on_kick is not None:
+            self.add_item(_KickPlayerButton(row=3))
+        if on_cancel is not None:
+            self.add_item(_CancelDraftButton(row=3))
 
     async def apply(self, interaction: discord.Interaction, *, on_apply: Apply,
                     value: str, attr: str, notice: str, marker: str) -> None:
@@ -76,6 +99,8 @@ class PodSettingsView(ui.View):
             on_seating_mode=self.on_seating_mode, current_seating=self.current_seating,
             on_seating=self.on_seating, seat_order_provider=self.seat_order_provider,
             on_seating_table=self.on_seating_table, on_seated=self.on_seated,
+            kick_targets_provider=self.kick_targets_provider, on_kick=self.on_kick,
+            on_cancel=self.on_cancel, event_name=self.event_name,
         ))
         if interaction.channel is not None:
             await send_settings_notice(interaction.channel, interaction.client.user, notice, marker=marker)
@@ -127,3 +152,78 @@ class _SeatingSetting(ui.Select):
                          marker=settings_notice_marker("Seats"))
         if mode == "leaderboard" and view.on_seating_table is not None:
             await view.on_seating_table(interaction)
+
+
+class _KickPlayerButton(ui.Button):
+    def __init__(self, row: int | None = None) -> None:
+        super().__init__(label="Kick Player", emoji="🔨", style=discord.ButtonStyle.grey, row=row)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view: PodSettingsView = self.view
+        targets = view.kick_targets_provider()
+        if not targets:
+            await interaction.response.send_message("No players in the Draftmancer session.", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            view=_KickSelectView(targets, view.on_kick), ephemeral=True,
+        )
+
+
+class _KickSelectView(ui.View):
+    def __init__(self, targets: list[tuple[str, str]], on_kick: KickApply) -> None:
+        super().__init__(timeout=120)
+        self.add_item(_KickSelect(targets, on_kick))
+
+
+class _KickSelect(ui.Select):
+    def __init__(self, targets: list[tuple[str, str]], on_kick: KickApply) -> None:
+        options = [discord.SelectOption(label=name, value=user_id) for user_id, name in targets[:25]]
+        super().__init__(placeholder="Remove a player from the table", options=options,
+                         min_values=1, max_values=1)
+        self.names = dict(targets)
+        self.on_kick = on_kick
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer()
+        user_id = self.values[0]
+        name = self.names.get(user_id, "player")
+        err = await self.on_kick(interaction, user_id)
+        if err:
+            await interaction.followup.send(f"⚠️ {err}", ephemeral=True)
+            return
+        await interaction.edit_original_response(content=f"🔨 **{name}** removed.", view=None)
+        if interaction.channel is not None:
+            await interaction.channel.send(kick_notice(actor_label(interaction), name))
+
+
+class _CancelDraftButton(ui.Button):
+    def __init__(self, row: int | None = None) -> None:
+        super().__init__(label="Cancel Draft", emoji="🗑️", style=discord.ButtonStyle.danger, row=row)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view: PodSettingsView = self.view
+        event_name = view.event_name or "this pod draft"
+        await interaction.response.send_message(
+            f"This permanently deletes **{event_name}** — participants, matches, replays, and the "
+            "leaderboard page. This can't be undone.",
+            view=_CancelConfirmView(view.on_cancel, event_name),
+            ephemeral=True,
+        )
+
+
+class _CancelConfirmView(ui.View):
+    def __init__(self, on_cancel: CancelApply, event_name: str) -> None:
+        super().__init__(timeout=60)
+        self.on_cancel = on_cancel
+        self.event_name = event_name
+
+    @ui.button(label="Delete Event", style=discord.ButtonStyle.danger, emoji="🗑️")
+    async def confirm(self, interaction: discord.Interaction, button: ui.Button) -> None:
+        await interaction.response.defer()
+        err = await self.on_cancel(interaction)
+        if err:
+            await interaction.followup.send(f"⚠️ {err}", ephemeral=True)
+            return
+        await interaction.edit_original_response(content=f"🗑️ **{self.event_name}** deleted.", view=None)
+        if interaction.channel is not None:
+            await interaction.channel.send(cancel_notice(actor_label(interaction)))

@@ -9,14 +9,14 @@ import re
 import discord
 from discord import app_commands
 from discord.ext import commands
-from sqlalchemy import any_, select
+from sqlalchemy import any_, delete, select
 
 from bot import audit, emojis
 from bot.commands import descriptions as desc
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.discord_helpers import display_width, extract_avatar_hash, player_url
-from bot.models import Player
+from bot.models import Player, PodDraftEvent
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_draft_manager import (
     set_event_format,
@@ -126,42 +126,10 @@ class PodDraft(commands.Cog):
                 ephemeral=True,
             )
             return
-        current_code = await asyncio.to_thread(load_event_set_code_sync, event_id)
-        current_mode = await asyncio.to_thread(load_event_pairing_mode_sync, event_id)
-        current_seating = await asyncio.to_thread(load_event_seating_mode_sync, event_id)
-
-        async def on_format(inter: discord.Interaction, code: str) -> str | None:
-            return await set_event_format(event_id, code)
-
-        async def on_pairing(inter: discord.Interaction, mode: str) -> str | None:
-            return await set_event_pairing_mode(event_id, mode)
-
-        async def on_seating_mode(inter: discord.Interaction, mode: str) -> str | None:
-            return await set_event_seating_mode(event_id, mode)
-
-        async def on_seating_table(inter: discord.Interaction) -> None:
-            await post_seeding_table(self.bot, event_id, inter.channel)
-
-        async def on_seated(inter: discord.Interaction, labels: list[str]) -> None:
-            await post_manual_seating_table(self.bot, inter.channel, labels, actor_label(inter))
-
-        manager = ACTIVE_POD_MANAGERS.get(event_id)
-        on_seating = None
-        seat_order_provider = None
-        if manager is not None:
-            async def on_seating(inter: discord.Interaction, ordered_user_names: list[str]) -> str | None:
-                return await set_event_seating(event_id, ordered_user_names)
-            seat_order_provider = manager.seating_lobby_order
-
         log.info(f"pod-settings: {interaction.user} opened panel for event_id={event_id}")
+        is_owner = await self.bot.is_owner(interaction.user)
         await interaction.response.send_message(
-            view=PodSettingsView(
-                on_format=on_format, on_pairing=on_pairing,
-                current_code=current_code, current_mode=current_mode,
-                on_seating_mode=on_seating_mode, current_seating=current_seating,
-                on_seating=on_seating, seat_order_provider=seat_order_provider,
-                on_seating_table=on_seating_table, on_seated=on_seated,
-            ),
+            view=await build_pod_settings_view(self.bot, event_id, is_owner=is_owner),
             ephemeral=True,
         )
 
@@ -650,6 +618,80 @@ async def delete_stale_seeding_messages(
         await channel.purge(limit=None, check=stale, reason="Stale pod-seeding table")
     except discord.HTTPException as exc:
         log.warning(f"pod-seeding: could not purge stale seeding messages: {exc}")
+
+
+async def build_pod_settings_view(bot, event_id: str, *, is_owner: bool) -> PodSettingsView:
+    """Settings panel wired for `event_id`. Shared by /pod-settings and the lobby Settings button.
+    Kick Player appears when a Draftmancer session is live; Cancel Draft only for the bot owner."""
+    current_code = await asyncio.to_thread(load_event_set_code_sync, event_id)
+    current_mode = await asyncio.to_thread(load_event_pairing_mode_sync, event_id)
+    current_seating = await asyncio.to_thread(load_event_seating_mode_sync, event_id)
+    event_name = await asyncio.to_thread(load_event_name_sync, event_id)
+    manager = ACTIVE_POD_MANAGERS.get(event_id)
+
+    async def on_format(inter: discord.Interaction, code: str) -> str | None:
+        return await set_event_format(event_id, code)
+
+    async def on_pairing(inter: discord.Interaction, mode: str) -> str | None:
+        return await set_event_pairing_mode(event_id, mode)
+
+    async def on_seating_mode(inter: discord.Interaction, mode: str) -> str | None:
+        return await set_event_seating_mode(event_id, mode)
+
+    async def on_seating_table(inter: discord.Interaction) -> None:
+        await post_seeding_table(bot, event_id, inter.channel)
+
+    async def on_seated(inter: discord.Interaction, labels: list[str]) -> None:
+        await post_manual_seating_table(bot, inter.channel, labels, actor_label(inter))
+
+    on_seating = None
+    seat_order_provider = None
+    kick_targets_provider = None
+    on_kick = None
+    if manager is not None:
+        async def on_seating(inter: discord.Interaction, ordered_user_names: list[str]) -> str | None:
+            return await set_event_seating(event_id, ordered_user_names)
+        seat_order_provider = manager.seating_lobby_order
+        kick_targets_provider = manager.kick_targets
+
+        async def on_kick(inter: discord.Interaction, user_id: str) -> str | None:
+            return await manager.kick_player(user_id)
+
+    on_cancel = None
+    if is_owner:
+        async def on_cancel(inter: discord.Interaction) -> str | None:
+            return await cancel_pod_event(event_id, actor=actor_label(inter))
+
+    return PodSettingsView(
+        on_format=on_format, on_pairing=on_pairing,
+        current_code=current_code, current_mode=current_mode,
+        on_seating_mode=on_seating_mode, current_seating=current_seating,
+        on_seating=on_seating, seat_order_provider=seat_order_provider,
+        on_seating_table=on_seating_table, on_seated=on_seated,
+        kick_targets_provider=kick_targets_provider, on_kick=on_kick,
+        on_cancel=on_cancel, event_name=event_name,
+    )
+
+
+async def cancel_pod_event(event_id: str, *, actor: str) -> str | None:
+    """Tear down a pod draft entirely: cancel pending tournament tasks, disconnect the manager, and
+    delete the event row — the cascade drops participants, matches, replays, and DM trackers, which
+    also removes the leaderboard pod page."""
+    log.warning(f"pod-cancel: {actor} deleting event {event_id}")
+    manager = ACTIVE_POD_MANAGERS.get(event_id)
+    if manager is not None:
+        for task in (manager.grace_task, manager.championship_task):
+            if task is not None and not task.done():
+                task.cancel()
+        await manager.disconnect_safely()
+    await asyncio.to_thread(_delete_event_sync, event_id)
+    return None
+
+
+def _delete_event_sync(event_id: str) -> None:
+    with SessionLocal() as session:
+        session.execute(delete(PodDraftEvent).where(PodDraftEvent.id == event_id))
+        session.commit()
 
 
 async def seating_message_for_event(bot, event_id: str) -> tuple[discord.File | None, discord.Embed | None]:

@@ -912,6 +912,28 @@ class PodDraftManager:
         log.info(f"[SEATING] applied event={self.event_id} order={ordered_user_names}")
         return None
 
+    def kick_targets(self) -> list[tuple[str, str]]:
+        """(userID, userName) for every non-bot session user, for the Settings kick select."""
+        return [
+            (u.get("userID"), u.get("userName")) for u in self.session_users
+            if u.get("userID") and u.get("userName") and u.get("userName") != _BOT_USER_NAME
+        ]
+
+    async def kick_player(self, user_id: str) -> str | None:
+        """Remove a user from the Draftmancer session (owner-only socket action; Draftmancer parks
+        the removed user in a fresh session). Pre-draft only. Returns an error string or None."""
+        if not self.sio.connected:
+            return "Draftmancer session is not connected."
+        if self.drafting or self.draft_complete:
+            return "Players can't be removed once the draft has started."
+        try:
+            await self.sio.emit("removePlayer", user_id)
+        except Exception:
+            log.exception(f"[KICK] emit_failed event={self.event_id} user_id={user_id}")
+            return "Could not remove the player."
+        log.info(f"[KICK] removed event={self.event_id} user_id={user_id}")
+        return None
+
     async def apply_seating_mode(self) -> None:
         """Push the current seating_mode to the live table. Leaderboard recomputes the seeded order
         from the present lobby; random asserts the shuffle flag; manual is driven by the Seat Order

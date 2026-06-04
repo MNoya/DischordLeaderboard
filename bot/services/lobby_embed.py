@@ -73,10 +73,7 @@ class LobbyReadyButtonView(discord.ui.View):
         self, interaction: discord.Interaction, button: discord.ui.Button,
     ) -> None:
         from bot.services.pod_active import ACTIVE_POD_MANAGERS
-        from bot.services.pod_draft_manager import (
-            set_event_format, set_event_pairing_mode, set_event_seating, set_event_seating_mode,
-        )
-        from bot.services.pod_settings_view import PodSettingsView
+        from bot.commands.pod_draft import build_pod_settings_view
         channel = interaction.channel
         channel_id = channel.id if channel else None
         actor = actor_label(interaction)
@@ -92,36 +89,9 @@ class LobbyReadyButtonView(discord.ui.View):
             await interaction.response.send_message(_NO_ACTIVE_POD_MSG, ephemeral=True)
             return
         log.info(f"[{manager.event_name}] {actor} clicked Settings")
-        event_id = manager.event_id
-
-        async def on_format(inter: discord.Interaction, code: str) -> str | None:
-            return await set_event_format(event_id, code)
-
-        async def on_pairing(inter: discord.Interaction, mode: str) -> str | None:
-            return await set_event_pairing_mode(event_id, mode)
-
-        async def on_seating(inter: discord.Interaction, ordered_user_names: list[str]) -> str | None:
-            return await set_event_seating(event_id, ordered_user_names)
-
-        async def on_seating_mode(inter: discord.Interaction, mode: str) -> str | None:
-            return await set_event_seating_mode(event_id, mode)
-
-        from bot.commands.pod_draft import post_manual_seating_table, post_seeding_table
-
-        async def on_seating_table(inter: discord.Interaction) -> None:
-            await post_seeding_table(inter.client, event_id, inter.channel)
-
-        async def on_seated(inter: discord.Interaction, labels: list[str]) -> None:
-            await post_manual_seating_table(inter.client, inter.channel, labels, actor_label(inter))
-
+        is_owner = await interaction.client.is_owner(interaction.user)
         await interaction.response.send_message(
-            view=PodSettingsView(
-                on_format=on_format, on_pairing=on_pairing,
-                current_code=manager.set_code, current_mode=manager.pairing_mode,
-                on_seating_mode=on_seating_mode, current_seating=manager.seating_mode,
-                on_seating=on_seating, seat_order_provider=manager.seating_lobby_order,
-                on_seating_table=on_seating_table, on_seated=on_seated,
-            ),
+            view=await build_pod_settings_view(interaction.client, manager.event_id, is_owner=is_owner),
             ephemeral=True,
         )
 

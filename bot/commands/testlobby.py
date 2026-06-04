@@ -245,7 +245,7 @@ async def _start_live_test_pod(ctx, mode: str) -> None:
 
 async def _start_live_test_lobby(ctx) -> None:
     """Seed a lobby-only event and connect a real manager to a live Draftmancer session, so the real
-    lobby + ready-check flow runs. Open the session link in 6+ tabs to drive it. Local DB only."""
+    lobby + ready-check flow runs. Local DB only."""
     if await _refuse_if_prod(ctx):
         return
     await _purge_and_reset_test(ctx)
@@ -260,10 +260,7 @@ async def _start_live_test_lobby(ctx) -> None:
     if manager is None:
         await ctx.send("⚠️ Could not connect to Draftmancer — see logs.")
         return
-    await ctx.send(
-        f"🧪 Connected to Draftmancer `{session_id}`. Open {url} in 6+ tabs with distinct names, "
-        "then use the lobby card's **Ready Check** button. The card appears once players join."
-    )
+    await ctx.send(f"🧪 Connected to Draftmancer `{session_id}`.")
 
 
 async def _test_submit_deck_color(interaction: discord.Interaction, color: str) -> None:
