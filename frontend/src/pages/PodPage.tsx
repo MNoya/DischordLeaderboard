@@ -208,7 +208,11 @@ export function PodPage() {
 
   useEffect(() => {
     if (preselectChecked) return;
-    if (seats.length === 0) return;
+    if (participantsLoading) return;
+    if (seats.length === 0) {
+      setPreselectChecked(true);
+      return;
+    }
     let target: PodSeat | undefined;
     if (preselectName) {
       const lower = preselectName.toLowerCase();
@@ -224,7 +228,7 @@ export function PodPage() {
     }
     if (target) setSelectedSeat(target.seatIndex);
     setPreselectChecked(true);
-  }, [seats, preselectName, isMobile, preselectChecked]);
+  }, [seats, preselectName, isMobile, preselectChecked, participantsLoading]);
 
   const preselectPending = (!!preselectName || isMobile) && !preselectChecked;
 
