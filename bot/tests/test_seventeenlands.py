@@ -5,7 +5,6 @@ import responses
 
 from bot.services.seventeenlands import (
     DEFAULT_BASE_URL,
-    SUPPORTED_FORMATS,
     MinIntervalLimiter,
     SeventeenLandsClient,
     classify_token_reply,
@@ -64,8 +63,8 @@ def test_extract_token_handles_none():
         (None, "empty"),
         ("x" * 2001, "too_long"),
         (VALID_TOKEN, "hex_present"),
-        (f"https://17lands.com/history/events", "17lands_url_no_token"),
-        (f"http://www.17lands.com/user_history/short", "17lands_url_no_token"),
+        ("https://17lands.com/history/events", "17lands_url_no_token"),
+        ("http://www.17lands.com/user_history/short", "17lands_url_no_token"),
         ("https://example.com/foo", "other_url"),
         ("abc123def", "hex_but_wrong_length"),
         ("just text reply", "text_only"),

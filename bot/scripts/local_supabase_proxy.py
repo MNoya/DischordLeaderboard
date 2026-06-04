@@ -107,8 +107,8 @@ def main() -> None:
     app.router.add_get("/rest/v1/{view}", _handle_view)
     app.router.add_route("OPTIONS", "/rest/v1/{view}", _handle_view)
 
-    log.info(f"local supabase proxy → docker postgres, listening on http://localhost:3001")
-    log.info(f"set VITE_SUPABASE_URL=http://localhost:3001 in frontend/.env.local")
+    log.info("local supabase proxy → docker postgres, listening on http://localhost:3001")
+    log.info("set VITE_SUPABASE_URL=http://localhost:3001 in frontend/.env.local")
     web.run_app(app, host="localhost", port=3001, print=None)
 
 

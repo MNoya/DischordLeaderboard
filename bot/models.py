@@ -39,7 +39,8 @@ class Player(Base):
     seventeenlands_token = Column(String, nullable=True)
     active               = Column(Boolean, nullable=False, default=True)
     joined_at            = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    updated_at           = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+    updated_at           = Column(DateTime(timezone=True), nullable=False, server_default=func.now(),
+                                  onupdate=func.now())
     token_invalid        = Column(Boolean, nullable=False, default=False)
     leaderboard_opt_in   = Column(Boolean, nullable=False, default=True)
 

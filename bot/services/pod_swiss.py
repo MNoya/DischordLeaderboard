@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from itertools import groupby
 
 
 _MIN_PCT = 1.0 / 3.0  # MTR floor for OMW% / OGW% per-opponent terms

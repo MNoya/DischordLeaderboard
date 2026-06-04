@@ -323,7 +323,8 @@ def load_event_thread_id_sync(event_id: str) -> str | None:
 
 
 def search_event_names_sync(query: str, limit: int = 25) -> list[str]:
-    """Most-recent-first event names matching a case-insensitive substring of `query`; empty query returns the most recent."""
+    """Most-recent-first event names matching a case-insensitive substring of `query`; empty query
+    returns the most recent."""
     with SessionLocal() as session:
         stmt = select(PodDraftEvent.name).order_by(PodDraftEvent.event_date.desc().nulls_last())
         if query:
@@ -486,7 +487,8 @@ def finalize_champion(
     event_id: str,
     standings: Sequence[FinalStanding],
 ) -> PodDraftEvent:
-    """Apply placements/records to participants and mark socket_status='complete'. Draft-log URLs are written mid-draft by pod_draft_manager and intentionally left untouched here."""
+    """Apply placements/records to participants and mark socket_status='complete'. Draft-log URLs
+    are written mid-draft by pod_draft_manager and intentionally left untouched here."""
     event = session.get(PodDraftEvent, event_id)
     if event is None:
         raise ValueError(f"pod_draft_event {event_id} not found")
@@ -911,9 +913,9 @@ def _summarize_pod_records(finishes: list[tuple[str | None, int | None]]) -> Pod
     """A trophy is a 3-0 record or a pod win (placement 1); a 2-1 that won is a trophy, not a 2-1."""
     wins = losses = trophies = wins_2_1 = 0
     for record, placement in finishes:
-        w, l = _parse_record(record)
-        wins += w
-        losses += l
+        won, lost = _parse_record(record)
+        wins += won
+        losses += lost
         if record == "3-0" or placement == 1:
             trophies += 1
         elif record == "2-1":

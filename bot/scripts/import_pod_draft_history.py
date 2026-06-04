@@ -1,7 +1,8 @@
 """One-shot import of historical SOS pod-draft results into pod_draft_events + pod_draft_participants.
 
 Idempotent: skips events that already exist by (name, event_date).
-For names without a matching Player, creates a lightweight Player (no 17lands token) with `historical-{slug}` discord_id.
+For names without a matching Player, creates a lightweight Player (no 17lands token) with a
+`historical-{slug}` discord_id.
 
 Run with:
     DATABASE_URL=... python -m bot.scripts.import_pod_draft_history
@@ -81,7 +82,8 @@ EVENTS = [
 
 
 def _resolve_or_create_player(session, taken_slugs, display_name, arena_name):
-    """Find an existing Player by arena_name / mapped discord_id / normalized display_name, else create a lightweight one."""
+    """Find an existing Player by arena_name / mapped discord_id / normalized display_name, else
+    create a lightweight one."""
     if arena_name:
         player = _player_for_name(session, arena_name)
         if player is not None:
@@ -110,7 +112,10 @@ def _resolve_or_create_player(session, taken_slugs, display_name, arena_name):
         )
         session.add(player)
         session.flush()
-        log.info(f"created identified player: {new_display} (slug={new_slug}, arena_name={arena_name}, discord_id={entry['discord_id']})")
+        log.info(
+            f"created identified player: {new_display} (slug={new_slug}, arena_name={arena_name}, "
+            f"discord_id={entry['discord_id']})"
+        )
         return player
 
     player = _player_for_name(session, display_name)

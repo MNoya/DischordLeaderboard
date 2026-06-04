@@ -72,7 +72,7 @@ def test_leaderboard_seat_order_ranks_present_users_unranked_to_bottom(session):
     s = _seed_set(session)
     alice = _seed_player(session, "Alice", "1", "a")
     bob = _seed_player(session, "Bob", "2", "b")
-    carol = _seed_player(session, "Carol", "3", "c", leaderboard_opt_in=False)
+    _seed_player(session, "Carol", "3", "c", leaderboard_opt_in=False)
     _seed_stats(session, alice, s, trophies=2, events=4)
     _seed_stats(session, bob, s, trophies=5, events=8)  # Bob outscores Alice -> rank 1
     session.commit()

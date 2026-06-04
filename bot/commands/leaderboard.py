@@ -14,7 +14,9 @@ from sqlalchemy.orm import Session
 from bot import audit, emojis
 from bot.commands import descriptions as desc
 from bot.commands.messages import MSG_NOT_REGISTERED
-from bot.services.player_stats import process_stats, rank_players_for_set, render_embed as render_stats_embed, resolve_player
+from bot.services.player_stats import (
+    process_stats, rank_players_for_set, render_embed as render_stats_embed, resolve_player,
+)
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.discord_helpers import display_width, player_url
@@ -361,7 +363,10 @@ def process_leaderboard_for_direct(
 
     ranked = _ranked_for_direct(session, magic_set.code, magic_set.id)
     top = [
-        LeaderboardEntry(rank=rank, player_id=pid, slug=slug, display_name=name, score=boxes, trophies=trophies, events=round(boxes))
+        LeaderboardEntry(
+            rank=rank, player_id=pid, slug=slug, display_name=name,
+            score=boxes, trophies=trophies, events=round(boxes),
+        )
         for rank, pid, slug, name, _did, boxes, trophies in ranked[:top_n]
     ]
     viewer_entry: LeaderboardEntry | None = None
@@ -471,14 +476,20 @@ def process_leaderboard_for_pod(
         for idx, r in enumerate(rows)
     ]
     top = [
-        LeaderboardEntry(rank=rank, player_id=pid, slug=slug, display_name=name, score=float(trophies), trophies=trophies, events=events)
+        LeaderboardEntry(
+            rank=rank, player_id=pid, slug=slug, display_name=name,
+            score=float(trophies), trophies=trophies, events=events,
+        )
         for rank, pid, slug, name, _did, trophies, events in ranked[:top_n]
     ]
     viewer_entry: LeaderboardEntry | None = None
     if viewer_discord_id is not None:
         for rank, pid, slug, name, did, trophies, events in ranked:
             if did == viewer_discord_id:
-                viewer_entry = LeaderboardEntry(rank=rank, player_id=pid, slug=slug, display_name=name, score=float(trophies), trophies=trophies, events=events)
+                viewer_entry = LeaderboardEntry(
+                    rank=rank, player_id=pid, slug=slug, display_name=name,
+                    score=float(trophies), trophies=trophies, events=events,
+                )
                 break
 
     last_updated = session.execute(
@@ -848,7 +859,9 @@ class _FilterPanel(discord.ui.View):
         self.add_item(_FormatSelect(format_value))
         self.add_item(_ColorSelect(color_value, with_emoji))
 
-    async def apply(self, interaction: discord.Interaction, *, set_code=_UNSET, format_value=_UNSET, color_value=_UNSET) -> None:
+    async def apply(
+        self, interaction: discord.Interaction, *, set_code=_UNSET, format_value=_UNSET, color_value=_UNSET,
+    ) -> None:
         new_set = self.set_code if set_code is _UNSET else set_code
         new_fmt = self.format_value if format_value is _UNSET else format_value
         new_color = self.color_value if color_value is _UNSET else color_value
@@ -929,11 +942,16 @@ class _FilterButton(discord.ui.Button):
             pass
 
 
-def _player_url(slug: str, set_code: str | None = None, filter_type: str | None = None, filter_value: str | None = None) -> str:
+def _player_url(
+    slug: str, set_code: str | None = None, filter_type: str | None = None, filter_value: str | None = None,
+) -> str:
     return player_url(slug, set_code) + _site_query(filter_type, filter_value)
 
 
-def _format_leaderboard(top: list[LeaderboardEntry], set_code: str | None = None, show_score: bool = True, filter_type: str | None = None, filter_value: str | None = None) -> str:
+def _format_leaderboard(
+    top: list[LeaderboardEntry], set_code: str | None = None, show_score: bool = True,
+    filter_type: str | None = None, filter_value: str | None = None,
+) -> str:
     """Wrap each row in inline code (single backticks) — renders as monospace
     without the code-block brick, and spaces are preserved so columns align.
     Same trick scoreboards.dev uses to get tabular layout in an embed.

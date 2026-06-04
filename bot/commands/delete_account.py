@@ -73,7 +73,10 @@ class ConfirmExileView(discord.ui.View):
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         with SessionLocal() as session:
             result = process_delete_account(session, self.user_id)
-        audit.event("delete_account_result", user_id=self.user_id, kind=result.kind, deleted_player_id=result.deleted_player_id)
+        audit.event(
+            "delete_account_result", user_id=self.user_id, kind=result.kind,
+            deleted_player_id=result.deleted_player_id,
+        )
         logger.info(f"exile: {interaction.user} deleted player_id={result.deleted_player_id}")
         if result.kind == "deleted":
             await bot_log.get(self.bot).post_plain(

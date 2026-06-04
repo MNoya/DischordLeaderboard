@@ -59,8 +59,8 @@ def render_help_embed() -> discord.Embed:
     embed = discord.Embed(title=HELP_TITLE, color=discord.Color.blurple())
     for section_label, items in HELP_SECTIONS:
         lines = []
-        for cmd, desc in items:
-            lines.append(f"`{cmd}`: {desc}")
+        for cmd, blurb in items:
+            lines.append(f"`{cmd}`: {blurb}")
             for example in HELP_EXAMPLES.get(cmd, []):
                 lines.append("> " + " ".join(f"`{chip}`" for chip in example))
         embed.add_field(name=section_label, value="\n".join(lines), inline=False)

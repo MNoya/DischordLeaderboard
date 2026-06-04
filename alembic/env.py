@@ -4,7 +4,7 @@ from sqlalchemy import engine_from_config, pool
 from bot.config import settings
 from bot.models import Base
 
-# Skip alembic.ini's [logger_*] config — disable_existing_loggers=True there silently kills bot/discord loggers downstream
+# Skip alembic.ini's [logger_*] config — disable_existing_loggers=True there silently kills bot/discord loggers
 config = context.config
 # Escape % so configparser doesn't try to interpolate (Supabase pooler passwords contain percent-encoded chars like %2B)
 config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))

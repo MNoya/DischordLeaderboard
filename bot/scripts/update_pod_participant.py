@@ -14,7 +14,6 @@ Only the flags you pass are written; omitted flags leave existing values unchang
 from __future__ import annotations
 
 import argparse
-import sys
 
 from sqlalchemy import select
 
@@ -22,13 +21,13 @@ from bot.database import SessionLocal
 from bot.models import PodDraftEvent, PodDraftParticipant
 
 
-def main(event_query: str, player_name: str, colors: str | None, screenshot_url: str | None, caption: str | None) -> None:
+def main(query: str, player_name: str, colors: str | None, screenshot_url: str | None, caption: str | None) -> None:
     with SessionLocal() as session:
         events = session.execute(
-            select(PodDraftEvent).where(PodDraftEvent.name.ilike(f"%{event_query}%"))
+            select(PodDraftEvent).where(PodDraftEvent.name.ilike(f"%{query}%"))
         ).scalars().all()
         if not events:
-            raise SystemExit(f"no event matching {event_query!r}")
+            raise SystemExit(f"no event matching {query!r}")
         if len(events) > 1:
             raise SystemExit(f"ambiguous — matched {len(events)} events: " + ", ".join(e.name for e in events))
         event = events[0]

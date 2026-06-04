@@ -161,7 +161,8 @@ class SeventeenLandsClient:
             token: 17lands user token.
             start_date: Earliest draft date to include (server-side filter).
             end_date: Latest draft date to include (server-side filter).
-            expansion: Single expansion code to scope to (server-side filter). Excludes alchemy variants — fall back to the date window when alchemy drafts must come along.
+            expansion: Single expansion code to scope to (server-side filter). Excludes alchemy
+                variants — fall back to the date window when alchemy drafts must come along.
 
         Raises:
             requests.HTTPError: Upstream returned non-2xx.

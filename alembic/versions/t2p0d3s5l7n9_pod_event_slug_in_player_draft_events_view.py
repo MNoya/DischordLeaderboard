@@ -74,7 +74,8 @@ def _view_sql(pod_slug_17l: str, pod_slug_pod: str) -> str:
 
 
 def upgrade() -> None:
-    op.execute(_view_sql(",\n            NULL::text AS pod_event_slug", f",\n            {_POD_SLUG_SQL} AS pod_event_slug"))
+    pod_slug_select = f",\n            {_POD_SLUG_SQL} AS pod_event_slug"
+    op.execute(_view_sql(",\n            NULL::text AS pod_event_slug", pod_slug_select))
     op.execute("GRANT SELECT ON public_player_draft_events TO anon;")
 
 

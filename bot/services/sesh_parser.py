@@ -77,7 +77,9 @@ def parse_sesh_embed(embed: discord.Embed) -> ParsedSeshFields | None:
     try:
         tz = ZoneInfo(settings.pod_draft_fallback_tz)
     except ZoneInfoNotFoundError:
-        log.warning(f"POD_DRAFT_FALLBACK_TZ={settings.pod_draft_fallback_tz!r} is not a known IANA zone; falling back to UTC")
+        log.warning(
+            f"POD_DRAFT_FALLBACK_TZ={settings.pod_draft_fallback_tz!r} is not a known IANA zone; falling back to UTC"
+        )
         tz = ZoneInfo("UTC")
     event_date = event_time.astimezone(tz).date()
 

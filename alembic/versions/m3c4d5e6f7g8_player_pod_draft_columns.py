@@ -1,9 +1,11 @@
 """Player schema changes for pod-draft-capable users
 
 Adds arena_name for `/pod-link-arena`.
-Drops the redundant seventeenlands_url column (pure denormalization of `https://www.17lands.com/user_history/{token}`, never read).
+Drops the redundant seventeenlands_url column (pure denormalization of
+`https://www.17lands.com/user_history/{token}`, never read).
 Makes seventeenlands_token nullable so pod-draft-only players can exist without a 17lands profile.
-Backfills any pre-existing NULL discord_id rows with `seed-{slug}` placeholders before tightening discord_id to NOT NULL.
+Backfills any pre-existing NULL discord_id rows with `seed-{slug}` placeholders before tightening
+discord_id to NOT NULL.
 
 Revision ID: m3c4d5e6f7g8
 Revises: l2b3c4d5e6f7

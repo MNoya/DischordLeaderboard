@@ -106,7 +106,10 @@ class SeshListener(commands.Cog):
         log.info(f"sesh pod-draft embed detected: {fields.name}")
         thread = await self._wait_for_thread(message)
         if thread is None:
-            log.warning(f"sesh embed {message.id} never spawned a thread within {THREAD_POLL_TIMEOUT_S}s; skipping registration")
+            log.warning(
+                f"sesh embed {message.id} never spawned a thread within {THREAD_POLL_TIMEOUT_S}s; "
+                "skipping registration"
+            )
             return
 
         discord_event_id = await _resolve_discord_event_id(message.guild, fields.event_time)

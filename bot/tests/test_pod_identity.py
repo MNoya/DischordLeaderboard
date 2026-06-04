@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import re
-from datetime import date
 
 from bot.models import Player
 from bot.services.pod_drafts import (
@@ -111,7 +110,7 @@ def test_ignores_inactive_players(session):
 
 def test_display_name_wins_over_discord_username_when_both_match(session):
     # Two players: one whose display_name normalizes to "ace", one whose username is "ace"
-    p_display = _seed_player(session, discord_id="8", username="notace", display_name="Ace")
+    _seed_player(session, discord_id="8", username="notace", display_name="Ace")
     _seed_player(session, discord_id="9", username="ace", display_name="Somebody Else")
 
     found = _player_for_name(session, "Ace#1111")

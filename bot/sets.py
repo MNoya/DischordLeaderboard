@@ -82,7 +82,9 @@ COLLECTOR_WINDOW_SLACK = timedelta(days=1)
 
 def is_collector_booster_window(set_code: str, when: date) -> bool:
     for w in COLLECTOR_BOOSTER_WINDOWS:
-        if w.set_code == set_code and w.start_date - COLLECTOR_WINDOW_SLACK <= when <= w.end_date + COLLECTOR_WINDOW_SLACK:
+        if w.set_code != set_code:
+            continue
+        if w.start_date - COLLECTOR_WINDOW_SLACK <= when <= w.end_date + COLLECTOR_WINDOW_SLACK:
             return True
     return False
 

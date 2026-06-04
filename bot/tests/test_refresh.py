@@ -280,7 +280,7 @@ def test_claim_orphan_drafts_leaves_non_matching_orphans_alone(session):
 
 
 def test_refresh_player_writes_stats_and_events(session):
-    s = _seed_set(session, code="ECL")
+    _seed_set(session, code="ECL")
     p = _seed_player(session)
     drafts = [
         _draft("alpha", format="PremierDraft", expansion="ECL", wins=5, losses=3),
@@ -379,7 +379,7 @@ def test_refresh_active_players_skips_pod_only_players_without_token(session):
 
 def test_refresh_active_players_summary_counts_mixed_statuses(session):
     _seed_active_set(session)
-    p_ok = _seed_player(session, name="ok", token_suffix="a")
+    _seed_player(session, name="ok", token_suffix="a")
     p_404 = _seed_player(session, name="bad", token_suffix="b")
     p_5xx = _seed_player(session, name="flaky", token_suffix="c")
     session.flush()

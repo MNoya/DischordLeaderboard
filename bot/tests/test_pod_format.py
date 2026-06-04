@@ -55,7 +55,8 @@ def _manager(set_code: str) -> PodDraftManager:
 def test_emit_format_loads_cube_for_registered_code():
     mgr = _manager(PEASANT_CODE)
     asyncio.run(mgr._emit_session_settings())
-    assert ("importCube", ({"service": "Cube Cobra", "cubeID": PEASANT_CUBE_ID, "matchVersions": True},)) in mgr.sio.calls
+    expected_import = ("importCube", ({"service": "Cube Cobra", "cubeID": PEASANT_CUBE_ID, "matchVersions": True},))
+    assert expected_import in mgr.sio.calls
     assert "setRestriction" not in mgr.sio.events()
 
 

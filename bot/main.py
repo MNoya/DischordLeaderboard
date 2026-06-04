@@ -197,7 +197,7 @@ def build_bot(guild_id: int) -> commands.Bot:
     async def sync_commands(ctx: commands.Context, scope: str = "all") -> None:
         """Owner-only. Sync slash commands to Discord.
 
-        `!sync`        — full sync: guild gets server-visible commands, global gets only the DM-only ones (link-17lands, exile)
+        `!sync`        — full sync: server-visible commands to the guild, DM-only ones (link-17lands, exile) to global
         `!sync guild`  — guild sync only (skip the global publish)
         `!sync clear`  — wipe every command registration (recovery only)
         """

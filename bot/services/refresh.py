@@ -225,7 +225,8 @@ def rebuild_player_stats(session: Session, player_id: str, set_id: str) -> int:
         text(
             """
             INSERT INTO player_stats
-                (id, player_id, set_id, format, expansion, events, wins, losses, games_played, trophies, last_fetched_at)
+                (id, player_id, set_id, format, expansion, events, wins, losses, games_played,
+                 trophies, last_fetched_at)
             SELECT gen_random_uuid()::text, player_id, set_id, format, expansion,
                    COUNT(*)::int, SUM(wins)::int, SUM(losses)::int, SUM(wins + losses)::int,
                    SUM(CASE WHEN is_trophy THEN 1 ELSE 0 END)::int,
@@ -307,7 +308,7 @@ def _refresh_active_with_window(session: Session, client: _DraftClient, fetch_st
     for idx, player in enumerate(players, start=1):
         t0 = _time.monotonic()
         result = refresh_player(session, client, player, fetch_start=fetch_start)
-        # Commit per-player so a mid-run crash keeps already-fetched data and the token_invalid flag persists immediately
+        # Commit per-player so a mid-run crash keeps fetched data and the token_invalid flag persists
         session.commit()
         elapsed = _time.monotonic() - t0
         status = result.get("status") or "error"

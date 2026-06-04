@@ -184,7 +184,8 @@ class ParticipantDeckData(NamedTuple):
 
 
 def _load_event_deck_data_sync(event_id: str) -> dict[str, ParticipantDeckData]:
-    """Return normalized_name → deck colors + screenshot URL + caption + MPT URL + review opt-in for every participant."""
+    """Return normalized_name → deck colors + screenshot URL + caption + MPT URL + review opt-in
+    for every participant."""
     with SessionLocal() as session:
         rows = session.execute(
             select(
@@ -1116,7 +1117,6 @@ def _build_dm_match_view(
     )
     if recipient_key is None:
         return None, None
-    recipient = dm_info[recipient_key]
     viewer_is_a = recipient_key == normalize_player_name(match_state.get("a_name") or "")
     opp_key = normalize_player_name(
         match_state["b_name"] if viewer_is_a else match_state["a_name"]
@@ -1646,7 +1646,8 @@ def _emojis_for_color_set(colors: set[str]) -> str:
 
 
 def _format_champion_title(names_with_colors: list[tuple[str, str | None]], short_event: str) -> str:
-    """Headline-style title — single: `Name takes {event} with {colors}`; multi: `A {colors} and B {colors} share {event}`."""
+    """Headline-style title — single: `Name takes {event} with {colors}`; multi: `A {colors} and
+    B {colors} share {event}`."""
     if not names_with_colors:
         return f"🏆 {short_event}"
 
@@ -1853,7 +1854,8 @@ def build_champion_embed(
     description = f"{header}\n" + "\n".join(lines)
     if include_submit_cta:
         chordo_love = emojis.get("chordo_love")
-        description += f"\n\n**🎨 Share a screenshot and comment on your deck below**\n{chordo_love} Thank you for playing!"
+        submit_cta = f"**🎨 Share a screenshot and comment on your deck below**\n{chordo_love} Thank you for playing!"
+        description += f"\n\n{submit_cta}"
 
     return discord.Embed(
         title=title,
@@ -2663,8 +2665,8 @@ def mark_trophy_match(match_states: list[dict], round_num: int) -> None:
         if not record or "-" not in record:
             return None
         try:
-            w, l = record.split("-", 1)
-            return int(w), int(l)
+            wins, losses = record.split("-", 1)
+            return int(wins), int(losses)
         except ValueError:
             return None
 
@@ -2699,8 +2701,8 @@ def _state_for_pending(match_id: str, a_name: str, b_name: str, standings_by_id,
 def _parse_wl(record: str | None) -> tuple[int, int]:
     if record and "-" in record:
         try:
-            w, l = record.split("-", 1)
-            return int(w), int(l)
+            wins, losses = record.split("-", 1)
+            return int(wins), int(losses)
         except ValueError:
             pass
     return (0, 0)
@@ -2923,8 +2925,8 @@ def bracket_placeholder_states(event_id: str, round_num: int, real: list[dict] |
         return displays.get(normalize_player_name(name), {}).get("display_name") or name
 
     out: list[dict] = []
-    for (w, l), a, b in pod_bracket.padding_slots(players, completed, real_records, paired, round_num):
-        rec = f"{w}-{l}"
+    for (wins, losses), a, b in pod_bracket.padding_slots(players, completed, real_records, paired, round_num):
+        rec = f"{wins}-{losses}"
         if a and b:
             label = dropdown_label = f"{disp(a)} vs {disp(b)}"
         elif a:
