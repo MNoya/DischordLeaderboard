@@ -41,6 +41,8 @@ SUBTEXT_START = f"-# {ZWSP}"
 
 HYPE_BAR_SLOTS = 10
 CAPTION_MAX_CHARS = 100
+CREDIT_NBSP_PER_CHAR = 2.0
+CREDIT_PAD_MAX = 120
 FLAVOR_RECOUNTS_MAX = 3
 FOOTER_EXTRA_EMOJIS = 3
 REVEAL_DELAY_SECONDS = 5
@@ -62,6 +64,7 @@ class AwardWinner:
     image_url: str
     recounts: tuple[tuple[str, int], ...]
     caption: str | None = None
+    author: str | None = None
 
 
 @dataclass(frozen=True)
@@ -88,6 +91,7 @@ class ScoredPost:
     jump_url: str
     image_url: str
     content: str
+    author: str
     created_at: datetime
     reactions: dict[str, int]
 
@@ -156,13 +160,25 @@ def _suspense_line(reveal: int, award_total: int) -> str:
 
 def _award_text(heading: str, tagline: str, winner: AwardWinner, caption_replaces: bool = False) -> str:
     if winner.caption and caption_replaces:
-        line = f"_{winner.caption}_"
+        line = f"[_{winner.caption}_]({winner.jump_url})"
     elif winner.caption:
-        line = f"{tagline} - {winner.caption}"
+        line = f"_{tagline} -_ [{winner.caption}]({winner.jump_url})"
     else:
-        line = tagline
+        line = f"[{tagline}]({winner.jump_url})"
     recount = (GAP * 2).join(_emoji_count(emoji, count) for emoji, count in winner.recounts)
-    return f"{heading}\n{GAP}[{line}]({winner.jump_url})\n{SUBTEXT_START}{GAP}{recount}"
+    subtext = f"{SUBTEXT_START}{GAP}{recount}"
+    if winner.caption and caption_replaces and winner.author:
+        subtext += _credit_suffix(winner.caption, recount, winner.author)
+    return f"{heading}\n{GAP}{line}\n{subtext}"
+
+
+def _credit_suffix(caption: str, recount: str, author: str) -> str:
+    """Push the credit toward the end of the quote above, approximately: Discord has no real
+    alignment, so pad with NBSPs scaled by how much of the caption's width the recount left over."""
+    credit = f"~{author}"
+    pad_chars = round((len(caption) - len(recount) - len(credit)) * CREDIT_NBSP_PER_CHAR)
+    pad = NBSP * min(max(pad_chars, 0), CREDIT_PAD_MAX)
+    return f"{pad}{credit}"
 
 
 def _hype_meter_text(hot_pct: int) -> str:
@@ -318,6 +334,7 @@ def _winner_from_post(post: ScoredPost, recounts: tuple[tuple[str, int], ...]) -
         image_url=post.image_url,
         recounts=recounts,
         caption=_trim_caption(post.content),
+        author=post.author,
     )
 
 
@@ -353,6 +370,7 @@ async def _collect_posts(channels: list[discord.TextChannel], window: PreviewWin
                 jump_url=message.jump_url,
                 image_url=image_url,
                 content=message.content,
+                author=message.author.display_name,
                 created_at=message.created_at,
                 reactions=reactions,
             ))

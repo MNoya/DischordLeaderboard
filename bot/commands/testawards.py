@@ -53,6 +53,7 @@ _FIXTURE = AwardsData(
     comedy=AwardWinner(
         _POST_DEEP_LINK, _IMAGE_COMEDY, (("😂", 31),),
         caption="me when I win with a pile of serra angels and 6/6 no texts",
+        author="MemeSmith",
     ),
     surprise=AwardWinner(_POST_DEEP_LINK, _IMAGE_READ_AGAIN, (("👀", 14),), caption="Evil's Thrall"),
     flavor=AwardWinner(
