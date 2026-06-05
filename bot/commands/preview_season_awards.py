@@ -41,7 +41,7 @@ SUBTEXT_START = f"-# {ZWSP}"
 
 HYPE_BAR_SLOTS = 10
 CAPTION_MAX_CHARS = 100
-FLAVOR_EXTRA_RECOUNTS = 2
+FLAVOR_RECOUNTS_MAX = 3
 FOOTER_EXTRA_EMOJIS = 3
 REVEAL_DELAY_SECONDS = 5
 
@@ -114,8 +114,9 @@ def build_awards_view(data: AwardsData, reveal: int | None = None) -> ui.LayoutV
     awarded_rows = [(heading, tagline, winner) for heading, tagline, winner in rows if winner is not None]
     shown_rows = awarded_rows if reveal is None else awarded_rows[:reveal]
     for i, (heading, tagline, winner) in enumerate(shown_rows):
+        award_text = _award_text(heading, tagline, winner, caption_replaces=winner is data.comedy)
         container.add_item(ui.Section(
-            ui.TextDisplay(_award_text(heading, tagline, winner)),
+            ui.TextDisplay(award_text),
             accessory=ui.Thumbnail(media=winner.image_url, spoiler=True),
         ))
         if i < len(shown_rows) - 1:
@@ -153,8 +154,13 @@ def _suspense_line(reveal: int, award_total: int) -> str:
     return SUSPENSE_FINAL
 
 
-def _award_text(heading: str, tagline: str, winner: AwardWinner) -> str:
-    line = f"_{winner.caption}_" if winner.caption else tagline
+def _award_text(heading: str, tagline: str, winner: AwardWinner, caption_replaces: bool = False) -> str:
+    if winner.caption and caption_replaces:
+        line = f"_{winner.caption}_"
+    elif winner.caption:
+        line = f"{tagline} - {winner.caption}"
+    else:
+        line = tagline
     recount = (GAP * 2).join(_emoji_count(emoji, count) for emoji, count in winner.recounts)
     return f"{heading}\n{GAP}[{line}]({winner.jump_url})\n{SUBTEXT_START}{GAP}{recount}"
 
@@ -256,7 +262,7 @@ def _tally_fields(posts: list[ScoredPost]) -> dict:
     return dict(
         hottest=_category_winner(posts, (FIRE,)),
         trash=_category_winner(posts, (WASTEBASKET, WILTED_ROSE)),
-        comedy=_category_winner(posts, (JOY,), with_caption=True),
+        comedy=_category_winner(posts, (JOY,)),
         surprise=_category_winner(posts, (EYES,)),
         flavor=_flavor_winner(posts),
         totals=tuple(core_counts + top_extras),
@@ -264,9 +270,7 @@ def _tally_fields(posts: list[ScoredPost]) -> dict:
     )
 
 
-def _category_winner(
-    posts: list[ScoredPost], emojis: tuple[str, ...], with_caption: bool = False,
-) -> AwardWinner | None:
+def _category_winner(posts: list[ScoredPost], emojis: tuple[str, ...]) -> AwardWinner | None:
     best: ScoredPost | None = None
     best_key: tuple[int, int, datetime] | None = None
     for post in posts:
@@ -280,29 +284,41 @@ def _category_winner(
     if best is None:
         return None
     recounts = tuple((emoji, best.reactions[emoji]) for emoji in emojis if best.reactions.get(emoji, 0) > 0)
-    caption = _trim_caption(best.content) if with_caption else None
-    return AwardWinner(jump_url=best.jump_url, image_url=best.image_url, recounts=recounts, caption=caption)
+    return _winner_from_post(best, recounts)
 
 
 def _flavor_winner(posts: list[ScoredPost]) -> AwardWinner | None:
     best: ScoredPost | None = None
-    best_emoji = ""
+    best_one_offs: list[tuple[str, int]] = []
     best_key: tuple[int, int, datetime] | None = None
     for post in posts:
-        for emoji, count in post.reactions.items():
-            if emoji in CORE_EMOJIS or count == 0:
-                continue
-            key = (count, _extra_reactions(post, (emoji,)), post.created_at)
-            if best_key is None or key > best_key:
-                best = post
-                best_emoji = emoji
-                best_key = key
+        one_offs = [(emoji, count) for emoji, count in post.reactions.items()
+                    if emoji not in CORE_EMOJIS and count > 0]
+        if not one_offs:
+            continue
+        one_off_emojis = tuple(emoji for emoji, _ in one_offs)
+        score = sum(count for _, count in one_offs)
+        key = (score, _extra_reactions(post, one_off_emojis), post.created_at)
+        if best_key is None or key > best_key:
+            best = post
+            best_one_offs = one_offs
+            best_key = key
     if best is None:
         return None
-    extras = [(emoji, count) for emoji, count in best.reactions.items() if emoji != best_emoji and count > 0]
-    extras.sort(key=lambda item: item[1], reverse=True)
-    recounts = ((best_emoji, best_key[0]), *extras[:FLAVOR_EXTRA_RECOUNTS])
-    return AwardWinner(jump_url=best.jump_url, image_url=best.image_url, recounts=recounts)
+    best_one_offs.sort(key=lambda item: item[1], reverse=True)
+    core_extras = [(emoji, best.reactions[emoji]) for emoji in CORE_EMOJIS if best.reactions.get(emoji, 0) > 0]
+    core_extras.sort(key=lambda item: item[1], reverse=True)
+    recounts = tuple((best_one_offs + core_extras)[:FLAVOR_RECOUNTS_MAX])
+    return _winner_from_post(best, recounts)
+
+
+def _winner_from_post(post: ScoredPost, recounts: tuple[tuple[str, int], ...]) -> AwardWinner:
+    return AwardWinner(
+        jump_url=post.jump_url,
+        image_url=post.image_url,
+        recounts=recounts,
+        caption=_trim_caption(post.content),
+    )
 
 
 def _extra_reactions(post: ScoredPost, category_emojis: tuple[str, ...]) -> int:
