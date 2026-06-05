@@ -21,6 +21,7 @@ from sqlalchemy import delete, func, select, update
 
 from bot import emojis
 from bot.config import settings
+from bot.discord_helpers import NBSP, first_image_url
 from bot.slug import slugify
 from bot.database import SessionLocal
 from bot.models import Player as DbPlayer, PodDraftEvent, PodDraftMatch, PodDraftParticipant
@@ -81,7 +82,6 @@ SELECT_CUSTOM_PREFIX = "podmatchresult"
 MAX_MATCHES_PER_ROUND = 5  # Discord caps ActionRows at 5; supports pods up to 10 players
 SKIPPED_SENTINEL = "(skipped)"  # winner_name value for "Not played" matches
 CLEAR_SENTINEL = "(clear)"  # transient value from the dropdown; commits NULL winner/score
-NBSP = "\u00A0"  # Discord collapses runs of regular spaces; non-breaking spaces survive
 
 # Pairing group kinds \u2014 the data model for a round's brackets, independent of how they render
 WINNERS = "winners"
@@ -1320,11 +1320,7 @@ async def _r3_deck_recovery_scan(
             caption = (msg.content or "").strip() or None
             if not caption_has_record_pattern(caption):
                 continue
-            image_url = next(
-                (att.url for att in msg.attachments
-                 if (att.content_type or "").lower().startswith("image/")),
-                None,
-            )
+            image_url = first_image_url(msg)
             if image_url is None:
                 continue
             latest_by_user[author_id] = (image_url, caption)

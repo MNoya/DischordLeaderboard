@@ -26,6 +26,7 @@ from bot.commands.leaderboard import (
     setup as setup_leaderboard,
 )
 from bot.commands.pod_draft import setup as setup_pod_draft
+from bot.commands.preview_season_awards import setup as setup_preview_season_awards
 from bot.commands.signout import setup as setup_signout
 from bot.commands.signup import setup as setup_signup
 from bot.commands.stats import setup as setup_stats
@@ -33,6 +34,7 @@ from bot.config import settings
 from bot.database import SessionLocal, run_migrations
 from bot.discord_helpers import refresh_player_profiles
 from bot import emojis
+from bot.commands.testawards import setup as setup_testawards
 from bot.commands.testcomponent import setup as setup_testcomponent
 from bot.commands.testlobby import setup as setup_testlobby
 from bot.listeners.auto_link_listener import setup as setup_auto_link_listener
@@ -146,11 +148,13 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_link_17lands(bot)
         await setup_leaderboard_visibility(bot)
         await setup_pod_draft(bot)
+        await setup_preview_season_awards(bot)
         await setup_sesh_listener(bot)
         await setup_pod_screenshots(bot)
         await setup_auto_link_listener(bot)
         await setup_testlobby(bot)
         await setup_testcomponent(bot)
+        await setup_testawards(bot)
         reschedule_pending_events(bot)
         register_pod_views(bot)
         _log_startup_summary()

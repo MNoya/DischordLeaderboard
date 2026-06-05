@@ -89,6 +89,20 @@ def is_collector_booster_window(set_code: str, when: date) -> bool:
     return False
 
 
+@dataclass(frozen=True)
+class PreviewWindow:
+    set_code: str
+    start_date: date
+    end_date: date
+
+
+# Spoiler-season day ranges, inclusive on both ends, interpreted in US Eastern time.
+# Independent of ALL_SETS — a set gets its window before it joins the rotation.
+PREVIEW_WINDOWS: tuple[PreviewWindow, ...] = (
+    PreviewWindow("MSH", date(2026, 6, 2), date(2026, 6, 9)),
+)
+
+
 EXPANSION_ALIASES: dict[str, str] = {
     s.expansion_match: s.code for s in ALL_SETS if s.expansion_match
 }

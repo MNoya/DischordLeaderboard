@@ -19,6 +19,7 @@ import discord
 from discord.ext import commands
 
 from bot.database import SessionLocal
+from bot.discord_helpers import first_image_url
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_drafts import (
     active_event_for_discord_user_in_dm,
@@ -39,7 +40,7 @@ class PodScreenshotListener(commands.Cog):
     async def on_message(self, message: discord.Message) -> None:
         if message.author.bot:
             return
-        image_url = _first_image_url(message)
+        image_url = first_image_url(message)
         if image_url is None:
             return
 
@@ -95,14 +96,6 @@ class PodScreenshotListener(commands.Cog):
             )
         except discord.HTTPException:
             log.warning("could not reply to DM image", exc_info=True)
-
-
-def _first_image_url(message: discord.Message) -> str | None:
-    for att in message.attachments:
-        ct = (att.content_type or "").lower()
-        if ct.startswith("image/"):
-            return att.url
-    return None
 
 
 def _capture_sync(thread_id: str, discord_id: str, image_url: str, caption: str | None) -> str | None:

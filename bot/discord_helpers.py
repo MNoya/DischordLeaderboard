@@ -21,6 +21,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+NBSP = "\u00a0"  # Discord collapses runs of regular spaces; non-breaking spaces survive
+ZWSP = "\u200b"  # anchors a -# subtext line so Discord keeps the NBSP indent that follows
+
 def extract_avatar_hash(user: "discord.abc.User | discord.User | discord.Member | None") -> str | None:
     """Return the Discord avatar hash for a user, or None if they use the default avatar.
 
@@ -108,3 +111,16 @@ async def resolve_display_name(bot: "commands.Bot", user: "discord.User") -> str
             if member is not None:
                 return member.display_name
     return user.display_name
+
+
+def first_image_url(message: "discord.Message", include_embeds: bool = False) -> str | None:
+    for attachment in message.attachments:
+        if (attachment.content_type or "").lower().startswith("image/"):
+            return attachment.url
+    if include_embeds:
+        for embed in message.embeds:
+            if embed.image.url:
+                return embed.image.url
+            if embed.thumbnail.url:
+                return embed.thumbnail.url
+    return None
