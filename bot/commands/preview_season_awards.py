@@ -43,7 +43,6 @@ HYPE_BAR_SLOTS = 10
 CAPTION_MAX_CHARS = 100
 CREDIT_NBSP_PER_CHAR = 2.0
 CREDIT_PAD_MAX = 120
-FLAVOR_RECOUNTS_MAX = 3
 FOOTER_EXTRA_EMOJIS = 3
 REVEAL_DELAY_SECONDS = 5
 
@@ -275,18 +274,39 @@ def _tally_fields(posts: list[ScoredPost]) -> dict:
     reused_extras = [(emoji, count) for emoji, count in extra_totals.items() if posts_using[emoji] > 1]
     top_extras = sorted(reused_extras, key=lambda item: item[1], reverse=True)[:FOOTER_EXTRA_EMOJIS]
 
+    pool = list(posts)
+
+    def claim_category(emojis: tuple[str, ...]) -> AwardWinner | None:
+        post = _category_best(pool, emojis)
+        if post is None:
+            return None
+        pool.remove(post)
+        return _winner_from_post(post, _recounts(post, emojis))
+
+    hottest = claim_category((FIRE,))
+    trash = claim_category((WASTEBASKET, WILTED_ROSE))
+    comedy = claim_category((JOY,))
+    surprise = claim_category((EYES,))
+
+    flavor = None
+    flavor_best = _flavor_best(pool)
+    if flavor_best is not None:
+        post, one_off_emojis = flavor_best
+        pool.remove(post)
+        flavor = _winner_from_post(post, _recounts(post, one_off_emojis))
+
     return dict(
-        hottest=_category_winner(posts, (FIRE,)),
-        trash=_category_winner(posts, (WASTEBASKET, WILTED_ROSE)),
-        comedy=_category_winner(posts, (JOY,)),
-        surprise=_category_winner(posts, (EYES,)),
-        flavor=_flavor_winner(posts),
+        hottest=hottest,
+        trash=trash,
+        comedy=comedy,
+        surprise=surprise,
+        flavor=flavor,
         totals=tuple(core_counts + top_extras),
         hot_pct=hot_pct,
     )
 
 
-def _category_winner(posts: list[ScoredPost], emojis: tuple[str, ...]) -> AwardWinner | None:
+def _category_best(posts: list[ScoredPost], emojis: tuple[str, ...]) -> ScoredPost | None:
     best: ScoredPost | None = None
     best_key: tuple[int, int, datetime] | None = None
     for post in posts:
@@ -297,13 +317,10 @@ def _category_winner(posts: list[ScoredPost], emojis: tuple[str, ...]) -> AwardW
         if best_key is None or key > best_key:
             best = post
             best_key = key
-    if best is None:
-        return None
-    recounts = tuple((emoji, best.reactions[emoji]) for emoji in emojis if best.reactions.get(emoji, 0) > 0)
-    return _winner_from_post(best, recounts)
+    return best
 
 
-def _flavor_winner(posts: list[ScoredPost]) -> AwardWinner | None:
+def _flavor_best(posts: list[ScoredPost]) -> tuple[ScoredPost, tuple[str, ...]] | None:
     best: ScoredPost | None = None
     best_one_offs: list[tuple[str, int]] = []
     best_key: tuple[int, int, datetime] | None = None
@@ -322,10 +339,14 @@ def _flavor_winner(posts: list[ScoredPost]) -> AwardWinner | None:
     if best is None:
         return None
     best_one_offs.sort(key=lambda item: item[1], reverse=True)
-    core_extras = [(emoji, best.reactions[emoji]) for emoji in CORE_EMOJIS if best.reactions.get(emoji, 0) > 0]
-    core_extras.sort(key=lambda item: item[1], reverse=True)
-    recounts = tuple((best_one_offs + core_extras)[:FLAVOR_RECOUNTS_MAX])
-    return _winner_from_post(best, recounts)
+    return best, tuple(emoji for emoji, _ in best_one_offs)
+
+
+def _recounts(post: ScoredPost, primary: tuple[str, ...]) -> tuple[tuple[str, int], ...]:
+    primary_counts = [(emoji, post.reactions[emoji]) for emoji in primary if post.reactions.get(emoji, 0) > 0]
+    rest = [(emoji, count) for emoji, count in post.reactions.items() if emoji not in primary and count > 0]
+    rest.sort(key=lambda item: item[1], reverse=True)
+    return tuple(primary_counts + rest)
 
 
 def _winner_from_post(post: ScoredPost, recounts: tuple[tuple[str, int], ...]) -> AwardWinner:
@@ -400,7 +421,7 @@ def _day_label(day: date) -> str:
 
 
 def _channel_label(channels: list[discord.TextChannel]) -> str:
-    return " & ".join(f"#{channel.name}" for channel in channels)
+    return " & ".join(channel.mention for channel in channels)
 
 
 async def setup(bot: commands.Bot) -> None:

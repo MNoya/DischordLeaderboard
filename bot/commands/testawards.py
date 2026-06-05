@@ -47,15 +47,19 @@ _POST_DEEP_LINK = "https://discord.com/channels/1465844083107827745/150505348497
 _FIXTURE = AwardsData(
     set_code="MSH",
     window_label="June 2 – 8",
-    channel_label="#preview-season & #preview-season-images",
+    channel_label="<#775822803328040961> & <#1387550143234052156>",
     hottest=AwardWinner(_POST_DEEP_LINK, _IMAGE_HOTTEST, (("🔥", 23),), caption="Okoye, Dora Milaje Leader"),
-    trash=AwardWinner(_POST_DEEP_LINK, _IMAGE_TRASH, (("🗑", 12), ("🥀", 5)), caption="Madame Hydra"),
+    trash=AwardWinner(
+        _POST_DEEP_LINK, _IMAGE_TRASH, (("🗑", 12), ("🥀", 5), ("👀", 4)), caption="Madame Hydra",
+    ),
     comedy=AwardWinner(
         _POST_DEEP_LINK, _IMAGE_COMEDY, (("😂", 31),),
         caption="me when I win with a pile of serra angels and 6/6 no texts",
         author="MemeSmith",
     ),
-    surprise=AwardWinner(_POST_DEEP_LINK, _IMAGE_READ_AGAIN, (("👀", 14),), caption="Evil's Thrall"),
+    surprise=AwardWinner(
+        _POST_DEEP_LINK, _IMAGE_READ_AGAIN, (("👀", 14), ("❤️", 3)), caption="Evil's Thrall",
+    ),
     flavor=AwardWinner(
         _POST_DEEP_LINK, _IMAGE_FLAVOR_WIN, (("🦅", 8), ("🇺🇸", 6), ("🔥", 10)),
         caption="Captain America, Wings of Freedom",
