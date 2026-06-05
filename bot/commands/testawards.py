@@ -10,7 +10,7 @@ import logging
 
 from discord.ext import commands
 
-from bot.commands.preview_season_awards import AwardsData, AwardWinner, build_awards_view
+from bot.commands.preview_season_awards import AwardsData, AwardWinner, build_awards_view, reveal_awards
 
 log = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ _FIXTURE = AwardsData(
     ),
     surprise=AwardWinner(_POST_DEEP_LINK, _IMAGE_READ_AGAIN, (("👀", 14),)),
     flavor=AwardWinner(_POST_DEEP_LINK, _IMAGE_FLAVOR_WIN, (("🦅", 11), ("🔥", 8))),
-    totals=(("🔥", 87), ("🗑", 22), ("🥀", 12), ("😂", 31), ("👀", 14)),
+    totals=(("🔥", 87), ("🗑", 22), ("🥀", 12), ("😂", 31), ("👀", 14), ("🦅", 11), ("🐐", 6)),
     hot_pct=72,
 )
 
@@ -64,6 +64,13 @@ _FIXTURE = AwardsData(
 async def setup(bot: commands.Bot) -> None:
     @bot.command(name="testawards")
     @commands.is_owner()
-    async def test_awards(ctx: commands.Context) -> None:
-        """Owner-only. Post the fixture-backed preview season awards sample in this channel."""
+    async def test_awards(ctx: commands.Context, mode: str = "") -> None:
+        """Owner-only. Post the fixture-backed preview season awards sample in this channel.
+
+        `!testawards gated` plays the timed one-award-per-edit reveal instead of the full post.
+        """
+        if mode == "gated":
+            ceremony = await ctx.send(view=build_awards_view(_FIXTURE, reveal=0))
+            await reveal_awards(ceremony, _FIXTURE)
+            return
         await ctx.send(view=build_awards_view(_FIXTURE))
