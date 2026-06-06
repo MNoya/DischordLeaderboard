@@ -10,9 +10,12 @@ from bot.services.pod_schedule import (
     SCHEDULE_TZ,
     build_create_command,
     build_underfill_message,
+    compose_monday_message,
     format_clock,
     monday_blurb,
     monday_kind,
+    next_release_after,
+    release_unix,
     slots_for_week,
     week_index_for,
 )
@@ -69,6 +72,35 @@ def test_monday_blurbs_fall_back_to_generic_and_wrap():
     assert monday_blurb("ZZZ", 0) == GENERIC_MONDAY_BLURBS[0]
     assert monday_blurb("ZZZ", len(GENERIC_MONDAY_BLURBS)) == GENERIC_MONDAY_BLURBS[0]
     assert monday_blurb("MSH", 1) == GENERIC_MONDAY_BLURBS[1]
+
+
+def test_compose_monday_message_normal_week_opens_with_the_blurb_and_lists_both_slots():
+    monday = date(2026, 6, 8)
+
+    message = compose_monday_message(monday, "SOS")
+
+    expected_blurb = monday_blurb("SOS", week_index_for("SOS", monday))
+    assert message.split("\n\n")[0] == expected_blurb
+    assert "SOS" in message
+    for slot in slots_for_week(monday):
+        assert f"<t:{int(slot.timestamp())}:F>" in message
+
+
+def test_compose_monday_message_release_week_counts_down_to_the_drop():
+    monday = date(2026, 6, 22)
+
+    message = compose_monday_message(monday, "SOS")
+
+    release = next_release_after(monday)
+    assert release.name in message
+    assert str(release_unix(release)) in message
+
+
+def test_compose_monday_message_championship_week_names_both_sets():
+    message = compose_monday_message(date(2026, 6, 15), "SOS")
+
+    assert "SOS" in message
+    assert "Marvel Super Heroes" in message
 
 
 def test_build_create_command_interpolates_event_data():

@@ -28,7 +28,18 @@ MONDAY_KIND_CHAMPIONSHIP_WEEK = "championship_week"
 
 # User-facing copy
 
-MSG_SCHEDULE_EMBED_TITLE = "📅 {set_code} Pod Drafts this week"
+MSG_SCHEDULE_HEADER = "📅 {set_code} Pod Drafts this week:"
+
+MSG_MONDAY_DM_INTRO = "Monday schedule draft — paste it as-is, tweak it first, or press a button:"
+
+BTN_POST_FOR_ME = "Post it for me"
+BTN_GOT_IT = "I've got it"
+BTN_SKIP = "Skip this week"
+
+MSG_BTN_POSTED = "Posted ✅"
+MSG_BTN_ALREADY_POSTED = "The schedule is already up — nothing posted."
+MSG_BTN_GOT_IT = "All yours — no fallback post this week."
+MSG_BTN_SKIPPED = "Skipped — no schedule post this week."
 
 MSG_RELEASE_WEEK = (
     "🌀 **{set_name}** drops <t:{unix}:R>! Regular pods are paused this week while the new set hits the queues.\n"
@@ -131,6 +142,27 @@ def week_index_for(set_code: str, monday: date) -> int:
 def monday_blurb(set_code: str, week_index: int) -> str:
     pool = MONDAY_BLURBS.get(set_code) or GENERIC_MONDAY_BLURBS
     return pool[week_index % len(pool)]
+
+
+def compose_monday_message(monday: date, set_code: str) -> str:
+    """The paste-ready weekly post — plain text so it reads identically from the owner or the bot."""
+    kind, release = monday_kind(monday)
+    if kind == MONDAY_KIND_RELEASE_WEEK:
+        return MSG_RELEASE_WEEK.format(set_name=release.name, unix=release_unix(release))
+    if kind == MONDAY_KIND_CHAMPIONSHIP_WEEK:
+        return MSG_CHAMPIONSHIP_WEEK.format(set_code=set_code, next_name=release.name, unix=release_unix(release))
+    blurb = monday_blurb(set_code, week_index_for(set_code, monday))
+    header = MSG_SCHEDULE_HEADER.format(set_code=set_code)
+    slot_lines = []
+    for slot in slots_for_week(monday):
+        unix = int(slot.timestamp())
+        slot_lines.append(f"• <t:{unix}:F> (<t:{unix}:R>)")
+    return blurb + "\n\n" + header + "\n" + "\n".join(slot_lines)
+
+
+def release_unix(release: UpcomingRelease) -> int:
+    release_moment = datetime.combine(release.release_date, time(12, 0), tzinfo=SCHEDULE_TZ)
+    return int(release_moment.timestamp())
 
 
 def build_create_command(set_code: str, event_number: int, slot_start: datetime) -> str:

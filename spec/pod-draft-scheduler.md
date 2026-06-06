@@ -28,16 +28,43 @@ Hardcoded, single source of truth for features 1–2, in a new `bot/services/pod
 next occurrence from a reference date; everything below renders times as Discord `<t:...:F>` timestamps so
 readers see local time.
 
-## Feature 1 — Weekly schedule post
+## Feature 1 — Weekly schedule post, ghostwritten
 
-APScheduler cron job: **Mondays 12:00 PM ET**, posting to the coordination channel
-(`pod_draft_channel_id`).
+The owner posts the weekly message personally for warmth; the bot drafts it, nudges, and backstops.
+The post itself is **plain text** (a user can't post embeds) so the same content works from either
+author:
 
 - Opens with a **flavor blurb** themed to the active set, a different one each week from a curated
   per-set pool (see [Flavor pools](#flavor-pools)) so the post stays interesting for however many weeks
   the format runs.
-- Below it, an embed lists the week's slots as `<t:...:F>` + `<t:...:R>` timestamp pairs. Ping-free —
-  the only pings in this feature come from the underfill reminders.
+- Below it, the week's slots as `<t:...:F>` + `<t:...:R>` timestamp pairs. Ping-free — the only pings
+  in this feature come from the underfill reminders.
+
+### Monday flow
+
+Two ET times, both module constants in `pod_schedule_post.py` (defaults: DM in the morning at 9 AM,
+fallback at noon — tune freely):
+
+| Moment | What happens |
+|---|---|
+| DM time | Bot DMs the owner one package: the paste-ready schedule message (single blurb — the owner rewrites freely), the `/create` blocks (feature 2), and three buttons. |
+| In between | Owner either pastes the message (edited or not) into the coordination channel, or presses a button. |
+| Fallback time | The bot posts the default version itself — unless the week is handled. |
+
+Buttons on the DM:
+
+- **Post it for me** — bot posts the default version immediately.
+- **I've got it** — bot stands down; the owner posts manually.
+- **Skip this week** — no post at all this week.
+
+**Double-post guard**: before the fallback (and the *Post it for me* handler) posts, the bot scans the
+coordination channel since the DM went out for a message containing a `<t:` timestamp from the owner or
+itself — found means the schedule is already up, so it stands down. Pressing *I've got it* is
+convenience, not a contract; forgetting it never causes a double-post.
+
+**Restart edge (accepted)**: button-press state is in-memory. A bot restart inside the DM→fallback
+window re-arms the fallback; the channel scan recovers "already posted", but a pressed *Skip* is lost
+and the fallback may post anyway. Rare enough to live with.
 
 ### Format-boundary Mondays
 
@@ -45,10 +72,11 @@ Sets always release on **Tuesday**, so two Mondays around each rotation deviate 
 
 | Monday | Condition | Behavior |
 |---|---|---|
-| Release week | A seeded set releases within the next 7 days (i.e. tomorrow) | Replace the schedule post with a light opt-in message: new set drops `<t:...:R>`, regular pods paused this week, "react 👍 if you still want a pod". No `/create` DMs. |
-| Championship week (last week of format) | A seeded set releases 8–13 days out | Replace the schedule post with a Set Championship promo — the season closer takes the week; no regular pods, no `/create` DMs. |
+| Release week | A seeded set releases within the next 7 days (i.e. tomorrow) | The drafted message becomes a light opt-in: new set drops `<t:...:R>`, regular pods paused this week, "react 👍 if you still want a pod". No `/create` blocks in the DM. |
+| Championship week (last week of format) | A seeded set releases 8–13 days out | The drafted message becomes a Set Championship promo — the season closer takes the week; no regular pods, no `/create` blocks. |
 
-The following Monday (first full week of the new format, ~6 days after release) resumes the normal post.
+Boundary Mondays run the same DM-first flow — only the drafted content changes. The following Monday
+(first full week of the new format, ~6 days after release) resumes the normal draft.
 
 **Mechanism**: `pod_schedule.py` owns an `UPCOMING_RELEASES` table of known future release dates,
 independent of `ALL_SETS` so set rotation stays a one-step bump. The boundary predicates use the earliest
@@ -61,11 +89,11 @@ future date; past entries are inert. Known dates at spec time:
 | 2026-09-29 | Reality Fracture (FRA) |
 | 2026-11-10 | Star Trek (TRE) |
 
-## Feature 2 — Owner `/create` DM
+## Feature 2 — Owner `/create` lines
 
 Sesh slash commands can't be invoked by another bot, so the bot assembles the command and the owner
-copy-pastes it. Fires **immediately after the Monday post**, one DM per slot, so events exist days ahead
-and accumulate RSVPs before the feature-3 checks run:
+copy-pastes it. The lines ride along **inside the Monday morning DM** (one code block per slot), so
+events exist days ahead and accumulate RSVPs before the feature-3 checks run:
 
 ```
 /create title:SOS Pod Draft #14 - June 10 datetime:June 10 8pm ET channel:#🚀-pod-draft-coordination on_create_mentions:@Any Pronouns
