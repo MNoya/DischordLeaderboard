@@ -976,12 +976,12 @@ def _format_leaderboard(
     """
     name_width = max(max(display_width(e.display_name) for e in top), len("Name"))
     rank_col_width = max(max(len(f"{e.rank}.") for e in top), len("#"))
+    # min 2 so single-digit trophies align under the 🏆 header, which renders ~1 col wider than a digit
+    trophy_width = max(max(len(str(e.trophies)) for e in top), 2)
+    header_trophy_width = trophy_width - 1
 
     if show_score:
         score_width = max(max(len(f"{round(e.score)}") for e in top), len("Points"))
-        trophy_width = max(max(len(str(e.trophies)) for e in top), 1)
-        # Trophy header emoji renders ~1 col wider than a digit, so pad header trophy field one less
-        header_trophy_width = max(trophy_width - 1, 1)
         header_inner = (
             f"{'#':<{rank_col_width}} {'Name':<{name_width}}  "
             f"{'Points':>{score_width}}  {'🏆':>{header_trophy_width}}"
@@ -990,9 +990,6 @@ def _format_leaderboard(
         is_direct = filter_type == "format" and filter_value == "Direct"
         left_label = "📦" if is_direct else "Drafts"
         drafts_width = max(max(len(str(e.events)) for e in top), 2 if is_direct else len(left_label))
-        # min 2 so single-digit trophies align under the emoji header
-        trophy_width = max(max(len(str(e.trophies)) for e in top), 2)
-        header_trophy_width = trophy_width - 1
         header_left_width = drafts_width - 1 if is_direct else drafts_width
         header_inner = (
             f"{'#':<{rank_col_width}} {'Name':<{name_width}}   "
