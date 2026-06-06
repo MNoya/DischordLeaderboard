@@ -68,7 +68,7 @@ copy-pastes it. Fires **immediately after the Monday post**, one DM per slot, so
 and accumulate RSVPs before the feature-3 checks run:
 
 ```
-/create title:SOS Pod Draft #14 - June 10 datetime:June 10 8pm ET channel:#🚀-pod-draft-coordination on_create_mentions:@Any Pronouns description:<generated line>
+/create title:SOS Pod Draft #14 - June 10 datetime:June 10 8pm ET channel:#🚀-pod-draft-coordination on_create_mentions:@Any Pronouns
 ```
 
 - **Set code**: active set from `bot/sets.py`.
@@ -77,9 +77,7 @@ and accumulate RSVPs before the feature-3 checks run:
 - **`datetime`**: full month-day + time + ET (e.g. `June 10 8pm ET`) — Sesh parses natural language
   reliably, and the full date keeps the line unambiguous regardless of when it's pasted.
 - **Mentions**: a hardcoded constant for now (`@Any Pronouns` per current practice).
-
-The `description:` value is a single short flavor line from the curated per-set pool (see
-[Flavor pools](#flavor-pools)), hard-capped at ~100 chars to fit Sesh's embed.
+- **No description** — flavor lives in the Monday post only; the owner can hand-add one before pasting.
 
 ## Feature 3 — Underfill reminders (T-24h, T-3h)
 
@@ -105,15 +103,10 @@ generates candidates with GPT-5.5 (a refined per-set prompt, see guidance below)
 and commits them; at runtime the bot only selects from the curated pool. No API key, no failure modes —
 the pool is the product.
 
-Two pools per set, in `pod_schedule.py` under a `SET_FLAVOR` map:
-
-| Pool | Used by | Shape | Size |
-|---|---|---|---|
-| `monday_blurbs` | Feature 1 schedule post | Short multi-line passage | ≥ format length in weeks |
-| `event_descriptions` | Feature 2 `/create` line | Single line, ≤ ~100 chars | ≥ 2 × weeks |
-
-Selection cycles the pool in order (week/event index into the list), wrapping if exhausted, so nothing
-repeats until everything has run once. A set with no pools falls back to a small generic default pool.
+One pool per set: `MONDAY_BLURBS` in `pod_schedule.py` — short multi-line passages opening the feature-1
+schedule post, sized ≥ the format's normal-week count (~5–6). Selection cycles the pool in week order,
+wrapping if exhausted, so nothing repeats until everything has run once. A set with no pool falls back
+to a small generic default.
 
 ### Prompt guidance (for offline curation)
 

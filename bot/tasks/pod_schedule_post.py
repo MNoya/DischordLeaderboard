@@ -27,7 +27,6 @@ from bot.services.pod_schedule import (
     SCHEDULE_TZ,
     UpcomingRelease,
     build_create_command,
-    event_description,
     monday_blurb,
     monday_kind,
     slots_for_week,
@@ -126,8 +125,7 @@ async def _dm_create_commands(slots: list[datetime]) -> None:
     event_count = await asyncio.to_thread(_count_set_events)
     blocks = []
     for i, slot in enumerate(slots):
-        description = event_description(ACTIVE_SET_CODE, event_count + i)
-        command = build_create_command(ACTIVE_SET_CODE, event_count + 1 + i, slot, description)
+        command = build_create_command(ACTIVE_SET_CODE, event_count + 1 + i, slot)
         blocks.append(f"```\n{command}\n```")
     body = MSG_CREATE_DM_HEADER + "\n" + "\n".join(blocks)
     try:

@@ -3,9 +3,9 @@
 Pure date/selection logic — no Discord, no DB. The APScheduler wiring lives in
 bot/tasks/pod_schedule_post.py and bot/tasks/pod_underfill.py.
 
-Flavor pools are curated offline (generated with an LLM, hand-picked per set) — see
-spec/pod-draft-scheduler.md for the prompt guidance. A set with missing or empty pools
-falls back to GENERIC_FLAVOR.
+Monday blurbs are curated offline (generated with an LLM, hand-picked per set) — see
+spec/pod-draft-scheduler.md for the prompt guidance. A set with a missing or empty pool
+falls back to GENERIC_MONDAY_BLURBS.
 """
 from __future__ import annotations
 
@@ -53,37 +53,18 @@ CREATE_COMMAND_TEMPLATE = (
     "/create title:{set_code} Pod Draft #{event_number} - {day} "
     "datetime:{day} {clock} ET "
     "channel:{channel} "
-    "on_create_mentions:{mentions} "
-    "description:{description}"
+    "on_create_mentions:{mentions}"
 )
 
-
-@dataclass(frozen=True)
-class SetFlavor:
-    monday_blurbs: tuple[str, ...]
-    event_descriptions: tuple[str, ...]
-
-
-GENERIC_FLAVOR = SetFlavor(
-    monday_blurbs=(
-        "📜 **Weekly Draft Bulletin**\nThe packs are sealed. The seats are open. The lanes remain, for now, unclaimed.",
-        "📜 **Notice from the Pairings Office**\nTwo pods are scheduled this week. History shows the best seats go to "
-        "those who react early.",
-        "📜 **Weekly Records Update**\nArchivists note that every memorable draft began the same way: somebody RSVP'd.",
-    ),
-    event_descriptions=(
-        "Eight seats. Three rounds. One trophy. The math checks out.",
-        "The packs are sealed and the seats are waiting.",
-        "Officials confirm the open lane exists. Someone will find it.",
-        "A trophy will be awarded. Witnesses expected.",
-    ),
+GENERIC_MONDAY_BLURBS: tuple[str, ...] = (
+    "📜 **Weekly Draft Bulletin**\nThe packs are sealed. The seats are open. The lanes remain, for now, unclaimed.",
+    "📜 **Notice from the Pairings Office**\nTwo pods are scheduled this week. History shows the best seats go to "
+    "those who react early.",
+    "📜 **Weekly Records Update**\nArchivists note that every memorable draft began the same way: somebody RSVP'd.",
 )
 
-SET_FLAVOR: dict[str, SetFlavor] = {
-    "MSH": SetFlavor(
-        monday_blurbs=(),
-        event_descriptions=(),
-    ),
+MONDAY_BLURBS: dict[str, tuple[str, ...]] = {
+    "MSH": (),
 }
 
 
@@ -148,16 +129,11 @@ def week_index_for(set_code: str, monday: date) -> int:
 
 
 def monday_blurb(set_code: str, week_index: int) -> str:
-    pool = _pool(set_code, "monday_blurbs")
+    pool = MONDAY_BLURBS.get(set_code) or GENERIC_MONDAY_BLURBS
     return pool[week_index % len(pool)]
 
 
-def event_description(set_code: str, event_index: int) -> str:
-    pool = _pool(set_code, "event_descriptions")
-    return pool[event_index % len(pool)]
-
-
-def build_create_command(set_code: str, event_number: int, slot_start: datetime, description: str) -> str:
+def build_create_command(set_code: str, event_number: int, slot_start: datetime) -> str:
     return CREATE_COMMAND_TEMPLATE.format(
         set_code=set_code,
         event_number=event_number,
@@ -165,7 +141,6 @@ def build_create_command(set_code: str, event_number: int, slot_start: datetime,
         clock=format_clock(slot_start),
         channel=CREATE_CHANNEL_REF,
         mentions=CREATE_MENTIONS,
-        description=description,
     )
 
 
@@ -192,9 +167,3 @@ def format_clock(slot_start: datetime) -> str:
     hour = slot_start.strftime("%I").lstrip("0")
     minute = f":{slot_start.minute:02d}" if slot_start.minute else ""
     return f"{hour}{minute}{slot_start.strftime('%p').lower()}"
-
-
-def _pool(set_code: str, pool_name: str) -> tuple[str, ...]:
-    flavor = SET_FLAVOR.get(set_code)
-    pool: tuple[str, ...] = getattr(flavor, pool_name) if flavor else ()
-    return pool or getattr(GENERIC_FLAVOR, pool_name)

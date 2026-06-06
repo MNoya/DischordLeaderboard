@@ -3,14 +3,13 @@ from datetime import date, datetime, timezone
 import pytest
 
 from bot.services.pod_schedule import (
-    GENERIC_FLAVOR,
+    GENERIC_MONDAY_BLURBS,
     MONDAY_KIND_CHAMPIONSHIP_WEEK,
     MONDAY_KIND_NORMAL,
     MONDAY_KIND_RELEASE_WEEK,
     SCHEDULE_TZ,
     build_create_command,
     build_underfill_message,
-    event_description,
     format_clock,
     monday_blurb,
     monday_kind,
@@ -66,27 +65,22 @@ def test_week_index_for_unknown_set_falls_back_to_iso_week():
     assert week_index_for("ZZZ", date(2026, 6, 8)) == date(2026, 6, 8).isocalendar().week
 
 
-def test_flavor_pools_fall_back_to_generic_and_wrap():
-    blurbs = GENERIC_FLAVOR.monday_blurbs
-    descriptions = GENERIC_FLAVOR.event_descriptions
-
-    assert monday_blurb("ZZZ", 0) == blurbs[0]
-    assert monday_blurb("ZZZ", len(blurbs)) == blurbs[0]
-    assert monday_blurb("MSH", 1) == blurbs[1]
-    assert event_description("ZZZ", len(descriptions) + 2) == descriptions[2]
+def test_monday_blurbs_fall_back_to_generic_and_wrap():
+    assert monday_blurb("ZZZ", 0) == GENERIC_MONDAY_BLURBS[0]
+    assert monday_blurb("ZZZ", len(GENERIC_MONDAY_BLURBS)) == GENERIC_MONDAY_BLURBS[0]
+    assert monday_blurb("MSH", 1) == GENERIC_MONDAY_BLURBS[1]
 
 
 def test_build_create_command_interpolates_event_data():
     slot = datetime(2026, 6, 24, 20, 0, tzinfo=SCHEDULE_TZ)
 
-    command = build_create_command("MSH", 5, slot, "Assemble.")
+    command = build_create_command("MSH", 5, slot)
 
     assert command.startswith("/create ")
     assert "MSH" in command
     assert "#5" in command
     assert "June 24" in command
     assert "8pm" in command
-    assert command.endswith("Assemble.")
 
 
 @pytest.mark.parametrize(
