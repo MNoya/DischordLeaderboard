@@ -6,6 +6,7 @@ import logging
 
 import discord
 
+from bot.services.lobby_embed import SettingsButton
 from bot.services.pod_format import format_display
 from bot.services.pod_pairing_select import pairing_label
 from bot.services.pod_seating_select import seating_mode_label
@@ -15,6 +16,12 @@ log = logging.getLogger("bot.pod_registration_embed")
 
 REGISTERED_TITLE = "🤖 Pod Draft registered!"
 HISTORY_SCAN_LIMIT = 25
+
+
+class RegisteredSettingsView(discord.ui.View):
+    def __init__(self) -> None:
+        super().__init__(timeout=None)
+        self.add_item(SettingsButton())
 
 
 def build_registered_embed(

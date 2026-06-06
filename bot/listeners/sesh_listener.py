@@ -19,7 +19,7 @@ from bot.config import settings
 from bot.database import SessionLocal
 from bot.models import PodDraftEvent
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
-from bot.services.pod_registration_embed import build_registered_embed
+from bot.services.pod_registration_embed import RegisteredSettingsView, build_registered_embed
 from bot.services.pod_drafts import ParsedSeshEvent, record_event, update_event_time_if_changed
 from bot.services.sesh_parser import ParsedSeshFields, parse_sesh_embed
 from bot.sets import ACTIVE_SET_CODE
@@ -135,8 +135,10 @@ class SeshListener(commands.Cog):
         self._schedule_reminder(event_row.id, event_row.event_time)
 
         try:
-            await thread.send(embed=build_registered_embed(
-                event_row.set_code, event_row.pairing_mode, event_row.seating_mode))
+            await thread.send(
+                embed=build_registered_embed(event_row.set_code, event_row.pairing_mode, event_row.seating_mode),
+                view=RegisteredSettingsView(),
+            )
         except discord.HTTPException:
             log.warning(f"could not post confirmation in pod draft thread {thread.id}", exc_info=True)
 

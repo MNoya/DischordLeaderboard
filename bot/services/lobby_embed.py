@@ -6,6 +6,7 @@ startup; clicks dispatch to the active manager for the thread.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 
@@ -13,6 +14,7 @@ import discord
 
 from bot import emojis
 from bot.commands import descriptions as desc
+from bot.services.pod_drafts import load_event_id_by_thread_sync
 from bot.services.pod_tournament import actor_label
 
 
@@ -31,6 +33,7 @@ class LobbyReadyButtonView(discord.ui.View):
         super().__init__(timeout=None)
         if ready_disabled:
             self.ready_check.disabled = True
+        self.add_item(SettingsButton())
         if draftmancer_url:
             self.add_item(discord.ui.Button(
                 label="Join Draftmancer",
@@ -65,35 +68,40 @@ class LobbyReadyButtonView(discord.ui.View):
         if err:
             await interaction.followup.send(f"⚠️ {err}", ephemeral=True)
 
-    @discord.ui.button(
-        label="Settings", style=discord.ButtonStyle.grey,
-        custom_id=SETTINGS_CUSTOM_ID, emoji="⚙️",
-    )
-    async def settings(
-        self, interaction: discord.Interaction, button: discord.ui.Button,
-    ) -> None:
-        from bot.services.pod_active import ACTIVE_POD_MANAGERS
-        from bot.commands.pod_draft import build_pod_settings_view
-        channel = interaction.channel
-        channel_id = channel.id if channel else None
-        actor = actor_label(interaction)
-        manager = next(
-            (m for m in ACTIVE_POD_MANAGERS.values() if m.thread_id == channel_id),
-            None,
+
+class SettingsButton(discord.ui.Button):
+    def __init__(self) -> None:
+        super().__init__(
+            label="Settings", style=discord.ButtonStyle.grey,
+            custom_id=SETTINGS_CUSTOM_ID, emoji="⚙️",
         )
-        if manager is None:
-            if _settings_preview_factory is not None:
-                await interaction.response.send_message(view=_settings_preview_factory(), ephemeral=True)
-                return
-            log.info(f"{actor} clicked Settings in channel={channel_id} (no active pod)")
-            await interaction.response.send_message(_NO_ACTIVE_POD_MSG, ephemeral=True)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await open_settings_panel(interaction)
+
+
+async def open_settings_panel(interaction: discord.Interaction) -> None:
+    """Resolve the thread's pod-draft event and open the ephemeral Settings panel. Resolution goes
+    through the DB rather than ACTIVE_POD_MANAGERS so the button works from registration onward,
+    before the Draftmancer session launches."""
+    from bot.commands.pod_draft import build_pod_settings_view
+    channel_id = interaction.channel_id
+    actor = actor_label(interaction)
+    thread_id = str(channel_id) if channel_id else None
+    event_id = await asyncio.to_thread(load_event_id_by_thread_sync, thread_id) if thread_id else None
+    if event_id is None:
+        if _settings_preview_factory is not None:
+            await interaction.response.send_message(view=_settings_preview_factory(), ephemeral=True)
             return
-        log.info(f"[{manager.event_name}] {actor} clicked Settings")
-        is_owner = await interaction.client.is_owner(interaction.user)
-        await interaction.response.send_message(
-            view=await build_pod_settings_view(interaction.client, manager.event_id, is_owner=is_owner),
-            ephemeral=True,
-        )
+        log.info(f"{actor} clicked Settings in channel={channel_id} (no pod-draft event)")
+        await interaction.response.send_message(_NO_ACTIVE_POD_MSG, ephemeral=True)
+        return
+    log.info(f"{actor} clicked Settings for event {event_id}")
+    is_owner = await interaction.client.is_owner(interaction.user)
+    await interaction.response.send_message(
+        view=await build_pod_settings_view(interaction.client, event_id, is_owner=is_owner),
+        ephemeral=True,
+    )
 
 
 def render(
