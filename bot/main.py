@@ -51,6 +51,8 @@ from bot.services.refresh import refresh_active_players
 from bot.services.seventeenlands import MinIntervalLimiter, SeventeenLandsClient
 from bot.sets import ACTIVE_SET_CODE
 from bot.tasks.pod_draft_reminder import init_reminder
+from bot.tasks.pod_schedule_post import init_schedule_post
+from bot.tasks.pod_underfill import init_underfill
 
 
 log = logging.getLogger("bot.main")
@@ -136,6 +138,8 @@ def build_bot(guild_id: int) -> commands.Bot:
         bot.pod_scheduler = AsyncIOScheduler()
         bot.pod_scheduler.start()
         init_reminder(bot)
+        init_underfill(bot)
+        init_schedule_post(bot)
 
         # Load cogs into memory and mirror to the guild tree so dispatch works.
         # Discord-side sync is handled by the owner-only `!sync` text command, not on startup.
