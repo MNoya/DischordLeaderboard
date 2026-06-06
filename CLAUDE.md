@@ -153,7 +153,7 @@ On push/PR to `master`: spin up Postgres service container → `alembic upgrade 
 ## Conventions (do not violate)
 
 - **Branch is `master`**, never `main`.
-- **Solo repo: commit directly to `master`** for routine changes. Branch + PR only for genuinely large changesets.
+- **Solo repo: commit directly to `master`** for routine changes. Large changesets get a branch — **never a PR**. Merge back by squash, or with a merge commit when the intermediate history is worth keeping; ask which when finishing a branch.
 - **Bundle frontend changes; the user reviews locally before commit.** Commit backend first, leave frontend uncommitted until the user explicitly approves.
 - **Tests target logic, not framework behavior.** No tests for "does Postgres work" or "does Alembic apply migrations" — focus on aggregator / scoring / signup branches / interaction handling.
 - **Bot user-facing strings avoid first-person.** Use "Check your DMs" not "I sent you a DM". No "sign up" in user copy — use "join" / "joined" / "on the leaderboard" (internal Python identifiers like `process_signup`, `SignupKind` stay as-is).
