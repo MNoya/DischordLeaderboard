@@ -9,6 +9,7 @@ from bot.commands.leaderboard import (
     encode_filter,
     process_leaderboard,
     process_leaderboard_for_archetype,
+    process_leaderboard_for_format,
     process_personal_standings,
     render_personal_embed,
     render_public_embed,
@@ -40,14 +41,16 @@ def _seed_player(session, name, discord_id, token_suffix, active=True, leaderboa
     return p
 
 
-def _seed_stats(session, p, s, trophies=0, events=1, fmt="PremierDraft", expansion=None):
+def _seed_stats(session, p, s, trophies=0, events=1, fmt="PremierDraft", expansion=None, wins=None, losses=None):
     """Single PlayerStats row, defaults to Premier so compute_score weights it at 10pts.
 
     A row with (trophies=0, events=N) yields score=0 — same effect as the old _score(score=0).
+    Explicit wins/losses override the trophy-derived defaults for wins-scored formats like LCQ Draft 2.
     """
     session.add(PlayerStats(
         player_id=p.id, set_id=s.id, format=fmt, expansion=expansion or s.code,
-        events=events, wins=trophies * 7, losses=max(0, events - trophies),
+        events=events, wins=trophies * 7 if wins is None else wins,
+        losses=max(0, events - trophies) if losses is None else losses,
         games_played=events * 5, trophies=trophies,
     ))
 
@@ -384,6 +387,42 @@ def test_personal_standings_format_excludes_sets_without_group_events(session):
     assert data.rows == []
 
 
+def _seed_lcq_stats(session, alice, bob, s):
+    _seed_stats(session, alice, s, trophies=1, events=1, fmt="LimitedChampionshipQualifier_Draft1")
+    _seed_stats(session, alice, s, events=1, fmt="LimitedChampionshipQualifier_Draft2", wins=4, losses=2)
+    _seed_stats(session, bob, s, events=1, fmt="LimitedChampionshipQualifier_Draft2", wins=3, losses=3)
+    _seed_stats(session, bob, s, trophies=5, events=5, fmt="PremierDraft")
+    session.commit()
+
+
+def test_format_board_lcq_combines_both_lcq_groups(session):
+    s = _seed_set(session)
+    alice = _seed_player(session, "Alice", "1", "a")
+    bob = _seed_player(session, "Bob", "2", "b")
+    _seed_lcq_stats(session, alice, bob, s)
+
+    data = process_leaderboard_for_format(session, viewer_discord_id=None, format_label="LCQ")
+
+    assert [(e.rank, e.display_name) for e in data.top] == [(1, "Alice"), (2, "Bob")]
+    # Alice: D1 trophy 1×30×1 shrunk by 1/3 → 10, plus D2 4×(4/6)×10 → 26.67
+    assert data.top[0].score == 36.67
+    # Bob's Premier trophies stay off the LCQ board: D2 only, 3×(3/6)×10
+    assert data.top[1].score == 15.0
+
+
+def test_personal_standings_lcq_filter_scopes_and_ranks(session):
+    s = _seed_set(session)
+    alice = _seed_player(session, "Alice", "1", "a")
+    bob = _seed_player(session, "Bob", "2", "b")
+    _seed_lcq_stats(session, alice, bob, s)
+
+    data = process_personal_standings(session, "2", format_label="LCQ")
+
+    assert data.format_label == "LCQ"
+    assert len(data.rows) == 1
+    assert (data.rows[0].score, data.rows[0].rank, data.rows[0].events) == (15.0, 2, 1)
+
+
 def _seed_direct(session, p, s, wins, losses, finished, eid):
     session.add(DraftEvent(
         player_id=p.id, set_id=s.id, seventeenlands_event_id=eid,
@@ -511,7 +550,7 @@ def test_archetype_board_combines_format_and_color(session):
     session.commit()
 
     premier = next(g for g in DEFAULT_QUEUE_GROUPS if g.label == "Premier")
-    combined = process_leaderboard_for_archetype(session, viewer_discord_id=None, archetype="UG", group=premier)
+    combined = process_leaderboard_for_archetype(session, viewer_discord_id=None, archetype="UG", groups=(premier,))
     assert [(e.display_name, e.trophies) for e in combined.top] == [("Alice", 2)]  # a1 + a2, Quick excluded
 
     color_only = process_leaderboard_for_archetype(session, viewer_discord_id=None, archetype="UG")

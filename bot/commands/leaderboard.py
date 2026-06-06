@@ -21,7 +21,9 @@ from bot.config import settings
 from bot.database import SessionLocal
 from bot.discord_helpers import display_width, player_url
 from bot.models import DraftEvent, LeaderboardMessage, MagicSet, Player, PlayerStats, PodDraftEvent, PodDraftParticipant
-from bot.scoring import DEFAULT_QUEUE_GROUPS, QueueGroup, boxes_for_event, compute_score, pod_points
+from bot.scoring import (
+    DEFAULT_QUEUE_GROUPS, QueueGroup, boxes_for_event, compute_score, pod_points, supported_formats,
+)
 from bot.services.pod_deck_color import PAIR_EMOJI_NAME
 from bot.services.pod_drafts import pod_summary_by_set_for_player
 from bot.sets import ACTIVE_SET_CODE, ALL_SETS
@@ -159,11 +161,12 @@ def process_leaderboard(
 
 
 def _ranked_for_format(
-    session: Session, group: QueueGroup, set_id: str,
+    session: Session, groups: tuple[QueueGroup, ...], set_id: str,
 ) -> list[tuple[int, str, str, str, str | None, float, int]]:
-    """Rank active, opted-in players by their score in one queue group for a set.
+    """Rank active, opted-in players by their score in the given queue groups for a set.
 
-    Returns (rank, player_id, slug, display_name, discord_id, score, trophies) per
+    Most filters resolve to a single group; LCQ spans Draft 1 + Draft 2. Returns
+    (rank, player_id, slug, display_name, discord_id, score, trophies) per
     scoring player. Shared by the public format board and the personal standings rank.
     """
     rows = session.execute(
@@ -177,7 +180,7 @@ def _ranked_for_format(
             Player.active.is_(True),
             Player.leaderboard_opt_in.is_(True),
             PlayerStats.set_id == set_id,
-            PlayerStats.format.in_(group.formats),
+            PlayerStats.format.in_(supported_formats(groups)),
         )
     ).all()
 
@@ -196,7 +199,7 @@ def _ranked_for_format(
 
     scored: list[tuple[float, int, str, str, str, str | None]] = []
     for pid, b in bucket.items():
-        score = compute_score(b["stats"], groups=(group,))
+        score = compute_score(b["stats"], groups=groups)
         if score <= 0:
             continue
         scored.append((score, b["trophies"], pid, b["slug"], b["display_name"], b["discord_id"]))
@@ -208,23 +211,34 @@ def _ranked_for_format(
     ]
 
 
+LCQ_FILTER = "LCQ"
+COMBINED_FORMAT_LABELS: dict[str, tuple[str, ...]] = {LCQ_FILTER: ("LCQ Draft 1", "LCQ Draft 2")}
+
+
+def _groups_for_label(format_label: str) -> tuple[QueueGroup, ...] | None:
+    labels = COMBINED_FORMAT_LABELS.get(format_label, (format_label,))
+    groups = tuple(g for g in DEFAULT_QUEUE_GROUPS if g.label in labels)
+    return groups or None
+
+
 def process_leaderboard_for_format(
     session: Session, viewer_discord_id: str | None, format_label: str, top_n: int = 10,
     magic_set: MagicSet | None = None,
 ) -> LeaderboardData | None:
     """Per-format leaderboard: ranks each player by their score contribution
-    in the named queue group (Premier, Quick, Sealed, etc.).
+    in the named queue group (Premier, Quick, Sealed, etc.). LCQ rolls both
+    LCQ queue groups into one board.
     """
     if magic_set is None:
         magic_set = _current_set(session)
     if magic_set is None:
         return None
 
-    group = next((g for g in DEFAULT_QUEUE_GROUPS if g.label == format_label), None)
-    if group is None:
+    groups = _groups_for_label(format_label)
+    if groups is None:
         return None
 
-    ranked = _ranked_for_format(session, group, magic_set.id)
+    ranked = _ranked_for_format(session, groups, magic_set.id)
     top = [
         LeaderboardEntry(rank=rank, player_id=pid, slug=slug, display_name=name, score=score, trophies=trophies)
         for rank, pid, slug, name, _did, score, trophies in ranked[:top_n]
@@ -255,11 +269,11 @@ def process_leaderboard_for_format(
 
 def process_leaderboard_for_archetype(
     session: Session, viewer_discord_id: str | None, archetype: str, top_n: int = 10,
-    magic_set: MagicSet | None = None, group: QueueGroup | None = None,
+    magic_set: MagicSet | None = None, groups: tuple[QueueGroup, ...] | None = None,
 ) -> LeaderboardData | None:
     """Per-archetype (color combo) leaderboard. Aggregates from draft_events,
-    filtering by archetype, then runs compute_score per player. When ``group`` is
-    given the board is scoped to that queue group's formats and scored within it,
+    filtering by archetype, then runs compute_score per player. When ``groups`` is
+    given the board is scoped to those queue groups' formats and scored within them,
     so format + color combine.
     """
     if magic_set is None:
@@ -267,7 +281,7 @@ def process_leaderboard_for_archetype(
     if magic_set is None:
         return None
 
-    allowed = set(group.formats) if group is not None else None
+    allowed = set(supported_formats(groups)) if groups is not None else None
     events = session.execute(
         select(
             Player.id, Player.slug, Player.display_name, Player.discord_id,
@@ -303,7 +317,6 @@ def process_leaderboard_for_archetype(
             f["trophies"] += 1
             b["trophies"] += 1
 
-    groups = (group,) if group is not None else None
     scored: list[tuple[float, int, str, str, str, str | None]] = []
     for pid, b in bucket.items():
         score = compute_score(list(b["stats_by_format"].values()), groups=groups) if groups \
@@ -525,8 +538,8 @@ def process_personal_standings(
     Subject is ``player_name`` when given, else the caller. Aggregates the player's
     PlayerStats per set (alchemy variants bucket under their parent set via set_id),
     sorts by score then trophies, and caps at the top 10. When ``format_label`` names a
-    queue group, each row is scoped to that group's formats and ranked against that
-    set's per-format board.
+    format filter, each row is scoped to its queue groups' formats and ranked against
+    that set's per-format board.
     """
     player = resolve_player(session, player_name, viewer_discord_id)
     if player is None:
@@ -540,12 +553,12 @@ def process_personal_standings(
     if format_label == DIRECT_FILTER:
         return _personal_direct_standings(session, player, opted_out, last_updated)
 
-    group: QueueGroup | None = None
+    groups: tuple[QueueGroup, ...] | None = None
     if format_label is not None:
-        group = next((g for g in DEFAULT_QUEUE_GROUPS if g.label == format_label), None)
-        if group is None:
+        groups = _groups_for_label(format_label)
+        if groups is None:
             return None
-    allowed = set(group.formats) if group is not None else None
+    allowed = set(supported_formats(groups)) if groups is not None else None
 
     stats_rows = session.execute(
         select(
@@ -572,7 +585,7 @@ def process_personal_standings(
         b["wins"] += int(r.wins or 0)
         b["losses"] += int(r.losses or 0)
 
-    pod_by_set = pod_summary_by_set_for_player(session, player.id) if group is None else {}
+    pod_by_set = pod_summary_by_set_for_player(session, player.id) if groups is None else {}
     missing_pod_codes = [code for code in pod_by_set if code not in {b["code"] for b in by_set.values()}]
     if missing_pod_codes:
         for s in session.execute(
@@ -584,11 +597,11 @@ def process_personal_standings(
 
     rows: list[PersonalStanding] = []
     for set_id, b in by_set.items():
-        if group is not None:
+        if groups is not None:
             if b["events"] == 0:
                 continue
-            score = compute_score(b["stats"], groups=(group,))
-            rank = None if opted_out else _set_rank_for_format(session, group, set_id, player.id, score)
+            score = compute_score(b["stats"], groups=groups)
+            rank = None if opted_out else _set_rank_for_format(session, groups, set_id, player.id, score)
         else:
             pod = pod_by_set.get(b["code"])
             pod_pts = pod_points(pod.trophies, pod.wins_2_1) if pod else 0
@@ -605,7 +618,7 @@ def process_personal_standings(
     return PersonalStandingsData(
         player_name=player.display_name, player_slug=player.slug,
         rows=rows[:PERSONAL_STANDINGS_LIMIT], opted_out=opted_out,
-        format_label=group.label if group is not None else None,
+        format_label=format_label if groups is not None else None,
         last_updated=last_updated,
     )
 
@@ -619,10 +632,10 @@ def _set_rank(session: Session, set_id: str, player_id: str, score: float) -> in
 
 
 def _set_rank_for_format(
-    session: Session, group: QueueGroup, set_id: str, player_id: str, score: float,
+    session: Session, groups: tuple[QueueGroup, ...], set_id: str, player_id: str, score: float,
 ) -> int | None:
     """The player's standing on a set's per-format board, same opted-out fallback as _set_rank."""
-    ranked = _ranked_for_format(session, group, set_id)
+    ranked = _ranked_for_format(session, groups, set_id)
     return _rank_of(ranked, player_id, score)
 
 
@@ -706,6 +719,7 @@ _FORMAT_FILTERS: list[tuple[str, str | None]] = [
     ("Traditional", "Trad"),
     ("Sealed", "Sealed"),
     ("Quick", "Quick"),
+    ("LCQ", "LCQ"),
     ("Pod", "Pod"),
     ("Direct", "Direct"),
 ]
@@ -1292,12 +1306,12 @@ def _drafter_count(
     if magic_set is None:
         return 0
 
-    group = None
+    groups = None
     if format_value and format_value not in SPECIAL_FORMATS:
-        group = next((g for g in DEFAULT_QUEUE_GROUPS if g.label == format_value), None)
+        groups = _groups_for_label(format_value)
 
     if color_value is not None:
-        allowed = set(group.formats) if group is not None else None
+        allowed = set(supported_formats(groups)) if groups is not None else None
         rows = session.execute(
             select(DraftEvent.player_id, DraftEvent.format, DraftEvent.colors)
             .join(Player, Player.id == DraftEvent.player_id)
@@ -1319,8 +1333,8 @@ def _drafter_count(
         Player.active.is_(True),
         Player.leaderboard_opt_in.is_(True),
     ]
-    if group is not None:
-        conditions.append(PlayerStats.format.in_(group.formats))
+    if groups is not None:
+        conditions.append(PlayerStats.format.in_(supported_formats(groups)))
     return session.execute(
         select(func.count(func.distinct(PlayerStats.player_id)))
         .join(Player, Player.id == PlayerStats.player_id)
@@ -1344,9 +1358,9 @@ def render_filtered_data(
     boards can be rendered. Format and color combine; Pod/Direct stay standalone.
     """
     format_value, color_value = decode_filter(filter_type, filter_value)
-    group = None
+    groups = None
     if format_value and format_value not in SPECIAL_FORMATS:
-        group = next((g for g in DEFAULT_QUEUE_GROUPS if g.label == format_value), None)
+        groups = _groups_for_label(format_value)
 
     if format_value == "Pod":
         data = process_leaderboard_for_pod(session, viewer_discord_id=viewer_discord_id, magic_set=magic_set)
@@ -1356,7 +1370,7 @@ def render_filtered_data(
         suffix = "Direct"
     elif color_value is not None:
         data = process_leaderboard_for_archetype(
-            session, viewer_discord_id=viewer_discord_id, archetype=color_value, magic_set=magic_set, group=group,
+            session, viewer_discord_id=viewer_discord_id, archetype=color_value, magic_set=magic_set, groups=groups,
         )
         label = CODE_TO_COLOR_LABEL.get(color_value, color_value)
         emoji = _archetype_emoji(color_value)
@@ -1574,6 +1588,7 @@ class Leaderboard(commands.Cog):
             app_commands.Choice(name="Traditional", value="Trad"),
             app_commands.Choice(name="Sealed",      value="Sealed"),
             app_commands.Choice(name="Quick",       value="Quick"),
+            app_commands.Choice(name="LCQ",         value="LCQ"),
             app_commands.Choice(name="Pod",         value="Pod"),
             app_commands.Choice(name="Direct",      value="Direct"),
         ],
@@ -1765,6 +1780,7 @@ class Leaderboard(commands.Cog):
             valid = {g.label.lower(): g.label for g in DEFAULT_QUEUE_GROUPS}
             valid["traditional"] = "Trad"
             valid[DIRECT_FILTER.lower()] = DIRECT_FILTER
+            valid[LCQ_FILTER.lower()] = LCQ_FILTER
             tokens = args.split()
             if tokens[-1].lower() in valid:
                 fmt = valid[tokens.pop().lower()]
