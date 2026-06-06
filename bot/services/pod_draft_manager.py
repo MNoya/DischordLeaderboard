@@ -267,6 +267,7 @@ class PodDraftManager:
             await asyncio.sleep(0.3)
             await self._emit_session_settings()
             await self.apply_seating_mode()
+            await self._enable_spectators_and_share_link()
             log.info(f"[LIFECYCLE] ownership_applied event={self.event_id} bot_user={self.bot_user_id}")
         except Exception:
             log.exception(f"[LIFECYCLE] ownership_failed event={self.event_id}")
@@ -290,6 +291,22 @@ class PodDraftManager:
             f"max_players={settings.pod_draft_max_players} pick_timer={settings.pod_draft_pick_timer} "
             f"bots={settings.pod_draft_bots}"
         )
+
+    async def _enable_spectators_and_share_link(self) -> None:
+        result = await self._emit_with_ack("setAllowSpectators", True)
+        spectate_key = result.get("spectateKey") if isinstance(result, dict) else None
+        if not spectate_key:
+            error_text = _ack_error_text(result)
+            log.warning(f"[LIFECYCLE] spectators.enable_failed event={self.event_id} error={error_text!r}")
+            return
+        thread = await self._fetch_thread()
+        if thread is None:
+            return
+        try:
+            await thread.send(f"👀 Spectate the Draft: <{self.draftmancer_url}&spectate={spectate_key}>")
+            log.info(f"[LIFECYCLE] spectators.enabled event={self.event_id}")
+        except Exception:
+            log.warning(f"[LIFECYCLE] spectators.thread_post_error event={self.event_id}", exc_info=True)
 
     async def _emit_format(self) -> str | None:
         """

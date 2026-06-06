@@ -101,7 +101,7 @@ def _seed_live_test_event_sync(
             set_code=ACTIVE_SET_CODE,
             name="Testlobby Live Pod",
             draftmancer_session=session_id,
-            draftmancer_url=f"https://draftmancer.com/?session={session_id}",
+            draftmancer_url=f"{settings.draftmancer_web_url}/?session={session_id}",
             discord_thread_id=str(channel_id),
             sesh_message_id=f"testlobby-{channel_id}",
             socket_status=_LIVE_TEST_STATUS,
@@ -156,7 +156,7 @@ def _build_live_test_manager(
     manager = PodDraftManager(
         bot, event_id, session_id, channel_id, ACTIVE_SET_CODE, len(roster),
         event_name="Testlobby Live Pod",
-        draftmancer_url=f"https://draftmancer.com/?session={session_id}",
+        draftmancer_url=f"{settings.draftmancer_web_url}/?session={session_id}",
     )
     manager.tournament_roster = list(roster)
     manager.pairing_mode = mode
@@ -251,7 +251,7 @@ async def _start_live_test_lobby(ctx) -> None:
     await _purge_and_reset_test(ctx)
     channel_id = ctx.channel.id
     event_id, session_id = await asyncio.to_thread(_seed_live_test_event_sync, channel_id, "swiss")
-    url = f"https://draftmancer.com/?session={session_id}"
+    url = f"{settings.draftmancer_web_url}/?session={session_id}"
     log.info(f"[testlobby] live lobby connecting event={event_id} session={session_id}")
     manager = await start_manager(
         ctx.bot, event_id, session_id, channel_id, ACTIVE_SET_CODE, len(_LIVE_TEST_ROSTER),
@@ -309,7 +309,7 @@ def _trophy_hype_preview() -> discord.ui.LayoutView:
 
 
 _THREAD_NAME = "SOS Pod Draft #3 - May 15"
-_DRAFTMANCER_URL = "https://draftmancer.com/?session=LLUT-SOS-May-15-D"
+_DRAFTMANCER_URL = f"{settings.draftmancer_web_url}/?session=LLUT-SOS-May-15-D"
 _RSVPS_YES = [
     "Noya", "Bacchus", "NiamhIsTired", "maimslap", "Waveofshadow", "Elfandor",
     "fullerene60", "whalematron", "springbok7", "jonnietang",

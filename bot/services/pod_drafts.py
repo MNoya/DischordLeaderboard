@@ -191,7 +191,7 @@ def record_event(session: Session, parsed: ParsedSeshEvent) -> PodDraftEvent:
     """Insert a pod_draft_event row plus one participant per sesh attendee."""
     set_id = _lookup_set_id(session, parsed.set_code) if parsed.set_code else None
     session_id = _build_draftmancer_session(session, parsed)
-    url = f"https://draftmancer.com/?session={session_id}"
+    url = f"{settings.draftmancer_web_url}/?session={session_id}"
 
     event = PodDraftEvent(
         event_date=parsed.event_date,

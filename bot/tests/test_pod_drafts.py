@@ -67,7 +67,7 @@ def test_record_event_persists_and_links_known_attendees(session, monkeypatch):
 
     assert event.socket_status == "pending"
     assert event.draftmancer_session == "LLU-SOS-May-13"
-    assert event.draftmancer_url == "https://draftmancer.com/?session=LLU-SOS-May-13"
+    assert event.draftmancer_url == f"{settings.draftmancer_web_url}/?session=LLU-SOS-May-13"
     assert event.set_id is not None
 
     participants = session.execute(
@@ -102,7 +102,7 @@ def test_record_event_custom_format_uses_slug_and_drops_prefix(session, monkeypa
     monkeypatch.setattr(settings, "pod_draft_session_prefix", "LLU")
     event = record_event(session, _parsed_event(set_code="PEASANT", attendees=(), event_number=4))
     assert event.draftmancer_session == "Peasant-26-D4"
-    assert event.draftmancer_url == "https://draftmancer.com/?session=Peasant-26-D4"
+    assert event.draftmancer_url == f"{settings.draftmancer_web_url}/?session=Peasant-26-D4"
     assert event.format_label == "Peasant Cube"
 
 

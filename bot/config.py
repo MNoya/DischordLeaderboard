@@ -3,6 +3,8 @@ from __future__ import annotations
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+DRAFTMANCER_HOST = "beta.draftmancer.com"
+
 
 class Settings(BaseSettings):
     """Process-wide configuration loaded from env (or .env in repo root).
@@ -33,7 +35,8 @@ class Settings(BaseSettings):
     pod_draft_skip_reminder_wait: bool = False
     pod_draft_end_watchdog_minutes: int = 90
     sesh_bot_id: int = 616754792965865495
-    draftmancer_ws_url: str = "wss://draftmancer.com"
+    draftmancer_ws_url: str = f"wss://{DRAFTMANCER_HOST}"
+    draftmancer_web_url: str = f"https://{DRAFTMANCER_HOST}"
     mpt_api_key: SecretStr | None = None
 
 
