@@ -13,8 +13,8 @@ from bot.commands.leaderboard import (
     render_personal_embed,
     render_public_embed,
 )
-from bot.services.player_stats import StatsData, render_embed as render_stats_embed
-from bot.models import MagicSet, Player, PlayerStats
+from bot.services.player_stats import StatsData, process_stats, render_embed as render_stats_embed
+from bot.models import DraftEvent, MagicSet, Player, PlayerStats
 
 
 def _seed_set(session, code="SOS"):
@@ -385,7 +385,6 @@ def test_personal_standings_format_excludes_sets_without_group_events(session):
 
 
 def _seed_direct(session, p, s, wins, losses, finished, eid):
-    from bot.models import DraftEvent
     session.add(DraftEvent(
         player_id=p.id, set_id=s.id, seventeenlands_event_id=eid,
         format="ArenaDirect_Sealed", expansion=s.code,
@@ -424,6 +423,17 @@ def test_personal_standings_direct_collector_window_restricts_boxes(session):
 
     data = process_personal_standings(session, "1", format_label="Direct")
     assert data.rows[0].score == 1.0
+
+
+def test_stats_aggregates_direct_boxes(session):
+    s = _seed_set(session)
+    alice = _seed_player(session, "Alice", "1", "a")
+    _seed_direct(session, alice, s, 7, 2, datetime(2026, 5, 10), "a1")
+    _seed_direct(session, alice, s, 6, 3, datetime(2026, 5, 10), "a2")
+    session.commit()
+
+    data = process_stats(session, player_name=None, viewer_discord_id="1", set_code="SOS")
+    assert data.direct_stats == {"events": 2, "wins": 13, "losses": 5, "boxes": 3}
 
 
 def _personal(rows=None, opted_out=False, format_label=None):

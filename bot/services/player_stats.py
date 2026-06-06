@@ -83,7 +83,7 @@ def process_stats(
                 break
 
     direct_rows = session.execute(
-        select(DraftEvent.wins, DraftEvent.losses, DraftEvent.finished_at).where(
+        select(DraftEvent.wins, DraftEvent.losses, DraftEvent.finished_at, DraftEvent.is_trophy).where(
             DraftEvent.player_id == player.id,
             DraftEvent.set_id == magic_set.id,
             DraftEvent.format == "ArenaDirect_Sealed",
@@ -93,7 +93,9 @@ def process_stats(
     if direct_rows:
         wins = sum(int(r.wins or 0) for r in direct_rows)
         losses = sum(int(r.losses or 0) for r in direct_rows)
-        boxes = sum(boxes_for_event(magic_set.code, int(r.wins or 0), r.finished_at) for r in direct_rows)
+        boxes = 0
+        for r in direct_rows:
+            boxes += boxes_for_event(magic_set.code, int(r.wins or 0), r.finished_at, bool(r.is_trophy))
         direct_stats = {"events": len(direct_rows), "wins": wins, "losses": losses, "boxes": boxes}
 
     return StatsData(
