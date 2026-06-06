@@ -16,7 +16,7 @@ import { SetSwitcherDesktop, SetSwitcherMobile } from "../components/SetSwitcher
 import { FilterDropdown } from "../components/FilterDropdown";
 import { ColorsSwitcher } from "../components/ColorsSwitcher";
 import { LeaderboardSidebar } from "../components/LeaderboardSidebar";
-import { DEFAULT_SORT, DEFAULT_SORT_NOSCORE, LeaderboardColumnHeader, LeaderboardTable, sortRows } from "../components/LeaderboardTable";
+import { boardModeFor, DEFAULT_SORT, DEFAULT_SORT_NOSCORE, defaultSortFor, LeaderboardColumnHeader, LeaderboardTable, sortRows } from "../components/LeaderboardTable";
 import type { SortDir, SortKey, SortState } from "../components/LeaderboardTable";
 import { SectionLabel } from "../components/SectionLabel";
 import { ChamferedButton } from "../components/ChamferedButton";
@@ -145,10 +145,11 @@ export function LeaderboardPage() {
   const isLoading = active.isLoading;
   const error = active.error as Error | null;
 
-  const noScoreMode = format === "Pod" || format === "Direct";
-  const effectiveDefaultSort: SortState = noScoreMode ? DEFAULT_SORT_NOSCORE : DEFAULT_SORT;
+  const boardMode = boardModeFor(format);
+  const noScoreMode = format === "Pod" || boardMode === "direct";
+  const effectiveDefaultSort: SortState = format === "Pod" ? DEFAULT_SORT_NOSCORE : defaultSortFor(boardMode);
   const rawSort = readSortFromParams(searchParams);
-  const sort: SortState = noScoreMode && rawSort.key === "score" ? DEFAULT_SORT_NOSCORE : rawSort;
+  const sort: SortState = noScoreMode && rawSort.key === "score" ? effectiveDefaultSort : rawSort;
   const rows = useMemo(
     () => (baseRows ? sortRows(baseRows, sort) : baseRows),
     [baseRows, sort.key, sort.dir],
@@ -213,6 +214,8 @@ const SORT_KEYS: ReadonlySet<SortKey> = new Set([
   "events",
   "record",
   "winPct",
+  "earnings",
+  "boxes",
 ]);
 
 function readSortFromParams(searchParams: URLSearchParams): SortState {
@@ -284,7 +287,7 @@ function Desktop({
           variant="desktop"
           loading={isLoading}
           error={error}
-          showScore={filters.format !== "Direct"}
+          mode={boardModeFor(filters.format)}
           sort={sort}
           onSort={onSort}
           onRowPrefetch={(r) => prefetchPlayer(r.slug, r.setCode)}
@@ -342,6 +345,7 @@ function SetHero({
   const week = weekOfSet(setMeta);
   const isActive = setMeta?.isActive ?? false;
   const filterActive = format !== "ALL" || colors !== "ALL";
+  const tightHero = useIsMobile(1400);
   return (
     <div className="relative px-10 py-5 border-b border-border bg-surface flex items-center gap-6">
       <SetGlyph code={activeSet} size={84} />
@@ -360,17 +364,16 @@ function SetHero({
           {week && ` · ${week}`}
         </div>
       </div>
-      <div className="flex-1" />
+      {filterActive ? <FilterHero format={format} colors={colors} /> : <div className="flex-1" />}
       {sets && (
         <SetSwitcherDesktop
           sets={sets}
           activeCode={activeSet}
           onChange={onSelectSet}
           onPrefetch={onPrefetchSet}
-          extraHide={filterActive ? 2 : 0}
+          extraHide={filterActive ? (tightHero ? 3 : 2) : 0}
         />
       )}
-      {filterActive && <FilterHero format={format} colors={colors} />}
     </div>
   );
 }
@@ -435,9 +438,9 @@ function FilterHero({ format, colors }: { format: string; colors: string }) {
 
   if (colorsActive && formatActive) {
     return (
-      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none gap-2.5">
+      <div className="flex-1 min-w-0 flex flex-col items-center justify-center pointer-events-none gap-2.5">
         <span
-          className="font-display tracking-[0.06em] whitespace-nowrap"
+          className="font-display tracking-[0.06em] whitespace-nowrap max-w-full overflow-hidden text-ellipsis"
           style={{ fontSize: 26, lineHeight: 1, color: formatColor }}
         >
           {formatLabel}
@@ -457,7 +460,7 @@ function FilterHero({ format, colors }: { format: string; colors: string }) {
 
   if (colorsActive) {
     return (
-      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+      <div className="flex-1 min-w-0 flex items-center justify-center pointer-events-none">
         <span
           className="relative whitespace-nowrap font-display tracking-[0.06em]"
           style={{ fontSize: 36, lineHeight: 1 }}
@@ -471,9 +474,9 @@ function FilterHero({ format, colors }: { format: string; colors: string }) {
     );
   }
   return (
-    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+    <div className="flex-1 min-w-0 flex items-center justify-center pointer-events-none">
       <span
-        className="font-display tracking-[0.06em] whitespace-nowrap"
+        className="font-display tracking-[0.06em] whitespace-nowrap max-w-full overflow-hidden text-ellipsis"
         style={{ fontSize: 36, lineHeight: 1, color: formatColor }}
       >
         {formatLabel}
@@ -575,7 +578,7 @@ function Mobile({
         </div>
         {/* Column header is part of the sticky chrome so it stays pinned with the
             rest of the page chrome as rows scroll under it. */}
-        <LeaderboardColumnHeader variant="mobile" showScore={filters.format !== "Direct"} sort={sort} onSort={onSort} />
+        <LeaderboardColumnHeader variant="mobile" mode={boardModeFor(filters.format)} sort={sort} onSort={onSort} />
       </div>
 
       <LeaderboardTable
@@ -584,7 +587,7 @@ function Mobile({
         loading={isLoading}
         error={error}
         showHeader={false}
-        showScore={filters.format !== "Direct"}
+        mode={boardModeFor(filters.format)}
         onRowPrefetch={(r) => prefetchPlayer(r.slug, r.setCode)}
         renderExpanded={(r) => (
           <MobileExpandedRow

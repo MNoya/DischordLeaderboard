@@ -243,7 +243,7 @@ export function PodDraftsPage({ setCode }: { setCode?: string } = {}) {
               rows={sortedLeaderboard}
               loading={leaderboard === undefined}
               variant={isMobile ? "mobile" : "desktop"}
-              showScore={false}
+              mode="pod"
               sort={sort}
               onSort={onSort}
               emptyMessage={`No player stats yet for ${activeSet}.`}

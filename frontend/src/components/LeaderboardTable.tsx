@@ -23,9 +23,22 @@ export interface LeaderboardTableRow {
   wins: number;
   losses: number;
   lastCalculatedAt: string;
+  boxes?: number;
+  earnings?: number;
 }
 
-export type SortKey = "score" | "trophies" | "events" | "record" | "winPct";
+// points = standard score board; lcq adds a $ column; pod swaps score for
+// events+record (PodDraftsPage); direct swaps score for boxes won. The main
+// leaderboard's Pod filter keeps the points layout — its score is pod points.
+export type BoardMode = "points" | "lcq" | "pod" | "direct";
+
+export function boardModeFor(format: string): BoardMode {
+  if (format === "Direct") return "direct";
+  if (format === "LCQ") return "lcq";
+  return "points";
+}
+
+export type SortKey = "score" | "trophies" | "events" | "record" | "winPct" | "earnings" | "boxes";
 export type SortDir = "asc" | "desc";
 export interface SortState {
   key: SortKey;
@@ -34,6 +47,13 @@ export interface SortState {
 
 export const DEFAULT_SORT: SortState = { key: "score", dir: "desc" };
 export const DEFAULT_SORT_NOSCORE: SortState = { key: "trophies", dir: "desc" };
+export const DEFAULT_SORT_DIRECT: SortState = { key: "boxes", dir: "desc" };
+
+export function defaultSortFor(mode: BoardMode): SortState {
+  if (mode === "pod") return DEFAULT_SORT_NOSCORE;
+  if (mode === "direct") return DEFAULT_SORT_DIRECT;
+  return DEFAULT_SORT;
+}
 
 const SORT_VALUE: Record<SortKey, (r: LeaderboardTableRow) => number> = {
   score: (r) => r.score ?? 0,
@@ -41,6 +61,8 @@ const SORT_VALUE: Record<SortKey, (r: LeaderboardTableRow) => number> = {
   events: (r) => r.events,
   record: (r) => r.wins,
   winPct: (r) => r.wins / Math.max(1, r.wins + r.losses),
+  earnings: (r) => r.earnings ?? 0,
+  boxes: (r) => r.boxes ?? 0,
 };
 
 export function sortRows<T extends LeaderboardTableRow>(
@@ -60,10 +82,18 @@ export function sortRows<T extends LeaderboardTableRow>(
   });
 }
 
-const COLS_DESKTOP_WITH_SCORE = "44px 1fr 70px 100px 110px 90px 90px";
-const COLS_DESKTOP_NO_SCORE = "44px 1fr 70px 100px 110px 90px";
-const COLS_MOBILE_WITH_SCORE = "20px 1fr 44px 50px";
-const COLS_MOBILE_NO_SCORE = "20px 1fr 40px 44px 56px";
+const COLS_DESKTOP: Record<BoardMode, string> = {
+  points: "44px 1fr 70px 100px 110px 90px 90px",
+  lcq: "44px 1fr 44px 70px 100px 110px 90px 90px",
+  pod: "44px 1fr 70px 100px 110px 90px",
+  direct: "44px 1fr 70px 100px 110px 90px 90px",
+};
+const COLS_MOBILE: Record<BoardMode, string> = {
+  points: "20px 1fr 44px 50px",
+  lcq: "20px 1fr 44px 40px 50px",
+  pod: "20px 1fr 40px 44px 56px",
+  direct: "20px 1fr 40px 56px 44px",
+};
 
 export function LeaderboardTable<T extends LeaderboardTableRow>({
   rows,
@@ -75,7 +105,7 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
   /** When false, the caller renders LeaderboardColumnHeader separately (e.g. inside a
    *  page-level sticky chrome). Defaults to true so the table is self-contained. */
   showHeader = true,
-  showScore = true,
+  mode = "points",
   sort,
   onSort,
   playerHref,
@@ -88,7 +118,7 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
   emptyMessage?: React.ReactNode;
   renderExpanded?: (row: T) => React.ReactNode;
   showHeader?: boolean;
-  showScore?: boolean;
+  mode?: BoardMode;
   sort?: SortState;
   onSort?: (key: SortKey) => void;
   playerHref?: (row: T) => string | null;
@@ -115,7 +145,7 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
   return (
     <div>
       {showHeader && (
-        <LeaderboardColumnHeader variant={variant} showScore={showScore} sort={sort} onSort={onSort} />
+        <LeaderboardColumnHeader variant={variant} mode={mode} sort={sort} onSort={onSort} />
       )}
       <div className={cn("flex flex-col", isMobile ? "gap-0" : "gap-[1px]")}>
         {rows.map((r) => {
@@ -137,14 +167,14 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
               {isMobile ? (
                 <MobileRow
                   row={r}
-                  showScore={showScore}
+                  mode={mode}
                   href={href}
                   onToggle={clickable ? () => setOpenSlug(open ? null : r.slug) : undefined}
                 />
               ) : (
                 <DesktopRow
                   row={r}
-                  showScore={showScore}
+                  mode={mode}
                   href={href}
                   onToggle={clickable ? () => setOpenSlug(open ? null : r.slug) : undefined}
                 />
@@ -176,49 +206,59 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
 
 export function LeaderboardColumnHeader({
   variant,
-  showScore = true,
+  mode = "points",
   sort,
   onSort,
 }: {
   variant: "desktop" | "mobile";
-  showScore?: boolean;
+  mode?: BoardMode;
   sort?: SortState;
   onSort?: (key: SortKey) => void;
 }) {
   if (variant === "mobile") {
-    const cols = showScore ? COLS_MOBILE_WITH_SCORE : COLS_MOBILE_NO_SCORE;
     return (
       <div
         className="grid gap-3 py-1.5 pl-2 pr-3.5 font-display text-[10px] tracking-[0.2em] text-muted border-b border-border"
-        style={{ gridTemplateColumns: cols }}
+        style={{ gridTemplateColumns: COLS_MOBILE[mode] }}
       >
         <span className="text-center">#</span>
         <span>PLAYER</span>
+        {mode === "lcq" && <SortHeader label="$" sortKey="earnings" sort={sort} onSort={onSort} />}
         <SortHeader label="TR" sortKey="trophies" sort={sort} onSort={onSort} />
-        {showScore ? (
+        {(mode === "points" || mode === "lcq") && (
           <SortHeader label="PTS" sortKey="score" sort={sort} onSort={onSort} />
-        ) : (
+        )}
+        {mode === "pod" && (
           <>
             <SortHeader label="PODS" sortKey="events" sort={sort} onSort={onSort} />
             <SortHeader label="RECORD" sortKey="record" sort={sort} onSort={onSort} />
           </>
         )}
+        {mode === "direct" && (
+          <>
+            <SortHeader label="RECORD" sortKey="record" sort={sort} onSort={onSort} />
+            <SortHeader label="BOXES" sortKey="boxes" sort={sort} onSort={onSort} />
+          </>
+        )}
       </div>
     );
   }
-  const cols = showScore ? COLS_DESKTOP_WITH_SCORE : COLS_DESKTOP_NO_SCORE;
   return (
     <div
       className="grid gap-x-3 py-2.5 pl-2 pr-5 mb-1 font-display text-[11px] tracking-[0.2em] text-muted"
-      style={{ gridTemplateColumns: cols }}
+      style={{ gridTemplateColumns: COLS_DESKTOP[mode] }}
     >
       <span className="text-center">RANK</span>
       <span>PLAYER</span>
+      {mode === "lcq" && <SortHeader label="$" sortKey="earnings" sort={sort} onSort={onSort} />}
       <SortHeader label="TROPHIES" sortKey="trophies" sort={sort} onSort={onSort} />
       <SortHeader label="EVENTS" sortKey="events" sort={sort} onSort={onSort} />
       <SortHeader label="RECORD" sortKey="record" sort={sort} onSort={onSort} />
       <SortHeader label="WIN %" sortKey="winPct" sort={sort} onSort={onSort} />
-      {showScore && <SortHeader label="POINTS" sortKey="score" sort={sort} onSort={onSort} />}
+      {(mode === "points" || mode === "lcq") && (
+        <SortHeader label="POINTS" sortKey="score" sort={sort} onSort={onSort} />
+      )}
+      {mode === "direct" && <SortHeader label="BOXES" sortKey="boxes" sort={sort} onSort={onSort} />}
     </div>
   );
 }
@@ -268,26 +308,28 @@ function SortHeader({
 
 function DesktopRow({
   row,
-  showScore,
+  mode,
   onToggle,
   href,
 }: {
   row: LeaderboardTableRow;
-  showScore: boolean;
+  mode: BoardMode;
   onToggle?: () => void;
   href?: string | null;
 }) {
-  const cols = showScore ? COLS_DESKTOP_WITH_SCORE : COLS_DESKTOP_NO_SCORE;
+  const cols = COLS_DESKTOP[mode];
   const rowLinked = !!href && !onToggle;
   const body = (
     <>
       <span className="mono text-[13px] text-muted text-center">{row.rank}</span>
       <PlayerCell row={row} avatarSize={30} nameSize={18} linked={rowLinked} />
-      <TrophyCell trophies={row.trophies} compact={false} large={!showScore} />
+      {mode === "lcq" && <EarningsCell earnings={row.earnings ?? 0} />}
+      <TrophyCell trophies={row.trophies} compact={false} large={mode === "pod"} />
       <span className="mono text-right text-[13px] text-muted">{row.events}</span>
       <Record className="mono text-right text-[13px]" wins={row.wins} losses={row.losses} />
       <span className="mono text-right text-[13px] text-muted">{winPct(row.wins, row.losses)}%</span>
-      {showScore && <ScoreCell score={row.score ?? 0} large />}
+      {(mode === "points" || mode === "lcq") && <ScoreCell score={row.score ?? 0} large />}
+      {mode === "direct" && <BoxesCell boxes={row.boxes ?? 0} large />}
     </>
   );
   if (rowLinked) {
@@ -317,30 +359,38 @@ function DesktopRow({
 
 function MobileRow({
   row,
-  showScore,
+  mode,
   onToggle,
   href,
 }: {
   row: LeaderboardTableRow;
-  showScore: boolean;
+  mode: BoardMode;
   onToggle?: () => void;
   href?: string | null;
 }) {
-  const cols = showScore ? COLS_MOBILE_WITH_SCORE : COLS_MOBILE_NO_SCORE;
+  const cols = COLS_MOBILE[mode];
   const rowLinked = !!href && !onToggle;
   const body = (
     <>
       <span className="mono text-[12px] text-muted text-center">{row.rank}</span>
       <PlayerCell row={row} avatarSize={26} nameSize={17} linked={rowLinked} />
-      <TrophyCell trophies={row.trophies} compact large={!showScore} />
-      {showScore ? (
+      {mode === "lcq" && <EarningsCell earnings={row.earnings ?? 0} compact />}
+      <TrophyCell trophies={row.trophies} compact large={mode === "pod"} />
+      {(mode === "points" || mode === "lcq") && (
         <span className="font-display text-right text-[18px] tracking-[0.02em] tabular-nums leading-none">
           {fmtPts(row.score ?? 0)}
         </span>
-      ) : (
+      )}
+      {mode === "pod" && (
         <>
           <span className="mono text-right text-[13px] text-muted tabular-nums">{row.events}</span>
           <Record className="mono text-right text-[13px]" wins={row.wins} losses={row.losses} />
+        </>
+      )}
+      {mode === "direct" && (
+        <>
+          <Record className="mono text-right text-[13px]" wins={row.wins} losses={row.losses} />
+          <BoxesCell boxes={row.boxes ?? 0} />
         </>
       )}
     </>
@@ -438,6 +488,36 @@ function ScoreCell({ score, large }: { score: number; large?: boolean }) {
       )}
     >
       {fmtPts(score)}
+    </div>
+  );
+}
+
+function EarningsCell({ earnings, compact = false }: { earnings: number; compact?: boolean }) {
+  if (earnings <= 0) {
+    return <span className="mono text-right text-[13px] text-dim">—</span>;
+  }
+  return (
+    <span
+      className={cn(
+        "text-right font-display tracking-[0.02em] tabular-nums leading-none text-green",
+        compact ? "text-[16px]" : "text-[18px]",
+      )}
+    >
+      ${earnings / 1000}K
+    </span>
+  );
+}
+
+function BoxesCell({ boxes, large = false }: { boxes: number; large?: boolean }) {
+  return (
+    <div
+      className={cn(
+        "text-right font-display tracking-[0.02em] tabular-nums leading-none",
+        large ? "text-[24px]" : "text-[18px]",
+        boxes === 0 && "text-dim",
+      )}
+    >
+      {boxes}
     </div>
   );
 }

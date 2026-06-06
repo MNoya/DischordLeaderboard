@@ -9,6 +9,8 @@ import { TrophyCount } from "./TrophyCount";
 import { Record } from "./Record";
 
 import { useColorsSummary, useFormatScopedTrophies, useRecentTrophies } from "../data/hooks";
+import { lcqDraft2Earnings } from "../data/scoring";
+import { formatsForBucket } from "../data/format-buckets";
 import { colorsOf, effectiveColorCount, mainColors, relativeTime } from "../data/utils";
 import { FMT_COLORS, FMT_DEFAULT_COLOR, shortFormat } from "../data/format-display";
 import { colorsDisplayName, MULTI, OTHER } from "../data/filters";
@@ -18,17 +20,22 @@ import type { ColorsSummary, RecentTrophy } from "../types/leaderboard";
 // Derive a Top Colors summary from a list of trophy events. Each trophy is
 // bucketed into MULTI (≥4 effective colors) or its main archetype (splash
 // stripped). Used for the format-scoped sidebar where no precomputed per-format
-// summary view exists.
+// summary view exists. LCQ Day 2 runs count their cash payout; a paying run
+// without a trophy still enters the table on cash alone.
 function topColorsFromTrophies(setCode: string, trophies: RecentTrophy[]): ColorsSummary[] {
-  const counts = new Map<string, { trophies: number; players: Set<string> }>();
+  const counts = new Map<string, { trophies: number; earnings: number; players: Set<string> }>();
   for (const t of trophies) {
+    const isTrophy = t.isTrophy !== false;
+    const cash = lcqCashForRow(t);
+    if (!isTrophy && cash === 0) continue;
     const keys: string[] = [];
     const main = colorsOf(t.colors);
     if (main) keys.push(main);
     if (effectiveColorCount(t.colors) >= 4) keys.push(MULTI);
     for (const key of keys) {
-      const cur = counts.get(key) ?? { trophies: 0, players: new Set<string>() };
-      cur.trophies += 1;
+      const cur = counts.get(key) ?? { trophies: 0, earnings: 0, players: new Set<string>() };
+      if (isTrophy) cur.trophies += 1;
+      cur.earnings += cash;
       cur.players.add(t.slug);
       counts.set(key, cur);
     }
@@ -40,9 +47,15 @@ function topColorsFromTrophies(setCode: string, trophies: RecentTrophy[]): Color
       trophies: v.trophies,
       events: v.trophies,
       players: v.players.size,
+      earnings: v.earnings,
     }))
-    .filter((r) => r.trophies > 0)
-    .sort((a, b) => b.trophies - a.trophies);
+    .sort((a, b) => b.trophies - a.trophies || b.earnings - a.earnings);
+}
+
+const LCQ_DRAFT_2_FORMATS = formatsForBucket("LCQ Draft 2");
+
+function lcqCashForRow(t: RecentTrophy): number {
+  return LCQ_DRAFT_2_FORMATS.includes(t.format) ? lcqDraft2Earnings(t.wins) : 0;
 }
 
 export function LeaderboardSidebar({
@@ -103,10 +116,12 @@ export function LeaderboardSidebar({
   ) : formatScoped ? (
     <span style={{ color: formatColor! }}>{scopeLabel}</span>
   ) : null;
-  const recentTitle = scoped ? <>RECENT {scopeChip} TROPHIES</> : "RECENT TROPHIES";
-  const recentEmpty = scoped ? `NO RECENT ${scopeLabel} TROPHIES` : "NO TROPHIES YET";
+  const lcqScope = formatScoped && format === "LCQ";
+  const recentNoun = lcqScope ? "TROPHIES & DAY 2" : "TROPHIES";
+  const recentTitle = scoped ? <>RECENT {scopeChip} {recentNoun}</> : "RECENT TROPHIES";
+  const recentEmpty = scoped ? `NO RECENT ${scopeLabel} ${recentNoun}` : "NO TROPHIES YET";
   const topColorsTitle = formatScoped
-    ? <>TOP COLORS · BY {scopeChip} TROPHIES</>
+    ? <>TOP COLORS · {scopeChip} {lcqScope ? "TROPHIES & CASH" : "TROPHIES"}</>
     : "TOP COLORS · BY TROPHIES";
   // Pips per row only when the scope mixes combos (unscoped, format-only, OTHER, SOUP).
   // For a fixed named combo every row has the same colors — promote the pips
@@ -117,7 +132,13 @@ export function LeaderboardSidebar({
   return (
     <aside className="flex flex-col gap-4">
       <SurfaceCard>
-        <SectionLabel size={16} className="mb-1 text-subtle">{topColorsTitle}</SectionLabel>
+        <SectionLabel
+          size={16}
+          letterSpacing={lcqScope ? "0.14em" : undefined}
+          className="mb-1 text-subtle whitespace-nowrap"
+        >
+          {topColorsTitle}
+        </SectionLabel>
         {!topColors ? (
           <div className="mono text-[11px] text-muted py-2">LOADING…</div>
         ) : topColors.length === 0 ? (
@@ -126,7 +147,10 @@ export function LeaderboardSidebar({
           topColors.slice(0, 5).map((row, i) => {
             const isActive = row.colors === colors;
             const cls =
-              "grid grid-cols-[24px_28px_1fr_auto] gap-2 items-center py-2 -mx-1 px-1 text-left transition-colors " +
+              (lcqScope
+                ? "grid grid-cols-[24px_28px_1fr_auto_auto] "
+                : "grid grid-cols-[24px_28px_1fr_auto] ") +
+              "gap-2 items-center py-2 -mx-1 px-1 text-left transition-colors " +
               (i ? "border-t border-border" : "") +
               (isActive ? " text-green" : "") +
               (onColorsSelect ? " cursor-pointer hover:bg-surface2" : "");
@@ -143,6 +167,11 @@ export function LeaderboardSidebar({
                 <span className="font-display text-[14px] tracking-[0.05em] pl-1.5">
                   {colorsDisplayName(row.colors)}
                 </span>
+                {lcqScope && (
+                  <span className="font-display text-[14px] tracking-[0.02em] tabular-nums text-right text-green mr-2">
+                    {row.earnings ? `$${row.earnings / 1000}K` : ""}
+                  </span>
+                )}
                 <TrophyCount count={row.trophies} size="compact" className="text-muted" />
               </>
             );
@@ -185,7 +214,7 @@ export function LeaderboardSidebar({
           recentScoped.map((t, i) => {
             const isExternal = Boolean(t.seventeenlandsEventId);
             const cls =
-              "grid gap-2 items-center py-[7px] no-underline text-inherit transition-colors hover:bg-surface2 -mx-1 px-1 " +
+              "group grid gap-2 items-center py-[7px] no-underline text-inherit transition-colors hover:bg-surface2 -mx-1 px-1 " +
               (showRowPips
                 ? "grid-cols-[auto_1fr_28px_96px] "
                 : "grid-cols-[1fr_28px_96px] ") +
@@ -209,12 +238,24 @@ export function LeaderboardSidebar({
                   wins={t.wins}
                   losses={t.losses}
                   mono
+                  color={lcqCashForRow(t) > 0 ? "#2ee85c" : undefined}
                   className="mono text-[13px] text-subtle text-right"
                 />
-                <span className="flex items-center justify-end gap-1 mono text-dim">
-                  <span className="text-[11px]">{shortFormat(t.format)}</span>
-                  <span className="text-[11px] tabular-nums">{relativeTime(t.finishedAt)}</span>
-                  {isExternal && <ExternalLink size={13} aria-hidden="true" />}
+                <span className="grid grid-cols-[1fr_auto] items-center gap-1 mono text-dim">
+                  <span
+                    className="text-[11px] text-text justify-self-center"
+                    style={LCQ_DRAFT_2_FORMATS.includes(t.format) ? { color: FMT_COLORS.LCQ } : undefined}
+                  >
+                    {shortFormat(t.format)}
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="text-[11px] tabular-nums transition-colors group-hover:text-text">
+                      {relativeTime(t.finishedAt)}
+                    </span>
+                    {isExternal && (
+                      <ExternalLink size={13} className="transition-colors group-hover:text-text" aria-hidden="true" />
+                    )}
+                  </span>
                 </span>
               </>
             );

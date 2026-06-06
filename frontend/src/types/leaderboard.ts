@@ -28,6 +28,9 @@ export interface LeaderboardRow {
   wins: number;
   losses: number;
   lastCalculatedAt: string;
+  // Populated only on format-scoped boards: boxes for Direct, $ for LCQ
+  boxes?: number;
+  earnings?: number;
 }
 
 export interface PlayerFormatBreakdown {
@@ -76,6 +79,8 @@ export interface ColorsLeaderboardRow {
   wins: number;
   losses: number;
   lastCalculatedAt: string;
+  boxes?: number;
+  earnings?: number;
 }
 
 export interface ColorsSummary {
@@ -84,6 +89,8 @@ export interface ColorsSummary {
   trophies: number;
   events: number;
   players: number;
+  // LCQ Day 2 cash summed per combo; only set on the LCQ-scoped sidebar
+  earnings?: number;
 }
 
 // Recent trophy event, enriched with the player's display name. In production
@@ -100,6 +107,8 @@ export interface RecentTrophy {
   wins: number;
   losses: number;
   finishedAt: string;
+  // false only for LCQ Day 2 runs merged into the LCQ-scoped list
+  isTrophy?: boolean;
 }
 
 export interface PodEventSummary {

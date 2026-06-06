@@ -14,13 +14,16 @@ import {
 } from "./adapter";
 import {
   aggregate,
+  boxesForEvent,
   computeScore,
+  lcqDraft2Earnings,
   podPoints,
   scoreFromGroups,
   type GroupTotals,
   type ScoringStatRow,
 } from "./scoring";
 import { colorsOf, effectiveColorCount } from "./utils";
+import { formatsForBucket } from "./format-buckets";
 import { FORMAT_LABEL_GROUPS, FORMAT_RAW_GROUPS, MULTI, OTHER } from "./filters";
 import type {
   ColorsLeaderboardRow,
@@ -46,6 +49,7 @@ function client() {
 }
 
 const ARENA_DIRECT_FORMAT = "ArenaDirect_Sealed";
+const LCQ_DRAFT_2_FORMATS = formatsForBucket("LCQ Draft 2");
 
 // ─── public_sets ───────────────────────────────────────────────────────────
 
@@ -293,13 +297,37 @@ export async function fetchFormatLeaderboard(
     });
   }
 
+  if (format === "LCQ") {
+    const earningsBySlug = await fetchLcqEarningsBySlug(setCode);
+    for (const row of rows) {
+      row.earnings = earningsBySlug.get(row.slug) ?? 0;
+    }
+  }
+
   return rows
     .sort((a, b) => b.score - a.score)
     .map((r, i) => ({ ...r, rank: i + 1 }));
 }
 
-// Arena Direct has no precomputed board (boxes are a discord-only metric); rank by
-// event-win trophies aggregated from the raw event log, mirroring the no-score Pod board.
+// LCQ Draft 2 cash needs per-event win counts (a 5-win and a 6-win event pay
+// differently), which the aggregated breakdown view can't distinguish.
+async function fetchLcqEarningsBySlug(setCode: string): Promise<Map<string, number>> {
+  const { data, error } = await client()
+    .from("public_player_draft_events")
+    .select("slug, wins")
+    .eq("set_code", setCode)
+    .in("format", LCQ_DRAFT_2_FORMATS);
+  if (error) throw error;
+  const bySlug = new Map<string, number>();
+  for (const raw of (data ?? []) as Array<{ slug: string; wins: number | null }>) {
+    const payout = lcqDraft2Earnings(raw.wins ?? 0);
+    if (payout > 0) bySlug.set(raw.slug, (bySlug.get(raw.slug) ?? 0) + payout);
+  }
+  return bySlug;
+}
+
+// Arena Direct board: boxes won per the era rules in scoring.boxesForEvent,
+// aggregated from the raw event log and ranked boxes-first like the bot's board.
 async function fetchDirectLeaderboard(setCode: string): Promise<LeaderboardRow[]> {
   const events: Array<Record<string, unknown>> = [];
   const pageSize = 1000;
@@ -326,20 +354,22 @@ async function fetchDirectLeaderboard(setCode: string): Promise<LeaderboardRow[]
     metaBySlug.set(m.slug as string, m);
   }
 
-  interface Agg { trophies: number; events: number; wins: number; losses: number; lastFinishedAt: string }
+  interface Agg { boxes: number; trophies: number; events: number; wins: number; losses: number; lastFinishedAt: string }
   const perSlug = new Map<string, Agg>();
   for (const raw of events) {
     const slug = raw.slug as string;
     let agg = perSlug.get(slug);
     if (!agg) {
-      agg = { trophies: 0, events: 0, wins: 0, losses: 0, lastFinishedAt: "" };
+      agg = { boxes: 0, trophies: 0, events: 0, wins: 0, losses: 0, lastFinishedAt: "" };
       perSlug.set(slug, agg);
     }
+    const wins = (raw.wins as number) ?? 0;
+    const finishedAt = (raw.finished_at as string) ?? "";
     agg.events += 1;
-    agg.wins += (raw.wins as number) ?? 0;
+    agg.wins += wins;
     agg.losses += (raw.losses as number) ?? 0;
     if (raw.is_trophy) agg.trophies += 1;
-    const finishedAt = (raw.finished_at as string) ?? "";
+    agg.boxes += boxesForEvent(setCode, wins, finishedAt || null, Boolean(raw.is_trophy));
     if (finishedAt > agg.lastFinishedAt) agg.lastFinishedAt = finishedAt;
   }
 
@@ -354,6 +384,7 @@ async function fetchDirectLeaderboard(setCode: string): Promise<LeaderboardRow[]
       avatarUrl: (m?.avatar_url as string | null) ?? null,
       rank: 0,
       score: 0,
+      boxes: agg.boxes,
       trophies: agg.trophies,
       events: agg.events,
       wins: agg.wins,
@@ -365,6 +396,7 @@ async function fetchDirectLeaderboard(setCode: string): Promise<LeaderboardRow[]
 
   return rows
     .sort((a, b) => {
+      if (b.boxes !== a.boxes) return (b.boxes ?? 0) - (a.boxes ?? 0);
       if (b.trophies !== a.trophies) return b.trophies - a.trophies;
       const wpA = a.wins / Math.max(1, a.wins + a.losses);
       const wpB = b.wins / Math.max(1, b.wins + b.losses);
@@ -498,6 +530,8 @@ async function aggregateColorsFromEvents(
     trophies: number;
     wins: number;
     losses: number;
+    boxes: number;
+    earnings: number;
     lastFinishedAt: string;
   }
   const perSlug = new Map<string, PlayerAgg>();
@@ -516,13 +550,15 @@ async function aggregateColorsFromEvents(
 
     let agg = perSlug.get(slug);
     if (!agg) {
-      agg = { formatRows: [], events: 0, trophies: 0, wins: 0, losses: 0, lastFinishedAt: "" };
+      agg = { formatRows: [], events: 0, trophies: 0, wins: 0, losses: 0, boxes: 0, earnings: 0, lastFinishedAt: "" };
       perSlug.set(slug, agg);
     }
     agg.events += 1;
     agg.wins += wins;
     agg.losses += losses;
     if (isTrophy) agg.trophies += 1;
+    if (fmt === ARENA_DIRECT_FORMAT) agg.boxes += boxesForEvent(setCode, wins, finishedAt || null, isTrophy);
+    if (LCQ_DRAFT_2_FORMATS.includes(fmt)) agg.earnings += lcqDraft2Earnings(wins);
     agg.formatRows.push({ format: fmt, wins, losses, trophies: isTrophy ? 1 : 0, events: 1 });
     if (finishedAt > agg.lastFinishedAt) agg.lastFinishedAt = finishedAt;
   }
@@ -543,6 +579,8 @@ async function aggregateColorsFromEvents(
       events: agg.events,
       wins: agg.wins,
       losses: agg.losses,
+      boxes: agg.boxes,
+      earnings: agg.earnings,
       lastCalculatedAt:
         agg.lastFinishedAt ||
         ((meta?.last_calculated_at as string | undefined) ?? new Date(0).toISOString()),
@@ -551,6 +589,7 @@ async function aggregateColorsFromEvents(
 
   return rows
     .sort((a, b) => {
+      if (formatFilter === "Direct" && a.boxes !== b.boxes) return (b.boxes ?? 0) - (a.boxes ?? 0);
       if (b.score !== a.score) return b.score - a.score;
       const wpA = a.wins / Math.max(1, a.wins + a.losses);
       const wpB = b.wins / Math.max(1, b.wins + b.losses);
@@ -704,6 +743,7 @@ export async function fetchFormatRecentTrophies(
   format: string,
 ): Promise<RecentTrophy[]> {
   if (format === "Pod") return fetchPodRecentTrophies(setCode);
+  if (format === "LCQ") return fetchLcqRecentTrophiesAndWins(setCode);
   const group = FORMAT_RAW_GROUPS[format];
 
   const all: RecentTrophy[] = [];
@@ -737,7 +777,62 @@ function adaptRecentTrophy(row: Record<string, unknown>): RecentTrophy {
     wins: row.wins as number,
     losses: row.losses as number,
     finishedAt: row.finished_at as string,
+    isTrophy: true,
   };
+}
+
+// The LCQ recent list shows Day 1 trophies plus every Day 2 run — Day 2 pays
+// cash without necessarily minting a 17lands trophy, so the trophies view
+// alone misses those finishes.
+async function fetchLcqRecentTrophiesAndWins(setCode: string): Promise<RecentTrophy[]> {
+  const group = FORMAT_RAW_GROUPS.LCQ;
+  const [trophiesResp, d2Resp, metaResp] = await Promise.all([
+    client()
+      .from("public_recent_trophies")
+      .select("*")
+      .eq("set_code", setCode)
+      .in("format", group),
+    client()
+      .from("public_player_draft_events")
+      .select("slug, seventeenlands_event_id, format, colors, wins, losses, finished_at, is_trophy")
+      .eq("set_code", setCode)
+      .in("format", LCQ_DRAFT_2_FORMATS),
+    client()
+      .from("public_leaderboard")
+      .select("slug, display_name, avatar_url")
+      .eq("set_code", setCode),
+  ]);
+  if (trophiesResp.error) throw trophiesResp.error;
+  if (d2Resp.error) throw d2Resp.error;
+  if (metaResp.error) throw metaResp.error;
+
+  const metaBySlug = new Map<string, Record<string, unknown>>();
+  for (const m of (metaResp.data ?? []) as Array<Record<string, unknown>>) {
+    metaBySlug.set(m.slug as string, m);
+  }
+
+  const rows = ((trophiesResp.data ?? []) as Array<Record<string, unknown>>).map(adaptRecentTrophy);
+  const seen = new Set(rows.map((r) => r.seventeenlandsEventId).filter(Boolean));
+  for (const raw of (d2Resp.data ?? []) as Array<Record<string, unknown>>) {
+    const eventId = (raw.seventeenlands_event_id ?? null) as string | null;
+    if (eventId && seen.has(eventId)) continue;
+    const slug = raw.slug as string;
+    const m = metaBySlug.get(slug);
+    rows.push({
+      setCode,
+      slug,
+      displayName: (m?.display_name as string) ?? slug,
+      avatarUrl: (m?.avatar_url as string | null) ?? null,
+      seventeenlandsEventId: eventId,
+      format: raw.format as string,
+      colors: (raw.colors as string) ?? "",
+      wins: (raw.wins as number) ?? 0,
+      losses: (raw.losses as number) ?? 0,
+      finishedAt: (raw.finished_at as string) ?? "",
+      isTrophy: Boolean(raw.is_trophy),
+    });
+  }
+  return rows.sort((a, b) => (a.finishedAt < b.finishedAt ? 1 : a.finishedAt > b.finishedAt ? -1 : 0));
 }
 
 export async function fetchPodEvents(setCode: string): Promise<PodEventSummary[]> {

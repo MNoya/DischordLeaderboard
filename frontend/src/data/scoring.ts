@@ -129,3 +129,54 @@ export function computeScore(rows: ScoringStatRow[]): number {
 export function scoreFromGroups(groups: GroupTotals[]): number {
   return Math.round(aggregate(groups).total * 100) / 100;
 }
+
+// Arena Direct box payouts — port of bot/scoring.py boxes_for_event and the era
+// constants in bot/sets.py. Must stay in sync.
+const SIX_WIN_PLAY_DIRECT_SETS = new Set(["OTJ", "FDN", "BLB", "DSK"]);
+const SIX_WIN_COLLECTOR_DIRECT_SETS = new Set(["DFT"]);
+
+const COLLECTOR_BOOSTER_WINDOWS: ReadonlyArray<{ setCode: string; startDate: string; endDate: string }> = [
+  { setCode: "TDM", startDate: "2025-04-18", endDate: "2025-04-20" },
+  { setCode: "FIN", startDate: "2025-06-20", endDate: "2025-06-22" },
+  { setCode: "EOE", startDate: "2025-08-08", endDate: "2025-08-11" },
+  { setCode: "TLA", startDate: "2025-11-28", endDate: "2025-11-30" },
+  { setCode: "ECL", startDate: "2026-01-30", endDate: "2026-02-01" },
+  { setCode: "TMT", startDate: "2026-03-13", endDate: "2026-03-15" },
+  { setCode: "SOS", startDate: "2026-04-30", endDate: "2026-05-04" },
+];
+
+const COLLECTOR_WINDOW_SLACK_DAYS = 1;
+
+function shiftDays(isoDate: string, days: number): string {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function isCollectorBoosterWindow(setCode: string, finishedAt: string): boolean {
+  const day = finishedAt.slice(0, 10);
+  for (const w of COLLECTOR_BOOSTER_WINDOWS) {
+    if (w.setCode !== setCode) continue;
+    const start = shiftDays(w.startDate, -COLLECTOR_WINDOW_SLACK_DAYS);
+    const end = shiftDays(w.endDate, COLLECTOR_WINDOW_SLACK_DAYS);
+    if (start <= day && day <= end) return true;
+  }
+  return false;
+}
+
+export function boxesForEvent(
+  setCode: string,
+  wins: number,
+  finishedAt: string | null,
+  isTrophy: boolean,
+): number {
+  if (SIX_WIN_PLAY_DIRECT_SETS.has(setCode)) return isTrophy ? 2 : 0;
+  if (SIX_WIN_COLLECTOR_DIRECT_SETS.has(setCode)) return isTrophy ? 1 : 0;
+  if (finishedAt && isCollectorBoosterWindow(setCode, finishedAt)) return isTrophy ? 1 : 0;
+  return wins >= 7 ? 2 : wins === 6 ? 1 : 0;
+}
+
+// LCQ Draft 2 cash payouts per event: a 6-win run pays $2k, a 5-win run $1k.
+export function lcqDraft2Earnings(wins: number): number {
+  return wins >= 6 ? 2000 : wins === 5 ? 1000 : 0;
+}
