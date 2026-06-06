@@ -781,9 +781,8 @@ function adaptRecentTrophy(row: Record<string, unknown>): RecentTrophy {
   };
 }
 
-// The LCQ recent list shows Day 1 trophies plus every Day 2 run — Day 2 pays
-// cash without necessarily minting a 17lands trophy, so the trophies view
-// alone misses those finishes.
+// Day 1 trophies plus finished Day 2 runs — Day 2 pays cash without
+// necessarily minting a trophy, and in-progress runs stay hidden.
 async function fetchLcqRecentTrophiesAndWins(setCode: string): Promise<RecentTrophy[]> {
   const group = FORMAT_RAW_GROUPS.LCQ;
   const [trophiesResp, d2Resp, metaResp] = await Promise.all([
@@ -816,6 +815,9 @@ async function fetchLcqRecentTrophiesAndWins(setCode: string): Promise<RecentTro
   for (const raw of (d2Resp.data ?? []) as Array<Record<string, unknown>>) {
     const eventId = (raw.seventeenlands_event_id ?? null) as string | null;
     if (eventId && seen.has(eventId)) continue;
+    const isTrophy = Boolean(raw.is_trophy);
+    const losses = (raw.losses as number) ?? 0;
+    if (!isTrophy && losses < 2) continue;
     const slug = raw.slug as string;
     const m = metaBySlug.get(slug);
     rows.push({
@@ -827,9 +829,9 @@ async function fetchLcqRecentTrophiesAndWins(setCode: string): Promise<RecentTro
       format: raw.format as string,
       colors: (raw.colors as string) ?? "",
       wins: (raw.wins as number) ?? 0,
-      losses: (raw.losses as number) ?? 0,
+      losses,
       finishedAt: (raw.finished_at as string) ?? "",
-      isTrophy: Boolean(raw.is_trophy),
+      isTrophy,
     });
   }
   return rows.sort((a, b) => (a.finishedAt < b.finishedAt ? 1 : a.finishedAt > b.finishedAt ? -1 : 0));
