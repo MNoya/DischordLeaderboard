@@ -1578,7 +1578,7 @@ class Leaderboard(commands.Cog):
 
     @app_commands.command(name="leaderboard", description=desc.LEADERBOARD)
     @app_commands.describe(
-        format="Show only one queue (Premier, Trad, Pod, Direct)",
+        format="Show only one queue (Premier, Trad, LCQ, Pod, Direct)",
         color="Filter by archetype: guilds, shards/wedges, or Soup (4+ colors)",
         set="A set code, or ALL for your lifetime standings across every set",
     )
