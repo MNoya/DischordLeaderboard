@@ -17,6 +17,7 @@ from discord.ext import commands
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.models import PodDraftEvent
+from bot.services.pod_schedule import build_underfill_message
 from bot.tasks.pod_draft_reminder import fetch_sesh_rsvps
 
 
@@ -96,23 +97,6 @@ async def fire_underfill(event_id: str, hours_before: int) -> None:
         log.info(f"T-{hours_before}h underfill reminder posted for {event_id}: {len(yes_attendees)}/{target} Yes")
     except discord.HTTPException:
         log.warning(f"fire_underfill: could not post reminder for {event_id}", exc_info=True)
-
-
-def build_underfill_message(
-    role_id: int | None,
-    yes_count: int,
-    target: int,
-    event_time: datetime,
-    jump_url: str,
-) -> str:
-    needed = target - yes_count
-    plural = "s" if needed != 1 else ""
-    unix = int(event_time.timestamp())
-    role_mention = f"<@&{role_id}> " if role_id else ""
-    return (
-        f"{role_mention}{needed} more player{plural} needed for the pod draft on <t:{unix}:F> (<t:{unix}:R>) — "
-        f"{yes_count}/{target} in so far. RSVP: {jump_url}"
-    )
 
 
 def _sesh_jump_url(sesh_message_id: str) -> str:

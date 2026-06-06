@@ -20,6 +20,10 @@ from bot.models import PodDraftEvent
 from bot.services.pod_schedule import (
     MONDAY_KIND_CHAMPIONSHIP_WEEK,
     MONDAY_KIND_RELEASE_WEEK,
+    MSG_CHAMPIONSHIP_WEEK,
+    MSG_CREATE_DM_HEADER,
+    MSG_RELEASE_WEEK,
+    MSG_SCHEDULE_EMBED_TITLE,
     SCHEDULE_TZ,
     UpcomingRelease,
     build_create_command,
@@ -33,15 +37,6 @@ from bot.sets import ACTIVE_SET_CODE
 
 
 WEEKLY_POST_HOUR_ET = 12
-
-MSG_RELEASE_WEEK = (
-    "🌀 **{set_name}** drops <t:{unix}:R>! Regular pods are paused this week while the new set hits the queues.\n"
-    "React with 👍 if you still want a pod this week."
-)
-MSG_CHAMPIONSHIP_WEEK = (
-    "🏆 Final week of **{set_code}**! The Set Championship closes out the season — regular pods are paused "
-    "this week. **{next_name}** arrives <t:{unix}:R>."
-)
 
 log = logging.getLogger(__name__)
 
@@ -118,7 +113,7 @@ def _build_schedule_embed(slots: list[datetime]) -> discord.Embed:
         unix = int(slot.timestamp())
         lines.append(f"• <t:{unix}:F> (<t:{unix}:R>)")
     return discord.Embed(
-        title=f"📅 {ACTIVE_SET_CODE} Pod Drafts this week",
+        title=MSG_SCHEDULE_EMBED_TITLE.format(set_code=ACTIVE_SET_CODE),
         description="\n".join(lines),
         color=discord.Color.blurple(),
     )
@@ -134,7 +129,7 @@ async def _dm_create_commands(slots: list[datetime]) -> None:
         description = event_description(ACTIVE_SET_CODE, event_count + i)
         command = build_create_command(ACTIVE_SET_CODE, event_count + 1 + i, slot, description)
         blocks.append(f"```\n{command}\n```")
-    body = "Sesh commands for this week's pods:\n" + "\n".join(blocks)
+    body = MSG_CREATE_DM_HEADER + "\n" + "\n".join(blocks)
     try:
         await owner.send(body)
         log.info(f"DM'd {len(blocks)} /create command(s) to owner")

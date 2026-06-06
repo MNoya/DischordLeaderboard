@@ -1,4 +1,4 @@
-"""Slot table, release calendar and flavor pools driving the weekly pod-draft schedule automation.
+"""Slot table, release calendar, and every user-facing string the pod-draft scheduler emits.
 
 Pure date/selection logic — no Discord, no DB. The APScheduler wiring lives in
 bot/tasks/pod_schedule_post.py and bot/tasks/pod_underfill.py.
@@ -25,34 +25,36 @@ MONDAY_KIND_NORMAL = "normal"
 MONDAY_KIND_RELEASE_WEEK = "release_week"
 MONDAY_KIND_CHAMPIONSHIP_WEEK = "championship_week"
 
-CREATE_CHANNEL_REF = "#🚀-pod-draft-coordination"
-CREATE_MENTIONS = "@Any Pronouns"
 
+# User-facing copy
 
-@dataclass(frozen=True)
-class WeeklySlot:
-    weekday: int
-    start: time
+MSG_SCHEDULE_EMBED_TITLE = "📅 {set_code} Pod Drafts this week"
 
-
-WEEKLY_SLOTS: tuple[WeeklySlot, ...] = (
-    WeeklySlot(weekday=WEDNESDAY, start=time(20, 0)),
-    WeeklySlot(weekday=THURSDAY, start=time(14, 0)),
+MSG_RELEASE_WEEK = (
+    "🌀 **{set_name}** drops <t:{unix}:R>! Regular pods are paused this week while the new set hits the queues.\n"
+    "React with 👍 if you still want a pod this week."
 )
 
+MSG_CHAMPIONSHIP_WEEK = (
+    "🏆 Final week of **{set_code}**! The Set Championship closes out the season — regular pods are paused "
+    "this week. **{next_name}** arrives <t:{unix}:R>."
+)
 
-@dataclass(frozen=True)
-class UpcomingRelease:
-    release_date: date
-    code: str
-    name: str
+MSG_UNDERFILL = (
+    "{role_mention}{needed} more player{plural} needed for the pod draft on <t:{unix}:F> (<t:{unix}:R>) — "
+    "{yes_count}/{target} in so far. RSVP: {jump_url}"
+)
 
+MSG_CREATE_DM_HEADER = "Sesh commands for this week's pods:"
 
-UPCOMING_RELEASES: tuple[UpcomingRelease, ...] = (
-    UpcomingRelease(date(2026, 6, 23), "MSH", "Marvel Super Heroes"),
-    UpcomingRelease(date(2026, 8, 11), "HOB", "The Hobbit"),
-    UpcomingRelease(date(2026, 9, 29), "FRA", "Reality Fracture"),
-    UpcomingRelease(date(2026, 11, 10), "TRE", "Star Trek"),
+CREATE_CHANNEL_REF = "#🚀-pod-draft-coordination"
+CREATE_MENTIONS = "@Any Pronouns"
+CREATE_COMMAND_TEMPLATE = (
+    "/create title:{set_code} Pod Draft #{event_number} - {day} "
+    "datetime:{day} {clock} ET "
+    "channel:{channel} "
+    "on_create_mentions:{mentions} "
+    "description:{description}"
 )
 
 
@@ -83,6 +85,33 @@ SET_FLAVOR: dict[str, SetFlavor] = {
         event_descriptions=(),
     ),
 }
+
+
+@dataclass(frozen=True)
+class WeeklySlot:
+    weekday: int
+    start: time
+
+
+WEEKLY_SLOTS: tuple[WeeklySlot, ...] = (
+    WeeklySlot(weekday=WEDNESDAY, start=time(20, 0)),
+    WeeklySlot(weekday=THURSDAY, start=time(14, 0)),
+)
+
+
+@dataclass(frozen=True)
+class UpcomingRelease:
+    release_date: date
+    code: str
+    name: str
+
+
+UPCOMING_RELEASES: tuple[UpcomingRelease, ...] = (
+    UpcomingRelease(date(2026, 6, 23), "MSH", "Marvel Super Heroes"),
+    UpcomingRelease(date(2026, 8, 11), "HOB", "The Hobbit"),
+    UpcomingRelease(date(2026, 9, 29), "FRA", "Reality Fracture"),
+    UpcomingRelease(date(2026, 11, 10), "TRE", "Star Trek"),
+)
 
 
 def slots_for_week(monday: date) -> list[datetime]:
@@ -129,14 +158,33 @@ def event_description(set_code: str, event_index: int) -> str:
 
 
 def build_create_command(set_code: str, event_number: int, slot_start: datetime, description: str) -> str:
-    day = f"{slot_start:%B} {slot_start.day}"
-    clock = format_clock(slot_start)
-    return (
-        f"/create title:{set_code} Pod Draft #{event_number} - {day} "
-        f"datetime:{day} {clock} ET "
-        f"channel:{CREATE_CHANNEL_REF} "
-        f"on_create_mentions:{CREATE_MENTIONS} "
-        f"description:{description}"
+    return CREATE_COMMAND_TEMPLATE.format(
+        set_code=set_code,
+        event_number=event_number,
+        day=f"{slot_start:%B} {slot_start.day}",
+        clock=format_clock(slot_start),
+        channel=CREATE_CHANNEL_REF,
+        mentions=CREATE_MENTIONS,
+        description=description,
+    )
+
+
+def build_underfill_message(
+    role_id: int | None,
+    yes_count: int,
+    target: int,
+    event_time: datetime,
+    jump_url: str,
+) -> str:
+    needed = target - yes_count
+    return MSG_UNDERFILL.format(
+        role_mention=f"<@&{role_id}> " if role_id else "",
+        needed=needed,
+        plural="s" if needed != 1 else "",
+        unix=int(event_time.timestamp()),
+        yes_count=yes_count,
+        target=target,
+        jump_url=jump_url,
     )
 
 

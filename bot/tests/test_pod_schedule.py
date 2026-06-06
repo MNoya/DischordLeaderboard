@@ -9,6 +9,7 @@ from bot.services.pod_schedule import (
     MONDAY_KIND_RELEASE_WEEK,
     SCHEDULE_TZ,
     build_create_command,
+    build_underfill_message,
     event_description,
     format_clock,
     monday_blurb,
@@ -16,7 +17,6 @@ from bot.services.pod_schedule import (
     slots_for_week,
     week_index_for,
 )
-from bot.tasks.pod_underfill import build_underfill_message
 
 
 def test_slots_for_week_returns_wednesday_and_thursday_eastern():
