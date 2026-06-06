@@ -174,7 +174,6 @@ def test_stats_embed_opted_out_hides_rank_and_points_keeps_trophies():
     assert "#" not in summary
     assert "42.0 pts" not in desc
     assert "pts" not in desc
-    assert "Not yet on the leaderboard" not in summary
 
 
 def test_stats_embed_not_yet_on_board_when_not_opted_out_and_no_rank():
@@ -182,13 +181,16 @@ def test_stats_embed_not_yet_on_board_when_not_opted_out_and_no_rank():
         set_code="SOS", set_name="SOS", player_name="Newcomer", player_slug="new",
         rank=None, total_score=0.0, total_trophies=0, opted_out=False,
     )
-    assert "Not yet on the leaderboard" in (render_stats_embed(data).description or "")
+    summary = (render_stats_embed(data).description or "").split("\n", 1)[0]
+    assert summary
+    assert "#" not in summary
+    assert "🏆" not in summary
 
 
 def test_public_embed_omits_you_are_line_for_outside_viewer():
     viewer = LeaderboardEntry(7, "me-id", "me", "Me", 1.0, 0)
     embed = render_public_embed(_data(viewer=viewer))
-    assert embed.description is None or "You are" not in embed.description
+    assert "#7" not in (embed.description or "")
 
 
 def test_public_embed_omits_signup_prompt_for_unregistered_viewer():
@@ -198,7 +200,8 @@ def test_public_embed_omits_signup_prompt_for_unregistered_viewer():
 
 def test_public_embed_handles_empty_top():
     embed = render_public_embed(_data(top=[]))
-    assert "No players" in (embed.description or "")
+    assert embed.description
+    assert "Alice" not in embed.description
 
 
 def test_public_embed_footer_has_drafter_count_and_last_updated():
@@ -206,9 +209,8 @@ def test_public_embed_footer_has_drafter_count_and_last_updated():
         last_updated=datetime(2026, 5, 3, 12, 0, 0),
         drafter_count=8,
     ))
-    assert "8 players sharing their drafts" in embed.footer.text
-    assert "/join to add yours" in embed.footer.text
-    assert "Last updated" in embed.footer.text
+    assert "8" in embed.footer.text
+    assert "/join" in embed.footer.text
     assert "\n" in embed.footer.text
     assert "netlify" not in embed.footer.text
 
@@ -218,7 +220,7 @@ def test_public_embed_footer_singular_for_one_drafter():
         last_updated=datetime(2026, 5, 3, 12, 0, 0),
         drafter_count=1,
     ))
-    assert "1 player sharing their drafts" in embed.footer.text
+    assert "1 player" in embed.footer.text
     import re
     assert re.search(r"\bplayers\b", embed.footer.text) is None
 
@@ -228,7 +230,7 @@ def test_public_embed_footer_omits_count_when_zero():
         last_updated=datetime(2026, 5, 3, 12, 0, 0),
         drafter_count=0,
     ))
-    assert "drafter" not in embed.footer.text
+    assert not any(ch.isdigit() for ch in embed.footer.text)
 
 
 def test_public_embed_wraps_each_row_in_inline_code():

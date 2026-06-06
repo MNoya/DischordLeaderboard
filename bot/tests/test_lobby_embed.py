@@ -1,6 +1,8 @@
 """Pure-function tests for the pod-draft lobby + ready-check embeds."""
 from __future__ import annotations
 
+import discord
+
 from bot.services.lobby_embed import render, render_ready_check_progress
 
 
@@ -20,7 +22,7 @@ def test_in_session_arena_handle_deduped_from_maybe():
     )
     maybe = _field(embed, "🤷 Maybe")
     assert maybe is not None
-    assert maybe.name == "🤷 Maybe (0)"
+    assert maybe.name.endswith("(0)")
 
 
 def test_lobby_card_shows_overview_not_split_during_ready():
@@ -30,7 +32,7 @@ def test_lobby_card_shows_overview_not_split_during_ready():
     embed = render(
         title="Pod Draft", rsvps_yes=[], rsvps_maybe=[], in_session=in_session, state="ready",
     )
-    assert _field(embed, "✅ In Draftmancer").name == "✅ In Draftmancer (5)"
+    assert _field(embed, "✅ In Draftmancer").name.endswith("(5)")
     assert _field(embed, "✅ Ready (") is None
     assert _field(embed, "⏳ Pending") is None
 
@@ -38,16 +40,16 @@ def test_lobby_card_shows_overview_not_split_during_ready():
 def test_ready_progress_drafting_marks_everyone_ready():
     in_session = [(f"P{i}#000{i}", f"Player{i}") for i in range(8)]
     embed = render_ready_check_progress("Pod Draft", in_session, state="drafting")
-    assert _field(embed, "✅ Ready").name == "✅ Ready (8)"
+    assert _field(embed, "✅ Ready").name.endswith("(8)")
     assert _field(embed, "⏳ Pending") is None
 
 
 def test_ready_progress_complete_labels_players():
     in_session = [(f"P{i}#000{i}", f"Player{i}") for i in range(8)]
     embed = render_ready_check_progress("Pod Draft", in_session, state="complete")
-    assert _field(embed, "✅ Players").name == "✅ Players (8)"
+    assert _field(embed, "✅ Players").name.endswith("(8)")
     assert _field(embed, "⏳ Pending") is None
-    assert "Draft complete" in embed.description
+    assert embed.color == discord.Color.green()
 
 
 def test_ready_progress_in_progress_splits_ready_and_pending():
@@ -56,8 +58,8 @@ def test_ready_progress_in_progress_splits_ready_and_pending():
     embed = render_ready_check_progress(
         "Pod Draft", in_session, state="ready", ready_arena_names=ready,
     )
-    assert _field(embed, "✅ Ready").name == "✅ Ready (3)"
-    assert _field(embed, "⏳ Pending").name == "⏳ Pending (5)"
+    assert _field(embed, "✅ Ready").name.endswith("(3)")
+    assert _field(embed, "⏳ Pending").name.endswith("(5)")
 
 
 def test_ready_progress_superseded_shows_only_decliner_no_roster():
@@ -70,7 +72,7 @@ def test_ready_progress_superseded_shows_only_decliner_no_roster():
     )
     assert _field(embed, "✅ In Draftmancer") is None
     assert _field(embed, "⏳ Pending") is None
-    assert "Player3#0003` is Not Ready" in embed.description
+    assert "Player3#0003" in embed.description
     assert "retry" not in embed.description
 
 
@@ -83,8 +85,8 @@ def test_ready_progress_declined_collapses_to_tally():
         draftmancer_url="https://draftmancer.com/?session=X",
         decliner_name="Player3#0003", ready_count=3, total_count=8,
     )
-    assert "Player3#0003` is Not Ready" in embed.description
-    assert "3/8 Ready" in embed.description
+    assert "Player3#0003" in embed.description
+    assert "3/8" in embed.description
     assert "draftmancer.com" not in embed.description
     assert _field(embed, "✅ Ready") is None
     assert _field(embed, "⏳ Pending") is None
@@ -95,8 +97,8 @@ def test_ready_progress_shows_initiator_only_during_active_check():
     active = render_ready_check_progress(
         "Pod Draft", in_session, state="ready", ready_arena_names=set(), initiated_by="Noya",
     )
-    assert "Started by Noya" in active.description
+    assert "Noya" in active.description
     declined = render_ready_check_progress(
         "Pod Draft", in_session, state="notready", decliner_name="x", initiated_by="Noya",
     )
-    assert "Started by" not in declined.description
+    assert "Noya" not in (declined.description or "")

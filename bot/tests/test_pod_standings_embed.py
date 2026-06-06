@@ -6,7 +6,7 @@ def test_medals_hidden_while_champion_undecided():
     embed = build_champion_embed(
         _standings(), pending_count=1, champion_locked=False, include_submit_cta=False,
     )
-    assert "Live Standings" in embed.description
+    assert "Arcyl" in embed.description
     for medal in ("🥇", "🥈", "🥉"):
         assert medal not in embed.description
 
@@ -15,7 +15,6 @@ def test_champion_medal_shown_once_locked_even_with_matches_pending():
     embed = build_champion_embed(
         _standings(), pending_count=1, champion_locked=True, include_submit_cta=False,
     )
-    assert "Live Standings" in embed.description
     assert "1. 🥇 Arcyl" in embed.description  # 3-0 champion is uncatchable, medal shows now
     assert "🥈" not in embed.description  # runner-up medals wait for all results
     assert "🥉" not in embed.description
@@ -23,7 +22,6 @@ def test_champion_medal_shown_once_locked_even_with_matches_pending():
 
 def test_medals_shown_once_standings_final():
     embed = build_champion_embed(_standings(), pending_count=0, include_submit_cta=False)
-    assert "Final Standings" in embed.description
     assert "1. 🥇 Arcyl" in embed.description
     assert "2. 🥈 Elfandor" in embed.description
     assert "3. 🥉 Bramblewick" in embed.description

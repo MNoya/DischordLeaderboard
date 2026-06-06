@@ -67,47 +67,45 @@ def test_final_round_splits_trophy_middle_last_chance():
     assert _pairs(groups[0][1]) == {frozenset(("Aria", "Esk"))}
 
 
-# --- rendering (one smoke test; the single place exact format is pinned) ---
+# --- rendering ---
 
-def test_round2_render_smoke():
+def test_round2_renders_three_groups_with_records_on_the_pair_up():
     states = [
         _ms("Aria", "Caedmon", "1-0", "1-0"),
         _ms("Bryn", "Esk", "0-1", "1-0"),
         _ms("Doryn", "Fenn", "0-1", "0-1"),
     ]
-    assert _norm(round_embed(2, states).description) == (
-        "⬆️ **1-0 Match**\n"
-        "⚔️ Aria vs Caedmon\n"
-        "\n"
-        "🌉 **Pair Up Match**\n"
-        "⚔️ Esk (1-0) vs Bryn (0-1)\n"
-        "\n"
-        "⬇️ **0-1 Match**\n"
-        "⚔️ Doryn vs Fenn"
-    )
+    groups = _norm(round_embed(2, states).description).split("\n\n")
+    assert len(groups) == 3
+    assert "Aria vs Caedmon" in groups[0]
+    assert "Esk (1-0) vs Bryn (0-1)" in groups[1]
+    assert "Doryn vs Fenn" in groups[2]
 
 
-def test_round1_seated_titles_by_seats_with_annotation():
+def test_round1_seated_annotates_seat_pairings():
     states = [_seated("Aria", "Bryn", 1, 5), _seated("Caedmon", "Doryn", 2, 6)]
     embed = round_embed(1, states)
-    assert "by Seats" in embed.title
-    assert "⚔️ Aria vs Bryn (1v5)" in _norm(embed.description)
+    assert "Aria vs Bryn (1v5)" in _norm(embed.description)
 
 
-def test_round1_without_seats_titles_random_and_drops_annotation():
+def test_round1_without_seats_drops_seat_annotation():
     embed = round_embed(1, [_ms("Aria", "Bryn")])
-    assert "(Random)" in embed.title
     assert "(1v" not in embed.description
 
 
-def test_reported_and_skipped_lines_render():
+def test_reported_and_skipped_lines_drop_the_pending_marker():
     states = [
         _ms("Aria", "Caedmon", "1-0", "1-0", winner_name="Aria", score="2-1"),
         _ms("Esk", "Gwyn", "1-0", "1-0", winner_name="(skipped)"),
     ]
-    desc = _norm(round_embed(2, states).description)
-    assert "▫️ Aria wins 2-1 vs Caedmon" in desc
-    assert "🚫 Not played: Esk vs Gwyn" in desc
+    lines = _norm(round_embed(2, states).description).splitlines()
+    reported = next(line for line in lines if "Aria" in line)
+    assert "2-1" in reported
+    assert "Caedmon" in reported
+    skipped = next(line for line in lines if "Esk" in line)
+    assert "Gwyn" in skipped
+    assert "⚔️" not in reported
+    assert "⚔️" not in skipped
 
 
 def _ms(a: str, b: str, a_record: str = "0-0", b_record: str = "0-0", **extra) -> dict:

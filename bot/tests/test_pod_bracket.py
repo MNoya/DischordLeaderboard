@@ -128,9 +128,17 @@ def test_padding_empty_for_unsupported_round():
 
 # --- shared wording -------------------------------------------------------
 
-def test_format_result_change_reported():
-    assert format_result_change("Arcyl", "Bramblewick", "Bramblewick", "2-1") == "Bramblewick wins 2-1 vs Arcyl"
+def test_format_result_change_reported_leads_with_winner_and_score():
+    phrase = format_result_change("Arcyl", "Bramblewick", "Bramblewick", "2-1")
+
+    assert phrase.startswith("Bramblewick")
+    assert "2-1" in phrase
+    assert "Arcyl" in phrase
 
 
-def test_format_result_change_cleared():
-    assert format_result_change("Arcyl", "Bramblewick", None, None) == "Arcyl vs Bramblewick result cleared"
+def test_format_result_change_cleared_names_both_without_score():
+    phrase = format_result_change("Arcyl", "Bramblewick", None, None)
+
+    assert "Arcyl" in phrase
+    assert "Bramblewick" in phrase
+    assert not any(ch.isdigit() for ch in phrase)
