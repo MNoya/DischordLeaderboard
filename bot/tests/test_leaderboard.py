@@ -1,6 +1,7 @@
 from datetime import date, datetime
 
 from bot.commands.leaderboard import (
+    LcqExtras,
     LeaderboardData,
     LeaderboardEntry,
     PersonalStanding,
@@ -10,7 +11,9 @@ from bot.commands.leaderboard import (
     process_leaderboard,
     process_leaderboard_for_archetype,
     process_leaderboard_for_format,
+    process_leaderboard_for_lcq,
     process_personal_standings,
+    render_filtered_data,
     render_personal_embed,
     render_public_embed,
 )
@@ -410,6 +413,43 @@ def test_format_board_lcq_combines_both_lcq_groups(session):
     assert data.top[1].score == 15.0
 
 
+def test_lcq_board_carries_d1_trophies_d2_record_and_cash(session):
+    s = _seed_set(session)
+    alice = _seed_player(session, "Alice", "1", "a")
+    bob = _seed_player(session, "Bob", "2", "b")
+    _seed_stats(session, alice, s, trophies=1, events=1, fmt="LimitedChampionshipQualifier_Draft1", wins=3, losses=0)
+    _seed_stats(session, alice, s, events=2, fmt="LimitedChampionshipQualifier_Draft2", wins=11, losses=3)
+    _seed_stats(session, bob, s, events=1, fmt="LimitedChampionshipQualifier_Draft2", wins=3, losses=2)
+    _seed_draft(session, alice, s, "LimitedChampionshipQualifier_Draft1", "WU", "a1", trophy=True, wins=3, losses=0)
+    _seed_draft(session, alice, s, "LimitedChampionshipQualifier_Draft2", "WU", "a2", wins=6, losses=1)
+    _seed_draft(session, alice, s, "LimitedChampionshipQualifier_Draft2", "UG", "a3", wins=5, losses=2)
+    _seed_draft(session, bob, s, "LimitedChampionshipQualifier_Draft2", "BR", "b1", wins=3, losses=2)
+    session.commit()
+
+    data = process_leaderboard_for_lcq(session, viewer_discord_id=None)
+
+    assert [e.display_name for e in data.top] == ["Alice", "Bob"]
+    assert data.top[0].lcq == LcqExtras(d1_trophies=1, d2_wins=11, d2_losses=3, cash=3000)
+    assert data.top[1].lcq == LcqExtras(d1_trophies=0, d2_wins=3, d2_losses=2, cash=0)
+
+
+def test_lcq_board_renders_d2_and_cash_columns(session):
+    s = _seed_set(session)
+    alice = _seed_player(session, "Alice", "1", "a")
+    _seed_stats(session, alice, s, trophies=1, events=1, fmt="LimitedChampionshipQualifier_Draft1", wins=3, losses=0)
+    _seed_draft(session, alice, s, "LimitedChampionshipQualifier_Draft1", "WU", "a1", trophy=True, wins=3, losses=0)
+    _seed_draft(session, alice, s, "LimitedChampionshipQualifier_Draft2", "WU", "a2", wins=6, losses=1)
+    session.commit()
+
+    data, suffix = render_filtered_data(session, filter_type="format", filter_value="LCQ", viewer_discord_id=None)
+    desc = render_public_embed(data).description or ""
+
+    assert suffix == "LCQ"
+    header = desc.split("\n", 1)[0]
+    assert "Day2" in header and "💰" in header
+    assert "6-1" in desc and "2K" in desc
+
+
 def test_personal_standings_lcq_filter_scopes_and_ranks(session):
     s = _seed_set(session)
     alice = _seed_player(session, "Alice", "1", "a")
@@ -514,12 +554,11 @@ def test_personal_embed_direct_uses_boxes_column_not_points():
     assert "Win%" in desc
 
 
-def _seed_draft(session, p, s, fmt, colors, eid, trophy=False):
-    from bot.models import DraftEvent
+def _seed_draft(session, p, s, fmt, colors, eid, trophy=False, wins=None, losses=2):
     session.add(DraftEvent(
         player_id=p.id, set_id=s.id, seventeenlands_event_id=eid,
         format=fmt, expansion=s.code, colors=colors,
-        wins=7 if trophy else 3, losses=2, is_trophy=trophy,
+        wins=(7 if trophy else 3) if wins is None else wins, losses=losses, is_trophy=trophy,
         finished_at=datetime(2026, 5, 10),
     ))
 

@@ -61,6 +61,14 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class LcqExtras:
+    d1_trophies: int = 0
+    d2_wins: int = 0
+    d2_losses: int = 0
+    cash: int = 0
+
+
+@dataclass
 class LeaderboardEntry:
     rank: int
     player_id: str
@@ -69,6 +77,7 @@ class LeaderboardEntry:
     score: float
     trophies: int
     events: int = 0
+    lcq: LcqExtras | None = None
 
 
 @dataclass
@@ -265,6 +274,61 @@ def process_leaderboard_for_format(
         last_updated=last_updated,
         drafter_count=len(ranked),
     )
+
+
+def process_leaderboard_for_lcq(
+    session: Session, viewer_discord_id: str | None, top_n: int = 10,
+    magic_set: MagicSet | None = None,
+) -> LeaderboardData | None:
+    """The combined LCQ format board, decorated with the per-player Draft 1 trophy
+    count, Draft 2 record, and cash winnings the generic format board can't carry.
+    """
+    if magic_set is None:
+        magic_set = _current_set(session)
+    if magic_set is None:
+        return None
+    data = process_leaderboard_for_format(
+        session, viewer_discord_id=viewer_discord_id, format_label=LCQ_FILTER, top_n=top_n, magic_set=magic_set,
+    )
+    if data is None:
+        return None
+    extras = _lcq_extras_by_player(session, magic_set.id)
+    entries = data.top if data.viewer is None else data.top + [data.viewer]
+    for e in entries:
+        e.lcq = extras.get(e.player_id, LcqExtras())
+    return data
+
+
+def _lcq_cash_for_event(wins: int, losses: int) -> int:
+    """Mirrors lcqCashPrize in frontend/src/data/utils.ts: $2K at 6+ wins, $1K at 5-2."""
+    if wins >= 6:
+        return 2000
+    if wins == 5 and losses == 2:
+        return 1000
+    return 0
+
+
+def _lcq_extras_by_player(session: Session, set_id: str) -> dict[str, LcqExtras]:
+    d2_formats = next(g.formats for g in DEFAULT_QUEUE_GROUPS if g.label == "LCQ Draft 2")
+    rows = session.execute(
+        select(DraftEvent.player_id, DraftEvent.format, DraftEvent.wins, DraftEvent.losses, DraftEvent.is_trophy)
+        .where(
+            DraftEvent.set_id == set_id,
+            DraftEvent.format.in_(supported_formats(_groups_for_label(LCQ_FILTER))),
+        )
+    ).all()
+    extras: dict[str, LcqExtras] = {}
+    for r in rows:
+        e = extras.setdefault(r.player_id, LcqExtras())
+        wins = int(r.wins or 0)
+        losses = int(r.losses or 0)
+        if r.format in d2_formats:
+            e.d2_wins += wins
+            e.d2_losses += losses
+            e.cash += _lcq_cash_for_event(wins, losses)
+        elif r.is_trophy:
+            e.d1_trophies += 1
+    return extras
 
 
 def process_leaderboard_for_archetype(
@@ -962,6 +1026,72 @@ def _player_url(
     return player_url(slug, set_code) + _site_query(filter_type, filter_value)
 
 
+@dataclass(frozen=True)
+class _Column:
+    header: str
+    align: str
+    cell: Callable[..., str]
+    pad: int = 0
+
+
+# Emoji headers render ~1 col wider than a digit: min value width 2, header padded one less
+EMOJI_HEADERS = ("🏆", "📦", "💰")
+
+
+def _cell_text(value: str, width: int, align: str) -> str:
+    if align == "l":
+        return f"{value:<{width}}"
+    if align == "c":
+        return _center_right_bias(value, width)
+    return f"{value:>{width}}"
+
+
+def _table_cells(cols: list[_Column], rows: list) -> tuple[list[str], list[list[str]]]:
+    """Header + per-row cells with shared widths, ready to be '  '-joined into lines."""
+    header_cells: list[str] = []
+    row_cells: list[list[str]] = [[] for _ in rows]
+    for col in cols:
+        values = [col.cell(r) for r in rows]
+        is_wide = col.header in EMOJI_HEADERS
+        width = max(max(len(v) for v in values), 2 if is_wide else len(col.header)) + col.pad
+        header_cells.append(_cell_text(col.header, width - 1 if is_wide else width, "l" if col.align == "l" else "r"))
+        for i, v in enumerate(values):
+            row_cells[i].append(_cell_text(v, width, col.align))
+    return header_cells, row_cells
+
+
+def _lcq_d2_record(e: LeaderboardEntry) -> str:
+    if e.lcq is None or (e.lcq.d2_wins == 0 and e.lcq.d2_losses == 0):
+        return "—"
+    return f"{e.lcq.d2_wins}-{e.lcq.d2_losses}"
+
+
+def _lcq_cash_label(e: LeaderboardEntry) -> str:
+    if e.lcq is None or e.lcq.cash == 0:
+        return "—"
+    return f"{e.lcq.cash // 1000}K"
+
+
+def _board_columns(show_score: bool, filter_type: str | None, filter_value: str | None) -> list[_Column]:
+    """Column specs per board variant: scored boards carry Points, Pod counts drafts,
+    Direct counts boxes, and LCQ adds the Draft 2 record + cash columns.
+    """
+    if filter_type == "format" and filter_value == LCQ_FILTER:
+        return [
+            _Column("Pts", "c", lambda e: str(round(e.score))),
+            _Column("🏆", "r", lambda e: str(e.lcq.d1_trophies) if e.lcq else str(e.trophies)),
+            _Column("Day2", "r", _lcq_d2_record, pad=1),
+            _Column("💰", "r", _lcq_cash_label),
+        ]
+    if show_score:
+        counter = _Column("Points", "c", lambda e: str(round(e.score)))
+    elif filter_type == "format" and filter_value == DIRECT_FILTER:
+        counter = _Column("📦", "c", lambda e: str(e.events))
+    else:
+        counter = _Column("Drafts", "c", lambda e: str(e.events))
+    return [counter, _Column("🏆", "r", lambda e: str(e.trophies))]
+
+
 def _format_leaderboard(
     top: list[LeaderboardEntry], set_code: str | None = None, show_score: bool = True,
     filter_type: str | None = None, filter_value: str | None = None,
@@ -974,30 +1104,12 @@ def _format_leaderboard(
     works because the underlying ORDER BY in process_leaderboard uses the raw
     float value, not this rendered string.
     """
-    name_width = max(max(display_width(e.display_name) for e in top), len("Name"))
     rank_col_width = max(max(len(f"{e.rank}.") for e in top), len("#"))
-    # min 2 so single-digit trophies align under the 🏆 header, which renders ~1 col wider than a digit
-    trophy_width = max(max(len(str(e.trophies)) for e in top), 2)
-    header_trophy_width = trophy_width - 1
+    name_width = max(max(display_width(e.display_name) for e in top), len("Name"))
+    header_cells, row_cells = _table_cells(_board_columns(show_score, filter_type, filter_value), top)
 
-    if show_score:
-        score_width = max(max(len(f"{round(e.score)}") for e in top), len("Points"))
-        header_inner = (
-            f"{'#':<{rank_col_width}} {'Name':<{name_width}}  "
-            f"{'Points':>{score_width}}  {'🏆':>{header_trophy_width}}"
-        )
-    else:
-        is_direct = filter_type == "format" and filter_value == "Direct"
-        left_label = "📦" if is_direct else "Drafts"
-        drafts_width = max(max(len(str(e.events)) for e in top), 2 if is_direct else len(left_label))
-        header_left_width = drafts_width - 1 if is_direct else drafts_width
-        header_inner = (
-            f"{'#':<{rank_col_width}} {'Name':<{name_width}}   "
-            f"{left_label:>{header_left_width}}  {'🏆':>{header_trophy_width}}"
-        )
-
-    lines = [f"`{header_inner}`"]
-    for e in top:
+    lines = [f"`{'#':<{rank_col_width}} {'Name':<{name_width}}  " + "  ".join(header_cells) + "`"]
+    for i, e in enumerate(top):
         medal = MEDAL_EMOJIS.get(e.rank)
         if medal is not None:
             # emoji takes ~1 col more than digit-pair in monospace rendering, so pad shorter
@@ -1005,15 +1117,7 @@ def _format_leaderboard(
         else:
             rank = f"{e.rank}.".ljust(rank_col_width)
         name = e.display_name + " " * max(0, name_width - display_width(e.display_name))
-        trophy = f"{e.trophies:>{trophy_width}}"
-        if show_score:
-            # Center the integer under the wider 'Points' header — right-bias so
-            # single-digit values shift one space rightward and look more centered
-            score = _center_right_bias(str(round(e.score)), score_width)
-            inner = f"{rank} {name}  {score}  {trophy}"
-        else:
-            drafts_col = _center_right_bias(str(e.events), drafts_width)
-            inner = f"{rank} {name}   {drafts_col}  {trophy}"
+        inner = f"{rank} {name}  " + "  ".join(row_cells[i])
         lines.append(f"[`{inner}`](<{_player_url(e.slug, set_code, filter_type, filter_value)}>)")
     return "\n".join(lines)
 
@@ -1080,13 +1184,6 @@ def render_embed(data: LeaderboardData) -> discord.Embed:
 render_public_embed = render_embed
 
 
-@dataclass(frozen=True)
-class _Column:
-    header: str
-    align: str
-    cell: Callable[[PersonalStanding], str]
-
-
 def _winrate(r: PersonalStanding) -> str:
     games = r.wins + r.losses
     return f"{round(r.wins / games * 100)}%" if games else "—"
@@ -1124,26 +1221,8 @@ def render_personal_embed(data: PersonalStandingsData) -> discord.Embed:
         return embed
 
     rows = data.rows
-    cols = _personal_columns(data)
-
-    def _fmt(value: str, width: int, align: str) -> str:
-        if align == "l":
-            return f"{value:<{width}}"
-        if align == "c":
-            return _center_right_bias(value, width)
-        return f"{value:>{width}}"
-
     ord_width = max(len(f"{len(rows)}."), len("#"))
-    header_cells: list[str] = []
-    row_cells: list[list[str]] = [[] for _ in rows]
-    for col in cols:
-        values = [col.cell(r) for r in rows]
-        is_wide = col.header in ("🏆", "📦")
-        width = max(max(len(v) for v in values), 2 if is_wide else len(col.header))
-        # emoji headers render ~1 col wider than a digit, so pad them one less
-        header_cells.append(_fmt(col.header, width - 1 if is_wide else width, "l" if col.align == "l" else "r"))
-        for i, v in enumerate(values):
-            row_cells[i].append(_fmt(v, width, col.align))
+    header_cells, row_cells = _table_cells(_personal_columns(data), rows)
 
     link_filter_type = "format" if data.format_label else None
     lines = [f"`{'#':<{ord_width}} " + "  ".join(header_cells) + "`"]
@@ -1365,6 +1444,9 @@ def render_filtered_data(
     elif format_value == DIRECT_FILTER:
         data = process_leaderboard_for_direct(session, viewer_discord_id=viewer_discord_id, magic_set=magic_set)
         suffix = "Direct"
+    elif format_value == LCQ_FILTER and color_value is None:
+        data = process_leaderboard_for_lcq(session, viewer_discord_id=viewer_discord_id, magic_set=magic_set)
+        suffix = LCQ_FILTER
     elif color_value is not None:
         data = process_leaderboard_for_archetype(
             session, viewer_discord_id=viewer_discord_id, archetype=color_value, magic_set=magic_set, groups=groups,
@@ -1575,7 +1657,7 @@ class Leaderboard(commands.Cog):
 
     @app_commands.command(name="leaderboard", description=desc.LEADERBOARD)
     @app_commands.describe(
-        format="Show only one queue (Premier, Trad, LCQ, Pod, Direct)",
+        format="Show only one queue (Premier, Trad, Sealed, Quick, LCQ, Pod, Direct)",
         color="Filter by archetype: guilds, shards/wedges, or Soup (4+ colors)",
         set="A set code, or ALL for your lifetime standings across every set",
     )

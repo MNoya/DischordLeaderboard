@@ -510,14 +510,19 @@ function EarningsCell({ earnings, compact = false }: { earnings: number; compact
 
 function BoxesCell({ boxes, large = false }: { boxes: number; large?: boolean }) {
   return (
-    <div
-      className={cn(
-        "text-right font-display tracking-[0.02em] tabular-nums leading-none",
-        large ? "text-[24px]" : "text-[18px]",
-        boxes === 0 && "text-dim",
-      )}
-    >
-      {boxes}
+    <div className={cn("flex items-center justify-end", large ? "gap-1.5" : "gap-1")}>
+      <span className={cn("leading-none", large ? "text-[15px]" : "text-[11px]")} aria-hidden="true">
+        📦
+      </span>
+      <span
+        className={cn(
+          "font-display tracking-[0.02em] tabular-nums leading-none",
+          large ? "text-[24px]" : "text-[18px]",
+          boxes === 0 && "text-dim",
+        )}
+      >
+        {boxes}
+      </span>
     </div>
   );
 }
