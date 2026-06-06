@@ -188,6 +188,13 @@ export function formatTag(format: string, expansion?: string | null): FormatTag 
   return null;
 }
 
+export function lcqCashPrize(event: { format: string; wins: number; losses: number }): string | null {
+  if (event.format !== "LimitedChampionshipQualifier_Draft2") return null;
+  if (event.wins >= 6) return "$2K";
+  if (event.wins === 5 && event.losses === 2) return "$1K";
+  return null;
+}
+
 export function stripDiscriminator(name: string): string {
   return name.replace(/#\d+$/, "");
 }

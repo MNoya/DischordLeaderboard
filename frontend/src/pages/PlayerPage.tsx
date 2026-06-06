@@ -31,7 +31,7 @@ import { Tooltip } from "../components/Tooltip";
 
 import { useAvailableFormats, useColorChips, useDraftEvents, useLeaderboard, usePlayerIdentity, usePlayerProfile, useSets } from "../data/hooks";
 import { computeScore, type ScoringStatRow } from "../data/scoring";
-import { canonicalSetCode, colorsOf, effectiveColorCount, eventDate, eventDisplayLabel, fmtShortDate, formatTag, isFlashbackEvent, mainColors, prettyFormat, winPct } from "../data/utils";
+import { canonicalSetCode, colorsOf, effectiveColorCount, eventDate, eventDisplayLabel, fmtShortDate, formatTag, isFlashbackEvent, lcqCashPrize, mainColors, prettyFormat, winPct } from "../data/utils";
 import { ACTIVE_SET_CODE } from "../data/constants";
 import {
   colorsDisplayName,
@@ -1209,6 +1209,19 @@ function FormatTagPill({ tag }: { tag: { label: string; tone: "midweek" | "open"
   );
 }
 
+function CashPrizePill({ amount, className }: { amount: string; className?: string }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center px-2 py-1 bg-[#ff8c3a] border border-[#ff8c3a] text-bg font-mono font-bold text-[13px] tracking-[0.08em] leading-none whitespace-nowrap",
+        className,
+      )}
+    >
+      {amount}
+    </span>
+  );
+}
+
 function FlashbackDivider({ variant }: { variant: "desktop" | "mobile" }) {
   const mxClass = variant === "mobile" ? "-mx-[18px]" : "-mx-2";
   const spanCls = variant === "desktop" ? "col-span-full" : "";
@@ -1271,6 +1284,8 @@ function EventLogRow({
   const podWithoutDeck = isPod && !e.colors;
   const formatLabel = eventDisplayLabel(e).toUpperCase();
   const tag = isPod ? null : formatTag(e.format, e.expansion);
+  const cashPrize = lcqCashPrize(e);
+  const recordColor = cashPrize ? "#ff8c3a" : e.isTrophy ? "#2ee85c" : "#e6ecf5";
   const borderCls = hideBottomBorder ? "" : "border-b border-border";
 
   if (variant === "desktop") {
@@ -1295,8 +1310,11 @@ function EventLogRow({
           {e.isTrophy && <Trophy size={18} color="#ffc63a" />}
         </span>
         <span className="text-[12px] text-muted text-center">{fmtShortDate(eventDate(e))}</span>
-        <span className="flex items-center justify-between gap-2 min-w-0">
+        <span className="flex items-center gap-2 min-w-0 pr-4">
           <span className="font-display text-[16px] tracking-[0.08em] whitespace-nowrap">{formatLabel}</span>
+          <span className="flex-1 flex items-center justify-center">
+            {cashPrize && <CashPrizePill amount={cashPrize} />}
+          </span>
           {tag && <FormatTagPill tag={tag} />}
         </span>
         {isPod ? (
@@ -1339,7 +1357,7 @@ function EventLogRow({
                   mono
                   wins={e.wins}
                   losses={e.losses}
-                  color={e.isTrophy ? "#2ee85c" : "#e6ecf5"}
+                  color={recordColor}
                   className="text-right font-display text-[22px]"
                 />
                 <ExternalLink size={18} aria-hidden="true" />
@@ -1351,7 +1369,7 @@ function EventLogRow({
                 mono
                 wins={e.wins}
                 losses={e.losses}
-                color={e.isTrophy ? "#2ee85c" : "#e6ecf5"}
+                color={recordColor}
                 className="text-right font-display text-[22px]"
               />
             </span>
@@ -1363,7 +1381,7 @@ function EventLogRow({
                 mono
                 wins={e.wins}
                 losses={e.losses}
-                color={e.isTrophy ? "#2ee85c" : "#e6ecf5"}
+                color={recordColor}
                 className="text-right font-display text-[22px]"
               />
               {href && <ExternalLink size={18} aria-hidden="true" />}
@@ -1407,6 +1425,7 @@ function EventLogRow({
           <span className="font-display text-[13px] tracking-[0.08em]">
             {formatLabel}
           </span>
+          {cashPrize && <CashPrizePill amount={cashPrize} className="mx-1.5" />}
           {tag && <FormatTagPill tag={tag} />}
         </div>
         <div className="flex items-center gap-2 mt-0.5">
@@ -1440,7 +1459,7 @@ function EventLogRow({
                 mono
                 wins={e.wins}
                 losses={e.losses}
-                color={e.isTrophy ? "#2ee85c" : "#e6ecf5"}
+                color={recordColor}
                 className="font-display text-[22px]"
               />
               <ExternalLink size={16} aria-hidden="true" />
@@ -1452,7 +1471,7 @@ function EventLogRow({
               mono
               wins={e.wins}
               losses={e.losses}
-              color={e.isTrophy ? "#2ee85c" : "#e6ecf5"}
+              color={recordColor}
               className="font-display text-[22px]"
             />
           </span>
@@ -1464,7 +1483,7 @@ function EventLogRow({
               mono
               wins={e.wins}
               losses={e.losses}
-              color={e.isTrophy ? "#2ee85c" : "#e6ecf5"}
+              color={recordColor}
               className="font-display text-[22px]"
             />
             {href && <ExternalLink size={16} aria-hidden="true" />}
