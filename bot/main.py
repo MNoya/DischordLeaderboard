@@ -25,6 +25,7 @@ from bot.commands.leaderboard import (
     edit_tracked_messages_for_set,
     setup as setup_leaderboard,
 )
+from bot.commands.pod_backfill import setup as setup_pod_backfill
 from bot.commands.pod_draft import setup as setup_pod_draft
 from bot.commands.preview_season_awards import setup as setup_preview_season_awards
 from bot.commands.signout import setup as setup_signout
@@ -148,6 +149,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_link_17lands(bot)
         await setup_leaderboard_visibility(bot)
         await setup_pod_draft(bot)
+        await setup_pod_backfill(bot)
         await setup_preview_season_awards(bot)
         await setup_sesh_listener(bot)
         await setup_pod_screenshots(bot)
