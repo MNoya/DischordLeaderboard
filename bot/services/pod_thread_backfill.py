@@ -5,11 +5,13 @@ See spec/pod-backfill-handoff.md for the pipeline this implements.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Mapping, Sequence
 
 from bot.services import pod_swiss
+from bot.services.pod_backfill import normalize_colors
 from bot.services.pod_drafts import normalize_player_name, parse_caption_record
 from bot.services.pod_replays import extract_game_id, filter_and_sort_games, is_in_event_window, parse_game_time
 
@@ -33,6 +35,7 @@ class DeckPost:
     image_url: str
     caption: str | None
     record: str | None
+    colors: str | None
     posted_at: datetime
 
 
@@ -86,9 +89,33 @@ def extract_deck_posts(messages: Sequence[ScrapedMessage]) -> dict[str, DeckPost
             image_url=m.image_url,
             caption=caption,
             record=record,
+            colors=parse_caption_colors(caption),
             posted_at=m.created_at,
         )
     return out
+
+
+WUBRG_LETTERS = frozenset("WUBRGwubrg")
+
+
+def parse_caption_colors(caption: str | None) -> str | None:
+    """First color-combo word in a deck caption, WUBRG-normalized ('1-2 RW failed WB' -> 'WR').
+    A token counts when it is 2-5 WUBRG letters with no repeats and at least one uppercase —
+    rejecting ordinary words ('SB' has no S color, 'GG' repeats) and lowercase prose."""
+    if not caption:
+        return None
+    for token in re.findall(r"[A-Za-z]+", caption):
+        if not 2 <= len(token) <= 5:
+            continue
+        if any(c not in WUBRG_LETTERS for c in token):
+            continue
+        if token.islower():
+            continue
+        deduped = set(token.upper())
+        if len(deduped) != len(token):
+            continue
+        return normalize_colors(token)
+    return None
 
 
 def extract_draft_log_attachment(messages: Sequence[ScrapedMessage]) -> tuple[str, str] | None:

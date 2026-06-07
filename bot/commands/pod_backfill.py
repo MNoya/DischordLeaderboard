@@ -368,6 +368,8 @@ def _assemble_sync(
             seat.caption = post.caption
             if post.record:
                 seat.record = post.record
+            if post.colors and not seat.colors:
+                seat.colors = post.colors
 
         db_matches = session.execute(
             select(PodDraftMatch).where(PodDraftMatch.event_id == info["event_id"])
