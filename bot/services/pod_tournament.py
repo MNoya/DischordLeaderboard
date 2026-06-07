@@ -129,7 +129,7 @@ def format_match_result_log(*, event_label: str, round_num: int, actor: str,
 
 def build_thread_link_button(guild_id: int | str, thread_id: int | str) -> ui.Button:
     """`:manat: Thread` link button jumping to the pod-draft thread. Shared by the champion
-    announcement view and `/pod-draft-standings` when invoked outside the event's thread."""
+    announcement view and `/pod-standings` when invoked outside the event's thread."""
     return ui.Button(
         label="Thread",
         style=discord.ButtonStyle.link,
@@ -242,7 +242,7 @@ def _mark_championship_posted_sync(event_id: str) -> None:
 
 def _load_tournament_players_sync(event_id: str) -> list[pod_swiss.Player]:
     """Rebuild pod_swiss.Player list from participants — used when the in-memory manager isn't
-    around (e.g. after a bot restart, or for the standalone /pod-draft-standings command)."""
+    around (e.g. after a bot restart, or for the standalone /pod-standings command)."""
     with SessionLocal() as session:
         rows = session.execute(
             select(PodDraftParticipant.draftmancer_name, PodDraftParticipant.display_name)
@@ -1843,7 +1843,7 @@ def build_champion_embed(
 ) -> discord.Embed:
     """Thread-side standings embed. `player_colors` adds a mana-emoji glyph after each player's record.
     `deck_data` appends an inline Draft Log link per row when the participant has a MPT URL.
-    `include_submit_cta` controls the trailing Submit-Deck CTA; the /pod-draft-standings command
+    `include_submit_cta` controls the trailing Submit-Deck CTA; the /pod-standings command
     sets it to False since it posts a snapshot, not a call to action."""
     displays = displays or {}
     player_colors = player_colors or {}

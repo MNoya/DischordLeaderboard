@@ -258,13 +258,13 @@ class PodDraft(commands.Cog):
             await delete_stale_seeding_messages(interaction.channel, self.bot.user, keep_message_id=posted.id)
 
     @app_commands.command(
-        name="pod-draft-standings",
-        description=desc.POD_DRAFT_STANDINGS,
+        name="pod-standings",
+        description=desc.POD_STANDINGS,
     )
     @app_commands.describe(event="Pick an event to publish standings for; defaults to the current thread")
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
-    async def pod_draft_standings(self, interaction: discord.Interaction, event: str | None = None) -> None:
+    async def pod_standings(self, interaction: discord.Interaction, event: str | None = None) -> None:
         await interaction.response.defer(thinking=False)
 
         if event:
@@ -302,8 +302,8 @@ class PodDraft(commands.Cog):
 
         await interaction.followup.send(embed=embed, view=view)
 
-    @pod_draft_standings.autocomplete("event")
-    async def _pod_draft_standings_event_autocomplete(
+    @pod_standings.autocomplete("event")
+    async def _pod_standings_event_autocomplete(
         self, interaction: discord.Interaction, current: str,
     ) -> list[app_commands.Choice[str]]:
         names = await asyncio.to_thread(search_event_names_sync, current)
