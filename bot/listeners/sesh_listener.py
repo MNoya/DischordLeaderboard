@@ -137,16 +137,20 @@ class SeshListener(commands.Cog):
         self._schedule_reminder(event_row.id, event_row.event_time)
         self._schedule_underfill(event_row.id, event_row.event_time)
 
+        championship = is_championship(event_row.name)
         try:
             await thread.send(
                 embed=build_registered_embed(
                     event_row.set_code, event_row.pairing_mode, event_row.seating_mode,
-                    championship=is_championship(event_row.name),
+                    championship=championship,
                 ),
                 view=RegisteredSettingsView(),
             )
         except discord.HTTPException:
             log.warning(f"could not post confirmation in pod draft thread {thread.id}", exc_info=True)
+
+        if championship:
+            notify_seeding_change(self.bot, event_row.id)
 
     async def _handle_pod_draft_edit(self, message: discord.Message, fields: ParsedSeshFields) -> None:
         result = await asyncio.to_thread(

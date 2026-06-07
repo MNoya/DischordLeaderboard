@@ -62,6 +62,7 @@ _ARENA_SUFFIX_RE = re.compile(r"#\d+$")
 _AI_BOT_NAME_RE = re.compile(r"^Bot #\d+$")
 
 _SEEDING_REFRESH_HOOK = None
+_SEEDING_REPOST_HOOK = None
 
 
 def set_seeding_refresh_hook(callback) -> None:
@@ -71,11 +72,25 @@ def set_seeding_refresh_hook(callback) -> None:
     _SEEDING_REFRESH_HOOK = callback
 
 
+def set_seeding_repost_hook(callback) -> None:
+    """Companion to set_seeding_refresh_hook: re-posts a fresh seeding table at the bottom of the thread
+    (the in-place refresh only edits the existing ones)."""
+    global _SEEDING_REPOST_HOOK
+    _SEEDING_REPOST_HOOK = callback
+
+
 def notify_seeding_change(bot, event_id: str) -> None:
     """Fire the registered seeding-table refresh (no-op if unset). Called on Draftmancer join/leave and
     on sesh RSVP edits; the refresher itself decides whether a table exists and the pod is leaderboard-seated."""
     if _SEEDING_REFRESH_HOOK is not None:
         asyncio.create_task(_SEEDING_REFRESH_HOOK(bot, event_id))
+
+
+def notify_seeding_repost(bot, event_id: str) -> None:
+    """Re-post a fresh seeding table at the bottom of the thread (no-op if unset). Fired when the spectate
+    link goes up so the live table sits by the action instead of only at the scrolled-up pinned anchor."""
+    if _SEEDING_REPOST_HOOK is not None:
+        asyncio.create_task(_SEEDING_REPOST_HOOK(bot, event_id))
 
 
 class PodDraftManager:
@@ -96,7 +111,9 @@ class PodDraftManager:
         self.rsvps_yes: list[str] = list(rsvps_yes or [])
         self.rsvps_maybe: list[str] = list(rsvps_maybe or [])
         self.session_users: list[dict] = []
-        self.desired_seating: list[str] | None = None 
+        self.spectator_user_ids: set[str] = set()
+        self.spectator_names: list[str] = []
+        self.desired_seating: list[str] | None = None
         self.bot_user_id: str | None = None
         self.owner_claimed = False
         self._closed = False
@@ -136,6 +153,7 @@ class PodDraftManager:
         self.sio.on("connect", self._on_connect)
         self.sio.on("disconnect", self._on_disconnect)
         self.sio.on("sessionUsers", self._on_session_users)
+        self.sio.on("sessionSpectators", self._on_session_spectators)
         self.sio.on("updateUser", self._on_update_user)
         self.sio.on("setReady", self._on_set_ready)
         self.sio.on("endDraft", self._on_end_draft)
@@ -256,9 +274,20 @@ class PodDraftManager:
             notify_seeding_change(self.bot, self.event_id)
 
         if self.ready_check_active:
-            current = {u.get("userID") for u in self.session_users if u.get("userName") != _BOT_USER_NAME}
+            current = {u.get("userID") for u in self.player_session_users()}
             if current != self.expected_user_ids:
                 asyncio.create_task(self._invalidate_ready_check("Player list changed"))
+
+    async def _on_session_spectators(self, spectators) -> None:
+        rows = spectators if isinstance(spectators, list) else []
+        self.spectator_user_ids = {s.get("userID") for s in rows if s.get("userID")}
+        self.spectator_names = [s.get("userName") for s in rows if s.get("userName")]
+        log.info(f"draftmancer sessionSpectators for {self.session_id}: {self.spectator_names}")
+        if self.draft_complete:
+            return
+        non_bot_names = self.non_bot_session_names()
+        classified = await self._classify_users(non_bot_names) if non_bot_names else []
+        await self._refresh_lobby_status(classified)
 
     async def _on_update_user(self, payload) -> None:
         if not isinstance(payload, dict):
@@ -325,6 +354,7 @@ class PodDraftManager:
             log.info(f"[LIFECYCLE] spectators.enabled event={self.event_id}")
         except Exception:
             log.warning(f"[LIFECYCLE] spectators.thread_post_error event={self.event_id}", exc_info=True)
+        notify_seeding_repost(self.bot, self.event_id)
 
     async def _emit_format(self) -> str | None:
         """
@@ -391,7 +421,7 @@ class PodDraftManager:
             return "Draftmancer session is not connected."
         if self.ready_check_active:
             return "Ready check already in progress."
-        non_bot = [u for u in self.session_users if u.get("userName") != _BOT_USER_NAME]
+        non_bot = self.player_session_users()
         if not non_bot:
             return "Nobody in the Draftmancer lobby yet."
         min_players = settings.pod_draft_min_ready_players
@@ -496,9 +526,16 @@ class PodDraftManager:
             await asyncio.to_thread(_ensure_players_for_members_sync, unresolved)
         return out
 
+    def player_session_users(self) -> list[dict]:
+        """Session users that count as players: excludes the bot and anyone spectating."""
+        return [
+            u for u in self.session_users
+            if u.get("userName") and u.get("userName") != _BOT_USER_NAME
+            and u.get("userID") not in self.spectator_user_ids
+        ]
+
     def non_bot_session_names(self) -> list[str]:
-        return [u.get("userName") for u in self.session_users
-                if u.get("userName") and u.get("userName") != _BOT_USER_NAME]
+        return [u.get("userName") for u in self.player_session_users()]
 
     async def classified_session_users(self) -> list[tuple[str, str | None]]:
         """Current non-bot session users as (arena_name, linked_display_name_or_None)."""
@@ -568,6 +605,7 @@ class PodDraftManager:
             cancel_reason=self.last_cancel_reason,
             initiated_by=self.initiated_by,
             display_name_by_mention_id=await self._resolve_rsvp_mentions(thread.guild),
+            spectators=self.spectator_names,
             **self._settings_labels(),
         )
         has_unrecognized = any(dn is None for _, dn in classified)
@@ -899,10 +937,7 @@ class PodDraftManager:
         """Insert pod_draft_participants for every non-bot Draftmancer userName now that the draft
         has begun (lobby locked). Idempotent — start_tournament will re-call with the same roster
         as a safety net after endDraft."""
-        roster = [
-            u.get("userName") for u in self.session_users
-            if u.get("userName") and u.get("userName") != _BOT_USER_NAME
-        ]
+        roster = self.non_bot_session_names()
         if not roster:
             log.warning(f"[DRAFT] seed_participants.empty_roster event={self.event_id}")
             return
@@ -916,10 +951,7 @@ class PodDraftManager:
 
     async def seating_lobby_order(self) -> list[tuple[str, str]]:
         """Current non-bot lobby users in Draftmancer order, as (userName, display_label)."""
-        names = [
-            u.get("userName") for u in self.session_users
-            if u.get("userName") and u.get("userName") != _BOT_USER_NAME and u.get("userID")
-        ]
+        names = [u.get("userName") for u in self.player_session_users() if u.get("userID")]
         classified = await asyncio.to_thread(_classify_names_sync, names)
         return [(name, display or name) for name, display in classified]
 
@@ -931,8 +963,8 @@ class PodDraftManager:
             return "Seating can't be changed once the draft has started."
         name_to_id = {
             u.get("userName"): u.get("userID")
-            for u in self.session_users
-            if u.get("userName") and u.get("userName") != _BOT_USER_NAME and u.get("userID")
+            for u in self.player_session_users()
+            if u.get("userID")
         }
         if set(ordered_user_names) != set(name_to_id):
             return "Lobby changed since the panel opened — reopen Settings and set the seating again."
@@ -950,8 +982,8 @@ class PodDraftManager:
     def kick_targets(self) -> list[tuple[str, str]]:
         """(userID, userName) for every non-bot session user, for the Settings kick select."""
         return [
-            (u.get("userID"), u.get("userName")) for u in self.session_users
-            if u.get("userID") and u.get("userName") and u.get("userName") != _BOT_USER_NAME
+            (u.get("userID"), u.get("userName")) for u in self.player_session_users()
+            if u.get("userID")
         ]
 
     async def kick_player(self, user_id: str) -> str | None:
@@ -989,8 +1021,8 @@ class PodDraftManager:
         setSeating itself triggers can't drive a re-seat loop."""
         name_to_id = {
             u.get("userName"): u.get("userID")
-            for u in self.session_users
-            if u.get("userName") and u.get("userName") != _BOT_USER_NAME and u.get("userID")
+            for u in self.player_session_users()
+            if u.get("userID")
         }
         if len(name_to_id) < 2:
             return

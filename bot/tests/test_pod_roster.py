@@ -39,3 +39,19 @@ def test_snapshot_tournament_roster(session_users, draft_log, expected):
     roster = mgr._snapshot_tournament_roster()
 
     assert roster == expected
+
+
+def test_player_roster_excludes_spectators():
+    mgr = _manager(
+        [
+            {"userID": "1", "userName": "Ava"},
+            {"userID": "2", "userName": "Bram"},
+            {"userID": "3", "userName": "DisChordBot"},
+            {"userID": "4", "userName": "Cyra"},
+        ],
+        None,
+    )
+    mgr.spectator_user_ids = {"4"}
+
+    assert mgr.non_bot_session_names() == ["Ava", "Bram"]
+    assert mgr.kick_targets() == [("1", "Ava"), ("2", "Bram")]

@@ -25,6 +25,23 @@ def test_in_session_arena_handle_deduped_from_maybe():
     assert maybe.name.endswith("(0)")
 
 
+def test_spectators_listed_comma_separated_when_present():
+    embed = render(
+        title="Pod Draft", rsvps_yes=[], rsvps_maybe=[], in_session=[],
+        state="linked", spectators=["Tassagk", "Vesperin"],
+    )
+    field = _field(embed, "👀 Spectators")
+    assert field.name.endswith("(2)")
+    assert field.value == "Tassagk, Vesperin"
+
+
+def test_no_spectator_field_when_none():
+    embed = render(
+        title="Pod Draft", rsvps_yes=[], rsvps_maybe=[], in_session=[], state="linked",
+    )
+    assert _field(embed, "👀 Spectators") is None
+
+
 def test_lobby_card_shows_overview_not_split_during_ready():
     """During a ready check the lobby card keeps the In Draftmancer overview; the live Ready/Pending
     split lives only on the separate progress card."""

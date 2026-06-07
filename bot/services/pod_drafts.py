@@ -337,6 +337,19 @@ def load_event_thread_id_sync(event_id: str) -> str | None:
         ).scalar_one_or_none()
 
 
+def load_event_seeding_context_sync(event_id: str) -> tuple[str | None, str | None, str]:
+    """(seating_mode, thread_id, name) in one query — the fields the seeding-table refresh reads on every
+    fire. name falls back to 'Pod Draft', the others to None when the event is missing."""
+    with SessionLocal() as session:
+        row = session.execute(
+            select(PodDraftEvent.seating_mode, PodDraftEvent.discord_thread_id, PodDraftEvent.name)
+            .where(PodDraftEvent.id == event_id)
+        ).one_or_none()
+    if row is None:
+        return None, None, "Pod Draft"
+    return row.seating_mode, row.discord_thread_id, row.name or "Pod Draft"
+
+
 def search_event_names_sync(query: str, limit: int = 25) -> list[str]:
     """Most-recent-first event names matching a case-insensitive substring of `query`; empty query
     returns the most recent."""

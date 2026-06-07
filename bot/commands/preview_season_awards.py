@@ -44,7 +44,7 @@ HYPE_BAR_SLOTS = 10
 CAPTION_MAX_CHARS = 100
 CREDIT_NBSP_PER_CHAR = 2.0
 CREDIT_PAD_MAX = 120
-FOOTER_EXTRA_EMOJIS = 3
+FOOTER_MAX_EMOJIS = 7
 REVEAL_DELAY_SECONDS = 5
 
 SUSPENSE_COUNTING = "Counting the Votes…"
@@ -187,7 +187,11 @@ def _hype_meter_text(hot_pct: int) -> str:
 
 
 def _footer_text(totals: tuple[tuple[str, int], ...]) -> str:
-    counts = (GAP * 2).join(_emoji_count(emoji, count) for emoji, count in totals)
+    core = [(emoji, count) for emoji, count in totals if emoji in CORE_EMOJIS]
+    extras = [(emoji, count) for emoji, count in totals if emoji not in CORE_EMOJIS]
+    counts = (GAP * 2).join(_emoji_count(emoji, count) for emoji, count in core)
+    for emoji, count in extras:
+        counts += f"{GAP}{_emoji_count(emoji, count)}"
     return f"{SUBTEXT_START}{counts}"
 
 
@@ -272,7 +276,8 @@ def _tally_fields(posts: list[ScoredPost]) -> dict:
 
     core_counts = [(emoji, count) for emoji, count in totals.items() if count > 0 and posts_using[emoji] > 1]
     reused_extras = [(emoji, count) for emoji, count in extra_totals.items() if posts_using[emoji] > 1]
-    top_extras = sorted(reused_extras, key=lambda item: item[1], reverse=True)[:FOOTER_EXTRA_EMOJIS]
+    extras_room = max(FOOTER_MAX_EMOJIS - len(core_counts), 0)
+    top_extras = sorted(reused_extras, key=lambda item: item[1], reverse=True)[:extras_room]
 
     pool = list(posts)
 

@@ -316,6 +316,7 @@ _RSVPS_YES = [
     "fullerene60", "whalematron", "springbok7", "jonnietang",
 ]
 _RSVPS_MAYBE = ["Aristeo", "DongSlinger420", "Oophies"]
+_SPECTATORS = ["Tassagk", "Vesperin"]
 # Seats match the real Pod Draft #3 Draftmancer log (DraftLog_LLUSOS31). Arena tag = log userName;
 # discord display name (second element) is what we show in the announcement.
 _LINKED_EIGHT: list[tuple[str, str]] = [
@@ -389,6 +390,7 @@ def _build(state: str) -> tuple[discord.Embed, discord.ui.View | None]:
         _THREAD_NAME, _RSVPS_YES, _RSVPS_MAYBE, in_session,
         state=render_state, draftmancer_url=_DRAFTMANCER_URL,
         decliner_name=decliner_name, cancel_reason=cancel_reason, initiated_by=initiated_by,
+        spectators=_SPECTATORS,
         format_label=format_display(ACTIVE_SET_CODE), pairing_label=pairing_label("swiss"),
         seating_label=seating_mode_label("random"),
     )

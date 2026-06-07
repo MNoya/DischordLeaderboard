@@ -25,13 +25,16 @@ from bot.services.pod_draft_manager import (
     set_event_seating,
     set_event_seating_mode,
     set_seeding_refresh_hook,
+    set_seeding_repost_hook,
 )
 from bot.services.pod_drafts import (
+    is_championship,
     load_event_id_by_name_sync,
     load_event_id_by_thread_sync,
     load_event_name_sync,
     load_event_pairing_mode_sync,
     load_event_seating_mode_sync,
+    load_event_seeding_context_sync,
     load_event_sesh_message_id_sync,
     load_event_set_code_sync,
     load_event_thread_id_sync,
@@ -65,11 +68,17 @@ CHAMPIONSHIP_CUT = 8
 SEEDING_YES_HEADER = f"**{YES_EMOJI} Yes ("
 SEEDING_MAYBE_HEADER = f"**{MAYBE_EMOJI} Maybe ("
 
-SEEDING_PHASE_PROJECTED = f"🔮 **Projected** - Players ranked by {ACTIVE_SET_CODE} Leaderboard"
 SEEDING_PHASE_LIVE = "🟢 **Live** - On Draftmancer"
 SEEDING_CUT_ALTERNATES = "Alternates"
 SEEDING_CUT_OVER_CAP = "Past the cut"
 
+
+def seeding_phase_projected() -> str:
+    """Pre-lobby seeding header — built at call time so the llu emoji resolves from the live registry."""
+    url = f"{settings.public_site_url.rstrip('/')}/{ACTIVE_SET_CODE}"
+    return f"{emojis.prefix('llu')}Players ranked by **[{ACTIVE_SET_CODE} Leaderboard]({url})**"
+
+MSG_SEEDING_WAITING = "Waiting for players to confirm attendance."
 MSG_SEEDING_NOT_POD_THREAD = "Run this inside a pod-draft thread."
 MSG_SEEDING_NO_SESH = "Couldn't read the sesh post for this pod — it may have been deleted."
 MSG_SEEDING_NO_RSVPS = f"No {YES_EMOJI} or {MAYBE_EMOJI} RSVPs on this pod yet."
@@ -260,8 +269,7 @@ class PodDraft(commands.Cog):
             posted = await interaction.followup.send(embed=embed, file=file, wait=True)
         else:
             posted = await interaction.followup.send(embed=embed, wait=True)
-        if isinstance(interaction.channel, discord.Thread) and self.bot.user:
-            await delete_stale_seeding_messages(interaction.channel, self.bot.user, keep_message_id=posted.id)
+        await finalize_seeding_post(interaction.channel, self.bot.user, posted)
 
     @app_commands.command(
         name="pod-standings",
@@ -475,7 +483,7 @@ def _build_seeding_embed(
         )
     if maybe:
         parts.append(f"{SEEDING_MAYBE_HEADER}{len(maybe)})**\n" + _seeding_block(maybe))
-    return discord.Embed(description="\n\n".join(parts), color=discord.Color.gold())
+    return discord.Embed(description="\n\n".join(parts), color=discord.Color.green())
 
 
 def _attendee_rnk(a: SeededAttendee) -> str:
@@ -626,19 +634,26 @@ def _seating_octagon(seated: list[SeededAttendee]) -> str:
     return "\n".join(line.rstrip() for line in rows)
 
 
+def has_seeding_headers(message: discord.Message) -> bool:
+    """True for a leaderboard seeding table — identified by its Yes/Maybe embed headers."""
+    return any(
+        SEEDING_YES_HEADER in (e.description or "") or SEEDING_MAYBE_HEADER in (e.description or "")
+        for e in message.embeds
+    )
+
+
 async def delete_stale_seeding_messages(
     channel: discord.Thread | discord.TextChannel, bot_user: discord.ClientUser, *,
-    keep_message_id: int | None = None,
+    keep_message_id: int | None = None, include_pinned: bool = False,
 ) -> None:
     def stale(message: discord.Message) -> bool:
         if message.id == keep_message_id or message.author.id != bot_user.id:
             return False
+        if message.pinned and not include_pinned:
+            return False
         if SEATING_ORDER_MARKER in message.content:
             return True
-        return any(
-            SEEDING_YES_HEADER in (e.description or "") or SEEDING_MAYBE_HEADER in (e.description or "")
-            for e in message.embeds
-        )
+        return has_seeding_headers(message)
 
     try:
         await channel.purge(limit=None, check=stale, reason="Stale pod-seeding table")
@@ -734,7 +749,7 @@ async def seating_message_for_event(bot, event_id: str) -> tuple[discord.File | 
         return None, None
     pooled = {n.casefold() for n in pool} | {n.casefold() for n in overflow} | locked_keys
     maybe = [n for n in maybe if n.casefold() not in pooled]
-    header = SEEDING_PHASE_LIVE if locked else SEEDING_PHASE_PROJECTED
+    header = SEEDING_PHASE_LIVE if locked else seeding_phase_projected()
     cut_label = SEEDING_CUT_OVER_CAP if locked else SEEDING_CUT_ALTERNATES
     return await asyncio.to_thread(
         build_seeding_image_message_for_pool, pool, overflow, maybe, header=header, cut_label=cut_label)
@@ -779,50 +794,103 @@ async def post_seeding_table(bot, event_id: str, channel) -> None:
     await post_table(bot, channel, file, embed)
 
 
-async def refresh_seeding_table(bot, event_id: str) -> None:
-    """Edit the already-posted leaderboard seeding table in place to track the current pool. No-op when
-    none has been posted, or when the pod isn't on leaderboard seats. Fires on Draftmancer joins/leaves
-    (live phase) and on sesh RSVP edits (projected phase) — never creates a table, only updates one."""
-    seating_mode = await asyncio.to_thread(load_event_seating_mode_sync, event_id)
-    if seating_mode != "leaderboard":
-        return
-    thread_id = await asyncio.to_thread(load_event_thread_id_sync, event_id)
-    if thread_id is None:
-        return
+_SEEDING_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+def _seeding_lock(event_id: str) -> asyncio.Lock:
+    """Per-event lock serializing all seeding-table mutations, so a re-post's clear+post can't race a
+    concurrent refresh into double-posting."""
+    lock = _SEEDING_LOCKS.get(event_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _SEEDING_LOCKS[event_id] = lock
+    return lock
+
+
+async def _resolve_seeding_render(bot, event_id: str):
+    """(channel, file, embed, championship) for a leaderboard pod — the live/projected table, or the
+    championship waiting placeholder when there's nothing to show. None when the pod isn't
+    leaderboard-seated, the thread is gone, or a non-championship pod has nothing to show."""
+    seating_mode, thread_id, name = await asyncio.to_thread(load_event_seeding_context_sync, event_id)
+    if seating_mode != "leaderboard" or thread_id is None:
+        return None
     channel = bot.get_channel(int(thread_id))
     if channel is None:
         try:
             channel = await bot.fetch_channel(int(thread_id))
         except discord.HTTPException:
-            return
-    existing = await _find_seeding_message(channel, bot.user)
-    if existing is None:
-        return
+            return None
+    championship = is_championship(name)
     file, embed = await seating_message_for_event(bot, event_id)
     if embed is None:
-        return
-    try:
-        await existing.edit(embed=embed, attachments=[file] if file else [])
-    except discord.HTTPException:
-        log.warning("could not refresh the seeding table in place", exc_info=True)
+        if not championship:
+            return None
+        file, embed = None, _championship_waiting_embed()
+    return channel, file, embed, championship
 
 
-async def _find_seeding_message(channel, bot_user) -> discord.Message | None:
-    """The most recent bot-posted seeding table in the channel, identified by its embed headers."""
+async def refresh_seeding_table(bot, event_id: str) -> None:
+    """Keep the leaderboard seeding table current as the pool changes. Fires on Draftmancer joins/leaves
+    (live phase) and on sesh RSVP edits (projected phase). Edits the posted table(s) in place; for the
+    championship it also auto-creates one so the organizer never has to post it. Other pods only update a
+    table that was posted on demand, and non-leaderboard pods are left alone."""
+    async with _seeding_lock(event_id):
+        resolved = await _resolve_seeding_render(bot, event_id)
+        if resolved is None:
+            return
+        channel, file, embed, championship = resolved
+        existing = await _find_seeding_messages(channel, bot.user)
+        if existing:
+            png = file.fp.read() if file is not None else None
+            for message in existing:
+                attachments = [discord.File(io.BytesIO(png), "seating.png")] if png is not None else []
+                try:
+                    await message.edit(embed=embed, attachments=attachments)
+                except discord.HTTPException:
+                    log.warning("could not refresh the seeding table in place", exc_info=True)
+            return
+        if championship:
+            await post_table(bot, channel, file, embed)
+
+
+async def repost_seeding_table(bot, event_id: str) -> None:
+    """Replace the seeding table when the lobby goes live: clear the scrolled-up pinned anchor (and any
+    on-demand copies) and post a fresh table at the bottom, by the spectate link, then pin that one. Fired
+    right after the spectate link. Leaderboard-seated pods only; championship falls back to the placeholder."""
+    async with _seeding_lock(event_id):
+        resolved = await _resolve_seeding_render(bot, event_id)
+        if resolved is None:
+            return
+        channel, file, embed, _ = resolved
+        if isinstance(channel, (discord.Thread, discord.TextChannel)) and bot.user:
+            await delete_stale_seeding_messages(channel, bot.user, include_pinned=True)
+        await post_table(bot, channel, file, embed)
+
+
+def _championship_waiting_embed() -> discord.Embed:
+    """Placeholder seeding table for a championship with no RSVPs yet. Carries the Yes header so the
+    in-place refresher finds and replaces it once players confirm."""
+    description = (
+        f"{seeding_phase_projected()}\n\n"
+        f"{SEEDING_YES_HEADER}0)**\n"
+        f"_{MSG_SEEDING_WAITING}_"
+    )
+    return discord.Embed(description=description, color=discord.Color.green())
+
+
+async def _find_seeding_messages(channel, bot_user) -> list[discord.Message]:
+    """Every bot-posted seeding table in the channel — the pinned anchor plus any on-demand re-post —
+    so the refresher keeps each one current rather than letting the pinned anchor drift stale."""
     if bot_user is None or not isinstance(channel, (discord.Thread, discord.TextChannel)):
-        return None
+        return []
+    found: list[discord.Message] = []
     try:
         async for message in channel.history(limit=50):
-            if message.author.id != bot_user.id:
-                continue
-            if any(
-                SEEDING_YES_HEADER in (e.description or "") or SEEDING_MAYBE_HEADER in (e.description or "")
-                for e in message.embeds
-            ):
-                return message
+            if message.author.id == bot_user.id and has_seeding_headers(message):
+                found.append(message)
     except discord.HTTPException:
-        log.warning("could not scan for an existing seeding table", exc_info=True)
-    return None
+        log.warning("could not scan for existing seeding tables", exc_info=True)
+    return found
 
 
 def build_manual_seating_image(labels: list[str]) -> discord.File | None:
@@ -850,8 +918,35 @@ async def post_table(bot, channel, file: discord.File | None, embed: discord.Emb
         posted = await channel.send(content=content, embed=embed, file=file)
     else:
         posted = await channel.send(content=content, embed=embed)
-    if isinstance(channel, (discord.Thread, discord.TextChannel)) and bot.user:
-        await delete_stale_seeding_messages(channel, bot.user, keep_message_id=posted.id)
+    await finalize_seeding_post(channel, bot.user, posted)
+
+
+async def finalize_seeding_post(channel, bot_user, posted: discord.Message) -> None:
+    """Pin the durable seeding table (the first one posted) and purge stale non-pinned re-posts. Shared
+    by /pod-seeding, the Seating Table button, and the championship auto-post so all behave the same:
+    one pinned anchor, on-demand re-posts overriding each other below it."""
+    if bot_user is None or not isinstance(channel, (discord.Thread, discord.TextChannel)):
+        return
+    await _pin_first_seeding_table(channel, bot_user, posted)
+    await delete_stale_seeding_messages(channel, bot_user, keep_message_id=posted.id)
+
+
+async def _pin_first_seeding_table(channel, bot_user, posted: discord.Message) -> None:
+    """Pin `posted` only when it's a seeding table and none is pinned yet — so a later on-demand re-post
+    stays unpinned and just overrides the previous one below the anchor."""
+    if not has_seeding_headers(posted):
+        return
+    try:
+        pins = await channel.pins()
+    except discord.HTTPException:
+        return
+    for message in pins:
+        if message.id != posted.id and message.author.id == bot_user.id and has_seeding_headers(message):
+            return
+    try:
+        await posted.pin()
+    except discord.HTTPException:
+        log.warning("could not pin the seeding table", exc_info=True)
 
 
 def _pick_takeover_target(manager, invoker_display_name: str):
@@ -878,4 +973,5 @@ def _find_manager_for_thread(interaction: discord.Interaction):
 
 async def setup(bot: commands.Bot) -> None:
     set_seeding_refresh_hook(refresh_seeding_table)
+    set_seeding_repost_hook(repost_seeding_table)
     await bot.add_cog(PodDraft(bot))

@@ -93,12 +93,15 @@ top 8 seated, the rest are alternates below the divider. (This is the one behavi
 currently fills the projected pool in RSVP arrival order — it should rank-order it.)
 
 ```
-🔮 Projected · Available players, ranked by {set_code} Leaderboard
+:llu: Players ranked by **{set_code} Leaderboard** (linked)
 …seated 8…
 ──────────
 Alternates
 …rest…
 ```
+
+The pre-lobby header drops the "Projected" word, leads with the llu emoji, and links the set's leaderboard.
+Built at render time (`seeding_phase_projected()`) so the emoji resolves from the live registry.
 
 **Phase 2 — lobby is up.** The connected Draftmancer players are the pool, rank-sorted, top 8 seated, anyone
 over the cap shown below the divider as kick candidates.
@@ -124,8 +127,32 @@ edits itself in place as the pool changes, in both phases:
 
 Both route through `notify_seeding_change` → a `set_seeding_refresh_hook` callback the command layer
 registers (so the service/listener layers don't import the command module). The refresher only acts on
-**leaderboard-seated** pods and only edits a table that already exists — it never auto-creates one, and
-random-seated pods are untouched.
+**leaderboard-seated** pods, and random-seated pods are untouched.
+
+**Auto-post for the championship.** Right after the crown registration embed posts, the listener fires one
+refresh. For the championship the refresher **auto-creates** the seeding table (so the organizer never has
+to post it), then keeps it current through the same projected → live refresh. With zero RSVPs at
+registration it posts an explicit placeholder — "Waiting for players to confirm attendance." under a
+`Yes (0)` header — so the table is visible immediately and the in-place refresher replaces it as RSVPs and
+then connections arrive. Non-championship pods keep the post-on-demand behavior: the refresher only updates
+a table that was already posted via `/pod-seeding` or the Seating Table button, never creating one.
+
+**Pinning.** The first seeding table posted is pinned (`finalize_seeding_post` → `_pin_first_seeding_table`).
+Later on-demand `/pod-seeding` re-posts stay unpinned and override each other below the anchor — the stale
+purge skips pinned messages. The refresher updates *every* seeding table it finds (pinned anchor plus any
+on-demand re-post, each gets its own image copy), so the anchor never drifts stale. The Draftmancer lobby
+message stays the manager's own separate pin: **two pins** during the draft (lobby + seeding), by choice —
+folding the seeding embed into the lobby message was considered and rejected to avoid two updaters
+clobbering one message's embeds.
+
+**Spectate relocation.** Right after the manager posts the spectate link, it fires `notify_seeding_repost`
+→ `repost_seeding_table`, which *replaces* the table rather than editing it: it clears the scrolled-up
+pinned anchor (and any on-demand copies, `include_pinned=True`) and posts a fresh table at the bottom by
+the spectate link, then pins that one. So the seeding table follows the action down to the live lobby
+instead of staying stranded at the top, and there's still exactly one seeding pin. The spectate link goes up
+the moment the bot claims ownership, when the lobby is usually still empty, so for the championship the
+re-post falls back to the waiting placeholder (same as registration) rather than posting nothing — it then
+fills in as players connect.
 
 ## The announcement
 

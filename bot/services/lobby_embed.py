@@ -117,6 +117,7 @@ def render(
     cancel_reason: str | None = None,
     initiated_by: str | None = None,
     display_name_by_mention_id: dict[int, str] | None = None,
+    spectators: list[str] | None = None,
     format_label: str | None = None,
     pairing_label: str | None = None,
     seating_label: str | None = None,
@@ -128,7 +129,8 @@ def render(
     Buckets: In Draftmancer (linked + in session), Unrecognized name (in session, no Player row),
     Waiting on (Yes RSVP not in session), Maybe (Maybe RSVP not in session). Waiting + Maybe are
     hidden once ready check fires; the live Ready/Pending split lives on the separate ready-check
-    progress card, not here."""
+    progress card, not here. `spectators` lists Draftmancer sessionSpectators comma-separated below
+    Maybe whenever any are present, regardless of state."""
     in_draftmancer = [(arena, dn) for arena, dn in in_session if dn is not None]
     unrecognized = [arena for arena, dn in in_session if dn is None]
     mention_map = display_name_by_mention_id or {}
@@ -194,6 +196,13 @@ def render(
             inline=True,
         )
         embed.add_field(name="​", value="​", inline=True)
+
+    if spectators:
+        embed.add_field(
+            name=f"👀 Spectators ({len(spectators)})",
+            value=", ".join(spectators),
+            inline=False,
+        )
 
     if state != "complete":
         embed.add_field(

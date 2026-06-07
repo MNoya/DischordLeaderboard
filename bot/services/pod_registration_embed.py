@@ -46,7 +46,7 @@ def build_registered_embed(
         return discord.Embed(
             title=CHAMPIONSHIP_TITLE,
             description=f"{championship_flavor(set_code)}\n{settings_line}",
-            color=discord.Color.gold(),
+            color=discord.Color.green(),
         )
     return discord.Embed(
         title=REGISTERED_TITLE,

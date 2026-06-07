@@ -65,7 +65,7 @@ _FIXTURE = AwardsData(
         _POST_DEEP_LINK, _IMAGE_FLAVOR_WIN, (("🦅", 8), ("🇺🇸", 6), ("🔥", 10)),
         caption="Captain America, Wings of Freedom",
     ),
-    totals=(("🔥", 87), ("🗑", 22), ("🥀", 12), ("😂", 31), ("👀", 14), ("🦅", 11), ("🐐", 6)),
+    totals=(("🔥", 87), ("🗑", 22), ("🥀", 12), ("😂", 31), ("👀", 14), ("🦅", 11), ("🇺🇸", 6)),
     hot_pct=72,
 )
 

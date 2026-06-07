@@ -17,8 +17,8 @@ from bot.commands.pod_draft import (
     SEEDING_CUT_ALTERNATES,
     SEEDING_CUT_OVER_CAP,
     SEEDING_PHASE_LIVE,
-    SEEDING_PHASE_PROJECTED,
     build_seeding_image_message_from_names,
+    seeding_phase_projected,
 )
 from bot.commands.test_group import test_group
 from bot.database import SessionLocal
@@ -45,7 +45,7 @@ async def setup(bot: commands.Bot) -> None:
 
         projected_file, projected_embed = await asyncio.to_thread(
             build_seeding_image_message_from_names, names, None,
-            seat_cap=CHAMPIONSHIP_CUT, header=SEEDING_PHASE_PROJECTED, cut_label=SEEDING_CUT_ALTERNATES,
+            seat_cap=CHAMPIONSHIP_CUT, header=seeding_phase_projected(), cut_label=SEEDING_CUT_ALTERNATES,
         )
         live_file, live_embed = await asyncio.to_thread(
             build_seeding_image_message_from_names, names, None,
