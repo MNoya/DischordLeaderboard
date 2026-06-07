@@ -10,7 +10,7 @@ import { Pips } from "../ManaPips";
 import { Record } from "../Record";
 import { cn } from "../../lib/utils";
 import { useIsMobile } from "../../lib/use-is-mobile";
-import { stripDiscriminator } from "../../data/utils";
+import { podSeatName, stripDiscriminator } from "../../data/utils";
 import type { PodEventMatchRow, PodEventReplayRow, PodSeat } from "../../types/leaderboard";
 
 const SKIPPED_SENTINEL = "(skipped)";
@@ -38,10 +38,9 @@ export function PlayerSeatPanel({
   onRoundHover,
   onShowDeck,
 }: Props) {
+  const seatName = podSeatName(participant);
   const playerMatches = matches
-    .filter(
-      (m) => m.playerAName === participant.displayName || m.playerBName === participant.displayName,
-    )
+    .filter((m) => m.playerAName === seatName || m.playerBName === seatName)
     .sort((a, b) => a.round - b.round);
 
   const profileHref = (slug: string | null | undefined): string | null =>
@@ -53,7 +52,7 @@ export function PlayerSeatPanel({
       <div className="flex flex-col">
         {playerMatches.map((match) => {
           const opponentName =
-            match.playerAName === participant.displayName ? match.playerBName : match.playerAName;
+            match.playerAName === seatName ? match.playerBName : match.playerAName;
           const opponent = participantsBySeatName.get(opponentName);
           return (
             <RoundRow
@@ -285,7 +284,7 @@ function RoundRow({
   const isMobile = useIsMobile();
   const isSkipped = match.winnerName === SKIPPED_SENTINEL;
   const isPending = !isSkipped && match.winnerName == null;
-  const won = !isSkipped && !isPending && match.winnerName === participant.displayName;
+  const won = !isSkipped && !isPending && match.winnerName === podSeatName(participant);
   const outcome: RoundOutcome = isSkipped ? "skip" : isPending ? "pending" : won ? "win" : "loss";
   const score = match.score ?? null;
   const yourScore = score ? (won ? score.split("-")[0] : score.split("-")[1]) : null;

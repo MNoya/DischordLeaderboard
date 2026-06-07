@@ -206,6 +206,10 @@ export function podDiscordName(p: {
   return stripDiscriminator(p.playerDisplayName ?? p.displayName);
 }
 
+export function podSeatName(p: { draftmancerName: string | null; displayName: string }): string {
+  return p.draftmancerName ?? p.displayName;
+}
+
 export function cleanPodEventName(name: string, setCode: string): string {
   const escaped = setCode.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const cleaned = name

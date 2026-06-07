@@ -1079,6 +1079,7 @@ function adaptPodEventParticipant(row: Record<string, unknown>): PodEventPartici
   return {
     eventId: row.event_id as string,
     displayName: row.display_name as string,
+    draftmancerName: (row.draftmancer_name ?? null) as string | null,
     seatIndex: (row.seat_index ?? null) as number | null,
     placement: (row.placement ?? null) as number | null,
     record: (row.record ?? null) as string | null,

@@ -11,6 +11,7 @@ function participantToRow(p: PodParticipant): PodEventParticipantRow {
   return {
     eventId: p.eventId,
     displayName: p.displayName,
+    draftmancerName: p.displayName,
     seatIndex: p.seatIndex,
     placement: p.placement ?? null,
     record: p.record,

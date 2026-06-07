@@ -18,7 +18,7 @@ import {
   usePodEventReplays,
   usePodEvents,
 } from "../data/hooks";
-import { cleanPodEventName, podDiscordName } from "../data/utils";
+import { cleanPodEventName, podDiscordName, podSeatName } from "../data/utils";
 import type {
   PodEventParticipantRow,
   PodSeat,
@@ -150,7 +150,7 @@ export function PodPage() {
 
   const participantsBySeatName = useMemo(() => {
     const m = new Map<string, PodSeat>();
-    for (const s of seats) m.set(s.displayName, s);
+    for (const s of seats) m.set(podSeatName(s), s);
     return m;
   }, [seats]);
 
@@ -208,7 +208,7 @@ export function PodPage() {
 
   useEffect(() => {
     if (preselectChecked) return;
-    if (participantsLoading) return;
+    if (!participantRows) return;
     if (seats.length === 0) {
       setPreselectChecked(true);
       return;
@@ -228,7 +228,7 @@ export function PodPage() {
     }
     if (target) setSelectedSeat(target.seatIndex);
     setPreselectChecked(true);
-  }, [seats, preselectName, isMobile, preselectChecked, participantsLoading]);
+  }, [seats, preselectName, isMobile, preselectChecked, participantRows]);
 
   const preselectPending = (!!preselectName || isMobile) && !preselectChecked;
 

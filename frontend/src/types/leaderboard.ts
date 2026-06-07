@@ -133,6 +133,7 @@ export interface PodEventSummary {
 export interface PodEventParticipantRow {
   eventId: string;
   displayName: string;
+  draftmancerName: string | null;
   seatIndex: number | null;
   placement: number | null;
   record: string | null;
