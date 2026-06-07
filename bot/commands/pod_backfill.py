@@ -12,7 +12,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import discord
 from discord import app_commands
@@ -63,6 +63,7 @@ MSG_NOT_POD_THREAD = "Run this inside a pod-draft thread, or pass an `event` to 
 SCORE_RE = re.compile(r"^[0-3]-[0-3]$")
 DELETE_SENTINEL = "-"
 VIEW_TIMEOUT_S = 30 * 60
+REPLAY_HORIZON = timedelta(days=7)
 
 
 @dataclass
@@ -94,6 +95,7 @@ class Workspace:
     unassigned_decks: list[DeckPost] = field(default_factory=list)
     raw_games: dict[str, list[dict]] = field(default_factory=dict)
     announce: bool = False
+    replays_skipped: bool = False
 
     def seat_named(self, name: str) -> SeatDraft | None:
         norm = normalize_player_name(name)
@@ -190,10 +192,11 @@ async def assemble_workspace(bot: commands.Bot, event_id: str) -> Workspace:
     ws.draft_log = draft_log
     ws.draft_log_filename = draft_log_filename
 
+    ws.replays_skipped = datetime.now(timezone.utc) - ws.event_time > REPLAY_HORIZON
     client = SeventeenLandsClient()
     games_by_seat = {}
     for seat in ws.seats:
-        if not seat.token:
+        if ws.replays_skipped or not seat.token:
             continue
         raw = await asyncio.to_thread(client.fetch_user_games, seat.token)
         ws.raw_games[seat.name] = raw
@@ -330,10 +333,14 @@ def _assemble_sync(
 
 
 def build_workspace_embed(ws: Workspace) -> discord.Embed:
+    if ws.replays_skipped:
+        seventeenlands_status = "skipped (event past the replay horizon)"
+    else:
+        seventeenlands_status = f"{len(ws.raw_games)}/{len(ws.seats)} seats"
     header = [
         f"**{ws.event_time:%Y-%m-%d}** · {ws.pairing_mode} · status `{ws.socket_status}`",
         f"DraftLog: {f'✅ `{ws.draft_log_filename}`' if ws.draft_log else '—'}"
-        f" · 17lands: {len(ws.raw_games)}/{len(ws.seats)} seats",
+        f" · 17lands: {seventeenlands_status}",
         f"Announce: {'📣 post championship on confirm' if ws.announce else '🤫 quiet (no announcement)'}",
     ]
     if ws.already_announced:
@@ -651,14 +658,17 @@ async def run_backfill(bot: commands.Bot, ws: Workspace) -> discord.Embed:
             if mpt is not None:
                 lines.append(f"MagicProTools: {mpt.submitted} submitted, {mpt.failed} failed")
 
-    replay_rows = 0
-    for seat in ws.seats:
-        raw = ws.raw_games.get(seat.name)
-        if seat.player_id and raw:
-            replay_rows += await asyncio.to_thread(
-                persist_replays_sync, ws.event_id, seat.player_id, seat.name, raw,
-            )
-    lines.append(f"Replays: {replay_rows} rows touched")
+    if ws.replays_skipped:
+        lines.append("Replays: skipped — event is past the 17lands history horizon")
+    else:
+        replay_rows = 0
+        for seat in ws.seats:
+            raw = ws.raw_games.get(seat.name)
+            if seat.player_id and raw:
+                replay_rows += await asyncio.to_thread(
+                    persist_replays_sync, ws.event_id, seat.player_id, seat.name, raw,
+                )
+        lines.append(f"Replays: {replay_rows} rows touched")
 
     if ws.announce:
         announced = await post_championship_for_event(bot, ws.event_id, ws.thread_id)
