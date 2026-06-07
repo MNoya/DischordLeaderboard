@@ -54,7 +54,7 @@ from bot.services.pod_thread_backfill import (
     merge_matches,
 )
 from bot.services.pod_tournament import TOTAL_ROUNDS, post_championship_for_event
-from bot.services.sesh_parser import parse_sesh_embed
+from bot.services.sesh_parser import parse_sesh_embed, unescape_markdown
 from bot.services.seventeenlands import SeventeenLandsClient
 from bot.sets import ACTIVE_SET_CODE
 from bot.tasks.pod_draft_reminder import fetch_sesh_message, fetch_sesh_rsvps
@@ -69,6 +69,7 @@ MSG_SESH_UNREADABLE = (
 )
 
 SCORE_RE = re.compile(r"^[0-3]-[0-3]$")
+ARENA_SUFFIX_RE = re.compile(r"#\d+$")
 DELETE_SENTINEL = "-"
 VIEW_TIMEOUT_S = 30 * 60
 REPLAY_HORIZON = timedelta(days=7)
@@ -326,7 +327,7 @@ def _assemble_sync(
             if seat is None:
                 if roster is not None and p.placement is None and p.record is None:
                     continue
-                seat = SeatDraft(name=p.draftmancer_name or p.display_name)
+                seat = SeatDraft(name=unescape_markdown(p.draftmancer_name or p.display_name))
                 ws.seats.append(seat)
             seat.player_id = p.player_id
             seat.record = p.record
@@ -350,7 +351,7 @@ def _assemble_sync(
 
         seats_by_discord = {s.discord_id: s for s in ws.seats if s.discord_id}
         for post in deck_posts.values():
-            seat = seats_by_discord.get(post.author_id)
+            seat = seats_by_discord.get(post.author_id) or ws.seat_named(post.author_display)
             if seat is None:
                 player = session.execute(
                     select(Player).where(Player.discord_id == post.author_id)
@@ -407,19 +408,24 @@ def build_workspace_embed(ws: Workspace) -> discord.Embed:
     for s in ws.seats:
         link = "🪪" if s.player_id else "❔"
         shot = "📷" if s.screenshot_url else "·"
-        seat_lines.append(f"{link} `{s.name}`  {s.record or '?-?'}  {s.colors or '—'}  {shot}")
+        seat_lines.append(f"{link} `{short_name(s.name)}`  {s.record or '?-?'}  {s.colors or '—'}  {shot}")
     embed.add_field(name=f"Seats ({len(ws.seats)})", value="\n".join(seat_lines) or "—", inline=False)
 
     for round_num in range(1, TOTAL_ROUNDS + 1):
         lines = []
         for m in [m for m in ws.matches if m.round == round_num]:
-            outcome = f"{m.score or PLACEHOLDER_SCORE + '?'} → **{m.winner}**" if m.winner else "❓ winner unknown"
-            lines.append(f"`{m.player_a}` vs `{m.player_b}` — {outcome} ({m.source})")
+            if m.winner:
+                outcome = f"{m.score or PLACEHOLDER_SCORE + '?'} → **{short_name(m.winner)}**"
+            else:
+                outcome = "❓ winner unknown"
+            lines.append(f"`{short_name(m.player_a)}` vs `{short_name(m.player_b)}` — {outcome} ({m.source})")
         embed.add_field(name=f"Round {round_num}", value="\n".join(lines) or "❓ no matches", inline=False)
 
     standings = compute_placements([s.name for s in ws.seats], ws.matches, seat_records(ws))
     if standings:
-        placement_lines = [f"{st.rank}. `{st.player_name}` ({st.wins}-{st.losses})" for st in standings]
+        placement_lines = [
+            f"{st.rank}. `{short_name(st.player_name)}` ({st.wins}-{st.losses})" for st in standings
+        ]
         embed.add_field(name="Computed placements", value="\n".join(placement_lines), inline=False)
 
     gaps = compute_gaps(ws)
@@ -473,6 +479,11 @@ def seat_records(ws: Workspace) -> dict[str, str | None]:
     return {s.name: s.record for s in ws.seats}
 
 
+def short_name(name: str) -> str:
+    """Drop the trailing #NNNN arena suffix for display; canonical seat names keep it."""
+    return ARENA_SUFFIX_RE.sub("", name)
+
+
 def blocking_gaps(ws: Workspace) -> list[str]:
     blockers = [f"R{m.round} `{m.player_a}` vs `{m.player_b}`: winner unknown"
                 for m in ws.matches if not m.winner]
@@ -500,7 +511,7 @@ class BackfillView(discord.ui.View):
             placeholder="Edit a seat…",
             options=[
                 discord.SelectOption(
-                    label=s.name[:100], value=s.name[:100],
+                    label=short_name(s.name)[:100], value=s.name[:100],
                     description=f"{s.record or '?-?'} {s.colors or ''}".strip()[:100] or None,
                 )
                 for s in self.ws.seats[:25]
@@ -512,9 +523,9 @@ class BackfillView(discord.ui.View):
 
         match_options = [discord.SelectOption(label="➕ Add match", value="add")]
         for i, m in enumerate(self.ws.matches[:24]):
-            outcome = f"{m.score or '?'} → {m.winner}" if m.winner else "winner unknown"
+            outcome = f"{m.score or '?'} → {short_name(m.winner)}" if m.winner else "winner unknown"
             match_options.append(discord.SelectOption(
-                label=f"R{m.round}: {m.player_a} vs {m.player_b}"[:100],
+                label=f"R{m.round}: {short_name(m.player_a)} vs {short_name(m.player_b)}"[:100],
                 value=str(i),
                 description=outcome[:100],
             ))
@@ -623,7 +634,8 @@ class SeatModal(discord.ui.Modal):
 
         self.seat.record = record or None
         self.seat.colors = normalize_colors(colors) if colors else None
-        self.seat.screenshot_url = self.screenshot_input.value.strip() or None
+        screenshot = self.screenshot_input.value.strip()
+        self.seat.screenshot_url = strip_cdn_dims(screenshot) if screenshot else None
         self.seat.caption = self.caption_input.value.strip() or None
         await self.view.refresh(interaction)
 

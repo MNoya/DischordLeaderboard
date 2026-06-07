@@ -108,8 +108,9 @@ _NAME_TOKEN_RE = re.compile(r"[\s()/\\,|-]+")
 
 
 def normalize_player_name(name: str) -> str:
-    """Strip trailing MTG Arena suffix (`#NNNN`) and lowercase for matching."""
-    return _ARENA_ID_RE.sub("", name).lower()
+    """Strip markdown escape backslashes and the trailing MTG Arena suffix (`#NNNN`), lowercase
+    for matching."""
+    return _ARENA_ID_RE.sub("", name.replace("\\", "")).lower()
 
 
 def _normalized_column(col):

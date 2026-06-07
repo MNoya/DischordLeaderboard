@@ -36,6 +36,9 @@ DRAFT_NUM_RE = re.compile(r"\bDraft\s+(\d+)\b", re.IGNORECASE)
 # Discord shortcode emoji form, e.g. :calendar_spiral:
 SHORTCODE_RE = re.compile(r":[a-z0-9_+-]+:")
 
+# Backslash escapes Discord/sesh insert before markdown characters in display names
+MARKDOWN_ESCAPE_RE = re.compile(r"\\([_*~`|])")
+
 
 @dataclass(frozen=True)
 class ParsedSeshFields:
@@ -125,11 +128,16 @@ def _parse_event_time(field_value: str) -> datetime | None:
 
 
 def _parse_attendees(field_value: str) -> list[str]:
-    """Names, one per line; strips Discord block-quote prefixes (> / >> / >>>) and dash placeholders."""
+    """Names, one per line; strips Discord block-quote prefixes (> / >> / >>>), dash placeholders,
+    and the backslash escapes sesh adds before markdown characters (Giant\\_Tiger -> Giant_Tiger)."""
     result: list[str] = []
     for raw in field_value.splitlines():
         line = raw.lstrip(">").strip()
         if not line or line in {"-", "—"}:
             continue
-        result.append(line)
+        result.append(unescape_markdown(line))
     return result
+
+
+def unescape_markdown(name: str) -> str:
+    return MARKDOWN_ESCAPE_RE.sub(r"\1", name)
