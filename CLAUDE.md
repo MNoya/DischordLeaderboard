@@ -153,6 +153,7 @@ On push/PR to `master`: spin up Postgres service container → `alembic upgrade 
 ## Conventions (do not violate)
 
 - **Branch is `master`**, never `main`.
+- **Never `git push`.** Pushing to `master` deploys via CI/CD; the user pushes manually from their git IDE. Commits are fine — the push itself is always the user's call, even right after they approved a commit.
 - **Solo repo: commit directly to `master`** for routine changes. Large changesets get a branch — **never a PR**. Merge back by squash, or with a merge commit when the intermediate history is worth keeping; ask which when finishing a branch.
 - **Bundle frontend changes; the user reviews locally before commit.** Commit backend first, leave frontend uncommitted until the user explicitly approves.
 - **Tests target logic, not framework behavior.** No tests for "does Postgres work" or "does Alembic apply migrations" — focus on aggregator / scoring / signup branches / interaction handling.

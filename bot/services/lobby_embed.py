@@ -14,6 +14,7 @@ import discord
 
 from bot import emojis
 from bot.commands import descriptions as desc
+from bot.discord_helpers import command_line
 from bot.services.pod_drafts import load_event_id_by_thread_sync
 from bot.services.pod_tournament import actor_label
 
@@ -197,12 +198,12 @@ def render(
     if state != "complete":
         embed.add_field(
             name="🤖 Commands",
-            value=(
-                f"`/link-arena`: {desc.LINK_ARENA_LOBBY}\n"
-                f"`/pod-ready`: {desc.POD_READY}\n"
-                f"`/pod-start`: {desc.POD_START}\n"
-                f"`/pod-takeover`: {desc.POD_TAKEOVER}"
-            ),
+            value="\n".join([
+                command_line("/link-arena", desc.LINK_ARENA_LOBBY),
+                command_line("/pod-ready", desc.POD_READY),
+                command_line("/pod-start", desc.POD_START),
+                command_line("/pod-takeover", desc.POD_TAKEOVER),
+            ]),
             inline=False,
         )
     return embed

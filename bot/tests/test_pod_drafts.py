@@ -293,8 +293,8 @@ def test_finalize_champion_writes_standings_and_marks_complete(session):
 
     standings = [
         FinalStanding(draftmancer_name="Alice", placement=1, record="3-0", eliminated_round=None),
-        FinalStanding(draftmancer_name="Bob",   placement=2, record="2-1", eliminated_round=3),
-        FinalStanding(draftmancer_name="Carl",  placement=3, record="1-2", eliminated_round=3),
+        FinalStanding(draftmancer_name="Bob", placement=2, record="2-1", eliminated_round=3),
+        FinalStanding(draftmancer_name="Carl", placement=3, record="1-2", eliminated_round=3),
     ]
     updated = finalize_champion(session, event.id, standings)
 
@@ -315,7 +315,7 @@ def test_finalize_champion_stamps_finalized_at_and_preserves_it_on_rerun(session
     event = record_event(session, _parsed_event(attendees=("Alice", "Bob")))
     standings = [
         FinalStanding(draftmancer_name="Alice", placement=1, record="3-0", eliminated_round=None),
-        FinalStanding(draftmancer_name="Bob",   placement=2, record="2-1", eliminated_round=3),
+        FinalStanding(draftmancer_name="Bob", placement=2, record="2-1", eliminated_round=3),
     ]
     first = finalize_champion(session, event.id, standings)
     assert first.finalized_at is not None
@@ -557,9 +557,9 @@ def test_apply_mainboards_writes_when_decklist_present_and_skips_others(session)
     _seed_set(session)
     event = record_event(session, _parsed_event(attendees=("Alice", "Bob", "Carl", "Dee")))
     upsert_participant(session, event.id, display_name="Alice", draftmancer_name="Alice#1")
-    upsert_participant(session, event.id, display_name="Bob",   draftmancer_name="Bob#2")
-    upsert_participant(session, event.id, display_name="Carl",  draftmancer_name="Carl#3")
-    upsert_participant(session, event.id, display_name="Dee",   draftmancer_name=None)
+    upsert_participant(session, event.id, display_name="Bob", draftmancer_name="Bob#2")
+    upsert_participant(session, event.id, display_name="Carl", draftmancer_name="Carl#3")
+    upsert_participant(session, event.id, display_name="Dee", draftmancer_name=None)
     session.flush()
 
     log_payload = {
@@ -567,9 +567,9 @@ def test_apply_mainboards_writes_when_decklist_present_and_skips_others(session)
             "u1": {"userName": "Alice#1", "decklist": {"main": ["c-a1", "c-a2", "c-a3"]}},
             "u2": {"userName": "Bob#2"},
             "u3": {"userName": "Carl#3", "decklist": {"main": ["c-c1"]}, "isBot": True},
-            "u4": {"userName": "Dee",    "decklist": {"main": ["c-d1", "c-d2"]}},
+            "u4": {"userName": "Dee", "decklist": {"main": ["c-d1", "c-d2"]}},
             "u5": {"userName": "DisChordBot", "decklist": {"main": ["junk"]}},
-            "u6": {"userName": "Bot #1",      "decklist": {"main": ["junk"]}},
+            "u6": {"userName": "Bot #1", "decklist": {"main": ["junk"]}},
         },
     }
     apply_mainboards(session, event.id, log_payload)

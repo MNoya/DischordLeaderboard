@@ -8,6 +8,8 @@ from discord.ext import commands
 
 from bot import audit
 from bot.commands import descriptions as desc
+from bot.config import settings
+from bot.discord_helpers import command_line
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +30,26 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
     ("🔗 Integration", [
         ("/link-17lands", desc.LINK_17LANDS),
         ("/link-arena", desc.LINK_ARENA),
+    ]),
+]
+
+POD_HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
+    ("🚀 Pod Drafts", [
+        ("/pod-seeding", desc.POD_SEEDING),
+        ("/pod-ready", desc.POD_READY),
+        ("/pod-start", desc.POD_START),
+        ("/pod-settings", desc.POD_SETTINGS),
+        ("/pod-takeover", desc.POD_TAKEOVER),
+        ("/pod-standings", desc.POD_STANDINGS),
+        ("/help", desc.HELP),
+    ]),
+    ("🔗 Integration", [
+        ("/link-17lands", desc.LINK_17LANDS),
+        ("/link-arena", desc.LINK_ARENA),
+    ]),
+    ("⚙️ Admin", [
+        ("/pod-champion", desc.POD_CHAMPION.removeprefix("[Admin] ")),
+        ("/pod-backfill", desc.POD_BACKFILL.removeprefix("[Admin] ")),
     ]),
 ]
 
@@ -55,12 +77,12 @@ class HelpView(discord.ui.View):
         await interaction.delete_original_response()
 
 
-def render_help_embed() -> discord.Embed:
+def render_help_embed(sections: list[tuple[str, list[tuple[str, str]]]] = HELP_SECTIONS) -> discord.Embed:
     embed = discord.Embed(title=HELP_TITLE, color=discord.Color.blurple())
-    for section_label, items in HELP_SECTIONS:
+    for section_label, items in sections:
         lines = []
         for cmd, blurb in items:
-            lines.append(f"`{cmd}`: {blurb}")
+            lines.append(command_line(cmd, blurb))
             for example in HELP_EXAMPLES.get(cmd, []):
                 lines.append("> " + " ".join(f"`{chip}`" for chip in example))
         embed.add_field(name=section_label, value="\n".join(lines), inline=False)
@@ -80,8 +102,17 @@ class Help(commands.Cog):
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
     async def help(self, interaction: discord.Interaction) -> None:
+        sections = POD_HELP_SECTIONS if _in_pod_coordination(interaction.channel) else HELP_SECTIONS
         audit.event("help_invoked", user_id=str(interaction.user.id))
-        await interaction.response.send_message(embed=render_help_embed(), view=HelpView(), ephemeral=False)
+        await interaction.response.send_message(embed=render_help_embed(sections), view=HelpView(), ephemeral=False)
+
+
+def _in_pod_coordination(channel: discord.interactions.InteractionChannel | None) -> bool:
+    if channel is None:
+        return False
+    if channel.id == settings.pod_draft_channel_id:
+        return True
+    return getattr(channel, "parent_id", None) == settings.pod_draft_channel_id
 
 
 async def setup(bot: commands.Bot) -> None:

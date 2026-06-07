@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from bot.commands.leaderboard import (
     LcqExtras,
@@ -12,13 +12,14 @@ from bot.commands.leaderboard import (
     process_leaderboard_for_archetype,
     process_leaderboard_for_format,
     process_leaderboard_for_lcq,
+    process_leaderboard_for_peasant,
     process_personal_standings,
     render_filtered_data,
     render_personal_embed,
     render_public_embed,
 )
 from bot.services.player_stats import StatsData, process_stats, render_embed as render_stats_embed
-from bot.models import DraftEvent, MagicSet, Player, PlayerStats
+from bot.models import DraftEvent, MagicSet, Player, PlayerStats, PodDraftEvent, PodDraftParticipant
 
 
 def _seed_set(session, code="SOS"):
@@ -154,7 +155,7 @@ def _data(viewer=None, top=None, last_updated=None, drafter_count=0):
         set_name="Secrets of Strixhaven",
         top=top if top is not None else [
             LeaderboardEntry(1, "alice-id", "alice", "Alice", 50.0, 5),
-            LeaderboardEntry(2, "bob-id",   "bob",   "Bob",   30.0, 3),
+            LeaderboardEntry(2, "bob-id", "bob", "Bob", 30.0, 3),
         ],
         viewer=viewer,
         last_updated=last_updated,
@@ -626,3 +627,31 @@ def test_drafter_count_narrows_by_filter(session):
     assert _drafter_count(session, s, color_value="UG") == 1
     assert _drafter_count(session, s, format_value="Premier", color_value="UG") == 1
     assert _drafter_count(session, s, format_value="Quick", color_value="UG") == 0
+
+
+def _seed_pod_event(session, set_code, name):
+    event = PodDraftEvent(
+        event_date=date(2026, 5, 1), event_time=datetime(2026, 5, 1, tzinfo=timezone.utc),
+        set_code=set_code, name=name, draftmancer_session=f"{name}-sess",
+        discord_thread_id=f"{name}-thread", sesh_message_id=f"{name}-msg", socket_status="complete",
+    )
+    session.add(event)
+    session.flush()
+    return event
+
+
+def test_peasant_board_filters_to_peasant_pods(session):
+    _seed_set(session)
+    alice = _seed_player(session, "Alice", "1", "a")
+    bob = _seed_player(session, "Bob", "2", "b")
+    peasant = _seed_pod_event(session, "PEASANT", "Peasant Cube Draft 1")
+    sos_pod = _seed_pod_event(session, "SOS", "SOS Pod 1")
+    session.add(PodDraftParticipant(event_id=peasant.id, player_id=alice.id, display_name="Alice", placement=1))
+    session.add(PodDraftParticipant(event_id=sos_pod.id, player_id=bob.id, display_name="Bob", placement=1))
+    session.commit()
+
+    data = process_leaderboard_for_peasant(session, viewer_discord_id=None)
+
+    assert data.set_code == "PEASANT"
+    assert data.show_score is False
+    assert [(e.slug, e.trophies, e.events) for e in data.top] == [(alice.slug, 1, 1)]

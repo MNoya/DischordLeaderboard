@@ -205,7 +205,7 @@ def test_rebuild_player_stats_aggregates_by_format_and_expansion(session):
         _draft("a", format="PremierDraft", expansion="SOS", wins=5, losses=3),
         _draft("b", format="PremierDraft", expansion="SOS", wins=7, losses=0, event_wins=7),
         _draft("c", format="PremierDraft", expansion="Y26SOS", wins=4, losses=3),
-        _draft("d", format="TradDraft",    expansion="SOS", wins=4, losses=0, event_wins=4),
+        _draft("d", format="TradDraft", expansion="SOS", wins=4, losses=0, event_wins=4),
     ]
     bulk_upsert_draft_events(session, p.id, drafts, [sos])
     session.flush()
@@ -284,7 +284,7 @@ def test_refresh_player_writes_stats_and_events(session):
     p = _seed_player(session)
     drafts = [
         _draft("alpha", format="PremierDraft", expansion="ECL", wins=5, losses=3),
-        _draft("beta",  format="TradDraft",    expansion="ECL", wins=4, losses=0, event_wins=4),
+        _draft("beta", format="TradDraft", expansion="ECL", wins=4, losses=0, event_wins=4),
     ]
     client = FakeClient(drafts=drafts)
     result = refresh_player(session, client, p)

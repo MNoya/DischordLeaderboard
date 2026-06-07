@@ -24,6 +24,11 @@ logger = logging.getLogger(__name__)
 NBSP = "\u00a0"  # Discord collapses runs of regular spaces; non-breaking spaces survive
 ZWSP = "\u200b"  # anchors a -# subtext line so Discord keeps the NBSP indent that follows
 
+
+def command_line(cmd: str, blurb: str) -> str:
+    """One `/command` + description line, shared by /help and the lobby embed."""
+    return f"`{cmd}` - {blurb}"
+
 def extract_avatar_hash(user: "discord.abc.User | discord.User | discord.Member | None") -> str | None:
     """Return the Discord avatar hash for a user, or None if they use the default avatar.
 
