@@ -203,7 +203,9 @@ async def assemble_workspace(bot: commands.Bot, event_id: str) -> Workspace:
         games_by_seat[seat.name] = games_from_17lands(raw, ws.event_time)
 
     inferred = infer_matches(games_by_seat)
-    ws.matches = merge_matches(ws.matches, inferred, ws.event_time)
+    ws.matches = merge_matches(ws.matches, inferred)
+    if not ws.replays_skipped:
+        ws.matches = fill_reported_ats(ws.matches, ws.event_time)
     return ws
 
 
@@ -639,7 +641,8 @@ class MatchModal(discord.ui.Modal):
             ws.matches = [edited if m is self.match else m for m in ws.matches]
         else:
             ws.matches = [*ws.matches, edited]
-        ws.matches = fill_reported_ats(ws.matches, ws.event_time)
+        if not ws.replays_skipped:
+            ws.matches = fill_reported_ats(ws.matches, ws.event_time)
         await self.view.refresh(interaction)
 
 

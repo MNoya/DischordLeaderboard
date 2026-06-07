@@ -191,7 +191,6 @@ PLACEHOLDER_SCORE = "2-1"
 def merge_matches(
     db_matches: Sequence[MatchDraft],
     inferred: Sequence[InferredMatch],
-    event_time: datetime,
 ) -> list[MatchDraft]:
     """Fold replay-inferred matches into what the DB already holds. Replay evidence wins on score
     when it captured a complete match (a side reached 2 wins) — it corrected misreported bracket
@@ -226,8 +225,7 @@ def merge_matches(
         else:
             merged[key] = replace(existing, reported_at=reported_at)
 
-    drafts = sorted(merged.values(), key=lambda m: (m.round, m.player_a))
-    return fill_reported_ats(drafts, event_time)
+    return sorted(merged.values(), key=lambda m: (m.round, m.player_a))
 
 
 def _match_key(round_num: int, a: str, b: str) -> tuple[int, frozenset[str]]:
