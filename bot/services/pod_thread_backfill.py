@@ -12,6 +12,7 @@ from typing import Mapping, Sequence
 
 from bot.services import pod_swiss
 from bot.services.pod_backfill import normalize_colors
+from bot.services.pod_deck_color import GUILDS
 from bot.services.pod_drafts import normalize_player_name, parse_caption_record
 from bot.services.pod_replays import extract_game_id, filter_and_sort_games, is_in_event_window, parse_game_time
 
@@ -97,14 +98,31 @@ def extract_deck_posts(messages: Sequence[ScrapedMessage]) -> dict[str, DeckPost
 
 WUBRG_LETTERS = frozenset("WUBRGwubrg")
 
+COLOR_NICKNAMES = {
+    **{name.lower(): code for code, name in GUILDS},
+    "bant": "WUG", "esper": "WUB", "grixis": "UBR", "jund": "BRG", "naya": "WRG",
+    "abzan": "WBG", "jeskai": "WUR", "sultai": "UBG", "mardu": "WBR", "temur": "URG",
+}
+COLOR_WORDS = {"white": "W", "blue": "U", "black": "B", "red": "R", "green": "G"}
+
 
 def parse_caption_colors(caption: str | None) -> str | None:
-    """First color-combo word in a deck caption, WUBRG-normalized ('1-2 RW failed WB' -> 'WR').
-    A token counts when it is 2-5 WUBRG letters with no repeats and at least one uppercase —
-    rejecting ordinary words ('SB' has no S color, 'GG' repeats) and lowercase prose."""
+    """First color signal in a deck caption, WUBRG-normalized ('1-2 RW failed WB' -> 'WR').
+    Recognizes letter combos (2-5 WUBRG letters, no repeats, not all-lowercase — rejecting
+    ordinary words like 'SB' or 'GG'), guild/shard/wedge nicknames ('rakdos' -> 'BR',
+    'sultai' -> 'UBG'), and 'mono <color>'."""
     if not caption:
         return None
-    for token in re.findall(r"[A-Za-z]+", caption):
+    tokens = re.findall(r"[A-Za-z]+", caption)
+    for i, token in enumerate(tokens):
+        lowered = token.lower()
+        nickname = COLOR_NICKNAMES.get(lowered)
+        if nickname:
+            return nickname
+        if lowered == "mono" and i + 1 < len(tokens):
+            mono = COLOR_WORDS.get(tokens[i + 1].lower())
+            if mono:
+                return mono
         if not 2 <= len(token) <= 5:
             continue
         if any(c not in WUBRG_LETTERS for c in token):
