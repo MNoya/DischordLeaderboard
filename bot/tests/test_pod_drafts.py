@@ -67,7 +67,6 @@ def test_record_event_persists_and_links_known_attendees(session, monkeypatch):
 
     assert event.socket_status == "pending"
     assert event.draftmancer_session == "LLU-SOS-May-13"
-    assert event.draftmancer_url == f"{settings.draftmancer_web_url}/?session=LLU-SOS-May-13"
     assert event.set_id is not None
 
     participants = session.execute(
@@ -102,7 +101,6 @@ def test_record_event_custom_format_uses_slug_and_drops_prefix(session, monkeypa
     monkeypatch.setattr(settings, "pod_draft_session_prefix", "LLU")
     event = record_event(session, _parsed_event(set_code="PEASANT", attendees=(), event_number=4))
     assert event.draftmancer_session == "Peasant-26-D4"
-    assert event.draftmancer_url == f"{settings.draftmancer_web_url}/?session=Peasant-26-D4"
     assert event.format_label == "Peasant Cube"
 
 
@@ -613,7 +611,6 @@ def test_capture_deck_screenshot_gating(
     event = PodDraftEvent(
         event_date=date(2026, 6, 3), event_time=datetime(2026, 6, 3, tzinfo=timezone.utc),
         set_code="SOS", name="SOS Pod Capture", draftmancer_session="cap-sess",
-        draftmancer_url="https://draftmancer.com/?session=cap-sess",
         discord_thread_id="cap-thread", sesh_message_id="cap-msg", socket_status="complete",
         current_round=current_round,
         championship_posted_at=datetime(2026, 6, 3, 23, tzinfo=timezone.utc) if championship_posted else None,

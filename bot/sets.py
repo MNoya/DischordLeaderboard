@@ -99,7 +99,7 @@ class PreviewWindow:
 # Spoiler-season day ranges, inclusive on both ends, interpreted in US Eastern time.
 # Independent of ALL_SETS — a set gets its window before it joins the rotation.
 PREVIEW_WINDOWS: tuple[PreviewWindow, ...] = (
-    PreviewWindow("MSH", date(2026, 6, 2), date(2026, 6, 9)),
+    PreviewWindow("MSH", date(2026, 6, 2), date(2026, 6, 8)),
 )
 
 

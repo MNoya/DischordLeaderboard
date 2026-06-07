@@ -166,7 +166,6 @@ class PodDraftEvent(Base):
     format_label        = Column(String, nullable=True)
     name                = Column(String, nullable=False)
     draftmancer_session = Column(String, nullable=False)
-    draftmancer_url     = Column(String, nullable=False)
     discord_thread_id   = Column(String, nullable=False)
     sesh_message_id     = Column(String, nullable=False)
     socket_status       = Column(String, nullable=False)

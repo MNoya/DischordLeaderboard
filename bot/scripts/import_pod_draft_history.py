@@ -170,7 +170,6 @@ def main() -> None:
                 set_code=ev["set_code"],
                 format_label=None,
                 draftmancer_session=f"LLU-SOS-historical-{ev['event_date'].isoformat()}",
-                draftmancer_url=f"https://draftmancer.com/?session=LLU-SOS-historical-{ev['event_date'].isoformat()}",
                 discord_thread_id="0",
                 sesh_message_id="0",
                 socket_status="complete",

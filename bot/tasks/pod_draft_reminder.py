@@ -15,6 +15,7 @@ from bot.config import settings
 from bot.database import SessionLocal
 from bot.models import PodDraftEvent
 from bot.services.pod_draft_manager import start_manager
+from bot.services.pod_drafts import draftmancer_url_for
 from bot.services.sesh_parser import parse_sesh_embed
 
 
@@ -49,8 +50,8 @@ async def fire_reminder(event_id: str, *, early: bool = False) -> None:
             return
         thread_id = int(event.discord_thread_id)
         sesh_message_id = int(event.sesh_message_id)
-        draftmancer_url = event.draftmancer_url
         draftmancer_session = event.draftmancer_session
+        draftmancer_url = draftmancer_url_for(draftmancer_session)
         set_code = event.set_code
         event_name = event.name
 

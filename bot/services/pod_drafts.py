@@ -187,11 +187,16 @@ def _player_for_name(session: Session, name: str) -> Player | None:
     return None
 
 
+def draftmancer_url_for(session_id: str) -> str:
+    """Compose the player-facing session URL from current settings at send time, so a host change
+    reaches already-recorded events instead of fossilizing in the row."""
+    return f"{settings.draftmancer_web_url}/?session={session_id}"
+
+
 def record_event(session: Session, parsed: ParsedSeshEvent) -> PodDraftEvent:
     """Insert a pod_draft_event row plus one participant per sesh attendee."""
     set_id = _lookup_set_id(session, parsed.set_code) if parsed.set_code else None
     session_id = _build_draftmancer_session(session, parsed)
-    url = f"{settings.draftmancer_web_url}/?session={session_id}"
 
     event = PodDraftEvent(
         event_date=parsed.event_date,
@@ -201,7 +206,6 @@ def record_event(session: Session, parsed: ParsedSeshEvent) -> PodDraftEvent:
         format_label=pod_format.label_for(parsed.set_code),
         name=parsed.name,
         draftmancer_session=session_id,
-        draftmancer_url=url,
         discord_thread_id=parsed.discord_thread_id,
         sesh_message_id=parsed.sesh_message_id,
         socket_status="pending",
