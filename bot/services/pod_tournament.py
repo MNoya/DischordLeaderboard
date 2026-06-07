@@ -58,6 +58,7 @@ from bot.services.pod_drafts import (
     load_event_name_sync,
     load_event_pairing_mode_sync,
     load_event_thread_id_sync,
+    parse_record,
     participant_dm_info,
     participant_id_for_discord_user,
     participants_with_discord_for_event,
@@ -253,6 +254,34 @@ def _load_tournament_players_sync(event_id: str) -> list[pod_swiss.Player]:
         for dm, dn in rows
         if (dm or dn)
     ]
+
+
+def _load_participant_standings_sync(event_id: str) -> list[pod_swiss.Standing]:
+    """Standings straight from stored placements/records, for events with no match rows
+    (record-only backfills). Tiebreaker percentages are zeroed — the placement is the order."""
+    with SessionLocal() as session:
+        rows = session.execute(
+            select(
+                PodDraftParticipant.draftmancer_name,
+                PodDraftParticipant.display_name,
+                PodDraftParticipant.placement,
+                PodDraftParticipant.record,
+            )
+            .where(
+                PodDraftParticipant.event_id == event_id,
+                PodDraftParticipant.placement.isnot(None),
+            )
+            .order_by(PodDraftParticipant.placement)
+        ).all()
+    standings = []
+    for dm, dn, placement, record in rows:
+        name = dm or dn
+        wins, losses = parse_record(record)
+        standings.append(pod_swiss.Standing(
+            rank=placement, player_id=name, player_name=name,
+            wins=wins, losses=losses, omw_pct=0.0, gw_pct=0.0, ogw_pct=0.0,
+        ))
+    return standings
 
 
 def _short_event_name(event_name: str | None) -> str | None:
@@ -1878,20 +1907,25 @@ def build_champion_embed(
 async def build_standings_embed_for_event(event_id: str) -> discord.Embed | None:
     """Snapshot variant of the live standings: same shape as `_post_or_update_live_standings`'s
     embed but loads tournament_players from the DB (no in-memory manager required) and omits the
-    Submit-Deck CTA. Returns None when the event has no pairings yet."""
+    Submit-Deck CTA. Events with no match rows (record-only backfills) fall back to the stored
+    placements; returns None when there are neither pairings nor placements."""
     players = await asyncio.to_thread(_load_tournament_players_sync, event_id)
     if not players:
         return None
     match_states = await asyncio.to_thread(_load_round_states, event_id, TOTAL_ROUNDS)
-    if not match_states:
-        return None
-    mark_trophy_match(match_states, TOTAL_ROUNDS)
-    trophy = [m for m in match_states if m.get("is_trophy_match")]
-    champion_locked = bool(trophy) and all(m.get("winner_name") for m in trophy)
-    pending_count = sum(1 for m in match_states if not m.get("winner_name"))
-
-    prior = await asyncio.to_thread(_load_matches, event_id)
-    standings = pod_swiss.compute_standings(players, prior)
+    if match_states:
+        mark_trophy_match(match_states, TOTAL_ROUNDS)
+        trophy = [m for m in match_states if m.get("is_trophy_match")]
+        champion_locked = bool(trophy) and all(m.get("winner_name") for m in trophy)
+        pending_count = sum(1 for m in match_states if not m.get("winner_name"))
+        prior = await asyncio.to_thread(_load_matches, event_id)
+        standings = pod_swiss.compute_standings(players, prior)
+    else:
+        standings = await asyncio.to_thread(_load_participant_standings_sync, event_id)
+        if not standings:
+            return None
+        champion_locked = any(s.rank == 1 for s in standings)
+        pending_count = 0
     displays = await asyncio.to_thread(_load_participant_displays, event_id)
     event_name = await asyncio.to_thread(load_event_name_sync, event_id)
     deck_data = await asyncio.to_thread(_load_event_deck_data_sync, event_id)
@@ -1915,26 +1949,30 @@ async def build_champion_announcement_view_for_event(
     guild_id: int | None = None,
 ) -> ui.LayoutView | None:
     """Manager-free builder for the channel-level champion announcement view. Returns None when the
-    trophy match has no winner yet, the event has no pairings, or nobody is undefeated. Used by
-    /pod-champion to re-post the announcement after the fact (e.g. when finalization was missed)."""
+    trophy match has no winner yet, nobody is undefeated, or the event has neither pairings nor
+    stored placements. Used by /pod-champion to re-post the announcement after the fact (e.g. when
+    finalization was missed, or for a record-only backfill)."""
     players = await asyncio.to_thread(_load_tournament_players_sync, event_id)
     if not players:
         return None
     match_states = await asyncio.to_thread(_load_round_states, event_id, TOTAL_ROUNDS)
-    if not match_states:
-        return None
-    mark_trophy_match(match_states, TOTAL_ROUNDS)
-    trophy = [m for m in match_states if m.get("is_trophy_match")]
-    if not trophy or not all(m.get("winner_name") for m in trophy):
-        return None
+    if match_states:
+        mark_trophy_match(match_states, TOTAL_ROUNDS)
+        trophy = [m for m in match_states if m.get("is_trophy_match")]
+        if not trophy or not all(m.get("winner_name") for m in trophy):
+            return None
 
-    prior = await asyncio.to_thread(_load_matches, event_id)
-    standings = pod_swiss.compute_standings(players, prior)
-    if not standings:
-        return None
-    if not any(s.losses == 0 for s in standings):
-        # No undefeated player; wait for every R3 match to resolve before crowning rank 1
-        if not all(m.get("winner_name") for m in match_states):
+        prior = await asyncio.to_thread(_load_matches, event_id)
+        standings = pod_swiss.compute_standings(players, prior)
+        if not standings:
+            return None
+        if not any(s.losses == 0 for s in standings):
+            # No undefeated player; wait for every R3 match to resolve before crowning rank 1
+            if not all(m.get("winner_name") for m in match_states):
+                return None
+    else:
+        standings = await asyncio.to_thread(_load_participant_standings_sync, event_id)
+        if not standings or not any(s.rank == 1 for s in standings):
             return None
 
     displays = await asyncio.to_thread(_load_participant_displays, event_id)

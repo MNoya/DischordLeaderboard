@@ -734,7 +734,7 @@ async def run_backfill(bot: commands.Bot, ws: Workspace) -> discord.Embed:
                 lines.append(f"MagicProTools: {mpt.submitted} submitted, {mpt.failed} failed")
 
     if ws.replays_skipped:
-        lines.append("Replays: skipped — event is past the 17lands history horizon")
+        lines.append(f"Replays: skipped — event is older than {REPLAY_HORIZON.days} days")
     else:
         replay_rows = 0
         for seat in ws.seats:

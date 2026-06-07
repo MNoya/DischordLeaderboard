@@ -928,7 +928,7 @@ def _summarize_pod_records(finishes: list[tuple[str | None, int | None]]) -> Pod
     """A trophy is a 3-0 record or a pod win (placement 1); a 2-1 that won is a trophy, not a 2-1."""
     wins = losses = trophies = wins_2_1 = 0
     for record, placement in finishes:
-        won, lost = _parse_record(record)
+        won, lost = parse_record(record)
         wins += won
         losses += lost
         if record == "3-0" or placement == 1:
@@ -938,7 +938,7 @@ def _summarize_pod_records(finishes: list[tuple[str | None, int | None]]) -> Pod
     return PodSetSummary(len(finishes), wins, losses, trophies, wins_2_1)
 
 
-def _parse_record(record: str | None) -> tuple[int, int]:
+def parse_record(record: str | None) -> tuple[int, int]:
     if not record or "-" not in record:
         return 0, 0
     w_str, l_str = record.split("-", 1)
