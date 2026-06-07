@@ -409,7 +409,7 @@ def build_workspace_embed(ws: Workspace) -> discord.Embed:
         link = "🪪" if s.player_id else "❔"
         shot = "📷" if s.screenshot_url else "·"
         seat_lines.append(f"{link} `{short_name(s.name)}`  {s.record or '?-?'}  {s.colors or '—'}  {shot}")
-    embed.add_field(name=f"Seats ({len(ws.seats)})", value="\n".join(seat_lines) or "—", inline=False)
+    embed.add_field(name=f"Players ({len(ws.seats)})", value="\n".join(seat_lines) or "—", inline=False)
 
     for round_num in range(1, TOTAL_ROUNDS + 1):
         lines = []
@@ -440,7 +440,7 @@ def build_workspace_embed(ws: Workspace) -> discord.Embed:
 def compute_gaps(ws: Workspace) -> list[str]:
     gaps: list[str] = []
     if len(ws.seats) % 2:
-        gaps.append(f"odd seat count ({len(ws.seats)})")
+        gaps.append(f"odd player count ({len(ws.seats)})")
     expected = len(ws.seats) // 2
 
     for s in ws.seats:
@@ -471,7 +471,7 @@ def compute_gaps(ws: Workspace) -> list[str]:
             gaps.append(f"`{st.player_name}` caption record {caption_record} ≠ computed {computed}")
 
     for post in ws.unassigned_decks:
-        gaps.append(f"deck post by `{post.author_display}` not matched to a seat")
+        gaps.append(f"deck post by `{post.author_display}` not matched to a player")
     return gaps
 
 
@@ -488,7 +488,7 @@ def blocking_gaps(ws: Workspace) -> list[str]:
     blockers = [f"R{m.round} `{m.player_a}` vs `{m.player_b}`: winner unknown"
                 for m in ws.matches if not m.winner]
     if not ws.matches and not any(s.record for s in ws.seats):
-        blockers.append("no matches and no seat records — nothing to score")
+        blockers.append("no matches and no player records — nothing to score")
     return blockers
 
 
@@ -508,14 +508,14 @@ class BackfillView(discord.ui.View):
         self.clear_items()
 
         seat_select = discord.ui.Select(
-            placeholder="Edit a seat…",
+            placeholder="Edit a player…",
             options=[
                 discord.SelectOption(
                     label=short_name(s.name)[:100], value=s.name[:100],
                     description=f"{s.record or '?-?'} {s.colors or ''}".strip()[:100] or None,
                 )
                 for s in self.ws.seats[:25]
-            ] or [discord.SelectOption(label="(no seats)", value="none")],
+            ] or [discord.SelectOption(label="(no players)", value="none")],
             row=0,
         )
         seat_select.callback = self._on_seat_select
@@ -599,11 +599,11 @@ class BackfillView(discord.ui.View):
 
 class SeatModal(discord.ui.Modal):
     def __init__(self, view: BackfillView, seat: SeatDraft) -> None:
-        super().__init__(title=f"Seat — {seat.name}"[:45])
+        super().__init__(title=f"Player — {seat.name}"[:45])
         self.view = view
         self.seat = seat
         self.record_input = discord.ui.TextInput(
-            label=f"Record (W-L, or `{DELETE_SENTINEL}` to remove the seat)",
+            label=f"Record (W-L, or `{DELETE_SENTINEL}` to remove the player)",
             required=False, default=seat.record or "", max_length=5,
         )
         self.colors_input = discord.ui.TextInput(
@@ -689,9 +689,9 @@ class MatchModal(discord.ui.Modal):
         player_a = ws.resolve_seat_name(self.player_a_input.value.strip())
         player_b = ws.resolve_seat_name(self.player_b_input.value.strip())
         if player_a is None:
-            errors.append(f"`{self.player_a_input.value.strip()}` doesn't match a seat")
+            errors.append(f"`{self.player_a_input.value.strip()}` doesn't match a player")
         if player_b is None:
-            errors.append(f"`{self.player_b_input.value.strip()}` doesn't match a seat")
+            errors.append(f"`{self.player_b_input.value.strip()}` doesn't match a player")
         winner = None
         winner_raw = self.winner_input.value.strip()
         if winner_raw:
@@ -811,7 +811,7 @@ def _apply_workspace_sync(ws: Workspace) -> list[str]:
         session.commit()
 
     champion = standings[0].player_name if standings else None
-    lines.append(f"Wrote {len(ws.seats)} seats, {len(matches)} matches. Champion: **{champion}**")
+    lines.append(f"Wrote {len(ws.seats)} players, {len(matches)} matches. Champion: **{champion}**")
     for error in seat_errors:
         lines.append(f"⚠️ {error}")
     return lines
