@@ -27,11 +27,13 @@ from bot.models import Player, PodDraftEvent, PodDraftMatch, PodDraftParticipant
 from bot.services.pod_backfill import COLORS_RE, apply_seat, normalize_colors, strip_cdn_dims
 from bot.services.pod_drafts import (
     FinalStanding,
+    ParsedSeshEvent,
     finalize_champion,
     load_event_id_by_name_sync,
     load_event_id_by_thread_sync,
     normalize_player_name,
     player_for_name,
+    record_event,
     record_match,
     search_event_names_sync,
     upsert_participant,
@@ -52,13 +54,19 @@ from bot.services.pod_thread_backfill import (
     merge_matches,
 )
 from bot.services.pod_tournament import TOTAL_ROUNDS, post_championship_for_event
+from bot.services.sesh_parser import parse_sesh_embed
 from bot.services.seventeenlands import SeventeenLandsClient
-from bot.tasks.pod_draft_reminder import fetch_sesh_rsvps
+from bot.sets import ACTIVE_SET_CODE
+from bot.tasks.pod_draft_reminder import fetch_sesh_message, fetch_sesh_rsvps
 
 
 log = logging.getLogger(__name__)
 
 MSG_NOT_POD_THREAD = "Run this inside a pod-draft thread, or pass an `event` to backfill a specific pod."
+MSG_SESH_UNREADABLE = (
+    "No event is registered for this thread, and it couldn't be reconstructed — "
+    "the sesh post is missing or has no readable Time/Attendees embed."
+)
 
 SCORE_RE = re.compile(r"^[0-3]-[0-3]$")
 DELETE_SENTINEL = "-"
@@ -131,20 +139,26 @@ class PodBackfill(commands.Cog):
             await interaction.response.send_message(MSG_ADMIN_ONLY, ephemeral=True)
             return
 
+        await interaction.response.defer(ephemeral=True, thinking=True)
         if event:
             event_id = await asyncio.to_thread(load_event_id_by_name_sync, event)
             if event_id is None:
-                await interaction.response.send_message(f"No pod-draft event named `{event}`.", ephemeral=True)
+                await interaction.followup.send(f"No pod-draft event named `{event}`.", ephemeral=True)
                 return
         else:
             thread_id = str(interaction.channel_id) if interaction.channel_id else None
-            event_id = await asyncio.to_thread(load_event_id_by_thread_sync, thread_id) if thread_id else None
-            if event_id is None:
-                await interaction.response.send_message(MSG_NOT_POD_THREAD, ephemeral=True)
+            if thread_id is None:
+                await interaction.followup.send(MSG_NOT_POD_THREAD, ephemeral=True)
                 return
+            event_id = await asyncio.to_thread(load_event_id_by_thread_sync, thread_id)
+            if event_id is None:
+                event_id = await reconstruct_event_from_thread(self.bot, thread_id)
+                if event_id is None:
+                    await interaction.followup.send(MSG_SESH_UNREADABLE, ephemeral=True)
+                    return
+                log.info(f"pod-backfill: reconstructed pre-bot event {event_id} from thread {thread_id}")
 
         log.info(f"pod-backfill: {interaction.user} started for event_id={event_id}")
-        await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             ws = await assemble_workspace(self.bot, event_id)
         except Exception:
@@ -163,6 +177,40 @@ class PodBackfill(commands.Cog):
     ) -> list[app_commands.Choice[str]]:
         names = await asyncio.to_thread(search_event_names_sync, current)
         return [app_commands.Choice(name=n, value=n) for n in names]
+
+
+async def reconstruct_event_from_thread(bot: commands.Bot, thread_id: str) -> str | None:
+    """Register a pod event for a thread that predates the bot. Sesh spawns the thread from its RSVP
+    message, so the thread id doubles as the sesh message id — fetch it, parse the embed, and record
+    the event with its original date, attendees and set code."""
+    message = await fetch_sesh_message(bot, thread_id)
+    if message is None:
+        return None
+    fields = None
+    for embed in message.embeds:
+        fields = parse_sesh_embed(embed)
+        if fields is not None:
+            break
+    if fields is None:
+        return None
+    parsed = ParsedSeshEvent(
+        event_date=fields.event_date,
+        event_time=fields.event_time,
+        set_code=fields.set_code or ACTIVE_SET_CODE,
+        event_number=fields.event_number,
+        name=fields.name,
+        attendees=fields.attendees,
+        sesh_message_id=thread_id,
+        discord_thread_id=thread_id,
+    )
+    return await asyncio.to_thread(_record_event_sync, parsed)
+
+
+def _record_event_sync(parsed: ParsedSeshEvent) -> str:
+    with SessionLocal() as session:
+        event = record_event(session, parsed)
+        session.commit()
+        return event.id
 
 
 async def assemble_workspace(bot: commands.Bot, event_id: str) -> Workspace:
