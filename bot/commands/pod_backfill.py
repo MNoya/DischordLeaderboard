@@ -603,7 +603,8 @@ class SeatModal(discord.ui.Modal):
         self.view = view
         self.seat = seat
         self.record_input = discord.ui.TextInput(
-            label="Record (W-L)", required=False, default=seat.record or "", max_length=5,
+            label=f"Record (W-L, or `{DELETE_SENTINEL}` to remove the seat)",
+            required=False, default=seat.record or "", max_length=5,
         )
         self.colors_input = discord.ui.TextInput(
             label="Colors (WUBRG order, lowercase = splash)", required=False,
@@ -621,6 +622,11 @@ class SeatModal(discord.ui.Modal):
             self.add_item(item)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
+        if self.record_input.value.strip() == DELETE_SENTINEL:
+            self.view.ws.seats = [s for s in self.view.ws.seats if s is not self.seat]
+            await self.view.refresh(interaction)
+            return
+
         errors = []
         record = self.record_input.value.strip()
         if record and not SCORE_RE.match(record):
