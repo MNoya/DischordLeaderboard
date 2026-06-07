@@ -53,7 +53,7 @@ from bot.services.pod_thread_backfill import (
     infer_matches,
     merge_matches,
 )
-from bot.services.pod_tournament import TOTAL_ROUNDS, post_championship_for_event
+from bot.services.pod_tournament import TOTAL_ROUNDS, post_championship_for_event, set_organizer_deck_override
 from bot.services.sesh_parser import parse_sesh_embed, unescape_markdown
 from bot.services.seventeenlands import SeventeenLandsClient
 from bot.sets import ACTIVE_SET_CODE
@@ -159,18 +159,7 @@ class PodBackfill(commands.Cog):
                     return
                 log.info(f"pod-backfill: reconstructed pre-bot event {event_id} from thread {thread_id}")
 
-        log.info(f"pod-backfill: {interaction.user} started for event_id={event_id}")
-        try:
-            ws = await assemble_workspace(self.bot, event_id)
-        except Exception:
-            log.warning(f"pod-backfill: assembly failed for event_id={event_id}", exc_info=True)
-            await interaction.followup.send("Couldn't assemble the event from its thread — check the logs.",
-                                            ephemeral=True)
-            return
-
-        view = BackfillView(self.bot, ws, invoker_id=interaction.user.id)
-        message = await interaction.followup.send(embed=build_workspace_embed(ws), view=view, wait=True)
-        view.message = message
+        await launch_backfill_wizard(self.bot, interaction, event_id)
 
     @pod_backfill.autocomplete("event")
     async def _pod_backfill_event_autocomplete(
@@ -178,6 +167,49 @@ class PodBackfill(commands.Cog):
     ) -> list[app_commands.Choice[str]]:
         names = await asyncio.to_thread(search_event_names_sync, current)
         return [app_commands.Choice(name=n, value=n) for n in names]
+
+
+async def launch_backfill_wizard(bot: commands.Bot, interaction: discord.Interaction, event_id: str) -> None:
+    """Assemble the workspace and post the confirmation wizard; the interaction must be deferred."""
+    log.info(f"pod-backfill: {interaction.user} started for event_id={event_id}")
+    try:
+        ws = await assemble_workspace(bot, event_id)
+    except Exception:
+        log.warning(f"pod-backfill: assembly failed for event_id={event_id}", exc_info=True)
+        await interaction.followup.send("Couldn't assemble the event from its thread — check the logs.",
+                                        ephemeral=True)
+        return
+
+    view = BackfillView(bot, ws, invoker_id=interaction.user.id)
+    message = await interaction.followup.send(embed=build_workspace_embed(ws), view=view, wait=True)
+    view.message = message
+
+
+ORGANIZER_ROLE_NAMES = frozenset({"admin", "moderator"})
+
+
+async def maybe_open_organizer_backfill(bot: commands.Bot, interaction: discord.Interaction) -> bool:
+    """Submit Deck override for organizers: an admin or moderator clicking the button in a pod
+    thread gets the backfill wizard instead of the personal color picker, so colors and records
+    for the whole pod report from one place. Returns False to fall through to the personal flow."""
+    if interaction.guild is None:
+        return False
+    if not await _is_organizer(bot, interaction.user):
+        return False
+    thread_id = str(interaction.channel_id) if interaction.channel_id else None
+    event_id = await asyncio.to_thread(load_event_id_by_thread_sync, thread_id) if thread_id else None
+    if event_id is None:
+        return False
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    await launch_backfill_wizard(bot, interaction, event_id)
+    return True
+
+
+async def _is_organizer(bot: commands.Bot, user: discord.abc.User) -> bool:
+    if await bot.is_owner(user):
+        return True
+    roles = getattr(user, "roles", None) or []
+    return any(role.name.lower() in ORGANIZER_ROLE_NAMES for role in roles)
 
 
 async def reconstruct_event_from_thread(bot: commands.Bot, thread_id: str) -> str | None:
@@ -819,3 +851,8 @@ def _apply_workspace_sync(ws: Workspace) -> list[str]:
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(PodBackfill(bot))
+
+    async def organizer_backfill(interaction: discord.Interaction) -> bool:
+        return await maybe_open_organizer_backfill(bot, interaction)
+
+    set_organizer_deck_override(organizer_backfill)

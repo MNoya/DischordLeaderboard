@@ -33,6 +33,7 @@ from bot.services.pod_deck_color import (
     SAVED_MSG,
     LiveDeckColorSelectView,
     NotInPodError,
+    OrganizerCallback,
     SubmitDeckButton,
     SubmitDeckView,
 )
@@ -573,8 +574,26 @@ async def live_review_choice_submit(interaction: discord.Interaction, wants_revi
     asyncio.create_task(_refresh_submit_deck_dm(interaction.client, event_id, discord_id))
 
 
+ORGANIZER_DECK_OVERRIDE: OrganizerCallback | None = None
+
+
+def set_organizer_deck_override(callback: OrganizerCallback) -> None:
+    """Hook the Submit Deck button for organizers: the callback returns True when it handled the
+    click (e.g. opened the backfill wizard), False to fall through to the personal color flow.
+    Registered by the /pod-backfill command module at setup — a direct import here would cycle."""
+    global ORGANIZER_DECK_OVERRIDE
+    ORGANIZER_DECK_OVERRIDE = callback
+
+
+async def _dispatch_organizer_deck_override(interaction: discord.Interaction) -> bool:
+    if ORGANIZER_DECK_OVERRIDE is None:
+        return False
+    return await ORGANIZER_DECK_OVERRIDE(interaction)
+
+
 def build_live_submit_deck_view() -> SubmitDeckView:
-    return SubmitDeckView(live_deck_color_submit, live_deck_state_lookup, live_review_choice_submit)
+    return SubmitDeckView(live_deck_color_submit, live_deck_state_lookup, live_review_choice_submit,
+                          _dispatch_organizer_deck_override)
 
 
 def build_live_submit_deck_button() -> SubmitDeckButton:
@@ -583,7 +602,8 @@ def build_live_submit_deck_button() -> SubmitDeckButton:
     Shares the persistent custom_id ('poddecksubmit') with build_live_submit_deck_view, so the
     persistent view registered at startup catches the click regardless of which message it came from.
     """
-    return SubmitDeckButton(live_deck_color_submit, live_deck_state_lookup, live_review_choice_submit)
+    return SubmitDeckButton(live_deck_color_submit, live_deck_state_lookup, live_review_choice_submit,
+                            _dispatch_organizer_deck_override)
 
 
 def build_live_deck_color_select_view(

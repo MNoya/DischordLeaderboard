@@ -25,6 +25,7 @@ class NotInPodError(Exception):
 SubmitCallback = Callable[[discord.Interaction, str], Awaitable[None]]
 LookupCallback = Callable[[discord.Interaction], Awaitable[tuple[str | None, bool | None]]]
 ReviewToggleCallback = Callable[[discord.Interaction, bool], Awaitable[None]]
+OrganizerCallback = Callable[[discord.Interaction], Awaitable[bool]]
 
 
 # Track the most recent ephemeral per user so we can delete it on the next button click
@@ -99,9 +100,10 @@ class SubmitDeckView(ui.View):
         on_submit: SubmitCallback,
         on_lookup: LookupCallback,
         on_review_toggle: ReviewToggleCallback,
+        on_organizer: OrganizerCallback | None = None,
     ) -> None:
         super().__init__(timeout=None)
-        self.add_item(SubmitDeckButton(on_submit, on_lookup, on_review_toggle))
+        self.add_item(SubmitDeckButton(on_submit, on_lookup, on_review_toggle, on_organizer))
 
 
 class SubmitDeckButton(ui.Button):
@@ -110,6 +112,7 @@ class SubmitDeckButton(ui.Button):
         on_submit: SubmitCallback,
         on_lookup: LookupCallback,
         on_review_toggle: ReviewToggleCallback,
+        on_organizer: OrganizerCallback | None = None,
     ) -> None:
         super().__init__(
             label="Submit Deck",
@@ -120,8 +123,11 @@ class SubmitDeckButton(ui.Button):
         self._submit = on_submit
         self._lookup = on_lookup
         self._review_toggle = on_review_toggle
+        self._organizer = on_organizer
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        if self._organizer is not None and await self._organizer(interaction):
+            return
         try:
             current_color, current_review = await self._lookup(interaction)
         except NotInPodError:
