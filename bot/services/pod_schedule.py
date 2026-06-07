@@ -24,13 +24,14 @@ THURSDAY = 3
 MONDAY_KIND_NORMAL = "normal"
 MONDAY_KIND_RELEASE_WEEK = "release_week"
 MONDAY_KIND_CHAMPIONSHIP_WEEK = "championship_week"
+MONDAY_KIND_SEASON_OVER = "season_over"
 
 
 # User-facing copy
 
 MSG_SCHEDULE_HEADER = "📅 {set_code} Pod Drafts this week:"
 
-MSG_MONDAY_DM_INTRO = "Monday schedule draft — paste it as-is, tweak it first, or press a button:"
+MSG_MONDAY_DRAFT_INTRO = "Weekly schedule draft — paste it as-is, tweak it first, or press a button:"
 
 BTN_POST_FOR_ME = "Post it for me"
 BTN_GOT_IT = "I've got it"
@@ -47,8 +48,13 @@ MSG_RELEASE_WEEK = (
 )
 
 MSG_CHAMPIONSHIP_WEEK = (
-    "🏆 Final week of **{set_code}**! The Set Championship closes out the season — regular pods are paused "
-    "this week. **{next_name}** arrives <t:{unix}:R>."
+    "👑 Final week of **{set_code}**! The Set Championship <t:{champ_unix}:D> closes out the season — regular "
+    "pods are paused this week. **{next_name}** arrives <t:{unix}:R>."
+)
+
+MSG_SEASON_OVER = (
+    "🏁 That's a wrap on **{set_code}** — the champion's crowned and the season's done. Regular pods are paused "
+    "until **{next_name}** drops <t:{unix}:R>."
 )
 
 MSG_UNDERFILL = (
@@ -56,10 +62,12 @@ MSG_UNDERFILL = (
     "{yes_count}/{target} in so far. RSVP: {jump_url}"
 )
 
-MSG_CREATE_DM_HEADER = "Sesh commands for this week's pods:"
+MSG_CREATE_BLOCKS_HEADER = "Sesh commands for this week's pods:"
+
+POD_DRAFTERS_ROLE_NAME = "Pod Drafters"
 
 CREATE_CHANNEL_REF = "#🚀-pod-draft-coordination"
-CREATE_MENTIONS = "@Any Pronouns"
+CREATE_MENTIONS = f"@{POD_DRAFTERS_ROLE_NAME}"
 CREATE_COMMAND_TEMPLATE = (
     "/create title:{set_code} Pod Draft #{event_number} - {day} "
     "datetime:{day} {clock} ET "
@@ -96,10 +104,11 @@ class UpcomingRelease:
     release_date: date
     code: str
     name: str
+    championship_date: date | None = None
 
 
 UPCOMING_RELEASES: tuple[UpcomingRelease, ...] = (
-    UpcomingRelease(date(2026, 6, 23), "MSH", "Marvel Super Heroes"),
+    UpcomingRelease(date(2026, 6, 23), "MSH", "Marvel Super Heroes", championship_date=date(2026, 6, 13)),
     UpcomingRelease(date(2026, 8, 11), "HOB", "The Hobbit"),
     UpcomingRelease(date(2026, 9, 29), "FRA", "Reality Fracture"),
     UpcomingRelease(date(2026, 11, 10), "TRE", "Star Trek"),
@@ -121,14 +130,22 @@ def next_release_after(day: date) -> UpcomingRelease | None:
 
 
 def monday_kind(monday: date) -> tuple[str, UpcomingRelease | None]:
+    """Classify a week against the next release and the season-closing championship that precedes it.
+
+    Release week wins outright; otherwise the explicit championship date decides — the week holding it
+    is championship week, any week after it (but before release week) is the paused season-over gap.
+    """
     release = next_release_after(monday)
     if release is None:
         return MONDAY_KIND_NORMAL, None
-    days_out = (release.release_date - monday).days
-    if days_out <= 7:
+    if (release.release_date - monday).days <= 7:
         return MONDAY_KIND_RELEASE_WEEK, release
-    if days_out <= 13:
-        return MONDAY_KIND_CHAMPIONSHIP_WEEK, release
+    championship = release.championship_date
+    if championship is not None:
+        if monday <= championship < monday + timedelta(days=7):
+            return MONDAY_KIND_CHAMPIONSHIP_WEEK, release
+        if championship < monday:
+            return MONDAY_KIND_SEASON_OVER, release
     return MONDAY_KIND_NORMAL, None
 
 
@@ -150,7 +167,14 @@ def compose_monday_message(monday: date, set_code: str) -> str:
     if kind == MONDAY_KIND_RELEASE_WEEK:
         return MSG_RELEASE_WEEK.format(set_name=release.name, unix=release_unix(release))
     if kind == MONDAY_KIND_CHAMPIONSHIP_WEEK:
-        return MSG_CHAMPIONSHIP_WEEK.format(set_code=set_code, next_name=release.name, unix=release_unix(release))
+        return MSG_CHAMPIONSHIP_WEEK.format(
+            set_code=set_code,
+            next_name=release.name,
+            champ_unix=championship_unix(release),
+            unix=release_unix(release),
+        )
+    if kind == MONDAY_KIND_SEASON_OVER:
+        return MSG_SEASON_OVER.format(set_code=set_code, next_name=release.name, unix=release_unix(release))
     blurb = monday_blurb(set_code, week_index_for(set_code, monday))
     header = MSG_SCHEDULE_HEADER.format(set_code=set_code)
     slot_lines = []
@@ -161,8 +185,15 @@ def compose_monday_message(monday: date, set_code: str) -> str:
 
 
 def release_unix(release: UpcomingRelease) -> int:
-    release_moment = datetime.combine(release.release_date, time(12, 0), tzinfo=SCHEDULE_TZ)
-    return int(release_moment.timestamp())
+    return _noon_unix(release.release_date)
+
+
+def championship_unix(release: UpcomingRelease) -> int:
+    return _noon_unix(release.championship_date)
+
+
+def _noon_unix(day: date) -> int:
+    return int(datetime.combine(day, time(12, 0), tzinfo=SCHEDULE_TZ).timestamp())
 
 
 def build_create_command(set_code: str, event_number: int, slot_start: datetime) -> str:

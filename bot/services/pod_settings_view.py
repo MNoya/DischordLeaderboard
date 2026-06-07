@@ -13,6 +13,7 @@ from discord import ui
 
 from bot.services.pod_format import format_change_message, settings_notice_marker
 from bot.services.pod_notices import send_settings_notice
+from bot.services.pod_drafts import is_championship
 from bot.services.pod_registration_embed import update_registered_embed
 from bot.services.pod_format_select import SELECT_PLACEHOLDER as FORMAT_PLACEHOLDER
 from bot.services.pod_format_select import format_options
@@ -110,6 +111,7 @@ class PodSettingsView(ui.View):
             set_code=self.current_code or ACTIVE_SET_CODE,
             pairing_mode=self.current_mode,
             seating_mode=self.current_seating,
+            championship=is_championship(self.event_name),
         )
 
 

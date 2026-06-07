@@ -20,7 +20,8 @@ from bot.database import SessionLocal
 from bot.models import PodDraftEvent
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_registration_embed import RegisteredSettingsView, build_registered_embed
-from bot.services.pod_drafts import ParsedSeshEvent, record_event, update_event_time_if_changed
+from bot.services.pod_draft_manager import notify_seeding_change
+from bot.services.pod_drafts import ParsedSeshEvent, is_championship, record_event, update_event_time_if_changed
 from bot.services.sesh_parser import ParsedSeshFields, parse_sesh_embed
 from bot.sets import ACTIVE_SET_CODE
 from bot.tasks.pod_draft_reminder import REMINDER_LEAD_MIN, fire_reminder
@@ -138,7 +139,10 @@ class SeshListener(commands.Cog):
 
         try:
             await thread.send(
-                embed=build_registered_embed(event_row.set_code, event_row.pairing_mode, event_row.seating_mode),
+                embed=build_registered_embed(
+                    event_row.set_code, event_row.pairing_mode, event_row.seating_mode,
+                    championship=is_championship(event_row.name),
+                ),
                 view=RegisteredSettingsView(),
             )
         except discord.HTTPException:
@@ -151,6 +155,7 @@ class SeshListener(commands.Cog):
         if result is None:
             return
         event, needs_reschedule, was_active = result
+        notify_seeding_change(self.bot, event.id)
         if not needs_reschedule:
             return
 

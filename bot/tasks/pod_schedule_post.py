@@ -29,8 +29,8 @@ from bot.services.pod_schedule import (
     MSG_BTN_GOT_IT,
     MSG_BTN_POSTED,
     MSG_BTN_SKIPPED,
-    MSG_CREATE_DM_HEADER,
-    MSG_MONDAY_DM_INTRO,
+    MSG_CREATE_BLOCKS_HEADER,
+    MSG_MONDAY_DRAFT_INTRO,
     SCHEDULE_TZ,
     build_create_command,
     compose_monday_message,
@@ -86,7 +86,7 @@ def init_schedule_post(bot: commands.Bot) -> None:
     )
 
 
-async def fire_monday_dm(monday: date | None = None) -> None:
+async def fire_monday_dm() -> None:
     if _bot is None:
         log.error("fire_monday_dm: bot reference is not initialised")
         return
@@ -94,27 +94,37 @@ async def fire_monday_dm(monday: date | None = None) -> None:
     if owner is None:
         return
 
-    monday = monday or _upcoming_monday()
-    message = compose_monday_message(monday, ACTIVE_SET_CODE)
-    parts = [MSG_MONDAY_DM_INTRO, f"```\n{message}\n```"]
-
-    kind, _ = monday_kind(monday)
-    if kind == MONDAY_KIND_NORMAL:
-        parts.append(MSG_CREATE_DM_HEADER)
-        parts.extend(await _create_command_blocks(monday))
-
+    monday = upcoming_monday()
+    body, view, create_blocks = await build_monday_package(monday)
     try:
-        await owner.send("\n".join(parts), view=PodMondayView(monday))
-        log.info(f"monday schedule DM sent for {monday.isoformat()} ({kind})")
+        await owner.send(body, view=view)
+        if create_blocks is not None:
+            await owner.send(create_blocks)
+        log.info(f"monday schedule DM sent for {monday.isoformat()}")
     except discord.HTTPException:
         log.warning("could not DM the monday schedule draft to owner", exc_info=True)
+
+
+async def build_monday_package(monday: date) -> tuple[str, "PodMondayView", str | None]:
+    """Render the draft the Monday DM and /pod-schedule share.
+
+    The paste-ready message and its buttons come first; the Sesh /create blocks are a separate
+    aide unrelated to the post, returned as a standalone follow-up (None on boundary weeks).
+    """
+    message = compose_monday_message(monday, ACTIVE_SET_CODE)
+    body = f"{MSG_MONDAY_DRAFT_INTRO}\n```\n{message}\n```"
+    create_blocks = None
+    if monday_kind(monday)[0] == MONDAY_KIND_NORMAL:
+        blocks = await _create_command_blocks(monday)
+        create_blocks = "\n".join([MSG_CREATE_BLOCKS_HEADER, *blocks])
+    return body, PodMondayView(monday), create_blocks
 
 
 async def fire_fallback_post() -> None:
     if _bot is None:
         log.error("fire_fallback_post: bot reference is not initialised")
         return
-    monday = _upcoming_monday()
+    monday = upcoming_monday()
     status = _week_status.get(monday.isoformat())
     if status is not None:
         log.info(f"fallback post for {monday.isoformat()}: week already {status}; standing down")
@@ -130,7 +140,7 @@ class PodMondayView(discord.ui.View):
         self._monday = monday
 
     def _week(self) -> date:
-        return self._monday or _upcoming_monday()
+        return self._monday or upcoming_monday()
 
     @discord.ui.button(label=BTN_POST_FOR_ME, style=discord.ButtonStyle.primary, custom_id="pod-monday-post")
     async def post_for_me(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -161,7 +171,7 @@ async def _post_default_if_needed(monday: date | None = None) -> bool:
         log.info("schedule already posted in the coordination channel; standing down")
         return False
 
-    monday = monday or _upcoming_monday()
+    monday = monday or upcoming_monday()
     body = compose_monday_message(monday, ACTIVE_SET_CODE)
     message = await channel.send(body)
     kind, _ = monday_kind(monday)
@@ -175,7 +185,7 @@ async def _post_default_if_needed(monday: date | None = None) -> bool:
 
 
 async def _schedule_already_posted(channel: discord.abc.Messageable) -> bool:
-    since = datetime.combine(_upcoming_monday(), time(MONDAY_DM_HOUR_ET, 0), tzinfo=SCHEDULE_TZ)
+    since = datetime.combine(upcoming_monday(), time(MONDAY_DM_HOUR_ET, 0), tzinfo=SCHEDULE_TZ)
     poster_ids = {_bot.owner_id, _bot.user.id if _bot.user else None}
     try:
         async for message in channel.history(after=since, limit=50):
@@ -225,6 +235,6 @@ def _count_set_events() -> int:
         return count or 0
 
 
-def _upcoming_monday() -> date:
+def upcoming_monday() -> date:
     today = datetime.now(SCHEDULE_TZ).date()
     return today + timedelta(days=(7 - today.weekday()) % 7)

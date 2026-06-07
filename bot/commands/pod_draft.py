@@ -24,6 +24,7 @@ from bot.services.pod_draft_manager import (
     set_event_pairing_mode,
     set_event_seating,
     set_event_seating_mode,
+    set_seeding_refresh_hook,
 )
 from bot.services.pod_drafts import (
     load_event_id_by_name_sync,
@@ -37,7 +38,7 @@ from bot.services.pod_drafts import (
     normalize_player_name,
     search_event_names_sync,
 )
-from bot.services.player_stats import SeededAttendee, seed_attendees, seated_ring_order
+from bot.services.player_stats import SeededAttendee, rank_ordered_names, seed_attendees, seated_ring_order
 from bot.services.pod_seating_select import SEATING_ORDER_MARKER, seating_change_message
 from bot.services.pod_seating_image import drop_unrenderable, render_octagon_png
 from bot.sets import ACTIVE_SET_CODE
@@ -63,6 +64,11 @@ MAYBE_EMOJI = "🤷"
 CHAMPIONSHIP_CUT = 8
 SEEDING_YES_HEADER = f"**{YES_EMOJI} Yes ("
 SEEDING_MAYBE_HEADER = f"**{MAYBE_EMOJI} Maybe ("
+
+SEEDING_PHASE_PROJECTED = f"🔮 **Projected** - Players ranked by {ACTIVE_SET_CODE} Leaderboard"
+SEEDING_PHASE_LIVE = "🟢 **Live** - On Draftmancer"
+SEEDING_CUT_ALTERNATES = "Alternates"
+SEEDING_CUT_OVER_CAP = "Past the cut"
 
 MSG_SEEDING_NOT_POD_THREAD = "Run this inside a pod-draft thread."
 MSG_SEEDING_NO_SESH = "Couldn't read the sesh post for this pod — it may have been deleted."
@@ -385,21 +391,28 @@ def _seed_rsvps(
         return seed_attendees(session, yes), seed_attendees(session, maybe)
 
 
+def _rank_ordered_names_sync(names: list[str]) -> list[str]:
+    with SessionLocal() as session:
+        return rank_ordered_names(session, names)
+
+
 def build_seeding_image_message_from_names(
     yes: list[str], maybe: list[str] | None = None, *, seat_cap: int = CHAMPIONSHIP_CUT,
+    header: str | None = None, cut_label: str | None = None,
 ) -> tuple[discord.File | None, discord.Embed]:
     """Seed RSVP-style name lists and render the seeding message: the table embed with the round-table
     octagon as a PNG inside it. Shared by /pod-seeding, the Leaderboard-seats trigger, and the testlobby
     preview. `seat_cap` bounds how many seeds fill the seats: top-8 when Leaderboard seats decide the
     pod, the pod maximum otherwise. File is None for non-8 pods (the embed still stands alone)."""
     yes_seeded, maybe_seeded = _seed_rsvps(yes, list(maybe or []))
-    embed = _build_seeding_embed(yes_seeded, maybe_seeded, seat_cap=seat_cap)
+    embed = _build_seeding_embed(yes_seeded, maybe_seeded, seat_cap=seat_cap, header=header, cut_label=cut_label)
     file = _build_seeding_image(yes_seeded, embed, seat_cap=seat_cap)
     return file, embed
 
 
 def build_seeding_image_message_for_pool(
     pool: list[str], overflow: list[str], maybe: list[str],
+    *, header: str | None = None, cut_label: str | None = None,
 ) -> tuple[discord.File | None, discord.Embed]:
     """Seeding message where `pool` holds the table regardless of rank: pool and overflow are seeded
     separately so a high seed who only RSVP'd can't displace a locked Draftmancer player."""
@@ -408,7 +421,8 @@ def build_seeding_image_message_for_pool(
         overflow_seeded = seed_attendees(session, overflow)
         maybe_seeded = seed_attendees(session, maybe)
     yes_seeded = pool_seeded + overflow_seeded
-    embed = _build_seeding_embed(yes_seeded, maybe_seeded, seat_cap=CHAMPIONSHIP_CUT)
+    embed = _build_seeding_embed(
+        yes_seeded, maybe_seeded, seat_cap=CHAMPIONSHIP_CUT, header=header, cut_label=cut_label)
     file = _build_seeding_image(yes_seeded, embed, seat_cap=CHAMPIONSHIP_CUT)
     return file, embed
 
@@ -441,18 +455,24 @@ def _build_seeding_image(
 
 def _build_seeding_embed(
     yes: list[SeededAttendee], maybe: list[SeededAttendee], *, seat_cap: int,
+    header: str | None = None, cut_label: str | None = None,
 ) -> discord.Embed:
     """Seeding embed shared by /pod-seeding and the Leaderboard-seats trigger. The Yes list is seated by
     rank (the top seat_cap fill the ring); Maybe is listed without seats. The round-table octagon is
     attached as a PNG image (see _build_seeding_image) — embed code blocks wrap too narrowly for the
-    text version."""
+    text version. `header` prepends a phase line; `cut_label` titles the below-cut group."""
     parts: list[str] = []
+    if header:
+        parts.append(header)
     if yes:
         cut = seat_cap if len(yes) > seat_cap else None
         ring = seated_ring_order(yes[:seat_cap])
         seat_of = {id(a): i + 1 for i, a in enumerate(ring)}
         yes_seats = [seat_of.get(id(a)) for a in yes]
-        parts.append(f"{SEEDING_YES_HEADER}{len(yes)})**\n" + _seeding_block(yes, seats=yes_seats, cut_after=cut))
+        parts.append(
+            f"{SEEDING_YES_HEADER}{len(yes)})**\n"
+            + _seeding_block(yes, seats=yes_seats, cut_after=cut, cut_label=cut_label)
+        )
     if maybe:
         parts.append(f"{SEEDING_MAYBE_HEADER}{len(maybe)})**\n" + _seeding_block(maybe))
     return discord.Embed(description="\n\n".join(parts), color=discord.Color.gold())
@@ -480,7 +500,7 @@ SEEDING_COLS = (
 
 def _seeding_block(
     attendees: list[SeededAttendee], *, seats: list[int | None] | None = None,
-    cut_after: int | None = None, lead_label: str = "🪑",
+    cut_after: int | None = None, cut_label: str | None = None, lead_label: str = "🪑",
 ) -> str:
     """Inline-code rows (monospace) linked to each player's page, same trick /leaderboard uses. With
     `seats` (aligned with `attendees`) a leading seat column is shown, blank for anyone past the pod
@@ -513,6 +533,8 @@ def _seeding_block(
     for i, a in enumerate(attendees):
         if cut_after is not None and i == cut_after:
             lines.append(f"`{'─' * display_width(header_line)}`")
+            if cut_label:
+                lines.append(f"**{cut_label}**")
         inner = line(leads[i] if numbered else "", row_cells[i])
         if a.slug:
             lines.append(f"[`{inner}`](<{player_url(a.slug, ACTIVE_SET_CODE)}>)")
@@ -706,12 +728,16 @@ async def seating_message_for_event(bot, event_id: str) -> tuple[discord.File | 
     rsvps = await fetch_sesh_rsvps(bot, sesh_message_id) if sesh_message_id else None
     yes, maybe = rsvps if rsvps else ([], [])
     locked, locked_keys = await _locked_table_names(event_id)
+    yes = await asyncio.to_thread(_rank_ordered_names_sync, yes)
     pool, overflow = _seating_pool(locked, locked_keys, yes)
     if not pool and not maybe:
         return None, None
     pooled = {n.casefold() for n in pool} | {n.casefold() for n in overflow} | locked_keys
     maybe = [n for n in maybe if n.casefold() not in pooled]
-    return await asyncio.to_thread(build_seeding_image_message_for_pool, pool, overflow, maybe)
+    header = SEEDING_PHASE_LIVE if locked else SEEDING_PHASE_PROJECTED
+    cut_label = SEEDING_CUT_OVER_CAP if locked else SEEDING_CUT_ALTERNATES
+    return await asyncio.to_thread(
+        build_seeding_image_message_for_pool, pool, overflow, maybe, header=header, cut_label=cut_label)
 
 
 async def _locked_table_names(event_id: str) -> tuple[list[str], set[str]]:
@@ -751,6 +777,52 @@ async def post_seeding_table(bot, event_id: str, channel) -> None:
     if embed is None or channel is None:
         return
     await post_table(bot, channel, file, embed)
+
+
+async def refresh_seeding_table(bot, event_id: str) -> None:
+    """Edit the already-posted leaderboard seeding table in place to track the current pool. No-op when
+    none has been posted, or when the pod isn't on leaderboard seats. Fires on Draftmancer joins/leaves
+    (live phase) and on sesh RSVP edits (projected phase) — never creates a table, only updates one."""
+    seating_mode = await asyncio.to_thread(load_event_seating_mode_sync, event_id)
+    if seating_mode != "leaderboard":
+        return
+    thread_id = await asyncio.to_thread(load_event_thread_id_sync, event_id)
+    if thread_id is None:
+        return
+    channel = bot.get_channel(int(thread_id))
+    if channel is None:
+        try:
+            channel = await bot.fetch_channel(int(thread_id))
+        except discord.HTTPException:
+            return
+    existing = await _find_seeding_message(channel, bot.user)
+    if existing is None:
+        return
+    file, embed = await seating_message_for_event(bot, event_id)
+    if embed is None:
+        return
+    try:
+        await existing.edit(embed=embed, attachments=[file] if file else [])
+    except discord.HTTPException:
+        log.warning("could not refresh the seeding table in place", exc_info=True)
+
+
+async def _find_seeding_message(channel, bot_user) -> discord.Message | None:
+    """The most recent bot-posted seeding table in the channel, identified by its embed headers."""
+    if bot_user is None or not isinstance(channel, (discord.Thread, discord.TextChannel)):
+        return None
+    try:
+        async for message in channel.history(limit=50):
+            if message.author.id != bot_user.id:
+                continue
+            if any(
+                SEEDING_YES_HEADER in (e.description or "") or SEEDING_MAYBE_HEADER in (e.description or "")
+                for e in message.embeds
+            ):
+                return message
+    except discord.HTTPException:
+        log.warning("could not scan for an existing seeding table", exc_info=True)
+    return None
 
 
 def build_manual_seating_image(labels: list[str]) -> discord.File | None:
@@ -805,4 +877,5 @@ def _find_manager_for_thread(interaction: discord.Interaction):
 
 
 async def setup(bot: commands.Bot) -> None:
+    set_seeding_refresh_hook(refresh_seeding_table)
     await bot.add_cog(PodDraft(bot))

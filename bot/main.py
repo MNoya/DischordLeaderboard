@@ -27,6 +27,7 @@ from bot.commands.leaderboard import (
 )
 from bot.commands.pod_backfill import setup as setup_pod_backfill
 from bot.commands.pod_draft import setup as setup_pod_draft
+from bot.commands.pod_schedule import setup as setup_pod_schedule
 from bot.commands.preview_season_awards import setup as setup_preview_season_awards
 from bot.commands.signout import setup as setup_signout
 from bot.commands.signup import setup as setup_signup
@@ -37,6 +38,7 @@ from bot.discord_helpers import refresh_player_profiles
 from bot import emojis
 from bot.commands.test_group import setup as setup_test_group
 from bot.commands.testawards import setup as setup_testawards
+from bot.commands.testchampionship import setup as setup_testchampionship
 from bot.commands.testcomponent import setup as setup_testcomponent
 from bot.commands.testlobby import setup as setup_testlobby
 from bot.commands.testschedule import setup as setup_testschedule
@@ -156,6 +158,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_leaderboard_visibility(bot)
         await setup_pod_draft(bot)
         await setup_pod_backfill(bot)
+        await setup_pod_schedule(bot)
         await setup_preview_season_awards(bot)
         await setup_sesh_listener(bot)
         await setup_pod_screenshots(bot)
@@ -165,6 +168,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_testcomponent(bot)
         await setup_testawards(bot)
         await setup_testschedule(bot)
+        await setup_testchampionship(bot)
         reschedule_pending_events(bot)
         register_pod_views(bot)
         _log_startup_summary()

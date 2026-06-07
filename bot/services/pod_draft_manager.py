@@ -61,6 +61,22 @@ _READY_DEBOUNCE_S = 2.0
 _ARENA_SUFFIX_RE = re.compile(r"#\d+$")
 _AI_BOT_NAME_RE = re.compile(r"^Bot #\d+$")
 
+_SEEDING_REFRESH_HOOK = None
+
+
+def set_seeding_refresh_hook(callback) -> None:
+    """The command layer registers its seeding-table refresher here so the manager and the sesh listener
+    can update the posted table without importing the command module (which imports the manager)."""
+    global _SEEDING_REFRESH_HOOK
+    _SEEDING_REFRESH_HOOK = callback
+
+
+def notify_seeding_change(bot, event_id: str) -> None:
+    """Fire the registered seeding-table refresh (no-op if unset). Called on Draftmancer join/leave and
+    on sesh RSVP edits; the refresher itself decides whether a table exists and the pod is leaderboard-seated."""
+    if _SEEDING_REFRESH_HOOK is not None:
+        asyncio.create_task(_SEEDING_REFRESH_HOOK(bot, event_id))
+
 
 class PodDraftManager:
     def __init__(self, bot: commands.Bot, event_id: str, session_id: str, thread_id: int,
@@ -234,8 +250,10 @@ class PodDraftManager:
         classified = await self._classify_users(non_bot_names) if non_bot_names else []
         await self._refresh_lobby_status(classified)
 
-        if self.seating_mode == "leaderboard" and self.owner_claimed:
-            asyncio.create_task(self._apply_leaderboard_seating())
+        if self.seating_mode == "leaderboard":
+            if self.owner_claimed:
+                asyncio.create_task(self._apply_leaderboard_seating())
+            notify_seeding_change(self.bot, self.event_id)
 
         if self.ready_check_active:
             current = {u.get("userID") for u in self.session_users if u.get("userName") != _BOT_USER_NAME}

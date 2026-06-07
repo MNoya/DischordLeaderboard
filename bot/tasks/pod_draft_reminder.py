@@ -6,6 +6,8 @@ best-effort basis, and posts the Draftmancer link in the event thread
 from __future__ import annotations
 
 import logging
+import re
+from collections.abc import Sequence
 
 import discord
 from discord.ext import commands
@@ -137,13 +139,44 @@ async def fetch_sesh_rsvps(bot: commands.Bot, sesh_message_id: int | str) -> tup
     for embed in message.embeds:
         parsed = parse_sesh_embed(embed)
         if parsed is not None:
-            return list(parsed.attendees), list(parsed.maybe_attendees)
+            yes = await _resolve_attendee_names(message.guild, parsed.attendees)
+            maybe = await _resolve_attendee_names(message.guild, parsed.maybe_attendees)
+            return yes, maybe
     return [], []
 
 
 async def _refetch_attendees(sesh_message_id: int) -> tuple[list[str], list[str]]:
     """Re-fetch the sesh embed for the latest Yes / Maybe RSVPs. Returns (yes, maybe)."""
     return await fetch_sesh_rsvps(_bot, sesh_message_id) or ([], [])
+
+
+MENTION_RE = re.compile(r"^<@!?(\d+)>$")
+
+
+async def _resolve_attendee_names(guild: discord.Guild | None, attendees: Sequence[str]) -> list[str]:
+    """Turn raw <@id> sesh attendee tokens into member display names so they rank and dedup like
+    plain-name RSVPs; non-mention entries and unresolvable ids pass through untouched."""
+    resolved: list[str] = []
+    for name in attendees:
+        member = await _member_from_mention(guild, name)
+        resolved.append(member.display_name if member else name)
+    return resolved
+
+
+async def _member_from_mention(guild: discord.Guild | None, token: str) -> discord.Member | None:
+    if guild is None:
+        return None
+    match = MENTION_RE.match(token)
+    if match is None:
+        return None
+    user_id = int(match.group(1))
+    member = guild.get_member(user_id)
+    if member is not None:
+        return member
+    try:
+        return await guild.fetch_member(user_id)
+    except discord.HTTPException:
+        return None
 
 
 async def _resolve_mentions(guild: discord.Guild | None, attendees: list[str]) -> str:

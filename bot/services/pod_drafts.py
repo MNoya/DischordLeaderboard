@@ -63,6 +63,11 @@ class FinalStanding:
     eliminated_round: int | None
 
 
+def is_championship(name: str | None) -> bool:
+    """The season-closing Set Championship pod, recognized by its event name."""
+    return bool(name) and "championship" in name.lower()
+
+
 def _lookup_set_id(session: Session, set_code: str) -> str | None:
     return session.execute(
         select(MagicSet.id).where(func.upper(MagicSet.code) == set_code.upper())
@@ -72,7 +77,8 @@ def _lookup_set_id(session: Session, set_code: str) -> str | None:
 def _build_draftmancer_session(session: Session, parsed: ParsedSeshEvent) -> str:
     """Compose a stable session id; prefer #N from the title, fall back to Month-Day; suffix collisions A/B/C.
 
-    Custom formats drop the LLU prefix and lead with their own slug instead of a set code.
+    Custom formats drop the LLU prefix and lead with their own slug instead of a set code. The Set
+    Championship gets a fixed `-Championship` base so its lobby URL stays clean across re-creates.
     """
     slug = pod_format.session_slug_for(parsed.set_code)
     if slug is not None:
@@ -80,7 +86,9 @@ def _build_draftmancer_session(session: Session, parsed: ParsedSeshEvent) -> str
     else:
         head = f"{settings.pod_draft_session_prefix}-{parsed.set_code}"
 
-    if parsed.event_number is not None:
+    if is_championship(parsed.name):
+        base = f"{head}-Championship"
+    elif parsed.event_number is not None:
         suffix = f"D{parsed.event_number}" if slug is not None else str(parsed.event_number)
         base = f"{head}-{suffix}"
     else:
@@ -212,6 +220,8 @@ def record_event(session: Session, parsed: ParsedSeshEvent) -> PodDraftEvent:
         socket_status="pending",
         discord_event_id=parsed.discord_event_id,
     )
+    if is_championship(parsed.name):
+        event.seating_mode = "leaderboard"
     session.add(event)
     session.flush()
 

@@ -17,7 +17,7 @@ from discord.ext import commands
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.models import PodDraftEvent
-from bot.services.pod_schedule import build_underfill_message
+from bot.services.pod_schedule import POD_DRAFTERS_ROLE_NAME, build_underfill_message
 from bot.tasks.pod_draft_reminder import fetch_sesh_rsvps
 
 
@@ -91,12 +91,21 @@ async def fire_underfill(event_id: str, hours_before: int) -> None:
         return
 
     jump_url = _sesh_jump_url(sesh_message_id)
-    body = build_underfill_message(settings.pod_drafters_role_id, len(yes_attendees), target, event_time, jump_url)
+    role_id = pod_drafters_role_id(channel.guild)
+    body = build_underfill_message(role_id, len(yes_attendees), target, event_time, jump_url)
     try:
         await channel.send(body, allowed_mentions=discord.AllowedMentions(roles=True))
         log.info(f"T-{hours_before}h underfill reminder posted for {event_id}: {len(yes_attendees)}/{target} Yes")
     except discord.HTTPException:
         log.warning(f"fire_underfill: could not post reminder for {event_id}", exc_info=True)
+
+
+def pod_drafters_role_id(guild: discord.Guild | None) -> int | None:
+    """Resolve the @Pod Drafters role to its id for pinging; None when the guild has no such role."""
+    if guild is None:
+        return None
+    role = discord.utils.get(guild.roles, name=POD_DRAFTERS_ROLE_NAME)
+    return role.id if role is not None else None
 
 
 def _sesh_jump_url(sesh_message_id: str) -> str:

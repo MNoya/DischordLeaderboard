@@ -252,12 +252,11 @@ def seated_ring_order(ranked: Sequence) -> list:
     return ring
 
 
-def leaderboard_seat_order(session: Session, names: Sequence[str]) -> list[str]:
-    """Order the present Draftmancer userNames into the seeded ring by active-set leaderboard rank.
+def rank_ordered_names(session: Session, names: Sequence[str]) -> list[str]:
+    """The given names sorted by active-set leaderboard rank, best first, unranked trailing by name.
 
-    Ranked players sort by standing; unranked ones (unlinked, opted out, no score, or an unresolvable
-    handle) fall to the bottom seeds, tie-broken by name — same treatment as `/pod-seeding`. Returns the
-    original userNames in seat order (seat 0 first), ready to map to Draftmancer userIDs for setSeating.
+    Unranked players (unlinked, opted out, no score, or an unresolvable handle) fall to the end —
+    same treatment as `/pod-seeding`. Returns the original names, just reordered.
     """
     set_id = session.execute(
         select(MagicSet.id).where(MagicSet.code == ACTIVE_SET_CODE)
@@ -270,8 +269,16 @@ def leaderboard_seat_order(session: Session, names: Sequence[str]) -> list[str]:
         rank = ranks.get(player.id) if player is not None else None
         return (rank is None, rank or 0, name.lower())
 
-    ordered = sorted(resolved, key=sort_key)
-    return seated_ring_order([name for name, _ in ordered])
+    return [name for name, _ in sorted(resolved, key=sort_key)]
+
+
+def leaderboard_seat_order(session: Session, names: Sequence[str]) -> list[str]:
+    """The given names in seeded-ring seat order (seat 0 first) by active-set leaderboard rank.
+
+    Rank order best-first via `rank_ordered_names`, then mapped onto the seat ring — ready to map to
+    Draftmancer userIDs for setSeating.
+    """
+    return seated_ring_order(rank_ordered_names(session, names))
 
 
 def _stats_by_player(session: Session, set_id: str) -> dict[str, list[dict]]:

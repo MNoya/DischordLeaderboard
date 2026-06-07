@@ -7,6 +7,7 @@ from bot.services.pod_schedule import (
     MONDAY_KIND_CHAMPIONSHIP_WEEK,
     MONDAY_KIND_NORMAL,
     MONDAY_KIND_RELEASE_WEEK,
+    MONDAY_KIND_SEASON_OVER,
     SCHEDULE_TZ,
     build_create_command,
     build_underfill_message,
@@ -40,8 +41,9 @@ def test_slots_for_week_tracks_dst_end():
 @pytest.mark.parametrize(
     ("monday", "expected_kind", "expected_code"),
     [
-        (date(2026, 6, 8), MONDAY_KIND_NORMAL, None),
-        (date(2026, 6, 15), MONDAY_KIND_CHAMPIONSHIP_WEEK, "MSH"),
+        (date(2026, 6, 1), MONDAY_KIND_NORMAL, None),
+        (date(2026, 6, 8), MONDAY_KIND_CHAMPIONSHIP_WEEK, "MSH"),
+        (date(2026, 6, 15), MONDAY_KIND_SEASON_OVER, "MSH"),
         (date(2026, 6, 22), MONDAY_KIND_RELEASE_WEEK, "MSH"),
         (date(2026, 6, 29), MONDAY_KIND_NORMAL, None),
         (date(2026, 8, 10), MONDAY_KIND_RELEASE_WEEK, "HOB"),
@@ -75,7 +77,7 @@ def test_monday_blurbs_fall_back_to_generic_and_wrap():
 
 
 def test_compose_monday_message_normal_week_opens_with_the_blurb_and_lists_both_slots():
-    monday = date(2026, 6, 8)
+    monday = date(2026, 6, 1)
 
     message = compose_monday_message(monday, "SOS")
 
@@ -97,10 +99,21 @@ def test_compose_monday_message_release_week_counts_down_to_the_drop():
 
 
 def test_compose_monday_message_championship_week_names_both_sets():
-    message = compose_monday_message(date(2026, 6, 15), "SOS")
+    message = compose_monday_message(date(2026, 6, 8), "SOS")
 
     assert "SOS" in message
     assert "Marvel Super Heroes" in message
+
+
+def test_compose_monday_message_season_over_counts_down_to_the_next_drop():
+    monday = date(2026, 6, 15)
+
+    message = compose_monday_message(monday, "SOS")
+
+    release = next_release_after(monday)
+    assert "SOS" in message
+    assert release.name in message
+    assert str(release_unix(release)) in message
 
 
 def test_build_create_command_interpolates_event_data():

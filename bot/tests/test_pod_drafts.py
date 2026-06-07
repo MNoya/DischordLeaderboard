@@ -12,6 +12,7 @@ from bot.services.pod_drafts import (
     capture_deck_screenshot,
     finalize_champion,
     get_participant_deck_state,
+    is_championship,
     list_champions,
     participant_dm_info,
     pod_summary_by_set_for_player,
@@ -45,13 +46,14 @@ def _seed_player(session, discord_id="111", username="alice", display_name="Alic
     return p
 
 
-def _parsed_event(set_code="SOS", event_date=date(2026, 5, 13), attendees=("Alice", "Bob", "Carl"), event_number=None):
+def _parsed_event(set_code="SOS", event_date=date(2026, 5, 13), attendees=("Alice", "Bob", "Carl"),
+                  event_number=None, name=None):
     return ParsedSeshEvent(
         event_date=event_date,
         event_time=datetime(event_date.year, event_date.month, event_date.day, 0, 0, tzinfo=timezone.utc),
         set_code=set_code,
         event_number=event_number,
-        name=f"{set_code} Pod Draft — {event_date:%b %d}",
+        name=name or f"{set_code} Pod Draft — {event_date:%b %d}",
         attendees=list(attendees),
         sesh_message_id=f"msg-{event_date.isoformat()}-{event_number}",
         discord_thread_id=f"thread-{event_date.isoformat()}-{event_number}",
@@ -86,6 +88,36 @@ def test_record_event_same_day_collision_appends_letter_suffix(session, monkeypa
     assert e1.draftmancer_session == "LLU-SOS-May-13"
     assert e2.draftmancer_session == "LLU-SOS-May-13-A"
     assert e3.draftmancer_session == "LLU-SOS-May-13-B"
+
+
+def test_is_championship_detects_name_case_insensitively():
+    assert is_championship("SOS Dischord Community Championship Pod Draft")
+    assert is_championship("set CHAMPIONSHIP")
+
+    assert not is_championship("SOS Pod Draft #14")
+    assert not is_championship("")
+    assert not is_championship(None)
+
+
+def test_record_event_championship_uses_fixed_session_and_leaderboard_seats(session, monkeypatch):
+    monkeypatch.setattr(settings, "pod_draft_session_prefix", "LLU")
+    _seed_set(session)
+
+    event = record_event(session, _parsed_event(attendees=(), name="SOS Community Championship Pod Draft"))
+
+    assert event.draftmancer_session == "LLU-SOS-Championship"
+    assert event.seating_mode == "leaderboard"
+
+
+def test_record_event_championship_session_collision_appends_suffix(session, monkeypatch):
+    monkeypatch.setattr(settings, "pod_draft_session_prefix", "LLU")
+    _seed_set(session)
+
+    e1 = record_event(session, _parsed_event(attendees=(), name="SOS Championship"))
+    e2 = record_event(session, _parsed_event(attendees=(), name="SOS Championship"))
+
+    assert e1.draftmancer_session == "LLU-SOS-Championship"
+    assert e2.draftmancer_session == "LLU-SOS-Championship-A"
 
 
 def test_record_event_with_event_number_uses_n_in_session(session, monkeypatch):

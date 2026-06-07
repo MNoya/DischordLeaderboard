@@ -50,6 +50,7 @@ POD_HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
     ("⚙️ Admin", [
         ("/pod-champion", desc.POD_CHAMPION.removeprefix("[Admin] ")),
         ("/pod-backfill", desc.POD_BACKFILL.removeprefix("[Admin] ")),
+        ("/pod-schedule", desc.POD_SCHEDULE.removeprefix("[Admin] ")),
     ]),
 ]
 

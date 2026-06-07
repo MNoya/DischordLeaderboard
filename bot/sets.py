@@ -110,3 +110,12 @@ EXPANSION_ALIASES: dict[str, str] = {
 
 def normalize_expansion(expansion: str) -> str:
     return EXPANSION_ALIASES.get(expansion, expansion)
+
+
+def set_name_for(code: str) -> str:
+    """Full set name for a code (e.g. SOS -> "Secrets of Strixhaven"); the bare code if unknown."""
+    upper = code.upper()
+    for s in ALL_SETS:
+        if s.code == upper:
+            return s.name
+    return upper
