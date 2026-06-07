@@ -2565,16 +2565,22 @@ def _load_unannounced_finalized_sync() -> list[tuple[str, str]]:
         ]
 
 
+async def post_championship_for_event(bot, event_id: str, thread_id: str | int) -> bool:
+    """Post the championship announcement for a finalized event with no live manager (restart sweep,
+    /pod-backfill). Idempotent via the championship_posted_at DB guard."""
+    players = await asyncio.to_thread(_load_tournament_players_sync, event_id)
+    shim = _RecoveryManager(bot, event_id, int(thread_id), players)
+    await maybe_post_championship(shim, force=True)
+    return shim.champion_announced
+
+
 async def reconcile_unannounced_championships(bot) -> None:
     """Startup sweep: post the championship for any recently-finalized pod whose one-time announcement
     never went out (e.g. the bot restarted between finalize and post). Idempotent via the DB guard."""
     rows = await asyncio.to_thread(_load_unannounced_finalized_sync)
     posted = 0
     for event_id, thread_id in rows:
-        players = await asyncio.to_thread(_load_tournament_players_sync, event_id)
-        shim = _RecoveryManager(bot, event_id, int(thread_id), players)
-        await maybe_post_championship(shim, force=True)
-        if shim.champion_announced:
+        if await post_championship_for_event(bot, event_id, thread_id):
             posted += 1
     if posted:
         log.info(f"startup sweep reconciled {posted} unannounced championship(s)")

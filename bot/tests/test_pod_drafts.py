@@ -552,7 +552,7 @@ def test_set_participant_review_choice_rejects_non_participant(session):
 
 
 def test_apply_mainboards_writes_when_decklist_present_and_skips_others(session):
-    from bot.services.pod_draft_manager import _apply_mainboards
+    from bot.services.pod_draft_manager import apply_mainboards
 
     _seed_set(session)
     event = record_event(session, _parsed_event(attendees=("Alice", "Bob", "Carl", "Dee")))
@@ -572,7 +572,7 @@ def test_apply_mainboards_writes_when_decklist_present_and_skips_others(session)
             "u6": {"userName": "Bot #1",      "decklist": {"main": ["junk"]}},
         },
     }
-    _apply_mainboards(session, event.id, log_payload)
+    apply_mainboards(session, event.id, log_payload)
     session.flush()
 
     by_name = {

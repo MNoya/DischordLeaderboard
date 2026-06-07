@@ -753,8 +753,8 @@ class PodDraftManager:
                     log.warning(f"[DRAFT] persist.event_missing event={self.event_id}")
                     return
                 event.draft_log_gz = blob
-                _apply_seat_indexes(session, self.event_id, compact.get("seats") or [])
-                _apply_mainboards(session, self.event_id, log_payload)
+                apply_seat_indexes(session, self.event_id, compact.get("seats") or [])
+                apply_mainboards(session, self.event_id, log_payload)
                 session.commit()
                 log.info(f"[DRAFT] persist.done event={self.event_id} bytes={len(blob)}")
         except Exception:
@@ -787,7 +787,7 @@ class PodDraftManager:
         if not any(seats):
             return False
         with SessionLocal() as session:
-            _apply_seat_indexes(session, self.event_id, seats)
+            apply_seat_indexes(session, self.event_id, seats)
             session.commit()
         return True
 
@@ -1133,7 +1133,7 @@ class PodDraftManager:
             tag="DRAFT",
         )
 
-def _apply_mainboards(session, event_id: str, log_payload: dict) -> None:
+def apply_mainboards(session, event_id: str, log_payload: dict) -> None:
     users = log_payload.get("users")
     if not isinstance(users, dict):
         return
@@ -1170,7 +1170,7 @@ def _apply_mainboards(session, event_id: str, log_payload: dict) -> None:
     log.info(f"mainboard: applied to {matched} seats for {event_id}")
 
 
-def _apply_seat_indexes(session, event_id: str, seats: list[str]) -> None:
+def apply_seat_indexes(session, event_id: str, seats: list[str]) -> None:
     if not seats:
         return
     rows = session.execute(
