@@ -1,4 +1,4 @@
-"""Owner-only `!testcomponent` — PoC of a Components V2 champion announcement.
+"""Owner-only `!test component` — PoC of a Components V2 champion announcement.
 
 Components V2 is opt-in per-message via MessageFlags.components_v2 (32768). When set, the message
 can't use traditional `content=` or `embeds=` — everything lives in `view=` as typed components
@@ -18,6 +18,7 @@ from discord import ui
 from discord.ext import commands
 
 from bot import emojis
+from bot.commands.test_group import test_group
 
 
 log = logging.getLogger(__name__)
@@ -129,7 +130,7 @@ def _build_champion_view() -> ui.LayoutView:
 
 
 async def setup(bot: commands.Bot) -> None:
-    @bot.command(name="testcomponent")
+    @test_group.command(name="component")
     @commands.is_owner()
     async def test_component(ctx: commands.Context) -> None:
         """Owner-only. Post a hardcoded Components V2 sample announcement in this channel."""

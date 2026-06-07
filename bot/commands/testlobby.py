@@ -35,6 +35,7 @@ from bot.services.pod_pairing_select import pairing_label
 from bot.services.pod_seating_select import seating_mode_label
 from bot.services.player_stats import rank_players_for_set
 from bot.commands.pod_draft import build_seeding_image_message_from_names, post_manual_seating_table, post_table
+from bot.commands.test_group import register_test_fallback
 from bot.services.pod_format_select import FormatSelectView
 from bot.services.pod_settings_view import PodSettingsView
 from bot.services.pod_drafts import normalize_player_name
@@ -504,11 +505,9 @@ def _settings_preview_view() -> PodSettingsView:
 
 
 async def setup(bot: commands.Bot) -> None:
-    """Wire the `!test` command and register the settings preview."""
+    """Wire the lobby states as the `!test` fallback and register the settings preview."""
     register_settings_preview(_settings_preview_view)
 
-    @bot.command(name="test")
-    @commands.is_owner()
     async def test_lobby(ctx: commands.Context, state: str = "", extra: str = "") -> None:
         """Owner-only. Render the pod-draft lobby embed in this channel.
 
@@ -574,3 +573,5 @@ async def setup(bot: commands.Bot) -> None:
         msg = await ctx.send(embed=embed, view=view)
         _LAST_MESSAGE[ctx.channel.id] = msg
         await _sync_progress_cards(ctx.channel, progress)
+
+    register_test_fallback(test_lobby)

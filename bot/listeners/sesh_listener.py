@@ -24,6 +24,7 @@ from bot.services.pod_drafts import ParsedSeshEvent, record_event, update_event_
 from bot.services.sesh_parser import ParsedSeshFields, parse_sesh_embed
 from bot.sets import ACTIVE_SET_CODE
 from bot.tasks.pod_draft_reminder import REMINDER_LEAD_MIN, fire_reminder
+from bot.tasks.pod_underfill import schedule_underfill_checks
 
 
 log = logging.getLogger(__name__)
@@ -133,6 +134,7 @@ class SeshListener(commands.Cog):
             log.warning(f"could not join thread {thread.id}", exc_info=True)
 
         self._schedule_reminder(event_row.id, event_row.event_time)
+        self._schedule_underfill(event_row.id, event_row.event_time)
 
         try:
             await thread.send(
@@ -162,6 +164,7 @@ class SeshListener(commands.Cog):
             f"sesh embed {message.id} rescheduled pod-draft {event.id} to {event.event_time.isoformat()}"
         )
         self._schedule_reminder(event.id, event.event_time)
+        self._schedule_underfill(event.id, event.event_time)
 
         thread = await self._resolve_thread(message.guild, event.discord_thread_id)
         if thread is None:
@@ -240,6 +243,12 @@ class SeshListener(commands.Cog):
             replace_existing=True,
         )
         log.info(f"scheduled pod-draft reminder for event {event_id} at {run_at.isoformat()}")
+
+    def _schedule_underfill(self, event_id: str, event_time: datetime) -> None:
+        scheduler = getattr(self.bot, "pod_scheduler", None)
+        if scheduler is None:
+            return
+        schedule_underfill_checks(scheduler, event_id, event_time)
 
 
 async def _fire_after_delay(event_id: str, delay_s: float) -> None:
@@ -331,6 +340,7 @@ def reschedule_pending_events(bot: commands.Bot) -> None:
                 id=f"pod-reminder-{event.id}",
                 replace_existing=True,
             )
+            schedule_underfill_checks(scheduler, event.id, event.event_time)
             rearmed += 1
     if rearmed:
         log.info(f"startup sweep re-armed {rearmed} pending pod-draft reminder(s)")

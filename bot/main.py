@@ -34,9 +34,11 @@ from bot.config import settings
 from bot.database import SessionLocal, run_migrations
 from bot.discord_helpers import refresh_player_profiles
 from bot import emojis
+from bot.commands.test_group import setup as setup_test_group
 from bot.commands.testawards import setup as setup_testawards
 from bot.commands.testcomponent import setup as setup_testcomponent
 from bot.commands.testlobby import setup as setup_testlobby
+from bot.commands.testschedule import setup as setup_testschedule
 from bot.listeners.auto_link_listener import setup as setup_auto_link_listener
 from bot.listeners.pod_screenshots import setup as setup_pod_screenshots
 from bot.listeners.sesh_listener import reschedule_pending_events, setup as setup_sesh_listener
@@ -51,6 +53,8 @@ from bot.services.refresh import refresh_active_players
 from bot.services.seventeenlands import MinIntervalLimiter, SeventeenLandsClient
 from bot.sets import ACTIVE_SET_CODE
 from bot.tasks.pod_draft_reminder import init_reminder
+from bot.tasks.pod_schedule_post import init_schedule_post
+from bot.tasks.pod_underfill import init_underfill
 
 
 log = logging.getLogger("bot.main")
@@ -136,6 +140,8 @@ def build_bot(guild_id: int) -> commands.Bot:
         bot.pod_scheduler = AsyncIOScheduler()
         bot.pod_scheduler.start()
         init_reminder(bot)
+        init_underfill(bot)
+        init_schedule_post(bot)
 
         # Load cogs into memory and mirror to the guild tree so dispatch works.
         # Discord-side sync is handled by the owner-only `!sync` text command, not on startup.
@@ -152,9 +158,11 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_sesh_listener(bot)
         await setup_pod_screenshots(bot)
         await setup_auto_link_listener(bot)
+        await setup_test_group(bot)
         await setup_testlobby(bot)
         await setup_testcomponent(bot)
         await setup_testawards(bot)
+        await setup_testschedule(bot)
         reschedule_pending_events(bot)
         register_pod_views(bot)
         _log_startup_summary()

@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     auto_refresh_enabled: bool = True
 
     pod_draft_channel_id: int = 1028072146645295125
+    pod_draft_target_players: int = 8
+    pod_drafters_role_id: int | None = None
+    pod_schedule_enabled: bool = True
     pod_draft_session_prefix: str = "LLU"
     pod_draft_max_players: int = 10
     pod_draft_min_ready_players: int = 6
