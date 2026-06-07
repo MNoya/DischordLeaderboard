@@ -21,6 +21,7 @@ from discord.ext import commands
 
 from bot import audit
 from bot.commands import descriptions as desc
+from bot.commands.messages import MSG_ADMIN_ONLY
 from bot.discord_helpers import NBSP, ZWSP, first_image_url
 from bot.sets import PREVIEW_WINDOWS, PreviewWindow
 
@@ -50,7 +51,6 @@ SUSPENSE_COUNTING = "Counting the Votes…"
 SUSPENSE_UP_NEXT = "Up Next…"
 SUSPENSE_FINAL = "Final Verdict…"
 
-MSG_ADMIN_ONLY = "This command is reserved for the bot admin."
 MSG_NO_CHANNELS = "No channels with “preview-season” in the name were found in this server."
 MSG_NO_POSTS = "No image posts found between {start} and {end} — nothing to award."
 MSG_NO_REACTIONS = "Found {count} image posts but no reactions to score."

@@ -13,6 +13,7 @@ from sqlalchemy import any_, delete, select
 
 from bot import audit, emojis
 from bot.commands import descriptions as desc
+from bot.commands.messages import MSG_ADMIN_ONLY
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.discord_helpers import display_width, extract_avatar_hash, player_url
@@ -316,6 +317,9 @@ class PodDraft(commands.Cog):
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
     async def pod_champion(self, interaction: discord.Interaction, event: str) -> None:
+        if not await self.bot.is_owner(interaction.user):
+            await interaction.response.send_message(MSG_ADMIN_ONLY, ephemeral=True)
+            return
         await interaction.response.defer(thinking=False)
 
         event_id = await asyncio.to_thread(load_event_id_by_name_sync, event)
