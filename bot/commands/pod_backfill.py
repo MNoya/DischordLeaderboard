@@ -1,8 +1,9 @@
 """/pod-backfill — reconstruct a pod-draft event from its Discord thread.
 
-Pipeline: scrape the thread → infer structure (seats, records, decks, matches via 17lands
-mirror-join) → gaps-first confirmation wizard → idempotent writes in one transaction →
-post-process (DraftLog ingest, MagicProTools, replay backfill, optional announcement).
+Pipeline: scrape the thread (seats, records, decks, DraftLog) → gaps-first confirmation wizard →
+idempotent writes in one transaction → post-process (DraftLog ingest, MagicProTools, replay
+backfill, optional announcement). Matches come from the DB or the match editor — replay-based
+pairing inference proved unreliable and was removed.
 See spec/pod-backfill-handoff.md.
 """
 from __future__ import annotations
@@ -49,9 +50,6 @@ from bot.services.pod_thread_backfill import (
     extract_deck_posts,
     extract_draft_log_attachment,
     fill_reported_ats,
-    games_from_17lands,
-    infer_matches,
-    merge_matches,
 )
 from bot.services.pod_tournament import TOTAL_ROUNDS, post_championship_for_event, set_organizer_deck_override
 from bot.services.sesh_parser import parse_sesh_embed, unescape_markdown
@@ -96,7 +94,6 @@ class Workspace:
     thread_id: str
     pairing_mode: str
     socket_status: str
-    already_announced: bool
     seats: list[SeatDraft]
     matches: list[MatchDraft]
     draft_log: dict | None = None
@@ -275,16 +272,11 @@ async def assemble_workspace(bot: commands.Bot, event_id: str) -> Workspace:
 
     ws.replays_skipped = datetime.now(timezone.utc) - ws.event_time > REPLAY_HORIZON
     client = SeventeenLandsClient()
-    games_by_seat = {}
     for seat in ws.seats:
         if ws.replays_skipped or not seat.token:
             continue
-        raw = await asyncio.to_thread(client.fetch_user_games, seat.token)
-        ws.raw_games[seat.name] = raw
-        games_by_seat[seat.name] = games_from_17lands(raw, ws.event_time)
+        ws.raw_games[seat.name] = await asyncio.to_thread(client.fetch_user_games, seat.token)
 
-    inferred = infer_matches(games_by_seat)
-    ws.matches = merge_matches(ws.matches, inferred)
     if not ws.replays_skipped:
         ws.matches = fill_reported_ats(ws.matches, ws.event_time)
     return ws
@@ -346,7 +338,6 @@ def _assemble_sync(
             thread_id=info["thread_id"],
             pairing_mode=info["pairing_mode"],
             socket_status=info["socket_status"],
-            already_announced=info["championship_posted_at"] is not None,
             seats=[],
             matches=[],
         )
@@ -419,17 +410,15 @@ def _assemble_sync(
 
 def build_workspace_embed(ws: Workspace) -> discord.Embed:
     if ws.replays_skipped:
-        seventeenlands_status = "skipped (event past the replay horizon)"
+        replays_status = "skipped (event older than 7 days)"
     else:
-        seventeenlands_status = f"{len(ws.raw_games)}/{len(ws.seats)} seats"
+        replays_status = f"{len(ws.raw_games)}/{len(ws.seats)} seats"
     header = [
         f"**{ws.event_time:%Y-%m-%d}** · {ws.pairing_mode} · status `{ws.socket_status}`",
-        f"DraftLog: {f'✅ `{ws.draft_log_filename}`' if ws.draft_log else '—'}"
-        f" · 17lands: {seventeenlands_status}",
-        f"Announce: {'📣 post championship on confirm' if ws.announce else '🤫 quiet (no announcement)'}",
+        f"DraftLog: {f'✅ `{ws.draft_log_filename}`' if ws.draft_log else '**Missing**'}",
+        f"17lands Replays: {replays_status}",
+        f"Announcement: {'**Yes**' if ws.announce else '**No**'}",
     ]
-    if ws.already_announced:
-        header.append("Championship was already announced for this event.")
     embed = discord.Embed(
         title=f"Pod Backfill — {ws.event_name}",
         description="\n".join(header),
@@ -486,7 +475,7 @@ def compute_gaps(ws: Workspace) -> list[str]:
 
     for round_num in range(1, TOTAL_ROUNDS + 1):
         in_round = [m for m in ws.matches if m.round == round_num]
-        if len(in_round) < expected:
+        if len(in_round) != expected:
             gaps.append(f"round {round_num}: {len(in_round)}/{expected} matches known")
         for m in in_round:
             if not m.winner:
@@ -566,13 +555,13 @@ class BackfillView(discord.ui.View):
         self.add_item(match_select)
 
         announce = discord.ui.Button(
-            label="Announce: on 📣" if self.ws.announce else "Announce: off 🤫",
+            label="Announce: On 📣" if self.ws.announce else "Announcement: Off 🤫",
             style=discord.ButtonStyle.secondary, row=2,
         )
         announce.callback = self._on_announce_toggle
         self.add_item(announce)
 
-        confirm = discord.ui.Button(label="Confirm & write", style=discord.ButtonStyle.success, row=2)
+        confirm = discord.ui.Button(label="Confirm & Write", style=discord.ButtonStyle.success, row=2)
         confirm.callback = self._on_confirm
         self.add_item(confirm)
 
