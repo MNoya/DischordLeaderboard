@@ -415,7 +415,7 @@ def build_workspace_embed(ws: Workspace) -> discord.Embed:
             lines.append(f"`{m.player_a}` vs `{m.player_b}` — {outcome} ({m.source})")
         embed.add_field(name=f"Round {round_num}", value="\n".join(lines) or "❓ no matches", inline=False)
 
-    standings = compute_placements([s.name for s in ws.seats], ws.matches)
+    standings = compute_placements([s.name for s in ws.seats], ws.matches, seat_records(ws))
     if standings:
         placement_lines = [f"{st.rank}. `{st.player_name}` ({st.wins}-{st.losses})" for st in standings]
         embed.add_field(name="Computed placements", value="\n".join(placement_lines), inline=False)
@@ -455,9 +455,9 @@ def compute_gaps(ws: Workspace) -> list[str]:
                 gaps.append(f"R{round_num} `{m.player_a}` vs `{m.player_b}`: score unknown "
                             f"(will write {PLACEHOLDER_SCORE})")
 
-    seat_records = {normalize_player_name(s.name): s.record for s in ws.seats if s.record}
-    for st in compute_placements([s.name for s in ws.seats], ws.matches):
-        caption_record = seat_records.get(normalize_player_name(st.player_name))
+    caption_records = {normalize_player_name(s.name): s.record for s in ws.seats if s.record}
+    for st in compute_placements([s.name for s in ws.seats], ws.matches, seat_records(ws)):
+        caption_record = caption_records.get(normalize_player_name(st.player_name))
         computed = f"{st.wins}-{st.losses}"
         if caption_record and caption_record != computed and (st.wins or st.losses):
             gaps.append(f"`{st.player_name}` caption record {caption_record} ≠ computed {computed}")
@@ -467,11 +467,15 @@ def compute_gaps(ws: Workspace) -> list[str]:
     return gaps
 
 
+def seat_records(ws: Workspace) -> dict[str, str | None]:
+    return {s.name: s.record for s in ws.seats}
+
+
 def blocking_gaps(ws: Workspace) -> list[str]:
     blockers = [f"R{m.round} `{m.player_a}` vs `{m.player_b}`: winner unknown"
                 for m in ws.matches if not m.winner]
-    if not ws.matches:
-        blockers.append("no matches at all — add them before confirming")
+    if not ws.matches and not any(s.record for s in ws.seats):
+        blockers.append("no matches and no seat records — nothing to score")
     return blockers
 
 
@@ -761,7 +765,7 @@ def _apply_workspace_sync(ws: Workspace) -> list[str]:
             if m.reported_at is not None:
                 row.reported_at = m.reported_at
 
-        standings = compute_placements([s.name for s in ws.seats], matches)
+        standings = compute_placements([s.name for s in ws.seats], matches, seat_records(ws))
         final = [
             FinalStanding(
                 draftmancer_name=st.player_name,

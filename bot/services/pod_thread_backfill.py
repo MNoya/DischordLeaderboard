@@ -260,9 +260,12 @@ def fill_reported_ats(matches: Sequence[MatchDraft], event_time: datetime) -> li
 def compute_placements(
     names: Sequence[str],
     matches: Sequence[MatchDraft],
+    records: Mapping[str, str | None] | None = None,
 ) -> list[pod_swiss.Standing]:
     """Standings over the confirmed matches, same tiebreakers the live finalize uses. Matches still
-    missing a winner or score are excluded — placements firm up as the admin fills gaps."""
+    missing a winner or score are excluded — placements firm up as the admin fills gaps. With no
+    completed matches at all (pre-bot reconstructions where pairings are unrecoverable), falls back
+    to ordering by the seats' caption records; seats without a record stay unplaced."""
     players = [pod_swiss.Player(id=n, name=n) for n in names]
     outcomes = [
         pod_swiss.MatchOutcome(
@@ -275,4 +278,27 @@ def compute_placements(
         for m in matches
         if m.winner and m.score
     ]
+    if not outcomes and records:
+        return _standings_from_records(names, records)
     return pod_swiss.compute_standings(players, outcomes)
+
+
+def _standings_from_records(names: Sequence[str], records: Mapping[str, str | None]) -> list[pod_swiss.Standing]:
+    recorded: list[tuple[str, int, int]] = []
+    for name in names:
+        record = records.get(name)
+        if not record or "-" not in record:
+            continue
+        wins_raw, losses_raw = record.split("-", 1)
+        try:
+            recorded.append((name, int(wins_raw), int(losses_raw)))
+        except ValueError:
+            continue
+    recorded.sort(key=lambda entry: (-entry[1], entry[2], entry[0].lower()))
+    return [
+        pod_swiss.Standing(
+            rank=i + 1, player_id=name, player_name=name,
+            wins=wins, losses=losses, omw_pct=0.0, gw_pct=0.0, ogw_pct=0.0,
+        )
+        for i, (name, wins, losses) in enumerate(recorded)
+    ]
