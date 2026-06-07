@@ -17,8 +17,8 @@ from bot.services.seventeenlands import SeventeenLandsClient
 log = logging.getLogger(__name__)
 
 _REPLAY_BASE_URL = "https://www.17lands.com"
-_POD_EVENT_NAMES = frozenset({"DirectGameTournamentLimited", "DirectGameLimited"})
-_MIN_TURNS = 3
+POD_EVENT_NAMES = frozenset({"DirectGameTournamentLimited", "DirectGameLimited"})
+MIN_TURNS = 3
 _EVENT_WINDOW_HOURS = 6
 
 
@@ -40,7 +40,7 @@ async def fetch_and_persist_replays_for_player(
         return 0
     try:
         return await asyncio.to_thread(
-            _persist_replays_sync, event_id, player_id, player_seat_name, games,
+            persist_replays_sync, event_id, player_id, player_seat_name, games,
         )
     except Exception:
         log.warning(f"persist_replays failed for player {player_id} in event {event_id}", exc_info=True)
@@ -58,7 +58,7 @@ def attribute_games_to_rounds(
     bracket alike), so the window is decisive. Reported scores aren't consulted: 17lands drops games
     and players misreport 2-0 as 2-1, and missing replays cost more than a result reported late
     enough to file a game under the prior round. Skipped matches (score 0-0) form no window."""
-    usable = _filter_and_sort_games(games)
+    usable = filter_and_sort_games(games)
     matches_in_round_order = sorted(player_matches, key=lambda m: m.round)
 
     out: dict[str, int] = {}
@@ -71,20 +71,20 @@ def attribute_games_to_rounds(
         prev_reported_at = upper_with_grace
         eligible = [
             g for g in usable
-            if (lower is None or _parse_game_time(g.get("game_time")) > lower)
-            and _parse_game_time(g.get("game_time")) <= upper_with_grace
+            if (lower is None or parse_game_time(g.get("game_time")) > lower)
+            and parse_game_time(g.get("game_time")) <= upper_with_grace
         ]
         if not eligible:
             log.info(f"[REPLAYS] attribute.empty_window round={m.round} player={player_seat_name!r}")
             continue
         for g in eligible:
-            gid = _extract_game_id(g)
+            gid = extract_game_id(g)
             if gid:
                 out[gid] = m.round
     return out
 
 
-def _persist_replays_sync(
+def persist_replays_sync(
     event_id: str,
     player_id: str,
     player_seat_name: str,
@@ -106,17 +106,17 @@ def _persist_replays_sync(
             )
         ).scalars().all()
 
-        in_window = [g for g in games if _is_in_event_window(g, event.event_time)]
+        in_window = [g for g in games if is_in_event_window(g, event.event_time)]
         attribution = attribute_games_to_rounds(in_window, player_matches, player_seat_name)
 
         count = 0
         for g in in_window:
-            if g.get("event_name") not in _POD_EVENT_NAMES:
+            if g.get("event_name") not in POD_EVENT_NAMES:
                 continue
-            gid = _extract_game_id(g)
+            gid = extract_game_id(g)
             if not gid:
                 continue
-            gt = _parse_game_time(g.get("game_time"))
+            gt = parse_game_time(g.get("game_time"))
             if gt is None:
                 continue
             raw_link = g.get("link") or ""
@@ -151,15 +151,15 @@ def _persist_replays_sync(
         return count
 
 
-def _filter_and_sort_games(games: Sequence[dict]) -> list[dict]:
+def filter_and_sort_games(games: Sequence[dict]) -> list[dict]:
     out: list[tuple[datetime, dict]] = []
     for g in games:
-        if g.get("event_name") not in _POD_EVENT_NAMES:
+        if g.get("event_name") not in POD_EVENT_NAMES:
             continue
         turns = g.get("turns")
-        if not isinstance(turns, int) or turns < _MIN_TURNS:
+        if not isinstance(turns, int) or turns < MIN_TURNS:
             continue
-        gt = _parse_game_time(g.get("game_time"))
+        gt = parse_game_time(g.get("game_time"))
         if gt is None:
             continue
         out.append((gt, g))
@@ -167,23 +167,23 @@ def _filter_and_sort_games(games: Sequence[dict]) -> list[dict]:
     return [g for _, g in out]
 
 
-def _is_in_event_window(game: dict, event_time: datetime | None) -> bool:
+def is_in_event_window(game: dict, event_time: datetime | None) -> bool:
     if event_time is None:
         return True
-    gt = _parse_game_time(game.get("game_time"))
+    gt = parse_game_time(game.get("game_time"))
     if gt is None:
         return False
     delta = abs((gt - event_time).total_seconds()) / 3600.0
     return delta <= _EVENT_WINDOW_HOURS
 
 
-def _extract_game_id(game: dict) -> str | None:
+def extract_game_id(game: dict) -> str | None:
     link = game.get("link") or ""
     parts = link.split("/")
     return parts[-2] if len(parts) >= 2 and parts[-2] else None
 
 
-def _parse_game_time(raw: str | None) -> datetime | None:
+def parse_game_time(raw: str | None) -> datetime | None:
     if not isinstance(raw, str):
         return None
     try:

@@ -16,7 +16,7 @@ from sqlalchemy import select
 
 from bot.database import SessionLocal
 from bot.models import MagicSet, Player, PodDraftEvent, PodDraftParticipant
-from bot.services.pod_drafts import _player_for_name
+from bot.services.pod_drafts import player_for_name
 from bot.slug import disambiguate_slug, slugify
 
 
@@ -85,7 +85,7 @@ def _resolve_or_create_player(session, taken_slugs, display_name, arena_name):
     """Find an existing Player by arena_name / mapped discord_id / normalized display_name, else
     create a lightweight one."""
     if arena_name:
-        player = _player_for_name(session, arena_name)
+        player = player_for_name(session, arena_name)
         if player is not None:
             if not player.arena_name:
                 player.arena_name = arena_name
@@ -118,7 +118,7 @@ def _resolve_or_create_player(session, taken_slugs, display_name, arena_name):
         )
         return player
 
-    player = _player_for_name(session, display_name)
+    player = player_for_name(session, display_name)
     if player is not None:
         if arena_name and not player.arena_name:
             player.arena_name = arena_name

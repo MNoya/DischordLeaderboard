@@ -17,9 +17,9 @@ from bot.models import PodDraftEvent, PodDraftParticipant
 
 WUBRG_ORDER = "WUBRG"
 
-_CDN_DIM_RE = re.compile(r"&(?:width|height)=\d+")
-_COLORS_RE = re.compile(r"^[WUBRGwubrg]{1,5}$")
-_RECORD_RE = re.compile(r"^\d+-\d+$")
+CDN_DIM_RE = re.compile(r"&(?:width|height)=\d+")
+COLORS_RE = re.compile(r"^[WUBRGwubrg]{1,5}$")
+RECORD_RE = re.compile(r"^\d+-\d+$")
 
 
 @dataclass(frozen=True)
@@ -36,7 +36,7 @@ def normalize_colors(s: str) -> str:
 
 
 def strip_cdn_dims(url: str) -> str:
-    return _CDN_DIM_RE.sub("", url)
+    return CDN_DIM_RE.sub("", url)
 
 
 def resolve_event(session: Session, slug_or_id: str) -> PodDraftEvent | None:
@@ -66,9 +66,9 @@ def apply_seat(
     screenshot: str | None = None,
 ) -> SeatResult:
     """Update one participant. Caller commits the session."""
-    if colors is not None and not _COLORS_RE.match(colors):
+    if colors is not None and not COLORS_RE.match(colors):
         return SeatResult(False, [], error=f"invalid colors `{colors}` (expected 1-5 of W/U/B/R/G)")
-    if record is not None and not _RECORD_RE.match(record):
+    if record is not None and not RECORD_RE.match(record):
         return SeatResult(False, [], error=f"invalid record `{record}` (expected `N-N`)")
 
     participant = (

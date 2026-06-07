@@ -121,17 +121,17 @@ def classify_lobby_names(session: Session, names: Sequence[str]) -> list[tuple[s
     """For each Draftmancer userName, return (arena_name, display_name) if linked else (arena_name, None)."""
     result = []
     for n in names:
-        player = _player_for_name(session, n)
+        player = player_for_name(session, n)
         result.append((n, player.display_name if player else None))
     return result
 
 
 def players_for_names(session: Session, names: Sequence[str]) -> list[tuple[str, Player | None]]:
     """Resolve each sesh attendee name to its Player (or None if unmatched), preserving order."""
-    return [(n, _player_for_name(session, n)) for n in names]
+    return [(n, player_for_name(session, n)) for n in names]
 
 
-def _player_for_name(session: Session, name: str) -> Player | None:
+def player_for_name(session: Session, name: str) -> Player | None:
     """Resolve a Draftmancer/Discord name to a Player.
 
     Matching tiers (first hit wins):
@@ -345,7 +345,7 @@ def seed_event_participants(session: Session, event_id: str, roster: list[str]) 
 
 
 def _add_attendee(session: Session, event_id: str, display_name: str) -> PodDraftParticipant:
-    player = _player_for_name(session, display_name)
+    player = player_for_name(session, display_name)
     participant = PodDraftParticipant(
         event_id=event_id,
         display_name=display_name,
@@ -400,9 +400,9 @@ def upsert_participant(
         found.draftmancer_name = draftmancer_name
 
     if found.player_id is None:
-        candidate = _player_for_name(session, draftmancer_name or display_name)
+        candidate = player_for_name(session, draftmancer_name or display_name)
         if candidate is None and draftmancer_name:
-            candidate = _player_for_name(session, display_name)
+            candidate = player_for_name(session, display_name)
         if candidate is not None:
             found.player_id = candidate.id
 
@@ -750,11 +750,21 @@ def set_participant_deck_colors(
     return True
 
 
-_RECORD_PATTERN = re.compile(r"\b[0-3]\s*[-:\s]\s*[0-3]\b")
+_RECORD_PATTERN = re.compile(r"\b([0-3])\s*[-:\s]\s*([0-3])\b")
 
 
 def caption_has_record_pattern(caption: str | None) -> bool:
-    return bool(caption and _RECORD_PATTERN.search(caption))
+    return parse_caption_record(caption) is not None
+
+
+def parse_caption_record(caption: str | None) -> str | None:
+    """Normalized 'W-L' record from a deck caption ('2-1 rakdos stuff' -> '2-1'), or None."""
+    if not caption:
+        return None
+    m = _RECORD_PATTERN.search(caption)
+    if m is None:
+        return None
+    return f"{m.group(1)}-{m.group(2)}"
 
 
 def capture_deck_screenshot(

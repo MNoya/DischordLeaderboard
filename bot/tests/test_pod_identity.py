@@ -6,7 +6,7 @@ import re
 from bot.models import Player
 from bot.services.pod_drafts import (
     normalize_player_name,
-    _player_for_name,
+    player_for_name,
     classify_lobby_names,
 )
 
@@ -62,14 +62,14 @@ def test_normalize_empty_string():
     assert normalize_player_name("") == ""
 
 
-# --- _player_for_name priority ---
+# --- player_for_name priority ---
 
 def test_exact_arena_name_wins_over_display_name(session):
     _seed_player(session, discord_id="1", username="alice", display_name="Alice", arena_name="MagicAlice#9999")
     _seed_player(session, discord_id="2", username="magicalice", display_name="MagicAlice")
 
     # "MagicAlice#9999" matches player 1's arena_name exactly (lower), not player 2's display_name
-    found = _player_for_name(session, "MagicAlice#9999")
+    found = player_for_name(session, "MagicAlice#9999")
     assert found is not None
     assert found.discord_id == "1"
 
@@ -77,14 +77,14 @@ def test_exact_arena_name_wins_over_display_name(session):
 def test_arena_name_match_is_case_insensitive(session):
     _seed_player(session, discord_id="3", username="bob", display_name="Bob", arena_name="Bob#5678")
 
-    assert _player_for_name(session, "bob#5678") is not None
-    assert _player_for_name(session, "BOB#5678") is not None
+    assert player_for_name(session, "bob#5678") is not None
+    assert player_for_name(session, "BOB#5678") is not None
 
 
 def test_falls_back_to_normalized_display_name(session):
     _seed_player(session, discord_id="4", username="charlie", display_name="Charlie")
 
-    found = _player_for_name(session, "Charlie#0001")
+    found = player_for_name(session, "Charlie#0001")
     assert found is not None
     assert found.discord_id == "4"
 
@@ -93,19 +93,19 @@ def test_falls_back_to_normalized_discord_username(session):
     # display_name doesn't match but discord_username does after normalization
     _seed_player(session, discord_id="5", username="nightowl", display_name="NightOwl2025")
 
-    found = _player_for_name(session, "nightowl#777")
+    found = player_for_name(session, "nightowl#777")
     assert found is not None
     assert found.discord_id == "5"
 
 
 def test_returns_none_when_no_match(session):
     _seed_player(session, discord_id="6", username="dave", display_name="Dave")
-    assert _player_for_name(session, "ghost#1234") is None
+    assert player_for_name(session, "ghost#1234") is None
 
 
 def test_ignores_inactive_players(session):
     _seed_player(session, discord_id="7", username="retired", display_name="Retired", active=False)
-    assert _player_for_name(session, "retired") is None
+    assert player_for_name(session, "retired") is None
 
 
 def test_display_name_wins_over_discord_username_when_both_match(session):
@@ -113,7 +113,7 @@ def test_display_name_wins_over_discord_username_when_both_match(session):
     _seed_player(session, discord_id="8", username="notace", display_name="Ace")
     _seed_player(session, discord_id="9", username="ace", display_name="Somebody Else")
 
-    found = _player_for_name(session, "Ace#1111")
+    found = player_for_name(session, "Ace#1111")
     # display_name leg fires before discord_username leg; p_display should win
     assert found is not None
     assert found.discord_id == "8"
@@ -193,8 +193,8 @@ def test_alias_exact_match_resolves_to_owner(session):
         arena_name="fullerene60#49190",
         arena_aliases=["fullerene60", "edvor"],
     )
-    assert _player_for_name(session, "fullerene60#49190").discord_id == "10"
-    assert _player_for_name(session, "edvor#11111").discord_id == "10"
+    assert player_for_name(session, "fullerene60#49190").discord_id == "10"
+    assert player_for_name(session, "edvor#11111").discord_id == "10"
 
 
 def test_alias_match_independent_of_primary_arena_name(session):
@@ -203,7 +203,7 @@ def test_alias_match_independent_of_primary_arena_name(session):
         arena_name="primaryhandle#10000",
         arena_aliases=["primaryhandle", "secondhandle"],
     )
-    assert _player_for_name(session, "secondhandle#22222").discord_id == "11"
+    assert player_for_name(session, "secondhandle#22222").discord_id == "11"
 
 
 def test_longest_alias_prefix_wins(session):
@@ -215,8 +215,8 @@ def test_longest_alias_prefix_wins(session):
         session, discord_id="13", username="b", display_name="B",
         arena_aliases=["dragonslayer"],
     )
-    assert _player_for_name(session, "dragonslayer99#1234").discord_id == "13"
-    assert _player_for_name(session, "dragfoo#9999").discord_id == "12"
+    assert player_for_name(session, "dragonslayer99#1234").discord_id == "13"
+    assert player_for_name(session, "dragfoo#9999").discord_id == "12"
 
 
 def test_alias_no_match_falls_back_to_display_name(session):
@@ -224,22 +224,22 @@ def test_alias_no_match_falls_back_to_display_name(session):
         session, discord_id="14", username="zoinks", display_name="zoinks",
         arena_name=None,
     )
-    assert _player_for_name(session, "zoinks#42").discord_id == "14"
+    assert player_for_name(session, "zoinks#42").discord_id == "14"
 
 
 # --- token-in-display-name matching (tier 4) ---
 
 def test_token_match_in_display_name(session):
     _seed_player(session, discord_id="20", username="zorn", display_name="Zorn (Kael)")
-    assert _player_for_name(session, "Kael#12345").discord_id == "20"
+    assert player_for_name(session, "Kael#12345").discord_id == "20"
 
 
 def test_token_match_does_not_fire_for_short_norm(session):
     _seed_player(session, discord_id="21", username="xy", display_name="XY (ab)")
-    assert _player_for_name(session, "ab#1") is None
+    assert player_for_name(session, "ab#1") is None
 
 
 def test_exact_display_name_beats_token_match(session):
     exact = _seed_player(session, discord_id="22", username="u22", display_name="Kael")
     _seed_player(session, discord_id="23", username="u23", display_name="Zorn (Kael)")
-    assert _player_for_name(session, "Kael#12345").discord_id == exact.discord_id
+    assert player_for_name(session, "Kael#12345").discord_id == exact.discord_id
