@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 
 import discord
 from discord.ext import commands
@@ -86,7 +86,7 @@ def init_schedule_post(bot: commands.Bot) -> None:
     )
 
 
-async def fire_monday_dm() -> None:
+async def fire_monday_dm(monday: date | None = None) -> None:
     if _bot is None:
         log.error("fire_monday_dm: bot reference is not initialised")
         return
@@ -94,7 +94,7 @@ async def fire_monday_dm() -> None:
     if owner is None:
         return
 
-    monday = _current_week_monday()
+    monday = monday or _upcoming_monday()
     message = compose_monday_message(monday, ACTIVE_SET_CODE)
     parts = [MSG_MONDAY_DM_INTRO, f"```\n{message}\n```"]
 
@@ -104,7 +104,7 @@ async def fire_monday_dm() -> None:
         parts.extend(await _create_command_blocks(monday))
 
     try:
-        await owner.send("\n".join(parts), view=PodMondayView())
+        await owner.send("\n".join(parts), view=PodMondayView(monday))
         log.info(f"monday schedule DM sent for {monday.isoformat()} ({kind})")
     except discord.HTTPException:
         log.warning("could not DM the monday schedule draft to owner", exc_info=True)
@@ -114,7 +114,7 @@ async def fire_fallback_post() -> None:
     if _bot is None:
         log.error("fire_fallback_post: bot reference is not initialised")
         return
-    monday = _current_week_monday()
+    monday = _upcoming_monday()
     status = _week_status.get(monday.isoformat())
     if status is not None:
         log.info(f"fallback post for {monday.isoformat()}: week already {status}; standing down")
@@ -123,23 +123,29 @@ async def fire_fallback_post() -> None:
 
 
 class PodMondayView(discord.ui.View):
-    def __init__(self) -> None:
+    """Persistent (timeout=None) so buttons survive restarts; the restored copy falls back to the current week."""
+
+    def __init__(self, monday: date | None = None) -> None:
         super().__init__(timeout=None)
+        self._monday = monday
+
+    def _week(self) -> date:
+        return self._monday or _upcoming_monday()
 
     @discord.ui.button(label=BTN_POST_FOR_ME, style=discord.ButtonStyle.primary, custom_id="pod-monday-post")
     async def post_for_me(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        _week_status[_current_week_monday().isoformat()] = STATUS_HANDLED
-        posted = await _post_default_if_needed()
+        _week_status[self._week().isoformat()] = STATUS_HANDLED
+        posted = await _post_default_if_needed(self._week())
         await _respond(interaction, MSG_BTN_POSTED if posted else MSG_BTN_ALREADY_POSTED)
 
     @discord.ui.button(label=BTN_GOT_IT, style=discord.ButtonStyle.secondary, custom_id="pod-monday-got-it")
     async def got_it(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        _week_status[_current_week_monday().isoformat()] = STATUS_HANDLED
+        _week_status[self._week().isoformat()] = STATUS_HANDLED
         await _respond(interaction, MSG_BTN_GOT_IT)
 
     @discord.ui.button(label=BTN_SKIP, style=discord.ButtonStyle.secondary, custom_id="pod-monday-skip")
     async def skip(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        _week_status[_current_week_monday().isoformat()] = STATUS_SKIPPED
+        _week_status[self._week().isoformat()] = STATUS_SKIPPED
         await _respond(interaction, MSG_BTN_SKIPPED)
 
 
@@ -147,7 +153,7 @@ async def _respond(interaction: discord.Interaction, message: str) -> None:
     await interaction.response.send_message(message, ephemeral=(interaction.guild is not None))
 
 
-async def _post_default_if_needed() -> bool:
+async def _post_default_if_needed(monday: date | None = None) -> bool:
     channel = await _fetch_coordination_channel()
     if channel is None:
         return False
@@ -155,7 +161,7 @@ async def _post_default_if_needed() -> bool:
         log.info("schedule already posted in the coordination channel; standing down")
         return False
 
-    monday = _current_week_monday()
+    monday = monday or _upcoming_monday()
     body = compose_monday_message(monday, ACTIVE_SET_CODE)
     message = await channel.send(body)
     kind, _ = monday_kind(monday)
@@ -169,7 +175,7 @@ async def _post_default_if_needed() -> bool:
 
 
 async def _schedule_already_posted(channel: discord.abc.Messageable) -> bool:
-    since = datetime.combine(_current_week_monday(), time(MONDAY_DM_HOUR_ET, 0), tzinfo=SCHEDULE_TZ)
+    since = datetime.combine(_upcoming_monday(), time(MONDAY_DM_HOUR_ET, 0), tzinfo=SCHEDULE_TZ)
     poster_ids = {_bot.owner_id, _bot.user.id if _bot.user else None}
     try:
         async for message in channel.history(after=since, limit=50):
@@ -219,6 +225,6 @@ def _count_set_events() -> int:
         return count or 0
 
 
-def _current_week_monday():
+def _upcoming_monday() -> date:
     today = datetime.now(SCHEDULE_TZ).date()
-    return today - timedelta(days=today.weekday())
+    return today + timedelta(days=(7 - today.weekday()) % 7)

@@ -34,9 +34,11 @@ from bot.config import settings
 from bot.database import SessionLocal, run_migrations
 from bot.discord_helpers import refresh_player_profiles
 from bot import emojis
+from bot.commands.test_group import setup as setup_test_group
 from bot.commands.testawards import setup as setup_testawards
 from bot.commands.testcomponent import setup as setup_testcomponent
 from bot.commands.testlobby import setup as setup_testlobby
+from bot.commands.testschedule import setup as setup_testschedule
 from bot.listeners.auto_link_listener import setup as setup_auto_link_listener
 from bot.listeners.pod_screenshots import setup as setup_pod_screenshots
 from bot.listeners.sesh_listener import reschedule_pending_events, setup as setup_sesh_listener
@@ -156,9 +158,11 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_sesh_listener(bot)
         await setup_pod_screenshots(bot)
         await setup_auto_link_listener(bot)
+        await setup_test_group(bot)
         await setup_testlobby(bot)
         await setup_testcomponent(bot)
         await setup_testawards(bot)
+        await setup_testschedule(bot)
         reschedule_pending_events(bot)
         register_pod_views(bot)
         _log_startup_summary()

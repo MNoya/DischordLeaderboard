@@ -1,4 +1,4 @@
-"""Owner-only `!testawards` — preview season awards post rendered from fixture data.
+"""Owner-only `!test awards` — preview season awards post rendered from fixture data.
 
 Feeds a hardcoded `AwardsData` through the production `build_awards_view` so the
 Components V2 layout can be tweaked and confirmed visually without scanning channels.
@@ -11,6 +11,7 @@ import logging
 from discord.ext import commands
 
 from bot.commands.preview_season_awards import AwardsData, AwardWinner, build_awards_view, reveal_awards
+from bot.commands.test_group import test_group
 
 log = logging.getLogger(__name__)
 
@@ -70,12 +71,12 @@ _FIXTURE = AwardsData(
 
 
 async def setup(bot: commands.Bot) -> None:
-    @bot.command(name="testawards")
+    @test_group.command(name="awards")
     @commands.is_owner()
     async def test_awards(ctx: commands.Context, mode: str = "") -> None:
         """Owner-only. Post the fixture-backed preview season awards sample in this channel.
 
-        `!testawards gated` plays the timed one-award-per-edit reveal instead of the full post.
+        `!test awards gated` plays the timed one-award-per-edit reveal instead of the full post.
         """
         if mode == "gated":
             ceremony = await ctx.send(view=build_awards_view(_FIXTURE, reveal=0))
