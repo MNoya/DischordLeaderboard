@@ -23,11 +23,11 @@ export function AWordmark({
   subtitle?: string;
 }) {
   const s =
-    size === "sm" ? { lg: 12, sm: 8 } :
+    size === "sm" ? { lg: 15, sm: 9 } :
     size === "lg" ? { lg: 28, sm: 12 } :
     { lg: 18, sm: 9 };
   return (
-    <div className="flex flex-col font-display" style={{ lineHeight: 0.95 }}>
+    <div className="flex flex-col font-display whitespace-nowrap" style={{ lineHeight: 0.95 }}>
       <span className="text-text tracking-[0.1em]" style={{ fontSize: s.lg }}>
         LIMITED LEVEL-UPS
       </span>
