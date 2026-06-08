@@ -10,6 +10,7 @@ from bot.services.pod_schedule import (
     MONDAY_KIND_SEASON_OVER,
     SCHEDULE_TZ,
     build_create_command,
+    build_underfill_filled_message,
     build_underfill_message,
     compose_monday_message,
     format_clock,
@@ -140,22 +141,31 @@ def test_format_clock(slot, expected):
     assert format_clock(slot) == expected
 
 
-def test_underfill_message_interpolates_role_count_time_and_link():
+def test_underfill_message_interpolates_thread_count_time_and_links():
     event_time = datetime(2026, 6, 24, 0, 0, tzinfo=timezone.utc)
+    thread_url = "https://discord.com/channels/1/9"
     jump_url = "https://discord.com/channels/1/2/3"
 
-    body = build_underfill_message(1234, 5, 8, event_time, jump_url)
+    body = build_underfill_message("FIN Pod Draft #1", thread_url, 5, 8, event_time, jump_url)
 
-    assert "<@&1234>" in body
-    assert "3 more" in body
-    assert f"<t:{int(event_time.timestamp())}:" in body
-    assert jump_url in body
+    assert "[FIN Pod Draft #1](https://discord.com/channels/1/9)" in body
+    assert "3 more players needed" in body
+    assert f"<t:{int(event_time.timestamp())}:R>" in body
+    assert ":F>" not in body
+    assert f"[Sign Up Link]({jump_url})" in body
 
 
-def test_underfill_message_without_role_skips_the_mention():
+def test_underfill_message_never_pings_a_role():
     event_time = datetime(2026, 6, 24, 0, 0, tzinfo=timezone.utc)
 
-    body = build_underfill_message(None, 7, 8, event_time, "url")
+    body = build_underfill_message("Pod", "thread_url", 7, 8, event_time, "url")
 
     assert "<@&" not in body
-    assert "1 more" in body
+    assert "1 more player needed" in body
+
+
+def test_underfill_filled_message_links_the_thread():
+    body = build_underfill_filled_message("FIN Pod Draft #1", "https://discord.com/channels/1/9")
+
+    assert "[FIN Pod Draft #1](https://discord.com/channels/1/9)" in body
+    assert "Pod is full" in body

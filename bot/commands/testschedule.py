@@ -14,22 +14,22 @@ from discord.ext import commands
 from bot.commands.test_group import test_group
 from bot.config import settings
 from bot.services.pod_schedule import SCHEDULE_TZ, build_underfill_message, slots_for_week
-from bot.tasks.pod_underfill import pod_drafters_role_id
 
 
 async def setup(bot: commands.Bot) -> None:
     @test_group.command(name="underfill")
     @commands.is_owner()
     async def test_underfill(ctx: commands.Context, yes_count: int = 5) -> None:
-        """Owner-only. Post a sample underfill reminder in this channel — no DB or sesh lookup."""
+        """Owner-only. Post a sample underfill nudge in this channel — no DB or sesh lookup."""
         body = build_underfill_message(
-            pod_drafters_role_id(ctx.guild),
+            ctx.channel.name if isinstance(ctx.channel, discord.Thread) else "Sample Pod Draft",
+            ctx.channel.jump_url,
             yes_count,
             settings.pod_draft_target_players,
             _next_slot(),
             ctx.message.jump_url,
         )
-        await ctx.send(body, allowed_mentions=discord.AllowedMentions(roles=True))
+        await ctx.send(body, allowed_mentions=discord.AllowedMentions.none())
 
 
 def _next_slot() -> datetime:

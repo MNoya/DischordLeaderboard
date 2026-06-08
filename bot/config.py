@@ -22,8 +22,12 @@ class Settings(BaseSettings):
     discord_guild_id: int | None = None
     discord_admin_role_id: int | None = None
     discord_botlog_channel_id: int | None = None
-    public_site_url: str = "https://dischord.pages.dev/leaderboard"
+    public_site_url: str = "https://dischord.pages.dev"
     auto_refresh_enabled: bool = True
+
+    @property
+    def leaderboard_url(self) -> str:
+        return f"{self.public_site_url.rstrip('/')}/leaderboard"
 
     pod_draft_channel_id: int = 1028072146645295125
     pod_draft_target_players: int = 8

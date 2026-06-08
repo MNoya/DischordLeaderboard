@@ -301,7 +301,7 @@ def _build_standings_row(
     displays: dict[str, dict],
     player_colors: dict[str, str | None],
     deck_data: dict[str, ParticipantDeckData],
-    site_root: str | None,
+    leaderboard_url: str | None,
     show_review_flag: bool = False,
     inline_caption: bool = False,
     show_medal: bool = True,
@@ -318,8 +318,8 @@ def _build_standings_row(
     medal = _RANK_MEDALS.get(s.rank) if show_medal else None
     prefix = f"{s.rank}. {medal} " if medal else f"{s.rank}. "
     rendered = (
-        f"[{name}]({site_root}/player/{slug})"
-        if slug and site_root else name
+        f"[{name}]({leaderboard_url}/player/{slug})"
+        if slug and leaderboard_url else name
     )
     color_glyph = _format_deck_color_emojis(player_colors.get(key))
     color_suffix = f"  {color_glyph}" if color_glyph else ""
@@ -1734,7 +1734,7 @@ def build_champion_announcement_view(
     event_name: str,
     displays: dict[str, dict] | None = None,
     player_colors: dict[str, str | None] | None = None,
-    site_root: str | None = None,
+    leaderboard_url: str | None = None,
     pending_count: int = 0,
     deck_data: dict[str, "ParticipantDeckData"] | None = None,
     guild_id: int | None = None,
@@ -1795,7 +1795,7 @@ def build_champion_announcement_view(
     for s in top_standings:
         row_text = _build_standings_row(
             s, displays=displays, player_colors=player_colors,
-            deck_data=deck_data, site_root=site_root,
+            deck_data=deck_data, leaderboard_url=leaderboard_url,
             inline_caption=True,
         )
         key = normalize_player_name(s.player_name)
@@ -1884,7 +1884,7 @@ def build_champion_embed(
     event_name: str = "Pod Draft",
     displays: dict[str, dict] | None = None,
     player_colors: dict[str, str | None] | None = None,
-    site_root: str | None = None,
+    leaderboard_url: str | None = None,
     champion_locked: bool = True,
     pending_count: int = 0,
     deck_data: dict[str, "ParticipantDeckData"] | None = None,
@@ -1901,7 +1901,7 @@ def build_champion_embed(
     lines = [
         _build_standings_row(
             s, displays=displays, player_colors=player_colors,
-            deck_data=deck_data, site_root=site_root,
+            deck_data=deck_data, leaderboard_url=leaderboard_url,
             show_review_flag=True, show_medal=medals_locked or (champion_locked and s.rank == 1),
         )
         for s in standings
@@ -1955,7 +1955,7 @@ async def build_standings_embed_for_event(event_id: str) -> discord.Embed | None
         event_name=event_name,
         displays=displays,
         player_colors=player_colors,
-        site_root=settings.public_site_url.rstrip("/"),
+        leaderboard_url=settings.leaderboard_url,
         champion_locked=champion_locked,
         pending_count=pending_count,
         deck_data=deck_data,
@@ -2009,7 +2009,7 @@ async def build_champion_announcement_view_for_event(
         event_name=event_name,
         displays=displays,
         player_colors=player_colors,
-        site_root=settings.public_site_url.rstrip("/"),
+        leaderboard_url=settings.leaderboard_url,
         pending_count=pending_count,
         deck_data=deck_data,
         event_started_at=event_started_at,
@@ -2383,7 +2383,7 @@ async def maybe_post_championship(manager, *, force: bool = False) -> None:
         event_name=event_name,
         displays=displays,
         player_colors=player_colors,
-        site_root=settings.public_site_url.rstrip("/"),
+        leaderboard_url=settings.leaderboard_url,
         pending_count=0,
         deck_data=deck_data,
         event_started_at=await asyncio.to_thread(_load_event_started_at_sync, event_id),
@@ -2674,7 +2674,7 @@ async def _post_or_update_live_standings(manager) -> None:
         event_name=event_name,
         displays=displays,
         player_colors=player_colors,
-        site_root=settings.public_site_url.rstrip("/"),
+        leaderboard_url=settings.leaderboard_url,
         champion_locked=champion_locked,
         pending_count=pending_count,
         deck_data=deck_data,

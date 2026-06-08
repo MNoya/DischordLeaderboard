@@ -58,9 +58,11 @@ MSG_SEASON_OVER = (
 )
 
 MSG_UNDERFILL = (
-    "{role_mention}{needed} more player{plural} needed for the pod draft on <t:{unix}:F> (<t:{unix}:R>) — "
-    "{yes_count}/{target} in so far. RSVP: {jump_url}"
+    "[{thread_name}]({thread_url}): {needed} more player{plural} needed in <t:{unix}:R> "
+    "- [Sign Up Link]({jump_url})"
 )
+
+MSG_UNDERFILL_FILLED = "[{thread_name}]({thread_url}): Pod is full ✅"
 
 MSG_CREATE_BLOCKS_HEADER = "Sesh commands for this week's pods:"
 
@@ -208,7 +210,8 @@ def build_create_command(set_code: str, event_number: int, slot_start: datetime)
 
 
 def build_underfill_message(
-    role_id: int | None,
+    thread_name: str,
+    thread_url: str,
     yes_count: int,
     target: int,
     event_time: datetime,
@@ -216,14 +219,17 @@ def build_underfill_message(
 ) -> str:
     needed = target - yes_count
     return MSG_UNDERFILL.format(
-        role_mention=f"<@&{role_id}> " if role_id else "",
+        thread_name=thread_name,
+        thread_url=thread_url,
         needed=needed,
         plural="s" if needed != 1 else "",
         unix=int(event_time.timestamp()),
-        yes_count=yes_count,
-        target=target,
         jump_url=jump_url,
     )
+
+
+def build_underfill_filled_message(thread_name: str, thread_url: str) -> str:
+    return MSG_UNDERFILL_FILLED.format(thread_name=thread_name, thread_url=thread_url)
 
 
 def format_clock(slot_start: datetime) -> str:

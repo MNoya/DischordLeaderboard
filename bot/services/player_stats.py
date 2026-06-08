@@ -8,8 +8,8 @@ import discord
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from bot.config import settings
 from bot.models import DraftEvent, MagicSet, Player, PlayerStats
+from bot.discord_helpers import player_url
 from bot.scoring import boxes_for_event, compute_score, compute_score_breakdown, pod_points
 from bot.services.pod_drafts import PodSetSummary, players_for_names, pod_scoring_counts, pod_summary_by_set_for_player
 from bot.sets import ACTIVE_SET_CODE
@@ -116,7 +116,7 @@ def process_stats(
 
 
 def profile_url(data: StatsData) -> str:
-    return f"{settings.public_site_url.rstrip('/')}/{data.set_code}/player/{data.player_slug}"
+    return player_url(data.player_slug, data.set_code)
 
 
 def render_embed(data: StatsData) -> discord.Embed:

@@ -1049,7 +1049,7 @@ def board_site_url(set_code: str | None, filter_type: str | None, filter_value: 
     """Public-site URL for a board: the Peasant pods page, or the set page plus the filter query."""
     if set_code == PEASANT_CODE:
         return _peasant_board_url()
-    base = settings.public_site_url.rstrip("/")
+    base = settings.leaderboard_url
     set_base = base if set_code is None or set_code == ACTIVE_SET_CODE else f"{base}/{set_code}"
     return set_base + _site_query(filter_type, filter_value)
 

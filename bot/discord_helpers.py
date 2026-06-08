@@ -92,7 +92,7 @@ def display_width(s: str) -> int:
 
 def player_url(slug: str, set_code: str | None = None) -> str:
     """Public site URL for a player's page, set-scoped when set_code is given."""
-    base = settings.public_site_url.rstrip("/")
+    base = settings.leaderboard_url
     return f"{base}/{set_code}/player/{slug}" if set_code else f"{base}/player/{slug}"
 
 

@@ -75,7 +75,7 @@ SEEDING_CUT_OVER_CAP = "Past the cut"
 
 def seeding_phase_projected() -> str:
     """Pre-lobby seeding header — built at call time so the llu emoji resolves from the live registry."""
-    url = f"{settings.public_site_url.rstrip('/')}/{ACTIVE_SET_CODE}"
+    url = f"{settings.leaderboard_url}/{ACTIVE_SET_CODE}"
     return f"{emojis.prefix('llu')}Players ranked by **[{ACTIVE_SET_CODE} Leaderboard]({url})**"
 
 MSG_SEEDING_WAITING = "Waiting for players to confirm attendance."

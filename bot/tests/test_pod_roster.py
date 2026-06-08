@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from bot.services.pod_draft_manager import PodDraftManager
@@ -39,6 +41,23 @@ def test_snapshot_tournament_roster(session_users, draft_log, expected):
     roster = mgr._snapshot_tournament_roster()
 
     assert roster == expected
+
+
+def test_spectator_rename_updates_state_and_refreshes():
+    mgr = _manager([], None)
+    refreshed = []
+
+    async def _record_refresh():
+        refreshed.append(True)
+
+    mgr.refresh_lobby_now = _record_refresh
+    asyncio.run(mgr._on_session_spectators([{"userID": "4", "userName": "Cyra"}]))
+
+    asyncio.run(mgr._on_update_user({"userID": "4", "updatedProperties": {"userName": "Nyx"}}))
+
+    assert mgr.spectator_names == ["Nyx"]
+    assert mgr.spectator_targets == [("4", "Nyx")]
+    assert refreshed == [True]
 
 
 def test_player_roster_excludes_spectators():

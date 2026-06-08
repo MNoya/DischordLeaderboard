@@ -25,7 +25,7 @@ from bot.services.pod_drafts import ParsedSeshEvent, is_championship, record_eve
 from bot.services.sesh_parser import ParsedSeshFields, parse_sesh_embed
 from bot.sets import ACTIVE_SET_CODE
 from bot.tasks.pod_draft_reminder import REMINDER_LEAD_MIN, fire_reminder
-from bot.tasks.pod_underfill import schedule_underfill_checks
+from bot.tasks.pod_underfill import refresh_underfill_nudge, schedule_underfill_checks
 
 
 log = logging.getLogger(__name__)
@@ -82,6 +82,11 @@ class SeshListener(commands.Cog):
             await self._handle_pod_draft_edit(message, fields)
         except Exception:
             log.exception(f"pod draft edit handling failed for message {message.id}")
+
+        try:
+            await refresh_underfill_nudge(self.bot, str(message.id), len(fields.attendees))
+        except Exception:
+            log.exception(f"underfill nudge refresh failed for message {message.id}")
 
     def _is_target_message(self, message: discord.Message) -> bool:
         if message.author.id != settings.sesh_bot_id:

@@ -111,6 +111,7 @@ class PodDraftManager:
         self.rsvps_yes: list[str] = list(rsvps_yes or [])
         self.rsvps_maybe: list[str] = list(rsvps_maybe or [])
         self.session_users: list[dict] = []
+        self.session_spectators: list[dict] = []
         self.spectator_user_ids: set[str] = set()
         self.spectator_names: list[str] = []
         self.spectator_targets: list[tuple[str, str]] = []
@@ -281,19 +282,23 @@ class PodDraftManager:
                 asyncio.create_task(self._invalidate_ready_check("Player list changed"))
 
     async def _on_session_spectators(self, spectators) -> None:
-        rows = spectators if isinstance(spectators, list) else []
-        self.spectator_user_ids = {s.get("userID") for s in rows if s.get("userID")}
-        self.spectator_names = [s.get("userName") for s in rows if s.get("userName")]
-        self.spectator_targets = [
-            (s.get("userID"), s.get("userName")) for s in rows
-            if s.get("userID") and s.get("userName") != _BOT_USER_NAME
-        ]
+        self.session_spectators = list(spectators) if isinstance(spectators, list) else []
+        self._recompute_spectator_state()
         log.info(f"draftmancer sessionSpectators for {self.session_id}: {self.spectator_names}")
         if self.draft_complete:
             return
         non_bot_names = self.non_bot_session_names()
         classified = await self._classify_users(non_bot_names) if non_bot_names else []
         await self._refresh_lobby_status(classified)
+
+    def _recompute_spectator_state(self) -> None:
+        rows = self.session_spectators
+        self.spectator_user_ids = {s.get("userID") for s in rows if s.get("userID")}
+        self.spectator_names = [s.get("userName") for s in rows if s.get("userName")]
+        self.spectator_targets = [
+            (s.get("userID"), s.get("userName")) for s in rows
+            if s.get("userID") and s.get("userName") != _BOT_USER_NAME
+        ]
 
     async def _on_update_user(self, payload) -> None:
         if not isinstance(payload, dict):
@@ -302,14 +307,22 @@ class PodDraftManager:
         updates = payload.get("updatedProperties") or {}
         if not user_id or not updates:
             return
-        for u in self.session_users:
-            if u.get("userID") == user_id:
-                u.update(updates)
-                break
-        if "userName" in updates:
+        renamed_roster = self._apply_user_update(self.session_users, user_id, updates)
+        renamed_spectator = self._apply_user_update(self.session_spectators, user_id, updates)
+        if renamed_spectator:
+            self._recompute_spectator_state()
+        if "userName" in updates and (renamed_roster or renamed_spectator):
             log.info(f"draftmancer updateUser rename for {self.session_id}: {user_id} → {updates['userName']}")
             if not self.draft_complete:
                 await self.refresh_lobby_now()
+
+    @staticmethod
+    def _apply_user_update(rows: list[dict], user_id: str, updates: dict) -> bool:
+        for u in rows:
+            if u.get("userID") == user_id:
+                u.update(updates)
+                return True
+        return False
 
     async def _claim_ownership_and_apply_settings(self) -> None:
         if self.bot_user_id is None or self.owner_claimed:
