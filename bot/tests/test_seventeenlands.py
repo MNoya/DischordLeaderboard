@@ -319,6 +319,18 @@ def test_extract_event_row_trophy_flag_from_event_wins():
     assert extract_event_row(_draft(event_wins=4))["is_trophy"] is True
 
 
+def test_extract_event_row_lcq_draft_2_trophy_from_six_wins():
+    lcq = dict(format="LimitedChampionshipQualifier_Draft2", event_wins=0)
+
+    six_wins = extract_event_row(_draft(wins=6, losses=1, **lcq))
+    five_wins = extract_event_row(_draft(wins=5, losses=2, **lcq))
+    seven_wins = extract_event_row(_draft(wins=7, losses=0, **lcq))
+
+    assert six_wins["is_trophy"] is True
+    assert five_wins["is_trophy"] is False
+    assert seven_wins["is_trophy"] is False
+
+
 def test_extract_event_row_keeps_unknown_format():
     """Format is never filtered at extract; storage layer keeps everything."""
     row = extract_event_row(_draft(format="MidWeekSealed"))

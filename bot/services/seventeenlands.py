@@ -279,13 +279,19 @@ def extract_event_row(draft: dict) -> dict | None:
     if not fmt:
         return None
     expansion = normalize_expansion(draft.get("expansion") or "")
+    wins = int(draft.get("wins") or 0)
+    # WORKAROUND: 17lands ships event_wins=0 for LCQ Draft 2 trophies; revert once fixed upstream
+    if fmt == "LimitedChampionshipQualifier_Draft2":
+        is_trophy = wins == 6
+    else:
+        is_trophy = bool(draft.get("event_wins"))
     return {
         "seventeenlands_event_id": event_id,
         "format": fmt,
         "expansion": expansion,
-        "wins": int(draft.get("wins") or 0),
+        "wins": wins,
         "losses": int(draft.get("losses") or 0),
-        "is_trophy": bool(draft.get("event_wins")),
+        "is_trophy": is_trophy,
         "colors": draft.get("colors") or None,
         "start_rank": draft.get("start_rank") or None,
         "end_rank": draft.get("end_rank") or None,
