@@ -19,3 +19,6 @@ export const TIER_LIST_EMBED_BASE = "https://www.17lands.com/card_tiers/embedded
 
 // Fallback iframe height until the embed posts its real height via postMessage; sized to clear the longest measured tier list
 export const TIER_LIST_EMBED_HEIGHT = 2950;
+
+// Fixed iframe width on mobile so every color column stays legible and the wrapper scrolls horizontally to reach them
+export const TIER_LIST_EMBED_MOBILE_WIDTH = 760;

@@ -8,7 +8,7 @@ import { useIsMobile } from "../lib/use-is-mobile";
 // that a future LLU site shell can wrap or omit it cleanly.
 
 const NAV: Array<{ label: string; to: string; match: (path: string) => boolean }> = [
-  { label: "LEADERBOARD", to: "/", match: (p) => p === "/" || /^\/[A-Z0-9]{2,4}$/.test(p) },
+  { label: "LEADERBOARD", to: "/leaderboard", match: (p) => p === "/" || p === "/leaderboard" || p.startsWith("/leaderboard/") },
   { label: "POD DRAFTS", to: "/pods", match: (p) => p.startsWith("/pods") },
   { label: "TIER LIST", to: "/tier-list", match: (p) => p.startsWith("/tier-list") },
   { label: "ABOUT", to: "/about", match: (p) => p.startsWith("/about") },

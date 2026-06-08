@@ -6,7 +6,7 @@ import { cn } from "../lib/utils";
 export function ALogo({ size = 32 }: { size?: number }) {
   return (
     <img
-      src="/leaderboard/llu-logo-transparent.png"
+      src={`${import.meta.env.BASE_URL}llu-logo-transparent.png`}
       alt="Limited Level-Ups"
       style={{ height: size, width: "auto" }}
       className="block"

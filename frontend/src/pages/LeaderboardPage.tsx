@@ -37,7 +37,7 @@ import {
   usePrefetchers,
   useSets,
 } from "../data/hooks";
-import { canonicalSetCode, colorsOf, effectiveColorCount, eventDate, fmtRange, lastUpdated, prettyFormat, relativeTime, sumEvents, weekOfSet, winPct } from "../data/utils";
+import { canonicalSetCode, colorsOf, effectiveColorCount, eventDate, fmtRange, lastUpdated, leaderboardPath, playerPath, prettyFormat, relativeTime, sumEvents, weekOfSet, winPct } from "../data/utils";
 import { colorsDisplayName, FORMAT_LABEL_GROUPS, FORMAT_OPTIONS, matchesFormatFilter, MULTI, OTHER } from "../data/filters";
 import { FMT_COLORS, FMT_DEFAULT_COLOR, renderFormatOption, shortFormat } from "../data/format-display";
 import { guildLogoTransform, guildSvgUrl } from "../data/guild-art";
@@ -65,9 +65,9 @@ export function LeaderboardPage() {
   useEffect(() => {
     if (!params.setCode) return;
     if (activeSet === liveSetCode) {
-      navigate({ pathname: "/", search: searchParams.toString() }, { replace: true });
+      navigate({ pathname: leaderboardPath(), search: searchParams.toString() }, { replace: true });
     } else if (activeSet !== params.setCode) {
-      navigate({ pathname: `/${activeSet}`, search: searchParams.toString() }, { replace: true });
+      navigate({ pathname: leaderboardPath(activeSet), search: searchParams.toString() }, { replace: true });
     }
   }, [params.setCode, activeSet, liveSetCode, navigate, searchParams]);
   const format = searchParams.get("format") ?? "ALL";
@@ -295,7 +295,7 @@ function Desktop({
             <DesktopExpandedRow
               row={r}
               to={{
-                pathname: `/${activeSet}/player/${r.slug}`,
+                pathname: playerPath(r.slug, activeSet),
                 search: searchParams.toString(),
               }}
               activeFormat={filters.format}
@@ -593,7 +593,7 @@ function Mobile({
           <MobileExpandedRow
             row={r}
             to={{
-              pathname: `/${activeSet}/player/${r.slug}`,
+              pathname: playerPath(r.slug, activeSet),
               search: searchParams.toString(),
             }}
             activeFormat={filters.format}
@@ -1092,7 +1092,7 @@ function goToSet(
 ) {
   const activeCode = sets?.find((s) => s.isActive)?.code;
   navigate({
-    pathname: code === activeCode ? "/" : `/${code}`,
+    pathname: code === activeCode ? leaderboardPath() : leaderboardPath(code),
     search: searchParams.toString(),
   });
 }

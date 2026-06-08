@@ -10,7 +10,7 @@ import { Pips } from "../ManaPips";
 import { Record } from "../Record";
 import { cn } from "../../lib/utils";
 import { useIsMobile } from "../../lib/use-is-mobile";
-import { podSeatName, stripDiscriminator } from "../../data/utils";
+import { playerPath, podSeatName, stripDiscriminator } from "../../data/utils";
 import type { PodEventMatchRow, PodEventReplayRow, PodSeat } from "../../types/leaderboard";
 
 const SKIPPED_SENTINEL = "(skipped)";
@@ -44,7 +44,7 @@ export function PlayerSeatPanel({
     .sort((a, b) => a.round - b.round);
 
   const profileHref = (slug: string | null | undefined): string | null =>
-    slug && linkableSlugs.has(slug) ? `/${setCode}/player/${slug}` : null;
+    slug && linkableSlugs.has(slug) ? playerPath(slug, setCode) : null;
 
   return (
     <div>

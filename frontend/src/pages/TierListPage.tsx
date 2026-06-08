@@ -4,12 +4,19 @@ import { AppHeader } from "../components/AppHeader";
 import { ALogo, SetGlyph, setGlyphCode } from "../components/Brand";
 import { SetSwitcherDesktop, SetSwitcherMobile } from "../components/SetSwitcher";
 import { useSets } from "../data/hooks";
-import { useIsMobile } from "../lib/use-is-mobile";
-import { ACTIVE_SET_CODE, TIER_LIST_EMBED_BASE, TIER_LIST_EMBED_HEIGHT, TIER_LIST_UIDS } from "../data/constants";
+import { useIsLandscapePhone, useIsMobile } from "../lib/use-is-mobile";
+import {
+  ACTIVE_SET_CODE,
+  TIER_LIST_EMBED_BASE,
+  TIER_LIST_EMBED_HEIGHT,
+  TIER_LIST_EMBED_MOBILE_WIDTH,
+  TIER_LIST_UIDS,
+} from "../data/constants";
 
 export function TierListPage() {
   const { data: sets } = useSets();
   const isMobile = useIsMobile();
+  const landscapePhone = useIsLandscapePhone();
   const [picked, setPicked] = useState<string | null>(null);
   const [reportedHeight, setReportedHeight] = useState<number | null>(null);
   const [headerHidden, setHeaderHidden] = useState(false);
@@ -75,19 +82,24 @@ export function TierListPage() {
                 <SetSwitcherMobile sets={tierListSets} activeCode={current} onChange={setPicked} />
               </div>
             ) : (
-              <SetSwitcherDesktop sets={tierListSets} activeCode={current} onChange={setPicked} />
+              <SetSwitcherDesktop
+                sets={tierListSets}
+                activeCode={current}
+                onChange={setPicked}
+                extraHide={landscapePhone ? 2 : 0}
+              />
             ))}
         </div>
 
         {uid ? (
-          <div className="w-full overflow-hidden border border-border bg-surface">
+          <div className={`w-full border border-border bg-surface ${isMobile ? "overflow-x-auto" : "overflow-hidden"}`}>
             <iframe
               src={`${TIER_LIST_EMBED_BASE}/${uid}`}
               title={`${setMeta?.name ?? current} tier list`}
               className="block border-0"
               style={{
                 marginLeft: -30,
-                width: "calc(100% + 65px)",
+                width: isMobile ? TIER_LIST_EMBED_MOBILE_WIDTH + 30 : "calc(100% + 65px)",
                 height: reportedHeight ?? TIER_LIST_EMBED_HEIGHT,
               }}
             />

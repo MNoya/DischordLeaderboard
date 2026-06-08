@@ -18,6 +18,21 @@ export function useIsMobile(breakpoint = 720): boolean {
   return isMobile;
 }
 
+export function useIsLandscapePhone(): boolean {
+  const query = "(orientation: landscape) and (max-height: 520px)";
+  const [matches, setMatches] = React.useState<boolean>(
+    typeof window !== "undefined" ? window.matchMedia(query).matches : false
+  );
+  React.useEffect(() => {
+    const mql = window.matchMedia(query);
+    const handler = (e: MediaQueryListEvent | MediaQueryList) => setMatches(e.matches);
+    handler(mql);
+    mql.addEventListener("change", handler);
+    return () => mql.removeEventListener("change", handler);
+  }, []);
+  return matches;
+}
+
 const SET_VISIBLE_BREAKPOINTS: Array<[number, number]> = [
   [1400, 6],
   [1100, 5],
