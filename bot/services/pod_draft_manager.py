@@ -113,6 +113,7 @@ class PodDraftManager:
         self.session_users: list[dict] = []
         self.spectator_user_ids: set[str] = set()
         self.spectator_names: list[str] = []
+        self.spectator_targets: list[tuple[str, str]] = []
         self.desired_seating: list[str] | None = None
         self.bot_user_id: str | None = None
         self.owner_claimed = False
@@ -141,6 +142,7 @@ class PodDraftManager:
         self.seating_mode = "random"             # 'random', 'manual', or 'leaderboard'; hydrated on connect
         self._last_seating_signature: tuple[str, ...] | None = None
         self.standings_message = None
+        self._standings_post_lock = asyncio.Lock()
         self.round_messages: dict[int, "discord.Message"] = {}
         self.grace_task = None
         self.grace_round: int | None = None
@@ -282,6 +284,10 @@ class PodDraftManager:
         rows = spectators if isinstance(spectators, list) else []
         self.spectator_user_ids = {s.get("userID") for s in rows if s.get("userID")}
         self.spectator_names = [s.get("userName") for s in rows if s.get("userName")]
+        self.spectator_targets = [
+            (s.get("userID"), s.get("userName")) for s in rows
+            if s.get("userID") and s.get("userName") != _BOT_USER_NAME
+        ]
         log.info(f"draftmancer sessionSpectators for {self.session_id}: {self.spectator_names}")
         if self.draft_complete:
             return
@@ -980,11 +986,14 @@ class PodDraftManager:
         return None
 
     def kick_targets(self) -> list[tuple[str, str]]:
-        """(userID, userName) for every non-bot session user, for the Settings kick select."""
-        return [
+        """(userID, label) for every removable session user — seated players plus spectators,
+        spectators suffixed so the Settings kick select tells them apart."""
+        players = [
             (u.get("userID"), u.get("userName")) for u in self.player_session_users()
             if u.get("userID")
         ]
+        spectators = [(user_id, f"{name} (spectator)") for user_id, name in self.spectator_targets]
+        return players + spectators
 
     async def kick_player(self, user_id: str) -> str | None:
         """Remove a user from the Draftmancer session (owner-only socket action; Draftmancer parks

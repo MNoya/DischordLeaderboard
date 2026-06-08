@@ -52,6 +52,7 @@ def test_player_roster_excludes_spectators():
         None,
     )
     mgr.spectator_user_ids = {"4"}
+    mgr.spectator_targets = [("4", "Cyra")]
 
     assert mgr.non_bot_session_names() == ["Ava", "Bram"]
-    assert mgr.kick_targets() == [("1", "Ava"), ("2", "Bram")]
+    assert mgr.kick_targets() == [("1", "Ava"), ("2", "Bram"), ("4", "Cyra (spectator)")]

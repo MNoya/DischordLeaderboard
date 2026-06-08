@@ -2680,28 +2680,29 @@ async def _post_or_update_live_standings(manager) -> None:
         deck_data=deck_data,
     )
 
-    if manager.standings_message is None:
-        thread = await manager._fetch_thread()
-        if thread is None:
-            return
-        adopted = await _find_pinned_standings(thread, manager.bot.user, event_name)
-        if adopted is not None:
-            manager.standings_message = adopted
-        else:
-            view = build_live_submit_deck_view()
-            view.add_item(build_replays_link_button(event_name))
-            try:
-                manager.standings_message = await thread.send(embed=embed, view=view)
-            except Exception:
-                log.warning("could not post live standings", exc_info=True)
+    async with manager._standings_post_lock:
+        if manager.standings_message is None:
+            thread = await manager._fetch_thread()
+            if thread is None:
                 return
-            try:
-                await manager.standings_message.pin(reason="pod-draft live standings")
-            except discord.HTTPException:
-                log.warning(f"could not pin standings message {manager.standings_message.id}", exc_info=True)
-        await _attach_round_link(manager, TOTAL_ROUNDS)
-        if adopted is None:
-            return
+            adopted = await _find_pinned_standings(thread, manager.bot.user, event_name)
+            if adopted is not None:
+                manager.standings_message = adopted
+            else:
+                view = build_live_submit_deck_view()
+                view.add_item(build_replays_link_button(event_name))
+                try:
+                    manager.standings_message = await thread.send(embed=embed, view=view)
+                except Exception:
+                    log.warning("could not post live standings", exc_info=True)
+                    return
+                try:
+                    await manager.standings_message.pin(reason="pod-draft live standings")
+                except discord.HTTPException:
+                    log.warning(f"could not pin standings message {manager.standings_message.id}", exc_info=True)
+            await _attach_round_link(manager, TOTAL_ROUNDS)
+            if adopted is None:
+                return
     try:
         await manager.standings_message.edit(embed=embed)
     except Exception:

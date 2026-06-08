@@ -164,7 +164,9 @@ class _KickPlayerButton(ui.Button):
         view: PodSettingsView = self.view
         targets = view.kick_targets_provider()
         if not targets:
-            await interaction.response.send_message("No players in the Draftmancer session.", ephemeral=True)
+            await interaction.response.send_message(
+                "No players or spectators in the Draftmancer session.", ephemeral=True,
+            )
             return
         await interaction.response.send_message(
             view=_KickSelectView(targets, view.on_kick), ephemeral=True,
@@ -180,7 +182,7 @@ class _KickSelectView(ui.View):
 class _KickSelect(ui.Select):
     def __init__(self, targets: list[tuple[str, str]], on_kick: KickApply) -> None:
         options = [discord.SelectOption(label=name, value=user_id) for user_id, name in targets[:25]]
-        super().__init__(placeholder="Remove a player from the table", options=options,
+        super().__init__(placeholder="Remove a player or spectator from the table", options=options,
                          min_values=1, max_values=1)
         self.names = dict(targets)
         self.on_kick = on_kick
