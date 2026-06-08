@@ -10,7 +10,6 @@ import { useIsMobile } from "../lib/use-is-mobile";
 const NAV: Array<{ label: string; to: string; match: (path: string) => boolean }> = [
   { label: "LEADERBOARD", to: "/leaderboard", match: (p) => p === "/" || p === "/leaderboard" || p.startsWith("/leaderboard/") },
   { label: "POD DRAFTS", to: "/pods", match: (p) => p.startsWith("/pods") },
-  { label: "TIER LIST", to: "/tier-list", match: (p) => p.startsWith("/tier-list") },
   { label: "ABOUT", to: "/about", match: (p) => p.startsWith("/about") },
 ];
 
