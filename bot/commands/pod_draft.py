@@ -45,7 +45,7 @@ from bot.services.player_stats import SeededAttendee, rank_ordered_names, seed_a
 from bot.services.pod_seating_select import SEATING_ORDER_MARKER, seating_change_message
 from bot.services.pod_seating_image import drop_unrenderable, render_octagon_png
 from bot.sets import ACTIVE_SET_CODE
-from bot.tasks.pod_draft_reminder import fetch_sesh_rsvps
+from bot.tasks.pod_draft_reminder import fetch_sesh_rsvps, fire_reminder
 from bot.services.pod_settings_view import PodSettingsView
 from bot.services.pod_tournament import (
     actor_label,
@@ -129,6 +129,18 @@ class PodDraft(commands.Cog):
             await interaction.followup.send(f"⚠️ {err}", ephemeral=True)
         else:
             await interaction.followup.send("Force-starting the draft, watch the thread.", ephemeral=True)
+
+    @commands.command(name="start")
+    @commands.is_owner()
+    async def start_lobby(self, ctx: commands.Context) -> None:
+        """Owner-only. Bypass the T-10 wait and open the Draftmancer lobby for this thread now."""
+        thread_id = str(ctx.channel.id) if ctx.channel else None
+        event_id = await asyncio.to_thread(load_event_id_by_thread_sync, thread_id) if thread_id else None
+        if event_id is None:
+            await ctx.reply("Run this inside a pod-draft thread.", mention_author=False)
+            return
+        log.info(f"!start: {ctx.author} opening lobby early for event_id={event_id}")
+        await fire_reminder(event_id, early=True)
 
     @app_commands.command(name="pod-settings", description=desc.POD_SETTINGS)
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
