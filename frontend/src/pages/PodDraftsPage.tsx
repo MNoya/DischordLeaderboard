@@ -25,7 +25,7 @@ import {
 } from "../components/LeaderboardTable";
 import { useIsMobile } from "../lib/use-is-mobile";
 import { cn } from "../lib/utils";
-import { cleanPodEventName, fmtRange, podDiscordName, stripDiscriminator, weekOfSet } from "../data/utils";
+import { cleanPodEventName, fmtRange, playerPath, podDiscordName, stripDiscriminator, weekOfSet } from "../data/utils";
 import { ACTIVE_SET_CODE, DISCORD_GUILD_ID } from "../data/constants";
 import {
   useLeaderboard,
@@ -248,7 +248,7 @@ export function PodDraftsPage({ setCode }: { setCode?: string } = {}) {
               onSort={onSort}
               emptyMessage={`No player stats yet for ${activeSet}.`}
               playerHref={(row) =>
-                linkableSlugs.has(row.slug) ? `/${activeSet}/player/${row.slug}` : null
+                linkableSlugs.has(row.slug) ? playerPath(row.slug, activeSet) : null
               }
             />
           </section>
@@ -625,7 +625,7 @@ function EventStandings({ event }: { event: PodEventSummary }) {
                   p={p}
                   profileHref={
                     p.playerSlug && linkableSlugs.has(p.playerSlug)
-                      ? `/${event.setCode}/player/${p.playerSlug}`
+                      ? playerPath(p.playerSlug, event.setCode)
                       : null
                   }
                   onShowDeck={p.deckScreenshotUrl ? () => setDeckTarget(p) : undefined}

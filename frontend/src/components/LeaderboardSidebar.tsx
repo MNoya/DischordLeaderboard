@@ -11,7 +11,7 @@ import { Record } from "./Record";
 import { useColorsSummary, useFormatScopedTrophies, useRecentTrophies } from "../data/hooks";
 import { lcqDraft2Earnings } from "../data/scoring";
 import { formatsForBucket } from "../data/format-buckets";
-import { colorsOf, effectiveColorCount, mainColors, relativeTime } from "../data/utils";
+import { colorsOf, effectiveColorCount, mainColors, playerPath, relativeTime } from "../data/utils";
 import { FMT_COLORS, FMT_DEFAULT_COLOR, shortFormat } from "../data/format-display";
 import { colorsDisplayName, MULTI, OTHER } from "../data/filters";
 import { guildLogoTransform, guildSvgUrl } from "../data/guild-art";
@@ -273,7 +273,7 @@ export function LeaderboardSidebar({
             ) : (
               <Link
                 key={key}
-                to={{ pathname: `/${setCode}/player/${t.slug}`, search: qs }}
+                to={{ pathname: playerPath(t.slug, setCode), search: qs }}
                 className={cls}
               >
                 {inner}

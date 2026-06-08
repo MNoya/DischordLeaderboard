@@ -226,3 +226,14 @@ export function canonicalSetCode(raw: string, sets: SetSummary[] | undefined): s
   const known = sets?.find((s) => s.code.toLowerCase() === raw.toLowerCase());
   return known?.code ?? raw.toUpperCase();
 }
+
+// The leaderboard is a lowercase section; set codes stay uppercase under it (/leaderboard/SOS).
+export const LEADERBOARD_BASE = "/leaderboard";
+
+export function leaderboardPath(setCode?: string): string {
+  return setCode ? `${LEADERBOARD_BASE}/${setCode}` : LEADERBOARD_BASE;
+}
+
+export function playerPath(slug: string, setCode: string): string {
+  return `${LEADERBOARD_BASE}/${setCode}/player/${slug}`;
+}

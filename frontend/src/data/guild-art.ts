@@ -27,7 +27,7 @@ const SCALE_PCT: Record<string, number> = {
   BR: 20,
 };
 
-const BASE = "/leaderboard/guilds";
+const BASE = `${import.meta.env.BASE_URL}guilds`;
 
 export function guildSvgUrl(code: string): string | null {
   const guild = GUILD_FILENAME[code];

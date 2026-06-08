@@ -16,13 +16,10 @@ const queryClient = new QueryClient({
   },
 });
 
-// BrowserRouter with basename="/leaderboard" gives clean URLs like
-// /leaderboard/SOS/player/chonce. Cloudflare Pages serves the SPA index for
-// any /leaderboard/* path via the SPA-fallback rewrite in dist/_redirects.
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter basename="/leaderboard">
+      <BrowserRouter>
         <App />
       </BrowserRouter>
     </QueryClientProvider>

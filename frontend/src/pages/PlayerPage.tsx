@@ -31,7 +31,7 @@ import { Tooltip } from "../components/Tooltip";
 
 import { useAvailableFormats, useColorChips, useDraftEvents, useLeaderboard, usePlayerIdentity, usePlayerProfile, useSets } from "../data/hooks";
 import { computeScore, type ScoringStatRow } from "../data/scoring";
-import { canonicalSetCode, colorsOf, effectiveColorCount, eventDate, eventDisplayLabel, fmtShortDate, formatTag, isFlashbackEvent, lcqCashPrize, mainColors, prettyFormat, winPct } from "../data/utils";
+import { canonicalSetCode, colorsOf, effectiveColorCount, eventDate, eventDisplayLabel, fmtShortDate, formatTag, isFlashbackEvent, LEADERBOARD_BASE, lcqCashPrize, leaderboardPath, mainColors, playerPath, prettyFormat, winPct } from "../data/utils";
 import { ACTIVE_SET_CODE } from "../data/constants";
 import {
   colorsDisplayName,
@@ -137,12 +137,12 @@ export function PlayerPage() {
     if (!params.setCode) return;
     if (setCode === liveSetCode) {
       navigate(
-        { pathname: `/player/${slug}`, search: topSearchParams.toString() },
+        { pathname: `${LEADERBOARD_BASE}/player/${slug}`, search: topSearchParams.toString() },
         { replace: true },
       );
     } else if (setCode !== params.setCode) {
       navigate(
-        { pathname: `/${setCode}/player/${slug}`, search: topSearchParams.toString() },
+        { pathname: playerPath(slug, setCode), search: topSearchParams.toString() },
         { replace: true },
       );
     }
@@ -166,7 +166,7 @@ export function PlayerPage() {
   const topQs = topSearchParams.toString();
 
   const onChangeSet = (newCode: string) => {
-    navigate({ pathname: `/${newCode}/player/${slug}`, search: topQs });
+    navigate({ pathname: playerPath(slug, newCode), search: topQs });
   };
 
   useEffect(() => {
@@ -178,10 +178,10 @@ export function PlayerPage() {
       }
       if (e.key === "ArrowLeft" && prevSlug) {
         e.preventDefault();
-        navigate({ pathname: `/${setCode}/player/${prevSlug}`, search: topQs });
+        navigate({ pathname: playerPath(prevSlug, setCode), search: topQs });
       } else if (e.key === "ArrowRight" && nextSlug) {
         e.preventDefault();
-        navigate({ pathname: `/${setCode}/player/${nextSlug}`, search: topQs });
+        navigate({ pathname: playerPath(nextSlug, setCode), search: topQs });
       }
     };
     window.addEventListener("keydown", onKey);
@@ -289,10 +289,10 @@ function MobilePlayerHeader({
   qs?: string;
 }) {
   const toFor = (s: string | null) =>
-    s ? { pathname: `/${sibling.setCode}/player/${s}`, search: qs } : null;
+    s ? { pathname: playerPath(s, sibling.setCode), search: qs } : null;
   return (
     <MobilePageHeader
-      backOnClick={() => navigate({ pathname: `/${sibling.setCode}`, search: qs })}
+      backOnClick={() => navigate({ pathname: leaderboardPath(sibling.setCode), search: qs })}
       prevTo={toFor(sibling.prevSlug)}
       nextTo={toFor(sibling.nextSlug)}
       prevAriaLabel="Previous player"
@@ -338,7 +338,7 @@ function NoSetData({
       >
         {!isMobile && (
           <div className="flex items-center justify-between mb-4">
-            <BackButton onClick={() => navigate({ pathname: `/${setCode}`, search: qs })} inline />
+            <BackButton onClick={() => navigate({ pathname: leaderboardPath(setCode), search: qs })} inline />
             <SiblingNavButtons sibling={sibling} qs={qs} />
           </div>
         )}
@@ -671,7 +671,7 @@ function Desktop({
         style={{ background: "linear-gradient(180deg, #14181f 0%, #0a0c10 100%)" }}
       >
         <div className="flex items-center justify-between mb-4">
-          <BackButton onClick={() => navigate({ pathname: `/${profile.setCode}`, search: qs })} inline />
+          <BackButton onClick={() => navigate({ pathname: leaderboardPath(profile.setCode), search: qs })} inline />
           <SiblingNavButtons sibling={sibling} qs={qs} />
         </div>
         <div className="flex items-end gap-7">
@@ -1187,7 +1187,7 @@ function FormatTagPill({ tag }: { tag: { label: string; tone: "midweek" | "open"
   if (tag.tone === "alchemy") {
     return (
       <img
-        src="/leaderboard/alchemy.png"
+        src={`${import.meta.env.BASE_URL}alchemy.png`}
         alt={tag.label}
         className="h-6 w-auto object-contain"
       />
@@ -2020,7 +2020,7 @@ function SiblingNavButtons({
   );
   const disabledCls = "opacity-30 cursor-default pointer-events-none text-muted";
   const toFor = (s: string | null) =>
-    s ? { pathname: `/${sibling.setCode}/player/${s}`, search: qs } : null;
+    s ? { pathname: playerPath(s, sibling.setCode), search: qs } : null;
   const prevTo = toFor(sibling.prevSlug);
   const nextTo = toFor(sibling.nextSlug);
   return (
