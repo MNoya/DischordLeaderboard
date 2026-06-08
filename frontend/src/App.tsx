@@ -5,6 +5,7 @@ import { LeaderboardPage } from "./pages/LeaderboardPage";
 import { PlayerPage } from "./pages/PlayerPage";
 import { PodDraftsPage, PodsRoute } from "./pages/PodDraftsPage";
 import { AboutPage } from "./pages/AboutPage";
+import { TierListPage } from "./pages/TierListPage";
 import { preloadGuildLogos } from "./data/guild-art";
 
 // Browser routes per spec, basename "/leaderboard" applied at the BrowserRouter.
@@ -31,6 +32,8 @@ export function App() {
 
       <Route path="/pods" element={<PodDraftsPage />} />
       <Route path="/pods/:slug" element={<PodsRoute />} />
+
+      <Route path="/tier-list" element={<TierListPage />} />
 
       <Route path="/:setCode" element={<LeaderboardPage />} />
       <Route path="/:setCode/player/:slug" element={<PlayerPage />} />
