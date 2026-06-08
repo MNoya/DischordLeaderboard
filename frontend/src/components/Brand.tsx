@@ -24,7 +24,7 @@ export function AWordmark({
 }) {
   const s =
     size === "sm" ? { lg: 15, sm: 9 } :
-    size === "lg" ? { lg: 28, sm: 12 } :
+    size === "lg" ? { lg: 28, sm: "clamp(11px, 3.2vw, 14px)" } :
     { lg: 18, sm: 9 };
   return (
     <div className="flex flex-col font-display whitespace-nowrap" style={{ lineHeight: 0.95 }}>

@@ -6,6 +6,7 @@ import { PlayerPage } from "./pages/PlayerPage";
 import { PodDraftsPage, PodsRoute } from "./pages/PodDraftsPage";
 import { AboutPage } from "./pages/AboutPage";
 import { TierListPage } from "./pages/TierListPage";
+import { NotFoundPage } from "./pages/NotFoundPage";
 import { preloadGuildLogos } from "./data/guild-art";
 
 // Browser routes. The leaderboard is one section of the site, mounted at the
@@ -47,7 +48,7 @@ export function App() {
       <Route path="/leaderboard/archetypes/*" element={<Navigate to="/leaderboard" replace />} />
       <Route path="/leaderboard/:setCode/archetypes/*" element={<Navigate to="/leaderboard" replace />} />
 
-      <Route path="*" element={<Navigate to="/leaderboard" replace />} />
+      <Route path="*" element={<NotFoundPage />} />
     </Routes>
     </TooltipProvider>
   );

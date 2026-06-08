@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
 import { AppHeader } from "../components/AppHeader";
-import { ArrowRight, Globe } from "../components/Icons";
+import { Globe } from "../components/Icons";
 import { DiscordIcon, PatreonIcon, YoutubeIcon } from "../components/BrandIcons";
 import { Footer } from "../components/Footer";
+import { CtaPill } from "../components/CtaPill";
 import { cn } from "../lib/utils";
 
 const DISCORD_URL = "https://discord.com/invite/XWNVT9mxvU";
@@ -55,19 +56,9 @@ function CTA() {
   return (
     <div className="mb-6 md:mb-8 flex justify-center">
       <a href={DISCORD_URL} target="_blank" rel="noreferrer" className="no-underline">
-        <button
-          type="button"
-          className="bg-green text-bg cursor-pointer transition-colors hover:bg-green-2 inline-flex items-center gap-3 md:gap-4 py-2.5 md:py-3 pl-5 md:pl-6 pr-6 md:pr-8 border-none"
-          style={{ clipPath: "polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%)" }}
-        >
-          <span className="inline-flex items-center justify-center w-9 h-9 md:w-10 md:h-10 rounded-full bg-bg text-text shrink-0">
-            <DiscordIcon size={19} />
-          </span>
-          <span className="font-display text-[17px] md:text-[20px] tracking-[0.14em] leading-none">
-            JOIN THE DISCHORD
-          </span>
-          <ArrowRight size={18} />
-        </button>
+        <CtaPill size="lg" icon={<DiscordIcon size={19} />}>
+          JOIN THE DISCHORD
+        </CtaPill>
       </a>
     </div>
   );

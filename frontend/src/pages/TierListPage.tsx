@@ -55,9 +55,9 @@ export function TierListPage() {
   return (
     <div className="bg-bg text-text min-h-screen flex flex-col animate-fadeIn">
       <AppHeader subtitle="TIER LIST" />
-      <main className="flex flex-col w-full px-1.5 lg:px-8 pb-4">
+      <main className="flex flex-col w-full px-[15px] pb-4">
         <div ref={sentinelRef} className="h-0" aria-hidden="true" />
-        <div className="sticky top-0 z-20 bg-bg flex items-center justify-between gap-3 py-2 md:py-3 px-1.5 lg:px-0 relative">
+        <div className="sticky top-0 z-20 bg-bg flex items-center justify-between gap-3 py-2 md:py-3 relative">
           <h1 className="font-display tracking-[0.12em] flex items-center gap-2 md:gap-3 leading-none min-w-0">
             <SetGlyph code={setMeta ? setGlyphCode(setMeta) : current} size={isMobile ? 26 : 38} />
             <span className="text-[17px] md:text-[30px] truncate">
@@ -94,7 +94,7 @@ export function TierListPage() {
         {uid ? (
           <div className={`w-full border border-border bg-surface ${isMobile ? "overflow-x-auto" : "overflow-hidden"}`}>
             <iframe
-              src={`${TIER_LIST_EMBED_BASE}/${uid}`}
+              src={`${TIER_LIST_EMBED_BASE}/${uid}?filters=true`}
               title={`${setMeta?.name ?? current} tier list`}
               className="block border-0"
               style={{

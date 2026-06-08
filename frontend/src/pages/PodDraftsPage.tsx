@@ -11,6 +11,7 @@ import { SetSwitcherDesktop, SetSwitcherMobile } from "../components/SetSwitcher
 import { AAvatar, setGlyphCode, SetGlyph, Trophy } from "../components/Brand";
 import { ArrowRight, GiRoundTable, LuScrollText, TbCards } from "../components/Icons";
 import { DiscordIcon } from "../components/BrandIcons";
+import { CtaPill } from "../components/CtaPill";
 import { ChamferedButton } from "../components/ChamferedButton";
 import { BREAKDOWN_CAPTION, DeckScreenshotModal } from "../components/pod/DeckScreenshotModal";
 import { Pips } from "../components/ManaPips";
@@ -449,18 +450,9 @@ function EventRow({
 function JoinEventCTA() {
   return (
     <div className="flex items-center pr-3 md:pr-4 pl-2 shrink-0 self-center">
-      <span
-        className="bg-green text-bg group-hover:bg-green-2 transition-colors inline-flex items-center gap-3 py-2 pl-3.5 pr-5 border-none"
-        style={{ clipPath: "polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%)" }}
-      >
-        <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-bg text-text shrink-0">
-          <DiscordIcon size={15} />
-        </span>
-        <span className="font-display text-[15px] tracking-[0.10em] leading-none">
-          JOIN EVENT
-        </span>
-        <ArrowRight size={14} />
-      </span>
+      <CtaPill size="sm" icon={<DiscordIcon size={15} />} hover="group">
+        JOIN EVENT
+      </CtaPill>
     </div>
   );
 }
