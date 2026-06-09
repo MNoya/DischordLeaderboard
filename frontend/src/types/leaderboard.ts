@@ -111,11 +111,14 @@ export interface RecentTrophy {
   isTrophy?: boolean;
 }
 
+export type PodEventKind = "tournament" | "mock";
+
 export interface PodEventSummary {
   eventId: string;
   slug: string;
   name: string;
   setCode: string;
+  kind: PodEventKind;
   eventDate: string;
   eventTime: string;
   formatLabel: string | null;

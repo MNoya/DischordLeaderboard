@@ -17,24 +17,32 @@ from bot.services.pod_format import (
     custom_formats,
     format_applied_message,
 )
-from bot.sets import ACTIVE_SET_CODE
+from bot.sets import ACTIVE_SET_CODE, upcoming_sets
 
 
 ApplyFormatCallback = Callable[[discord.Interaction, str], Awaitable[str | None]]
 
 
 def format_options(current_code: str | None) -> list[discord.SelectOption]:
-    """The format dropdown options (current set + custom cubes), with the active one defaulted. Labels
-    are prefixed with 'Format:' so the collapsed dropdown reads e.g. 'Format: SOS', matching the
-    Pairings and Seats dropdowns and the lobby footer."""
+    """The format dropdown options (active set + upcoming sets + custom cubes), with the current one
+    defaulted. Labels are prefixed with 'Format:' so the collapsed dropdown reads e.g. 'Format: SOS',
+    matching the Pairings and Seats dropdowns and the lobby footer. Upcoming sets (e.g. MSH before it
+    rotates in) let a pod preview-draft a set the bot serves via setRestriction."""
     cur = (current_code or "").upper()
-    on_custom = cur in CUSTOM_FORMATS
+    on_other = cur in CUSTOM_FORMATS or cur in {s.code for s in upcoming_sets()}
     options = [discord.SelectOption(
         label=f"Format: {ACTIVE_SET_CODE}",
         value=ACTIVE_SET_CODE,
         description=f"Draft the latest set ({ACTIVE_SET_CODE})",
-        default=not on_custom,
+        default=not on_other,
     )]
+    for seed in upcoming_sets():
+        options.append(discord.SelectOption(
+            label=f"Format: {seed.code}",
+            value=seed.code,
+            description=f"Preview draft: {seed.name}",
+            default=(cur == seed.code),
+        ))
     for fmt in custom_formats():
         options.append(discord.SelectOption(
             label=f"Format: {fmt.label}",

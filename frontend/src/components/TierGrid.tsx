@@ -102,6 +102,8 @@ function DesktopGrid({
     );
   };
   const headerCell = { position: "sticky", top: stickyTop, zIndex: 10 } as const;
+  const tierHasAnyCard = (tier: string) => COLUMN_CODES.some((code) => (byKey.get(`${code}|${tier}`) ?? []).length > 0);
+  const tiers = TIER_ORDER.filter((tier) => tier !== "TBD" || tierHasAnyCard(tier));
 
   return (
     <div className="border-x border-b border-border bg-surface">
@@ -122,7 +124,7 @@ function DesktopGrid({
           </div>
         ))}
 
-        {TIER_ORDER.map((tier) => (
+        {tiers.map((tier) => (
           <Fragment key={tier}>
             <div
               className="border-b border-l-4 border-border bg-bg flex items-center justify-center font-display text-[20px] leading-none text-text"

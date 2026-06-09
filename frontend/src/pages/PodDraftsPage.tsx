@@ -189,15 +189,23 @@ export function PodDraftsPage({ setCode }: { setCode?: string } = {}) {
   };
 
   const nowMs = useNow(60_000);
-  const { played, upcoming } = useMemo(() => {
-    if (!events) return { played: [] as PodEventSummary[], upcoming: [] as PodEventSummary[] };
+  const { played, upcoming, mock } = useMemo(() => {
+    if (!events) {
+      return {
+        played: [] as PodEventSummary[],
+        upcoming: [] as PodEventSummary[],
+        mock: [] as PodEventSummary[],
+      };
+    }
     const p: PodEventSummary[] = [];
     const u: PodEventSummary[] = [];
+    const m: PodEventSummary[] = [];
     for (const e of events) {
-      if (!e.championDisplayName && new Date(e.eventTime).getTime() > nowMs) u.push(e);
+      if (e.kind === "mock") m.push(e);
+      else if (!e.championDisplayName && new Date(e.eventTime).getTime() > nowMs) u.push(e);
       else p.push(e);
     }
-    return { played: p, upcoming: u };
+    return { played: p, upcoming: u, mock: m };
   }, [events, nowMs]);
 
   usePodEventParticipants(played[0]?.eventId);
@@ -257,21 +265,28 @@ export function PodDraftsPage({ setCode }: { setCode?: string } = {}) {
           <section className="order-1 lg:order-2 flex flex-col gap-4">
             {events === undefined ? (
               <EventsLoadingBlock />
-            ) : upcoming.length === 0 && played.length === 0 ? (
+            ) : upcoming.length === 0 && played.length === 0 && mock.length === 0 ? (
               <div>
                 <SectionHeading label="EVENTS" count={0} unit="EVENTS" />
                 <EmptyHint>No pod drafts recorded yet for {activeSet}.</EmptyHint>
               </div>
-            ) : isMobile ? (
-              <MobileEventsBlock played={played} upcoming={upcoming} nowMs={nowMs} />
             ) : (
               <>
-                {upcoming.length > 0 && (
-                  <EventsBlock label="UPCOMING" events={upcoming} nowMs={nowMs} />
+                {isMobile ? (
+                  (upcoming.length > 0 || played.length > 0) && (
+                    <MobileEventsBlock played={played} upcoming={upcoming} nowMs={nowMs} />
+                  )
+                ) : (
+                  <>
+                    {upcoming.length > 0 && (
+                      <EventsBlock label="UPCOMING" events={upcoming} nowMs={nowMs} />
+                    )}
+                    {played.length > 0 && (
+                      <EventsBlock label="PAST" events={played} nowMs={nowMs} defaultOpenFirst />
+                    )}
+                  </>
                 )}
-                {played.length > 0 && (
-                  <EventsBlock label="PAST" events={played} nowMs={nowMs} defaultOpenFirst />
-                )}
+                {mock.length > 0 && <MockDraftsBlock events={mock} />}
               </>
             )}
           </section>
@@ -363,6 +378,53 @@ function EventsBlock({
         ))}
       </div>
     </div>
+  );
+}
+
+function MockDraftsBlock({ events }: { events: PodEventSummary[] }) {
+  return (
+    <div>
+      <SectionHeading
+        label="MOCK DRAFTS"
+        count={events.length}
+        unit={events.length === 1 ? "DRAFT" : "DRAFTS"}
+      />
+      <div className="flex flex-col lg:gap-2">
+        {events.map((e, i) => (
+          <MockEventRow key={e.eventId} event={e} index={i} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MockEventRow({ event, index }: { event: PodEventSummary; index: number }) {
+  return (
+    <Link
+      to={`/pods/${event.slug}`}
+      className="group bg-surface border-b lg:border border-border first:lg:border-t-0 min-h-[68px] flex items-stretch no-underline hover:bg-surface2/30 transition-colors animate-fadeUpIn"
+      style={{ animationDelay: `${Math.min(index, 6) * 45}ms` }}
+    >
+      <DateRail date={event.eventDate} highlighted={false} />
+      <div className="flex-1 min-w-0 py-2.5 px-3 md:px-4 flex items-center gap-3">
+        <span
+          className="font-display text-text min-w-0 truncate"
+          style={{ fontSize: 21, letterSpacing: "0.04em", lineHeight: 1.15 }}
+        >
+          {cleanPodEventName(event.name, event.setCode).toUpperCase()}
+        </span>
+      </div>
+      <div className="flex items-center pr-3 md:pr-4 pl-2 shrink-0 self-center gap-3">
+        <span className="hidden lg:inline text-muted text-[13px] font-body">{BREAKDOWN_CAPTION}</span>
+        <ChamferedButton>
+          <span className="inline-flex items-center gap-2">
+            <GiRoundTable size={30} className="-my-[6px]" />
+            VIEW BREAKDOWN
+            <ArrowRight size={14} />
+          </span>
+        </ChamferedButton>
+      </div>
+    </Link>
   );
 }
 

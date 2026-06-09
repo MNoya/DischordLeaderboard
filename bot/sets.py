@@ -42,9 +42,23 @@ ALL_SETS: tuple[SetSeed, ...] = (
     SetSeed("ECL", "Lorwyn Eclipsed", date(2026, 1, 20), date(2026, 3, 2)),
     SetSeed("TMT", "Teenage Mutant Ninja Turtles", date(2026, 3, 3), date(2026, 4, 20)),
     SetSeed("SOS", "Secrets of Strixhaven", date(2026, 4, 21), date(2026, 6, 22)),
+    SetSeed("MSH", "Marvel Super Heroes", date(2026, 6, 23), date(2026, 8, 10)),
 )
 
 ACTIVE_SET_CODE = "SOS"
+
+
+def upcoming_sets() -> tuple[SetSeed, ...]:
+    """Registered sets that rotate in after the active one — not yet the leaderboard set, but
+    draftable for pod/mock previews. Empty once the active set is the newest entry."""
+    codes = [s.code for s in ALL_SETS]
+    if ACTIVE_SET_CODE not in codes:
+        return ()
+    return ALL_SETS[codes.index(ACTIVE_SET_CODE) + 1:]
+
+
+def is_known_set(code: str) -> bool:
+    return any(s.code == code.upper() for s in ALL_SETS)
 
 
 @dataclass(frozen=True)

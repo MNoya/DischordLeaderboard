@@ -1060,6 +1060,7 @@ function adaptPodEvent(row: Record<string, unknown>): PodEventSummary {
     slug: row.slug as string,
     name: row.name as string,
     setCode: row.set_code as string,
+    kind: row.kind === "mock" ? "mock" : "tournament",
     eventDate: row.event_date as string,
     eventTime: row.event_time as string,
     formatLabel: (row.format_label ?? null) as string | null,

@@ -61,7 +61,7 @@ class PodScreenshotListener(commands.Cog):
 
         is_champion_in_memory = False
         manager = ACTIVE_POD_MANAGERS.get(event_id)
-        if manager is not None:
+        if manager is not None and manager.kind != "mock":
             await maybe_post_championship(manager)
             is_champion_in_memory = discord_id in manager.champion_discord_ids
 

@@ -20,6 +20,8 @@ from discord.ext import commands
 
 from sqlalchemy import func, select
 
+from bot import emojis
+from bot.commands.messages import MSG_MOCK_COMPLETE
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.discord_helpers import extract_avatar_hash
@@ -39,8 +41,10 @@ from bot.services.pod_seating_select import seating_mode_label
 from bot.services.pod_drafts import (
     normalize_player_name,
     classify_lobby_names,
+    finalize_mock_event,
     load_event_pairing_mode_sync,
     load_event_seating_mode_sync,
+    player_for_name,
     seed_event_participants,
     update_event_format,
 )
@@ -98,6 +102,7 @@ class PodDraftManager:
                  set_code: str, expected_attendee_count: int, *,
                  event_name: str = "Pod Draft",
                  draftmancer_url: str = "",
+                 kind: str = "tournament",
                  rsvps_yes: list[str] | None = None,
                  rsvps_maybe: list[str] | None = None) -> None:
         self.bot = bot
@@ -108,6 +113,8 @@ class PodDraftManager:
         self.expected_attendee_count = expected_attendee_count
         self.event_name = event_name
         self.draftmancer_url = draftmancer_url
+        self.kind = kind
+        self._thread_added_ids: set[str] = set()
         self.rsvps_yes: list[str] = list(rsvps_yes or [])
         self.rsvps_maybe: list[str] = list(rsvps_maybe or [])
         self.session_users: list[dict] = []
@@ -271,6 +278,9 @@ class PodDraftManager:
         classified = await self._classify_users(non_bot_names) if non_bot_names else []
         await self._refresh_lobby_status(classified)
 
+        if self.kind == "mock":
+            asyncio.create_task(self._sync_thread_membership())
+
         if self.seating_mode == "leaderboard":
             if self.owner_claimed:
                 asyncio.create_task(self._apply_leaderboard_seating())
@@ -351,12 +361,18 @@ class PodDraftManager:
         await self.sio.emit("setBots", settings.pod_draft_bots)
         await self.sio.emit("setColorBalance", False)
         await self.sio.emit("setPersonalLogs", True)
-        await self.sio.emit("setDraftLogRecipients", "delayed")
+        await self.sio.emit("setDraftLogRecipients", self._draft_log_recipients)
         log.info(
             f"[LIFECYCLE] session_settings_applied event={self.event_id} set={self.set_code} "
             f"max_players={settings.pod_draft_max_players} pick_timer={settings.pod_draft_pick_timer} "
-            f"bots={settings.pod_draft_bots}"
+            f"bots={settings.pod_draft_bots} log_recipients={self._draft_log_recipients}"
         )
+
+    @property
+    def _draft_log_recipients(self) -> str:
+        """Mock drafts play no rounds, so picks never need hiding — open every player's draft log the
+        moment the draft ends. Tournament pods stay 'delayed' so the table can't be scouted mid-event."""
+        return "everyone" if self.kind == "mock" else "delayed"
 
     async def _enable_spectators_and_share_link(self) -> None:
         result = await self._emit_with_ack("setAllowSpectators", True)
@@ -708,7 +724,59 @@ class PodDraftManager:
             self.mpt_task = asyncio.create_task(self._submit_logs_to_magicprotools(payload))
         else:
             log.warning(f"[DRAFT] end_no_payload event={self.event_id}")
-        asyncio.create_task(start_tournament(self))
+        if self.kind == "mock":
+            asyncio.create_task(self._finalize_mock())
+        else:
+            asyncio.create_task(start_tournament(self))
+
+    async def _finalize_mock(self) -> None:
+        """A mock draft ends at the draft itself — no rounds, no champion. Stamp the event finished so
+        the site renders the table + logs, post the breakdown link, then drop the bot from the
+        Draftmancer session so it's freed for deckbuilding. Logs are already open to everyone."""
+        self.finalized = True
+        await asyncio.to_thread(self._mark_mock_finalized)
+        log.info(f"[DRAFT] mock_finalized event={self.event_id}")
+        thread = await self._fetch_thread()
+        if thread is not None:
+            event_url = f"{settings.public_site_url.rstrip('/')}/pods/{slugify(self.event_name)}"
+            try:
+                await thread.send(MSG_MOCK_COMPLETE.format(url=event_url, manat=emojis.get("manat")))
+            except Exception:
+                log.warning(f"[DRAFT] mock_finalize.thread_post_error event={self.event_id}", exc_info=True)
+        if self.mpt_task is not None:
+            try:
+                await self.mpt_task
+            except Exception:
+                log.warning(f"[DRAFT] mock_finalize.mpt_await_error event={self.event_id}", exc_info=True)
+        await self.disconnect_safely()
+
+    def _mark_mock_finalized(self) -> None:
+        with SessionLocal() as session:
+            finalize_mock_event(session, self.event_id)
+            session.commit()
+
+    async def _sync_thread_membership(self) -> None:
+        """Add Draftmancer joiners we recognize as guild members to the mock-draft thread, so the
+        people drafting see the thread without being manually invited. Idempotent per discord id."""
+        thread = await self._fetch_thread()
+        guild = thread.guild if thread is not None else None
+        if guild is None:
+            return
+        names = self.non_bot_session_names()
+        if not names:
+            return
+        discord_id_by_name = await asyncio.to_thread(_discord_ids_for_names_sync, names)
+        for name in names:
+            discord_id = discord_id_by_name.get(name)
+            member = guild.get_member(int(discord_id)) if discord_id else _find_guild_member_for_arena(guild, name)
+            if member is None or str(member.id) in self._thread_added_ids:
+                continue
+            self._thread_added_ids.add(str(member.id))
+            try:
+                await thread.add_user(member)
+                log.info(f"[MOCK] thread_add event={self.event_id} member={member.display_name}")
+            except discord.HTTPException:
+                log.info(f"[MOCK] thread_add_failed event={self.event_id} member={member.display_name}", exc_info=True)
 
     def _snapshot_tournament_roster(self) -> list[str]:
         """The locked drafter list, frozen at endDraft. Prefers the draft log's seated users — immune
@@ -1299,6 +1367,7 @@ async def start_manager(
     set_code: str, expected_attendee_count: int, *,
     event_name: str = "Pod Draft",
     draftmancer_url: str = "",
+    kind: str = "tournament",
     rsvps_yes: list[str] | None = None,
     rsvps_maybe: list[str] | None = None,
 ) -> PodDraftManager | None:
@@ -1308,7 +1377,7 @@ async def start_manager(
         return existing
     manager = PodDraftManager(
         bot, event_id, session_id, thread_id, set_code, expected_attendee_count,
-        event_name=event_name, draftmancer_url=draftmancer_url,
+        event_name=event_name, draftmancer_url=draftmancer_url, kind=kind,
         rsvps_yes=rsvps_yes, rsvps_maybe=rsvps_maybe,
     )
     persisted_mode = await asyncio.to_thread(load_event_pairing_mode_sync, event_id)
@@ -1399,6 +1468,16 @@ async def set_event_seating(event_id: str, ordered_user_names: list[str]) -> str
 def _classify_names_sync(names: list[str]) -> list[tuple[str, str | None]]:
     with SessionLocal() as session:
         return classify_lobby_names(session, names)
+
+
+def _discord_ids_for_names_sync(names: list[str]) -> dict[str, str | None]:
+    """Map each Draftmancer userName to its linked player's discord_id (or None when unrecognized)."""
+    with SessionLocal() as session:
+        result: dict[str, str | None] = {}
+        for name in names:
+            player = player_for_name(session, name)
+            result[name] = player.discord_id if player else None
+        return result
 
 
 def _leaderboard_seat_order_sync(names: list[str]) -> list[str]:

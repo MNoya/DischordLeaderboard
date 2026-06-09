@@ -32,6 +32,7 @@ function summaryFromFixture(): PodEventSummary {
     slug: podSos3Fixture.slug,
     name: podSos3Fixture.name,
     setCode: podSos3Fixture.setCode,
+    kind: "tournament",
     eventDate: podSos3Fixture.date,
     eventTime: `${podSos3Fixture.date}T20:00:00Z`,
     formatLabel: podSos3Fixture.formatLabel,
@@ -49,10 +50,30 @@ function summaryFromFixture(): PodEventSummary {
 
 const extraSummaries: PodEventSummary[] = [
   {
+    eventId: "mock-sos-mock-1",
+    slug: "sos-mock-draft-1",
+    name: "SOS Mock Draft 1",
+    setCode: "SOS",
+    kind: "mock",
+    eventDate: "2026-05-21",
+    eventTime: "2026-05-21T20:00:00Z",
+    formatLabel: null,
+    totalRounds: 0,
+    championPlayerSlug: null,
+    championDisplayName: null,
+    championAvatarUrl: null,
+    championDeckColors: null,
+    championRecord: null,
+    participantCount: 8,
+    isFinalized: true,
+    discordEventId: null,
+  },
+  {
     eventId: "mock-sos-4",
     slug: "sos-pod-draft-4",
     name: "SOS Pod Draft #4",
     setCode: "SOS",
+    kind: "tournament",
     eventDate: "2026-05-20",
     eventTime: "2026-05-20T20:00:00Z",
     formatLabel: "Pod Draft · Swiss · 3 Rounds",
@@ -71,6 +92,7 @@ const extraSummaries: PodEventSummary[] = [
     slug: "sos-pod-draft-2",
     name: "SOS Pod Draft #2",
     setCode: "SOS",
+    kind: "tournament",
     eventDate: "2026-05-07",
     eventTime: "2026-05-07T20:00:00Z",
     formatLabel: "Pod Draft · Swiss · 3 Rounds",
@@ -89,6 +111,7 @@ const extraSummaries: PodEventSummary[] = [
     slug: "sos-pod-draft-1",
     name: "SOS Pod Draft #1",
     setCode: "SOS",
+    kind: "tournament",
     eventDate: "2026-04-30",
     eventTime: "2026-04-30T20:00:00Z",
     formatLabel: "Pod Draft · Swiss · 3 Rounds",
@@ -125,6 +148,7 @@ const peasantSummaries: PodEventSummary[] = [
     slug: "peasant-cube-pod-draft-2",
     name: "Peasant Cube Pod Draft #2",
     setCode: "PEASANT",
+    kind: "tournament",
     eventDate: "2026-05-29",
     eventTime: "2026-05-29T20:00:00Z",
     formatLabel: "Peasant Cube",
@@ -162,9 +186,18 @@ export const podEventsFixture: PodEventSummary[] = [
   ...peasantSummaries,
 ];
 
+const mockParticipants: PodEventParticipantRow[] = podSos3Fixture.participants.map((p, i) => ({
+  ...participantToRow(p),
+  eventId: "mock-sos-mock-1",
+  seatIndex: i,
+  placement: null,
+  record: null,
+}));
+
 export const podEventParticipantsFixture: PodEventParticipantRow[] = [
   ...podSos3Fixture.participants.map(participantToRow),
   ...peasantParticipants,
+  ...mockParticipants,
 ];
 
 export const podEventMatchesFixture: PodEventMatchRow[] = [
@@ -223,5 +256,6 @@ export const podLeaderboardFixtureRaw: Omit<PodLeaderboardRow, "rank">[] = [
 
 export const podSetCodesFixture = [
   { code: "SOS", label: null },
+  { code: "MSH", label: null },
   { code: "PEASANT", label: "Peasant Cube" },
 ];

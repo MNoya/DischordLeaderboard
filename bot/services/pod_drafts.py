@@ -196,6 +196,44 @@ def player_for_name(session: Session, name: str) -> Player | None:
     return None
 
 
+def build_mock_session(session: Session, set_code: str) -> tuple[str, int]:
+    """`LLU-<SET>-Mock-<N>` with N the next free per-set mock number. Collisions bump N, so two
+    mocks opened back to back never share a Draftmancer lobby."""
+    base = f"{settings.pod_draft_session_prefix}-{set_code.upper()}-Mock"
+    taken = set(session.execute(
+        select(PodDraftEvent.draftmancer_session).where(PodDraftEvent.draftmancer_session.like(f"{base}-%"))
+    ).scalars().all())
+    n = 1
+    while f"{base}-{n}" in taken:
+        n += 1
+    return f"{base}-{n}", n
+
+
+def record_mock_event(
+    session: Session, *, set_code: str, event_time: datetime, discord_thread_id: str,
+) -> PodDraftEvent:
+    """Insert a kind='mock' pod event — an on-demand draft with no sesh post, no RSVPs, no rounds.
+    Participants and draft logs are written by the manager once the Draftmancer draft completes."""
+    code = set_code.upper()
+    session_id, number = build_mock_session(session, code)
+    event = PodDraftEvent(
+        event_date=event_time.date(),
+        event_time=event_time,
+        set_id=_lookup_set_id(session, code),
+        set_code=code,
+        format_label=pod_format.label_for(code),
+        name=f"{code} Mock Draft {number}",
+        draftmancer_session=session_id,
+        discord_thread_id=discord_thread_id,
+        sesh_message_id=None,
+        socket_status="pending",
+        kind="mock",
+    )
+    session.add(event)
+    session.flush()
+    return event
+
+
 def draftmancer_url_for(session_id: str) -> str:
     """Compose the player-facing session URL from current settings at send time, so a host change
     reaches already-recorded events instead of fossilizing in the row."""
@@ -539,6 +577,19 @@ def finalize_champion(
     return event
 
 
+def finalize_mock_event(session: Session, event_id: str) -> PodDraftEvent | None:
+    """Mark a mock pod complete: no placements or records, just the done timestamp so the public view
+    treats it as final. The site renders its seating + draft logs; there are no rounds to score."""
+    event = session.get(PodDraftEvent, event_id)
+    if event is None:
+        return None
+    event.socket_status = "complete"
+    if event.finalized_at is None:
+        event.finalized_at = datetime.now(timezone.utc)
+    session.flush()
+    return event
+
+
 def upsert_dm_message(
     session: Session,
     *,
@@ -801,7 +852,8 @@ def capture_deck_screenshot(
     """Capture (or overwrite) a participant's deck screenshot. Returns event_id on capture.
 
     Gating:
-      - Picks must be done — event.current_round IS NOT NULL.
+      - Picks must be done — tournament pods set current_round once pairings begin; mock pods never
+        run rounds, so draft completion (socket_status draft_done/complete) opens the slot instead.
       - A stored caption that already matches the record-pattern locks the slot; a new image with
         no record-pattern is ignored. A new image WITH a record-pattern overwrites unconditionally
         (latest-record-wins).
@@ -813,7 +865,9 @@ def capture_deck_screenshot(
         select(
             PodDraftParticipant,
             PodDraftEvent.id,
+            PodDraftEvent.kind,
             PodDraftEvent.current_round,
+            PodDraftEvent.socket_status,
             PodDraftEvent.championship_posted_at,
         )
         .join(Player, Player.id == PodDraftParticipant.player_id)
@@ -825,8 +879,12 @@ def capture_deck_screenshot(
     ).first()
     if row is None:
         return None
-    participant, event_id, current_round, championship_posted_at = row
-    if current_round is None:
+    participant, event_id, kind, current_round, socket_status, championship_posted_at = row
+    if kind == "mock":
+        picks_done = socket_status in ("draft_done", "complete")
+    else:
+        picks_done = current_round is not None
+    if not picks_done:
         log.info(f"[DECK] screenshot.too_early event={event_id} discord_id={discord_id} caption={caption!r}")
         return None
     new_has_record = caption_has_record_pattern(caption)
