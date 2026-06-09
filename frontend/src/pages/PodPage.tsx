@@ -325,6 +325,7 @@ export function PodPage() {
           setCode={event.setCode}
           linkableSlugs={linkableSlugs}
           formatLabel={event.formatLabel}
+          isMock={event.kind === "mock"}
         />
         {deckTarget && (
           <DeckScreenshotModal
@@ -408,6 +409,7 @@ export function PodPage() {
                     linkableSlugs={linkableSlugs}
                     onRoundHover={handleRoundHover}
                     onShowDeck={setDeckTarget}
+                    isMock={event.kind === "mock"}
                   />
                 )}
                 {displayParticipant && auxLoading && (

@@ -65,6 +65,7 @@ _ARENA_INPUT_RE = re.compile(r"^.+#\d+$")
 YES_EMOJI = "✅"
 MAYBE_EMOJI = "🤷"
 CHAMPIONSHIP_CUT = 8
+MANUAL_READY_MIN_PLAYERS = 2
 SEEDING_YES_HEADER = f"**{YES_EMOJI} Yes ("
 SEEDING_MAYBE_HEADER = f"**{MAYBE_EMOJI} Maybe ("
 
@@ -103,7 +104,9 @@ class PodDraft(commands.Cog):
         thread = interaction.channel
         log.info(f"ready-check: {interaction.user} in thread {interaction.channel_id}")
         await interaction.response.defer(ephemeral=True, thinking=False)
-        err = await manager.initiate_ready_check(thread, initiated_by=actor_label(interaction))
+        err = await manager.initiate_ready_check(
+            thread, initiated_by=actor_label(interaction), min_players=MANUAL_READY_MIN_PLAYERS,
+        )
         if err is not None:
             log.warning(f"ready-check: failed — {err}")
             await interaction.followup.send(f"⚠️ {err}", ephemeral=True)

@@ -848,6 +848,7 @@ def capture_deck_screenshot(
     discord_id: str,
     image_url: str,
     caption: str | None = None,
+    colors: str | None = None,
 ) -> str | None:
     """Capture (or overwrite) a participant's deck screenshot. Returns event_id on capture.
 
@@ -860,6 +861,9 @@ def capture_deck_screenshot(
       - Once the championship has posted, a participant with a deck already on file is done — new
         images are ignored unless the caption carries a record pattern (intentional replacement).
       - Otherwise last-wins.
+
+    `colors` (parsed from the caption by the caller) backfills deck_colors only when the player
+    hasn't already reported them — an explicit color report always wins over a caption guess.
     """
     row = session.execute(
         select(
@@ -904,6 +908,8 @@ def capture_deck_screenshot(
     replaced = participant.deck_screenshot_url is not None
     participant.deck_screenshot_url = image_url
     participant.deck_screenshot_caption = caption or None
+    if colors and not participant.deck_colors:
+        participant.deck_colors = colors
     session.flush()
     log.info(
         f"[DECK] screenshot.stored event={event_id} discord_id={discord_id} round={current_round} "

@@ -19,6 +19,7 @@ interface Props {
   setCode: string;
   linkableSlugs: Set<string>;
   formatLabel?: string | null;
+  isMock?: boolean;
 }
 
 const GRID_REF_WIDTH = 380;
@@ -132,6 +133,7 @@ export function MobileSeatStack({
   setCode,
   linkableSlugs,
   formatLabel,
+  isMock = false,
 }: Props) {
   const sorted = [...participants].sort((a, b) => a.seatIndex - b.seatIndex);
   const selected = selectedSeat == null
@@ -167,6 +169,7 @@ export function MobileSeatStack({
                 setCode={setCode}
                 linkableSlugs={linkableSlugs}
                 onShowDeck={onShowDeck}
+                isMock={isMock}
               />
             </div>
           )}
@@ -339,9 +342,9 @@ function PlayerTile({
   scale: number;
 }) {
   const isChampion = participant.placement === 1;
-  const rec = participant.record ?? "0-0";
-  const wins = Number(rec.split("-")[0] || 0);
-  const losses = Number(rec.split("-")[1] || 0);
+  const hasRecord = participant.record != null;
+  const wins = Number((participant.record ?? "").split("-")[0] || 0);
+  const losses = Number((participant.record ?? "").split("-")[1] || 0);
   const w = REF_TILE.w * scale;
   const h = REF_TILE.h * scale;
 
@@ -350,7 +353,7 @@ function PlayerTile({
       type="button"
       onClick={onClick}
       aria-pressed={selected}
-      aria-label={`Seat ${participant.seatIndex + 1}: ${participant.discordName}, ${participant.record ?? "0-0"}`}
+      aria-label={`Seat ${participant.seatIndex + 1}: ${participant.discordName}${hasRecord ? `, ${participant.record}` : ""}`}
       className={cn(
         "block p-0 m-0 bg-surface border transition-colors text-left",
         selected
@@ -392,16 +395,20 @@ function PlayerTile({
             {participant.discordName}
           </span>
         </div>
-        <div
-          className="tabular-nums leading-none text-text"
-          style={{
-            fontSize: Math.round(12 * scale),
-            letterSpacing: "0.06em",
-            fontFamily: "'Bebas Neue', sans-serif",
-          }}
-        >
-          <Record wins={wins} losses={losses} mono separatorMargin={2} />
-        </div>
+        {hasRecord ? (
+          <div
+            className="tabular-nums leading-none text-text"
+            style={{
+              fontSize: Math.round(12 * scale),
+              letterSpacing: "0.06em",
+              fontFamily: "'Bebas Neue', sans-serif",
+            }}
+          >
+            <Record wins={wins} losses={losses} mono separatorMargin={2} />
+          </div>
+        ) : (
+          <div style={{ height: Math.round(12 * scale) }} />
+        )}
       </div>
     </button>
   );

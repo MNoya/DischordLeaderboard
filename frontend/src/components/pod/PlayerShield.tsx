@@ -24,9 +24,9 @@ const REF = { w: 118, h: 144, nameMax: 20, nameMin: 11, pip: 16, rec: 22 };
 
 export function PlayerShield({ participant, selected, highlighted = false, highlightedOutcome = null, onClick, scale = 1 }: Props) {
   const isChampion = participant.placement === 1;
-  const rec = participant.record ?? "0-0";
-  const wins = Number(rec.split("-")[0] || 0);
-  const losses = Number(rec.split("-")[1] || 0);
+  const hasRecord = participant.record != null;
+  const wins = Number((participant.record ?? "").split("-")[0] || 0);
+  const losses = Number((participant.record ?? "").split("-")[1] || 0);
   const dims = {
     w: REF.w * scale,
     h: REF.h * scale,
@@ -48,7 +48,7 @@ export function PlayerShield({ participant, selected, highlighted = false, highl
       type="button"
       onClick={onClick}
       aria-pressed={selected}
-      aria-label={`Seat ${participant.seatIndex + 1}: ${participant.discordName}, ${participant.record ?? "0-0"}`}
+      aria-label={`Seat ${participant.seatIndex + 1}: ${participant.discordName}${hasRecord ? `, ${participant.record}` : ""}`}
       className={cn(
         "group relative block p-0 m-0 border-0 bg-transparent cursor-pointer outline-none",
         "transition-transform duration-300 ease-out will-change-transform",
@@ -125,16 +125,18 @@ export function PlayerShield({ participant, selected, highlighted = false, highl
             className="leading-none uppercase text-text text-center"
           />
         </div>
-        <div
-          className="tabular-nums leading-none text-text"
-          style={{
-            fontSize: dims.rec,
-            letterSpacing: "0.04em",
-            fontFamily: "'Bebas Neue', sans-serif",
-          }}
-        >
-          <Record wins={wins} losses={losses} mono separatorMargin={3} />
-        </div>
+        {hasRecord && (
+          <div
+            className="tabular-nums leading-none text-text"
+            style={{
+              fontSize: dims.rec,
+              letterSpacing: "0.04em",
+              fontFamily: "'Bebas Neue', sans-serif",
+            }}
+          >
+            <Record wins={wins} losses={losses} mono separatorMargin={3} />
+          </div>
+        )}
       </div>
     </button>
   );

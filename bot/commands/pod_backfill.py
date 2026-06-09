@@ -30,6 +30,7 @@ from bot.services.pod_drafts import (
     FinalStanding,
     ParsedSeshEvent,
     finalize_champion,
+    finalize_mock_event,
     load_event_id_by_name_sync,
     load_event_id_by_thread_sync,
     normalize_player_name,
@@ -96,12 +97,18 @@ class Workspace:
     socket_status: str
     seats: list[SeatDraft]
     matches: list[MatchDraft]
+    kind: str = "tournament"
     draft_log: dict | None = None
     draft_log_filename: str | None = None
     unassigned_decks: list[DeckPost] = field(default_factory=list)
     raw_games: dict[str, list[dict]] = field(default_factory=dict)
     announce: bool = False
     replays_skipped: bool = False
+
+    @property
+    def is_mock(self) -> bool:
+        """Mock drafts play no rounds — backfill writes decks/colors only, never scores."""
+        return self.kind == "mock"
 
     def seat_named(self, name: str) -> SeatDraft | None:
         norm = normalize_player_name(name)
@@ -296,6 +303,7 @@ def _load_event_info_sync(event_id: str) -> dict:
             "pairing_mode": event.pairing_mode,
             "socket_status": event.socket_status,
             "championship_posted_at": event.championship_posted_at,
+            "kind": event.kind,
         }
 
 
@@ -338,6 +346,7 @@ def _assemble_sync(
             thread_id=info["thread_id"],
             pairing_mode=info["pairing_mode"],
             socket_status=info["socket_status"],
+            kind=info["kind"],
             seats=[],
             matches=[],
         )
@@ -414,7 +423,7 @@ def build_workspace_embed(ws: Workspace) -> discord.Embed:
     else:
         replays_status = f"{len(ws.raw_games)}/{len(ws.seats)} seats"
     header = [
-        f"**{ws.event_time:%Y-%m-%d}** · {ws.pairing_mode} · status `{ws.socket_status}`",
+        f"**{ws.event_time:%Y-%m-%d}** · {'mock' if ws.is_mock else ws.pairing_mode} · status `{ws.socket_status}`",
         f"DraftLog: {f'✅ `{ws.draft_log_filename}`' if ws.draft_log else '**Missing**'}",
         f"17lands Replays: {replays_status}",
         f"Announcement: {'**Yes**' if ws.announce else '**No**'}",
@@ -429,25 +438,27 @@ def build_workspace_embed(ws: Workspace) -> discord.Embed:
     for s in ws.seats:
         link = "🪪" if s.player_id else "❔"
         shot = "📷" if s.screenshot_url else "·"
-        seat_lines.append(f"{link} `{short_name(s.name)}`  {s.record or '?-?'}  {s.colors or '—'}  {shot}")
+        record_col = "" if ws.is_mock else f"  {s.record or '?-?'}"
+        seat_lines.append(f"{link} `{short_name(s.name)}`{record_col}  {s.colors or '—'}  {shot}")
     embed.add_field(name=f"Players ({len(ws.seats)})", value="\n".join(seat_lines) or "—", inline=False)
 
-    for round_num in range(1, TOTAL_ROUNDS + 1):
-        lines = []
-        for m in [m for m in ws.matches if m.round == round_num]:
-            if m.winner:
-                outcome = f"{m.score or PLACEHOLDER_SCORE + '?'} → **{short_name(m.winner)}**"
-            else:
-                outcome = "❓ winner unknown"
-            lines.append(f"`{short_name(m.player_a)}` vs `{short_name(m.player_b)}` — {outcome} ({m.source})")
-        embed.add_field(name=f"Round {round_num}", value="\n".join(lines) or "❓ no matches", inline=False)
+    if not ws.is_mock:
+        for round_num in range(1, TOTAL_ROUNDS + 1):
+            lines = []
+            for m in [m for m in ws.matches if m.round == round_num]:
+                if m.winner:
+                    outcome = f"{m.score or PLACEHOLDER_SCORE + '?'} → **{short_name(m.winner)}**"
+                else:
+                    outcome = "❓ winner unknown"
+                lines.append(f"`{short_name(m.player_a)}` vs `{short_name(m.player_b)}` — {outcome} ({m.source})")
+            embed.add_field(name=f"Round {round_num}", value="\n".join(lines) or "❓ no matches", inline=False)
 
-    standings = compute_placements([s.name for s in ws.seats], ws.matches, seat_records(ws))
-    if standings:
-        placement_lines = [
-            f"{st.rank}. `{short_name(st.player_name)}` ({st.wins}-{st.losses})" for st in standings
-        ]
-        embed.add_field(name="Computed placements", value="\n".join(placement_lines), inline=False)
+        standings = compute_placements([s.name for s in ws.seats], ws.matches, seat_records(ws))
+        if standings:
+            placement_lines = [
+                f"{st.rank}. `{short_name(st.player_name)}` ({st.wins}-{st.losses})" for st in standings
+            ]
+            embed.add_field(name="Computed placements", value="\n".join(placement_lines), inline=False)
 
     gaps = compute_gaps(ws)
     embed.add_field(
@@ -460,18 +471,26 @@ def build_workspace_embed(ws: Workspace) -> discord.Embed:
 
 def compute_gaps(ws: Workspace) -> list[str]:
     gaps: list[str] = []
-    if len(ws.seats) % 2:
-        gaps.append(f"odd player count ({len(ws.seats)})")
-    expected = len(ws.seats) // 2
 
     for s in ws.seats:
-        missing = [label for label, value in (
+        fields = (("colors", s.colors), ("screenshot", s.screenshot_url)) if ws.is_mock else (
             ("record", s.record), ("colors", s.colors), ("screenshot", s.screenshot_url),
-        ) if not value]
+        )
+        missing = [label for label, value in fields if not value]
         if missing:
             gaps.append(f"`{s.name}` missing {', '.join(missing)}")
         if s.player_id is None:
             gaps.append(f"`{s.name}` not linked to a player")
+
+    for post in ws.unassigned_decks:
+        gaps.append(f"deck post by `{post.author_display}` not matched to a player")
+
+    if ws.is_mock:
+        return gaps
+
+    if len(ws.seats) % 2:
+        gaps.append(f"odd player count ({len(ws.seats)})")
+    expected = len(ws.seats) // 2
 
     for round_num in range(1, TOTAL_ROUNDS + 1):
         in_round = [m for m in ws.matches if m.round == round_num]
@@ -491,8 +510,6 @@ def compute_gaps(ws: Workspace) -> list[str]:
         if caption_record and caption_record != computed and (st.wins or st.losses):
             gaps.append(f"`{st.player_name}` caption record {caption_record} ≠ computed {computed}")
 
-    for post in ws.unassigned_decks:
-        gaps.append(f"deck post by `{post.author_display}` not matched to a player")
     return gaps
 
 
@@ -506,6 +523,8 @@ def short_name(name: str) -> str:
 
 
 def blocking_gaps(ws: Workspace) -> list[str]:
+    if ws.is_mock:
+        return []
     blockers = [f"R{m.round} `{m.player_a}` vs `{m.player_b}`: winner unknown"
                 for m in ws.matches if not m.winner]
     if not ws.matches and not any(s.record for s in ws.seats):
@@ -801,25 +820,29 @@ def _apply_workspace_sync(ws: Workspace) -> list[str]:
                 taken_player_ids.add(seat.player_id)
         session.flush()
 
-        for m in matches:
-            row = record_match(session, ws.event_id, m.round, m.player_a, m.player_b, m.winner, m.score)
-            if m.reported_at is not None:
-                row.reported_at = m.reported_at
+        standings = []
+        if ws.is_mock:
+            finalize_mock_event(session, ws.event_id)
+        else:
+            for m in matches:
+                row = record_match(session, ws.event_id, m.round, m.player_a, m.player_b, m.winner, m.score)
+                if m.reported_at is not None:
+                    row.reported_at = m.reported_at
 
-        standings = compute_placements([s.name for s in ws.seats], matches, seat_records(ws))
-        final = [
-            FinalStanding(
-                draftmancer_name=st.player_name,
-                placement=st.rank,
-                record=f"{st.wins}-{st.losses}",
-                eliminated_round=None if st.rank == 1 else TOTAL_ROUNDS,
-            )
-            for st in standings
-        ]
-        event = finalize_champion(session, ws.event_id, final)
-        event.current_round = TOTAL_ROUNDS
-        if not ws.announce and event.championship_posted_at is None:
-            event.championship_posted_at = datetime.now(timezone.utc)
+            standings = compute_placements([s.name for s in ws.seats], matches, seat_records(ws))
+            final = [
+                FinalStanding(
+                    draftmancer_name=st.player_name,
+                    placement=st.rank,
+                    record=f"{st.wins}-{st.losses}",
+                    eliminated_round=None if st.rank == 1 else TOTAL_ROUNDS,
+                )
+                for st in standings
+            ]
+            event = finalize_champion(session, ws.event_id, final)
+            event.current_round = TOTAL_ROUNDS
+            if not ws.announce and event.championship_posted_at is None:
+                event.championship_posted_at = datetime.now(timezone.utc)
 
         seat_errors = []
         for seat in ws.seats:
@@ -831,8 +854,11 @@ def _apply_workspace_sync(ws: Workspace) -> list[str]:
                 seat_errors.append(result.error)
         session.commit()
 
-    champion = standings[0].player_name if standings else None
-    lines.append(f"Wrote {len(ws.seats)} players, {len(matches)} matches. Champion: **{champion}**")
+    if ws.is_mock:
+        lines.append(f"Wrote {len(ws.seats)} players (mock draft — decks only, no scoring).")
+    else:
+        champion = standings[0].player_name if standings else None
+        lines.append(f"Wrote {len(ws.seats)} players, {len(matches)} matches. Champion: **{champion}**")
     for error in seat_errors:
         lines.append(f"⚠️ {error}")
     return lines

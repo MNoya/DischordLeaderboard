@@ -96,6 +96,7 @@ class MockDraft(commands.Cog):
         draftmancer_url = draftmancer_url_for(session_id)
         starter = await channel.send(MSG_MOCK_LOBBY_OPEN.format(
             draftmancer_emoji=emojis.get("draftmancer"), event_name=event_name, url=draftmancer_url,
+            counter="",
         ))
         thread = await starter.create_thread(name=event_name, reason=f"Mock draft started by {interaction.user}")
 
@@ -106,6 +107,7 @@ class MockDraft(commands.Cog):
         await start_manager(
             self.bot, event_id, session_id, thread.id, code, 0,
             event_name=event_name, draftmancer_url=draftmancer_url, kind="mock",
+            mock_lobby_message=starter,
         )
 
         log.info(f"mock-draft: {interaction.user} opened {session_id} (event_id={event_id})")

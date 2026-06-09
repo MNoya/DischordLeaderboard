@@ -26,6 +26,7 @@ from bot.services.pod_drafts import (
     capture_deck_screenshot,
     is_pod_thread_champion,
 )
+from bot.services.pod_thread_backfill import parse_caption_colors
 from bot.services.pod_tournament import maybe_post_championship
 
 
@@ -100,7 +101,8 @@ class PodScreenshotListener(commands.Cog):
 
 def _capture_sync(thread_id: str, discord_id: str, image_url: str, caption: str | None) -> str | None:
     with SessionLocal() as session:
-        event_id = capture_deck_screenshot(session, thread_id, discord_id, image_url, caption)
+        colors = parse_caption_colors(caption)
+        event_id = capture_deck_screenshot(session, thread_id, discord_id, image_url, caption, colors)
         if event_id is not None:
             session.commit()
         return event_id

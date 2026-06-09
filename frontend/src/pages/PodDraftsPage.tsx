@@ -136,9 +136,10 @@ export function PodDraftsPage({ setCode }: { setCode?: string } = {}) {
   const availableSets = useMemo<SetSummary[]>(() => {
     if (!allSets || !podSetCodes) return [];
     const byCode = new Map(allSets.map((s) => [s.code, s]));
-    // Real sets first (in sets-table order), then pod-only cube formats with no `sets` row.
+    // Real sets first, then pod-only codes with no visible `sets` row. A label marks a cube format
+    // (custom → generic glyph); a bare code is a set hidden until release and keeps its own keyrune.
     const real = allSets.filter((s) => podSetCodes.some((p) => p.code === s.code));
-    const custom = podSetCodes
+    const synthesized = podSetCodes
       .filter((p) => !byCode.has(p.code))
       .map<SetSummary>((p) => ({
         code: p.code,
@@ -146,9 +147,9 @@ export function PodDraftsPage({ setCode }: { setCode?: string } = {}) {
         startDate: "",
         endDate: "",
         isActive: false,
-        custom: true,
+        custom: p.label != null,
       }));
-    return [...real, ...custom];
+    return [...real, ...synthesized];
   }, [allSets, podSetCodes]);
 
   const homeCode = useMemo(() => {

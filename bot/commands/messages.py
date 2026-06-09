@@ -12,9 +12,10 @@ MSG_MOCK_NOT_TEXT_CHANNEL = "Run `/mock-draft` in a server text channel — the 
 MSG_MOCK_UNKNOWN_SET = "Unknown set `{code}`. Pick one from the suggestions, or use a registered cube format."
 MSG_MOCK_ALREADY_ACTIVE = "A mock draft is already running in {thread}. Finish or cancel it before starting another."
 MSG_MOCK_LOBBY_OPEN = (
-    "{draftmancer_emoji} **{event_name}** lobby is open!\n"
+    "{draftmancer_emoji} **{event_name}** lobby is open!{counter}\n"
     "**Join the Draftmancer session:** <{url}>\n"
     "-# Use your Discord name so the bot can match you. No matches are played. When the draft ends, "
     "the table and draft logs will be posted on the site."
 )
-MSG_MOCK_COMPLETE = "✅ **Mock draft complete!** Draft Recap is now [on the site]({url}) {manat}"
+MSG_MOCK_COMPLETE = "✅ **{event_name} complete!** [Draft Recap here](<{url}>) {manat}"
+MSG_MOCK_LOBBY_COUNTER = " 👥 {count}/8"

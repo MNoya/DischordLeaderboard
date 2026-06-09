@@ -99,6 +99,36 @@ def test_manager_imports_finalize_mock_event():
 
 
 @pytest.mark.parametrize(
+    "existing_colors, caption_colors, expected",
+    [(None, "WR", "WR"), (None, None, None), ("UB", "WR", "UB")],
+    ids=["fills-when-empty", "no-caption-colors", "never-overrides-reported"],
+)
+def test_mock_screenshot_backfills_colors_without_overriding(
+    session, existing_colors, caption_colors, expected,
+):
+    player = _seed_player(session)
+    event = PodDraftEvent(
+        event_date=date(2026, 6, 23), event_time=datetime(2026, 6, 23, tzinfo=timezone.utc),
+        set_code="MSH", name="MSH Mock Draft 1", draftmancer_session="LLU-MSH-Mock-1",
+        discord_thread_id="mock-thread", sesh_message_id=None, socket_status="complete",
+        kind="mock", current_round=None,
+    )
+    session.add(event)
+    session.flush()
+    session.add(PodDraftParticipant(
+        event_id=event.id, player_id=player.id, display_name="Cap", deck_colors=existing_colors,
+    ))
+    session.flush()
+
+    capture_deck_screenshot(session, "mock-thread", "901", "https://cdn.test/deck.png", "RW", caption_colors)
+
+    stored = session.execute(
+        select(PodDraftParticipant).where(PodDraftParticipant.event_id == event.id)
+    ).scalar_one()
+    assert stored.deck_colors == expected
+
+
+@pytest.mark.parametrize(
     "socket_status, captured",
     [("pending", False), ("connected", False), ("draft_done", True), ("complete", True)],
 )

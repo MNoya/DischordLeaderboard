@@ -26,6 +26,7 @@ interface Props {
   linkableSlugs: Set<string>;
   onRoundHover?: (opponentSeatIndex: number | null, round: number | null, outcome: RoundOutcome | null) => void;
   onShowDeck: (p: PodSeat) => void;
+  isMock?: boolean;
 }
 
 export function PlayerSeatPanel({
@@ -37,6 +38,7 @@ export function PlayerSeatPanel({
   linkableSlugs,
   onRoundHover,
   onShowDeck,
+  isMock = false,
 }: Props) {
   const seatName = podSeatName(participant);
   const playerMatches = matches
@@ -48,26 +50,59 @@ export function PlayerSeatPanel({
 
   return (
     <div>
-      <SeatHeader participant={participant} profileHref={profileHref(participant.playerSlug)} onViewDeck={() => onShowDeck(participant)} />
+      <SeatHeader
+        participant={participant}
+        profileHref={profileHref(participant.playerSlug)}
+        onViewDeck={() => onShowDeck(participant)}
+        isMock={isMock}
+      />
       <div className="flex flex-col">
-        {playerMatches.map((match) => {
-          const opponentName =
-            match.playerAName === seatName ? match.playerBName : match.playerAName;
-          const opponent = participantsBySeatName.get(opponentName);
-          return (
-            <RoundRow
-              key={match.round}
-              match={match}
-              participant={participant}
-              opponentName={opponentName}
-              opponent={opponent}
-              opponentHref={profileHref(opponent?.playerSlug)}
-              replays={replays}
-              onHover={onRoundHover}
-              onViewDeck={onShowDeck}
-            />
-          );
-        })}
+        {isMock ? (
+          participant.deckScreenshotUrl ? (
+            <>
+              <button
+                type="button"
+                onClick={() => onShowDeck(participant)}
+                className="block w-full p-0 m-0 border-0 bg-transparent cursor-zoom-in"
+                aria-label={`${participant.discordName}'s deck — click to enlarge`}
+              >
+                <img
+                  src={participant.deckScreenshotUrl}
+                  alt={`${participant.discordName}'s deck`}
+                  className="block w-full h-auto"
+                />
+              </button>
+              {participant.deckScreenshotCaption && (
+                <div className="px-4 md:px-5 xl:px-8 py-3 border-t border-border text-muted font-body text-[13px]">
+                  {participant.deckScreenshotCaption}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="px-4 md:px-5 xl:px-8 py-10 text-muted font-body text-[13px]">
+              No deck screenshot posted yet.
+            </div>
+          )
+        ) : (
+          playerMatches.map((match) => {
+            const opponentName =
+              match.playerAName === seatName ? match.playerBName : match.playerAName;
+            const opponent = participantsBySeatName.get(opponentName);
+            return (
+              <RoundRow
+                key={match.round}
+                match={match}
+                participant={participant}
+                opponentName={opponentName}
+                opponent={opponent}
+                opponentHref={profileHref(opponent?.playerSlug)}
+                replays={replays}
+                onHover={onRoundHover}
+                onViewDeck={onShowDeck}
+              />
+            );
+          })
+        )}
       </div>
     </div>
   );
@@ -77,16 +112,18 @@ function SeatHeader({
   participant,
   profileHref,
   onViewDeck,
+  isMock = false,
 }: {
   participant: PodSeat;
   profileHref: string | null;
   onViewDeck: () => void;
+  isMock?: boolean;
 }) {
   const isMobile = useIsMobile();
   const isChampion = participant.placement === 1;
-  const rec = participant.record ?? "0-0";
-  const wins = Number(rec.split("-")[0] || 0);
-  const losses = Number(rec.split("-")[1] || 0);
+  const hasRecord = participant.record != null;
+  const wins = Number((participant.record ?? "").split("-")[0] || 0);
+  const losses = Number((participant.record ?? "").split("-")[1] || 0);
   const hasDeck = participant.deckScreenshotUrl !== null;
 
   const nameLink = profileHref ? (
@@ -112,26 +149,32 @@ function SeatHeader({
     ? "Champion"
     : participant.placement != null
       ? `${ordinalLabel(participant.placement)} place`
-      : "Unplaced";
+      : null;
   const metaRow = (
     <div className="flex items-baseline gap-2.5 lg:gap-4 flex-wrap text-muted" style={{ fontSize: 16 }}>
-      <span className="inline-flex items-center gap-2 self-center">
-        {participant.deckColors && <Pips colors={participant.deckColors} size={16} />}
-        <span
-          className="font-display tabular-nums whitespace-nowrap text-text"
-          style={{ letterSpacing: "0.08em" }}
-        >
-          <Record wins={wins} losses={losses} mono separatorMargin={3} />
+      {(participant.deckColors || hasRecord) && (
+        <span className="inline-flex items-center gap-2 self-center">
+          {participant.deckColors && <Pips colors={participant.deckColors} size={16} />}
+          {hasRecord && (
+            <span
+              className="font-display tabular-nums whitespace-nowrap text-text"
+              style={{ letterSpacing: "0.08em" }}
+            >
+              <Record wins={wins} losses={losses} mono separatorMargin={3} />
+            </span>
+          )}
         </span>
-      </span>
-      <span
-        className={cn(
-          "font-display tracking-[0.16em] uppercase whitespace-nowrap",
-          isChampion ? "text-green" : "text-muted",
-        )}
-      >
-        {placementLabel}
-      </span>
+      )}
+      {placementLabel && (
+        <span
+          className={cn(
+            "font-display tracking-[0.16em] uppercase whitespace-nowrap",
+            isChampion ? "text-green" : "text-muted",
+          )}
+        >
+          {placementLabel}
+        </span>
+      )}
     </div>
   );
 
@@ -148,7 +191,7 @@ function SeatHeader({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {hasDeck ? (
+          {!isMock && (hasDeck ? (
             <button
               type="button"
               onClick={onViewDeck}
@@ -167,7 +210,7 @@ function SeatHeader({
               <span>DECK MISSING</span>
               <TbCards size={16} aria-hidden="true" />
             </span>
-          )}
+          ))}
           {participant.draftLogUrl ? (
             <a
               href={participant.draftLogUrl}
@@ -202,7 +245,7 @@ function SeatHeader({
         {metaRow}
       </div>
       <div className="flex flex-col gap-2 shrink-0 min-w-[200px]">
-        {hasDeck ? (
+        {!isMock && (hasDeck ? (
           <button
             type="button"
             onClick={onViewDeck}
@@ -221,7 +264,7 @@ function SeatHeader({
             <span>DECK MISSING</span>
             <TbCards size={20} aria-hidden="true" />
           </span>
-        )}
+        ))}
         {participant.draftLogUrl ? (
           <a
             href={participant.draftLogUrl}

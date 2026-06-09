@@ -21,7 +21,7 @@ from discord.ext import commands
 from sqlalchemy import func, select
 
 from bot import emojis
-from bot.commands.messages import MSG_MOCK_COMPLETE
+from bot.commands.messages import MSG_MOCK_COMPLETE, MSG_MOCK_LOBBY_COUNTER, MSG_MOCK_LOBBY_OPEN
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.discord_helpers import extract_avatar_hash
@@ -103,6 +103,7 @@ class PodDraftManager:
                  event_name: str = "Pod Draft",
                  draftmancer_url: str = "",
                  kind: str = "tournament",
+                 mock_lobby_message: "discord.Message | None" = None,
                  rsvps_yes: list[str] | None = None,
                  rsvps_maybe: list[str] | None = None) -> None:
         self.bot = bot
@@ -114,6 +115,7 @@ class PodDraftManager:
         self.event_name = event_name
         self.draftmancer_url = draftmancer_url
         self.kind = kind
+        self.mock_lobby_message = mock_lobby_message
         self._thread_added_ids: set[str] = set()
         self.rsvps_yes: list[str] = list(rsvps_yes or [])
         self.rsvps_maybe: list[str] = list(rsvps_maybe or [])
@@ -257,8 +259,8 @@ class PodDraftManager:
 
     async def _on_session_users(self, users) -> None:
         self.session_users = list(users) if isinstance(users, list) else []
-        names = [u.get("userName") for u in self.session_users]
-        log.info(f"draftmancer sessionUsers for {self.session_id}: {names}")
+        slim = [{k: v for k, v in u.items() if k != "collection"} for u in self.session_users]
+        log.info(f"draftmancer sessionUsers for {self.session_id}: {slim}")
         if self.draft_complete:
             return
         # Any session change clears the notready banner; lobby reverts to its normal state
@@ -278,8 +280,7 @@ class PodDraftManager:
         classified = await self._classify_users(non_bot_names) if non_bot_names else []
         await self._refresh_lobby_status(classified)
 
-        if self.kind == "mock":
-            asyncio.create_task(self._sync_thread_membership())
+        self._refresh_mock_lobby()
 
         if self.seating_mode == "leaderboard":
             if self.owner_claimed:
@@ -325,6 +326,7 @@ class PodDraftManager:
             log.info(f"draftmancer updateUser rename for {self.session_id}: {user_id} → {updates['userName']}")
             if not self.draft_complete:
                 await self.refresh_lobby_now()
+                self._refresh_mock_lobby()
 
     @staticmethod
     def _apply_user_update(rows: list[dict], user_id: str, updates: dict) -> bool:
@@ -450,8 +452,12 @@ class PodDraftManager:
                 event.socket_status = status
                 session.commit()
 
-    async def initiate_ready_check(self, thread, initiated_by: str | None = None) -> str | None:
-        """Start a Draftmancer ready check; returns an error string on failure, None on success."""
+    async def initiate_ready_check(
+        self, thread, initiated_by: str | None = None, *, min_players: int | None = None,
+    ) -> str | None:
+        """Start a Draftmancer ready check; returns an error string on failure, None on success.
+        `min_players` overrides the floor — the lobby button uses the default, the manual /pod-ready
+        command passes a lower one so a small pod can be readied."""
         if not self.sio.connected:
             return "Draftmancer session is not connected."
         if self.ready_check_active:
@@ -459,7 +465,7 @@ class PodDraftManager:
         non_bot = self.player_session_users()
         if not non_bot:
             return "Nobody in the Draftmancer lobby yet."
-        min_players = settings.pod_draft_min_ready_players
+        min_players = min_players if min_players is not None else settings.pod_draft_min_ready_players
         if len(non_bot) < min_players:
             return (
                 f"Ready check is only available with {min_players} or more players. "
@@ -740,7 +746,9 @@ class PodDraftManager:
         if thread is not None:
             event_url = f"{settings.public_site_url.rstrip('/')}/pods/{slugify(self.event_name)}"
             try:
-                await thread.send(MSG_MOCK_COMPLETE.format(url=event_url, manat=emojis.get("manat")))
+                await thread.send(MSG_MOCK_COMPLETE.format(
+                    event_name=self.event_name, url=event_url, manat=emojis.get("manat"),
+                ))
             except Exception:
                 log.warning(f"[DRAFT] mock_finalize.thread_post_error event={self.event_id}", exc_info=True)
         if self.mpt_task is not None:
@@ -754,6 +762,30 @@ class PodDraftManager:
         with SessionLocal() as session:
             finalize_mock_event(session, self.event_id)
             session.commit()
+
+    def _refresh_mock_lobby(self) -> None:
+        """Mock-only reaction to a lobby change (join, leave, or rename): add recognized members to the
+        thread and update the live player count on the anchor message. No-op for tournament pods."""
+        if self.kind != "mock" or self.draft_complete:
+            return
+        asyncio.create_task(self._sync_thread_membership())
+        asyncio.create_task(self._update_mock_lobby_counter())
+
+    async def _update_mock_lobby_counter(self) -> None:
+        if self.mock_lobby_message is None:
+            return
+        count = len(self.player_session_users())
+        counter = MSG_MOCK_LOBBY_COUNTER.format(count=count) if count >= 1 else ""
+        content = MSG_MOCK_LOBBY_OPEN.format(
+            draftmancer_emoji=emojis.get("draftmancer"),
+            event_name=self.event_name,
+            url=self.draftmancer_url,
+            counter=counter,
+        )
+        try:
+            await self.mock_lobby_message.edit(content=content)
+        except discord.HTTPException:
+            log.info(f"[MOCK] counter_edit_failed event={self.event_id}", exc_info=True)
 
     async def _sync_thread_membership(self) -> None:
         """Add Draftmancer joiners we recognize as guild members to the mock-draft thread, so the
@@ -1368,6 +1400,7 @@ async def start_manager(
     event_name: str = "Pod Draft",
     draftmancer_url: str = "",
     kind: str = "tournament",
+    mock_lobby_message: "discord.Message | None" = None,
     rsvps_yes: list[str] | None = None,
     rsvps_maybe: list[str] | None = None,
 ) -> PodDraftManager | None:
@@ -1378,6 +1411,7 @@ async def start_manager(
     manager = PodDraftManager(
         bot, event_id, session_id, thread_id, set_code, expected_attendee_count,
         event_name=event_name, draftmancer_url=draftmancer_url, kind=kind,
+        mock_lobby_message=mock_lobby_message,
         rsvps_yes=rsvps_yes, rsvps_maybe=rsvps_maybe,
     )
     persisted_mode = await asyncio.to_thread(load_event_pairing_mode_sync, event_id)
