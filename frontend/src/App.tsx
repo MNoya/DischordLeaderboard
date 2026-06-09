@@ -42,6 +42,7 @@ export function App() {
       <Route path="/pods/:slug" element={<PodsRoute />} />
 
       <Route path="/tier-list" element={<TierListPage />} />
+      <Route path="/tier-list/:setCode" element={<TierListPage />} />
 
       {/* Legacy archetype routes redirect to the leaderboard — the archetype
           picker now lives there inline. */}

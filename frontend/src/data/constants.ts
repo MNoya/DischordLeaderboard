@@ -6,8 +6,8 @@ export const ACTIVE_SET_CODE = "SOS";
 // LLU community Discord guild
 export const DISCORD_GUILD_ID = "775371722065051658";
 
-// 17Lands tier-list embed ids per set, taken from a tier list's embed link
-// (https://www.17lands.com/card_tiers/embedded/<uid>). Add one as each set rotates in.
+// 17Lands tier-list ids per set, taken from a tier list's share link
+// (https://www.17lands.com/tier_list/<uid>). Add one as each set rotates in.
 export const TIER_LIST_UIDS: Record<string, string> = {
   SOS: "e195401b1eaa48e3b5d6670e0ae338e9",
   TMT: "fd5499ae88854ca0ac1bc2ad95ade9b2",
@@ -15,10 +15,13 @@ export const TIER_LIST_UIDS: Record<string, string> = {
   TLA: "efdfa8408fb448be846ac06f9d9192ff",
 };
 
-export const TIER_LIST_EMBED_BASE = "https://www.17lands.com/card_tiers/embedded";
+// Tier lists can publish before a set is registered backend-side (preview window).
+// These supply name/date for such codes until they show up in the live sets feed.
+export const TIER_LIST_PREVIEW_SETS: Record<string, { name: string; startDate: string }> = {};
 
-// Fallback iframe height until the embed posts its real height via postMessage; sized to clear the longest measured tier list
-export const TIER_LIST_EMBED_HEIGHT = 2950;
+// CORS-enabled 17Lands endpoint returning a tier list's card ratings array
+export const TIER_LIST_DATA_BASE = "https://www.17lands.com/card_tiers/data";
 
-// Fixed iframe width on mobile so every color column stays legible and the wrapper scrolls horizontally to reach them
-export const TIER_LIST_EMBED_MOBILE_WIDTH = 760;
+// Per-uid data-endpoint overrides for tier lists served elsewhere (e.g. a local
+// preview server for a set not yet public on 17Lands). Fetch becomes `${base}/${uid}`.
+export const TIER_LIST_DATA_BASE_OVERRIDES: Record<string, string> = {};

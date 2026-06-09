@@ -1,109 +1,138 @@
-import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { AppHeader } from "../components/AppHeader";
-import { ALogo, SetGlyph, setGlyphCode } from "../components/Brand";
-import { SetSwitcherDesktop, SetSwitcherMobile } from "../components/SetSwitcher";
+import { setGlyphCode } from "../components/Brand";
+import { TierFilterBar } from "../components/TierFilterBar";
+import { TierGrid } from "../components/TierGrid";
+import { TierSetDropdown } from "../components/TierSetDropdown";
 import { useSets } from "../data/hooks";
-import { useIsLandscapePhone, useIsMobile } from "../lib/use-is-mobile";
-import {
-  ACTIVE_SET_CODE,
-  TIER_LIST_EMBED_BASE,
-  TIER_LIST_EMBED_HEIGHT,
-  TIER_LIST_EMBED_MOBILE_WIDTH,
-  TIER_LIST_UIDS,
-} from "../data/constants";
+import { cn } from "../lib/utils";
+import { useIsMobile } from "../lib/use-is-mobile";
+import { ACTIVE_SET_CODE, TIER_LIST_PREVIEW_SETS, TIER_LIST_UIDS } from "../data/constants";
+import { EMPTY_FILTERS, hasActiveFilters, tierFilterOptions, useTierList, type TierFilters } from "../data/tierList";
+import type { SetSummary } from "../types/leaderboard";
 
 export function TierListPage() {
   const { data: sets } = useSets();
   const isMobile = useIsMobile();
-  const landscapePhone = useIsLandscapePhone();
-  const [picked, setPicked] = useState<string | null>(null);
-  const [reportedHeight, setReportedHeight] = useState<number | null>(null);
-  const [headerHidden, setHeaderHidden] = useState(false);
-  const sentinelRef = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
+  const { setCode } = useParams();
+  const [filters, setFilters] = useState<TierFilters>(EMPTY_FILTERS);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [headerHeight, setHeaderHeight] = useState(0);
+  const headerRef = useRef<HTMLDivElement>(null);
+
+  const activeFilterCount =
+    filters.sets.length + filters.manaValues.length + filters.rarities.length + filters.cardTypes.length;
 
   const liveSet = sets?.find((s) => s.isActive)?.code ?? ACTIVE_SET_CODE;
-  const current = picked ?? liveSet;
-  const setMeta = sets?.find((s) => s.code === current);
+  const current = setCode?.toUpperCase() ?? liveSet;
+  const pickSet = (code: string) => navigate(`/tier-list/${code}`);
+  const tierListSets = useMemo(() => buildTierListSets(sets), [sets]);
+  const setMeta = tierListSets.find((s) => s.code === current);
   const uid = TIER_LIST_UIDS[current];
-  const tierListSets = (sets ?? []).filter((s) => TIER_LIST_UIDS[s.code]);
+  const glyphCode = setMeta ? setGlyphCode(setMeta) : current;
+
+  const { data: tierData } = useTierList(uid);
+  const filterOptions = useMemo(() => tierFilterOptions(tierData ?? []), [tierData]);
+  const filtersReady = Boolean(tierData?.length);
 
   useEffect(() => {
-    setReportedHeight(null);
+    setFilters(EMPTY_FILTERS);
   }, [uid]);
 
   useEffect(() => {
-    const onMessage = (e: MessageEvent) => {
-      if (e.origin !== "https://www.17lands.com") return;
-      const data = e.data;
-      if (data && data.type === "tier-list-height" && typeof data.height === "number") {
-        setReportedHeight(data.height);
-      }
-    };
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  }, []);
-
-  useEffect(() => {
-    const sentinel = sentinelRef.current;
-    if (!sentinel) return;
-    const io = new IntersectionObserver(([entry]) => setHeaderHidden(!entry.isIntersecting));
-    io.observe(sentinel);
-    return () => io.disconnect();
+    const header = headerRef.current;
+    if (!header) return;
+    const ro = new ResizeObserver(() => setHeaderHeight(header.offsetHeight));
+    ro.observe(header);
+    setHeaderHeight(header.offsetHeight);
+    return () => ro.disconnect();
   }, []);
 
   return (
     <div className="bg-bg text-text min-h-screen flex flex-col animate-fadeIn">
       <AppHeader subtitle="TIER LIST" />
-      <main className="flex flex-col w-full px-[15px] pb-4">
-        <div ref={sentinelRef} className="h-0" aria-hidden="true" />
-        <div className="sticky top-0 z-20 bg-bg flex items-center justify-between gap-3 py-2 md:py-3 relative">
-          <h1 className="font-display tracking-[0.12em] flex items-center gap-2 md:gap-3 leading-none min-w-0">
-            <SetGlyph code={setMeta ? setGlyphCode(setMeta) : current} size={isMobile ? 26 : 38} />
-            <span className="text-[17px] md:text-[30px] truncate">
-              {setMeta?.name?.toUpperCase() ?? current}
-            </span>
-            {headerHidden && (
-              <span className="text-green text-[14px] md:text-[24px] shrink-0">TIER LIST</span>
-            )}
-          </h1>
-          {headerHidden && !isMobile && (
-            <Link
-              to="/"
-              aria-label="Limited Level-Ups"
-              className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 no-underline"
-            >
-              <ALogo size={40} />
-            </Link>
-          )}
-          {tierListSets.length > 1 &&
-            (isMobile ? (
-              <div className="w-[124px] shrink-0">
-                <SetSwitcherMobile sets={tierListSets} activeCode={current} onChange={setPicked} />
+      <main className="flex flex-col w-full px-2 md:px-[15px] pb-4 overflow-x-clip">
+        <div ref={headerRef} className="sticky top-0 z-20 bg-bg py-2 md:py-3">
+          {isMobile ? (
+            <>
+              <div className="flex items-center gap-x-5 gap-y-2">
+                <h1 className="font-display tracking-[0.12em] flex flex-1 items-center gap-2 leading-none min-w-0">
+                  <TierSetDropdown
+                    sets={tierListSets}
+                    activeCode={current}
+                    glyphCode={glyphCode}
+                    label={setMeta?.name?.toUpperCase() ?? current}
+                    isMobile
+                    onChange={pickSet}
+                  />
+                </h1>
+
+                {uid && filtersReady && (
+                  <button
+                    type="button"
+                    onClick={() => setFiltersOpen((open) => !open)}
+                    aria-expanded={filtersOpen}
+                    className={cn(
+                      "flex h-9 shrink-0 items-center gap-1.5 rounded border px-2.5 text-[12px] transition-colors",
+                      filtersOpen || hasActiveFilters(filters) ? "border-green text-text" : "border-border2 text-muted",
+                    )}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M3 5h18l-7 8v6l-4-2v-4z" strokeLinejoin="round" />
+                    </svg>
+                    Filters
+                    {activeFilterCount > 0 && (
+                      <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-green px-1 text-[10px] font-bold text-bg">
+                        {activeFilterCount}
+                      </span>
+                    )}
+                    <span className={cn("text-[10px] transition-transform", filtersOpen && "rotate-180")}>▾</span>
+                  </button>
+                )}
               </div>
-            ) : (
-              <SetSwitcherDesktop
-                sets={tierListSets}
-                activeCode={current}
-                onChange={setPicked}
-                extraHide={landscapePhone ? 2 : 0}
-              />
-            ))}
+
+              {uid && filtersReady && filtersOpen && (
+                <div className="pt-3">
+                  <TierFilterBar
+                    filters={filters}
+                    setFilters={setFilters}
+                    options={filterOptions}
+                    setCode={glyphCode}
+                    stacked
+                  />
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="grid items-center gap-x-[clamp(0.75rem,2.5vw,2.5rem)] grid-cols-[minmax(0,1fr)_auto] min-[1500px]:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
+              <h1 className="font-display tracking-[0.12em] flex items-center gap-3 leading-none min-w-0">
+                <TierSetDropdown
+                  sets={tierListSets}
+                  activeCode={current}
+                  glyphCode={glyphCode}
+                  label={setMeta?.name?.toUpperCase() ?? current}
+                  isMobile={false}
+                  onChange={pickSet}
+                />
+              </h1>
+
+              {uid && filtersReady ? (
+                <div className="justify-self-center -translate-y-1">
+                  <TierFilterBar filters={filters} setFilters={setFilters} options={filterOptions} setCode={glyphCode} />
+                </div>
+              ) : (
+                <div />
+              )}
+
+              <div className="hidden min-[1500px]:block" />
+            </div>
+          )}
         </div>
 
         {uid ? (
-          <div className={`w-full border border-border bg-surface ${isMobile ? "overflow-x-auto" : "overflow-hidden"}`}>
-            <iframe
-              src={`${TIER_LIST_EMBED_BASE}/${uid}?filters=true`}
-              title={`${setMeta?.name ?? current} tier list`}
-              className="block border-0"
-              style={{
-                marginLeft: -30,
-                width: isMobile ? TIER_LIST_EMBED_MOBILE_WIDTH + 30 : "calc(100% + 65px)",
-                height: reportedHeight ?? TIER_LIST_EMBED_HEIGHT,
-              }}
-            />
-          </div>
+          <TierGrid uid={uid} filters={filters} stickyTop={headerHeight} />
         ) : (
           <div className="flex items-center justify-center border border-border bg-surface text-muted text-[14px] min-h-[300px]">
             No tier list is available for {current} yet.
@@ -123,4 +152,19 @@ export function TierListPage() {
       </main>
     </div>
   );
+}
+
+function buildTierListSets(sets: SetSummary[] | undefined): SetSummary[] {
+  const live = (sets ?? []).filter((s) => TIER_LIST_UIDS[s.code]);
+  const liveCodes = new Set(live.map((s) => s.code));
+  const previews = Object.entries(TIER_LIST_PREVIEW_SETS)
+    .filter(([code]) => TIER_LIST_UIDS[code] && !liveCodes.has(code))
+    .map(([code, info]): SetSummary => ({
+      code,
+      name: info.name,
+      startDate: info.startDate,
+      endDate: "",
+      isActive: false,
+    }));
+  return [...previews, ...live].sort((a, b) => b.startDate.localeCompare(a.startDate));
 }
