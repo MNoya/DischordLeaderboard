@@ -1,8 +1,3 @@
-// SPA fallback for Cloudflare Pages.
-//
-// Pass through to the static asset for the request; if that returns 404 and
-// the path is a navigation (no file extension), serve /index.html so React
-// Router resolves the route client-side.
 export const onRequest: PagesFunction = async (context) => {
   const url = new URL(context.request.url);
 
@@ -15,8 +10,7 @@ export const onRequest: PagesFunction = async (context) => {
 
   const indexUrl = new URL("/index.html", url.origin);
   const indexResp = await context.env.ASSETS.fetch(indexUrl.toString());
-  return new Response(indexResp.body, {
-    status: 200,
-    headers: indexResp.headers,
-  });
+  const headers = new Headers(indexResp.headers);
+  headers.set("Cache-Control", "public, max-age=0, must-revalidate");
+  return new Response(indexResp.body, { status: 200, headers });
 };
