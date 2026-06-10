@@ -14,6 +14,7 @@ from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from bot.sets import ALL_SETS
+from bot.text import link_with_emoji
 
 
 SCHEDULE_TZ = ZoneInfo("America/New_York")
@@ -58,11 +59,11 @@ MSG_SEASON_OVER = (
 )
 
 MSG_UNDERFILL = (
-    "[{thread_name}]({thread_url}): {needed} more player{plural} needed in <t:{unix}:R> "
+    "{thread_link}: {needed} more player{plural} needed in <t:{unix}:R> "
     "- [Sign Up Link]({jump_url})"
 )
 
-MSG_UNDERFILL_FILLED = "[{thread_name}]({thread_url}): Pod is full ✅"
+MSG_UNDERFILL_FILLED = "{thread_link}: Pod is full ✅"
 
 MSG_CREATE_BLOCKS_HEADER = "Sesh commands for this week's pods:"
 
@@ -219,8 +220,7 @@ def build_underfill_message(
 ) -> str:
     needed = target - yes_count
     return MSG_UNDERFILL.format(
-        thread_name=thread_name,
-        thread_url=thread_url,
+        thread_link=link_with_emoji(thread_name, thread_url),
         needed=needed,
         plural="s" if needed != 1 else "",
         unix=int(event_time.timestamp()),
@@ -229,7 +229,7 @@ def build_underfill_message(
 
 
 def build_underfill_filled_message(thread_name: str, thread_url: str) -> str:
-    return MSG_UNDERFILL_FILLED.format(thread_name=thread_name, thread_url=thread_url)
+    return MSG_UNDERFILL_FILLED.format(thread_link=link_with_emoji(thread_name, thread_url))
 
 
 def format_clock(slot_start: datetime) -> str:
