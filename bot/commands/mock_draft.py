@@ -29,17 +29,18 @@ from bot.services import pod_format
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_drafts import draftmancer_url_for, record_mock_event
 from bot.services.pod_draft_manager import start_manager
-from bot.sets import ACTIVE_SET_CODE, is_known_set, upcoming_sets
+from bot.sets import ACTIVE_SET_CODE, ALL_SETS, is_known_set
 
 
 log = logging.getLogger(__name__)
 
 
 def _format_choices() -> list[tuple[str, str]]:
-    """(label, code) the set option offers: active set, upcoming sets, then custom cubes."""
+    """(label, code) the set option offers: the active set, every other supported set, then custom cubes."""
     choices = [(f"{ACTIVE_SET_CODE} (current)", ACTIVE_SET_CODE)]
-    for seed in upcoming_sets():
-        choices.append((f"{seed.code} — {seed.name}", seed.code))
+    for seed in reversed(ALL_SETS):
+        if seed.code != ACTIVE_SET_CODE:
+            choices.append((f"{seed.code} — {seed.name}", seed.code))
     for fmt in pod_format.custom_formats():
         choices.append((fmt.label, fmt.code))
     return choices
