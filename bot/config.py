@@ -3,7 +3,7 @@ from __future__ import annotations
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-DRAFTMANCER_HOST = "beta.draftmancer.com"
+DRAFTMANCER_HOST = "draftmancer.com"
 
 
 class Settings(BaseSettings):
