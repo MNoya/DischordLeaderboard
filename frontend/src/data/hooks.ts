@@ -29,8 +29,18 @@ import {
   fetchRecentTrophies,
   fetchSets,
 } from "./api";
+import { fetchEpisodes } from "./episodes";
 import { MULTI, OTHER } from "./filters";
 const FIVE_MINUTES = 5 * 60 * 1000;
+const ONE_HOUR = 60 * 60 * 1000;
+
+export function useEpisodes() {
+  return useQuery({
+    queryKey: ["episodes"],
+    queryFn: fetchEpisodes,
+    staleTime: ONE_HOUR,
+  });
+}
 
 export function useSets() {
   return useQuery({

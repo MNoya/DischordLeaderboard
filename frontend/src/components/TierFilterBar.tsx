@@ -2,7 +2,14 @@ import { type ReactNode } from "react";
 import { cn } from "../lib/utils";
 import { keyruneClass } from "./Brand";
 import { Tooltip } from "./Tooltip";
-import { MANA_VALUE_BUCKETS, type TierFilterOptions, type TierFilters } from "../data/tierList";
+import {
+  MANA_VALUE_BUCKETS,
+  TREND_COLOR,
+  TREND_GLYPH,
+  TREND_LABEL,
+  type TierFilterOptions,
+  type TierFilters,
+} from "../data/tierList";
 
 const RARITY_KEYRUNE: Record<string, string> = { C: "common", U: "uncommon", R: "rare", M: "mythic" };
 
@@ -107,6 +114,22 @@ export function TierFilterBar({
           ))}
         </FilterGroup>
       )}
+
+      <FilterGroup label="TREND" stacked={stacked} joined>
+        {(["up", "down"] as const).map((dir) => (
+          <IconToggle
+            key={dir}
+            active={filters.trends.includes(dir)}
+            onClick={() => toggle("trends", dir)}
+            label={`${TREND_LABEL[dir]} (${options.trends[dir]})`}
+            narrow
+          >
+            <span className="text-[15px] leading-none" style={{ color: TREND_COLOR[dir] }}>
+              {TREND_GLYPH[dir]}
+            </span>
+          </IconToggle>
+        ))}
+      </FilterGroup>
     </div>
   );
 }

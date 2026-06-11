@@ -1,6 +1,10 @@
 import { useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { Provider as TooltipProvider } from "@radix-ui/react-tooltip";
+import { ScoringModalHost } from "./components/ScoringModal";
+import { HomePage } from "./pages/HomePage";
+import { EpisodesPage } from "./pages/EpisodesPage";
+import { CommunityPage } from "./pages/CommunityPage";
 import { LeaderboardPage } from "./pages/LeaderboardPage";
 import { PlayerPage } from "./pages/PlayerPage";
 import { PodDraftsPage, PodsRoute } from "./pages/PodDraftsPage";
@@ -28,7 +32,9 @@ export function App() {
   return (
     <TooltipProvider delayDuration={150} skipDelayDuration={0} disableHoverableContent>
     <Routes>
-      <Route path="/" element={<Navigate to="/leaderboard" replace />} />
+      <Route path="/" element={<HomePage />} />
+      <Route path="/episodes" element={<EpisodesPage />} />
+      <Route path="/community" element={<CommunityPage />} />
 
       <Route path="/leaderboard" element={<LeaderboardPage />} />
       <Route path="/leaderboard/player/:slug" element={<PlayerPage />} />
@@ -51,6 +57,7 @@ export function App() {
 
       <Route path="*" element={<NotFoundPage />} />
     </Routes>
+    <ScoringModalHost />
     </TooltipProvider>
   );
 }

@@ -4,13 +4,15 @@ import { ALogo, AWordmark } from "./Brand";
 import { cn } from "../lib/utils";
 import { useIsMobile } from "../lib/use-is-mobile";
 
-// Top-of-page chrome. Designed to feel like its own product but small enough
-// that a future LLU site shell can wrap or omit it cleanly.
+// Top-of-page chrome shared across the whole community site. The brand mark is
+// the Home link; each section is a nav tab.
 
 const NAV: Array<{ label: string; to: string; match: (path: string) => boolean }> = [
-  { label: "LEADERBOARD", to: "/leaderboard", match: (p) => p === "/" || p === "/leaderboard" || p.startsWith("/leaderboard/") },
+  { label: "EPISODES", to: "/episodes", match: (p) => p.startsWith("/episodes") },
+  { label: "TIER LIST", to: "/tier-list", match: (p) => p.startsWith("/tier-list") },
+  { label: "LEADERBOARD", to: "/leaderboard", match: (p) => p === "/leaderboard" || p.startsWith("/leaderboard/") },
   { label: "POD DRAFTS", to: "/pods", match: (p) => p.startsWith("/pods") },
-  { label: "ABOUT", to: "/about", match: (p) => p.startsWith("/about") },
+  { label: "COMMUNITY", to: "/community", match: (p) => p.startsWith("/community") },
 ];
 
 const NAV_ITEM_CLASS = "py-2.5 px-5 no-underline border transition-colors whitespace-nowrap";
@@ -20,7 +22,7 @@ export function AppHeader({ subtitle = "LEADERBOARD" }: { subtitle?: string }) {
   const isMobile = useIsMobile();
   const [menuOpen, setMenuOpen] = useState(false);
   const [navCollapsed, setNavCollapsed] = useState(false);
-  const brandHref = /^\/pods\/[^/]+/.test(loc.pathname) ? "/pods" : "/";
+  const brandHref = "/";
 
   const headerRef = useRef<HTMLElement>(null);
   const brandRef = useRef<HTMLAnchorElement>(null);
@@ -100,42 +102,44 @@ export function AppHeader({ subtitle = "LEADERBOARD" }: { subtitle?: string }) {
         ))}
       </div>
 
-      {!navCollapsed && (
-        <nav className="flex gap-2 font-display text-[19px] tracking-[0.14em]">
-          {NAV.map((n) => {
-            const active = n.match(loc.pathname);
-            return (
-              <Link
-                key={n.label}
-                to={n.to}
-                className={cn(
-                  NAV_ITEM_CLASS,
-                  active
-                    ? "text-bg bg-green border-green"
-                    : "text-text border-transparent hover:bg-surface",
-                )}
-              >
-                {n.label}
-              </Link>
-            );
-          })}
-        </nav>
-      )}
+      <div className="flex items-center gap-3 md:gap-4">
+        {!navCollapsed && (
+          <nav className="flex gap-2 font-display text-[19px] tracking-[0.14em]">
+            {NAV.map((n) => {
+              const active = n.match(loc.pathname);
+              return (
+                <Link
+                  key={n.label}
+                  to={n.to}
+                  className={cn(
+                    NAV_ITEM_CLASS,
+                    active
+                      ? "text-bg bg-green border-green"
+                      : "text-text border-transparent hover:bg-surface",
+                  )}
+                >
+                  {n.label}
+                </Link>
+              );
+            })}
+          </nav>
+        )}
 
-      {navCollapsed && (
-        <button
-          type="button"
-          onClick={() => setMenuOpen((o) => !o)}
-          aria-label={menuOpen ? "Close menu" : "Open menu"}
-          aria-expanded={menuOpen}
-          className={cn(
-            "w-11 h-11 border flex items-center justify-center cursor-pointer transition-colors",
-            menuOpen ? "border-green text-green bg-surface" : "border-border2 text-muted bg-transparent",
-          )}
-        >
-          <span className="text-[28px] leading-none">{menuOpen ? "×" : "≡"}</span>
-        </button>
-      )}
+        {navCollapsed && (
+          <button
+            type="button"
+            onClick={() => setMenuOpen((o) => !o)}
+            aria-label={menuOpen ? "Close menu" : "Open menu"}
+            aria-expanded={menuOpen}
+            className={cn(
+              "w-11 h-11 border flex items-center justify-center cursor-pointer transition-colors",
+              menuOpen ? "border-green text-green bg-surface" : "border-border2 text-muted bg-transparent",
+            )}
+          >
+            <span className="text-[28px] leading-none">{menuOpen ? "×" : "≡"}</span>
+          </button>
+        )}
+      </div>
 
       {navCollapsed && menuOpen && (
         <MobileMenu pathname={loc.pathname} onClose={() => setMenuOpen(false)} />

@@ -14,5 +14,14 @@ export default defineConfig({
     outDir: "dist",
     emptyOutDir: true,
   },
-  server: { port: 5173 },
+  server: {
+    port: 5173,
+    proxy: {
+      "/api/tier-list": {
+        target: "https://www.17lands.com",
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/api\/tier-list/, "/data/tier_list"),
+      },
+    },
+  },
 });

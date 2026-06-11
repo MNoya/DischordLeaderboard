@@ -1,9 +1,47 @@
-import { useQuery } from "@tanstack/react-query";
-import { TIER_LIST_DATA_BASE, TIER_LIST_DATA_BASE_OVERRIDES } from "./constants";
+import { useQueries } from "@tanstack/react-query";
+import {
+  TIER_LIST_DATA_BASE,
+  TIER_LIST_DATA_BASE_OVERRIDES,
+} from "./constants";
 
-export const TIER_ORDER = ["A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D+", "D", "D-", "F", "SB", "TBD"];
+export interface GraderGrade {
+  name: string;
+  tier: string;
+}
+
+export interface Grader {
+  name: string;
+  uid: string;
+}
+
+export const TIER_ORDER = [
+  "A+",
+  "A",
+  "A-",
+  "B+",
+  "B",
+  "B-",
+  "C+",
+  "C",
+  "C-",
+  "D+",
+  "D",
+  "D-",
+  "F",
+  "SB",
+  "TBD",
+];
 export const COLOR_CODES = ["W", "U", "B", "R", "G", "M", "C", "L"];
-export const COLOR_NAMES = ["White", "Blue", "Black", "Red", "Green", "Multicolor", "Colorless", "Land"];
+export const COLOR_NAMES = [
+  "White",
+  "Blue",
+  "Black",
+  "Red",
+  "Green",
+  "Multicolor",
+  "Colorless",
+  "Land",
+];
 
 export interface TierCard {
   card_id: number;
@@ -19,12 +57,43 @@ export interface TierCard {
   expansion: string;
   inclusion_type: string;
   flags: { buildaround: boolean; synergy: boolean; sideboard?: boolean };
+  trend?: "up" | "down" | null;
+  trend_from?: string | null;
+  graders?: GraderGrade[];
+}
+
+export const TREND_COLOR: Record<"up" | "down", string> = {
+  up: "#4ade80",
+  down: "#f87171",
+};
+export const TREND_GLYPH: Record<"up" | "down", string> = { up: "▲", down: "▼" };
+export const TREND_LABEL: Record<"up" | "down", string> = {
+  up: "Up since the set review",
+  down: "Down since the set review",
+};
+
+export function trendSteps(card: TierCard): number {
+  if (!card.trend) return 0;
+  const from = TIER_ORDER.indexOf(card.trend_from ?? "");
+  const to = TIER_ORDER.indexOf(card.tier);
+  if (from === -1 || to === -1) return 1;
+  return Math.max(1, Math.abs(to - from));
 }
 
 // Filterable type groups — some card types collapse into one toggle (subtypes are ignored)
-export const TYPE_GROUPS: Array<{ key: string; label: string; ms: string; types: string[] }> = [
+export const TYPE_GROUPS: Array<{
+  key: string;
+  label: string;
+  ms: string;
+  types: string[];
+}> = [
   { key: "creature", label: "Creature", ms: "creature", types: ["creature"] },
-  { key: "spell", label: "Instant / Sorcery", ms: "instant", types: ["instant", "sorcery"] },
+  {
+    key: "spell",
+    label: "Instant / Sorcery",
+    ms: "instant",
+    types: ["instant", "sorcery"],
+  },
   {
     key: "permanent",
     label: "Artifact / Enchantment / Planeswalker",
@@ -34,9 +103,8 @@ export const TYPE_GROUPS: Array<{ key: string; label: string; ms: string; types:
   { key: "battle", label: "Battle", ms: "battle", types: ["battle"] },
   { key: "land", label: "Land", ms: "land", types: ["land"] },
 ];
-const TYPE_GROUP_BY_KEY: Record<string, { types: string[] }> = Object.fromEntries(
-  TYPE_GROUPS.map((g) => [g.key, g]),
-);
+const TYPE_GROUP_BY_KEY: Record<string, { types: string[] }> =
+  Object.fromEntries(TYPE_GROUPS.map((g) => [g.key, g]));
 
 export const MANA_VALUE_BUCKETS = ["1", "2", "3", "4", "5", "6+"];
 
@@ -51,17 +119,36 @@ export interface TierFilters {
   manaValues: string[];
   rarities: string[];
   cardTypes: string[];
+  trends: string[];
 }
 
-export const EMPTY_FILTERS: TierFilters = { sets: [], manaValues: [], rarities: [], cardTypes: [] };
+export const EMPTY_FILTERS: TierFilters = {
+  sets: [],
+  manaValues: [],
+  rarities: [],
+  cardTypes: [],
+  trends: [],
+};
 
 export function hasActiveFilters(f: TierFilters): boolean {
-  return f.sets.length > 0 || f.manaValues.length > 0 || f.rarities.length > 0 || f.cardTypes.length > 0;
+  return (
+    f.sets.length > 0 ||
+    f.manaValues.length > 0 ||
+    f.rarities.length > 0 ||
+    f.cardTypes.length > 0 ||
+    f.trends.length > 0
+  );
 }
 
+// Selecting both trends keeps unchanged cards visible but dimmed (isCardTrendDimmed)
 function cardMatchesFilters(card: TierCard, f: TierFilters): boolean {
+  if (f.trends.length === 1 && card.trend !== f.trends[0]) return false;
   if (f.sets.length > 0 && !f.sets.includes(card.expansion)) return false;
-  if (f.manaValues.length > 0 && !f.manaValues.includes(manaValueBucket(card.cmc))) return false;
+  if (
+    f.manaValues.length > 0 &&
+    !f.manaValues.includes(manaValueBucket(card.cmc))
+  )
+    return false;
   if (f.rarities.length > 0 && !f.rarities.includes(card.rarity)) return false;
   if (f.cardTypes.length > 0) {
     const present = new Set(card.types.map((t) => t.toLowerCase()));
@@ -78,8 +165,17 @@ export function isCardFilteredOut(card: TierCard, f: TierFilters): boolean {
   return !cardMatchesFilters(card, f);
 }
 
+export function isCardTrendDimmed(card: TierCard, f: TierFilters): boolean {
+  return f.trends.length === 2 && !card.trend;
+}
+
 export const RARITY_ORDER = ["C", "U", "R", "M"];
-export const RARITY_NAMES: Record<string, string> = { C: "Common", U: "Uncommon", R: "Rare", M: "Mythic" };
+export const RARITY_NAMES: Record<string, string> = {
+  C: "Common",
+  U: "Uncommon",
+  R: "Rare",
+  M: "Mythic",
+};
 
 const INCLUSION_ORDER = ["Main Set", "Bonus Sheet", "Special Guests"];
 
@@ -87,13 +183,18 @@ export interface TierFilterOptions {
   sets: Array<{ value: string; label: string; count: number }>;
   rarities: Array<{ value: string; name: string; count: number }>;
   types: Array<{ value: string; label: string; ms: string; count: number }>;
+  trends: { up: number; down: number };
 }
 
 export function tierFilterOptions(cards: TierCard[]): TierFilterOptions {
   const setInfo = new Map<string, { label: string; count: number }>();
   const rarityCounts = new Map<string, number>();
   const groupCounts = new Map<string, number>();
+  const trendCounts = { up: 0, down: 0 };
   for (const card of cards) {
+    if (card.trend) {
+      trendCounts[card.trend] += 1;
+    }
     const set = setInfo.get(card.expansion);
     if (set) {
       set.count += 1;
@@ -113,7 +214,10 @@ export function tierFilterOptions(cards: TierCard[]): TierFilterOptions {
     .sort((a, b) => {
       const ra = INCLUSION_ORDER.indexOf(a.label);
       const rb = INCLUSION_ORDER.indexOf(b.label);
-      return (ra === -1 ? INCLUSION_ORDER.length : ra) - (rb === -1 ? INCLUSION_ORDER.length : rb);
+      return (
+        (ra === -1 ? INCLUSION_ORDER.length : ra) -
+        (rb === -1 ? INCLUSION_ORDER.length : rb)
+      );
     });
   return {
     sets,
@@ -128,26 +232,82 @@ export function tierFilterOptions(cards: TierCard[]): TierFilterOptions {
       ms: g.ms,
       count: groupCounts.get(g.key)!,
     })),
+    trends: trendCounts,
   };
 }
 
-const FIVE_MINUTES = 5 * 60 * 1000;
+const ONE_HOUR = 60 * 60 * 1000;
 
-async function fetchTierList(uid: string): Promise<TierCard[]> {
-  const base = TIER_LIST_DATA_BASE_OVERRIDES[uid] ?? TIER_LIST_DATA_BASE;
-  const res = await fetch(`${base}/${uid}`);
+const normalizeName = (name: string) => name.trim().toLowerCase();
+
+interface TierListPayload {
+  cards: TierCard[];
+  lastUpdated: string | null;
+}
+
+// Bare-array responses are card ratings only; the dict shape adds list metadata
+// including `last_updated` (UTC, space-separated).
+async function fetchTierList(uid: string): Promise<TierListPayload> {
+  const override = TIER_LIST_DATA_BASE_OVERRIDES[uid];
+  const res = await fetch(override ?? `${TIER_LIST_DATA_BASE}/${uid}`);
   if (!res.ok) {
     throw new Error(`Tier list fetch failed: ${res.status}`);
   }
   const json = await res.json();
-  return Array.isArray(json) ? json : (json?.ratings ?? []);
+  if (Array.isArray(json)) {
+    return { cards: json, lastUpdated: null };
+  }
+  const lastUpdated = json?.last_updated
+    ? `${String(json.last_updated).replace(" ", "T")}Z`
+    : null;
+  return { cards: json?.ratings ?? [], lastUpdated };
 }
 
-export function useTierList(uid: string | undefined) {
-  return useQuery({
-    queryKey: ["tier-list", uid],
-    queryFn: () => fetchTierList(uid!),
-    enabled: !!uid,
-    staleTime: FIVE_MINUTES,
+// The consensus list updates every few days; grader review lists are locked and never change,
+// so they cache forever and the join attaches each grader's grade onto its card by name.
+export function useTierList(uid: string | undefined, graders: Grader[] = []) {
+  const results = useQueries({
+    queries: [
+      {
+        queryKey: ["tier-list", uid],
+        queryFn: () => fetchTierList(uid!),
+        enabled: !!uid,
+        staleTime: ONE_HOUR,
+      },
+      ...graders.map((grader) => ({
+        queryKey: ["tier-list", grader.uid],
+        queryFn: () => fetchTierList(grader.uid),
+        staleTime: Infinity,
+        gcTime: Infinity,
+      })),
+    ],
   });
+
+  const [consensus, ...graderResults] = results;
+  let data = consensus.data?.cards;
+  if (data && graders.length > 0) {
+    const gradesByName = graderResults.map((result) => {
+      const byName = new Map<string, string>();
+      for (const card of result.data?.cards ?? []) {
+        byName.set(normalizeName(card.name), card.tier);
+      }
+      return byName;
+    });
+    data = data.map((card) => ({
+      ...card,
+      graders: graders
+        .map((grader, i) => ({
+          name: grader.name,
+          tier: gradesByName[i].get(normalizeName(card.name)),
+        }))
+        .filter((grade): grade is GraderGrade => Boolean(grade.tier)),
+    }));
+  }
+
+  return {
+    data,
+    lastUpdated: consensus.data?.lastUpdated ?? null,
+    isLoading: consensus.isLoading,
+    isError: consensus.isError,
+  };
 }

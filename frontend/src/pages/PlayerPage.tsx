@@ -835,16 +835,17 @@ function StatStrip({
         );
         if (t.onClick) {
           return (
-            <button
-              key={t.label}
-              type="button"
-              ref={t.btnRef}
-              onClick={t.onClick}
-              aria-label={`Show ${t.label.toLowerCase()} breakdown`}
-              className={cn(tileCls, "bg-transparent cursor-pointer hover:bg-surface2/40 transition-colors")}
-            >
-              {body}
-            </button>
+            <Tooltip key={t.label} label="View Points Breakdown">
+              <button
+                type="button"
+                ref={t.btnRef}
+                onClick={t.onClick}
+                aria-label={`Show ${t.label.toLowerCase()} breakdown`}
+                className={cn(tileCls, "bg-transparent cursor-pointer hover:bg-surface2/40 transition-colors")}
+              >
+                {body}
+              </button>
+            </Tooltip>
           );
         }
         return (
