@@ -110,19 +110,25 @@ def _build_draftmancer_session(session: Session, parsed: ParsedSeshEvent) -> str
     return f"{base}-{n}"
 
 
-_ARENA_ID_RE = re.compile(r"#\d+$")
-_ARENA_ID_SQL = r"#\d+$"
+_ARENA_ID_RE = re.compile(r"#[0-9?]+$")
+_ARENA_ID_SQL = r"#[0-9?]+$"
 _NAME_TOKEN_RE = re.compile(r"[\s()/\\,|-]+")
 
 
 def normalize_player_name(name: str) -> str:
-    """Strip markdown escape backslashes and the trailing MTG Arena suffix (`#NNNN`), lowercase
-    for matching."""
+    """Strip markdown escape backslashes and the trailing MTG Arena suffix, lowercase for matching.
+    The suffix may be a `#?????` placeholder typed by players who don't know their Arena number."""
     return _ARENA_ID_RE.sub("", name.replace("\\", "")).lower()
 
 
+def name_token_match(norm: str, field: str) -> bool:
+    """True when norm appears as a standalone word token of field, e.g. `wonderland`
+    in `Alice (Wonderland)`."""
+    return len(norm) >= 3 and norm in _NAME_TOKEN_RE.split(field.lower())
+
+
 def _normalized_column(col):
-    """SQL expression: lowercase a column and strip the trailing `#NNNN` MTG Arena suffix."""
+    """SQL expression: lowercase a column and strip the trailing MTG Arena suffix."""
     return func.regexp_replace(func.lower(col), _ARENA_ID_SQL, "")
 
 
@@ -187,11 +193,10 @@ def player_for_name(session: Session, name: str) -> Player | None:
     if found is not None:
         return found
 
-    if len(norm) >= 3:
-        for p in candidates:
-            for field in (p.display_name or "", p.discord_username or ""):
-                if norm in _NAME_TOKEN_RE.split(field.lower()):
-                    return p
+    for p in candidates:
+        for field in (p.display_name or "", p.discord_username or ""):
+            if name_token_match(norm, field):
+                return p
 
     return None
 

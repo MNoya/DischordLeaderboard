@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import re
+from types import SimpleNamespace
 
 from bot.models import Player
+from bot.services.pod_draft_manager import _find_guild_member_for_arena
 from bot.services.pod_drafts import (
     normalize_player_name,
     player_for_name,
@@ -50,8 +52,13 @@ def test_normalize_lowercases_bare_name():
 
 
 def test_normalize_hash_with_no_digits_is_not_stripped():
-    # `#` alone doesn't match `#\d+$`, so the hash stays
+    # a bare trailing `#` is not an Arena suffix, so the hash stays
     assert normalize_player_name("Name#") == "name#"
+    assert normalize_player_name("Name#abc") == "name#abc"
+
+
+def test_normalize_strips_question_mark_placeholder_suffix():
+    assert normalize_player_name("WonderAlice#?????") == "wonderalice"
 
 
 def test_normalize_strips_only_trailing_suffix():
@@ -237,6 +244,42 @@ def test_token_match_in_display_name(session):
 def test_token_match_does_not_fire_for_short_norm(session):
     _seed_player(session, discord_id="21", username="xy", display_name="XY (ab)")
     assert player_for_name(session, "ab#1") is None
+
+
+def test_token_match_with_placeholder_suffix(session):
+    _seed_player(session, discord_id="22", username="zorn", display_name="Zorn (Kael)")
+    assert player_for_name(session, "kael#?????").discord_id == "22"
+
+
+# --- guild-member fallback for players without a row ---
+
+def _stub_guild(*members):
+    return SimpleNamespace(members=[SimpleNamespace(display_name=dn, name=un) for dn, un in members])
+
+
+def test_guild_member_exact_display_name_match():
+    guild = _stub_guild(("MNG", "mng_discord"))
+    found = _find_guild_member_for_arena(guild, "MNG#61656")
+    assert found is not None
+    assert found.display_name == "MNG"
+
+
+def test_guild_member_token_match_in_parenthesized_nick():
+    guild = _stub_guild(("Zorn (Kael)", "zorn_kael"))
+    found = _find_guild_member_for_arena(guild, "kael#?????")
+    assert found is not None
+    assert found.display_name == "Zorn (Kael)"
+
+
+def test_guild_member_exact_match_wins_over_token_match():
+    guild = _stub_guild(("Zorn (Kael)", "zorn_kael"), ("Kael", "kael_discord"))
+    found = _find_guild_member_for_arena(guild, "Kael#12345")
+    assert found.display_name == "Kael"
+
+
+def test_guild_member_no_match_returns_none():
+    guild = _stub_guild(("Somebody", "somebody"))
+    assert _find_guild_member_for_arena(guild, "ghost#1234") is None
 
 
 def test_exact_display_name_beats_token_match(session):

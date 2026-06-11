@@ -44,6 +44,7 @@ from bot.services.pod_drafts import (
     finalize_mock_event,
     load_event_pairing_mode_sync,
     load_event_seating_mode_sync,
+    name_token_match,
     player_for_name,
     seed_event_participants,
     update_event_format,
@@ -62,7 +63,6 @@ _BACKOFF_MAX_RETRIES = 8
 _BOT_USER_NAME = "DisChordBot"
 _READY_TIMEOUT_S = 90
 _READY_DEBOUNCE_S = 2.0
-_ARENA_SUFFIX_RE = re.compile(r"#\d+$")
 _AI_BOT_NAME_RE = re.compile(r"^Bot #\d+$")
 
 _SEEDING_REFRESH_HOOK = None
@@ -1521,10 +1521,17 @@ def _leaderboard_seat_order_sync(names: list[str]) -> list[str]:
 
 def _find_guild_member_for_arena(guild: discord.Guild, arena_name: str) -> discord.Member | None:
     """Match a Draftmancer username to a guild member by display_name or username.
-    Strips the trailing `#NNNN` Arena suffix so `MNG#61656` matches a member whose display name is `MNG`."""
-    norm = _ARENA_SUFFIX_RE.sub("", arena_name).lower()
+    Strips the trailing Arena suffix so `MNG#61656` matches a member whose display name is `MNG`.
+    Exact matches win; otherwise falls back to word tokens, so `wonderland#12345` matches
+    a member displayed as `Alice (Wonderland)`."""
+    norm = normalize_player_name(arena_name)
+    if not norm:
+        return None
     for member in guild.members:
         if member.display_name.lower() == norm or member.name.lower() == norm:
+            return member
+    for member in guild.members:
+        if name_token_match(norm, member.display_name) or name_token_match(norm, member.name):
             return member
     return None
 
