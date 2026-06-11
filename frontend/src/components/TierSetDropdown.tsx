@@ -10,6 +10,7 @@ export function TierSetDropdown({
   glyphCode,
   label,
   isMobile,
+  loading = false,
   onChange,
 }: {
   sets: SetSummary[];
@@ -17,6 +18,7 @@ export function TierSetDropdown({
   glyphCode: string;
   label: string;
   isMobile: boolean;
+  loading?: boolean;
   onChange: (code: string) => void;
 }) {
   const [open, setOpen] = React.useState(false);
@@ -39,7 +41,7 @@ export function TierSetDropdown({
     };
   }, [open]);
 
-  if (sets.length <= 1) {
+  if (!loading && sets.length <= 1) {
     return (
       <span className="flex items-center gap-2 md:gap-3 min-w-0">
         <SetGlyph code={glyphCode} size={glyphSize} />
@@ -48,15 +50,21 @@ export function TierSetDropdown({
     );
   }
 
+  const hasOptions = sets.length > 1;
+
   return (
     <div ref={ref} className="relative min-w-0">
       <button
         type="button"
+        disabled={!hasOptions}
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         className={cn(
-          "group flex max-w-full min-w-0 cursor-pointer items-center gap-2 rounded-md border px-3 py-1.5 transition-colors md:gap-3",
-          open ? "border-green text-green" : "border-border2 text-text hover:border-green hover:text-green",
+          "group flex max-w-full min-w-0 items-center gap-2 rounded-md border px-3 py-1.5 transition-colors md:gap-3",
+          open
+            ? "border-green text-green"
+            : "border-border2 text-text",
+          hasOptions && !open && "cursor-pointer hover:border-green hover:text-green",
         )}
       >
         <SetGlyph code={glyphCode} size={glyphSize} />

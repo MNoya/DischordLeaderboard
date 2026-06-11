@@ -85,20 +85,23 @@ export function TierListPage() {
                     glyphCode={glyphCode}
                     label={setMeta?.name?.toUpperCase() ?? current}
                     isMobile
+                    loading={!sets}
                     onChange={pickSet}
                   />
                 </h1>
 
-                {uid && filtersReady && (
+                {uid && (
                   <button
                     type="button"
                     onClick={() => setFiltersOpen((open) => !open)}
                     aria-expanded={filtersOpen}
+                    disabled={!filtersReady}
                     className={cn(
                       "flex h-9 shrink-0 items-center gap-1.5 rounded border px-2.5 text-[12px] transition-colors",
                       filtersOpen || hasActiveFilters(filters)
                         ? "border-green text-text"
                         : "border-border2 text-muted",
+                      !filtersReady && "opacity-50",
                     )}
                   >
                     <svg
@@ -132,7 +135,11 @@ export function TierListPage() {
                 )}
               </div>
 
-              <ListMeta lastUpdated={lastUpdated} className="mt-1.5" />
+              <ListMeta
+                lastUpdated={lastUpdated}
+                split
+                className="mt-1.5 whitespace-nowrap text-[clamp(8px,2.8vw,11px)]"
+              />
 
               {uid && filtersReady && filtersOpen && (
                 <div className="pt-3">
@@ -156,10 +163,11 @@ export function TierListPage() {
                     glyphCode={glyphCode}
                     label={setMeta?.name?.toUpperCase() ?? current}
                     isMobile={false}
+                    loading={!sets}
                     onChange={pickSet}
                   />
                 </h1>
-                <ListMeta lastUpdated={lastUpdated} className="mt-1 pl-[2px]" />
+                <ListMeta lastUpdated={lastUpdated} className="mt-1 pl-[2px] text-[11px]" />
               </div>
 
               {uid && filtersReady ? (
@@ -211,18 +219,41 @@ export function TierListPage() {
 function ListMeta({
   lastUpdated,
   className,
+  split = false,
 }: {
   lastUpdated: string | null;
   className?: string;
+  split?: boolean;
 }) {
-  const rel = lastUpdated ? relativeTime(lastUpdated) : null;
-  const updated =
-    rel === null ? null : rel === "now" ? "UPDATED JUST NOW" : `LAST UPDATED ${rel.toUpperCase()} AGO`;
+  const updated = lastUpdated ? lastUpdatedLabel(lastUpdated) : null;
+  if (split) {
+    return (
+      <div className={cn("mono flex justify-between gap-x-4 text-muted", className)}>
+        <span className="pl-[calc(0.75rem+26px+0.5rem)] tracking-[0.16em]">SET REVIEW GRADES</span>
+        {updated && <span className="tracking-[0.06em]">{updated}</span>}
+      </div>
+    );
+  }
   return (
-    <div className={cn("mono text-[11px] tracking-[0.16em] text-muted", className)}>
-      SET REVIEW GRADES{updated ? ` · ${updated}` : ""}
+    <div className={cn("mono tracking-[0.16em] text-muted", className)}>
+      SET REVIEW GRADES{updated ? ` — ${updated}` : ""}
     </div>
   );
+}
+
+// Relative time while fresh; absolute "JUN 3" once a week old ("JUN 3 '25" across years)
+function lastUpdatedLabel(iso: string): string {
+  const updated = new Date(iso);
+  const now = new Date();
+  const ageDays = (now.getTime() - updated.getTime()) / 86_400_000;
+  if (ageDays < 7) {
+    const rel = relativeTime(iso, now);
+    return rel === "now" ? "Updated just now" : `Last updated ${rel} ago`;
+  }
+  const monthDay = updated.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const shortYear = ` '${String(updated.getFullYear() % 100).padStart(2, "0")}`;
+  const sameYear = updated.getFullYear() === now.getFullYear();
+  return `Last updated ${monthDay}${sameYear ? "" : shortYear}`;
 }
 
 function buildTierListSets(sets: SetSummary[] | undefined): SetSummary[] {

@@ -306,7 +306,7 @@ const PREVIEW_W = 260;
 const PREVIEW_RATIO = 1.4;
 const PREVIEW_GAP = 12;
 const PREVIEW_EXTRAS_H = 60;
-const PREVIEW_MAT = "#1d2330";
+const PREVIEW_MAT = "#161b26";
 
 const TEXT_OUTLINE =
   "[text-shadow:1px_1px_1px_rgba(0,0,0,0.85),-1px_-1px_1px_rgba(0,0,0,0.85),1px_-1px_1px_rgba(0,0,0,0.85),-1px_1px_1px_rgba(0,0,0,0.85)]";
@@ -409,7 +409,6 @@ function CardBar({
               className={cn(
                 "min-w-0 line-clamp-2 text-[13px] font-medium leading-tight text-white",
                 TEXT_OUTLINE,
-                mobile && "underline decoration-dotted underline-offset-2",
               )}
             >
               {card.name}
@@ -575,7 +574,7 @@ function CardModal({
 }) {
   return (
     <div
-      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 p-6"
+      className="fixed inset-0 z-[200] flex items-start justify-center bg-black/70 p-6 pt-[max(24px,calc((100dvh-620px)/2))]"
       onClick={(e) => {
         e.stopPropagation();
         onClose();
@@ -588,20 +587,25 @@ function CardModal({
       >
         <GradesPanel card={card} />
         <img src={card.url} alt={card.name} className="w-full rounded-[10px]" />
-        {card.comment && (
-          <p className="whitespace-pre-line px-3 py-2.5 text-[14px] leading-snug text-text">
-            {card.comment}
-          </p>
-        )}
-        <div className="flex items-center justify-between border-t border-white/20 px-3 py-2">
-          <ModalNavButton label="Previous card" glyph="‹" onClick={onPrev} />
+        <div
+          className={cn(
+            "flex items-center justify-between px-3 py-3.5",
+            !card.comment && "-mb-[6px]",
+          )}
+        >
+          <ModalNavButton label="Previous card" dir="prev" onClick={onPrev} />
           {position && (
             <span className="mono text-[12px] tracking-[0.1em] text-white/70">
               {position}
             </span>
           )}
-          <ModalNavButton label="Next card" glyph="›" onClick={onNext} />
+          <ModalNavButton label="Next card" dir="next" onClick={onNext} />
         </div>
+        {card.comment && (
+          <p className="-mx-[6px] -mb-[6px] whitespace-pre-line border-t border-white/60 px-3 py-3.5 text-center text-[14px] leading-snug text-text">
+            {card.comment}
+          </p>
+        )}
       </div>
     </div>
   );
@@ -609,11 +613,11 @@ function CardModal({
 
 function ModalNavButton({
   label,
-  glyph,
+  dir,
   onClick,
 }: {
   label: string;
-  glyph: string;
+  dir: "prev" | "next";
   onClick?: () => void;
 }) {
   return (
@@ -623,11 +627,22 @@ function ModalNavButton({
       disabled={!onClick}
       aria-label={label}
       className={cn(
-        "flex h-9 w-9 items-center justify-center rounded border border-white/40 text-[22px] leading-none text-text transition-colors",
+        "flex h-9 w-9 items-center justify-center rounded border border-white/40 text-text transition-colors",
         onClick ? "hover:bg-white/10" : "opacity-30",
       )}
     >
-      {glyph}
+      <svg
+        width="15"
+        height="15"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d={dir === "prev" ? "M15 18l-6-6 6-6" : "M9 6l6 6 -6 6"} />
+      </svg>
     </button>
   );
 }
