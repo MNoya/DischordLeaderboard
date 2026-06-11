@@ -8,15 +8,19 @@ export function Tooltip({
   align,
   children,
   className,
+  open,
+  onOpenChange,
 }: {
   label: string;
   side?: "top" | "right" | "bottom" | "left";
   align?: "start" | "center" | "end";
   children: React.ReactNode;
   className?: string;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   return (
-    <Root>
+    <Root open={open} onOpenChange={onOpenChange}>
       <Trigger asChild>{children}</Trigger>
       <Portal>
         <Content

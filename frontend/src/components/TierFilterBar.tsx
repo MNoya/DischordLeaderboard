@@ -1,4 +1,4 @@
-import { type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { cn } from "../lib/utils";
 import { keyruneClass } from "./Brand";
 import { Tooltip } from "./Tooltip";
@@ -6,7 +6,6 @@ import {
   MANA_VALUE_BUCKETS,
   TREND_COLOR,
   TREND_GLYPH,
-  TREND_LABEL,
   type TierFilterOptions,
   type TierFilters,
 } from "../data/tierList";
@@ -32,16 +31,18 @@ export function TierFilterBar({
     setFilters({ ...filters, [key]: next });
   };
 
+  const [trendTipOpen, setTrendTipOpen] = useState(false);
   const trendState = filters.trends.length === 1 ? (filters.trends[0] as "up" | "down") : null;
   const cycleTrend = () => {
     const next = trendState === null ? ["up"] : trendState === "up" ? ["down"] : [];
     setFilters({ ...filters, trends: next });
+    setTrendTipOpen(true);
   };
   const trendCycleLabel =
     trendState === null
-      ? `${TREND_LABEL.up} (${options.trends.up})`
+      ? `Show only cards that moved up (${options.trends.up})`
       : trendState === "up"
-        ? `${TREND_LABEL.down} (${options.trends.down})`
+        ? `Show only cards that moved down (${options.trends.down})`
         : "Show all cards";
 
   const rarityGroup = (
@@ -123,7 +124,14 @@ export function TierFilterBar({
 
   const trendGroup = (
     <FilterGroup label="TREND" stacked={stacked} joined>
-      <IconToggle active={trendState !== null} onClick={cycleTrend} label={trendCycleLabel} narrow>
+      <IconToggle
+        active={trendState !== null}
+        onClick={cycleTrend}
+        label={trendCycleLabel}
+        narrow
+        tooltipOpen={trendTipOpen}
+        onTooltipOpenChange={setTrendTipOpen}
+      >
         <span className="flex w-[28px] items-center justify-center">
           {trendState === null ? (
             <span className="flex gap-0.5 text-[12px] leading-none opacity-70">
@@ -201,6 +209,8 @@ function IconToggle({
   children,
   roomy = false,
   narrow = false,
+  tooltipOpen,
+  onTooltipOpenChange,
 }: {
   active: boolean;
   onClick: () => void;
@@ -208,9 +218,11 @@ function IconToggle({
   children: ReactNode;
   roomy?: boolean;
   narrow?: boolean;
+  tooltipOpen?: boolean;
+  onTooltipOpenChange?: (open: boolean) => void;
 }) {
   return (
-    <Tooltip label={label}>
+    <Tooltip label={label} open={tooltipOpen} onOpenChange={onTooltipOpenChange}>
       <button
         type="button"
         onClick={onClick}
