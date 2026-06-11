@@ -26,6 +26,11 @@ logger = logging.getLogger(__name__)
 SUPPORTED_FORMATS: tuple[str, ...] = supported_formats()
 
 DEFAULT_BASE_URL = "https://www.17lands.com"
+
+LCQ_DRAFT2_FORMAT = "LimitedChampionshipQualifier_Draft2"
+QUALIFIER_DAY2_FORMAT = "Qualifier_D2_Sealed"
+QUALIFIER_DAY2_FOUR_WIN_POLICY_START = date(2025, 5, 10)
+
 _TOKEN_RE = re.compile(r"[a-f0-9]{32}")
 _HEX_RUN_RE = re.compile(r"[a-f0-9]{6,}")
 _URL_RE = re.compile(r"https?://", re.IGNORECASE)
@@ -260,6 +265,27 @@ def _parse_17lands_ts(value: str | None) -> datetime | None:
     return None
 
 
+def event_is_trophy(draft: dict) -> bool:
+    """Whether a 17lands draft is a trophy run.
+
+    Normally a trophy is ``event_wins`` truthy, but 17lands ships ``event_wins=0``
+    for two event types so the win count stands in:
+      - LCQ Draft 2 always (upstream bug).
+      - Qualifier Weekend Day 2 from 2025-05-10 on, when WOTC dropped the bar to
+        4 wins to qualify (https://magic.wizards.com/en/news/mtg-arena/qualifier-weekend-event-updates).
+        Earlier Day 2 runs keep the old win-6 bar and report ``event_wins`` correctly.
+    """
+    fmt = draft.get("format")
+    wins = int(draft.get("wins") or 0)
+    if fmt == LCQ_DRAFT2_FORMAT:
+        return wins == 6
+    if fmt == QUALIFIER_DAY2_FORMAT:
+        started_at = _parse_17lands_ts(draft.get("first_event_server_time"))
+        if started_at and started_at.date() >= QUALIFIER_DAY2_FOUR_WIN_POLICY_START:
+            return wins >= 4
+    return bool(draft.get("event_wins"))
+
+
 def extract_event_row(draft: dict) -> dict | None:
     """Build a ``DraftEvent``-shaped row dict from one 17lands draft. No filtering.
 
@@ -280,18 +306,13 @@ def extract_event_row(draft: dict) -> dict | None:
         return None
     expansion = normalize_expansion(draft.get("expansion") or "")
     wins = int(draft.get("wins") or 0)
-    # WORKAROUND: 17lands ships event_wins=0 for LCQ Draft 2 trophies; revert once fixed upstream
-    if fmt == "LimitedChampionshipQualifier_Draft2":
-        is_trophy = wins == 6
-    else:
-        is_trophy = bool(draft.get("event_wins"))
     return {
         "seventeenlands_event_id": event_id,
         "format": fmt,
         "expansion": expansion,
         "wins": wins,
         "losses": int(draft.get("losses") or 0),
-        "is_trophy": is_trophy,
+        "is_trophy": event_is_trophy(draft),
         "colors": draft.get("colors") or None,
         "start_rank": draft.get("start_rank") or None,
         "end_rank": draft.get("end_rank") or None,

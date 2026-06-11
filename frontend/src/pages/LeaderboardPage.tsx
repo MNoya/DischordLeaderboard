@@ -23,6 +23,7 @@ import { ChamferedButton } from "../components/ChamferedButton";
 import { Record } from "../components/Record";
 import { DonutChart } from "../components/DonutChart";
 import { TrophyCount } from "../components/TrophyCount";
+import { ArenaChampBadge, isArenaChampionshipFormat } from "../components/ArenaChampBadge";
 
 import {
   useAvailableFormats,
@@ -1057,6 +1058,7 @@ function MobileExpandedRow({
               <span className="font-display text-[11px] tracking-[0.08em] text-muted">
                 {prettyFormat(lastTrophy.format).toUpperCase()}
               </span>
+              {isArenaChampionshipFormat(lastTrophy.format) && <ArenaChampBadge size={22} box={14} />}
               <span className="text-dim text-[11px]">·</span>
               <span className="font-display text-[11px] tracking-[0.08em] text-dim tabular-nums">{relativeTime(eventDate(lastTrophy))}</span>
             </>
