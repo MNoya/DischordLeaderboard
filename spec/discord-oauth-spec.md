@@ -4,7 +4,7 @@
 
 The frontend at `dischord.pages.dev` is fully anonymous today — Supabase anon key, read-only `public_*` views, no user identity. This spec adds Discord OAuth so the site knows who the visitor is (Discord ID, username, avatar). This unlocks future features (voting, personalized views, self-service settings) but the initial PR is just the auth plumbing — login, logout, session, and the visual indicator in the header.
 
-No bot changes. No RLS changes. No new tables or migrations. No features that consume auth. Just the identity layer.
+No bot changes. No RLS changes. No new tables. One migration to grant `authenticated` SELECT on all `public_*` views (without this, logged-in users get permission denied on every read). No features that consume auth. Just the identity layer.
 
 ---
 
@@ -14,25 +14,27 @@ Two-tier, no new tables:
 
 - **`auth.users`** (Supabase-managed) — created automatically when anyone logs in with Discord. Stores Discord ID, username, avatar. Universal identity for all website visitors. Future contest/voting tables FK here.
 - **`players`** (bot-managed) — leaderboard participants only, created by the bot's `/join` flow. Has `discord_id` column.
-- **Linking:** When a logged-in user is also a leaderboard player, we match them at read time by joining `auth.users.raw_user_meta_data->provider_id` to `players.discord_id`. No migration, no explicit "link account" step.
+- **Linking (future):** Not implemented in this PR, but the identity model enables it. When a logged-in user is also a leaderboard player, the client can compare its own session's `discordId` (from `user_metadata.provider_id`) against the `discord_id` column in the public leaderboard data — a client-side join, not a SQL join on `auth.users` (that table isn't readable with anon/authenticated keys). No migration, no explicit "link account" step. This unlocks future features like highlighting your own leaderboard row or self-service settings.
 
-Someone can log in to vote in a contest without ever joining the leaderboard. Leaderboard players who log in are automatically recognized.
+Someone can log in to vote in a contest without ever joining the leaderboard. Leaderboard players who log in would be automatically recognized once a consuming feature ships.
 
 ---
 
 ## Auth Flow
 
 **Login:**
+
 1. User clicks "LOG IN" in the header
 2. `supabase.auth.signInWithOAuth({ provider: 'discord', options: { redirectTo: window.location.href } })`
 3. Browser -> Supabase auth endpoint -> Discord consent screen (scope: `identify` only)
-4. Discord -> Supabase callback (`https://yrecdosksgigpceholjl.supabase.co/auth/v1/callback`) -> Supabase exchanges code, mints session -> redirects browser back to `redirectTo` URL with PKCE tokens as hash fragments
-5. Supabase JS client auto-detects fragments on page load, stores session in `localStorage`, fires `onAuthStateChange(SIGNED_IN)`
+4. Discord -> Supabase callback (`https://yrecdosksgigpceholjl.supabase.co/auth/v1/callback`) -> Supabase exchanges code, mints session -> redirects browser back to `redirectTo` URL with `?code=` query param (PKCE flow)
+5. Supabase JS client detects the code param on page load, exchanges it for a session, stores in `localStorage`, fires `onAuthStateChange(SIGNED_IN)`
 6. `AuthProvider` picks up the event, React re-renders
 
 Using `window.location.href` as `redirectTo` means the user lands back on the exact page they were viewing.
 
 **Logout:**
+
 1. User clicks "Log out" from user menu
 2. `supabase.auth.signOut()` -> clears `localStorage` -> fires `onAuthStateChange(SIGNED_OUT)`
 3. Header reverts to login button
@@ -43,7 +45,9 @@ Using `window.location.href` as `redirectTo` means the user lands back on the ex
 
 ## Session Management
 
-Flip `persistSession` from `false` to `true` in `frontend/src/data/supabase.ts`. Session survives page reloads via `localStorage` under key `sb-yrecdosksgigpceholjl-auth-token`. Mock mode (`supabase === null`) is unaffected.
+Flip `persistSession` from `false` to `true` and add `flowType: 'pkce'` in `frontend/src/data/supabase.ts`. Session survives page reloads via `localStorage` under key `sb-yrecdosksgigpceholjl-auth-token`. Mock mode (`supabase === null`) is unaffected.
+
+`VITE_DATA_MODE=local` uses a real Supabase client pointed at the `:3001` proxy, which doesn't serve `/auth/v1/*` — auth is effectively unavailable in local mode. Login testing requires prod mode (`npm run dev` with default config). No code change needed; the sign-in call simply won't redirect.
 
 ---
 
@@ -74,6 +78,7 @@ AuthContextValue {
 **New: `frontend/src/auth/useAuth.ts`** — `useContext(AuthContext)` wrapper.
 
 **Provider placement in `frontend/src/main.tsx`:**
+
 ```
 <QueryClientProvider>
   <BrowserRouter>
@@ -89,11 +94,14 @@ AuthContextValue {
 ## UI — AppHeader
 
 **Desktop (inline nav visible):**
+
 - Right side of header, after the inline nav
 - Logged out: ghost-style button "LOG IN" matching nav item aesthetic (`font-display`, `tracking-[0.14em]`, border)
 - Logged in: Discord avatar (24-32px, `rounded-full`) + display name (truncated). Click opens minimal dropdown with "Log out"
+- The auth control's width must be included in the auto-collapse measurement (the hidden `navMeasureRef` div) so the nav collapses before the auth element overflows
 
 **Mobile (collapsed nav):**
+
 - Logged out: "LOG IN" as last item in the slide-in menu, styled like nav links
 - Logged in: avatar + name at top of slide-in menu, "Log out" at bottom
 
@@ -101,20 +109,22 @@ AuthContextValue {
 
 ## Cloudflare Pages
 
-**No middleware changes needed.** The PKCE flow redirects back to the user's original URL with hash fragments — the SPA fallback already serves `index.html` for that path, and Supabase JS parses the fragments client-side.
+**No middleware changes needed.** The PKCE flow redirects back to the user's original URL with a `?code=` query param — the SPA fallback already serves `index.html` for that path, and Supabase JS exchanges the code client-side.
 
 ---
 
 ## One-Time Configuration (outside the PR)
 
 **Discord Developer Portal:**
+
 1. Create app (or reuse existing DisChord Bot app — see open questions)
 2. Add OAuth2 redirect URI: `https://yrecdosksgigpceholjl.supabase.co/auth/v1/callback`
 3. Scope: `identify` only (no `email`)
 
 **Supabase Dashboard:**
+
 1. Authentication -> Providers -> Discord: enable, paste Client ID + Secret
-2. URL Configuration: Site URL = `https://dischord.pages.dev`, add `http://localhost:5173` to allowed redirects
+2. URL Configuration: Site URL = `https://limitedlevelups.com`, Redirect URLs: `http://localhost:5173/**`, `https://dischord.pages.dev/**`, `https://limitedlevelups.com/**`
 
 No new frontend env vars. Discord credentials live in Supabase's server-side config.
 
@@ -122,13 +132,14 @@ No new frontend env vars. Discord credentials live in Supabase's server-side con
 
 ## File Changes
 
-| File | Change |
-|---|---|
-| `frontend/src/data/supabase.ts` | `persistSession: false` -> `true` |
-| `frontend/src/auth/AuthContext.tsx` | **New.** AuthProvider + context |
-| `frontend/src/auth/useAuth.ts` | **New.** Convenience hook |
-| `frontend/src/main.tsx` | Wrap `<App>` in `<AuthProvider>` |
-| `frontend/src/components/AppHeader.tsx` | Login button / avatar+name+logout in both desktop and mobile layouts |
+| File                                    | Change                                                               |
+| --------------------------------------- | -------------------------------------------------------------------- |
+| `alembic/versions/…_grant_authenticated.py` | **New.** `GRANT SELECT ON` all 14 `public_*` views `TO authenticated` + `ALTER DEFAULT PRIVILEGES` so future views auto-grant both roles |
+| `frontend/src/data/supabase.ts`         | `persistSession: false` -> `true`, add `flowType: 'pkce'`           |
+| `frontend/src/auth/AuthContext.tsx`     | **New.** AuthProvider + context                                      |
+| `frontend/src/auth/useAuth.ts`          | **New.** Convenience hook                                            |
+| `frontend/src/main.tsx`                 | Wrap `<App>` in `<AuthProvider>`                                     |
+| `frontend/src/components/AppHeader.tsx` | Login button / avatar+name+logout in both desktop and mobile layouts; auth control included in collapse measurement |
 
 No changes to: `_middleware.ts`, `App.tsx`, `package.json`, data layer, types.
 
@@ -155,10 +166,3 @@ No changes to: `_middleware.ts`, `App.tsx`, `package.json`, data layer, types.
 6. Anonymous browsing still works identically (no regressions on leaderboard, pods, about pages)
 7. `npm run build` succeeds
 
----
-
-## Open Questions for Maintainer
-
-1. **Discord app:** New OAuth app, or reuse the existing DisChord Bot app (`1466076574372724819`)? Reusing is simpler but couples bot + website config.
-2. **Login button style:** Ghost border (matching nav), green accent, or Discord-branded (#5865F2)?
-3. **Display name:** Show `global_name` (friendly display name) or `username` (unique handle)?
