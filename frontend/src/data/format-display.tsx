@@ -57,7 +57,7 @@ export const renderFormatOption = (opt: FilterOption) => {
   const color = FMT_COLORS[opt.value] ?? FMT_DEFAULT_COLOR;
   return (
     <span className="flex items-center gap-2">
-      <span className="w-2 h-2 inline-block shrink-0" style={{ background: color }} />
+      <span className="h-2 w-2 shrink-0" style={{ background: color }} />
       <span>{opt.label}</span>
     </span>
   );

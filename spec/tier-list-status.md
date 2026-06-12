@@ -1,10 +1,12 @@
 # Tier List — status & resume-cold notes
 
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-11 (post 17lands PRs)_
 
 ## TL;DR
 
 Native React tier list at `/tier-list` and `/tier-list/:setCode`, fed by 17lands tier-list data through a same-origin proxy. **Base feature deployed to `master` in commit `d4eb8f0`** (and `llu` fast-forwarded to match); both branches still **ahead of their remotes — not yet pushed**. Everything dated 2026-06-10/11 below (trend filter, grades panel, right-side hover, Prev/Next modal, last-updated line, Pages Function proxy, MSH fixture) is **uncommitted working-tree**, bundled with the episodes/community/home site work. Tier List is now a visible navbar tab (second, after EPISODES) in that uncommitted work.
+
+The 17lands side of trend/history shipped as **PRs #3364 (backend) + #3365 (tier-list page UI, stacked)** — open, not merged; see `spec/tier-history-handoff.md`. Once #3364 deploys, every rating carries `trend_from` (first settled grade = set review grade) **for all cards, anonymously** — LLU's Set Review column needs no login/patron and the `trend_from ?? tier` fallback becomes nearly moot. The 17lands Trend dropdown is deliberately NOT ported to LLU.
 
 ## What shipped (committed `d4eb8f0`)
 
@@ -32,9 +34,10 @@ The list is ONE consensus list per set (the hosts' 17lands tier list). Two grade
 
 ### TREND filter
 
-- Fifth filter group ("TREND", right of SET GROUP): green ▲ / red ▼ `IconToggle`s, counts in tooltips via `tierFilterOptions().trends`.
-- `TierFilters.trends`: one direction selected → non-matching cards **hidden** (normal filter semantics). **Both selected → nothing hidden; unchanged cards render dimmed** (`isCardTrendDimmed` → `opacity-35 grayscale`). This is the one deliberate exception to "filtered-out cards are hidden, not dimmed".
-- Trend toggles count toward the mobile Filters badge.
+- Fifth filter group ("TREND", right of SET GROUP): a **single cycling `IconToggle`** — all → ▲ up only → ▼ down only → all (`trendState`/`cycleTrend` in `TierFilterBar`). The idle state shows both glyphs dimmed.
+- `TierFilters.trends`: one direction selected → non-matching cards **hidden** (normal filter semantics). The both-selected dim state (`isCardTrendDimmed`) is unreachable from the cycle UI but the code path remains.
+- Trend selection counts toward the mobile Filters badge.
+- A 17lands-style highlight dropdown (All/Changed/Up/Down/No changes/Hidden, dim-not-hide) was built, then deliberately reverted — that design lives on 17lands (PR #3365), not here. Don't re-port it.
 
 ### Trend arrows on card bars
 
@@ -104,7 +107,8 @@ The first implementation embedded 17lands' page via `<iframe>`: cross-origin siz
 - Fixture `last_updated` is frozen until re-snapshotted.
 - Hover height estimate (`PREVIEW_W × ratio + PREVIEW_EXTRAS_H`) ignores comment length — a very long comment can run past the viewport bottom.
 - No Clear button: a Mana Value filter set wide then narrowed below 1150px can't be cleared without widening again.
-- `trend_from` means "since this list's baseline snapshot" upstream — if 17lands ever re-baselines mid-format, "SET REVIEW" silently shifts meaning.
+- `trend_from` upstream semantics (17lands PR #3364): "first grade the card settled on, on a date before today" — present on EVERY card anonymously, not just trending ones. That is exactly the Set Review grade; the `trend_from ?? tier` fallback only covers cards first settled today. If 17lands ever re-baselines mid-format, "SET REVIEW" silently shifts meaning.
+- After #3364 deploys to prod 17lands, re-snapshot or retire the MSH fixture so LLU benefits from universal `trend_from` (the frozen fixture predates it).
 - Future idea (explicitly deferred): a 17lands data-driven grade as a third grade source.
 
 ## Resume cold

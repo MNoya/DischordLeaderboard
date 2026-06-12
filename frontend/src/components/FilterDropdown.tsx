@@ -100,12 +100,14 @@ export function FilterDropdown({
                 role="option"
                 aria-selected={isSelected}
                 className={cn(
-                  "w-full text-left flex items-center gap-2 font-display cursor-pointer transition-colors whitespace-nowrap",
+                  "w-full text-left flex items-center gap-2 border-l-2 font-display cursor-pointer transition-colors whitespace-nowrap",
                   isMobile
                     ? "px-2.5 py-[9px] text-[13px] tracking-[0.1em]"
                     : "px-3.5 py-2 text-[13px] tracking-[0.08em]",
                   i > 0 && "border-t border-border",
-                  isSelected ? "bg-surface2 text-text" : "bg-transparent text-text hover:bg-surface2",
+                  isSelected
+                    ? "border-l-green bg-surface2 text-green"
+                    : "border-l-transparent bg-transparent text-text hover:bg-surface2",
                 )}
               >
                 {renderOption ? renderOption(o) : o.label}

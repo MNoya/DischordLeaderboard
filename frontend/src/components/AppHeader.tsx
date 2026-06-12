@@ -17,7 +17,7 @@ const NAV: Array<{ label: string; to: string; match: (path: string) => boolean }
 
 const NAV_ITEM_CLASS = "py-2.5 px-5 no-underline border transition-colors whitespace-nowrap";
 
-export function AppHeader({ subtitle = "LEADERBOARD" }: { subtitle?: string }) {
+export function AppHeader({ subtitle = "LEADERBOARD", fill = false }: { subtitle?: string; fill?: boolean }) {
   const loc = useLocation();
   const isMobile = useIsMobile();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -72,6 +72,7 @@ export function AppHeader({ subtitle = "LEADERBOARD" }: { subtitle?: string }) {
         "border-b border-border flex items-center justify-between bg-bg shrink-0 relative",
         isMobile ? "py-1.5 px-3" : "py-4 pl-10 pr-6",
       )}
+      style={fill && !isMobile ? { paddingRight: "calc(1.5rem + var(--app-scrollbar, 0px))" } : undefined}
     >
       <Link
         ref={brandRef}
@@ -115,7 +116,7 @@ export function AppHeader({ subtitle = "LEADERBOARD" }: { subtitle?: string }) {
                     NAV_ITEM_CLASS,
                     active
                       ? "text-bg bg-green border-green"
-                      : "text-text border-transparent hover:bg-surface",
+                      : "text-text border-transparent hover:bg-surface hover:text-green",
                   )}
                 >
                   {n.label}

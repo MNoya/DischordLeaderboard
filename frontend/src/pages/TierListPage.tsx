@@ -16,13 +16,14 @@ import {
   TIER_LIST_UIDS,
 } from "../data/constants";
 import {
+  buildTierListSets,
   EMPTY_FILTERS,
   hasActiveFilters,
   tierFilterOptions,
+  useHideArt,
   useTierList,
   type TierFilters,
 } from "../data/tierList";
-import type { SetSummary } from "../types/leaderboard";
 
 export function TierListPage() {
   const { data: sets } = useSets();
@@ -30,6 +31,7 @@ export function TierListPage() {
   const navigate = useNavigate();
   const { setCode } = useParams();
   const [filters, setFilters] = useState<TierFilters>(EMPTY_FILTERS);
+  const [hideArt, setHideArt] = useHideArt();
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [headerHeight, setHeaderHeight] = useState(0);
   const headerRef = useRef<HTMLDivElement>(null);
@@ -148,6 +150,8 @@ export function TierListPage() {
                     setFilters={setFilters}
                     options={filterOptions}
                     setCode={glyphCode}
+                    hideArt={hideArt}
+                    setHideArt={setHideArt}
                     stacked
                   />
                 </div>
@@ -177,6 +181,8 @@ export function TierListPage() {
                     setFilters={setFilters}
                     options={filterOptions}
                     setCode={glyphCode}
+                    hideArt={hideArt}
+                    setHideArt={setHideArt}
                   />
                 </div>
               ) : (
@@ -193,6 +199,7 @@ export function TierListPage() {
             uid={uid}
             graders={graders}
             filters={filters}
+            hideArt={hideArt}
             stickyTop={headerHeight}
           />
         ) : (
@@ -208,7 +215,7 @@ export function TierListPage() {
             rel="noreferrer"
             className="mono text-[10px] md:text-[12px] text-muted hover:text-green transition-colors no-underline"
           >
-            via 17Lands
+            Powered by 17Lands
           </a>
         </div>
       </main>
@@ -254,23 +261,4 @@ function lastUpdatedLabel(iso: string): string {
   const shortYear = ` '${String(updated.getFullYear() % 100).padStart(2, "0")}`;
   const sameYear = updated.getFullYear() === now.getFullYear();
   return `Last updated ${monthDay}${sameYear ? "" : shortYear}`;
-}
-
-function buildTierListSets(sets: SetSummary[] | undefined): SetSummary[] {
-  const live = (sets ?? []).filter((s) => TIER_LIST_UIDS[s.code]);
-  const liveCodes = new Set(live.map((s) => s.code));
-  const previews = Object.entries(TIER_LIST_PREVIEW_SETS)
-    .filter(([code]) => TIER_LIST_UIDS[code] && !liveCodes.has(code))
-    .map(
-      ([code, info]): SetSummary => ({
-        code,
-        name: info.name,
-        startDate: info.startDate,
-        endDate: "",
-        isActive: false,
-      }),
-    );
-  return [...previews, ...live].sort((a, b) =>
-    b.startDate.localeCompare(a.startDate),
-  );
 }

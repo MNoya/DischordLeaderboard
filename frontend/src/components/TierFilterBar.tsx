@@ -17,12 +17,16 @@ export function TierFilterBar({
   setFilters,
   options,
   setCode,
+  hideArt,
+  setHideArt,
   stacked = false,
 }: {
   filters: TierFilters;
   setFilters: (f: TierFilters) => void;
   options: TierFilterOptions;
   setCode: string;
+  hideArt: boolean;
+  setHideArt: (value: boolean) => void;
   stacked?: boolean;
 }) {
   const toggle = (key: keyof TierFilters, value: string) => {
@@ -148,6 +152,22 @@ export function TierFilterBar({
     </FilterGroup>
   );
 
+  const artGroup = (
+    <FilterGroup label="ART" stacked={stacked} joined>
+      <IconToggle
+        active={hideArt}
+        onClick={() => setHideArt(!hideArt)}
+        label={hideArt ? "Show card art" : "Hide card art"}
+        narrow
+        mutedActive
+      >
+        <span className="flex w-[28px] items-center justify-center">
+          <ArtIcon hidden={hideArt} />
+        </span>
+      </IconToggle>
+    </FilterGroup>
+  );
+
   if (stacked) {
     return (
       <div className="flex w-full flex-col gap-y-3">
@@ -159,6 +179,7 @@ export function TierFilterBar({
           {manaValueGroup}
           {setGroup}
           {trendGroup}
+          {artGroup}
         </div>
       </div>
     );
@@ -171,7 +192,19 @@ export function TierFilterBar({
       {manaValueGroup}
       {setGroup}
       {trendGroup}
+      {artGroup}
     </div>
+  );
+}
+
+function ArtIcon({ hidden }: { hidden: boolean }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <rect x="3" y="3" width="18" height="18" rx="2" strokeLinejoin="round" />
+      <circle cx="8.5" cy="8.5" r="1.5" />
+      <path d="M21 15l-5-5L5 21" strokeLinecap="round" strokeLinejoin="round" />
+      {hidden && <path d="M3 3l18 18" strokeLinecap="round" />}
+    </svg>
   );
 }
 
@@ -209,6 +242,7 @@ function IconToggle({
   children,
   roomy = false,
   narrow = false,
+  mutedActive = false,
   tooltipOpen,
   onTooltipOpenChange,
 }: {
@@ -218,9 +252,13 @@ function IconToggle({
   children: ReactNode;
   roomy?: boolean;
   narrow?: boolean;
+  mutedActive?: boolean;
   tooltipOpen?: boolean;
   onTooltipOpenChange?: (open: boolean) => void;
 }) {
+  const activeClass = mutedActive
+    ? "z-10 border-border2 bg-surface2 text-subtle"
+    : "z-10 border-green bg-green/10 text-text";
   return (
     <Tooltip label={label} open={tooltipOpen} onOpenChange={onTooltipOpenChange}>
       <button
@@ -230,7 +268,7 @@ function IconToggle({
           "relative flex h-10 items-center justify-center rounded border transition-colors",
           roomy ? "min-w-[40px] px-2.5" : narrow ? "min-w-[34px] px-1.5" : "min-w-[40px] px-2",
           active
-            ? "z-10 border-green bg-green/10 text-text"
+            ? activeClass
             : "border-border2 bg-transparent text-muted hover:bg-surface hover:text-text",
         )}
       >

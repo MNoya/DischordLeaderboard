@@ -1,8 +1,31 @@
+import { useEffect, useState } from "react";
 import { useQueries } from "@tanstack/react-query";
 import {
   TIER_LIST_DATA_BASE,
   TIER_LIST_DATA_BASE_OVERRIDES,
+  TIER_LIST_PREVIEW_SETS,
+  TIER_LIST_UIDS,
 } from "./constants";
+import type { SetSummary } from "../types/leaderboard";
+
+// Sets that have a tier list (live feed or preview snapshot), newest first.
+// The first entry is the latest available tier list.
+export function buildTierListSets(sets: SetSummary[] | undefined): SetSummary[] {
+  const live = (sets ?? []).filter((s) => TIER_LIST_UIDS[s.code]);
+  const liveCodes = new Set(live.map((s) => s.code));
+  const previews = Object.entries(TIER_LIST_PREVIEW_SETS)
+    .filter(([code]) => TIER_LIST_UIDS[code] && !liveCodes.has(code))
+    .map(
+      ([code, info]): SetSummary => ({
+        code,
+        name: info.name,
+        startDate: info.startDate,
+        endDate: "",
+        isActive: false,
+      }),
+    );
+  return [...previews, ...live].sort((a, b) => b.startDate.localeCompare(a.startDate));
+}
 
 export interface GraderGrade {
   name: string;
@@ -235,6 +258,19 @@ export function tierFilterOptions(cards: TierCard[]): TierFilterOptions {
     })),
     trends: trendCounts,
   };
+}
+
+const HIDE_ART_STORAGE_KEY = "tierListHideArt";
+
+export function useHideArt(): [boolean, (value: boolean) => void] {
+  const [hideArt, setHideArt] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem(HIDE_ART_STORAGE_KEY) === "1";
+  });
+  useEffect(() => {
+    window.localStorage.setItem(HIDE_ART_STORAGE_KEY, hideArt ? "1" : "0");
+  }, [hideArt]);
+  return [hideArt, setHideArt];
 }
 
 const ONE_HOUR = 60 * 60 * 1000;

@@ -19,6 +19,12 @@ export const SITE_LINKS = {
   mailbag: "mailto:hello@limitedlevelups.com",
 } as const;
 
+export const DISCORD_GUILD_ID = "775371722065051658";
+
+export function discordEventLink(eventId: string): string {
+  return `https://discord.com/events/${DISCORD_GUILD_ID}/${eventId}`;
+}
+
 export const SITE_TAGLINE = "Get better at draft. One set at a time.";
 
 export const SITE_PITCH =

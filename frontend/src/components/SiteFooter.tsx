@@ -1,24 +1,49 @@
+import type { IconType } from "react-icons";
+import { SiApplepodcasts, SiPatreon, SiRss, SiSpotify, SiYoutube } from "react-icons/si";
 import { Container } from "./Container";
 import { LISTEN_ON, SITE_LINKS } from "../data/site";
+import { cn } from "../lib/utils";
 
-export function SiteFooter() {
-  return (
-    <footer className="border-t border-border mt-16 md:mt-24">
-      <Container className="py-6 flex flex-col-reverse md:flex-row items-center justify-between gap-3 text-[11px] md:text-[12px] text-muted">
-        <span className="mono text-center md:text-left">
-          © Limited Level-Ups · Not affiliated with Wizards of the Coast
-        </span>
-        <nav className="flex items-center gap-4 font-display tracking-[0.12em] text-[13px]">
-          {LISTEN_ON.map((l) => (
-            <a key={l.label} href={l.url} target="_blank" rel="noreferrer" className="no-underline hover:text-green transition-colors">
-              {l.label}
+const FOOTER_ICONS: Record<string, IconType> = {
+  Apple: SiApplepodcasts,
+  Spotify: SiSpotify,
+  YouTube: SiYoutube,
+  RSS: SiRss,
+  Patreon: SiPatreon,
+};
+
+// `flush` drops the top margin so the footer can sit directly under a
+// viewport-filling dashboard instead of pushing it up.
+export function SiteFooter({ flush = false }: { flush?: boolean }) {
+  const links = [...LISTEN_ON, { label: "Patreon", url: SITE_LINKS.patreon }];
+  const row = (
+    <div className="flex flex-col-reverse gap-3 text-[11px] md:text-[12px] text-muted md:flex-row md:items-center md:justify-between">
+      <span className="mono flex flex-col gap-0.5 text-center text-[10px] leading-tight md:text-left">
+        <span>© Limited Level-Ups is unofficial Fan Content permitted under the Fan Content Policy.</span>
+        <span>Not approved/endorsed by Wizards. Portions © Wizards of the Coast.</span>
+      </span>
+      <nav className="flex items-center justify-center gap-4 font-display tracking-[0.12em] text-[13px] md:justify-end">
+        {links.map(({ label, url }) => {
+          const Icon = FOOTER_ICONS[label];
+          return (
+            <a
+              key={label}
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 no-underline hover:text-green transition-colors"
+            >
+              {Icon ? <Icon className="text-[14px]" /> : null}
+              {label}
             </a>
-          ))}
-          <a href={SITE_LINKS.patreon} target="_blank" rel="noreferrer" className="no-underline hover:text-green transition-colors">
-            Patreon
-          </a>
-        </nav>
-      </Container>
+          );
+        })}
+      </nav>
+    </div>
+  );
+  return (
+    <footer className={cn("border-t border-border", flush ? "" : "mt-16 md:mt-24")}>
+      {flush ? <div className="px-4 lg:px-5 py-3">{row}</div> : <Container className="py-6">{row}</Container>}
     </footer>
   );
 }

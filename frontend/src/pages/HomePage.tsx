@@ -1,189 +1,820 @@
-import type { ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { PageShell } from "../components/PageShell";
-import { Container } from "../components/Container";
-import { SectionLabel } from "../components/SectionLabel";
-import { EpisodeCard } from "../components/EpisodeCard";
-import { DiscordBand } from "../components/DiscordBand";
-import { HostCard } from "../components/HostCard";
 import { CtaPill } from "../components/CtaPill";
+import { DiscordIcon } from "../components/BrandIcons";
 import { ArrowRight } from "../components/Icons";
-import { PatreonIcon } from "../components/BrandIcons";
-import { useEpisodes } from "../data/hooks";
-import { EPISODE_CATEGORIES, type Episode } from "../data/episodes";
-import { LISTEN_ON, SITE_LINKS, SITE_PITCH, SITE_STATS, SITE_TAGLINE } from "../data/site";
+import { CategoryTag } from "../components/CategoryTag";
+import { Pips } from "../components/ManaPips";
+import { GiRoundTable } from "react-icons/gi";
+import { SiPatreon, SiTwitch, SiYoutube } from "react-icons/si";
+import type { IconType } from "react-icons";
+import { Tooltip } from "../components/Tooltip";
+import { AAvatar, fmtPts, SetGlyph, setGlyphCode } from "../components/Brand";
+import { TierSetDropdown } from "../components/TierSetDropdown";
+import {
+  CardModal,
+  CardPreview,
+  PREVIEW_EXTRAS_H,
+  PREVIEW_GAP,
+  PREVIEW_RATIO,
+  PREVIEW_W,
+  type PreviewAnchor,
+} from "../components/TierGrid";
+import {
+  useAvailableFormats,
+  useEpisodes,
+  useFormatLeaderboard,
+  useLeaderboard,
+  usePodEvents,
+  useSets,
+} from "../data/hooks";
+import { buildTierListSets, TIER_ORDER, useTierList, type TierCard } from "../data/tierList";
+import { ACTIVE_SET_CODE, TIER_LIST_GRADERS, TIER_LIST_UIDS } from "../data/constants";
+import { FMT_COLORS, shortFormat } from "../data/format-display";
+import { FORMAT_OPTIONS } from "../data/filters";
+import { discordEventLink, HOST, SITE_LINKS } from "../data/site";
+import { cleanPodEventName, leaderboardPath, playerPath } from "../data/utils";
+import type { Episode } from "../data/episodes";
+import type { LeaderboardRow, PodEventSummary, SetSummary } from "../types/leaderboard";
 import { cn } from "../lib/utils";
 
 export function HomePage() {
+  const { data: sets } = useSets();
+  const setCode = sets?.find((s) => s.isActive)?.code ?? ACTIVE_SET_CODE;
   const { data: episodes } = useEpisodes();
-  const latest = episodes?.[0];
-  const recent = episodes?.slice(0, 4) ?? [];
+
   return (
-    <PageShell subtitle="PODCAST">
-      <Hero latest={latest} />
-      <BrowseByCategory episodes={episodes} />
-      <RecentEpisodes episodes={recent} loading={!episodes} />
-      <DiscordBand />
-      <AboutSupport />
+    <PageShell subtitle="HOME" fill>
+      <div
+        className={cn(
+          "p-4 lg:p-5 grid gap-4 grid-cols-1 lg:h-full",
+          "lg:grid-cols-[minmax(300px,360px)_1fr_minmax(300px,340px)] lg:[grid-template-rows:minmax(0,1fr)]",
+        )}
+      >
+        <div className="contents lg:flex lg:flex-col lg:gap-4 lg:min-h-0 lg:h-full">
+          <IdentityPanel />
+          <TierPanel />
+        </div>
+
+        <EpisodesHero episodes={episodes?.slice(0, 4) ?? []} loading={!episodes} />
+
+        <div className="contents lg:flex lg:flex-col lg:gap-4 lg:min-h-0 lg:h-full">
+          <LeaderboardPanel setCode={setCode} />
+          <PodDraftsPanel setCode={setCode} />
+        </div>
+      </div>
     </PageShell>
   );
 }
 
-function Hero({ latest }: { latest?: Episode }) {
+function Panel({
+  title,
+  to,
+  corner,
+  headerCenter,
+  action,
+  actionBorder = false,
+  headerBorder = false,
+  className,
+  bodyClassName,
+  children,
+}: {
+  title: string;
+  to: string;
+  corner?: ReactNode;
+  headerCenter?: ReactNode;
+  action?: string;
+  actionBorder?: boolean;
+  headerBorder?: boolean;
+  className?: string;
+  bodyClassName?: string;
+  children: ReactNode;
+}) {
   return (
-    <section
-      className="border-b border-border"
-      style={{ background: "linear-gradient(180deg, #14181f 0%, #0a0c10 100%)" }}
-    >
-      <Container className="py-16 md:py-24 flex flex-col items-center text-center">
-        <SectionLabel size={12} letterSpacing="0.26em" color="#2ee85c">
-          LIMITED LEVEL-UPS · A MAGIC: THE GATHERING PODCAST
-        </SectionLabel>
-        <h1 className="font-display text-text leading-[0.95] tracking-[0.01em] mt-5 text-[44px] md:text-[72px] max-w-[15ch]">
-          {SITE_TAGLINE}
-        </h1>
-        <p className="text-subtle text-[15px] md:text-[17px] leading-[1.6] mt-5 max-w-[58ch]">{SITE_PITCH}</p>
+    <section className={cn("group bg-surface border border-border rounded-xl p-4 flex flex-col min-h-0", className)}>
+      <div
+        className={cn(
+          "flex items-center gap-3 shrink-0",
+          headerBorder ? "-mx-4 px-4 pb-3 border-b border-border" : "mb-3",
+        )}
+      >
+        <Link
+          to={to}
+          className="font-display text-text text-[20px] tracking-[0.05em] no-underline hover:text-green transition-colors shrink-0"
+        >
+          {title}
+        </Link>
+        <div className="flex-1 min-w-0 flex justify-center">{headerCenter}</div>
+        {typeof corner === "string" ? (
+          <span className="mono text-[10px] tracking-[0.16em] text-muted uppercase shrink-0">{corner}</span>
+        ) : (
+          corner ?? null
+        )}
+      </div>
+      <div className={cn("flex-1 min-h-0 flex flex-col", bodyClassName)}>{children}</div>
+      {action ? (
+        <Link
+          to={to}
+          className={cn(
+            "-mx-4 -mb-4 shrink-0 flex w-[calc(100%+2rem)] items-center justify-end gap-1.5 rounded-b-xl px-4 py-2.5 font-display tracking-[0.08em] text-[13px] text-green no-underline transition-colors hover:bg-green/5 hover:text-green-2",
+            actionBorder && "border-t border-border",
+          )}
+        >
+          {action} <ArrowRight size={13} />
+        </Link>
+      ) : null}
+    </section>
+  );
+}
 
-        <div className="flex flex-wrap items-center justify-center gap-3 mt-8">
+function IdentityPanel() {
+  const socials: Array<{ label: string; url: string; Icon: IconType }> = [
+    { label: "YouTube", url: SITE_LINKS.youtube, Icon: SiYoutube },
+    { label: "Twitch", url: SITE_LINKS.twitch, Icon: SiTwitch },
+    { label: "Patreon", url: SITE_LINKS.patreon, Icon: SiPatreon },
+  ];
+  return (
+    <section className="order-1 lg:order-none bg-surface border border-border rounded-xl p-4 flex flex-col gap-3 shrink-0">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="font-display text-text text-[20px] tracking-[0.05em]">Limited Level-Ups</h2>
+        <span className="mono text-[10px] tracking-[0.16em] text-muted uppercase">The show</span>
+      </div>
+      <p className="text-subtle text-[13px] leading-[1.5]">
+        A weekly Magic: The Gathering Limited podcast — every set covered from first impressions through sunset.
+      </p>
+      <p className="mono text-[10px] tracking-[0.04em] text-muted">
+        Hosted by {HOST.name} ({HOST.handle}) · on YouTube &amp; all podcast apps
+      </p>
+      <a href={SITE_LINKS.discord} target="_blank" rel="noreferrer" className="self-center no-underline mt-0.5">
+        <CtaPill size="sm" icon={<DiscordIcon size={15} />}>JOIN THE DISCORD</CtaPill>
+      </a>
+      <div className="grid grid-cols-3 gap-2">
+        {socials.map(({ label, url, Icon }) => (
           <a
-            href={latest?.link ?? SITE_LINKS.podcast}
+            key={label}
+            href={url}
             target="_blank"
             rel="noreferrer"
-            className="no-underline"
+            className="mono text-[12px] tracking-[0.04em] flex items-center justify-center gap-1.5 bg-surface2 border border-border2 py-1.5 rounded text-subtle no-underline hover:border-green hover:text-green transition-colors"
           >
-            <CtaPill size="md" icon={<span className="text-[13px] pl-0.5">▶</span>}>
-              LATEST EPISODE
-            </CtaPill>
+            <Icon className="text-[13px]" />
+            {label}
           </a>
-          {LISTEN_ON.filter((l) => l.label !== "RSS").map((l) => (
-            <a
-              key={l.label}
-              href={l.url}
-              target="_blank"
-              rel="noreferrer"
-              className="font-display tracking-[0.12em] text-[15px] text-text border border-border2 px-5 py-2.5 no-underline transition-colors hover:border-green hover:text-green"
-            >
-              {l.label}
-            </a>
-          ))}
-        </div>
+        ))}
+      </div>
+    </section>
+  );
+}
 
-        <div className="w-full max-w-[760px] border-t border-border mt-12 pt-8 grid grid-cols-2 md:grid-cols-4 gap-y-6">
-          {SITE_STATS.map((s) => (
-            <div key={s.label} className="flex flex-col items-center gap-1.5">
-              <span className="font-display text-green text-[34px] md:text-[40px] leading-none tabular-nums">
-                {s.value}
+const TIER_SECONDS_PER_CARD = 3;
+
+function TierPanel() {
+  const { data: sets } = useSets();
+  const tierSets = useMemo(() => buildTierListSets(sets), [sets]);
+  const [picked, setPicked] = useState<string | undefined>();
+  const current = picked ?? tierSets[0]?.code ?? ACTIVE_SET_CODE;
+  const setMeta = tierSets.find((s) => s.code === current);
+  const uid = TIER_LIST_UIDS[current];
+  const graders = TIER_LIST_GRADERS[current] ?? [];
+  const { data } = useTierList(uid, graders);
+  const rows = useMemo(() => sampleTiers(data?.filter((card) => card.inclusion_type === "Main Set")), [data]);
+  const allCards = useMemo(() => rows.flatMap((row) => row.cards), [rows]);
+
+  const [hover, setHover] = useState<{ card: TierCard; anchor: PreviewAnchor } | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const selectedIndex = allCards.findIndex((c) => c.card_id === selectedId);
+  const selectedCard = selectedIndex >= 0 ? allCards[selectedIndex] : null;
+
+  const showPreview = (el: HTMLElement, card: TierCard) => {
+    const rect = el.getBoundingClientRect();
+    const previewH = PREVIEW_W * PREVIEW_RATIO + PREVIEW_EXTRAS_H;
+    const centerY = rect.top + rect.height / 2;
+    const top = Math.min(Math.max(centerY - previewH / 2, 8), Math.max(window.innerHeight - previewH - 8, 8));
+    const onRight = rect.right + PREVIEW_GAP + PREVIEW_W <= window.innerWidth - 8;
+    const left = onRight ? rect.right + PREVIEW_GAP : rect.left - PREVIEW_GAP - PREVIEW_W;
+    const arrowTop = Math.min(Math.max(centerY - top, 14), previewH - 14);
+    setHover({ card, anchor: { left, top, onRight, arrowTop } });
+  };
+
+  const tierDropdown = (
+    <TierSetDropdown
+      sets={tierSets}
+      activeCode={current}
+      glyphCode={setMeta ? setGlyphCode(setMeta) : current}
+      label={current}
+      isMobile={false}
+      compact
+      square
+      menuAlign="side-right"
+      triggerClassName="w-[92px]"
+      openOnHover
+      loading={!sets}
+      onChange={setPicked}
+    />
+  );
+
+  return (
+    <Panel title="SET REVIEW" to={`/tier-list/${current}`} corner={tierDropdown} action="Full Tier List Review" className="order-3 lg:order-none flex-1">
+      {rows.length ? (
+        <div className="-mx-4 flex-1 min-h-0 flex flex-col border-y border-border">
+          {rows.map((row, rowIndex) => (
+            <div key={row.letter} className="h-[84px] lg:h-auto lg:flex-1 min-h-0 flex items-stretch border-t border-border first:border-t-0">
+              <span
+                className="font-display w-10 shrink-0 flex items-center justify-center text-[17px] text-text bg-[#0e1218] border-r border-border"
+                style={{ borderLeft: `5px solid ${row.color}` }}
+              >
+                {row.letter}
               </span>
-              <span className="mono text-[11px] tracking-[0.14em] text-muted uppercase">{s.label}</span>
+              <div className="flex-1 min-h-0 overflow-x-auto lg:overflow-hidden no-scrollbar flex items-center">
+                <div
+                  className="flex h-full items-center w-max shrink-0 lg:animate-marquee motion-reduce:animate-none hover:[animation-play-state:paused]"
+                  style={{
+                    animationDuration: `${row.cards.length * TIER_SECONDS_PER_CARD}s`,
+                    animationDelay: `${rowIndex * (TIER_SECONDS_PER_CARD / 2) + 1}s`,
+                  }}
+                >
+                  {[...row.cards, ...row.cards].map((card, i) => (
+                    <div key={`${card.card_id}-${i}`} className="h-full shrink-0 pr-1.5 flex items-center">
+                      <img
+                        src={card.url}
+                        alt={i < row.cards.length ? card.name : ""}
+                        aria-hidden={i >= row.cards.length}
+                        onMouseEnter={(e) => showPreview(e.currentTarget, card)}
+                        onMouseLeave={() => setHover(null)}
+                        onClick={() => {
+                          setHover(null);
+                          setSelectedId(card.card_id);
+                        }}
+                        className="h-full w-auto rounded-[2px] border border-black cursor-pointer"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           ))}
         </div>
-      </Container>
-    </section>
+      ) : (
+        <Placeholder lines={4} />
+      )}
+
+      {hover ? createPortal(<CardPreview card={hover.card} anchor={hover.anchor} />, document.body) : null}
+      {selectedCard
+        ? createPortal(
+            <CardModal
+              card={selectedCard}
+              onClose={() => setSelectedId(null)}
+              onPrev={selectedIndex > 0 ? () => setSelectedId(allCards[selectedIndex - 1].card_id) : undefined}
+              onNext={
+                selectedIndex < allCards.length - 1
+                  ? () => setSelectedId(allCards[selectedIndex + 1].card_id)
+                  : undefined
+              }
+              position={`${selectedIndex + 1} / ${allCards.length}`}
+            />,
+            document.body,
+          )
+        : null}
+    </Panel>
   );
 }
 
-function BrowseByCategory({ episodes }: { episodes?: Episode[] }) {
-  const counts = new Map<string, number>();
-  for (const ep of episodes ?? []) {
-    counts.set(ep.category, (counts.get(ep.category) ?? 0) + 1);
-  }
+function EpisodesHero({ episodes, loading }: { episodes: Episode[]; loading: boolean }) {
   return (
-    <Container className="pt-12 md:pt-16">
-      <SectionLabel letterSpacing="0.24em">BROWSE BY CATEGORY</SectionLabel>
-      <div className="flex flex-wrap gap-2.5 mt-4">
-        {EPISODE_CATEGORIES.map((category) => (
-          <Link
-            key={category}
-            to={`/episodes?category=${encodeURIComponent(category)}`}
-            className="group inline-flex items-center gap-2 border border-border bg-surface px-4 py-2 no-underline transition-colors hover:border-green"
-          >
-            <span className="font-display tracking-[0.06em] text-[14px] text-text group-hover:text-green transition-colors">
-              {category}
-            </span>
-            {counts.has(category) ? (
-              <span className="mono text-[11px] text-muted tabular-nums">{counts.get(category)}</span>
-            ) : null}
-          </Link>
-        ))}
-      </div>
-    </Container>
-  );
-}
-
-function RecentEpisodes({ episodes, loading }: { episodes: Episode[]; loading: boolean }) {
-  return (
-    <Container className="pt-12 md:pt-14">
-      <div className="flex items-end justify-between gap-4 mb-6">
-        <h2 className="font-display text-text text-[24px] md:text-[28px] tracking-[0.04em]">Recent Episodes</h2>
-        <Link
-          to="/episodes"
-          className="font-display tracking-[0.1em] text-[14px] text-green no-underline inline-flex items-center gap-1.5 hover:text-green-2 transition-colors"
-        >
-          View full archive <ArrowRight size={14} />
-        </Link>
-      </div>
+    <Panel title="LATEST EPISODES" to="/episodes" corner="new weekly" action="View All Episodes" className="order-2 lg:order-none lg:h-full">
       {loading ? (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-5 gap-y-8">
+        <div className="grid grid-cols-2 gap-4 flex-1 min-h-0">
           {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="aspect-video bg-surface border border-border animate-pulse" />
-          ))}
-        </div>
-      ) : episodes.length ? (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-5 gap-y-8">
-          {episodes.map((ep) => (
-            <EpisodeCard key={ep.id} episode={ep} />
+            <div key={i} className="bg-surface2 border border-border rounded-lg animate-pulse" />
           ))}
         </div>
       ) : (
-        <p className="text-muted text-[14px]">Episodes are taking a minute to load — check back shortly.</p>
-      )}
-    </Container>
-  );
-}
-
-function AboutSupport() {
-  return (
-    <Container className="pt-12 md:pt-16 grid grid-cols-1 md:grid-cols-2 gap-5">
-      <SummaryCard title="About the show">
-        <p className="text-muted text-[14px] leading-[1.7]">
-          A weekly Magic: the Gathering Limited podcast hosted by Alex (Chord_O_Calls) — breaking down every new set
-          since November 2020.
-        </p>
-        <div className="mt-4">
-          <HostCard />
+        <div className="grid grid-cols-2 gap-4 flex-1 min-h-0">
+          {episodes.map((ep) => (
+            <HeroEpisodeCard key={ep.id} episode={ep} />
+          ))}
         </div>
-        <Link
-          to="/community"
-          className={cn(
-            "self-start mt-4 font-display tracking-[0.1em] text-[14px] text-green no-underline",
-            "inline-flex items-center gap-1.5 hover:text-green-2 transition-colors",
-          )}
-        >
-          Read more <ArrowRight size={14} />
-        </Link>
-      </SummaryCard>
-
-      <SummaryCard title="Support the show">
-        <p className="text-muted text-[14px] leading-[1.7]">
-          LLU is listener-supported. Patreon backers get bonus content, early access to set previews, ad-free feeds,
-          and a private Discord channel.
-        </p>
-        <a href={SITE_LINKS.patreon} target="_blank" rel="noreferrer" className="self-start mt-5 no-underline">
-          <CtaPill size="md" icon={<PatreonIcon size={16} />}>
-            BECOME A PATRON
-          </CtaPill>
-        </a>
-      </SummaryCard>
-    </Container>
+      )}
+    </Panel>
   );
 }
 
-function SummaryCard({ title, children }: { title: string; children: ReactNode }) {
+function HeroEpisodeCard({ episode }: { episode: Episode }) {
+  const meta = [episode.publishedLabel.toUpperCase(), episode.number ? `EP ${episode.number}` : null]
+    .filter(Boolean)
+    .join(" · ");
   return (
-    <section className="bg-surface border border-border p-5 md:p-6 flex flex-col">
-      <h2 className="font-display text-text text-[20px] tracking-[0.06em] mb-3">{title}</h2>
-      {children}
-    </section>
+    <a
+      href={episode.link}
+      target="_blank"
+      rel="noreferrer"
+      className="group/ep flex flex-col min-h-0 border border-border rounded-lg overflow-hidden bg-surface2 no-underline transition-colors hover:border-green"
+    >
+      <div className="relative flex-1 min-h-0 bg-surface">
+        {episode.image ? (
+          <img src={episode.image} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover" />
+        ) : null}
+        <CategoryTag category={episode.category} className="absolute top-2 left-2" />
+        {episode.durationLabel ? (
+          <span className="absolute bottom-2 right-2 mono text-[10px] text-text bg-bg/85 px-1.5 py-0.5">
+            {episode.durationLabel}
+          </span>
+        ) : null}
+        <span className="absolute inset-0 flex items-center justify-center bg-bg/40 opacity-0 transition-opacity group-hover/ep:opacity-100">
+          <span className="flex h-11 w-11 items-center justify-center rounded-full bg-green text-bg pl-0.5 text-[16px]">▶</span>
+        </span>
+      </div>
+      <div className="p-3 shrink-0">
+        <div className="mono text-[10px] tracking-[0.1em] text-muted">{meta}</div>
+        <h3 className="font-body text-text text-[14px] font-medium leading-snug mt-1 line-clamp-2 transition-colors group-hover/ep:text-green">
+          {episode.title}
+        </h3>
+      </div>
+    </a>
   );
+}
+
+const LB_ROW_HEIGHT = 28;
+const LB_CYCLE_MS = 5000;
+
+type BoardSnapshot = { key: string; setCode: string; rows: LeaderboardRow[] };
+
+function LeaderboardPanel({ setCode }: { setCode: string }) {
+  const { data: sets } = useSets();
+  const lbSets = useMemo(() => setsNewestFirst(sets), [sets]);
+  const [pickedSet, setPickedSet] = useState<string>();
+  const set = pickedSet ?? setCode;
+  const setMeta = lbSets.find((s) => s.code === set);
+
+  const { data: availableFormats } = useAvailableFormats(set);
+  const formats = useMemo(() => orderFormats(availableFormats), [availableFormats]);
+
+  const [index, setIndex] = useState(0);
+  const [manual, setManual] = useState<string | null>(null);
+  const pausedRef = useRef(false);
+  const manualRef = useRef(false);
+  useEffect(() => {
+    if (formats.length <= 1) {
+      return;
+    }
+    const id = setInterval(() => {
+      if (!pausedRef.current && !manualRef.current) {
+        setIndex((i) => i + 1);
+      }
+    }, LB_CYCLE_MS);
+    return () => clearInterval(id);
+  }, [formats.length]);
+
+  useEffect(() => {
+    setManual(null);
+    manualRef.current = false;
+    setIndex(0);
+  }, [set]);
+
+  const pickFormat = (format: string) => {
+    manualRef.current = true;
+    setManual(format);
+  };
+
+  const current = manual ?? formats[index % formats.length] ?? "ALL";
+  const isAll = current === "ALL";
+  const allBoard = useLeaderboard(isAll ? set : undefined);
+  const formatBoard = useFormatLeaderboard(isAll ? undefined : set, isAll ? undefined : current);
+  const data = isAll ? allBoard.data : formatBoard.data;
+
+  const listRef = useRef<HTMLDivElement>(null);
+  const [maxRows, setMaxRows] = useState(7);
+  useLayoutEffect(() => {
+    const el = listRef.current;
+    if (!el) {
+      return;
+    }
+    const measure = () => setMaxRows(Math.max(3, Math.floor(el.clientHeight / LB_ROW_HEIGHT)));
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    measure();
+    return () => observer.disconnect();
+  }, []);
+
+  const liveKey = `${set}-${current}`;
+  const liveRows = data?.slice(0, maxRows) ?? [];
+  const to = isAll ? leaderboardPath(set) : `${leaderboardPath(set)}?format=${encodeURIComponent(current)}`;
+
+  const [layers, setLayers] = useState<{ front: BoardSnapshot; back: BoardSnapshot | null }>(() => ({
+    front: { key: liveKey, setCode: set, rows: liveRows },
+    back: null,
+  }));
+  const shownKeyRef = useRef(liveKey);
+  useEffect(() => {
+    if (liveRows.length === 0) {
+      return;
+    }
+    const snapshot: BoardSnapshot = { key: liveKey, setCode: set, rows: liveRows };
+    const changed = shownKeyRef.current !== liveKey;
+    shownKeyRef.current = liveKey;
+    setLayers((prev) => ({ front: snapshot, back: changed ? prev.front : prev.back }));
+    if (changed) {
+      const timer = setTimeout(() => setLayers((prev) => ({ ...prev, back: null })), 240);
+      return () => clearTimeout(timer);
+    }
+  }, [liveKey, data, maxRows]);
+
+  const setDropdown = (
+    <TierSetDropdown
+      sets={lbSets}
+      activeCode={set}
+      glyphCode={setMeta ? setGlyphCode(setMeta) : set}
+      label={set}
+      isMobile={false}
+      compact
+      square
+      menuAlign="right"
+      triggerClassName="w-[92px]"
+      loading={!sets}
+      onChange={setPickedSet}
+    />
+  );
+
+  return (
+    <Panel
+      title="LEADERBOARD"
+      to={to}
+      corner={
+        <div className="flex items-center gap-2">
+          {setDropdown}
+          <FormatDropdown formats={formats} current={current} onPick={pickFormat} />
+        </div>
+      }
+      action="View Full leaderboard"
+      actionBorder
+      headerBorder
+      className="order-4 lg:order-none flex-1"
+    >
+      <div
+        ref={listRef}
+        className="relative -mx-4 min-h-0 overflow-hidden h-[224px] lg:h-auto lg:flex-1"
+        onMouseEnter={() => (pausedRef.current = true)}
+        onMouseLeave={() => (pausedRef.current = false)}
+      >
+        {layers.front.rows.length === 0 && !layers.back ? (
+          <Placeholder lines={5} />
+        ) : (
+          <>
+            {layers.back ? (
+              <div key={layers.back.key} className="absolute inset-0 flex h-full flex-col animate-fadeOut">
+                {layers.back.rows.map((row) => (
+                  <LeaderboardMiniRow key={row.slug} row={row} setCode={layers.back!.setCode} />
+                ))}
+              </div>
+            ) : null}
+            <div key={layers.front.key} className="absolute inset-0 flex h-full flex-col animate-fadeIn">
+              {layers.front.rows.map((row) => (
+                <LeaderboardMiniRow key={row.slug} row={row} setCode={layers.front.setCode} />
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
+const formatColor = (format: string) => FMT_COLORS[format] ?? "#5c8aff";
+
+function FormatDropdown({
+  formats,
+  current,
+  onPick,
+}: {
+  formats: string[];
+  current: string;
+  onPick: (format: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const onClickOutside = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onClickOutside);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onClickOutside);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className={cn(
+          "relative flex h-7 w-[92px] items-center justify-center border px-2 font-display tracking-[0.06em] text-[18px] leading-none transition-colors",
+          open ? "border-green text-green" : "border-border2 text-text hover:border-green hover:text-green",
+        )}
+      >
+        <span key={current} className="animate-fadeIn truncate">{shortFormat(current)}</span>
+        <span className={cn("absolute right-1.5 text-[12px] transition-transform", open && "rotate-180")}>▾</span>
+      </button>
+      {open ? (
+        <div className="absolute right-0 top-[calc(100%+6px)] z-30 w-max overflow-hidden border border-border2 bg-surface shadow-xl">
+          {formats.map((format) => (
+            <button
+              key={format}
+              type="button"
+              onClick={() => {
+                onPick(format);
+                setOpen(false);
+              }}
+              className={cn(
+                "flex w-full items-center gap-2.5 border-l-2 px-3.5 py-2 text-left font-display tracking-[0.06em] text-[15px] uppercase transition-colors",
+                format === current
+                  ? "border-green bg-surface2 text-green"
+                  : "border-transparent text-subtle hover:bg-surface2",
+              )}
+            >
+              {format !== "ALL" && (
+                <span className="h-2 w-2 shrink-0" style={{ background: formatColor(format) }} />
+              )}
+              {formatLabel(format)}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function LeaderboardMiniRow({ row, setCode }: { row: LeaderboardRow; setCode: string }) {
+  return (
+    <Link
+      to={playerPath(row.slug, setCode)}
+      className="group/row flex flex-1 items-center gap-2.5 px-4 border-t border-border no-underline text-text transition-colors first:border-t-0 hover:bg-surface2"
+      style={{ minHeight: LB_ROW_HEIGHT }}
+    >
+      <span className="mono w-5 shrink-0 text-center text-[12px] text-muted">{row.rank}</span>
+      <AAvatar displayName={row.displayName} avatarUrl={row.avatarUrl} size={22} />
+      <span className="truncate font-display text-[15px] leading-none tracking-[0.04em] transition-colors group-hover/row:text-green">
+        {row.displayName.toUpperCase()}
+      </span>
+      <span className="ml-auto font-display text-[15px] leading-none tracking-[0.02em] tabular-nums text-green">
+        {Number.isFinite(row.score) ? fmtPts(row.score) : "—"}
+      </span>
+    </Link>
+  );
+}
+
+const FORMAT_LABEL_BY_VALUE = new Map(FORMAT_OPTIONS.map((o) => [o.value, o.label]));
+
+function formatLabel(format: string): string {
+  return FORMAT_LABEL_BY_VALUE.get(format) ?? shortFormat(format);
+}
+
+function orderFormats(available: string[] | undefined): string[] {
+  const present = new Set(available ?? []);
+  const ordered = FORMAT_OPTIONS.map((o) => o.value).filter((v) => v === "ALL" || present.has(v));
+  const extras = (available ?? []).filter((v) => !ordered.includes(v));
+  return [...ordered, ...extras];
+}
+
+function setsNewestFirst(sets: SetSummary[] | undefined): SetSummary[] {
+  return [...(sets ?? [])].sort((a, b) => b.startDate.localeCompare(a.startDate));
+}
+
+function PodDraftsPanel({ setCode }: { setCode: string }) {
+  const { data: sets } = useSets();
+  const setMeta = sets?.find((s) => s.code === setCode);
+  const { data } = usePodEvents(setCode);
+  const entries = useMemo(() => splitPods(data), [data]);
+
+  const setDisplay = (
+    <span className="flex items-center gap-2 min-w-0">
+      <SetGlyph code={setMeta ? setGlyphCode(setMeta) : setCode} size={18} />
+      <span className="truncate font-display tracking-[0.06em] text-[17px] text-text">{setCode}</span>
+    </span>
+  );
+
+  return (
+    <Panel title="POD DRAFTS" to="/pods" corner={setDisplay} action="Check Replays & pods" actionBorder headerBorder className="order-5 lg:order-none">
+      {entries.length ? (
+        <div className="flex flex-col -mx-4">
+          {entries.map((entry) => (
+            <PodRow key={entry.event.slug} entry={entry} />
+          ))}
+        </div>
+      ) : (
+        <Placeholder lines={3} />
+      )}
+    </Panel>
+  );
+}
+
+function PodRow({ entry }: { entry: PodEntry }) {
+  const { event, upcoming } = entry;
+  const championName = event.championDisplayName?.replace(/#.*$/, "");
+  const title = cleanPodEventName(event.name, event.setCode);
+  const { month, day } = podMonthDay(event);
+
+  let sub: ReactNode;
+  if (upcoming) {
+    sub = <span className="truncate">{podWhenLabel(event)}</span>;
+  } else if (championName) {
+    sub = (
+      <>
+        <span className="shrink-0">🏆</span>
+        <span className="truncate text-[12px] font-bold text-text">{championName}</span>
+        {event.championRecord ? <span className="shrink-0">{event.championRecord}</span> : null}
+        {event.championDeckColors ? <Pips colors={event.championDeckColors} size={11} /> : null}
+      </>
+    );
+  } else {
+    sub = <span className="truncate">{event.participantCount} drafters</span>;
+  }
+
+  const rowClassName =
+    "group/pod flex items-center gap-2.5 px-4 py-2 border-t border-border first:border-t-0 no-underline transition-colors hover:bg-green/5";
+
+  const content = (
+    <>
+      <span
+        className={cn(
+          "flex h-[40px] w-[48px] shrink-0 flex-col items-center justify-center rounded font-display leading-none",
+          upcoming
+            ? "border border-green/30 bg-green/10 text-green text-[11px] tracking-[0.12em]"
+            : "border border-border bg-surface2",
+        )}
+      >
+        {upcoming ? (
+          "NEXT"
+        ) : (
+          <>
+            <span className="text-[9px] tracking-[0.12em] text-muted">{month}</span>
+            <span className="mt-0.5 text-[17px] tabular-nums text-text">{day}</span>
+          </>
+        )}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="text-[13px] font-medium text-text truncate">{title}</div>
+        <div className="mono text-[10px] text-muted flex items-center gap-1.5 min-w-0">{sub}</div>
+      </div>
+      {upcoming ? (
+        <PodCountdown target={podStartMs(event)} />
+      ) : (
+        <GiRoundTable size={18} className="shrink-0 text-muted transition-colors group-hover/pod:text-green" />
+      )}
+    </>
+  );
+
+  if (upcoming) {
+    const href = event.discordEventId ? discordEventLink(event.discordEventId) : SITE_LINKS.discord;
+    return (
+      <Tooltip label="View event on Discord" side="left">
+        <a href={href} target="_blank" rel="noreferrer" className={rowClassName}>
+          {content}
+        </a>
+      </Tooltip>
+    );
+  }
+  const winnerQuery = event.championDisplayName
+    ? `?player=${encodeURIComponent(event.championDisplayName)}`
+    : "";
+  return (
+    <Tooltip label="View seats, logs & replays" side="left">
+      <Link to={`/pods/${event.slug}${winnerQuery}`} className={rowClassName}>
+        {content}
+      </Link>
+    </Tooltip>
+  );
+}
+
+function podMonthDay(event: PodEventSummary): { month: string; day: number } {
+  const stamp = event.eventTime || event.eventDate;
+  const date = new Date(stamp.length <= 10 ? `${stamp}T12:00:00` : stamp);
+  return {
+    month: date.toLocaleString("en-US", { month: "short" }).toUpperCase(),
+    day: date.getDate(),
+  };
+}
+
+function Placeholder({ lines }: { lines: number }) {
+  return (
+    <div className="flex-1 flex flex-col gap-2">
+      {Array.from({ length: lines }).map((_, i) => (
+        <div key={i} className="h-5 bg-surface2 rounded animate-pulse" />
+      ))}
+    </div>
+  );
+}
+
+type PodEntry = { event: PodEventSummary; upcoming: boolean };
+
+function splitPods(events: PodEventSummary[] | undefined): PodEntry[] {
+  if (!events?.length) {
+    return [];
+  }
+  const now = Date.now();
+  const future = events
+    .filter((e) => !e.isFinalized && new Date(e.eventDate).getTime() >= now)
+    .sort((a, b) => new Date(a.eventDate).getTime() - new Date(b.eventDate).getTime());
+  const past = events.filter((e) => !future.includes(e));
+  const entries: PodEntry[] = [];
+  if (future[0]) {
+    entries.push({ event: future[0], upcoming: true });
+  }
+  for (const event of past) {
+    if (entries.length >= 3) {
+      break;
+    }
+    entries.push({ event, upcoming: false });
+  }
+  return entries;
+}
+
+function PodCountdown({ target }: { target: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const remaining = target - now;
+  return (
+    <span className="mono shrink-0 rounded border border-border bg-surface2 px-2 py-1 text-[11px] tracking-[0.08em] tabular-nums text-subtle">
+      {remaining <= 0 ? "LIVE" : formatCountdown(remaining)}
+    </span>
+  );
+}
+
+function formatCountdown(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const days = Math.floor(totalSeconds / 86400);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const clock = `${pad(Math.floor((totalSeconds % 86400) / 3600))}:${pad(Math.floor((totalSeconds % 3600) / 60))}:${pad(totalSeconds % 60)}`;
+  return days > 0 ? `${days}d ${clock}` : clock;
+}
+
+function podStartMs(event: PodEventSummary): number {
+  const stamp = event.eventTime || event.eventDate;
+  return new Date(stamp.length <= 10 ? `${stamp}T12:00:00` : stamp).getTime();
+}
+
+function podWhenLabel(event: PodEventSummary): string {
+  const stamp = event.eventTime || event.eventDate;
+  const date = new Date(stamp.length <= 10 ? `${stamp}T12:00:00` : stamp);
+  if (Number.isNaN(date.getTime())) {
+    return event.eventDate;
+  }
+  const hasTime = Boolean(event.eventTime);
+  return date.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    ...(hasTime ? { hour: "numeric", minute: "2-digit" } : {}),
+  });
+}
+
+const TIER_LETTERS = ["A", "B", "C", "D"] as const;
+const MAIN_TIERS = TIER_ORDER.filter((t) => t !== "SB" && t !== "TBD");
+
+function tierColor(tier: string): string {
+  const i = MAIN_TIERS.indexOf(tier);
+  if (i === -1) {
+    return "#4a5260";
+  }
+  const hue = Math.round(130 - (130 * i) / (MAIN_TIERS.length - 1));
+  return `hsl(${hue}, 62%, 47%)`;
+}
+
+function sampleTiers(cards: TierCard[] | undefined): Array<{ letter: string; color: string; cards: TierCard[] }> {
+  if (!cards?.length) {
+    return [];
+  }
+  const orderIndex = new Map(TIER_ORDER.map((tier, i) => [tier, i]));
+  const rows: Array<{ letter: string; color: string; cards: TierCard[] }> = [];
+  for (const letter of TIER_LETTERS) {
+    const inGrade = cards.filter((card) => card.tier?.[0] === letter && orderIndex.has(card.tier));
+    inGrade.sort((a, b) => {
+      const rankDiff = (orderIndex.get(a.tier) ?? 99) - (orderIndex.get(b.tier) ?? 99);
+      if (rankDiff !== 0) {
+        return rankDiff;
+      }
+      return (a.sort_key ?? 9999) - (b.sort_key ?? 9999);
+    });
+    if (inGrade.length) {
+      rows.push({ letter, color: tierColor(letter), cards: inGrade });
+    }
+  }
+  return rows;
 }

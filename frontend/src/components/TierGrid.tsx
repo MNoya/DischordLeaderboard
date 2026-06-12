@@ -66,11 +66,13 @@ export function TierGrid({
   uid,
   graders,
   filters,
+  hideArt,
   stickyTop,
 }: {
   uid: string;
   graders: Grader[];
   filters: TierFilters;
+  hideArt: boolean;
   stickyTop: number;
 }) {
   const { data, isLoading, isError } = useTierList(uid, graders);
@@ -103,19 +105,21 @@ export function TierGrid({
   }
 
   return isMobile ? (
-    <MobileTiers byKey={byKey} filters={filters} />
+    <MobileTiers byKey={byKey} filters={filters} hideArt={hideArt} />
   ) : (
-    <DesktopGrid byKey={byKey} filters={filters} stickyTop={stickyTop} />
+    <DesktopGrid byKey={byKey} filters={filters} hideArt={hideArt} stickyTop={stickyTop} />
   );
 }
 
 function DesktopGrid({
   byKey,
   filters,
+  hideArt,
   stickyTop,
 }: {
   byKey: Map<string, TierCard[]>;
   filters: TierFilters;
+  hideArt: boolean;
   stickyTop: number;
 }) {
   const filtering = hasActiveFilters(filters);
@@ -195,6 +199,7 @@ function DesktopGrid({
                         key={card.card_id}
                         card={card}
                         mobile={false}
+                        hideArt={hideArt}
                         dimmed={isCardTrendDimmed(card, filters)}
                         onOpen={() => pager.open(card.card_id)}
                       />
@@ -213,9 +218,11 @@ function DesktopGrid({
 function MobileTiers({
   byKey,
   filters,
+  hideArt,
 }: {
   byKey: Map<string, TierCard[]>;
   filters: TierFilters;
+  hideArt: boolean;
 }) {
   const filtering = hasActiveFilters(filters);
   const pager = useCardPager(byKey, filters);
@@ -261,6 +268,7 @@ function MobileTiers({
                         key={card.card_id}
                         card={card}
                         mobile
+                        hideArt={hideArt}
                         dimmed={isCardTrendDimmed(card, filters)}
                         onOpen={() => pager.open(card.card_id)}
                       />
@@ -340,16 +348,16 @@ function CardPagerModal({ pager }: { pager: ReturnType<typeof useCardPager> }) {
   );
 }
 
-const PREVIEW_W = 260;
-const PREVIEW_RATIO = 1.4;
-const PREVIEW_GAP = 12;
-const PREVIEW_EXTRAS_H = 60;
+export const PREVIEW_W = 260;
+export const PREVIEW_RATIO = 1.4;
+export const PREVIEW_GAP = 12;
+export const PREVIEW_EXTRAS_H = 60;
 const PREVIEW_MAT = "#161b26";
 
 const TEXT_OUTLINE =
   "[text-shadow:1px_1px_1px_rgba(0,0,0,0.85),-1px_-1px_1px_rgba(0,0,0,0.85),1px_-1px_1px_rgba(0,0,0,0.85),-1px_1px_1px_rgba(0,0,0,0.85)]";
 
-interface PreviewAnchor {
+export interface PreviewAnchor {
   left: number;
   top: number;
   onRight: boolean;
@@ -359,11 +367,13 @@ interface PreviewAnchor {
 function CardBar({
   card,
   mobile,
+  hideArt = false,
   dimmed = false,
   onOpen,
 }: {
   card: TierCard;
   mobile: boolean;
+  hideArt?: boolean;
   dimmed?: boolean;
   onOpen?: () => void;
 }) {
@@ -410,15 +420,24 @@ function CardBar({
       )}
       style={{ borderLeftColor: accent }}
     >
-      <div className="relative min-h-[28px] overflow-hidden rounded-r-[5px]">
-        <img
-          src={art}
-          alt=""
-          loading="lazy"
-          className="absolute inset-0 h-full w-full object-cover"
-          style={{ objectPosition: "center 22%" }}
-        />
-        <div className="absolute inset-0 bg-gradient-to-r from-black/85 via-black/55 to-black/30" />
+      <div
+        className={cn(
+          "relative min-h-[28px] overflow-hidden rounded-r-[5px]",
+          hideArt && "bg-surface2",
+        )}
+      >
+        {!hideArt && (
+          <>
+            <img
+              src={art}
+              alt=""
+              loading="lazy"
+              className="absolute inset-0 h-full w-full object-cover"
+              style={{ objectPosition: "center 22%" }}
+            />
+            <div className="absolute inset-0 bg-gradient-to-r from-black/85 via-black/55 to-black/30" />
+          </>
+        )}
         <div className="relative flex min-h-[28px] items-center justify-between gap-1 px-2 py-0.5">
           <span className="flex min-w-0 flex-1 items-center gap-1">
             {card.trend && (
@@ -560,7 +579,7 @@ function GradeCell({
   );
 }
 
-function CardPreview({
+export function CardPreview({
   card,
   anchor,
 }: {
@@ -608,7 +627,7 @@ function CardPreview({
   );
 }
 
-function CardModal({
+export function CardModal({
   card,
   onClose,
   onPrev,
