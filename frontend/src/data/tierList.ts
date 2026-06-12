@@ -51,6 +51,7 @@ export interface TierCard {
   color: string;
   tier: string;
   sort_key: number | null;
+  collector_number?: string | null;
   comment: string;
   types: string[];
   cmc: number;

@@ -1,4 +1,4 @@
-import { Fragment, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "../lib/utils";
 import { useIsMobile } from "../lib/use-is-mobile";
@@ -119,6 +119,7 @@ function DesktopGrid({
   stickyTop: number;
 }) {
   const filtering = hasActiveFilters(filters);
+  const pager = useCardPager(byKey, filters);
   const columnHasHit = (code: string) => {
     if (!filtering) return true;
     return TIER_ORDER.some((tier) =>
@@ -195,6 +196,7 @@ function DesktopGrid({
                         card={card}
                         mobile={false}
                         dimmed={isCardTrendDimmed(card, filters)}
+                        onOpen={() => pager.open(card.card_id)}
                       />
                     ))}
                 </div>
@@ -203,6 +205,7 @@ function DesktopGrid({
           </Fragment>
         ))}
       </div>
+      <CardPagerModal pager={pager} />
     </div>
   );
 }
@@ -215,7 +218,7 @@ function MobileTiers({
   filters: TierFilters;
 }) {
   const filtering = hasActiveFilters(filters);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const pager = useCardPager(byKey, filters);
   const visibleTiers = TIER_ORDER.map((tier) => ({
     tier,
     colors: COLUMN_CODES.filter((code) => {
@@ -226,21 +229,6 @@ function MobileTiers({
         : true;
     }),
   })).filter((t) => t.colors.length > 0);
-
-  const visibleCards = visibleTiers.flatMap(({ tier, colors }) =>
-    colors.flatMap((code) =>
-      (byKey.get(`${code}|${tier}`) ?? []).filter(
-        (card) => !isCardFilteredOut(card, filters),
-      ),
-    ),
-  );
-  const selectedIndex = visibleCards.findIndex(
-    (card) => card.card_id === selectedId,
-  );
-  const selectedCard =
-    selectedIndex === -1 ? null : visibleCards[selectedIndex];
-  const stepTo = (index: number) =>
-    setSelectedId(visibleCards[index].card_id);
 
   return (
     <div className="flex flex-col gap-[5px]">
@@ -274,7 +262,7 @@ function MobileTiers({
                         card={card}
                         mobile
                         dimmed={isCardTrendDimmed(card, filters)}
-                        onOpen={() => setSelectedId(card.card_id)}
+                        onOpen={() => pager.open(card.card_id)}
                       />
                     ))}
                 </div>
@@ -283,22 +271,72 @@ function MobileTiers({
           </div>
         </div>
       ))}
-      {selectedCard &&
-        createPortal(
-          <CardModal
-            card={selectedCard}
-            onClose={() => setSelectedId(null)}
-            onPrev={selectedIndex > 0 ? () => stepTo(selectedIndex - 1) : undefined}
-            onNext={
-              selectedIndex < visibleCards.length - 1
-                ? () => stepTo(selectedIndex + 1)
-                : undefined
-            }
-            position={`${selectedIndex + 1} / ${visibleCards.length}`}
-          />,
-          document.body,
-        )}
+      <CardPagerModal pager={pager} />
     </div>
+  );
+}
+
+const COLUMN_INDEX: Record<string, number> = Object.fromEntries(COLUMN_CODES.map((code, i) => [code, i]));
+
+// Pager walks by color column (W→U→B→R→G→multi→colorless), then keeps each
+// expansion's block contiguous, then printed number. Expansion matters because a
+// merged list reuses collector numbers across sets. Alt-art "PROMO-12" sorts last.
+function comparePagerOrder(a: TierCard, b: TierCard): number {
+  const da = COLUMN_INDEX[columnOf(a.color)] ?? COLUMN_CODES.length;
+  const db = COLUMN_INDEX[columnOf(b.color)] ?? COLUMN_CODES.length;
+  if (da !== db) return da - db;
+  if (a.expansion !== b.expansion) return a.expansion.localeCompare(b.expansion);
+  const ca = parseCollectorNumber(a.collector_number);
+  const cb = parseCollectorNumber(b.collector_number);
+  if (ca.altRank !== cb.altRank) return ca.altRank - cb.altRank;
+  if (ca.base !== cb.base) return ca.base - cb.base;
+  return ca.suffix.localeCompare(cb.suffix);
+}
+
+function parseCollectorNumber(num?: string | null) {
+  if (!num) return { base: 0, suffix: "", altRank: 0 };
+  const alt = num.match(/^([A-Za-z]+)-(\d+)$/);
+  if (alt) return { base: parseInt(alt[2], 10), suffix: "", altRank: 1 };
+  const norm = num.match(/^(\d+)([A-Za-z]*)$/);
+  return { base: parseInt(norm?.[1] ?? "0", 10), suffix: (norm?.[2] ?? "").toUpperCase(), altRank: 0 };
+}
+
+// Click-to-open card modal with Prev/Next over the visible cards, in pager order.
+// Selecting a card filtered out of view collapses to no selection, closing the modal.
+function useCardPager(byKey: Map<string, TierCard[]>, filters: TierFilters) {
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const visibleCards = useMemo(() => {
+    const cards: TierCard[] = [];
+    for (const bucket of byKey.values()) {
+      for (const card of bucket) {
+        if (!isCardFilteredOut(card, filters)) cards.push(card);
+      }
+    }
+    return cards.sort(comparePagerOrder);
+  }, [byKey, filters]);
+  const selectedIndex = visibleCards.findIndex((card) => card.card_id === selectedId);
+  return {
+    visibleCards,
+    selectedIndex,
+    selectedCard: selectedIndex === -1 ? null : visibleCards[selectedIndex],
+    open: (cardId: number) => setSelectedId(cardId),
+    close: () => setSelectedId(null),
+    stepTo: (index: number) => setSelectedId(visibleCards[index].card_id),
+  };
+}
+
+function CardPagerModal({ pager }: { pager: ReturnType<typeof useCardPager> }) {
+  const { selectedCard, selectedIndex, visibleCards, close, stepTo } = pager;
+  if (!selectedCard) return null;
+  return createPortal(
+    <CardModal
+      card={selectedCard}
+      onClose={close}
+      onPrev={selectedIndex > 0 ? () => stepTo(selectedIndex - 1) : undefined}
+      onNext={selectedIndex < visibleCards.length - 1 ? () => stepTo(selectedIndex + 1) : undefined}
+      position={`${selectedIndex + 1} / ${visibleCards.length}`}
+    />,
+    document.body,
   );
 }
 
@@ -362,10 +400,12 @@ function CardBar({
       ref={ref}
       onMouseEnter={mobile ? undefined : openPreview}
       onMouseLeave={mobile ? undefined : () => setAnchor(null)}
-      onClick={mobile ? onOpen : undefined}
+      onClick={() => {
+        setAnchor(null);
+        onOpen?.();
+      }}
       className={cn(
-        "relative min-[450px]:max-w-[300px] rounded-[5px] border-l-4",
-        mobile && "cursor-pointer",
+        "relative min-[450px]:max-w-[300px] cursor-pointer rounded-[5px] border-l-4",
         dimmed && "opacity-35 grayscale",
       )}
       style={{ borderLeftColor: accent }}
@@ -440,7 +480,7 @@ function GradesPanel({ card }: { card: TierCard }) {
     <div className="flex items-stretch px-3 py-2.5">
       <GradeCell caption="Set review" tier={card.trend_from ?? card.tier} />
       {card.trend ? (
-        <GradeCell caption="Updated" tier={card.tier} trend={card.trend} />
+        <GradeCell caption="Updated" tier={card.tier} trendCard={card} />
       ) : (
         graders.length > 0 && (
           <span className="grid flex-1 grid-cols-[auto_auto] content-center items-center justify-center gap-x-4 gap-y-1.5">
@@ -475,12 +515,13 @@ function GradesPanel({ card }: { card: TierCard }) {
 function GradeCell({
   caption,
   tier,
-  trend,
+  trendCard,
 }: {
   caption: string;
   tier: string;
-  trend?: "up" | "down" | null;
+  trendCard?: TierCard;
 }) {
+  const stack = trendCard?.trend ? trendGlyphStack(trendCard) : [];
   return (
     <span className="flex flex-1 flex-col items-center gap-2">
       <span
@@ -498,12 +539,20 @@ function GradeCell({
         >
           {tier}
         </span>
-        {trend && (
+        {trendCard?.trend && (
           <span
-            className={cn("text-[11px] leading-none", TEXT_OUTLINE)}
-            style={{ color: TREND_COLOR[trend] }}
+            className={cn("flex flex-col items-center", TEXT_OUTLINE)}
+            style={{ color: TREND_COLOR[trendCard.trend] }}
           >
-            {TREND_GLYPH[trend]}
+            {stack.map((char, i, arr) => (
+              <span
+                key={i}
+                className={cn("text-[11px] leading-none", i > 0 && "-mt-[5px]")}
+                style={{ zIndex: arr.length - i }}
+              >
+                {char}
+              </span>
+            ))}
           </span>
         )}
       </span>
@@ -572,6 +621,16 @@ function CardModal({
   onNext?: () => void;
   position?: string;
 }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "ArrowLeft") onPrev?.();
+      else if (e.key === "ArrowRight") onNext?.();
+      else if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onPrev, onNext, onClose]);
+
   return (
     <div
       className="fixed inset-0 z-[200] flex items-start justify-center bg-black/70 p-6 pt-[max(24px,calc((100dvh-620px)/2))]"
