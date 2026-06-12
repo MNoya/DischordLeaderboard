@@ -211,7 +211,7 @@ function DesktopAuth() {
             onClick={() => { signOut(); setOpen(false); }}
             className="w-full text-left px-4 py-2.5 text-sm text-muted hover:bg-surface hover:text-text cursor-pointer bg-transparent border-none"
           >
-            Log out
+            LOG OUT
           </button>
         </div>
       )}
@@ -276,7 +276,7 @@ function MobileMenu({ pathname, onClose }: { pathname: string; onClose: () => vo
             role="menuitem"
             className="flex items-center min-h-[54px] px-5 text-sm text-muted bg-transparent hover:bg-surface cursor-pointer border-x-0 border-t-0 border-b border-border"
           >
-            Log out
+            LOG OUT
           </button>
         )}
       </nav>
