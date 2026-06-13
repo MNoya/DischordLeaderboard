@@ -11,6 +11,7 @@ import { useAuth } from "../auth/useAuth";
 const NAV: Array<{ label: string; to: string; match: (path: string) => boolean }> = [
   { label: "LEADERBOARD", to: "/leaderboard", match: (p) => p === "/" || p === "/leaderboard" || p.startsWith("/leaderboard/") },
   { label: "POD DRAFTS", to: "/pods", match: (p) => p.startsWith("/pods") },
+  { label: "P0P1", to: "/p0p1", match: (p) => p.startsWith("/p0p1") },
   { label: "ABOUT", to: "/about", match: (p) => p.startsWith("/about") },
 ];
 

@@ -4,13 +4,15 @@
 // fetch logic, fixtures, or supabase. Wired through TanStack Query so caching
 // keys, stale-time, and idle prefetch sit in one place.
 
-import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 
 import {
   fetchAvailableFormats,
   fetchColorsLeaderboard,
   fetchColorsSummary,
+  fetchContestCards,
+  fetchContestVotes,
   fetchFormatColorsLeaderboard,
   fetchFormatLeaderboard,
   fetchFormatRecentTrophies,
@@ -28,7 +30,10 @@ import {
   fetchPodSetCodes,
   fetchRecentTrophies,
   fetchSets,
+  upsertContestVote,
+  deleteContestVote,
 } from "./api";
+import type { SlotKey } from "../types/p0p1";
 import { MULTI, OTHER } from "./filters";
 const FIVE_MINUTES = 5 * 60 * 1000;
 
@@ -311,5 +316,42 @@ export function usePodSetCodes() {
     queryKey: ["pod-set-codes"],
     queryFn: fetchPodSetCodes,
     staleTime: FIVE_MINUTES,
+  });
+}
+
+// --- P0P1 contest ---
+
+export function useContestCards(setCode: string | undefined) {
+  return useQuery({
+    queryKey: ["contest-cards", setCode],
+    queryFn: () => fetchContestCards(setCode!),
+    enabled: !!setCode,
+    staleTime: FIVE_MINUTES,
+  });
+}
+
+export function useContestVotes(setCode: string | undefined) {
+  return useQuery({
+    queryKey: ["contest-votes", setCode],
+    queryFn: () => fetchContestVotes(setCode!),
+    enabled: !!setCode,
+    staleTime: FIVE_MINUTES,
+  });
+}
+
+export function useUpsertVote(setCode: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ slot, cardName }: { slot: SlotKey; cardName: string }) =>
+      upsertContestVote(setCode, slot, cardName),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["contest-votes", setCode] }),
+  });
+}
+
+export function useDeleteVote(setCode: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (slot: SlotKey) => deleteContestVote(setCode, slot),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["contest-votes", setCode] }),
   });
 }

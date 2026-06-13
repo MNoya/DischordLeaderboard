@@ -1140,3 +1140,30 @@ function adaptPodLeaderboardRow(row: Record<string, unknown>): PodLeaderboardRow
     lastFinishedAt: (row.last_finished_at ?? null) as string | null,
   };
 }
+
+// --- P0P1 contest (stubs — wired to Supabase later) ---
+
+import type { MshCard, ContestVote, SlotKey } from "../types/p0p1";
+import { cardsMshFixture } from "./fixtures/cards-msh";
+
+export const fetchContestCards = (_setCode: string): Promise<MshCard[]> =>
+  Promise.resolve(cardsMshFixture);
+
+export const fetchContestVotes = (_setCode: string): Promise<ContestVote[]> => {
+  throw new Error("P0P1 realApi: fetchContestVotes not implemented");
+};
+
+export const upsertContestVote = (
+  _setCode: string,
+  _slot: SlotKey,
+  _cardName: string,
+): Promise<void> => {
+  throw new Error("P0P1 realApi: upsertContestVote not implemented");
+};
+
+export const deleteContestVote = (
+  _setCode: string,
+  _slot: SlotKey,
+): Promise<void> => {
+  throw new Error("P0P1 realApi: deleteContestVote not implemented");
+};

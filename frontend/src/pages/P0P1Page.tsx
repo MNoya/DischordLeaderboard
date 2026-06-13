@@ -1,0 +1,185 @@
+import { useMemo } from "react";
+import { AppHeader } from "../components/AppHeader";
+import { Footer } from "../components/Footer";
+import { CtaPill } from "../components/CtaPill";
+import { DiscordIcon } from "../components/BrandIcons";
+import { SlotCard } from "../components/p0p1/SlotCard";
+import { useAuth } from "../auth/useAuth";
+import { useContestCards, useContestVotes, useUpsertVote } from "../data/hooks";
+import { SLOTS } from "../data/p0p1Slots";
+import type { MshCard } from "../types/p0p1";
+
+const SET_CODE = "MSH";
+const VOTING_DEADLINE = new Date("2026-08-07T23:59:59Z");
+const SEVENTEEN_LANDS_URL = "https://www.17lands.com/card_data";
+
+export function P0P1Page() {
+  const { user, loading: authLoading, signIn } = useAuth();
+  const { data: cards } = useContestCards(SET_CODE);
+  const { data: votes } = useContestVotes(user ? SET_CODE : undefined);
+  const upsertVote = useUpsertVote(SET_CODE);
+
+  const cardsByName = useMemo(() => {
+    if (!cards) return new Map<string, MshCard>();
+    return new Map(cards.map((c) => [c.name, c]));
+  }, [cards]);
+
+  const votesBySlot = useMemo(() => {
+    if (!votes) return new Map<string, string>();
+    return new Map(votes.map((v) => [v.slot, v.cardName]));
+  }, [votes]);
+
+  const pickedCards = useMemo(
+    () => new Set(votesBySlot.values()),
+    [votesBySlot],
+  );
+
+  const filledCount = votesBySlot.size;
+  const isComplete = filledCount === SLOTS.length;
+  const isPastDeadline = new Date() > VOTING_DEADLINE;
+
+  return (
+    <div className="bg-bg text-text min-h-screen flex flex-col animate-fadeIn">
+      <AppHeader subtitle="P0P1" />
+      <main className="flex-1 flex flex-col mx-auto w-full max-w-[640px] px-5 md:px-10 pt-5 md:pt-10 pb-5">
+        <Rules />
+
+        {!authLoading && !user && (
+          <div className="flex justify-center my-8">
+            <button type="button" onClick={signIn} className="bg-transparent border-0 cursor-pointer p-0">
+              <CtaPill size="lg" icon={<DiscordIcon size={19} />}>
+                LOG IN TO PARTICIPATE
+              </CtaPill>
+            </button>
+          </div>
+        )}
+
+        {user && cards && (
+          <>
+            <ProgressBanner filled={filledCount} total={SLOTS.length} isComplete={isComplete} />
+
+            <div className="flex flex-col gap-2 mt-4">
+              {SLOTS.map((slot) => {
+                const cardName = votesBySlot.get(slot.key);
+                const selectedCard = cardName ? cardsByName.get(cardName) : undefined;
+                return (
+                  <SlotCard
+                    key={slot.key}
+                    slot={slot}
+                    selectedCard={selectedCard}
+                    allCards={cards}
+                    pickedCards={pickedCards}
+                    onSelect={(name) => {
+                      if (isPastDeadline) return;
+                      upsertVote.mutate({ slot: slot.key, cardName: name });
+                    }}
+                  />
+                );
+              })}
+            </div>
+
+            {isPastDeadline && (
+              <div className="mt-4 px-4 py-3 border border-border2 bg-surface text-muted text-[13px] text-center">
+                Voting has closed.
+              </div>
+            )}
+          </>
+        )}
+
+        <Footer className="mt-auto pt-8" />
+      </main>
+    </div>
+  );
+}
+
+function Rules() {
+  return (
+    <section className="mb-6">
+      <h2 className="font-display text-[16px] md:text-[18px] text-text tracking-[0.18em] mb-3">
+        PACK 0, PICK 1
+      </h2>
+      <div className="flex flex-col gap-3 text-[13px] md:text-[14px] text-muted leading-[1.6]">
+        <p>
+          Pick one card for each of 9 slots. After 6 weeks, rosters are ranked by the
+          sum of each card's{" "}
+          <a
+            href={SEVENTEEN_LANDS_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="text-green hover:underline underline-offset-2"
+          >
+            17lands GIH win rate
+          </a>
+          .
+        </p>
+        <div className="bg-surface border border-border2 px-4 py-3">
+          <table className="w-full text-[12px] md:text-[13px]">
+            <thead>
+              <tr className="text-left text-muted">
+                <th className="font-display tracking-[0.1em] pb-1.5 font-normal">#</th>
+                <th className="font-display tracking-[0.1em] pb-1.5 font-normal">SLOT</th>
+                <th className="font-display tracking-[0.1em] pb-1.5 font-normal">CONSTRAINT</th>
+              </tr>
+            </thead>
+            <tbody className="text-text">
+              <SlotRow n={1} slot="White Common" constraint="Mono-white commons" />
+              <SlotRow n={2} slot="Blue Common" constraint="Mono-blue commons" />
+              <SlotRow n={3} slot="Black Common" constraint="Mono-black commons" />
+              <SlotRow n={4} slot="Red Common" constraint="Mono-red commons" />
+              <SlotRow n={5} slot="Green Common" constraint="Mono-green commons" />
+              <SlotRow n={6} slot="Multicolor Uncommon" constraint="2+ color uncommons" />
+              <SlotRow n={7} slot="Wildcard Common" constraint="Any common not already picked" />
+              <SlotRow n={8} slot="Wildcard Uncommon" constraint="Any uncommon not already picked" />
+              <SlotRow n={9} slot="Best Hero" constraint="Hero type, any color, up to rare" />
+            </tbody>
+          </table>
+        </div>
+        <p className="text-[12px] text-dim">
+          No card may appear in more than one slot. Picks auto-save and can be changed
+          until the deadline. <Countdown deadline={VOTING_DEADLINE} />
+        </p>
+      </div>
+    </section>
+  );
+}
+
+function SlotRow({ n, slot, constraint }: { n: number; slot: string; constraint: string }) {
+  return (
+    <tr className="border-t border-border">
+      <td className="py-1.5 text-dim pr-2">{n}</td>
+      <td className="py-1.5 pr-3 whitespace-nowrap">{slot}</td>
+      <td className="py-1.5 text-muted">{constraint}</td>
+    </tr>
+  );
+}
+
+function ProgressBanner({ filled, total, isComplete }: { filled: number; total: number; isComplete: boolean }) {
+  return (
+    <div
+      className={`px-4 py-3 border text-[13px] text-center ${
+        isComplete
+          ? "border-green bg-green/10 text-green"
+          : "border-border2 bg-surface text-muted"
+      }`}
+    >
+      {isComplete
+        ? "Your ballot is complete!"
+        : `${filled}/${total} slots filled — your ballot is incomplete`}
+    </div>
+  );
+}
+
+function Countdown({ deadline }: { deadline: Date }) {
+  const now = new Date();
+  const diff = deadline.getTime() - now.getTime();
+  if (diff <= 0) return <span className="text-muted">Voting has closed.</span>;
+
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
+
+  return (
+    <span className="text-text">
+      {days}d {hours}h remaining
+    </span>
+  );
+}

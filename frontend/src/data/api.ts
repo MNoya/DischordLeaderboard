@@ -30,3 +30,7 @@ export const fetchPodEventMatches = impl.fetchPodEventMatches;
 export const fetchPodEventReplays = impl.fetchPodEventReplays;
 export const fetchPodLeaderboard = impl.fetchPodLeaderboard;
 export const fetchPodSetCodes = impl.fetchPodSetCodes;
+export const fetchContestCards = impl.fetchContestCards;
+export const fetchContestVotes = impl.fetchContestVotes;
+export const upsertContestVote = impl.upsertContestVote;
+export const deleteContestVote = impl.deleteContestVote;

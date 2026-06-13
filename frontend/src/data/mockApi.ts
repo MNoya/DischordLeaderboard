@@ -28,6 +28,7 @@ import type {
   RecentTrophy,
   SetSummary,
 } from "../types/leaderboard";
+import type { MshCard, ContestVote, SlotKey } from "../types/p0p1";
 import {
   podEventsFixture,
   podEventMatchesFixture,
@@ -398,3 +399,30 @@ export const fetchPodLeaderboard = (setCode: string): Promise<PodLeaderboardRow[
 };
 
 export const fetchPodSetCodes = (): Promise<PodSetCode[]> => wait(podSetCodesFixture);
+
+// --- P0P1 contest ---
+
+import { cardsMshFixture } from "./fixtures/cards-msh";
+
+const contestVotes = new Map<string, ContestVote>();
+
+export const fetchContestCards = (_setCode: string): Promise<MshCard[]> =>
+  wait(cardsMshFixture);
+
+export const fetchContestVotes = (_setCode: string): Promise<ContestVote[]> =>
+  wait([...contestVotes.values()]);
+
+export const upsertContestVote = async (
+  _setCode: string,
+  slot: SlotKey,
+  cardName: string,
+): Promise<void> => {
+  contestVotes.set(slot, { slot, cardName, lastUpdated: new Date().toISOString() });
+};
+
+export const deleteContestVote = async (
+  _setCode: string,
+  slot: SlotKey,
+): Promise<void> => {
+  contestVotes.delete(slot);
+};
