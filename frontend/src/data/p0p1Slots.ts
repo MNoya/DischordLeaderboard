@@ -1,5 +1,8 @@
 import type { MshCard, SlotDefinition } from "../types/p0p1";
 
+export const P0P1_SET_CODE = "MSH";
+export const P0P1_VOTING_DEADLINE = new Date("2026-06-23T15:00:00Z");
+
 function monoColor(color: string) {
   return (card: MshCard, picked: Set<string>) =>
     card.rarity === "common" &&
