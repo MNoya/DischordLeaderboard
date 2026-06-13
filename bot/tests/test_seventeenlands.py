@@ -331,6 +331,32 @@ def test_extract_event_row_lcq_draft_2_trophy_from_six_wins():
     assert seven_wins["is_trophy"] is False
 
 
+def test_extract_event_row_qualifier_day2_four_win_policy():
+    qd2 = dict(format="Qualifier_D2_Sealed", event_wins=0)
+
+    four_oh = extract_event_row(_draft(wins=4, losses=0, first_event_server_time="2026-05-17 14:04:36", **qd2))
+    five_two = extract_event_row(_draft(wins=5, losses=2, first_event_server_time="2025-10-19 10:00:00", **qd2))
+    three_two = extract_event_row(_draft(wins=3, losses=2, first_event_server_time="2026-05-17 14:04:36", **qd2))
+
+    assert four_oh["is_trophy"] is True
+    assert five_two["is_trophy"] is True
+    assert three_two["is_trophy"] is False
+
+
+def test_extract_event_row_qualifier_day2_keeps_old_win_six_bar_before_policy():
+    qd2 = dict(format="Qualifier_D2_Sealed")
+
+    old_four_win = extract_event_row(
+        _draft(wins=4, losses=2, event_wins=0, first_event_server_time="2025-04-06 10:00:00", **qd2)
+    )
+    old_trophy = extract_event_row(
+        _draft(wins=6, losses=1, event_wins=6, first_event_server_time="2024-05-12 10:00:00", **qd2)
+    )
+
+    assert old_four_win["is_trophy"] is False
+    assert old_trophy["is_trophy"] is True
+
+
 def test_extract_event_row_keeps_unknown_format():
     """Format is never filtered at extract; storage layer keeps everything."""
     row = extract_event_row(_draft(format="MidWeekSealed"))

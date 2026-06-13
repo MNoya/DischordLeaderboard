@@ -17,7 +17,7 @@ from sqlalchemy import or_, select
 from bot.database import SessionLocal
 from bot.models import Player
 from bot.scoring import DEFAULT_QUEUE_GROUPS
-from bot.services.seventeenlands import SeventeenLandsClient
+from bot.services.seventeenlands import SeventeenLandsClient, event_is_trophy
 from bot.sets import ACTIVE_SET_CODE, ALL_SETS, SetSeed
 
 _TOKEN_RE = re.compile(r"^[a-f0-9]{32}$")
@@ -117,9 +117,8 @@ def main() -> None:
         when = (d.get("first_event_server_time") or "")[:16]
         wins = d.get("wins", 0)
         losses = d.get("losses", 0)
-        event_wins = d.get("event_wins") or 0
         colors = d.get("colors") or "--"
-        trophy = "🏆" if event_wins else "  "
+        trophy = "🏆" if event_is_trophy(d) else "  "
         unsupp = " ⚠️" if fmt not in SUPPORTED_FORMATS else ""
         exp = d.get("expansion") or "?"
         print(f"  {trophy} {when}  {exp:8s} {fmt:34s} {colors:6s} {wins}-{losses}{unsupp}")

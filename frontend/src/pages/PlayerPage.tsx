@@ -24,6 +24,7 @@ import { Record } from "../components/Record";
 import { DonutChart } from "../components/DonutChart";
 import { ErrorState } from "../components/ErrorState";
 import { TrophyCount } from "../components/TrophyCount";
+import { ArenaChampBadge, isArenaChampionshipFormat } from "../components/ArenaChampBadge";
 import { SetCodeDropdown } from "../components/SetCodeDropdown";
 import { MobilePageHeader } from "../components/PageNav";
 import { RankBadge } from "../components/RankBadge";
@@ -1312,6 +1313,7 @@ function EventLogRow({
         <span className="text-[12px] text-muted text-center">{fmtShortDate(eventDate(e))}</span>
         <span className="flex items-center gap-2 min-w-0 pr-4">
           <span className="font-display text-[16px] tracking-[0.08em] whitespace-nowrap">{formatLabel}</span>
+          {e.isTrophy && isArenaChampionshipFormat(e.format) && <ArenaChampBadge size={36} box={22} />}
           <span className="flex-1 flex items-center justify-center">
             {cashPrize && <CashPrizePill amount={cashPrize} />}
           </span>
@@ -1425,6 +1427,7 @@ function EventLogRow({
           <span className="font-display text-[13px] tracking-[0.08em]">
             {formatLabel}
           </span>
+          {e.isTrophy && isArenaChampionshipFormat(e.format) && <ArenaChampBadge size={28} box={16} />}
           {cashPrize && <CashPrizePill amount={cashPrize} className="mx-1.5" />}
           {tag && <FormatTagPill tag={tag} />}
         </div>
