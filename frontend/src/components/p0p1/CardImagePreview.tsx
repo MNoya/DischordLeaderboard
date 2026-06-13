@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import {  ZoomInIcon } from "lucide-react";
 import { useIsMobile } from "../../lib/use-is-mobile";
 
-const PREVIEW_W = 232;
+const PREVIEW_W = 400;
 const PREVIEW_RATIO = 1.4;
 const PREVIEW_GAP = 12;
 
