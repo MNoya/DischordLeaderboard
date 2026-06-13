@@ -6,11 +6,8 @@ import { DiscordIcon } from "../components/BrandIcons";
 import { SlotCard } from "../components/p0p1/SlotCard";
 import { useAuth } from "../auth/useAuth";
 import { useContestCards, useContestVotes, useUpsertVote } from "../data/hooks";
-import { SLOTS } from "../data/p0p1Slots";
+import { P0P1_SET_CODE as SET_CODE, P0P1_VOTING_DEADLINE as VOTING_DEADLINE, SLOTS } from "../data/p0p1Slots";
 import type { MshCard } from "../types/p0p1";
-
-const SET_CODE = "MSH";
-const VOTING_DEADLINE = new Date("2026-08-07T23:59:59Z");
 const SEVENTEEN_LANDS_URL = "https://www.17lands.com/card_data";
 
 export function P0P1Page() {
@@ -98,7 +95,8 @@ function Rules() {
       <h2 className="font-display text-[16px] md:text-[18px] text-text tracking-[0.18em] mb-3">
         PACK 0, PICK 1
       </h2>
-      <div className="flex flex-col gap-3 text-[13px] md:text-[14px] text-muted leading-[1.6]">
+      <Countdown deadline={VOTING_DEADLINE} />
+      <div className="flex flex-col gap-3 text-[13px] md:text-[14px] text-muted leading-[1.6] mt-3">
         <p>
           Pick one card for each of 9 slots. After 6 weeks, rosters are ranked by the
           sum of each card's{" "}
@@ -136,7 +134,7 @@ function Rules() {
         </div>
         <p className="text-[12px] text-dim">
           No card may appear in more than one slot. Picks auto-save and can be changed
-          until the deadline. <Countdown deadline={VOTING_DEADLINE} />
+          until the deadline.
         </p>
       </div>
     </section>
@@ -163,8 +161,8 @@ function ProgressBanner({ filled, total, isComplete }: { filled: number; total: 
       }`}
     >
       {isComplete
-        ? "Your ballot is complete!"
-        : `${filled}/${total} slots filled — your ballot is incomplete`}
+        ? "Your roster is complete!"
+        : `${filled}/${total} slots filled — your roster is incomplete`}
     </div>
   );
 }
@@ -172,14 +170,22 @@ function ProgressBanner({ filled, total, isComplete }: { filled: number; total: 
 function Countdown({ deadline }: { deadline: Date }) {
   const now = new Date();
   const diff = deadline.getTime() - now.getTime();
-  if (diff <= 0) return <span className="text-muted">Voting has closed.</span>;
+  if (diff <= 0) {
+    return (
+      <div className="px-4 py-3 border border-border2 bg-surface text-muted text-[13px] text-center">
+        Voting has closed.
+      </div>
+    );
+  }
 
   const days = Math.floor(diff / (1000 * 60 * 60 * 24));
   const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
 
   return (
-    <span className="text-text">
-      {days}d {hours}h remaining
-    </span>
+    <div className="px-4 py-3 border border-green bg-surface text-center">
+      <span className="text-[14px] md:text-[16px] text-green">
+        {days} days, {hours} hours remaining
+      </span>
+    </div>
   );
 }
