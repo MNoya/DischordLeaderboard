@@ -19,3 +19,4 @@ MSG_MOCK_LOBBY_OPEN = (
 )
 MSG_MOCK_COMPLETE = "✅ **{event_name} complete!** [Draft Recap here](<{url}>) {manat}"
 MSG_MOCK_LOBBY_COUNTER = " 👥 {count}/8"
+MSG_LOBBY_FULL_PROMPT = "8️⃣ Players locked in! Initiate Ready Check?"
