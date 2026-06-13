@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { MshCard, SlotDefinition } from "../../types/p0p1";
+import { CardImagePreview } from "./CardImagePreview";
 
 interface Props {
   slot: SlotDefinition;
@@ -87,27 +88,31 @@ export function CardPicker({ slot, cards, pickedCards, onSelect, onClose }: Prop
           ) : (
             <div className="flex flex-col">
               {filtered.map((card) => (
-                <button
+                <div
                   key={card.name}
-                  type="button"
-                  onClick={() => onSelect(card.name)}
-                  className="flex items-center gap-3 px-4 py-2.5 text-left bg-transparent border-0 border-b border-border cursor-pointer hover:bg-surface transition-colors group"
+                  className="flex items-center gap-3 px-4 py-2.5 border-0 border-b border-border hover:bg-surface transition-colors group"
                 >
-                  <img
-                    src={card.imageArtCrop}
-                    alt=""
-                    className="w-16 h-10 object-cover shrink-0 border border-border2"
-                    loading="lazy"
-                  />
-                  <div className="flex-1 min-w-0">
+                  <CardImagePreview imageUrl={card.imageNormal} alt={card.name}>
+                    <img
+                      src={card.imageArtCrop}
+                      alt=""
+                      className="w-16 h-10 object-cover border border-border2"
+                      loading="lazy"
+                    />
+                  </CardImagePreview>
+                  <button
+                    type="button"
+                    onClick={() => onSelect(card.name)}
+                    className="flex-1 min-w-0 text-left bg-transparent border-0 cursor-pointer p-0"
+                  >
                     <div className="text-text text-[14px] truncate group-hover:text-green transition-colors">
                       {card.name}
                     </div>
                     <div className="text-muted text-[12px]">
                       {card.manaCost.replace(/\{([^}]+)\}/g, "$1 ").trim() || "—"}
                     </div>
-                  </div>
-                </button>
+                  </button>
+                </div>
               ))}
             </div>
           )}
