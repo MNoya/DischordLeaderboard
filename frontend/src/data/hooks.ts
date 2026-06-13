@@ -33,7 +33,7 @@ import {
   upsertContestVote,
   deleteContestVote,
 } from "./api";
-import type { SlotKey } from "../types/p0p1";
+import type { ContestVote, SlotKey } from "../types/p0p1";
 import { MULTI, OTHER } from "./filters";
 const FIVE_MINUTES = 5 * 60 * 1000;
 
@@ -341,10 +341,25 @@ export function useContestVotes(setCode: string | undefined) {
 
 export function useUpsertVote(setCode: string) {
   const qc = useQueryClient();
+  const queryKey = ["contest-votes", setCode];
   return useMutation({
     mutationFn: ({ slot, cardName }: { slot: SlotKey; cardName: string }) =>
       upsertContestVote(setCode, slot, cardName),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["contest-votes", setCode] }),
+    onMutate: async ({ slot, cardName }) => {
+      await qc.cancelQueries({ queryKey });
+      const prev = qc.getQueryData<ContestVote[]>(queryKey);
+      qc.setQueryData<ContestVote[]>(queryKey, (old = []) => {
+        const next = old.filter((v) => v.slot !== slot);
+        next.push({ slot, cardName, lastUpdated: new Date().toISOString() });
+        return next;
+      });
+      return { prev };
+    },
+    // TODO: surface failure to the user (toast or inline banner)
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(queryKey, ctx.prev);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey }),
   });
 }
 
