@@ -25,7 +25,7 @@ from bot.discord_helpers import NBSP, first_image_url
 from bot.slug import slugify
 from bot.database import SessionLocal
 from bot.models import Player as DbPlayer, PodDraftEvent, PodDraftMatch, PodDraftParticipant
-from bot.services import pod_bracket, pod_swiss
+from bot.services import bot_log as bot_log_mod, pod_bracket, pod_swiss
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_deck_color import (
     PAIR_EMOJI_NAME,
@@ -37,6 +37,7 @@ from bot.services.pod_deck_color import (
     SubmitDeckButton,
     SubmitDeckView,
 )
+from bot.services.player_stats import leaderboard_seat_order
 from bot.services.pod_replays import fetch_and_persist_replays_for_player
 from bot.services.seventeenlands import SeventeenLandsClient
 from bot.services.pod_drafts import (
@@ -94,11 +95,25 @@ MIDDLE = "middle"
 LAST_CHANCE = "last_chance"
 GRACE_SECONDS = 60  # window after round completion during which edits regenerate the next round
 BRACKET_EDIT_BLOCKED_MSG = "That result can't be changed now — a later round already reported a result."
+POD_PAIRING_FAILED_MSG = (
+    "⚠️ Round {round_num} pairings couldn't be generated. Reported results are safe, but the next "
+    "round won't post on its own — an organizer needs to step in."
+)
+POD_ROSTER_TOO_SMALL_MSG = "⚠️ Not enough players to start the tournament — at least 2 are needed."
+POD_ROSTER_ODD_MSG = (
+    "⚠️ Swiss needs an even number of players, but {count} are in the pod. Pairings can't be "
+    "generated until the roster is evened out."
+)
+POD_REPAIR_FAILED_MSG = (
+    "⚠️ Round {round_num} couldn't be re-paired after the edit, so its previous pairings stand. "
+    "An organizer should double-check the matchups."
+)
 ANNOUNCEMENT_TOP_N = 4  # channel-level announcement shows top performers only; thread keeps full standings
 TROPHY_HYPE_CHANNEL_ID = 775804000905461781  # 🏆-trophy-hype
 TROPHY_HYPE_HISTORY_LIMIT = 100  # messages scanned for a champion's own trophy post before the bot posts
 CHAMPIONSHIP_DEADLINE_SECONDS = 600  # hard cap from R3 end: post the announcement with whatever decks landed
 CHAMPIONSHIP_RECONCILE_WINDOW = timedelta(hours=24)  # startup sweep only revisits recently-finalized pods
+TOURNAMENT_REHYDRATE_WINDOW = timedelta(hours=24)  # startup sweep only rebuilds managers for recently-scheduled pods
 
 
 def build_deck_reminder_text(mentions: str) -> str:
@@ -792,14 +807,39 @@ def _load_participant_id_sync(event_id: str, discord_id: str) -> str | None:
         return participant_id_for_discord_user(session, event_id, discord_id)
 
 
+async def _alert_thread_and_owner(manager, thread_message: str, ops_summary: str, fingerprint: str) -> None:
+    """Surface a pod failure both in the thread (so organizers see it live) and in the bot-log channel
+    (so the owner is paged). Best-effort on each leg."""
+    try:
+        thread = await manager._fetch_thread()
+        if thread is not None:
+            await thread.send(thread_message)
+    except Exception:
+        log.warning("could not post pod failure notice to thread", exc_info=True)
+    try:
+        await bot_log_mod.get(manager.bot).post(ops_summary, fingerprint=fingerprint, tag="POD")
+    except Exception:
+        log.warning("could not post pod failure notice to bot-log", exc_info=True)
+
+
 async def start_tournament(manager: "PodDraftManager") -> None:
     """Snapshot the Draftmancer roster, post Round 1 pairings + result dropdowns in the thread."""
     roster = list(manager.tournament_roster)
     if len(roster) < 2:
         log.warning("not enough players in roster for %s: %s", manager.event_id, roster)
+        await _alert_thread_and_owner(
+            manager, POD_ROSTER_TOO_SMALL_MSG,
+            f"Pod `{manager.event_id}` can't start: only {len(roster)} player(s) in the roster.",
+            fingerprint=f"pod_roster_small:{manager.event_id}",
+        )
         return
     if len(roster) % 2 != 0:
         log.warning("odd-numbered roster (%d players) for %s — Swiss not supported", len(roster), manager.event_id)
+        await _alert_thread_and_owner(
+            manager, POD_ROSTER_ODD_MSG.format(count=len(roster)),
+            f"Pod `{manager.event_id}` can't start: odd roster of {len(roster)} players (Swiss needs even).",
+            fingerprint=f"pod_roster_odd:{manager.event_id}",
+        )
         return
 
     manager.tournament_players = [Player(id=name, name=name) for name in roster]
@@ -832,6 +872,47 @@ def _seed_participants_sync(event_id: str, roster: list[str]) -> None:
         session.commit()
 
 
+def _apply_fallback_seats_sync(event_id: str, seating_mode: str, names: list[str],
+                               desired_seating: list[str] | None) -> bool:
+    """Round-1 seats normally come from the draft log; when that read is incomplete, recompute the order
+    the table was actually seated with — leaderboard ranks or the organizer's manual order — and persist
+    it so pairing reflects the seating instead of a random shuffle. Returns True when a full order was
+    written. No-op for random seating, which has no intended order to recover."""
+    from bot.services.pod_draft_manager import apply_seat_indexes
+
+    with SessionLocal() as session:
+        if seating_mode == "leaderboard":
+            order = leaderboard_seat_order(session, names)
+        elif seating_mode == "manual" and desired_seating:
+            roster = set(names)
+            order = [name for name in desired_seating if name in roster]
+        else:
+            return False
+        if len(order) != len(names):
+            return False
+        apply_seat_indexes(session, event_id, order)
+        session.commit()
+    return True
+
+
+async def _recover_round1_seats(manager, players, seats: dict[str, int]) -> dict[str, int]:
+    """Return seats covering every player. When the log-derived map misses someone, fall back to the
+    applied seating order and re-read; otherwise return the map unchanged."""
+    if all(normalize_player_name(p.id) in seats for p in players):
+        return seats
+    names = [p.id for p in players]
+    applied = await asyncio.to_thread(
+        _apply_fallback_seats_sync, manager.event_id, manager.seating_mode, names, manager.desired_seating,
+    )
+    if not applied:
+        return seats
+    log.warning(
+        f"[SEATING] round1_seat_fallback event={manager.event_id} mode={manager.seating_mode} "
+        f"log_seats={len(seats)} expected={len(players)}"
+    )
+    return await asyncio.to_thread(_load_seat_indexes, manager.event_id)
+
+
 async def advance_to_round(manager: "PodDraftManager", round_num: int) -> None:
     """Compute pairings for round_num via pod_swiss, persist pending rows, post pairings + views."""
     players = manager.tournament_players
@@ -839,6 +920,8 @@ async def advance_to_round(manager: "PodDraftManager", round_num: int) -> None:
     if round_num == 1:
         await asyncio.to_thread(manager.persist_seat_indexes_from_log)
     seats = await asyncio.to_thread(_load_seat_indexes, manager.event_id)
+    if round_num == 1 and manager.pairing_mode != "random":
+        seats = await _recover_round1_seats(manager, players, seats)
     pairing_players = players
     if seats and manager.pairing_mode != "random":
         pairing_players = [replace(p, seat=seats.get(normalize_player_name(p.id))) for p in players]
@@ -846,6 +929,11 @@ async def advance_to_round(manager: "PodDraftManager", round_num: int) -> None:
         pairings = pod_swiss.pair_round(pairing_players, prior, round_num)
     except ValueError as e:
         log.error("pairing for round %d failed for %s: %s", round_num, manager.event_id, e)
+        await _alert_thread_and_owner(
+            manager, POD_PAIRING_FAILED_MSG.format(round_num=round_num),
+            f"Pod `{manager.event_id}` round {round_num} pairing failed: {e}",
+            fingerprint=f"pod_pairing_failed:{manager.event_id}:{round_num}",
+        )
         return
 
     pending_rows = await asyncio.to_thread(insert_pending_matches, manager.event_id, round_num, pairings)
@@ -1866,6 +1954,9 @@ def _round_header(round_num: int, complete: bool, *, seated: bool = True) -> str
     return f"⚔️ Round {round_num} Pairings ⚔️"
 
 
+_ROUND_TITLE_RE = re.compile(r"Round (\d+)")  # restart recovery reads the round number back out of _round_header titles
+
+
 def _escape_italics(text: str) -> str:
     return text.replace("_", "\\_").replace("*", "\\*")
 
@@ -2097,19 +2188,25 @@ def _dm_rows_for_round_sync(event_id: str, round_num: int):
 async def _regenerate_next_round(manager, next_round: int) -> None:
     """A previous-round edit landed during grace — re-pair `next_round` and edit its message in place.
 
-    Deletes existing next_round rows, re-pairs via Swiss using updated prior results, posts an edited
-    message + DMs any participant whose opponent changed.
+    Re-pairs via Swiss using updated prior results before touching the existing rows, then swaps them
+    and DMs any participant whose opponent changed. A pairing failure leaves the prior rows intact.
     """
     event_id = manager.event_id
     prev_pairings = await asyncio.to_thread(_load_pairings_for_round, event_id, next_round)
-    await asyncio.to_thread(_delete_round_rows, event_id, next_round)
 
     prior = await asyncio.to_thread(_load_matches, event_id)
     try:
         pairings = pod_swiss.pair_round(manager.tournament_players, prior, next_round)
     except ValueError as e:
         log.error("regenerate pairings for round %d failed for %s: %s", next_round, event_id, e)
+        await _alert_thread_and_owner(
+            manager, POD_REPAIR_FAILED_MSG.format(round_num=next_round),
+            f"Pod `{event_id}` round {next_round} re-pair after edit failed, keeping prior pairings: {e}",
+            fingerprint=f"pod_pairing_failed:{event_id}:{next_round}:regen",
+        )
         return
+
+    await asyncio.to_thread(_delete_round_rows, event_id, next_round)
 
     pending_rows = await asyncio.to_thread(insert_pending_matches, event_id, next_round, pairings)
     standings_by_id = {s.player_id: s for s in pod_swiss.compute_standings(manager.tournament_players, prior)}
@@ -2623,6 +2720,72 @@ def _load_unannounced_finalized_sync() -> list[tuple[str, str]]:
         ]
 
 
+def _load_in_progress_tournaments_sync() -> list[dict]:
+    """Pod events whose tournament had started (current_round set) but never finalized, within the
+    rehydrate window — the rows a restart sweep rebuilds an in-memory manager for."""
+    cutoff = datetime.now(timezone.utc) - TOURNAMENT_REHYDRATE_WINDOW
+    with SessionLocal() as session:
+        rows = session.execute(
+            select(
+                PodDraftEvent.id,
+                PodDraftEvent.draftmancer_session,
+                PodDraftEvent.discord_thread_id,
+                PodDraftEvent.set_code,
+                PodDraftEvent.name,
+                PodDraftEvent.pairing_mode,
+                PodDraftEvent.seating_mode,
+                PodDraftEvent.current_round,
+            ).where(
+                PodDraftEvent.kind == "tournament",
+                PodDraftEvent.finalized_at.is_(None),
+                PodDraftEvent.current_round.is_not(None),
+                PodDraftEvent.event_time >= cutoff,
+            )
+        ).all()
+    return [dict(row._mapping) for row in rows]
+
+
+async def rehydrate_active_tournaments(bot) -> None:
+    """Startup sweep: rebuild an in-memory manager for any pod whose tournament had started but not
+    finalized when the bot last stopped, so round advancement, grace-window locking, and finalize keep
+    working after a restart. Result dropdowns survive on their own (persistent views) — this restores
+    the manager those handlers look up. The Draftmancer socket is left unconnected: the draft is already
+    over by the tournament phase, and reconnecting would re-arm lobby/ready-check side effects."""
+    from bot.services.pod_draft_manager import PodDraftManager
+
+    rows = await asyncio.to_thread(_load_in_progress_tournaments_sync)
+    restored = 0
+    for row in rows:
+        event_id = row["id"]
+        if event_id in ACTIVE_POD_MANAGERS:
+            continue
+        players = await asyncio.to_thread(_load_tournament_players_sync, event_id)
+        if len(players) < 2:
+            continue
+        manager = PodDraftManager(
+            bot, event_id, row["draftmancer_session"], int(row["discord_thread_id"]),
+            row["set_code"], len(players), event_name=row["name"],
+        )
+        manager.tournament_players = players
+        manager.pairing_mode = row["pairing_mode"] or "swiss"
+        manager.seating_mode = row["seating_mode"] or "random"
+        manager.current_round = row["current_round"] or 0
+        manager.drafting = False
+        manager.draft_complete = True
+        thread = await manager._fetch_thread()
+        if thread is not None and bot.user is not None:
+            manager.round_messages = await _find_pinned_round_messages(thread, bot.user)
+            manager.standings_message = await _find_pinned_standings(thread, bot.user, row["name"])
+        ACTIVE_POD_MANAGERS[event_id] = manager
+        restored += 1
+        log.info(
+            f"[LIFECYCLE] rehydrate.restored event={event_id} round={manager.current_round} "
+            f"rounds_found={sorted(manager.round_messages)} pairing={manager.pairing_mode}"
+        )
+    if restored:
+        log.info(f"startup sweep rehydrated {restored} in-progress tournament(s)")
+
+
 async def post_championship_for_event(bot, event_id: str, thread_id: str | int) -> bool:
     """Post the championship announcement for a finalized event with no live manager (restart sweep,
     /pod-backfill). Idempotent via the championship_posted_at DB guard."""
@@ -2724,6 +2887,29 @@ async def _find_pinned_standings(thread, bot_user, event_name: str) -> discord.M
             if (pinned_embed.title or "").endswith(event_name) and "Standings" in (pinned_embed.description or ""):
                 return msg
     return None
+
+
+async def _find_pinned_round_messages(thread, bot_user) -> dict[int, discord.Message]:
+    """Rediscover round-pairings messages pinned by an earlier manager (pre-restart), keyed by round
+    number parsed from the embed title, so a rehydrated tournament can edit and lock prior rounds in
+    place instead of losing the references on restart."""
+    try:
+        pins = await thread.pins()
+    except discord.HTTPException:
+        log.warning("could not fetch pins to rediscover round messages", exc_info=True)
+        return {}
+    found: dict[int, discord.Message] = {}
+    for msg in pins:
+        if bot_user is not None and msg.author.id != bot_user.id:
+            continue
+        for embed in msg.embeds:
+            match = _ROUND_TITLE_RE.search(embed.title or "")
+            if match is None:
+                continue
+            round_num = int(match.group(1))
+            found.setdefault(round_num, msg)
+            break
+    return found
 
 
 async def _pin_round_message(message: discord.Message, round_num: int) -> None:
