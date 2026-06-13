@@ -21,7 +21,12 @@ from discord.ext import commands
 from sqlalchemy import func, select
 
 from bot import emojis
-from bot.commands.messages import MSG_MOCK_COMPLETE, MSG_MOCK_LOBBY_COUNTER, MSG_MOCK_LOBBY_OPEN
+from bot.commands.messages import (
+    MSG_LOBBY_FULL_PROMPT,
+    MSG_MOCK_COMPLETE,
+    MSG_MOCK_LOBBY_COUNTER,
+    MSG_MOCK_LOBBY_OPEN,
+)
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.discord_helpers import extract_avatar_hash
@@ -63,6 +68,8 @@ _BACKOFF_MAX_RETRIES = 8
 _BOT_USER_NAME = "DisChordBot"
 _READY_TIMEOUT_S = 90
 _READY_DEBOUNCE_S = 2.0
+_LOBBY_FULL_THRESHOLD = 8
+_LOBBY_FULL_PROMPT_DELAY_S = 10
 _AI_BOT_NAME_RE = re.compile(r"^Bot #\d+$")
 
 _SEEDING_REFRESH_HOOK = None
@@ -131,6 +138,9 @@ class PodDraftManager:
         self.ready_check_active = False
         self.ready_users: set[str] = set()
         self.expected_user_ids: set[str] = set()
+        self._lobby_full_prompt_task: asyncio.Task | None = None
+        self._lobby_full_prompt_message: "discord.Message | None" = None
+        self._lobby_full_prompted = False
         self._ready_check_started_at = 0.0
         self.lobby_status_message: object | None = None
         self.ready_check_progress_message: object | None = None
@@ -282,10 +292,7 @@ class PodDraftManager:
 
         self._refresh_mock_lobby()
 
-        if self.seating_mode == "leaderboard":
-            if self.owner_claimed:
-                asyncio.create_task(self._apply_leaderboard_seating())
-            notify_seeding_change(self.bot, self.event_id)
+        self._sync_leaderboard_seeding()
 
         if self.ready_check_active:
             current = {u.get("userID") for u in self.player_session_users()}
@@ -327,6 +334,8 @@ class PodDraftManager:
             if not self.draft_complete:
                 await self.refresh_lobby_now()
                 self._refresh_mock_lobby()
+                if renamed_roster:
+                    self._sync_leaderboard_seeding()
 
     @staticmethod
     def _apply_user_update(rows: list[dict], user_id: str, updates: dict) -> bool:
@@ -460,6 +469,8 @@ class PodDraftManager:
         command passes a lower one so a small pod can be readied."""
         if not self.sio.connected:
             return "Draftmancer session is not connected."
+        if self.drafting or self.draft_complete:
+            return "The draft has already started."
         if self.ready_check_active:
             return "Ready check already in progress."
         non_bot = self.player_session_users()
@@ -469,11 +480,14 @@ class PodDraftManager:
         if len(non_bot) < min_players:
             return (
                 f"Ready check is only available with {min_players} or more players. "
-                f"Currently {len(non_bot)} in the Draftmancer lobby."
+                f"Currently {len(non_bot)} in the Draftmancer lobby.\n"
+                "Wait for more players to join, or run `/pod-start` to start the draft now, "
+                "skipping the ready check."
             )
         self.expected_user_ids = {u.get("userID") for u in non_bot}
         self.ready_users = set()
         self.ready_check_active = True
+        self._suppress_lobby_full_prompt()
         self._ready_check_started_at = asyncio.get_running_loop().time()
         self.initiated_by = initiated_by
         prior_decliner = self.last_decliner_name
@@ -650,6 +664,7 @@ class PodDraftManager:
             **self._settings_labels(),
         )
         has_unrecognized = any(dn is None for _, dn in classified)
+        self._maybe_schedule_lobby_full_prompt(classified)
         view = (
             None if state in ("drafting", "complete")
             else LobbyReadyButtonView(
@@ -1043,6 +1058,7 @@ class PodDraftManager:
         self.drafting = True
         log.info(f"[DRAFT] started event={self.event_id} session_users={len(self.session_users)}")
         self._schedule_end_watchdog()
+        await self._retire_lobby_full_prompt()
         await asyncio.to_thread(self._seed_participants_at_draft_start)
         await self.refresh_lobby_now()
         thread = await self._fetch_thread()
@@ -1122,6 +1138,78 @@ class PodDraftManager:
             return "Could not remove the player."
         log.info(f"[KICK] removed event={self.event_id} user_id={user_id}")
         return None
+
+    def _sync_leaderboard_seeding(self) -> None:
+        """Re-apply leaderboard seating and refresh the posted seeding table after the player pool or a
+        name changes. No-op unless the pod is leaderboard-seated. Fires from both the sessionUsers and
+        the updateUser-rename paths so a name set after connect can't leave the seating one player behind."""
+        if self.seating_mode != "leaderboard":
+            return
+        if self.owner_claimed:
+            asyncio.create_task(self._apply_leaderboard_seating())
+        notify_seeding_change(self.bot, self.event_id)
+
+    @staticmethod
+    def _lobby_pod_full(classified: list[tuple[str, str | None]]) -> bool:
+        """A full, ready-checkable pod: a full pod's worth of players present and every one of them
+        linked. Unlinked players can't draft and disable the Ready Check, so they don't count."""
+        if any(display is None for _, display in classified):
+            return False
+        return len(classified) >= _LOBBY_FULL_THRESHOLD
+
+    def _suppress_lobby_full_prompt(self) -> None:
+        """Retire the auto-nudge for this lobby once a Ready Check has been initiated, so it can't fire
+        later even if that check is declined and the lobby returns to idle, and delete its posted message
+        so the stale Ready Check button can't be clicked."""
+        self._lobby_full_prompted = True
+        if self._lobby_full_prompt_task is not None:
+            self._lobby_full_prompt_task.cancel()
+            self._lobby_full_prompt_task = None
+        if self._lobby_full_prompt_message is not None:
+            asyncio.create_task(self._retire_lobby_full_prompt())
+
+    async def _retire_lobby_full_prompt(self) -> None:
+        """Delete the posted lobby-full nudge so its buttons can't outlive the lobby. Best-effort."""
+        message = self._lobby_full_prompt_message
+        self._lobby_full_prompt_message = None
+        if message is None:
+            return
+        try:
+            await message.delete()
+        except discord.HTTPException:
+            log.info(f"[LOBBY] full_prompt_delete_failed event={self.event_id}", exc_info=True)
+
+    def _maybe_schedule_lobby_full_prompt(self, classified: list[tuple[str, str | None]]) -> None:
+        """Arm a one-shot nudge to start a Ready Check once the lobby first fills with a full pod of
+        linked players. The delayed task re-validates before posting, so a transient dip-and-refill is
+        harmless and a sustained drop just lets it lapse. Sent at most once per lobby."""
+        if (self.kind == "mock" or self.draft_complete or self.drafting
+                or self.ready_check_active or self._lobby_full_prompted):
+            return
+        if not self._lobby_pod_full(classified):
+            return
+        if self._lobby_full_prompt_task is not None and not self._lobby_full_prompt_task.done():
+            return
+        self._lobby_full_prompt_task = asyncio.create_task(self._lobby_full_prompt_after_delay())
+
+    async def _lobby_full_prompt_after_delay(self) -> None:
+        try:
+            await asyncio.sleep(_LOBBY_FULL_PROMPT_DELAY_S)
+        except asyncio.CancelledError:
+            return
+        if self.draft_complete or self.drafting or self.ready_check_active or self._lobby_full_prompted:
+            return
+        if not self._lobby_pod_full(await self.classified_session_users()):
+            return
+        thread = await self._fetch_thread()
+        if thread is None:
+            return
+        self._lobby_full_prompted = True
+        try:
+            self._lobby_full_prompt_message = await thread.send(MSG_LOBBY_FULL_PROMPT, view=LobbyReadyButtonView())
+        except discord.HTTPException:
+            self._lobby_full_prompted = False
+            log.warning(f"[LOBBY] full_prompt_send_failed event={self.event_id}", exc_info=True)
 
     async def apply_seating_mode(self) -> None:
         """Push the current seating_mode to the live table. Leaderboard recomputes the seeded order
