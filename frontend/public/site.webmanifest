@@ -1,0 +1,13 @@
+{
+  "name": "Limited Level-Ups",
+  "short_name": "Level-Ups",
+  "description": "Check ranks and trophies from the community.",
+  "icons": [
+    { "src": "/icon-192.png", "type": "image/png", "sizes": "192x192" },
+    { "src": "/icon-512.png", "type": "image/png", "sizes": "512x512" }
+  ],
+  "theme_color": "#2ecc71",
+  "background_color": "#000000",
+  "display": "standalone",
+  "start_url": "/"
+}
