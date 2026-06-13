@@ -35,6 +35,9 @@ cache/
 # Supabase CLI local cache
 supabase/.temp/
 
+# Local design mockups and screenshots
+design/
+
 # Vite + TypeScript build artifacts
 frontend/dist/
 frontend/node_modules/
