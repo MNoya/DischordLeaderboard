@@ -1,10 +1,10 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { PageShell } from "../components/PageShell";
-import { CtaPill } from "../components/CtaPill";
+import { ChamferCta, CUT_CORNER_CHAMFER } from "../components/ChamferCta";
 import { DiscordIcon } from "../components/BrandIcons";
-import { ArrowRight } from "../components/Icons";
+import { ArrowRight, ChevronLeft, ChevronRight } from "../components/Icons";
 import { CategoryTag } from "../components/CategoryTag";
 import { Pips } from "../components/ManaPips";
 import { GiRoundTable } from "react-icons/gi";
@@ -16,6 +16,7 @@ import { TierSetDropdown } from "../components/TierSetDropdown";
 import {
   CardModal,
   CardPreview,
+  comparePagerOrder,
   PREVIEW_EXTRAS_H,
   PREVIEW_GAP,
   PREVIEW_RATIO,
@@ -24,9 +25,9 @@ import {
 } from "../components/TierGrid";
 import {
   useAvailableFormats,
-  useEpisodes,
   useFormatLeaderboard,
   useLeaderboard,
+  useMediaFeed,
   usePodEvents,
   useSets,
 } from "../data/hooks";
@@ -43,7 +44,7 @@ import { cn } from "../lib/utils";
 export function HomePage() {
   const { data: sets } = useSets();
   const setCode = sets?.find((s) => s.isActive)?.code ?? ACTIVE_SET_CODE;
-  const { data: episodes } = useEpisodes();
+  const { data: episodes } = useMediaFeed();
 
   return (
     <PageShell subtitle="HOME" fill>
@@ -135,21 +136,38 @@ function IdentityPanel() {
     { label: "Twitch", url: SITE_LINKS.twitch, Icon: SiTwitch },
     { label: "Patreon", url: SITE_LINKS.patreon, Icon: SiPatreon },
   ];
+  const offerings = ["Weekly episodes", "Set review tier lists", "Strategy discussion", "Community events"];
   return (
     <section className="order-1 lg:order-none bg-surface border border-border rounded-xl p-4 flex flex-col gap-3 shrink-0">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="font-display text-text text-[20px] tracking-[0.05em]">Limited Level-Ups</h2>
-        <span className="mono text-[10px] tracking-[0.16em] text-muted uppercase">The show</span>
-      </div>
-      <p className="text-subtle text-[13px] leading-[1.5]">
-        A weekly Magic: The Gathering Limited podcast — every set covered from first impressions through sunset.
+      <h2 className="font-display text-text text-[20px] tracking-[0.05em]">About the Community</h2>
+      <p className="text-subtle text-[13px] leading-[1.5] text-center">
+        Everything you need to get better at <span className="text-green">Limited Magic</span>
       </p>
-      <p className="mono text-[10px] tracking-[0.04em] text-muted">
-        Hosted by {HOST.name} ({HOST.handle}) · on YouTube &amp; all podcast apps
+      <ul className="grid grid-cols-[auto_auto] gap-x-6 gap-y-1.5 self-center">
+        {offerings.map((item) => (
+          <li key={item} className="flex items-center gap-2.5 text-subtle text-[13px] leading-tight">
+            <span className="w-[5px] h-[5px] shrink-0 bg-green rotate-45" />
+            {item}
+          </li>
+        ))}
+      </ul>
+      <p className="text-subtle text-[13px] leading-[1.5] text-center">
+        Join the <span className="text-green">Discord</span> to connect with other Limited players, draft with us and climb the leaderboard!
       </p>
-      <a href={SITE_LINKS.discord} target="_blank" rel="noreferrer" className="self-center no-underline mt-0.5">
-        <CtaPill size="sm" icon={<DiscordIcon size={15} />}>JOIN THE DISCORD</CtaPill>
-      </a>
+      <ChamferCta
+        label="JOIN THE DISCHORD"
+        href={SITE_LINKS.discord}
+        target="_blank"
+        className="self-center mt-0.5"
+        icon={
+          <span className="inline-flex items-center justify-center w-[22px] h-[22px] rounded-full bg-bg text-white shrink-0">
+            <DiscordIcon size={14} />
+          </span>
+        }
+      />
+      <p className="mono text-[12px] tracking-[0.04em] text-subtle text-center">
+        Hosted by {HOST.name} <i>@{HOST.handle}</i>
+      </p>
       <div className="grid grid-cols-3 gap-2">
         {socials.map(({ label, url, Icon }) => (
           <a
@@ -157,7 +175,8 @@ function IdentityPanel() {
             href={url}
             target="_blank"
             rel="noreferrer"
-            className="mono text-[12px] tracking-[0.04em] flex items-center justify-center gap-1.5 bg-surface2 border border-border2 py-1.5 rounded text-subtle no-underline hover:border-green hover:text-green transition-colors"
+            className="mono text-[12px] tracking-[0.04em] flex items-center justify-center gap-1.5 bg-surface2 py-2 text-subtle no-underline hover:bg-border hover:text-green transition-colors"
+            style={{ clipPath: CUT_CORNER_CHAMFER }}
           >
             <Icon className="text-[13px]" />
             {label}
@@ -168,7 +187,7 @@ function IdentityPanel() {
   );
 }
 
-const TIER_SECONDS_PER_CARD = 3;
+const CARDS_PER_PAGE = 5;
 
 function TierPanel() {
   const { data: sets } = useSets();
@@ -180,7 +199,7 @@ function TierPanel() {
   const graders = TIER_LIST_GRADERS[current] ?? [];
   const { data } = useTierList(uid, graders);
   const rows = useMemo(() => sampleTiers(data?.filter((card) => card.inclusion_type === "Main Set")), [data]);
-  const allCards = useMemo(() => rows.flatMap((row) => row.cards), [rows]);
+  const allCards = useMemo(() => rows.flatMap((row) => row.cards).sort(comparePagerOrder), [rows]);
 
   const [hover, setHover] = useState<{ card: TierCard; anchor: PreviewAnchor } | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -207,7 +226,6 @@ function TierPanel() {
       isMobile={false}
       compact
       square
-      menuAlign="side-right"
       triggerClassName="w-[92px]"
       openOnHover
       loading={!sets}
@@ -219,41 +237,17 @@ function TierPanel() {
     <Panel title="SET REVIEW" to={`/tier-list/${current}`} corner={tierDropdown} action="Full Tier List Review" className="order-3 lg:order-none flex-1">
       {rows.length ? (
         <div className="-mx-4 flex-1 min-h-0 flex flex-col border-y border-border">
-          {rows.map((row, rowIndex) => (
-            <div key={row.letter} className="h-[84px] lg:h-auto lg:flex-1 min-h-0 flex items-stretch border-t border-border first:border-t-0">
-              <span
-                className="font-display w-10 shrink-0 flex items-center justify-center text-[17px] text-text bg-[#0e1218] border-r border-border"
-                style={{ borderLeft: `5px solid ${row.color}` }}
-              >
-                {row.letter}
-              </span>
-              <div className="flex-1 min-h-0 overflow-x-auto lg:overflow-hidden no-scrollbar flex items-center">
-                <div
-                  className="flex h-full items-center w-max shrink-0 lg:animate-marquee motion-reduce:animate-none hover:[animation-play-state:paused]"
-                  style={{
-                    animationDuration: `${row.cards.length * TIER_SECONDS_PER_CARD}s`,
-                    animationDelay: `${rowIndex * (TIER_SECONDS_PER_CARD / 2) + 1}s`,
-                  }}
-                >
-                  {[...row.cards, ...row.cards].map((card, i) => (
-                    <div key={`${card.card_id}-${i}`} className="h-full shrink-0 pr-1.5 flex items-center">
-                      <img
-                        src={card.url}
-                        alt={i < row.cards.length ? card.name : ""}
-                        aria-hidden={i >= row.cards.length}
-                        onMouseEnter={(e) => showPreview(e.currentTarget, card)}
-                        onMouseLeave={() => setHover(null)}
-                        onClick={() => {
-                          setHover(null);
-                          setSelectedId(card.card_id);
-                        }}
-                        className="h-full w-auto rounded-[2px] border border-black cursor-pointer"
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
+          {rows.map((row) => (
+            <TierCardRow
+              key={row.letter}
+              row={row}
+              onPreview={showPreview}
+              onLeave={() => setHover(null)}
+              onSelect={(card) => {
+                setHover(null);
+                setSelectedId(card.card_id);
+              }}
+            />
           ))}
         </div>
       ) : (
@@ -281,27 +275,194 @@ function TierPanel() {
   );
 }
 
+const CARD_ASPECT = "745 / 1040";
+
+function TierCardRow({
+  row,
+  onPreview,
+  onLeave,
+  onSelect,
+}: {
+  row: { letter: string; color: string; cards: TierCard[] };
+  onPreview: (el: HTMLElement, card: TierCard) => void;
+  onLeave: () => void;
+  onSelect: (card: TierCard) => void;
+}) {
+  const clipRef = useRef<HTMLDivElement>(null);
+  const [edges, setEdges] = useState({ left: false, right: false });
+
+  const syncEdges = () => {
+    const el = clipRef.current;
+    if (!el) {
+      return;
+    }
+    const maxScroll = el.scrollWidth - el.clientWidth;
+    setEdges({ left: el.scrollLeft > 1, right: el.scrollLeft < maxScroll - 1 });
+  };
+
+  useEffect(() => {
+    const el = clipRef.current;
+    if (!el) {
+      return;
+    }
+    syncEdges();
+    const observer = new ResizeObserver(syncEdges);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [row.cards.length]);
+
+  const page = (direction: 1 | -1) => {
+    const el = clipRef.current;
+    if (!el) {
+      return;
+    }
+    const card = el.querySelector<HTMLElement>("[data-card]");
+    const stride = card ? card.offsetWidth : el.clientWidth / CARDS_PER_PAGE;
+    el.scrollBy({ left: stride * CARDS_PER_PAGE * direction, behavior: "smooth" });
+  };
+
+  return (
+    <div className="group/row relative h-[84px] lg:h-auto lg:flex-1 min-h-0 flex items-stretch border-t border-border first:border-t-0">
+      <span
+        className="font-display w-10 shrink-0 flex items-center justify-center text-[17px] text-text bg-[#0e1218] border-r border-border"
+        style={{ borderLeft: `5px solid ${row.color}` }}
+      >
+        {row.letter}
+      </span>
+      <div
+        ref={clipRef}
+        onScroll={syncEdges}
+        className="flex-1 min-h-0 overflow-x-auto no-scrollbar flex items-center scroll-smooth"
+      >
+        <div className="flex h-full items-center w-max shrink-0">
+          {row.cards.map((card) => (
+            <div key={card.card_id} data-card className="h-full shrink-0 pr-1.5 flex items-center">
+              <LazyCardImg card={card} rootRef={clipRef} onPreview={onPreview} onLeave={onLeave} onSelect={onSelect} />
+            </div>
+          ))}
+        </div>
+      </div>
+      <PageChevron direction={-1} show={edges.left} onClick={() => page(-1)} />
+      <PageChevron direction={1} show={edges.right} onClick={() => page(1)} />
+    </div>
+  );
+}
+
+function PageChevron({ direction, show, onClick }: { direction: 1 | -1; show: boolean; onClick: () => void }) {
+  const Icon = direction === 1 ? ChevronRight : ChevronLeft;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={direction === 1 ? "Show later cards" : "Show earlier cards"}
+      className={cn(
+        "absolute inset-y-0 z-10 flex w-12 items-center px-1.5 transition-opacity",
+        direction === 1 ? "right-0 justify-end bg-gradient-to-l" : "left-10 justify-start bg-gradient-to-r",
+        "from-bg/90 to-transparent",
+        show ? "opacity-100" : "pointer-events-none opacity-0",
+      )}
+    >
+      <span className="flex h-6 w-6 items-center justify-center rounded-full border border-border2 bg-surface2/90 text-text transition-colors hover:border-green hover:text-green">
+        <Icon size={14} />
+      </span>
+    </button>
+  );
+}
+
+function LazyCardImg({
+  card,
+  rootRef,
+  onPreview,
+  onLeave,
+  onSelect,
+}: {
+  card: TierCard;
+  rootRef: RefObject<HTMLDivElement>;
+  onPreview: (el: HTMLElement, card: TierCard) => void;
+  onLeave: () => void;
+  onSelect: (card: TierCard) => void;
+}) {
+  const ref = useRef<HTMLImageElement>(null);
+  const [load, setLoad] = useState(false);
+  useEffect(() => {
+    if (load) {
+      return;
+    }
+    const el = ref.current;
+    if (!el) {
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setLoad(true);
+          observer.disconnect();
+        }
+      },
+      { root: rootRef.current, rootMargin: "0px 300px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [load, rootRef]);
+
+  return (
+    <img
+      ref={ref}
+      src={load ? card.url : undefined}
+      alt={card.name}
+      decoding="async"
+      onMouseEnter={(e) => onPreview(e.currentTarget, card)}
+      onMouseLeave={onLeave}
+      onClick={() => onSelect(card)}
+      className="h-full w-auto rounded-[2px] border border-black bg-surface2 cursor-pointer"
+      style={{ aspectRatio: CARD_ASPECT }}
+    />
+  );
+}
+
 function EpisodesHero({ episodes, loading }: { episodes: Episode[]; loading: boolean }) {
   return (
-    <Panel title="LATEST EPISODES" to="/episodes" corner="new weekly" action="View All Episodes" className="order-2 lg:order-none lg:h-full">
+    <Panel title="LATEST CONTENT" to="/episodes" corner="podcast & youtube" action="View All Episodes" className="order-2 lg:order-none lg:h-full">
       {loading ? (
-        <div className="grid grid-cols-2 gap-4 flex-1 min-h-0">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="bg-surface2 border border-border rounded-lg animate-pulse" />
-          ))}
-        </div>
+        <>
+          <div className="lg:hidden flex flex-col gap-4">
+            <div className="aspect-video bg-surface2 border border-border rounded-lg animate-pulse" />
+            <div className="grid grid-cols-2 gap-4">
+              {Array.from({ length: 2 }).map((_, i) => (
+                <div key={i} className="aspect-video bg-surface2 border border-border rounded-lg animate-pulse" />
+              ))}
+            </div>
+          </div>
+          <div className="hidden lg:grid grid-cols-2 gap-4 flex-1 min-h-0">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="bg-surface2 border border-border rounded-lg animate-pulse" />
+            ))}
+          </div>
+        </>
       ) : (
-        <div className="grid grid-cols-2 gap-4 flex-1 min-h-0">
-          {episodes.map((ep) => (
-            <HeroEpisodeCard key={ep.id} episode={ep} />
-          ))}
-        </div>
+        <>
+          <div className="lg:hidden flex flex-col gap-4">
+            {episodes[0] ? <HeroEpisodeCard episode={episodes[0]} /> : null}
+            {episodes.length > 1 ? (
+              <div className="grid grid-cols-2 gap-4">
+                {episodes.slice(1, 3).map((ep) => (
+                  <HeroEpisodeCard key={ep.id} episode={ep} compact />
+                ))}
+              </div>
+            ) : null}
+          </div>
+          <div className="hidden lg:grid grid-cols-2 gap-4 flex-1 min-h-0">
+            {episodes.map((ep) => (
+              <HeroEpisodeCard key={ep.id} episode={ep} />
+            ))}
+          </div>
+        </>
       )}
     </Panel>
   );
 }
 
-function HeroEpisodeCard({ episode }: { episode: Episode }) {
+function HeroEpisodeCard({ episode, className, compact = false }: { episode: Episode; className?: string; compact?: boolean }) {
   const meta = [episode.publishedLabel.toUpperCase(), episode.number ? `EP ${episode.number}` : null]
     .filter(Boolean)
     .join(" · ");
@@ -310,14 +471,28 @@ function HeroEpisodeCard({ episode }: { episode: Episode }) {
       href={episode.link}
       target="_blank"
       rel="noreferrer"
-      className="group/ep flex flex-col min-h-0 border border-border rounded-lg overflow-hidden bg-surface2 no-underline transition-colors hover:border-green"
+      className={cn(
+        "group/ep flex flex-col min-h-0 border border-border rounded-lg overflow-hidden bg-surface2 no-underline transition-colors hover:border-green",
+        className,
+      )}
     >
-      <div className="relative flex-1 min-h-0 bg-surface">
+      <div className="relative aspect-video lg:aspect-auto lg:flex-1 lg:min-h-0 bg-surface">
         {episode.image ? (
           <img src={episode.image} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover" />
         ) : null}
-        <CategoryTag category={episode.category} className="absolute top-2 left-2" />
-        {episode.durationLabel ? (
+        {!compact ? <CategoryTag category={episode.category} className="absolute top-2 left-2" /> : null}
+        {episode.kind === "video" ? (
+          compact ? (
+            <span className="absolute bottom-2 right-2 inline-flex items-center bg-red text-text px-1 py-0.5">
+              <SiYoutube className="text-[12px]" />
+            </span>
+          ) : (
+            <span className="absolute top-2 right-2 inline-flex items-center gap-1 mono text-[10px] tracking-[0.08em] text-text bg-red px-1.5 py-0.5">
+              <SiYoutube className="text-[11px]" /> VIDEO
+            </span>
+          )
+        ) : null}
+        {!compact && episode.durationLabel ? (
           <span className="absolute bottom-2 right-2 mono text-[10px] text-text bg-bg/85 px-1.5 py-0.5">
             {episode.durationLabel}
           </span>
@@ -609,7 +784,7 @@ function PodDraftsPanel({ setCode }: { setCode: string }) {
   );
 
   return (
-    <Panel title="POD DRAFTS" to="/pods" corner={setDisplay} action="Check Replays & pods" actionBorder headerBorder className="order-5 lg:order-none">
+    <Panel title="POD DRAFTS" to="/pods" corner={setDisplay} action="Check Draft Replays" actionBorder headerBorder className="order-5 lg:order-none">
       {entries.length ? (
         <div className="flex flex-col -mx-4">
           {entries.map((entry) => (
@@ -669,7 +844,7 @@ function PodRow({ entry }: { entry: PodEntry }) {
       </span>
       <div className="min-w-0 flex-1">
         <div className="text-[13px] font-medium text-text truncate">{title}</div>
-        <div className="mono text-[10px] text-muted flex items-center gap-1.5 min-w-0">{sub}</div>
+        <div className="mono text-[12px] text-muted flex items-center gap-1.5 min-w-0">{sub}</div>
       </div>
       {upcoming ? (
         <PodCountdown target={podStartMs(event)} />
@@ -728,8 +903,8 @@ function splitPods(events: PodEventSummary[] | undefined): PodEntry[] {
   }
   const now = Date.now();
   const future = events
-    .filter((e) => !e.isFinalized && new Date(e.eventDate).getTime() >= now)
-    .sort((a, b) => new Date(a.eventDate).getTime() - new Date(b.eventDate).getTime());
+    .filter((e) => !e.isFinalized && podStartMs(e) >= now)
+    .sort((a, b) => podStartMs(a) - podStartMs(b));
   const past = events.filter((e) => !future.includes(e));
   const entries: PodEntry[] = [];
   if (future[0]) {

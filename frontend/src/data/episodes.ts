@@ -15,8 +15,11 @@ export const EPISODE_CATEGORIES = [
 
 export type EpisodeCategory = (typeof EPISODE_CATEGORIES)[number];
 
+export type MediaKind = "episode" | "video";
+
 export interface Episode {
   id: string;
+  kind: MediaKind;
   number: number | null;
   title: string;
   link: string;
@@ -28,6 +31,8 @@ export interface Episode {
   image: string;
   category: EpisodeCategory;
   summary: string;
+  youtubeId?: string;
+  videoUrl?: string;
 }
 
 export async function fetchEpisodes(): Promise<Episode[]> {
@@ -51,6 +56,7 @@ export async function fetchEpisodes(): Promise<Episode[]> {
     const pubDate = text(item, "pubDate");
     return {
       id: text(item, "guid") || item.querySelector("enclosure")?.getAttribute("url") || rawTitle,
+      kind: "episode" as const,
       number: parseEpisodeNumber(rawTitle),
       title: cleanTitle(rawTitle),
       link: text(item, "link"),
@@ -74,7 +80,7 @@ const CATEGORY_KEYWORDS: Array<[EpisodeCategory, RegExp]> = [
   ["Set Review", /set review|ranking|tier list|best|underrated|overrated|commons|uncommons|rares|mythics|cards/i],
 ];
 
-function inferCategory(title: string): EpisodeCategory {
+export function inferCategory(title: string): EpisodeCategory {
   for (const [category, pattern] of CATEGORY_KEYWORDS) {
     if (pattern.test(title)) {
       return category;
@@ -83,12 +89,12 @@ function inferCategory(title: string): EpisodeCategory {
   return "Strategy";
 }
 
-function parseEpisodeNumber(title: string): number | null {
+export function parseEpisodeNumber(title: string): number | null {
   const match = title.match(/#\s*(\d+)/);
   return match ? Number(match[1]) : null;
 }
 
-function cleanTitle(title: string): string {
+export function cleanTitle(title: string): string {
   return title.replace(/^(?:llu|limited level-?ups)\s*#?\s*\d+\s*[:\-–]\s*/i, "").trim() || title;
 }
 
@@ -114,7 +120,7 @@ function formatDuration(seconds: number): string {
   return hours ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
-function formatPublished(pubDate: string): string {
+export function formatPublished(pubDate: string): string {
   const date = new Date(pubDate);
   if (Number.isNaN(date.getTime())) {
     return "";

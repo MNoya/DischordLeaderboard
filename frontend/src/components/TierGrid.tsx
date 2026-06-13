@@ -289,7 +289,7 @@ const COLUMN_INDEX: Record<string, number> = Object.fromEntries(COLUMN_CODES.map
 // Pager walks by color column (W→U→B→R→G→multi→colorless), then keeps each
 // expansion's block contiguous, then printed number. Expansion matters because a
 // merged list reuses collector numbers across sets. Alt-art "PROMO-12" sorts last.
-function comparePagerOrder(a: TierCard, b: TierCard): number {
+export function comparePagerOrder(a: TierCard, b: TierCard): number {
   const da = COLUMN_INDEX[columnOf(a.color)] ?? COLUMN_CODES.length;
   const db = COLUMN_INDEX[columnOf(b.color)] ?? COLUMN_CODES.length;
   if (da !== db) return da - db;

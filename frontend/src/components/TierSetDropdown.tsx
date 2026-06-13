@@ -142,7 +142,7 @@ export function TierSetDropdown({
                 ? "right-0 top-[calc(100%+6px)]"
                 : menuAlign === "center"
                   ? "left-1/2 -translate-x-1/2 top-[calc(100%+6px)]"
-                  : "left-1 top-[calc(100%+6px)] min-w-full",
+                  : "left-0 top-full min-w-full",
           )}
         >
           {searchable && (

@@ -18,9 +18,9 @@ export function SiteFooter({ flush = false }: { flush?: boolean }) {
   const links = [...LISTEN_ON, { label: "Patreon", url: SITE_LINKS.patreon }];
   const row = (
     <div className="flex flex-col-reverse gap-3 text-[11px] md:text-[12px] text-muted md:flex-row md:items-center md:justify-between">
-      <span className="mono flex flex-col gap-0.5 text-center text-[10px] leading-tight md:text-left">
-        <span>© Limited Level-Ups is unofficial Fan Content permitted under the Fan Content Policy.</span>
-        <span>Not approved/endorsed by Wizards. Portions © Wizards of the Coast.</span>
+      <span className="mono block text-center text-[10px] leading-tight md:flex md:flex-col md:gap-0.5 md:text-left">
+        <span>© Limited Level-Ups is unofficial Fan Content permitted under the Fan Content Policy.</span>{" "}
+        <span>Not approved or endorsed by Wizards. Portions © Wizards of the Coast.</span>
       </span>
       <nav className="flex items-center justify-center gap-4 font-display tracking-[0.12em] text-[13px] md:justify-end">
         {links.map(({ label, url }) => {

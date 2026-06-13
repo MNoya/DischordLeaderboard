@@ -30,6 +30,7 @@ import {
   fetchSets,
 } from "./api";
 import { fetchEpisodes } from "./episodes";
+import { fetchYouTubeVideos, mergeMedia } from "./youtube";
 import { MULTI, OTHER } from "./filters";
 const FIVE_MINUTES = 5 * 60 * 1000;
 const ONE_HOUR = 60 * 60 * 1000;
@@ -40,6 +41,30 @@ export function useEpisodes() {
     queryFn: fetchEpisodes,
     staleTime: ONE_HOUR,
   });
+}
+
+export function useYouTubeVideos() {
+  return useQuery({
+    queryKey: ["youtube"],
+    queryFn: fetchYouTubeVideos,
+    staleTime: ONE_HOUR,
+  });
+}
+
+export function useMediaFeed() {
+  const episodes = useEpisodes();
+  const videos = useYouTubeVideos();
+  const data = useMemo(() => {
+    if (!episodes.data) {
+      return undefined;
+    }
+    return mergeMedia(episodes.data, videos.data ?? []);
+  }, [episodes.data, videos.data]);
+  return {
+    data,
+    isLoading: episodes.isLoading,
+    isError: episodes.isError,
+  };
 }
 
 export function useSets() {

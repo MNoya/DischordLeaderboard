@@ -1,8 +1,7 @@
+import { SiYoutube } from "react-icons/si";
 import type { Episode } from "../data/episodes";
 import { CategoryTag } from "./CategoryTag";
 
-// Cover thumbnail + meta + title + category tag. Reused by the home recent-grid
-// and the episodes archive; sizing is driven by its grid cell, not the card.
 export function EpisodeCard({ episode }: { episode: Episode }) {
   const meta = [episode.publishedLabel.toUpperCase(), episode.number ? `EP ${episode.number}` : null]
     .filter(Boolean)
@@ -12,6 +11,11 @@ export function EpisodeCard({ episode }: { episode: Episode }) {
       <div className="relative aspect-video bg-surface border border-border overflow-hidden transition-colors group-hover:border-green">
         {episode.image ? (
           <img src={episode.image} alt="" loading="lazy" className="h-full w-full object-cover" />
+        ) : null}
+        {episode.kind === "video" ? (
+          <span className="absolute top-2 right-2 inline-flex items-center gap-1 mono text-[10px] tracking-[0.08em] text-text bg-red px-1.5 py-0.5">
+            <SiYoutube className="text-[11px]" /> VIDEO
+          </span>
         ) : null}
         {episode.durationLabel ? (
           <span className="absolute bottom-2 right-2 mono text-[11px] text-text bg-bg/85 px-1.5 py-0.5">

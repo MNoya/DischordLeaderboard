@@ -4,7 +4,7 @@ import { PageShell } from "../components/PageShell";
 import { Container } from "../components/Container";
 import { EpisodeCard } from "../components/EpisodeCard";
 import { ChamferedButton } from "../components/ChamferedButton";
-import { useEpisodes } from "../data/hooks";
+import { useMediaFeed } from "../data/hooks";
 import { EPISODE_CATEGORIES, type Episode, type EpisodeCategory } from "../data/episodes";
 import { cn } from "../lib/utils";
 
@@ -13,7 +13,7 @@ type SortKey = "newest" | "oldest" | "longest";
 const PAGE_SIZE = 12;
 
 export function EpisodesPage() {
-  const { data: episodes, isLoading, isError } = useEpisodes();
+  const { data: episodes, isLoading, isError } = useMediaFeed();
   const [params, setParams] = useSearchParams();
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("newest");

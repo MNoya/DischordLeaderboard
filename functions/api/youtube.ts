@@ -1,0 +1,113 @@
+// Pulls the channel's full uploads catalog from the YouTube Data API v3, which
+// needs a key the browser can't carry. Resolves the handle to its uploads
+// playlist, pages through it, and returns normalized items. Edge-cached so the
+// quota cost stays near zero. In dev the same path is served by a vite plugin.
+interface Env {
+  YOUTUBE_API_KEY: string;
+}
+
+const CHANNEL_HANDLE = "limitedlevel-ups";
+const MAX_PAGES = 10;
+const API = "https://www.googleapis.com/youtube/v3";
+
+export const onRequestGet: PagesFunction<Env> = async (context) => {
+  const key = context.env.YOUTUBE_API_KEY;
+  if (!key) {
+    return new Response("Missing YOUTUBE_API_KEY", { status: 500 });
+  }
+
+  const uploads = await resolveUploadsPlaylist(key);
+  if (!uploads) {
+    return new Response("Could not resolve uploads playlist", { status: 502 });
+  }
+
+  const videos = await fetchPlaylist(uploads, key);
+  return new Response(JSON.stringify({ videos }), {
+    status: 200,
+    headers: {
+      "content-type": "application/json",
+      "cache-control": "public, max-age=3600",
+    },
+  });
+};
+
+async function resolveUploadsPlaylist(key: string): Promise<string | null> {
+  const url = `${API}/channels?part=contentDetails&forHandle=${CHANNEL_HANDLE}&key=${key}`;
+  const res = await fetch(url, { cf: { cacheTtl: 86400, cacheEverything: true } });
+  if (!res.ok) {
+    return null;
+  }
+  const json = (await res.json()) as YouTubeChannelResponse;
+  return json.items?.[0]?.contentDetails?.relatedPlaylists?.uploads ?? null;
+}
+
+async function fetchPlaylist(playlistId: string, key: string): Promise<NormalizedVideo[]> {
+  const videos: NormalizedVideo[] = [];
+  let pageToken = "";
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const url =
+      `${API}/playlistItems?part=snippet&maxResults=50&playlistId=${playlistId}&key=${key}` +
+      (pageToken ? `&pageToken=${pageToken}` : "");
+    const res = await fetch(url, { cf: { cacheTtl: 3600, cacheEverything: true } });
+    if (!res.ok) {
+      break;
+    }
+    const json = (await res.json()) as YouTubePlaylistResponse;
+    for (const item of json.items ?? []) {
+      const video = normalize(item);
+      if (video) {
+        videos.push(video);
+      }
+    }
+    if (!json.nextPageToken) {
+      break;
+    }
+    pageToken = json.nextPageToken;
+  }
+  return videos;
+}
+
+function normalize(item: YouTubePlaylistItem): NormalizedVideo | null {
+  const snippet = item.snippet;
+  const videoId = snippet?.resourceId?.videoId;
+  const title = snippet?.title ?? "";
+  if (!videoId || title === "Private video" || title === "Deleted video") {
+    return null;
+  }
+  const thumbs = snippet?.thumbnails ?? {};
+  const best = thumbs.maxres ?? thumbs.standard ?? thumbs.high ?? thumbs.medium ?? thumbs.default;
+  return {
+    id: videoId,
+    title,
+    publishedAt: snippet?.publishedAt ?? "",
+    description: snippet?.description ?? "",
+    thumbnail: best?.url ?? "",
+  };
+}
+
+interface NormalizedVideo {
+  id: string;
+  title: string;
+  publishedAt: string;
+  description: string;
+  thumbnail: string;
+}
+
+interface YouTubeChannelResponse {
+  items?: Array<{ contentDetails?: { relatedPlaylists?: { uploads?: string } } }>;
+}
+
+interface YouTubePlaylistResponse {
+  items?: YouTubePlaylistItem[];
+  nextPageToken?: string;
+}
+
+interface YouTubePlaylistItem {
+  snippet?: {
+    title?: string;
+    description?: string;
+    publishedAt?: string;
+    resourceId?: { videoId?: string };
+    thumbnails?: Record<string, { url?: string } | undefined>;
+  };
+}
