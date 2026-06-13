@@ -34,3 +34,4 @@ export const fetchContestCards = impl.fetchContestCards;
 export const fetchContestVotes = impl.fetchContestVotes;
 export const upsertContestVote = impl.upsertContestVote;
 export const deleteContestVote = impl.deleteContestVote;
+export const initialAuthUser = impl.initialAuthUser;

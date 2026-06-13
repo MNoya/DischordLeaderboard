@@ -1167,3 +1167,5 @@ export const deleteContestVote = (
 ): Promise<void> => {
   throw new Error("P0P1 realApi: deleteContestVote not implemented");
 };
+
+export const initialAuthUser = null;

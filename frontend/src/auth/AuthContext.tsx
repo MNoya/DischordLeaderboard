@@ -1,5 +1,6 @@
 import { createContext, useEffect, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
+import { initialAuthUser } from "../data/api";
 import { supabase } from "../data/supabase";
 
 export interface AuthUser {
@@ -39,8 +40,8 @@ function mapSessionUser(session: Session | null): AuthUser | null {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [loading, setLoading] = useState(supabase !== null);
+  const [user, setUser] = useState<AuthUser | null>(initialAuthUser);
+  const [loading, setLoading] = useState(!initialAuthUser);
 
   useEffect(() => {
     if (!supabase) return;

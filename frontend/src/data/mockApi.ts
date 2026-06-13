@@ -426,3 +426,11 @@ export const deleteContestVote = async (
 ): Promise<void> => {
   contestVotes.delete(slot);
 };
+
+export { type AuthUser } from "../auth/AuthContext";
+export const initialAuthUser = {
+  id: "mock-user-id",
+  discordId: "123456789",
+  username: "MockPlayer",
+  avatarUrl: null,
+};
