@@ -11,8 +11,8 @@ import {
   fetchAvailableFormats,
   fetchColorsLeaderboard,
   fetchColorsSummary,
-  fetchContestCards,
-  fetchContestVotes,
+  fetchP0P1Cards,
+  fetchP0P1Entries,
   fetchFormatColorsLeaderboard,
   fetchFormatLeaderboard,
   fetchFormatRecentTrophies,
@@ -30,10 +30,10 @@ import {
   fetchPodSetCodes,
   fetchRecentTrophies,
   fetchSets,
-  upsertContestVote,
-  deleteContestVote,
+  upsertP0P1Entry,
+  deleteP0P1Entry,
 } from "./api";
-import type { ContestVote, SlotKey } from "../types/p0p1";
+import type { P0P1Entry, SlotKey } from "../types/p0p1";
 import { MULTI, OTHER } from "./filters";
 const FIVE_MINUTES = 5 * 60 * 1000;
 
@@ -321,34 +321,34 @@ export function usePodSetCodes() {
 
 // --- P0P1 contest ---
 
-export function useContestCards(setCode: string | undefined) {
+export function useP0P1Cards(setCode: string | undefined) {
   return useQuery({
-    queryKey: ["contest-cards", setCode],
-    queryFn: () => fetchContestCards(setCode!),
+    queryKey: ["p0p1-cards", setCode],
+    queryFn: () => fetchP0P1Cards(setCode!),
     enabled: !!setCode,
     staleTime: FIVE_MINUTES,
   });
 }
 
-export function useContestVotes(setCode: string | undefined) {
+export function useP0P1Entries(setCode: string | undefined) {
   return useQuery({
-    queryKey: ["contest-votes", setCode],
-    queryFn: () => fetchContestVotes(setCode!),
+    queryKey: ["p0p1-entries", setCode],
+    queryFn: () => fetchP0P1Entries(setCode!),
     enabled: !!setCode,
     staleTime: FIVE_MINUTES,
   });
 }
 
-export function useUpsertVote(setCode: string) {
+export function useUpsertP0P1Entry(setCode: string) {
   const qc = useQueryClient();
-  const queryKey = ["contest-votes", setCode];
+  const queryKey = ["p0p1-entries", setCode];
   return useMutation({
     mutationFn: ({ slot, cardName }: { slot: SlotKey; cardName: string }) =>
-      upsertContestVote(setCode, slot, cardName),
+      upsertP0P1Entry(setCode, slot, cardName),
     onMutate: async ({ slot, cardName }) => {
       await qc.cancelQueries({ queryKey });
-      const prev = qc.getQueryData<ContestVote[]>(queryKey);
-      qc.setQueryData<ContestVote[]>(queryKey, (old = []) => {
+      const prev = qc.getQueryData<P0P1Entry[]>(queryKey);
+      qc.setQueryData<P0P1Entry[]>(queryKey, (old = []) => {
         const next = old.filter((v) => v.slot !== slot);
         next.push({ slot, cardName, lastUpdated: new Date().toISOString() });
         return next;
@@ -363,10 +363,10 @@ export function useUpsertVote(setCode: string) {
   });
 }
 
-export function useDeleteVote(setCode: string) {
+export function useDeleteP0P1Entry(setCode: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (slot: SlotKey) => deleteContestVote(setCode, slot),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["contest-votes", setCode] }),
+    mutationFn: (slot: SlotKey) => deleteP0P1Entry(setCode, slot),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["p0p1-entries", setCode] }),
   });
 }

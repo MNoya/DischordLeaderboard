@@ -5,16 +5,16 @@ import { CtaPill } from "../components/CtaPill";
 import { DiscordIcon } from "../components/BrandIcons";
 import { SlotCard } from "../components/p0p1/SlotCard";
 import { useAuth } from "../auth/useAuth";
-import { useContestCards, useContestVotes, useUpsertVote } from "../data/hooks";
+import { useP0P1Cards, useP0P1Entries, useUpsertP0P1Entry } from "../data/hooks";
 import { P0P1_SET_CODE as SET_CODE, P0P1_VOTING_DEADLINE as VOTING_DEADLINE, SLOTS } from "../data/p0p1Slots";
 import type { MshCard } from "../types/p0p1";
 const SEVENTEEN_LANDS_URL = "https://www.17lands.com/card_data";
 
 export function P0P1Page() {
   const { user, loading: authLoading, signIn } = useAuth();
-  const { data: cards } = useContestCards(SET_CODE);
-  const { data: votes } = useContestVotes(user ? SET_CODE : undefined);
-  const upsertVote = useUpsertVote(SET_CODE);
+  const { data: cards } = useP0P1Cards(SET_CODE);
+  const { data: votes } = useP0P1Entries(user ? SET_CODE : undefined);
+  const upsertVote = useUpsertP0P1Entry(SET_CODE);
 
   const cardsByName = useMemo(() => {
     if (!cards) return new Map<string, MshCard>();

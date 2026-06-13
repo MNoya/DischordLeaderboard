@@ -4,7 +4,7 @@ import { ALogo, AWordmark } from "./Brand";
 import { cn } from "../lib/utils";
 import { useIsMobile } from "../lib/use-is-mobile";
 import { useAuth } from "../auth/useAuth";
-import { useContestVotes } from "../data/hooks";
+import { useP0P1Entries } from "../data/hooks";
 import { P0P1_SET_CODE, P0P1_VOTING_DEADLINE, SLOTS } from "../data/p0p1Slots";
 
 // Top-of-page chrome. Designed to feel like its own product but small enough
@@ -291,7 +291,7 @@ function MobileMenu({ pathname, onClose }: { pathname: string; onClose: () => vo
 
 function P0P1Badge() {
   const { user } = useAuth();
-  const { data: votes } = useContestVotes(user ? P0P1_SET_CODE : undefined);
+  const { data: votes } = useP0P1Entries(user ? P0P1_SET_CODE : undefined);
   const isPastDeadline = new Date() > P0P1_VOTING_DEADLINE;
 
   if (isPastDeadline) return null;

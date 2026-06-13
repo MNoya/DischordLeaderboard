@@ -1143,29 +1143,51 @@ function adaptPodLeaderboardRow(row: Record<string, unknown>): PodLeaderboardRow
 
 // --- P0P1 contest (stubs — wired to Supabase later) ---
 
-import type { MshCard, ContestVote, SlotKey } from "../types/p0p1";
+import type { MshCard, P0P1Entry, SlotKey } from "../types/p0p1";
 import { cardsMshFixture } from "./fixtures/cards-msh";
 
-export const fetchContestCards = (_setCode: string): Promise<MshCard[]> =>
+export const fetchP0P1Cards = (_setCode: string): Promise<MshCard[]> =>
   Promise.resolve(cardsMshFixture);
 
-export const fetchContestVotes = (_setCode: string): Promise<ContestVote[]> => {
-  throw new Error("P0P1 realApi: fetchContestVotes not implemented");
-};
+export async function fetchP0P1Entries(setCode: string): Promise<P0P1Entry[]> {
+  const { data, error } = await client()
+    .from("p0p1_entries")
+    .select("slot, card_name, updated_at")
+    .eq("set_code", setCode);
+  if (error) throw error;
+  return (data ?? []).map((r) => ({
+    slot: r.slot as SlotKey,
+    cardName: r.card_name,
+    lastUpdated: r.updated_at,
+  }));
+}
 
-export const upsertContestVote = (
-  _setCode: string,
-  _slot: SlotKey,
-  _cardName: string,
-): Promise<void> => {
-  throw new Error("P0P1 realApi: upsertContestVote not implemented");
-};
+export async function upsertP0P1Entry(
+  setCode: string,
+  slot: SlotKey,
+  cardName: string,
+): Promise<void> {
+  const { data: { user } } = await client().auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+  const { error } = await client()
+    .from("p0p1_entries")
+    .upsert(
+      { user_id: user.id, set_code: setCode, slot, card_name: cardName, updated_at: new Date().toISOString() },
+      { onConflict: "user_id,set_code,slot" },
+    );
+  if (error) throw error;
+}
 
-export const deleteContestVote = (
-  _setCode: string,
-  _slot: SlotKey,
-): Promise<void> => {
-  throw new Error("P0P1 realApi: deleteContestVote not implemented");
-};
+export async function deleteP0P1Entry(
+  setCode: string,
+  slot: SlotKey,
+): Promise<void> {
+  const { error } = await client()
+    .from("p0p1_entries")
+    .delete()
+    .eq("set_code", setCode)
+    .eq("slot", slot);
+  if (error) throw error;
+}
 
 export const initialAuthUser = null;
