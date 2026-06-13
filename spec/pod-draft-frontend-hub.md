@@ -52,11 +52,9 @@ Today it imports `podSos3Fixture` directly. Needs to read real data.
 - Or derive deterministically on read: sort by `(placement NULLS LAST, display_name)` and assign 0..7. Stable but visually arbitrary vs the actual draft seating.
 - Recommend the migration path — seat order is real data, not display sugar.
 
-### 3. Top-level `/pods` route (deferred)
+### 3. Top-level `/pods` route (done)
 
-Currently `/pods` lives under Vite base `/leaderboard/`, so the URL is `dischord.pages.dev/leaderboard/pods`. Target: `dischord.pages.dev/pods` (and eventually `limitedlevelups.com/pods`).
-
-Needs: `vite.config.ts` `base: "/"`, drop React Router `basename`, update `functions/_middleware.ts` SPA fallback to handle multiple top-level paths, update `dist/` output dir. Existing `/leaderboard/...` URLs keep resolving as routes inside the SPA.
+`/pods` is a top-level route: Vite `base: "/"`, no React Router `basename`, and `functions/_middleware.ts` handles multiple top-level paths. The URL is `dischord.pages.dev/pods` (and `limitedlevelups.com/pods` at launch). Existing `/leaderboard/...` URLs keep resolving as routes inside the SPA.
 
 Best done as a separate focused PR alongside the custom-domain swap.
 

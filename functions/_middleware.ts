@@ -1,27 +1,46 @@
-// Serves the SPA index.html for every HTML route and rewrites its <head> meta
-// per route so link unfurls (Discord, Twitter, Slack) reflect the shared page
-// instead of the single baked-in leaderboard preview. Crawlers don't run JS, so
-// this is the only place per-page titles can land.
+// Serves the SPA index.html for every HTML route and rewrites its <head> meta per
+// route so link unfurls (Discord, Twitter, Slack) reflect the page instead of the
+// single baked-in preview. Crawlers don't run JS, so this is the only place per-page
+// titles, descriptions, and thumbnails can land.
 //
-// The og:site_name grey provider line is stripped so cards show only title and
-// description; the site name rides in the title instead (page | Limited Level-Ups).
+// Embed title and browser tab title diverge on purpose. The embed carries the brand in
+// the gray og:site_name line, so og:title is the bare label (e.g. "MSH Leaderboard",
+// "Noya · Player Profile"). The tab has no gray line, so <title> appends the brand:
+// "MSH Leaderboard | Limited Level-Ups". Home is the exception: no gray line, the brand
+// is the title. DocumentTitle reproduces the tab title client-side on SPA navigation.
 //
-// Player titles and pod set codes come from the same cached public_* views the
-// site reads, so player capitalization is the real display_name and the set
-// code list never drifts from bot/sets.py.
+// Thumbnail per route: a player's Discord avatar (falling back to the baked LLU logo
+// when they have none), a set's white symbol on set routes, the LLU logo everywhere else.
 
 import {
   PUBLIC_SUPABASE_URL,
   PUBLIC_SUPABASE_PUBLISHABLE_KEY,
 } from "../frontend/src/data/public-supabase-config";
+import { SITE_NAME as SITE, TITLE_SEPARATOR, TIER_LIST_PREVIEW_SETS } from "../frontend/src/data/constants";
 
-const SITE = "Limited Level-Ups";
 const LEADERBOARD_DESCRIPTION =
-  "Check ranks and trophies from the community. /join on Discord to share your drafts";
-const HOME_DESCRIPTION =
-  "Discuss Limited strategy, keep up with the latest sets, and draft with a community of dedicated players.";
+  "Check ranks and trophies from the community. /join on Discord to share your drafts and climb the leaderboard";
+const HOME_DESCRIPTION = "Weekly episodes, set reviews, strategy, and community events. Join the Discord and climb the leaderboard.";
 
-type RouteMeta = { title: string; description: string | null };
+type ImageIntent = { kind: "url"; url: string } | { kind: "setSymbol"; code: string } | null;
+
+type RouteMeta = {
+  ogTitle: string;
+  tabTitle: string;
+  siteName: string | null;
+  description: string | null;
+  image: ImageIntent;
+};
+
+const page = (label: string, description: string | null, image: ImageIntent = null): RouteMeta => ({
+  ogTitle: label,
+  tabTitle: `${label}${TITLE_SEPARATOR}${SITE}`,
+  siteName: SITE,
+  description,
+  image,
+});
+
+const HOME_META: RouteMeta = { ogTitle: SITE, tabTitle: SITE, siteName: null, description: HOME_DESCRIPTION, image: null };
 
 const slugToName = (slug: string): string => slug.replace(/-/g, " ");
 
@@ -55,62 +74,106 @@ const fetchSetCodes = async (): Promise<Set<string>> => {
   }
 };
 
-const playerName = async (slug: string): Promise<string> => {
+const fetchSetName = async (code: string): Promise<string> => {
+  try {
+    const resp = await restGet(`public_sets?code=eq.${encodeURIComponent(code)}&select=name&limit=1`);
+    if (resp.ok) {
+      const rows = (await resp.json()) as Array<{ name: string }>;
+      if (rows[0]?.name) return rows[0].name;
+    }
+  } catch {
+    // fall through
+  }
+  return TIER_LIST_PREVIEW_SETS[code]?.name ?? code;
+};
+
+type PlayerCard = { name: string; avatarUrl: string | null };
+
+const fetchPlayer = async (slug: string): Promise<PlayerCard> => {
   try {
     const resp = await restGet(
-      `public_leaderboard?slug=eq.${encodeURIComponent(slug)}&select=display_name&limit=1`,
+      `public_leaderboard?slug=eq.${encodeURIComponent(slug)}&select=display_name,avatar_url&limit=1`,
     );
     if (resp.ok) {
-      const rows = (await resp.json()) as Array<{ display_name: string }>;
-      if (rows[0]?.display_name) return rows[0].display_name;
+      const rows = (await resp.json()) as Array<{ display_name: string; avatar_url: string | null }>;
+      if (rows[0]?.display_name) {
+        return { name: rows[0].display_name, avatarUrl: rows[0].avatar_url ?? null };
+      }
     }
   } catch {
     // fall through to the slug
   }
-  return slugToName(slug);
+  return { name: slugToName(slug), avatarUrl: null };
 };
+
+const playerMeta = (player: PlayerCard): RouteMeta => ({
+  ogTitle: `${player.name} · Player Profile`,
+  tabTitle: `${player.name}${TITLE_SEPARATOR}${SITE}`,
+  siteName: SITE,
+  description: `Check ${player.name}'s drafts & stats on the leaderboard.`,
+  image: player.avatarUrl ? { kind: "url", url: player.avatarUrl } : null,
+});
 
 const resolveMeta = async (pathname: string): Promise<RouteMeta> => {
   const segments = pathname.split("/").filter(Boolean);
   if (segments.length === 0) {
-    return { title: SITE, description: HOME_DESCRIPTION };
+    return HOME_META;
   }
   const [section, ...rest] = segments;
 
   if (section === "leaderboard") {
     if (rest.length === 0) {
-      return { title: "Leaderboard", description: LEADERBOARD_DESCRIPTION };
+      return page("Leaderboard", LEADERBOARD_DESCRIPTION);
+    }
+    if (rest[0] === "about") {
+      return page("About", "Learn how the community leaderboard works.");
     }
     if (rest[0] === "player" && rest[1]) {
-      return { title: await playerName(rest[1]), description: null };
+      return playerMeta(await fetchPlayer(rest[1]));
     }
     const setCode = rest[0].toUpperCase();
     if (rest[1] === "player" && rest[2]) {
-      return { title: `${await playerName(rest[2])} | ${setCode}`, description: null };
+      return playerMeta(await fetchPlayer(rest[2]));
     }
-    return { title: `${setCode} Leaderboard`, description: null };
+    return page(
+      `${setCode} Leaderboard`,
+      `Check ${setCode} ranks and trophies on the leaderboard.`,
+      { kind: "setSymbol", code: setCode },
+    );
   }
 
   if (section === "tier-list") {
     if (rest[0]) {
-      return { title: `${rest[0].toUpperCase()} Tier List`, description: null };
+      const setCode = rest[0].toUpperCase();
+      const setName = await fetchSetName(setCode);
+      return page(
+        `${setCode} Tier List`,
+        `Check updated Set Review grades for ${setName}.`,
+        { kind: "setSymbol", code: setCode },
+      );
     }
-    return { title: "Tier List", description: null };
+    return page("Tier List", "Check updated Set Review grades for every set.");
   }
 
   if (section === "pods") {
     if (rest[0]) {
       const setCodes = await fetchSetCodes();
-      return { title: titleCaseSlug(rest[0], setCodes), description: null };
+      return page(titleCaseSlug(rest[0], setCodes), "Check seats, logs & replays for this pod draft.");
     }
-    return { title: "Pod Drafts", description: null };
+    return page("Pod Drafts", "Check community pod draft results and standings.");
   }
 
-  if (section === "episodes") return { title: "Episodes", description: null };
-  if (section === "community") return { title: "Community", description: null };
-  if (section === "about") return { title: "About", description: null };
+  if (section === "episodes") {
+    return page("Episodes", "Check out the latest episodes, or search the archive.");
+  }
+  if (section === "community") {
+    return page("Community", "Check out the Discord and start drafting.");
+  }
+  if (section === "about") {
+    return page("About", "Learn how the community leaderboard works.");
+  }
 
-  return { title: SITE, description: null };
+  return { ...HOME_META, description: null };
 };
 
 export const onRequest: PagesFunction = async (context) => {
@@ -124,30 +187,51 @@ export const onRequest: PagesFunction = async (context) => {
   const indexResp = await context.env.ASSETS.fetch(indexUrl.toString());
 
   const meta = await resolveMeta(url.pathname);
-  const title = meta.title === SITE ? SITE : `${meta.title} | ${SITE}`;
   const ogUrl = `${url.origin}${url.pathname}`;
-
-  const descriptionHandler: HTMLRewriterElementContentHandlers =
-    meta.description === null
-      ? { element: (el) => el.remove() }
-      : { element: (el) => el.setAttribute("content", meta.description as string) };
+  const imageUrl = await resolveImageUrl(meta.image, url.origin, context.env.ASSETS);
 
   const setContent = (value: string): HTMLRewriterElementContentHandlers => ({
     element: (el) => el.setAttribute("content", value),
   });
+  const remove: HTMLRewriterElementContentHandlers = { element: (el) => el.remove() };
+
+  const descriptionHandler = meta.description === null ? remove : setContent(meta.description);
+  const siteNameHandler = meta.siteName === null ? remove : setContent(meta.siteName);
 
   const headers = new Headers(indexResp.headers);
   headers.set("Cache-Control", "public, max-age=0, must-revalidate");
   const baseResponse = new Response(indexResp.body, { status: 200, headers });
 
-  return new HTMLRewriter()
-    .on("title", { element: (el) => el.setInnerContent(title) })
-    .on('meta[property="og:site_name"]', { element: (el) => el.remove() })
-    .on('meta[property="og:title"]', setContent(title))
-    .on('meta[name="twitter:title"]', setContent(title))
+  let rewriter = new HTMLRewriter()
+    .on("title", { element: (el) => el.setInnerContent(meta.tabTitle) })
+    .on('meta[property="og:site_name"]', siteNameHandler)
+    .on('meta[property="og:title"]', setContent(meta.ogTitle))
+    .on('meta[name="twitter:title"]', setContent(meta.ogTitle))
     .on('meta[property="og:url"]', setContent(ogUrl))
     .on('meta[name="description"]', descriptionHandler)
     .on('meta[property="og:description"]', descriptionHandler)
-    .on('meta[name="twitter:description"]', descriptionHandler)
-    .transform(baseResponse);
+    .on('meta[name="twitter:description"]', descriptionHandler);
+
+  if (imageUrl) {
+    rewriter = rewriter
+      .on('meta[property="og:image"]', setContent(imageUrl))
+      .on('meta[name="twitter:image"]', setContent(imageUrl))
+      .on('meta[property="og:image:width"]', remove)
+      .on('meta[property="og:image:height"]', remove)
+      .on('meta[property="og:image:alt"]', setContent(meta.ogTitle));
+  }
+
+  return rewriter.transform(baseResponse);
+};
+
+const resolveImageUrl = async (image: ImageIntent, origin: string, assets: Fetcher): Promise<string | null> => {
+  if (image === null) return null;
+  if (image.kind === "url") return image.url;
+  const candidate = `${origin}/set-symbols/${image.code.toLowerCase()}.png`;
+  try {
+    const resp = await assets.fetch(candidate);
+    return resp.ok ? candidate : null;
+  } catch {
+    return null;
+  }
 };

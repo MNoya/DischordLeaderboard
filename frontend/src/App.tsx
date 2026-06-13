@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { Provider as TooltipProvider } from "@radix-ui/react-tooltip";
 import { ScoringModalHost } from "./components/ScoringModal";
+import { DocumentTitle } from "./components/DocumentTitle";
 import { HomePage } from "./pages/HomePage";
 import { EpisodesPage } from "./pages/EpisodesPage";
 import { CommunityPage } from "./pages/CommunityPage";
@@ -31,17 +32,19 @@ export function App() {
   }, []);
   return (
     <TooltipProvider delayDuration={150} skipDelayDuration={0} disableHoverableContent>
+    <DocumentTitle />
     <Routes>
       <Route path="/" element={<HomePage />} />
       <Route path="/episodes" element={<EpisodesPage />} />
       <Route path="/community" element={<CommunityPage />} />
 
       <Route path="/leaderboard" element={<LeaderboardPage />} />
+      <Route path="/leaderboard/about" element={<AboutPage />} />
       <Route path="/leaderboard/player/:slug" element={<PlayerPage />} />
       <Route path="/leaderboard/:setCode" element={<LeaderboardPage />} />
       <Route path="/leaderboard/:setCode/player/:slug" element={<PlayerPage />} />
 
-      <Route path="/about" element={<AboutPage />} />
+      <Route path="/about" element={<Navigate to="/leaderboard/about" replace />} />
       <Route path="/players" element={<Navigate to="/leaderboard" replace />} />
 
       <Route path="/pods" element={<PodDraftsPage />} />
