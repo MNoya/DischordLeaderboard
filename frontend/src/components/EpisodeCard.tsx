@@ -1,17 +1,16 @@
 import { SiYoutube } from "react-icons/si";
 import type { Episode } from "../data/episodes";
 import { CategoryTag } from "./CategoryTag";
+import { EpisodeThumbnail } from "./EpisodeThumbnail";
 
-export function EpisodeCard({ episode }: { episode: Episode }) {
+export function EpisodeCard({ episode, thumbnailPending = false }: { episode: Episode; thumbnailPending?: boolean }) {
   const meta = [episode.publishedLabel.toUpperCase(), episode.number ? `EP ${episode.number}` : null]
     .filter(Boolean)
     .join(" · ");
   return (
     <a href={episode.link} target="_blank" rel="noreferrer" className="group flex flex-col no-underline">
       <div className="relative aspect-video bg-surface border border-border overflow-hidden transition-colors group-hover:border-green">
-        {episode.image ? (
-          <img src={episode.image} alt="" loading="lazy" className="h-full w-full object-cover" />
-        ) : null}
+        <EpisodeThumbnail src={episode.image} pending={thumbnailPending} />
         {episode.kind === "video" ? (
           <span className="absolute top-2 right-2 inline-flex items-center gap-1 mono text-[10px] tracking-[0.08em] text-text bg-red px-1.5 py-0.5">
             <SiYoutube className="text-[11px]" /> VIDEO

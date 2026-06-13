@@ -30,6 +30,7 @@ export function DiscordBand() {
           href={SITE_LINKS.discord}
           target="_blank"
           size="lg"
+          grow
           className="self-center shrink-0"
           icon={
             <span className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-bg text-white shrink-0">

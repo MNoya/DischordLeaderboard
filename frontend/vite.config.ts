@@ -38,6 +38,7 @@ function youtubeDevApi(key: string | undefined): Plugin {
     configureServer(server) {
       server.middlewares.use("/api/youtube", async (_req, res) => {
         res.setHeader("content-type", "application/json");
+        res.setHeader("cache-control", "public, max-age=3600");
         if (!key) {
           res.statusCode = 500;
           res.end(JSON.stringify({ error: "Set YOUTUBE_API_KEY in frontend/.env to use /api/youtube in dev" }));
@@ -87,6 +88,7 @@ async function fetchUploads(key: string) {
         publishedAt: snippet.publishedAt ?? "",
         description: snippet.description ?? "",
         thumbnail: best?.url ?? "",
+        duration: "",
       });
     }
     if (!json.nextPageToken) {
@@ -94,5 +96,24 @@ async function fetchUploads(key: string) {
     }
     pageToken = json.nextPageToken;
   }
+  await attachDurations(videos, key);
   return videos;
+}
+
+async function attachDurations(videos: Array<Record<string, string>>, key: string) {
+  for (let start = 0; start < videos.length; start += 50) {
+    const chunk = videos.slice(start, start + 50);
+    const ids = chunk.map((video) => video.id).join(",");
+    const res = await fetch(`${YOUTUBE_API}/videos?part=contentDetails&id=${ids}&key=${key}`);
+    const json = await res.json();
+    const byId = new Map<string, string>();
+    for (const item of json.items ?? []) {
+      if (item.id) {
+        byId.set(item.id, item.contentDetails?.duration ?? "");
+      }
+    }
+    for (const video of chunk) {
+      video.duration = byId.get(video.id) ?? "";
+    }
+  }
 }

@@ -22,6 +22,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   }
 
   const videos = await fetchPlaylist(uploads, key);
+  await attachDurations(videos, key);
   return new Response(JSON.stringify({ videos }), {
     status: 200,
     headers: {
@@ -82,7 +83,30 @@ function normalize(item: YouTubePlaylistItem): NormalizedVideo | null {
     publishedAt: snippet?.publishedAt ?? "",
     description: snippet?.description ?? "",
     thumbnail: best?.url ?? "",
+    duration: "",
   };
+}
+
+async function attachDurations(videos: NormalizedVideo[], key: string): Promise<void> {
+  for (let start = 0; start < videos.length; start += 50) {
+    const chunk = videos.slice(start, start + 50);
+    const ids = chunk.map((video) => video.id).join(",");
+    const url = `${API}/videos?part=contentDetails&id=${ids}&key=${key}`;
+    const res = await fetch(url, { cf: { cacheTtl: 3600, cacheEverything: true } });
+    if (!res.ok) {
+      continue;
+    }
+    const json = (await res.json()) as YouTubeVideoDetailsResponse;
+    const byId = new Map<string, string>();
+    for (const item of json.items ?? []) {
+      if (item.id) {
+        byId.set(item.id, item.contentDetails?.duration ?? "");
+      }
+    }
+    for (const video of chunk) {
+      video.duration = byId.get(video.id) ?? "";
+    }
+  }
 }
 
 interface NormalizedVideo {
@@ -91,6 +115,11 @@ interface NormalizedVideo {
   publishedAt: string;
   description: string;
   thumbnail: string;
+  duration: string;
+}
+
+interface YouTubeVideoDetailsResponse {
+  items?: Array<{ id?: string; contentDetails?: { duration?: string } }>;
 }
 
 interface YouTubeChannelResponse {

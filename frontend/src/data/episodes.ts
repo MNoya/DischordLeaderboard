@@ -45,11 +45,6 @@ export async function fetchEpisodes(): Promise<Episode[]> {
     throw new Error("Could not parse the Libsyn feed");
   }
 
-  const channelImage =
-    firstTagHref(xml, "itunes:image") ||
-    xml.querySelector("channel > image > url")?.textContent?.trim() ||
-    "";
-
   return Array.from(xml.querySelectorAll("item")).map((item) => {
     const rawTitle = text(item, "title");
     const durationSeconds = parseDurationSeconds(tagText(item, "itunes:duration"));
@@ -65,7 +60,7 @@ export async function fetchEpisodes(): Promise<Episode[]> {
       publishedLabel: formatPublished(pubDate),
       durationLabel: formatDuration(durationSeconds),
       durationSeconds,
-      image: tagHref(item, "itunes:image") || channelImage,
+      image: tagHref(item, "itunes:image"),
       category: inferCategory(rawTitle),
       summary: stripHtml(tagText(item, "itunes:summary") || text(item, "description")),
     };
@@ -111,7 +106,7 @@ function parseDurationSeconds(raw: string): number {
     .reduce((acc, part) => acc * 60 + (part || 0), 0);
 }
 
-function formatDuration(seconds: number): string {
+export function formatDuration(seconds: number): string {
   if (!seconds) {
     return "";
   }
@@ -142,8 +137,4 @@ function tagText(item: Element, qualifiedName: string): string {
 
 function tagHref(item: Element, qualifiedName: string): string {
   return item.getElementsByTagName(qualifiedName)[0]?.getAttribute("href")?.trim() ?? "";
-}
-
-function firstTagHref(doc: Document, qualifiedName: string): string {
-  return doc.getElementsByTagName(qualifiedName)[0]?.getAttribute("href")?.trim() ?? "";
 }

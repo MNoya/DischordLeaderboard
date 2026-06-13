@@ -6,6 +6,7 @@ import { ChamferCta, CUT_CORNER_CHAMFER } from "../components/ChamferCta";
 import { DiscordIcon } from "../components/BrandIcons";
 import { ArrowRight, ChevronLeft, ChevronRight } from "../components/Icons";
 import { CategoryTag } from "../components/CategoryTag";
+import { EpisodeThumbnail } from "../components/EpisodeThumbnail";
 import { Pips } from "../components/ManaPips";
 import { GiRoundTable } from "react-icons/gi";
 import { SiPatreon, SiTwitch, SiYoutube } from "react-icons/si";
@@ -44,7 +45,7 @@ import { cn } from "../lib/utils";
 export function HomePage() {
   const { data: sets } = useSets();
   const setCode = sets?.find((s) => s.isActive)?.code ?? ACTIVE_SET_CODE;
-  const { data: episodes } = useMediaFeed();
+  const { data: episodes, thumbnailsPending } = useMediaFeed();
 
   return (
     <PageShell subtitle="HOME" fill>
@@ -59,7 +60,7 @@ export function HomePage() {
           <TierPanel />
         </div>
 
-        <EpisodesHero episodes={episodes?.slice(0, 4) ?? []} loading={!episodes} />
+        <EpisodesHero episodes={episodes?.slice(0, 4) ?? []} loading={!episodes} thumbnailsPending={thumbnailsPending} />
 
         <div className="contents lg:flex lg:flex-col lg:gap-4 lg:min-h-0 lg:h-full">
           <LeaderboardPanel setCode={setCode} />
@@ -158,6 +159,7 @@ function IdentityPanel() {
         label="JOIN THE DISCHORD"
         href={SITE_LINKS.discord}
         target="_blank"
+        grow
         className="self-center mt-0.5"
         icon={
           <span className="inline-flex items-center justify-center w-[22px] h-[22px] rounded-full bg-bg text-white shrink-0">
@@ -332,7 +334,7 @@ function TierCardRow({
       <div
         ref={clipRef}
         onScroll={syncEdges}
-        className="flex-1 min-h-0 overflow-x-auto no-scrollbar flex items-center scroll-smooth"
+        className="flex-1 min-h-0 overflow-x-auto no-scrollbar flex items-center scroll-smooth py-0.5"
       >
         <div className="flex h-full items-center w-max shrink-0">
           {row.cards.map((card) => (
@@ -420,7 +422,15 @@ function LazyCardImg({
   );
 }
 
-function EpisodesHero({ episodes, loading }: { episodes: Episode[]; loading: boolean }) {
+function EpisodesHero({
+  episodes,
+  loading,
+  thumbnailsPending,
+}: {
+  episodes: Episode[];
+  loading: boolean;
+  thumbnailsPending: boolean;
+}) {
   return (
     <Panel title="LATEST CONTENT" to="/episodes" corner="podcast & youtube" action="View All Episodes" className="order-2 lg:order-none lg:h-full">
       {loading ? (
@@ -442,18 +452,18 @@ function EpisodesHero({ episodes, loading }: { episodes: Episode[]; loading: boo
       ) : (
         <>
           <div className="lg:hidden flex flex-col gap-4">
-            {episodes[0] ? <HeroEpisodeCard episode={episodes[0]} /> : null}
+            {episodes[0] ? <HeroEpisodeCard episode={episodes[0]} thumbnailPending={thumbnailsPending} /> : null}
             {episodes.length > 1 ? (
               <div className="grid grid-cols-2 gap-4">
                 {episodes.slice(1, 3).map((ep) => (
-                  <HeroEpisodeCard key={ep.id} episode={ep} compact />
+                  <HeroEpisodeCard key={ep.id} episode={ep} compact thumbnailPending={thumbnailsPending} />
                 ))}
               </div>
             ) : null}
           </div>
           <div className="hidden lg:grid grid-cols-2 gap-4 flex-1 min-h-0">
             {episodes.map((ep) => (
-              <HeroEpisodeCard key={ep.id} episode={ep} />
+              <HeroEpisodeCard key={ep.id} episode={ep} thumbnailPending={thumbnailsPending} />
             ))}
           </div>
         </>
@@ -462,7 +472,17 @@ function EpisodesHero({ episodes, loading }: { episodes: Episode[]; loading: boo
   );
 }
 
-function HeroEpisodeCard({ episode, className, compact = false }: { episode: Episode; className?: string; compact?: boolean }) {
+function HeroEpisodeCard({
+  episode,
+  className,
+  compact = false,
+  thumbnailPending = false,
+}: {
+  episode: Episode;
+  className?: string;
+  compact?: boolean;
+  thumbnailPending?: boolean;
+}) {
   const meta = [episode.publishedLabel.toUpperCase(), episode.number ? `EP ${episode.number}` : null]
     .filter(Boolean)
     .join(" · ");
@@ -477,9 +497,7 @@ function HeroEpisodeCard({ episode, className, compact = false }: { episode: Epi
       )}
     >
       <div className="relative aspect-video lg:aspect-auto lg:flex-1 lg:min-h-0 bg-surface">
-        {episode.image ? (
-          <img src={episode.image} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover" />
-        ) : null}
+        <EpisodeThumbnail src={episode.image} pending={thumbnailPending} />
         {!compact ? <CategoryTag category={episode.category} className="absolute top-2 left-2" /> : null}
         {episode.kind === "video" ? (
           compact ? (
@@ -502,8 +520,8 @@ function HeroEpisodeCard({ episode, className, compact = false }: { episode: Epi
         </span>
       </div>
       <div className="p-3 shrink-0">
-        <div className="mono text-[10px] tracking-[0.1em] text-muted">{meta}</div>
-        <h3 className="font-body text-text text-[14px] font-medium leading-snug mt-1 line-clamp-2 transition-colors group-hover/ep:text-green">
+        <div className="mono text-[12px] tracking-[0.1em] text-muted">{meta}</div>
+        <h3 className="font-body text-text text-[16px] font-medium leading-snug mt-1 line-clamp-2 transition-colors group-hover/ep:text-green">
           {episode.title}
         </h3>
       </div>

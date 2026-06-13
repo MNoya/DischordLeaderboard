@@ -13,7 +13,7 @@ type SortKey = "newest" | "oldest" | "longest";
 const PAGE_SIZE = 12;
 
 export function EpisodesPage() {
-  const { data: episodes, isLoading, isError } = useMediaFeed();
+  const { data: episodes, isLoading, isError, thumbnailsPending } = useMediaFeed();
   const [params, setParams] = useSearchParams();
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("newest");
@@ -111,7 +111,7 @@ export function EpisodesPage() {
           <>
             <Grid>
               {filtered.slice(0, visible).map((ep) => (
-                <EpisodeCard key={ep.id} episode={ep} />
+                <EpisodeCard key={ep.id} episode={ep} thumbnailPending={thumbnailsPending} />
               ))}
             </Grid>
             {visible < filtered.length ? (

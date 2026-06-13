@@ -7,6 +7,7 @@
 
 import {
   cleanTitle,
+  formatDuration,
   formatPublished,
   inferCategory,
   parseEpisodeNumber,
@@ -21,6 +22,7 @@ export interface YouTubeVideo {
   publishedAt: string;
   description: string;
   thumbnail: string;
+  duration?: string;
 }
 
 export async function fetchYouTubeVideos(): Promise<YouTubeVideo[]> {
@@ -90,6 +92,7 @@ function findMatch(episode: Episode, videos: YouTubeVideo[], claimed: Set<string
 }
 
 function toVideoEpisode(video: YouTubeVideo): Episode {
+  const durationSeconds = parseIsoDuration(video.duration);
   return {
     id: `yt:${video.id}`,
     kind: "video",
@@ -99,14 +102,26 @@ function toVideoEpisode(video: YouTubeVideo): Episode {
     audioUrl: "",
     pubDate: video.publishedAt,
     publishedLabel: formatPublished(video.publishedAt),
-    durationLabel: "",
-    durationSeconds: 0,
+    durationLabel: formatDuration(durationSeconds),
+    durationSeconds,
     image: video.thumbnail,
     category: inferCategory(video.title),
     summary: video.description,
     youtubeId: video.id,
     videoUrl: watchUrl(video.id),
   };
+}
+
+function parseIsoDuration(iso: string | undefined): number {
+  if (!iso) {
+    return 0;
+  }
+  const match = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+  if (!match) {
+    return 0;
+  }
+  const [, hours, minutes, seconds] = match;
+  return Number(hours ?? 0) * 3600 + Number(minutes ?? 0) * 60 + Number(seconds ?? 0);
 }
 
 function watchUrl(id: string): string {

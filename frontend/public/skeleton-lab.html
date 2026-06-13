@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LLU thumbnail skeleton lab</title>
+    <style>
+      :root {
+        --bg: #0a0c10;
+        --surface: #14181f;
+        --surface2: #1d2330;
+        --border: #2a3142;
+        --text: #e6ecf5;
+        --muted: #7a8395;
+        --green: #2ee85c;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: "Space Grotesk", Inter, system-ui, sans-serif;
+        padding: 32px;
+      }
+      h1 { font-size: 22px; letter-spacing: 0.02em; margin: 0 0 4px; }
+      p.lede { color: var(--muted); margin: 0 0 28px; font-size: 14px; max-width: 640px; }
+      .controls {
+        display: flex; gap: 20px; align-items: center; flex-wrap: wrap;
+        background: var(--surface); border: 1px solid var(--border);
+        padding: 14px 18px; border-radius: 10px; margin-bottom: 28px;
+      }
+      .controls label { font-size: 13px; color: var(--muted); display: flex; gap: 8px; align-items: center; }
+      .grid {
+        display: grid; gap: 24px;
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      }
+      .card { display: flex; flex-direction: column; gap: 0; }
+      .thumb {
+        position: relative; aspect-ratio: 16 / 9; overflow: hidden;
+        background: var(--surface2); border: 1px solid var(--border); border-radius: 10px 10px 0 0;
+        display: flex; align-items: center; justify-content: center;
+      }
+      .meta {
+        background: var(--surface); border: 1px solid var(--border); border-top: 0;
+        border-radius: 0 0 10px 10px; padding: 12px 14px;
+      }
+      .meta .name { font-size: 14px; font-weight: 600; }
+      .meta .css { font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--muted); margin-top: 6px; white-space: pre-wrap; line-height: 1.5; }
+      .logo { width: 50%; max-width: 170px; display: block; }
+
+      /* ---- 1. low-range opacity pulse (current) ---- */
+      @keyframes opacityPulse { 0%,100% { opacity: .05 } 50% { opacity: .12 } }
+      .v-pulse { filter: grayscale(.6); animation: opacityPulse 1.6s ease-in-out infinite; }
+
+      /* ---- 2. even fainter pulse ---- */
+      @keyframes opacityPulseFaint { 0%,100% { opacity: .03 } 50% { opacity: .07 } }
+      .v-pulse-faint { filter: grayscale(.6); animation: opacityPulseFaint 1.8s ease-in-out infinite; }
+
+      /* ---- 3. breathe (scale + opacity) ---- */
+      @keyframes breathe { 0%,100% { opacity: .05; transform: scale(.97) } 50% { opacity: .1; transform: scale(1) } }
+      .v-breathe { filter: grayscale(.7); animation: breathe 2.4s ease-in-out infinite; }
+
+      /* ---- 4. shimmer sweep across the tile, dim static logo ---- */
+      .v-static { filter: grayscale(.6); opacity: .06; }
+      .shimmer-sweep::after {
+        content: ""; position: absolute; inset: 0;
+        background: linear-gradient(100deg, transparent 30%, rgba(230,236,245,.05) 50%, transparent 70%);
+        transform: translateX(-100%); animation: sweep 1.8s ease-in-out infinite;
+      }
+      @keyframes sweep { to { transform: translateX(100%) } }
+
+      /* ---- 5. logo-shaped shimmer (mask) ---- */
+      .v-mask {
+        width: 50%; max-width: 170px; aspect-ratio: 1 / 1;
+        -webkit-mask: url("llu-logo-transparent.png") center / contain no-repeat;
+        mask: url("llu-logo-transparent.png") center / contain no-repeat;
+        background: linear-gradient(100deg, #2a3142 25%, #45506a 50%, #2a3142 75%);
+        background-size: 220% 100%;
+        animation: maskShimmer 1.6s linear infinite;
+      }
+      @keyframes maskShimmer { 0% { background-position: 200% 0 } 100% { background-position: -200% 0 } }
+
+      /* ---- 6. logo-shaped shimmer, green-tinted ---- */
+      .v-mask-green {
+        width: 50%; max-width: 170px; aspect-ratio: 1 / 1;
+        -webkit-mask: url("llu-logo-transparent.png") center / contain no-repeat;
+        mask: url("llu-logo-transparent.png") center / contain no-repeat;
+        background: linear-gradient(100deg, #1b3322 30%, #2ee85c 50%, #1b3322 70%);
+        background-size: 220% 100%;
+        animation: maskShimmer 1.9s linear infinite;
+        opacity: .5;
+      }
+
+      /* ---- 7. blur pulse ---- */
+      @keyframes blurPulse { 0%,100% { opacity: .04; filter: grayscale(.6) blur(1.5px) } 50% { opacity: .1; filter: grayscale(.6) blur(0) } }
+      .v-blur { animation: blurPulse 2.2s ease-in-out infinite; }
+
+      /* ---- 8. static, no animation, very dim ---- */
+      .v-deadstatic { filter: grayscale(.5); opacity: .05; }
+
+      /* ---- 9. dim logo + sweep highlight only over logo (mask sweep, subtle) ---- */
+      .v-mask-subtle {
+        width: 50%; max-width: 170px; aspect-ratio: 1 / 1;
+        -webkit-mask: url("llu-logo-transparent.png") center / contain no-repeat;
+        mask: url("llu-logo-transparent.png") center / contain no-repeat;
+        background: linear-gradient(100deg, #232a38 40%, #313a4e 50%, #232a38 60%);
+        background-size: 300% 100%;
+        animation: maskShimmer 2.4s ease-in-out infinite;
+        opacity: .8;
+      }
+
+      /* ---- 10. brightness pulse on grayscale ---- */
+      @keyframes brightPulse { 0%,100% { opacity: .06; filter: grayscale(1) brightness(.7) } 50% { opacity: .11; filter: grayscale(1) brightness(1) } }
+      .v-bright { animation: brightPulse 1.8s ease-in-out infinite; }
+    </style>
+  </head>
+  <body>
+    <h1>LLU thumbnail skeleton lab</h1>
+    <p class="lede">
+      Ten loading-skeleton treatments for the episode thumbnail, all on the real
+      <code>llu-logo-transparent.png</code> over the app surface. Toggle the background to compare against
+      <code>surface</code> vs <code>surface2</code>. Tell me the number you like and I'll wire it into
+      <code>EpisodeThumbnail.tsx</code>.
+    </p>
+
+    <div class="controls">
+      <label>Tile background:
+        <select id="bg-toggle">
+          <option value="#1d2330">surface2 (#1d2330)</option>
+          <option value="#14181f">surface (#14181f)</option>
+          <option value="#0a0c10">bg (#0a0c10)</option>
+        </select>
+      </label>
+      <label>Logo size:
+        <input id="size" type="range" min="30" max="70" value="50" /> <span id="size-val">50%</span>
+      </label>
+    </div>
+
+    <div class="grid" id="grid"></div>
+
+    <script>
+      const VARIANTS = [
+        { n: 1, name: "Opacity pulse (current)", css: "grayscale(.6) · opacity .05↔.12 · 1.6s", cls: "logo v-pulse" },
+        { n: 2, name: "Faint pulse", css: "grayscale(.6) · opacity .03↔.07 · 1.8s", cls: "logo v-pulse-faint" },
+        { n: 3, name: "Breathe (scale + opacity)", css: "grayscale(.7) · scale .97↔1 · opacity .05↔.1", cls: "logo v-breathe" },
+        { n: 4, name: "Static logo + tile sweep", css: "dim logo + diagonal highlight sweeps the tile", cls: "logo v-static", sweep: true },
+        { n: 5, name: "Logo-shaped shimmer (gray)", css: "logo as mask · gradient sweeps through the shape", cls: "v-mask", mask: true },
+        { n: 6, name: "Logo-shaped shimmer (green)", css: "mask shimmer tinted brand green · opacity .5", cls: "v-mask-green", mask: true },
+        { n: 7, name: "Blur pulse", css: "blur 1.5px↔0 + opacity .04↔.1", cls: "logo v-blur" },
+        { n: 8, name: "Dead static (no anim)", css: "grayscale(.5) · opacity .05 · no animation", cls: "logo v-deadstatic" },
+        { n: 9, name: "Subtle logo-shaped shimmer", css: "mask shimmer, low contrast, opacity .8", cls: "v-mask-subtle", mask: true },
+        { n: 10, name: "Brightness pulse", css: "grayscale(1) · brightness .7↔1 · opacity .06↔.11", cls: "logo v-bright" },
+      ];
+
+      const grid = document.getElementById("grid");
+      for (const v of VARIANTS) {
+        const card = document.createElement("div");
+        card.className = "card";
+        const inner = v.mask
+          ? `<div class="${v.cls}"></div>`
+          : `<img class="${v.cls}" src="llu-logo-transparent.png" alt="" />`;
+        card.innerHTML = `
+          <div class="thumb${v.sweep ? " shimmer-sweep" : ""}">${inner}</div>
+          <div class="meta">
+            <div class="name">${v.n}. ${v.name}</div>
+            <div class="css">${v.css}</div>
+          </div>`;
+        grid.appendChild(card);
+      }
+
+      const bgToggle = document.getElementById("bg-toggle");
+      const applyBg = () => document.querySelectorAll(".thumb").forEach((t) => (t.style.background = bgToggle.value));
+      bgToggle.addEventListener("change", applyBg);
+
+      const size = document.getElementById("size");
+      const sizeVal = document.getElementById("size-val");
+      size.addEventListener("input", () => {
+        sizeVal.textContent = size.value + "%";
+        document.querySelectorAll(".logo, .v-mask, .v-mask-green, .v-mask-subtle").forEach((el) => {
+          el.style.width = size.value + "%";
+        });
+      });
+    </script>
+  </body>
+</html>

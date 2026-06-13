@@ -64,6 +64,7 @@ export function useMediaFeed() {
     data,
     isLoading: episodes.isLoading,
     isError: episodes.isError,
+    thumbnailsPending: videos.isLoading,
   };
 }
 

@@ -71,16 +71,12 @@ button {
 }
 
 .no-scrollbar {
-  scrollbar-width: thin;
-  scrollbar-color: #2a3142 transparent;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
 .no-scrollbar::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-.no-scrollbar::-webkit-scrollbar-thumb {
-  background: #2a3142;
+  display: none;
 }
 
 .themed-scrollbar {
@@ -116,3 +112,8 @@ button {
   50% { background-color: rgba(46, 232, 92, 1); }
 }
 
+
+@keyframes thumbSweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}

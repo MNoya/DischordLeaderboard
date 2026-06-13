@@ -17,12 +17,15 @@ const ARROW_SIZE: Record<ChamferSize, number> = { sm: 13, lg: 16 };
 
 const BASE = "inline-flex items-center bg-green text-bg mono font-bold no-underline hover:bg-green-2 transition-colors";
 
+const GROW = "transition-[transform,background-color] duration-200 hover:scale-105";
+
 export function ChamferCta({
   label,
   icon,
   href,
   target,
   size = "sm",
+  grow = false,
   className,
 }: {
   label: string;
@@ -30,6 +33,7 @@ export function ChamferCta({
   href?: string;
   target?: string;
   size?: ChamferSize;
+  grow?: boolean;
   className?: string;
 }) {
   const inner = (
@@ -39,7 +43,10 @@ export function ChamferCta({
       <ArrowRight size={ARROW_SIZE[size]} />
     </>
   );
-  const props = { className: cn(BASE, SIZE_CLASSES[size], className), style: { clipPath: CUT_CORNER_CHAMFER } };
+  const props = {
+    className: cn(BASE, SIZE_CLASSES[size], grow && GROW, className),
+    style: { clipPath: CUT_CORNER_CHAMFER },
+  };
 
   if (href) {
     return (
