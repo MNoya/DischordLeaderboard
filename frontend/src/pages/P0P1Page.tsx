@@ -99,17 +99,18 @@ function Rules() {
       <div className="flex flex-col gap-3 text-[13px] md:text-[14px] text-muted leading-[1.6] mt-3">
         <p>
           Pick one card for each of 9 slots. After 6 weeks, rosters are ranked by the
-          sum of each card's{" "}
+          sum of slots 1–8's{" "}
           <a
             href={SEVENTEEN_LANDS_URL}
             target="_blank"
             rel="noreferrer"
             className="text-green hover:underline underline-offset-2"
           >
-            17lands GIH win rate
+            17Lands.com's GIH win rate metric
           </a>
           .
         </p>
+        <p>Slot 9 will only be used in case of a tie.</p>
         <div className="bg-surface border border-border2 px-4 py-3">
           <table className="w-full text-[12px] md:text-[13px]">
             <thead>
@@ -128,11 +129,11 @@ function Rules() {
               <SlotRow n={6} slot="Multicolor Uncommon" constraint="2+ color uncommons" />
               <SlotRow n={7} slot="Wildcard Common" constraint="Any common not already picked" />
               <SlotRow n={8} slot="Wildcard Uncommon" constraint="Any uncommon not already picked" />
-              <SlotRow n={9} slot="Best Hero" constraint="Hero type, any color, up to rare" />
+              <SlotRow n={9} slot="Best Hero" constraint="Any Hero creature card below mythic as a tiebreaker - NOT included in score" />
             </tbody>
           </table>
         </div>
-        <p className="text-[12px] text-dim">
+        <p className="text-[12px] text-muted">
           No card may appear in more than one slot. Picks auto-save and can be changed
           until the deadline.
         </p>
