@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { MshCard, SlotDefinition } from "../../types/p0p1";
+import { ManaCost } from "../ManaPips";
 import { CardImagePreview } from "./CardImagePreview";
 
 interface Props {
@@ -105,12 +106,13 @@ export function CardPicker({ slot, cards, pickedCards, onSelect, onClose }: Prop
                     onClick={() => onSelect(card.name)}
                     className="flex-1 min-w-0 text-left bg-transparent border-0 cursor-pointer p-0"
                   >
-                    <div className="text-text text-[14px] truncate group-hover:text-green transition-colors">
-                      {card.name}
+                    <div className="flex items-center gap-2">
+                      <div className="text-text text-[14px] truncate group-hover:text-green transition-colors">
+                        {card.name}
+                      </div>
+                      <ManaCost cost={card.manaCost} />
                     </div>
-                    <div className="text-muted text-[12px]">
-                      {card.manaCost.replace(/\{([^}]+)\}/g, "$1 ").trim() || "—"}
-                    </div>
+                    
                   </button>
                 </div>
               ))}

@@ -1,12 +1,25 @@
 // Mana symbols backed by Andrew Gioia's Mana Font (loaded from CDN in
-// index.html). The font renders proper MTG mana costs (rounded swatch + glyph)
-// for any color via `<i class="ms ms-{c} ms-cost ms-shadow" />`. Sized via
-// font-size — `ms-cost` tracks it.
-//
-// Splash colors (lowercase in 17lands strings) render at ~70% size so they
-// read visibly secondary while keeping full color saturation.
+// index.html). Sized via font-size — `ms-cost` tracks it.
 
 type Color = "W" | "U" | "B" | "R" | "G";
+
+// ManaCost is used for rendering the mana cost of a card, based on the {W}{U}{2} style cost string from Scryfall.
+export function ManaCost({ cost, size = 14 }: { cost: string; size?: number }) {
+  const symbols = [...cost.matchAll(/\{([^}]+)\}/g)].map((m) => m[1]);
+  if (symbols.length === 0) return <span>—</span>;
+  return (
+    <span className="inline-flex gap-px items-center">
+      {symbols.map((s, i) => (
+        <i
+          key={i}
+          className={`ms ms-${s.toLowerCase()} ms-cost ms-shadow shrink-0`}
+          style={{ fontSize: size, letterSpacing: 0 }}
+          aria-label={s}
+        />
+      ))}
+    </span>
+  );
+}
 
 export function Pip({ c, size = 14 }: { c: Color; size?: number }) {
   return (

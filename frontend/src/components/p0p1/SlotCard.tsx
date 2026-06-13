@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { MshCard, SlotDefinition } from "../../types/p0p1";
+import { ManaCost } from "../ManaPips";
 import { CardImagePreview } from "./CardImagePreview";
 import { CardPicker } from "./CardPicker";
 
@@ -11,7 +12,13 @@ interface Props {
   onSelect: (cardName: string) => void;
 }
 
-export function SlotCard({ slot, selectedCard, allCards, pickedCards, onSelect }: Props) {
+export function SlotCard({
+  slot,
+  selectedCard,
+  allCards,
+  pickedCards,
+  onSelect,
+}: Props) {
   const [pickerOpen, setPickerOpen] = useState(false);
 
   return (
@@ -19,7 +26,10 @@ export function SlotCard({ slot, selectedCard, allCards, pickedCards, onSelect }
       <div className="w-full flex items-center gap-4 px-4 py-3 bg-surface border border-border2 hover:border-green transition-colors group">
         {selectedCard ? (
           <>
-            <CardImagePreview imageUrl={selectedCard.imageNormal} alt={selectedCard.name}>
+            <CardImagePreview
+              imageUrl={selectedCard.imageNormal}
+              alt={selectedCard.name}
+            >
               <img
                 src={selectedCard.imageArtCrop}
                 alt=""
@@ -34,9 +44,11 @@ export function SlotCard({ slot, selectedCard, allCards, pickedCards, onSelect }
               <div className="text-muted text-[11px] tracking-[0.14em] font-display mb-0.5">
                 {slot.label.toUpperCase()}
               </div>
-              <div className="text-text text-[15px] truncate">{selectedCard.name}</div>
-              <div className="text-muted text-[12px]">
-                {selectedCard.manaCost.replace(/\{([^}]+)\}/g, "$1 ").trim() || "—"}
+              <div className="flex items-center gap-2">
+                <div className="text-text text-[15px] truncate">
+                  {selectedCard.name}
+                </div>
+                <ManaCost cost={selectedCard.manaCost} />
               </div>
             </button>
             <span
