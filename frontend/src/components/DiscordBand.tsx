@@ -1,11 +1,10 @@
 import { Container } from "./Container";
-import { CtaPill } from "./CtaPill";
+import { ChamferCta } from "./ChamferCta";
 import { SectionLabel } from "./SectionLabel";
 import { DiscordIcon } from "./BrandIcons";
 import { SITE_LINKS } from "../data/site";
 
-// The "join the Discord" call-to-action band, shared by the home page and the
-// community page so the pitch and stats stay identical in both places.
+// The "join the Discord" call-to-action band on the community page
 export function DiscordBand() {
   return (
     <section
@@ -26,11 +25,18 @@ export function DiscordBand() {
             4,200+ MEMBERS · 14 CHANNELS · NEW-SET CHANNELS ON RELEASE WEEK
           </div>
         </div>
-        <a href={SITE_LINKS.discord} target="_blank" rel="noreferrer" className="no-underline shrink-0">
-          <CtaPill size="lg" icon={<DiscordIcon size={19} />}>
-            JOIN THE DISCHORD
-          </CtaPill>
-        </a>
+        <ChamferCta
+          label="JOIN THE DISCHORD"
+          href={SITE_LINKS.discord}
+          target="_blank"
+          size="lg"
+          className="self-center shrink-0"
+          icon={
+            <span className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-bg text-white shrink-0">
+              <DiscordIcon size={20} />
+            </span>
+          }
+        />
       </Container>
     </section>
   );
