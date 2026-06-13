@@ -4,11 +4,14 @@ import { ALogo, AWordmark } from "./Brand";
 import { cn } from "../lib/utils";
 import { useIsMobile } from "../lib/use-is-mobile";
 import { useAuth } from "../auth/useAuth";
+import { useP0P1Entries } from "../data/hooks";
+import { P0P1_SET_CODE, P0P1_VOTING_DEADLINE, SLOTS } from "../data/p0p1Slots";
 
 // Top-of-page chrome. Designed to feel like its own product but small enough
 // that a future LLU site shell can wrap or omit it cleanly.
 
-const NAV: Array<{ label: string; to: string; match: (path: string) => boolean }> = [
+const NAV: Array<{ label: string; badge?: () => JSX.Element | null; to: string; match: (path: string) => boolean }> = [
+  { label: "P0P1", badge: P0P1Badge, to: "/p0p1", match: (p) => p.startsWith("/p0p1") },
   { label: "LEADERBOARD", to: "/leaderboard", match: (p) => p === "/" || p === "/leaderboard" || p.startsWith("/leaderboard/") },
   { label: "POD DRAFTS", to: "/pods", match: (p) => p.startsWith("/pods") },
   { label: "ABOUT", to: "/about", match: (p) => p.startsWith("/about") },
@@ -129,6 +132,7 @@ export function AppHeader({ subtitle = "LEADERBOARD" }: { subtitle?: string }) {
                   )}
                 >
                   {n.label}
+                  {n.badge && !active && <n.badge />}
                 </Link>
               );
             })}
@@ -256,6 +260,7 @@ function MobileMenu({ pathname, onClose }: { pathname: string; onClose: () => vo
               )}
             >
               {n.label}
+              {n.badge && !active && <n.badge />}
             </Link>
           );
         })}
@@ -281,5 +286,48 @@ function MobileMenu({ pathname, onClose }: { pathname: string; onClose: () => vo
         )}
       </nav>
     </>
+  );
+}
+
+function P0P1Badge() {
+  const { user } = useAuth();
+  const { data: votes } = useP0P1Entries(user ? P0P1_SET_CODE : undefined);
+  const isPastDeadline = new Date() > P0P1_VOTING_DEADLINE;
+
+  if (isPastDeadline) return null;
+
+  if (!user) {
+    return (
+      <span className="ml-1.5 inline-flex items-center gap-1 text-sm tracking-normal text-green font-sans font-medium">
+        <span className="w-1.5 h-1.5 rounded-full bg-green inline-block" />
+        OPEN
+      </span>
+    );
+  }
+
+  const filled = votes?.length ?? 0;
+  const total = SLOTS.length;
+
+  if (filled === 0) {
+    return (
+      <span className="ml-1.5 inline-flex items-center gap-1 text-sm tracking-normal text-green font-sans font-medium">
+        <span className="w-1.5 h-1.5 rounded-full bg-green inline-block" />
+        OPEN
+      </span>
+    );
+  }
+
+  if (filled === total) {
+    return (
+      <span className="ml-1.5 text-sm tracking-normal text-green font-sans font-medium">
+        ✓
+      </span>
+    );
+  }
+
+  return (
+    <span className="ml-1.5 text-sm tracking-normal text-muted font-sans font-medium">
+      {filled}/{total}
+    </span>
   );
 }

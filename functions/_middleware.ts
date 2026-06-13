@@ -106,6 +106,7 @@ const resolveMeta = async (pathname: string): Promise<RouteMeta> => {
     return { title: "Pod Drafts", description: null };
   }
 
+  if (section === "p0p1") return { title: "Pack 0, Pick 1", description: "Pick your roster of 9 cards and compete for the best GIH win rate" };
   if (section === "episodes") return { title: "Episodes", description: null };
   if (section === "community") return { title: "Community", description: null };
   if (section === "about") return { title: "About", description: null };

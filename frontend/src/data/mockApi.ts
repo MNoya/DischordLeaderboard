@@ -28,6 +28,7 @@ import type {
   RecentTrophy,
   SetSummary,
 } from "../types/leaderboard";
+import type { MshCard, P0P1Entry, SlotKey } from "../types/p0p1";
 import {
   podEventsFixture,
   podEventMatchesFixture,
@@ -398,3 +399,38 @@ export const fetchPodLeaderboard = (setCode: string): Promise<PodLeaderboardRow[
 };
 
 export const fetchPodSetCodes = (): Promise<PodSetCode[]> => wait(podSetCodesFixture);
+
+// --- P0P1 contest ---
+
+import { cardsMshFixture } from "./fixtures/cards-msh";
+
+const p0p1Entries = new Map<string, P0P1Entry>();
+
+export const fetchP0P1Cards = (_setCode: string): Promise<MshCard[]> =>
+  wait(cardsMshFixture);
+
+export const fetchP0P1Entries = (_setCode: string): Promise<P0P1Entry[]> =>
+  wait([...p0p1Entries.values()]);
+
+export const upsertP0P1Entry = async (
+  _setCode: string,
+  slot: SlotKey,
+  cardName: string,
+): Promise<void> => {
+  p0p1Entries.set(slot, { slot, cardName, lastUpdated: new Date().toISOString() });
+};
+
+export const deleteP0P1Entry = async (
+  _setCode: string,
+  slot: SlotKey,
+): Promise<void> => {
+  p0p1Entries.delete(slot);
+};
+
+export { type AuthUser } from "../auth/AuthContext";
+export const initialAuthUser = {
+  id: "mock-user-id",
+  discordId: "123456789",
+  username: "MockPlayer",
+  avatarUrl: null,
+};
