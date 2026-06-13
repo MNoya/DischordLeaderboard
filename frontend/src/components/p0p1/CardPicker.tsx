@@ -12,7 +12,13 @@ interface Props {
   onClose: () => void;
 }
 
-export function CardPicker({ slot, cards, pickedCards, onSelect, onClose }: Props) {
+export function CardPicker({
+  slot,
+  cards,
+  pickedCards,
+  onSelect,
+  onClose,
+}: Props) {
   const [search, setSearch] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -89,7 +95,9 @@ export function CardPicker({ slot, cards, pickedCards, onSelect, onClose }: Prop
           ) : (
             <div className="flex flex-col">
               {filtered.map((card) => (
-                <div
+                <button
+                  type="button"
+                  onClick={() => onSelect(card.name)}
                   key={card.name}
                   className="flex items-center gap-3 px-4 py-2.5 border-0 border-b border-border hover:bg-surface transition-colors group"
                 >
@@ -101,8 +109,7 @@ export function CardPicker({ slot, cards, pickedCards, onSelect, onClose }: Prop
                       loading="lazy"
                     />
                   </CardImagePreview>
-                  <button
-                    type="button"
+                  <div
                     onClick={() => onSelect(card.name)}
                     className="flex-1 min-w-0 text-left bg-transparent border-0 cursor-pointer p-0"
                   >
@@ -112,9 +119,8 @@ export function CardPicker({ slot, cards, pickedCards, onSelect, onClose }: Prop
                       </div>
                       <ManaCost cost={card.manaCost} />
                     </div>
-                    
-                  </button>
-                </div>
+                  </div>
+                </button>
               ))}
             </div>
           )}
