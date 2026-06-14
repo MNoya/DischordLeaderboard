@@ -257,12 +257,11 @@ function MobileMenu({ pathname, onClose }: { pathname: string; onClose: () => vo
               role="menuitem"
               className={cn(
                 "flex items-center min-h-[54px] px-5 no-underline font-display text-[17px] tracking-[0.14em] border-b border-border transition-colors",
-                n.badge && "relative",
                 active ? "bg-green text-bg" : "text-text bg-transparent hover:bg-surface",
               )}
             >
               {n.label}
-              {n.badge && <n.badge active={active} />}
+              {n.badge && <MobileBadgeSlot active={active} />}
             </Link>
           );
         })}
@@ -291,10 +290,16 @@ function MobileMenu({ pathname, onClose }: { pathname: string; onClose: () => vo
   );
 }
 
-function P0P1Badge({ active }: { active: boolean }) {
+function useP0P1BadgeState() {
   const { user } = useAuth();
   const { data: picks } = useP0P1Picks(user ? P0P1_SET_CODE : undefined);
   const isPastDeadline = new Date() > P0P1_VOTING_DEADLINE;
+  const filled = user ? (picks?.length ?? 0) : 0;
+  return { user, isPastDeadline, filled, total: SLOTS.length };
+}
+
+function P0P1Badge({ active }: { active: boolean }) {
+  const { user, isPastDeadline, filled, total } = useP0P1BadgeState();
 
   if (isPastDeadline) return null;
 
@@ -303,9 +308,6 @@ function P0P1Badge({ active }: { active: boolean }) {
     active ? "bg-bg/50 text-white" : "bg-green/15 text-green",
   );
   const dot = cn("w-1.5 h-1.5 rounded-full inline-block", active ? "bg-white" : "bg-green");
-
-  const filled = user ? (picks?.length ?? 0) : 0;
-  const total = SLOTS.length;
 
   if (!user || filled === 0) {
     return (
@@ -325,4 +327,18 @@ function P0P1Badge({ active }: { active: boolean }) {
       {filled}/{total}
     </span>
   );
+}
+
+function MobileBadgeSlot({ active }: { active: boolean }) {
+  const { user, isPastDeadline, filled, total } = useP0P1BadgeState();
+
+  if (isPastDeadline) return null;
+
+  const color = active ? "text-bg/80" : "text-green";
+
+  const commonClasses = "ml-2 text-[10px] font-semibold font-sans tracking-normal";
+
+  if (!user || filled === 0) return <span className={cn(commonClasses, color)}>・OPEN</span>;
+  if (filled === total) return <span className={cn(commonClasses, color)}>✓</span>;
+  return <span className={cn(commonClasses, color)}>{filled}/{total}</span>;
 }
