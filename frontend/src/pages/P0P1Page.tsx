@@ -300,8 +300,8 @@ function P0P1Hero({
 
 function RulesBar() {
   return (
-    <div className="px-10 py-2.5 bg-surface border-b border-border flex items-center gap-6">
-      <span className="text-[13px] text-muted leading-[1.6]">
+    <div className="px-10 py-3.5  flex items-center gap-6">
+      <span className="text-[14px] text-muted leading-[1.6]">
         Pick your best card for each slot. Teams ranked by{" "}
         <a
           href={SEVENTEEN_LANDS_URL}
