@@ -8,15 +8,17 @@ export function Tooltip({
   align,
   children,
   className,
+  delayDuration,
 }: {
   label: string;
   side?: "top" | "right" | "bottom" | "left";
   align?: "start" | "center" | "end";
   children: React.ReactNode;
   className?: string;
+  delayDuration?: number;
 }) {
   return (
-    <Root>
+    <Root delayDuration={delayDuration}>
       <Trigger asChild>{children}</Trigger>
       <Portal>
         <Content

@@ -45,33 +45,42 @@ PASS_DIRS = (+1, -1, +1)
 
 
 def build_compact(log: dict) -> dict:
+    """Self-sufficient draft artifact: card table indexed by position, plus packs, picks, and built
+    decks expressed as those indices. The 36-char Draftmancer id is intentionally omitted — every
+    reference is positional, and the high-entropy id roughly doubles the gzipped size."""
     cards = log["carddata"]
     ids = sorted(cards.keys())
     idx = {cid: i for i, cid in enumerate(ids)}
 
     seats: list[str] = []
     picks_by_seat: list[list[list[int]]] = []
+    decks: list[dict[str, list[int]]] = []
     for user in log["users"].values():
         seats.append(user["userName"])
         per_pack: list[list[int]] = [[] for _ in range(3)]
         for p in user["picks"]:
             per_pack[p["packNum"]].extend(p["pick"])
         picks_by_seat.append(per_pack)
+        decklist = user.get("decklist") or {}
+        main = [idx[cid] for cid in (decklist.get("main") or []) if cid in idx]
+        side = [idx[cid] for cid in (decklist.get("side") or []) if cid in idx]
+        decks.append({"main": main, "side": side})
 
     packs = [[idx[cid] for cid in b] for b in log["boosters"]]
     card_table = [
         {
-            "id": cid,
             "n": cards[cid].get("name"),
             "cn": cards[cid].get("collector_number"),
             "s": cards[cid].get("set"),
             "r": cards[cid].get("rarity"),
             "c": cards[cid].get("colors"),
+            "cmc": cards[cid].get("cmc"),
+            "type": cards[cid].get("type"),
         }
         for cid in ids
     ]
     return {
-        "v": 1,
+        "v": 2,
         "sid": log.get("sessionID"),
         "t": log.get("time"),
         "set": (log.get("setRestriction") or [None])[0],
@@ -79,6 +88,7 @@ def build_compact(log: dict) -> dict:
         "cards": card_table,
         "packs": packs,
         "picks": picks_by_seat,
+        "decks": decks,
     }
 
 
@@ -114,7 +124,7 @@ def cmd_pack(log: dict, out: Path) -> None:
 
 def cmd_verify(log: dict) -> int:
     compact = build_compact(log)
-    cards = compact["cards"]
+    ids = sorted(log["carddata"].keys())
     seats = list(log["users"].values())
     n_seats = len(seats)
 
@@ -128,12 +138,12 @@ def cmd_verify(log: dict) -> int:
     for i, user in enumerate(seats):
         for pn in range(3):
             for k in range(14):
-                got = cards[sim[i][pn][k]]["id"]
+                got = ids[sim[i][pn][k]]
                 want = original[i][pn][k]
                 if got != want:
                     fails += 1
                     print(f"  seat {i} ({user['userName']}) P{pn + 1}P{k + 1:02d}: want {want[:8]} got {got[:8]}")
-        picked_ids = sorted(cards[sim[i][pn][k]]["id"] for pn in range(3) for k in range(14))
+        picked_ids = sorted(ids[sim[i][pn][k]] for pn in range(3) for k in range(14))
         pool_ids = sorted(user["cards"])
         if picked_ids != pool_ids:
             fails += 1

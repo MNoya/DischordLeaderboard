@@ -19,6 +19,7 @@ import type {
   PlayerFormatBreakdown,
   PlayerIdentity,
   PlayerProfile,
+  PodDraftArtifact,
   PodEventMatchRow,
   PodEventParticipantRow,
   PodEventReplayRow,
@@ -30,6 +31,7 @@ import type {
 } from "../types/leaderboard";
 import type { Card, P0P1Pick, SlotKey } from "../types/p0p1";
 import {
+  podDraftArtifactFixture,
   podEventsFixture,
   podEventMatchesFixture,
   podEventParticipantsFixture,
@@ -361,6 +363,10 @@ export const fetchPodEventParticipants = (
   eventId: string,
 ): Promise<PodEventParticipantRow[]> => {
   return wait(podEventParticipantsFixture.filter((p) => p.eventId === eventId));
+};
+
+export const fetchPodDraftArtifact = (eventId: string): Promise<PodDraftArtifact | null> => {
+  return wait(podDraftArtifactFixture[eventId] ?? null);
 };
 
 export const fetchPodEventBySlug = (slug: string): Promise<PodEventSummary | null> => {

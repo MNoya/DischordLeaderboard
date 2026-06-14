@@ -969,8 +969,8 @@ class PodDraftManager:
                     log.warning(f"[DRAFT] persist.event_missing event={self.event_id}")
                     return
                 event.draft_log_gz = blob
+                event.draft_log = compact
                 apply_seat_indexes(session, self.event_id, compact.get("seats") or [])
-                apply_mainboards(session, self.event_id, log_payload)
                 session.commit()
                 log.info(f"[DRAFT] persist.done event={self.event_id} bytes={len(blob)}")
         except Exception:
@@ -1428,81 +1428,6 @@ class PodDraftManager:
             fingerprint=f"end_draft_watchdog:{self.event_id}",
             tag="DRAFT",
         )
-
-def apply_mainboards(session, event_id: str, log_payload: dict) -> None:
-    users = log_payload.get("users")
-    if not isinstance(users, dict):
-        return
-    rows = session.execute(
-        select(PodDraftParticipant).where(PodDraftParticipant.event_id == event_id)
-    ).scalars().all()
-    by_dm: dict[str, PodDraftParticipant] = {}
-    by_display: dict[str, PodDraftParticipant] = {}
-    for row in rows:
-        if row.draftmancer_name:
-            by_dm[normalize_player_name(row.draftmancer_name)] = row
-        if row.display_name:
-            by_display[normalize_player_name(row.display_name)] = row
-    matched = 0
-    for user in users.values():
-        if not isinstance(user, dict) or user.get("isBot"):
-            continue
-        name = user.get("userName")
-        if not name or name == _BOT_USER_NAME or _AI_BOT_NAME_RE.match(name):
-            continue
-        decklist = user.get("decklist")
-        if not isinstance(decklist, dict):
-            continue
-        main = decklist.get("main")
-        if not isinstance(main, list) or not main:
-            continue
-        key = normalize_player_name(name)
-        row = by_dm.get(key) or by_display.get(key)
-        if row is None:
-            log.info(f"mainboard: no participant matching {name!r} in {event_id}")
-            continue
-        row.mainboard_card_ids = list(main)
-        row.mainboard_cards = resolve_mainboard(main, decklist.get("lands"), log_payload.get("carddata"))
-        matched += 1
-    log.info(f"mainboard: applied to {matched} seats for {event_id}")
-
-
-_BASIC_LAND_NAMES = {"W": "Plains", "U": "Island", "B": "Swamp", "R": "Mountain", "G": "Forest"}
-
-
-def resolve_mainboard(main_ids: list[str], lands, carddata) -> dict | None:
-    """Resolve a Draftmancer decklist into the renderable shape the pod page consumes — nonbasic
-    spells grouped by name with counts, plus the basic-land tally. Returns None when carddata can't
-    resolve the ids, so the frontend falls back to the deck screenshot."""
-    if not isinstance(carddata, dict):
-        return None
-    grouped: dict[str, dict] = {}
-    for cid in main_ids:
-        card = carddata.get(cid)
-        if not isinstance(card, dict):
-            return None
-        name = card.get("name")
-        entry = grouped.get(name)
-        if entry is None:
-            grouped[name] = {
-                "name": name,
-                "set": card.get("set"),
-                "collectorNumber": card.get("collector_number"),
-                "colors": card.get("colors") or [],
-                "cmc": card.get("cmc"),
-                "type": card.get("type"),
-                "count": 1,
-            }
-        else:
-            entry["count"] += 1
-    cards = sorted(grouped.values(), key=lambda c: (c["cmc"] if c["cmc"] is not None else 99, c["name"]))
-    basics = {
-        _BASIC_LAND_NAMES[color]: count
-        for color, count in (lands or {}).items()
-        if color in _BASIC_LAND_NAMES and count
-    }
-    return {"cards": cards, "basics": basics}
-
 
 def apply_seat_indexes(session, event_id: str, seats: list[str]) -> None:
     if not seats:

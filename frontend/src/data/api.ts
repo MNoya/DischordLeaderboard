@@ -26,6 +26,7 @@ export const fetchFormatRecentTrophies = impl.fetchFormatRecentTrophies;
 export const fetchPodEvents = impl.fetchPodEvents;
 export const fetchPodEventBySlug = impl.fetchPodEventBySlug;
 export const fetchPodEventParticipants = impl.fetchPodEventParticipants;
+export const fetchPodDraftArtifact = impl.fetchPodDraftArtifact;
 export const fetchPodEventMatches = impl.fetchPodEventMatches;
 export const fetchPodEventReplays = impl.fetchPodEventReplays;
 export const fetchPodLeaderboard = impl.fetchPodLeaderboard;

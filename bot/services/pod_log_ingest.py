@@ -1,12 +1,13 @@
 """Ingest a raw Draftmancer DraftLog into a pod_draft_events row.
 
-Packs the log into compact-gz form (same shape build_compact emits), stores it on
-pod_draft_events.draft_log_gz, reconciles pod_draft_participants.draftmancer_name to the canonical
-Draftmancer userName, applies seat indexes + mainboards, and (when MPT_API_KEY is set) submits each
-non-bot seat to MagicProTools, stashing the URL on pod_draft_participants.draft_log_url.
+Packs the log into the compact artifact build_compact emits, stores it on
+pod_draft_events.draft_log (JSONB) and pod_draft_events.draft_log_gz, reconciles
+pod_draft_participants.draftmancer_name to the canonical Draftmancer userName, applies seat indexes,
+and (when MPT_API_KEY is set) submits each non-bot seat to MagicProTools, stashing the URL on
+pod_draft_participants.draft_log_url.
 
-Idempotent — re-ingesting overwrites draft_log_gz, re-applies mainboards, and re-aligns names from
-the same log. Shared by the CLI script (bot.scripts.ingest_pod_draft_log) and /pod-backfill.
+Idempotent — re-ingesting overwrites the stored log and re-aligns names from the same log. Shared by
+the CLI script (bot.scripts.ingest_pod_draft_log) and /pod-backfill.
 """
 from __future__ import annotations
 
@@ -22,7 +23,7 @@ from bot.database import SessionLocal
 from bot.models import Player, PodDraftEvent, PodDraftParticipant
 from bot.scripts.draftmancer_log import build_compact
 from bot.services.magicprotools import submit_to_api
-from bot.services.pod_draft_manager import apply_mainboards, apply_seat_indexes
+from bot.services.pod_draft_manager import apply_seat_indexes
 
 
 log = logging.getLogger(__name__)
@@ -109,9 +110,9 @@ def ingest_draft_log_sync(event_id: str, draft_log: dict) -> IngestSummary | Non
         event.draft_log_gz = gzip.compress(
             json.dumps(compact, separators=(",", ":")).encode(), compresslevel=9
         )
+        event.draft_log = compact
         stored_bytes = len(event.draft_log_gz)
         apply_seat_indexes(session, event_id, compact.get("seats") or [])
-        apply_mainboards(session, event_id, draft_log)
         session.commit()
 
     return IngestSummary(
