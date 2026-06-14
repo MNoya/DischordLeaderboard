@@ -12,9 +12,9 @@ import { useAuth } from "../auth/useAuth";
 import { useIsMobile } from "../lib/use-is-mobile";
 import {
   useP0P1Cards,
-  useP0P1Entries,
-  useUpsertP0P1Entry,
-  useDeleteAllP0P1Entries,
+  useP0P1Picks,
+  useUpsertP0P1Pick,
+  useDeleteAllP0P1Picks,
   useSets,
 } from "../data/hooks";
 import {
@@ -30,9 +30,9 @@ const SEVENTEEN_LANDS_URL = "https://www.17lands.com/card_data";
 export function P0P1Page() {
   const { user, loading: authLoading, signIn } = useAuth();
   const { data: cards } = useP0P1Cards(SET_CODE);
-  const { data: votes } = useP0P1Entries(user ? SET_CODE : undefined);
-  const upsertVote = useUpsertP0P1Entry(SET_CODE);
-  const clearAll = useDeleteAllP0P1Entries(SET_CODE);
+  const { data: picks } = useP0P1Picks(user ? SET_CODE : undefined);
+  const upsertPick = useUpsertP0P1Pick(SET_CODE);
+  const clearAll = useDeleteAllP0P1Picks(SET_CODE);
   const isDesktop = !useIsMobile(1024);
   const [editingSlotKey, setEditingSlotKey] = useState<SlotKey | null>(null);
 
@@ -41,23 +41,23 @@ export function P0P1Page() {
     return new Map(cards.map((c) => [c.name, c]));
   }, [cards]);
 
-  const votesBySlot = useMemo(() => {
-    if (!votes) return new Map<string, string>();
-    return new Map(votes.map((v) => [v.slot, v.cardName]));
-  }, [votes]);
+  const picksBySlot = useMemo(() => {
+    if (!picks) return new Map<string, string>();
+    return new Map(picks.map((v) => [v.slot, v.cardName]));
+  }, [picks]);
 
   const pickedCards = useMemo(
-    () => new Set(votesBySlot.values()),
-    [votesBySlot],
+    () => new Set(picksBySlot.values()),
+    [picksBySlot],
   );
 
-  const filledCount = votesBySlot.size;
+  const filledCount = picksBySlot.size;
   const isComplete = filledCount === SLOTS.length;
   const isPastDeadline = new Date() > VOTING_DEADLINE;
 
   const defaultSlotKey = useMemo(
-    () => SLOTS.find((s) => !votesBySlot.has(s.key))?.key ?? SLOTS[0].key,
-    [votesBySlot],
+    () => SLOTS.find((s) => !picksBySlot.has(s.key))?.key ?? SLOTS[0].key,
+    [picksBySlot],
   );
   const activeSlotKey = editingSlotKey ?? defaultSlotKey;
   const activeSlot = SLOTS.find((s) => s.key === activeSlotKey)!;
@@ -65,21 +65,19 @@ export function P0P1Page() {
   const nextUnfilledSlot = useCallback(
     (afterKey: SlotKey, newPick: string) => {
       const idx = SLOTS.findIndex((s) => s.key === afterKey);
-      const nextPicked = new Set(votesBySlot.values());
-      nextPicked.add(newPick);
       for (let i = 1; i < SLOTS.length; i++) {
         const candidate = SLOTS[(idx + i) % SLOTS.length];
-        if (!votesBySlot.has(candidate.key)) return candidate.key;
+        if (!picksBySlot.has(candidate.key)) return candidate.key;
       }
       return afterKey;
     },
-    [votesBySlot],
+    [picksBySlot],
   );
 
   const slotList = (
     <div className="flex flex-col gap-2">
       {SLOTS.map((slot) => {
-        const cardName = votesBySlot.get(slot.key);
+        const cardName = picksBySlot.get(slot.key);
         const selectedCard = cardName ? cardsByName.get(cardName) : undefined;
         return (
           <SlotCard
@@ -90,7 +88,7 @@ export function P0P1Page() {
             pickedCards={pickedCards}
             locked={isPastDeadline}
             onSelect={(name) => {
-              upsertVote.mutate({ slot: slot.key, cardName: name });
+              upsertPick.mutate({ slot: slot.key, cardName: name });
             }}
             {...(isDesktop && !isPastDeadline
               ? {
@@ -155,12 +153,10 @@ export function P0P1Page() {
                   slot={activeSlot}
                   cards={cards}
                   pickedCards={pickedCards}
-                  dismissable={false}
                   onSelect={(name) => {
-                    upsertVote.mutate({ slot: activeSlot.key, cardName: name });
+                    upsertPick.mutate({ slot: activeSlot.key, cardName: name });
                     setEditingSlotKey(nextUnfilledSlot(activeSlot.key, name));
                   }}
-                  onCancel={() => {}}
                 />
               </div>
             )}

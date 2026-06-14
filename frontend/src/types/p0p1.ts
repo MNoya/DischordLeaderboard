@@ -11,7 +11,7 @@ export interface MshCard {
   imageArtCrop: string;
 }
 
-export interface P0P1Entry {
+export interface P0P1Pick {
   slot: SlotKey;
   cardName: string;
   lastUpdated: string;

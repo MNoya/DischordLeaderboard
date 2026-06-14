@@ -12,7 +12,7 @@ import {
   fetchColorsLeaderboard,
   fetchColorsSummary,
   fetchP0P1Cards,
-  fetchP0P1Entries,
+  fetchP0P1Picks,
   fetchFormatColorsLeaderboard,
   fetchFormatLeaderboard,
   fetchFormatRecentTrophies,
@@ -30,10 +30,10 @@ import {
   fetchPodSetCodes,
   fetchRecentTrophies,
   fetchSets,
-  upsertP0P1Entry,
-  deleteAllP0P1Entries,
+  upsertP0P1Pick,
+  deleteAllP0P1Picks,
 } from "./api";
-import type { P0P1Entry, SlotKey } from "../types/p0p1";
+import type { P0P1Pick, SlotKey } from "../types/p0p1";
 import { MULTI, OTHER } from "./filters";
 const FIVE_MINUTES = 5 * 60 * 1000;
 
@@ -330,25 +330,25 @@ export function useP0P1Cards(setCode: string | undefined) {
   });
 }
 
-export function useP0P1Entries(setCode: string | undefined) {
+export function useP0P1Picks(setCode: string | undefined) {
   return useQuery({
-    queryKey: ["p0p1-entries", setCode],
-    queryFn: () => fetchP0P1Entries(setCode!),
+    queryKey: ["p0p1-picks", setCode],
+    queryFn: () => fetchP0P1Picks(setCode!),
     enabled: !!setCode,
     staleTime: FIVE_MINUTES,
   });
 }
 
-export function useUpsertP0P1Entry(setCode: string) {
+export function useUpsertP0P1Pick(setCode: string) {
   const qc = useQueryClient();
-  const queryKey = ["p0p1-entries", setCode];
+  const queryKey = ["p0p1-picks", setCode];
   return useMutation({
     mutationFn: ({ slot, cardName }: { slot: SlotKey; cardName: string }) =>
-      upsertP0P1Entry(setCode, slot, cardName),
+      upsertP0P1Pick(setCode, slot, cardName),
     onMutate: async ({ slot, cardName }) => {
       await qc.cancelQueries({ queryKey });
-      const prev = qc.getQueryData<P0P1Entry[]>(queryKey);
-      qc.setQueryData<P0P1Entry[]>(queryKey, (old = []) => {
+      const prev = qc.getQueryData<P0P1Pick[]>(queryKey);
+      qc.setQueryData<P0P1Pick[]>(queryKey, (old = []) => {
         const next = old.filter((v) => v.slot !== slot);
         next.push({ slot, cardName, lastUpdated: new Date().toISOString() });
         return next;
@@ -363,17 +363,15 @@ export function useUpsertP0P1Entry(setCode: string) {
   });
 }
 
-
-
-export function useDeleteAllP0P1Entries(setCode: string) {
+export function useDeleteAllP0P1Picks(setCode: string) {
   const qc = useQueryClient();
-  const queryKey = ["p0p1-entries", setCode];
+  const queryKey = ["p0p1-picks", setCode];
   return useMutation({
-    mutationFn: () => deleteAllP0P1Entries(setCode),
+    mutationFn: () => deleteAllP0P1Picks(setCode),
     onMutate: async () => {
       await qc.cancelQueries({ queryKey });
-      const prev = qc.getQueryData<P0P1Entry[]>(queryKey);
-      qc.setQueryData<P0P1Entry[]>(queryKey, []);
+      const prev = qc.getQueryData<P0P1Pick[]>(queryKey);
+      qc.setQueryData<P0P1Pick[]>(queryKey, []);
       return { prev };
     },
     onError: (_err, _vars, ctx) => {

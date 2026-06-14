@@ -28,7 +28,7 @@ import type {
   RecentTrophy,
   SetSummary,
 } from "../types/leaderboard";
-import type { MshCard, P0P1Entry, SlotKey } from "../types/p0p1";
+import type { MshCard, P0P1Pick, SlotKey } from "../types/p0p1";
 import {
   podEventsFixture,
   podEventMatchesFixture,
@@ -404,33 +404,33 @@ export const fetchPodSetCodes = (): Promise<PodSetCode[]> => wait(podSetCodesFix
 
 import { cardsMshFixture } from "./fixtures/cards-msh";
 
-const p0p1Entries = new Map<string, P0P1Entry>();
+const p0p1Picks = new Map<string, P0P1Pick>();
 
 export const fetchP0P1Cards = (_setCode: string): Promise<MshCard[]> =>
   wait(cardsMshFixture);
 
-export const fetchP0P1Entries = (_setCode: string): Promise<P0P1Entry[]> =>
-  wait([...p0p1Entries.values()]);
+export const fetchP0P1Picks = (_setCode: string): Promise<P0P1Pick[]> =>
+  wait([...p0p1Picks.values()]);
 
-export const upsertP0P1Entry = async (
+export const upsertP0P1Pick = async (
   _setCode: string,
   slot: SlotKey,
   cardName: string,
 ): Promise<void> => {
-  p0p1Entries.set(slot, { slot, cardName, lastUpdated: new Date().toISOString() });
+  p0p1Picks.set(slot, { slot, cardName, lastUpdated: new Date().toISOString() });
 };
 
-export const deleteP0P1Entry = async (
+export const deleteP0P1Pick = async (
   _setCode: string,
   slot: SlotKey,
 ): Promise<void> => {
-  p0p1Entries.delete(slot);
+  p0p1Picks.delete(slot);
 };
 
-export const deleteAllP0P1Entries = async (
+export const deleteAllP0P1Picks = async (
   _setCode: string,
 ): Promise<void> => {
-  p0p1Entries.clear();
+  p0p1Picks.clear();
 };
 
 export const initialAuthUser = {

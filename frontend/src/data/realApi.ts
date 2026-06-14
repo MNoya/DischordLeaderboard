@@ -1143,13 +1143,13 @@ function adaptPodLeaderboardRow(row: Record<string, unknown>): PodLeaderboardRow
 
 // --- P0P1 contest (stubs — wired to Supabase later) ---
 
-import type { MshCard, P0P1Entry, SlotKey } from "../types/p0p1";
+import type { MshCard, P0P1Pick, SlotKey } from "../types/p0p1";
 import { cardsMshFixture } from "./fixtures/cards-msh";
 
 export const fetchP0P1Cards = (_setCode: string): Promise<MshCard[]> =>
   Promise.resolve(cardsMshFixture);
 
-export async function fetchP0P1Entries(setCode: string): Promise<P0P1Entry[]> {
+export async function fetchP0P1Picks(setCode: string): Promise<P0P1Pick[]> {
   const { data, error } = await client()
     .from("p0p1_entries")
     .select("slot, card_name, updated_at")
@@ -1162,7 +1162,7 @@ export async function fetchP0P1Entries(setCode: string): Promise<P0P1Entry[]> {
   }));
 }
 
-export async function upsertP0P1Entry(
+export async function upsertP0P1Pick(
   setCode: string,
   slot: SlotKey,
   cardName: string,
@@ -1178,7 +1178,7 @@ export async function upsertP0P1Entry(
   if (error) throw error;
 }
 
-export async function deleteP0P1Entry(
+export async function deleteP0P1Pick(
   setCode: string,
   slot: SlotKey,
 ): Promise<void> {
@@ -1190,7 +1190,7 @@ export async function deleteP0P1Entry(
   if (error) throw error;
 }
 
-export async function deleteAllP0P1Entries(setCode: string): Promise<void> {
+export async function deleteAllP0P1Picks(setCode: string): Promise<void> {
   const { error } = await client()
     .from("p0p1_entries")
     .delete()
