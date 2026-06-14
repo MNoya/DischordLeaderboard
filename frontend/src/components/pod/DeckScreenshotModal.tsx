@@ -145,7 +145,7 @@ export function DeckScreenshotModal({ participant, breakdownHref, onClose, onPre
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center gap-1 md:gap-2 bg-black/80 backdrop-blur-sm animate-fadeIn px-2 md:px-4 py-8"
+      className="fixed inset-0 z-50 flex flex-col lg:flex-row items-center justify-center gap-3 lg:gap-2 bg-black/80 backdrop-blur-sm animate-fadeIn px-4 md:px-6 py-6 lg:py-8"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -153,7 +153,7 @@ export function DeckScreenshotModal({ participant, breakdownHref, onClose, onPre
     >
       {onPrev && <NavButton side="left" onClick={onPrev} />}
       <div
-        className="relative bg-surface border border-border flex-1 max-w-[1400px] max-h-full flex flex-col"
+        className="relative bg-surface border border-border w-full lg:w-auto flex-1 max-w-[1400px] max-h-full flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex items-center gap-3 lg:gap-6 pl-9 pr-5 py-3 border-b border-border shrink-0">
@@ -172,7 +172,7 @@ export function DeckScreenshotModal({ participant, breakdownHref, onClose, onPre
             />
           )}
           {hasScreenshot && hasDecklist && (
-            <div className="flex shrink-0 border border-border lg:ml-auto" role="tablist">
+            <div className="hidden lg:flex shrink-0 border border-border lg:ml-auto" role="tablist">
               <TabButton active={effectiveTab === "screenshot"} onClick={() => setTab("screenshot")}>
                 IMAGE
               </TabButton>
@@ -238,17 +238,17 @@ export function DeckScreenshotModal({ participant, breakdownHref, onClose, onPre
           </button>
         )}
 
-        {breakdownHref ? (
-          <Link to={breakdownHref} className="block no-underline border-t border-border shrink-0">
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 md:gap-4 px-3 md:px-4 py-3 bg-surface hover:bg-green/5 transition-colors cursor-pointer">
+        {breakdownHref && (
+          <Link to={breakdownHref} className="hidden lg:block no-underline border-t border-border shrink-0">
+            <div className="flex items-center justify-between gap-4 px-4 py-3 bg-surface hover:bg-green/5 transition-colors cursor-pointer">
               {participant.deckScreenshotCaption ? (
-                <span className="text-muted text-[15px] font-body italic leading-snug min-w-0 text-center md:text-left md:truncate md:pr-1 md:pl-5 md:leading-none">
+                <span className="text-muted text-[15px] font-body italic leading-none min-w-0 truncate pr-1 pl-5">
                   {participant.deckScreenshotCaption}
                 </span>
               ) : (
-                <span className="hidden md:block md:pl-5" />
+                <span className="pl-5" />
               )}
-              <div className="flex items-center justify-end gap-4 shrink-0 self-end md:self-auto">
+              <div className="flex items-center gap-4 shrink-0">
                 <span className="text-muted text-[13px] font-body">
                   {BREAKDOWN_CAPTION}
                 </span>
@@ -262,11 +262,17 @@ export function DeckScreenshotModal({ participant, breakdownHref, onClose, onPre
               </div>
             </div>
           </Link>
-        ) : participant.deckScreenshotCaption ? (
-          <div className="pl-9 pr-5 py-4 text-muted text-[15px] font-body italic leading-snug border-t border-border shrink-0 bg-surface">
+        )}
+        {participant.deckScreenshotCaption && (
+          <div
+            className={cn(
+              "pl-9 pr-5 py-4 text-muted text-[15px] font-body italic leading-snug border-t border-border shrink-0 bg-surface",
+              breakdownHref && "lg:hidden",
+            )}
+          >
             {participant.deckScreenshotCaption}
           </div>
-        ) : null}
+        )}
         {effectiveTab === "decklist" && (participant.mainboard?.sideboard.length ?? 0) > 0 && (
           <div className="border-t border-border shrink-0 bg-surface pl-9 pr-5 py-3">
             <div className="font-display tracking-[0.16em] text-muted leading-none mb-2" style={{ fontSize: 13 }}>
@@ -281,6 +287,38 @@ export function DeckScreenshotModal({ participant, breakdownHref, onClose, onPre
         )}
       </div>
       {onNext && <NavButton side="right" onClick={onNext} />}
+      {(onPrev || onNext || (hasScreenshot && hasDecklist) || breakdownHref) && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="lg:hidden shrink-0 flex items-center justify-center gap-3 rounded-2xl bg-surface border border-border shadow-lg px-3 py-2"
+        >
+          {onPrev && <MobileChevron side="left" onClick={onPrev} />}
+          {(hasScreenshot && hasDecklist) || breakdownHref ? (
+            <div className="flex items-center gap-1.5">
+              {hasScreenshot && hasDecklist && (
+                <>
+                  <MobileTab active={effectiveTab === "screenshot"} onClick={() => setTab("screenshot")}>
+                    IMAGE
+                  </MobileTab>
+                  <MobileTab active={effectiveTab === "decklist"} onClick={() => setTab("decklist")}>
+                    CARD POOL
+                  </MobileTab>
+                </>
+              )}
+              {breakdownHref && (
+                <Link
+                  to={breakdownHref}
+                  aria-label="View breakdown"
+                  className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-green/15 border border-green/50 text-green hover:bg-green/25 transition-colors"
+                >
+                  <GiRoundTable size={26} />
+                </Link>
+              )}
+            </div>
+          ) : null}
+          {onNext && <MobileChevron side="right" onClick={onNext} />}
+        </div>
+      )}
     </div>,
     document.body,
   );
@@ -297,11 +335,47 @@ function NavButton({ side, onClick }: { side: "left" | "right"; onClick: () => v
         onClick();
       }}
       aria-label={side === "left" ? "Previous deck" : "Next deck"}
-      className="shrink-0 inline-flex items-center gap-1 p-1.5 cursor-pointer bg-transparent border-0 text-green/80 hover:text-green transition-colors font-display tracking-[0.18em] text-[15px]"
+      className="hidden lg:inline-flex shrink-0 items-center gap-1 p-1.5 cursor-pointer bg-transparent border-0 text-green/80 hover:text-green transition-colors font-display tracking-[0.18em] text-[15px]"
     >
       {side === "left" && <Chevron size={34} strokeWidth={2.5} />}
       <span className="hidden min-[1600px]:inline">{label}</span>
       {side === "right" && <Chevron size={34} strokeWidth={2.5} />}
+    </button>
+  );
+}
+
+function MobileChevron({ side, onClick }: { side: "left" | "right"; onClick: () => void }) {
+  const Chevron = side === "left" ? ChevronLeft : ChevronRight;
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      aria-label={side === "left" ? "Previous deck" : "Next deck"}
+      className="shrink-0 inline-flex items-center justify-center w-10 h-10 rounded-full bg-surface2 border border-border text-green/90 hover:text-green hover:border-green/50 transition-colors cursor-pointer"
+    >
+      <Chevron size={24} strokeWidth={2.5} />
+    </button>
+  );
+}
+
+function MobileTab({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={cn(
+        "rounded-full border px-4 py-2 font-display tracking-[0.14em] leading-none cursor-pointer transition-colors",
+        "outline-none focus:outline-none focus-visible:outline-none",
+        active ? "bg-green/15 text-green border-green/50" : "bg-surface2 text-muted border-border hover:text-text",
+      )}
+      style={{ fontSize: 14 }}
+    >
+      {children}
     </button>
   );
 }
