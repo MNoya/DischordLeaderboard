@@ -208,6 +208,7 @@ class PodDraftParticipant(Base):
     eliminated_round    = Column(Integer, nullable=True)
     draft_log_url       = Column(String, nullable=True)
     mainboard_card_ids  = Column(JSONB, nullable=True)
+    mainboard_cards     = Column(JSONB, nullable=True)
     deck_colors             = Column(String, nullable=True)
     deck_screenshot_url     = Column(String, nullable=True)
     deck_screenshot_caption = Column(String, nullable=True)

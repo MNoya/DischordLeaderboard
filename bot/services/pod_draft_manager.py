@@ -1462,8 +1462,46 @@ def apply_mainboards(session, event_id: str, log_payload: dict) -> None:
             log.info(f"mainboard: no participant matching {name!r} in {event_id}")
             continue
         row.mainboard_card_ids = list(main)
+        row.mainboard_cards = resolve_mainboard(main, decklist.get("lands"), log_payload.get("carddata"))
         matched += 1
     log.info(f"mainboard: applied to {matched} seats for {event_id}")
+
+
+_BASIC_LAND_NAMES = {"W": "Plains", "U": "Island", "B": "Swamp", "R": "Mountain", "G": "Forest"}
+
+
+def resolve_mainboard(main_ids: list[str], lands, carddata) -> dict | None:
+    """Resolve a Draftmancer decklist into the renderable shape the pod page consumes — nonbasic
+    spells grouped by name with counts, plus the basic-land tally. Returns None when carddata can't
+    resolve the ids, so the frontend falls back to the deck screenshot."""
+    if not isinstance(carddata, dict):
+        return None
+    grouped: dict[str, dict] = {}
+    for cid in main_ids:
+        card = carddata.get(cid)
+        if not isinstance(card, dict):
+            return None
+        name = card.get("name")
+        entry = grouped.get(name)
+        if entry is None:
+            grouped[name] = {
+                "name": name,
+                "set": card.get("set"),
+                "collectorNumber": card.get("collector_number"),
+                "colors": card.get("colors") or [],
+                "cmc": card.get("cmc"),
+                "type": card.get("type"),
+                "count": 1,
+            }
+        else:
+            entry["count"] += 1
+    cards = sorted(grouped.values(), key=lambda c: (c["cmc"] if c["cmc"] is not None else 99, c["name"]))
+    basics = {
+        _BASIC_LAND_NAMES[color]: count
+        for color, count in (lands or {}).items()
+        if color in _BASIC_LAND_NAMES and count
+    }
+    return {"cards": cards, "basics": basics}
 
 
 def apply_seat_indexes(session, event_id: str, seats: list[str]) -> None:

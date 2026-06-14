@@ -619,6 +619,28 @@ def test_apply_mainboards_writes_when_decklist_present_and_skips_others(session)
     assert by_name["Dee"].mainboard_card_ids == ["c-d1", "c-d2"]
 
 
+def test_resolve_mainboard_groups_nonbasics_and_tallies_basics():
+    from bot.services.pod_draft_manager import resolve_mainboard
+
+    carddata = {
+        "id-bolt": {"name": "Bolt", "set": "sos", "collector_number": "1", "colors": ["R"], "cmc": 1},
+        "id-bear": {"name": "Bear", "set": "sos", "collector_number": "2", "colors": ["G"], "cmc": 2},
+    }
+
+    resolved = resolve_mainboard(["id-bear", "id-bolt", "id-bolt"], {"R": 0, "G": 9, "U": 0}, carddata)
+
+    assert resolved["basics"] == {"Forest": 9}
+    assert [(c["name"], c["count"]) for c in resolved["cards"]] == [("Bolt", 2), ("Bear", 1)]
+    assert resolved["cards"][0]["collectorNumber"] == "1"
+
+
+def test_resolve_mainboard_returns_none_when_ids_unresolvable():
+    from bot.services.pod_draft_manager import resolve_mainboard
+
+    assert resolve_mainboard(["missing"], None, {"present": {"name": "X"}}) is None
+    assert resolve_mainboard(["x"], None, None) is None
+
+
 @pytest.mark.parametrize(
     "current_round, championship_posted, existing_url, existing_caption, new_caption, captured",
     [
