@@ -49,9 +49,27 @@ export function P0P1Page() {
   const filledCount = votesBySlot.size;
   const isComplete = filledCount === SLOTS.length;
   const isPastDeadline = new Date() > VOTING_DEADLINE;
-  const editingSlot = editingSlotKey
-    ? SLOTS.find((s) => s.key === editingSlotKey)
-    : undefined;
+
+  const defaultSlotKey = useMemo(
+    () => SLOTS.find((s) => !votesBySlot.has(s.key))?.key ?? SLOTS[0].key,
+    [votesBySlot],
+  );
+  const activeSlotKey = editingSlotKey ?? defaultSlotKey;
+  const activeSlot = SLOTS.find((s) => s.key === activeSlotKey)!;
+
+  const nextUnfilledSlot = useCallback(
+    (afterKey: SlotKey, newPick: string) => {
+      const idx = SLOTS.findIndex((s) => s.key === afterKey);
+      const nextPicked = new Set(votesBySlot.values());
+      nextPicked.add(newPick);
+      for (let i = 1; i < SLOTS.length; i++) {
+        const candidate = SLOTS[(idx + i) % SLOTS.length];
+        if (!votesBySlot.has(candidate.key)) return candidate.key;
+      }
+      return afterKey;
+    },
+    [votesBySlot],
+  );
 
   const slotList = (
     <div className="flex flex-col gap-2">
@@ -72,7 +90,7 @@ export function P0P1Page() {
             {...(isDesktop && !isPastDeadline
               ? {
                   onEdit: () => setEditingSlotKey(slot.key),
-                  active: editingSlotKey === slot.key,
+                  active: activeSlotKey === slot.key,
                 }
               : {})}
           />
@@ -87,65 +105,81 @@ export function P0P1Page() {
       <main
         className={`flex-1 flex flex-col mx-auto w-full px-5 md:px-10 pt-5 md:pt-10 pb-5 ${isDesktop ? "max-w-[1100px]" : "max-w-[640px]"}`}
       >
-        {!authLoading && !user && !isPastDeadline && (
-          <div className="flex justify-center my-8">
-            <button
-              type="button"
-              onClick={signIn}
-              className="bg-transparent border-0 cursor-pointer p-0"
-            >
-              <CtaPill size="lg" icon={<DiscordIcon size={19} />}>
-                LOG IN TO PARTICIPATE
-              </CtaPill>
-            </button>
-          </div>
-        )}
-
         {isDesktop ? (
-          user && cards ? (
-            <>
-              {!isPastDeadline && (
-                <ProgressBanner
-                  filled={filledCount}
-                  total={SLOTS.length}
-                  isComplete={isComplete}
-                  onClearAll={() => clearAll.mutate()}
-                  clearing={clearAll.isPending}
-                />
-              )}
-              <div
-                className="grid gap-6 mt-4"
-                style={{ gridTemplateColumns: "minmax(0, 1fr) 340px" }}
-              >
-                <div>
-                  {editingSlot ? (
-                    <CardSelectionGrid
-                      key={editingSlot.key}
-                      slot={editingSlot}
-                      cards={cards}
-                      pickedCards={pickedCards}
-                      onSelect={(name) => {
-                        upsertVote.mutate({
-                          slot: editingSlot.key,
-                          cardName: name,
-                        });
-                        setEditingSlotKey(null);
-                      }}
-                      onCancel={() => setEditingSlotKey(null)}
-                    />
-                  ) : (
-                    <Rules />
-                  )}
-                </div>
-                <div className="sticky top-20 self-start">{slotList}</div>
+          <>
+            <CompactRules />
+
+            {!authLoading && !user && !isPastDeadline && (
+              <div className="flex justify-center my-8">
+                <button
+                  type="button"
+                  onClick={signIn}
+                  className="bg-transparent border-0 cursor-pointer p-0"
+                >
+                  <CtaPill size="lg" icon={<DiscordIcon size={19} />}>
+                    LOG IN TO PARTICIPATE
+                  </CtaPill>
+                </button>
               </div>
-            </>
-          ) : (
-            <Rules />
-          )
+            )}
+
+            {user && cards && !isPastDeadline && (
+              <>
+                <div
+                  className="grid gap-6 mt-4"
+                  style={{ gridTemplateColumns: "340px minmax(0, 1fr)" }}
+                >
+                  <div className="sticky top-20 self-start">
+                    <ProgressBanner
+                    filled={filledCount}
+                    total={SLOTS.length}
+                    isComplete={isComplete}
+                    onClearAll={() => clearAll.mutate()}
+                    clearing={clearAll.isPending}
+                  />
+                  <div className="mt-4">
+
+                    {slotList}
+                  </div>
+                  </div>
+                  <CardSelectionGrid
+                    key={activeSlot.key}
+                    slot={activeSlot}
+                    cards={cards}
+                    pickedCards={pickedCards}
+                    dismissable={false}
+                    onSelect={(name) => {
+                      upsertVote.mutate({ slot: activeSlot.key, cardName: name });
+                      setEditingSlotKey(nextUnfilledSlot(activeSlot.key, name));
+                    }}
+                    onCancel={() => {}}
+                  />
+                </div>
+              </>
+            )}
+
+            {user && cards && isPastDeadline && (
+              <div className="mt-4">{slotList}</div>
+            )}
+          </>
         ) : (
           <>
             <Rules />
+
+            {!authLoading && !user && !isPastDeadline && (
+              <div className="flex justify-center my-8">
+                <button
+                  type="button"
+                  onClick={signIn}
+                  className="bg-transparent border-0 cursor-pointer p-0"
+                >
+                  <CtaPill size="lg" icon={<DiscordIcon size={19} />}>
+                    LOG IN TO PARTICIPATE
+                  </CtaPill>
+                </button>
+              </div>
+            )}
+
             {user && cards && (
               <>
                 {!isPastDeadline && (
@@ -166,6 +200,31 @@ export function P0P1Page() {
         <Footer className="mt-auto pt-8" />
       </main>
     </div>
+  );
+}
+
+function CompactRules() {
+  return (
+    <section className="mb-4">
+      <div className="flex items-baseline justify-between gap-4 mb-3">
+        <h2 className="font-display text-[18px] text-text tracking-[0.18em]">
+          Pack 0, Pick 1 Challenge - {P0P1_SET_NAME}
+        </h2>
+        <CountdownInline deadline={VOTING_DEADLINE} />
+      </div>
+      <p className="text-[13px] text-muted leading-[1.6]">
+        Pick your best card for each slot. Teams ranked by{" "}
+        <a
+          href={SEVENTEEN_LANDS_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="text-green hover:underline underline-offset-2"
+        >
+          17Lands GIH win rate
+        </a>{" "}
+        after six weeks. Slot 9 is tiebreaker only. Picks auto-save.
+      </p>
+    </section>
   );
 }
 
@@ -261,6 +320,20 @@ function ProgressBanner({
         </button>
       )}
     </div>
+  );
+}
+
+function CountdownInline({ deadline }: { deadline: Date }) {
+  const diff = deadline.getTime() - Date.now();
+  if (diff <= 0) {
+    return <span className="text-muted text-[13px]">Voting closed</span>;
+  }
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
+  return (
+    <span className="text-green text-[14px] whitespace-nowrap">
+      {days}d {hours}h remaining
+    </span>
   );
 }
 
