@@ -133,31 +133,45 @@ export function P0P1Page() {
               </div>
             )}
 
-            {user && cards && !isPastDeadline && (
+            {user && !isPastDeadline && (
               <div
                 className="grid gap-6 mt-4"
                 style={{ gridTemplateColumns: "350px minmax(0, 1fr)" }}
               >
-                <div className="sticky top-20 self-start">
-                  <ProgressBanner
-                    filled={filledCount}
-                    total={SLOTS.length}
-                    isComplete={isComplete}
-                    onClearAll={() => clearAll.mutate()}
-                    clearing={clearAll.isPending}
-                  />
-                  <div className="mt-4">{slotList}</div>
-                </div>
-                <CardSelectionGrid
-                  key={activeSlot.key}
-                  slot={activeSlot}
-                  cards={cards}
-                  pickedCards={pickedCards}
-                  onSelect={(name) => {
-                    upsertPick.mutate({ slot: activeSlot.key, cardName: name });
-                    setEditingSlotKey(nextUnfilledSlot(activeSlot.key, name));
-                  }}
-                />
+                {cards && picks ? (
+                  <>
+                    <div className="sticky top-20 self-start">
+                      <ProgressBanner
+                        filled={filledCount}
+                        total={SLOTS.length}
+                        isComplete={isComplete}
+                        onClearAll={() => clearAll.mutate()}
+                        clearing={clearAll.isPending}
+                      />
+                      <div className="mt-4">{slotList}</div>
+                    </div>
+                    <CardSelectionGrid
+                      key={activeSlot.key}
+                      slot={activeSlot}
+                      cards={cards}
+                      pickedCards={pickedCards}
+                      onSelect={(name) => {
+                        upsertPick.mutate({ slot: activeSlot.key, cardName: name });
+                        setEditingSlotKey(nextUnfilledSlot(activeSlot.key, name));
+                      }}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <div className="flex items-center justify-center px-4 py-3 border border-border2 bg-surface">
+                        <div className="h-3 w-24 bg-surface2 animate-pulse" />
+                      </div>
+                      <div className="mt-4"><SlotsListSkeleton /></div>
+                    </div>
+                    <CardGridSkeleton />
+                  </>
+                )}
               </div>
             )}
 
@@ -188,19 +202,28 @@ export function P0P1Page() {
               </div>
             )}
 
-            {user && cards && (
-              <>
-                {!isPastDeadline && (
-                  <ProgressBanner
-                    filled={filledCount}
-                    total={SLOTS.length}
-                    isComplete={isComplete}
-                    onClearAll={() => clearAll.mutate()}
-                    clearing={clearAll.isPending}
-                  />
-                )}
-                <div className="mt-4">{slotList}</div>
-              </>
+            {user && (
+              cards && picks ? (
+                <>
+                  {!isPastDeadline && (
+                    <ProgressBanner
+                      filled={filledCount}
+                      total={SLOTS.length}
+                      isComplete={isComplete}
+                      onClearAll={() => clearAll.mutate()}
+                      clearing={clearAll.isPending}
+                    />
+                  )}
+                  <div className="mt-4">{slotList}</div>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center justify-center px-4 py-3 border border-border2 bg-surface">
+                    <div className="h-3 w-24 bg-surface2 animate-pulse" />
+                  </div>
+                  <div className="mt-4"><SlotsListSkeleton /></div>
+                </>
+              )
             )}
 
             <Footer className="mt-auto pt-8" />
@@ -391,6 +414,56 @@ function ProgressBanner({
           {confirming ? "Sure?" : "CLEAR ALL PICKS"}
         </button>
       )}
+    </div>
+  );
+}
+
+const SKEL_LABEL_W = [90, 75, 85, 65, 80, 120, 100, 110, 130];
+const SKEL_NAME_W = [120, 100, 110, 95, 105, 130, 115, 125, 140];
+
+function SlotCardSkeleton({ index }: { index: number }) {
+  return (
+    <div className="w-full flex items-center gap-4 px-4 py-3 bg-surface border border-border2">
+      <div className="w-20 h-12 bg-surface2 animate-pulse shrink-0" />
+      <div className="flex-1 flex flex-col gap-1.5">
+        <div
+          className="h-2 bg-surface2 animate-pulse"
+          style={{ width: SKEL_LABEL_W[index % SKEL_LABEL_W.length] }}
+        />
+        <div
+          className="h-3 bg-surface2 animate-pulse"
+          style={{ width: SKEL_NAME_W[index % SKEL_NAME_W.length] }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function CardGridSkeleton() {
+  return (
+    <div>
+      <div className="h-4 w-32 bg-surface2 animate-pulse mb-3" />
+      <div className="h-9 w-full bg-surface2 animate-pulse mb-3" />
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-2">
+        {Array.from({ length: 8 }, (_, i) => (
+          <div
+            key={i}
+            className="bg-surface2 animate-pulse rounded-lg"
+            style={{ aspectRatio: "488 / 680" }}
+          />
+        ))}
+      </div>
+      <div className="h-3 w-24 bg-surface2 animate-pulse mt-3" />
+    </div>
+  );
+}
+
+function SlotsListSkeleton() {
+  return (
+    <div className="flex flex-col gap-2">
+      {Array.from({ length: 9 }, (_, i) => (
+        <SlotCardSkeleton key={i} index={i} />
+      ))}
     </div>
   );
 }
