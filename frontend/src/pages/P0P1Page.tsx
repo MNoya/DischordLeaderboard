@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppHeader } from "../components/AppHeader";
 import { Footer } from "../components/Footer";
 import { CtaPill } from "../components/CtaPill";
@@ -23,6 +23,7 @@ import {
   SLOTS,
   P0P1_SET_NAME,
 } from "../data/p0p1Slots";
+import { useLocalP0P1Picks, setLocalPick, clearLocalPicks, getLocalPicks } from "../data/localPicks";
 import { fmtRange } from "../data/utils";
 import type { Card, SlotKey } from "../types/p0p1";
 const SEVENTEEN_LANDS_URL = "https://www.17lands.com/card_data";
@@ -30,11 +31,49 @@ const SEVENTEEN_LANDS_URL = "https://www.17lands.com/card_data";
 export function P0P1Page() {
   const { user, loading: authLoading, signIn } = useAuth();
   const { data: cards } = useP0P1Cards(SET_CODE);
-  const { data: picks } = useP0P1Picks(user ? SET_CODE : undefined);
+  const { data: serverPicks } = useP0P1Picks(user ? SET_CODE : undefined);
+  const localPicks = useLocalP0P1Picks(SET_CODE);
   const upsertPick = useUpsertP0P1Pick(SET_CODE);
   const clearAll = useDeleteAllP0P1Picks(SET_CODE);
   const isDesktop = !useIsMobile(1024);
   const [editingSlotKey, setEditingSlotKey] = useState<SlotKey | null>(null);
+
+  const activePicks = user ? serverPicks : localPicks;
+  const dataReady = cards && (user ? serverPicks : true);
+
+  // Sync local picks to server after login
+  const syncedRef = useRef(false);
+  useEffect(() => {
+    if (!user || !serverPicks || syncedRef.current) return;
+    syncedRef.current = true;
+    const local = getLocalPicks(SET_CODE);
+    if (local.length === 0) return;
+    const serverSlots = new Set(serverPicks.map((p) => p.slot));
+    const toSync = local.filter((p) => !serverSlots.has(p.slot));
+    for (const p of toSync) {
+      upsertPick.mutate({ slot: p.slot, cardName: p.cardName });
+    }
+    clearLocalPicks(SET_CODE);
+  }, [user, serverPicks, upsertPick]);
+
+  const handleSelect = useCallback(
+    (slot: SlotKey, cardName: string) => {
+      if (user) {
+        upsertPick.mutate({ slot, cardName });
+      } else {
+        setLocalPick(SET_CODE, slot, cardName);
+      }
+    },
+    [user, upsertPick],
+  );
+
+  const handleClearAll = useCallback(() => {
+    if (user) {
+      clearAll.mutate();
+    } else {
+      clearLocalPicks(SET_CODE);
+    }
+  }, [user, clearAll]);
 
   const cardsByName = useMemo(() => {
     if (!cards) return new Map<string, Card>();
@@ -42,9 +81,9 @@ export function P0P1Page() {
   }, [cards]);
 
   const picksBySlot = useMemo(() => {
-    if (!picks) return new Map<string, string>();
-    return new Map(picks.map((v) => [v.slot, v.cardName]));
-  }, [picks]);
+    if (!activePicks) return new Map<string, string>();
+    return new Map(activePicks.map((v) => [v.slot, v.cardName]));
+  }, [activePicks]);
 
   const pickedCards = useMemo(
     () => new Set(picksBySlot.values()),
@@ -87,9 +126,7 @@ export function P0P1Page() {
             allCards={cards!}
             pickedCards={pickedCards}
             locked={isPastDeadline}
-            onSelect={(name) => {
-              upsertPick.mutate({ slot: slot.key, cardName: name });
-            }}
+            onSelect={(name) => handleSelect(slot.key, name)}
             {...(isDesktop && !isPastDeadline
               ? {
                   onEdit: () => setEditingSlotKey(slot.key),
@@ -100,6 +137,18 @@ export function P0P1Page() {
         );
       })}
     </div>
+  );
+
+  const loginCta = !authLoading && !user && !isPastDeadline && (
+    <button
+      type="button"
+      onClick={signIn}
+      className="bg-transparent border-0 cursor-pointer p-0"
+    >
+      <CtaPill size="lg" icon={<DiscordIcon size={19} />}>
+        LOG IN TO SUBMIT PICKS
+      </CtaPill>
+    </button>
   );
 
   const { data: allSets } = useSets();
@@ -119,36 +168,23 @@ export function P0P1Page() {
           <RulesBar />
 
           <main className="flex-1 flex flex-col px-10 pb-5">
-            {!authLoading && !user && !isPastDeadline && (
-              <div className="flex justify-center my-8">
-                <button
-                  type="button"
-                  onClick={signIn}
-                  className="bg-transparent border-0 cursor-pointer p-0"
-                >
-                  <CtaPill size="lg" icon={<DiscordIcon size={19} />}>
-                    LOG IN TO PARTICIPATE
-                  </CtaPill>
-                </button>
-              </div>
-            )}
-
-            {user && !isPastDeadline && (
+            {!isPastDeadline && (
               <div
                 className="grid gap-6 mt-4"
                 style={{ gridTemplateColumns: "350px minmax(0, 1fr)" }}
               >
-                {cards && picks ? (
+                {dataReady ? (
                   <>
                     <div className="sticky top-20 self-start">
                       <ProgressBanner
                         filled={filledCount}
                         total={SLOTS.length}
                         isComplete={isComplete}
-                        onClearAll={() => clearAll.mutate()}
-                        clearing={clearAll.isPending}
+                        onClearAll={handleClearAll}
+                        clearing={user ? clearAll.isPending : false}
                       />
                       <div className="mt-4">{slotList}</div>
+                      {loginCta && <div className="flex justify-center mt-6">{loginCta}</div>}
                     </div>
                     <CardSelectionGrid
                       key={activeSlot.key}
@@ -156,7 +192,7 @@ export function P0P1Page() {
                       cards={cards}
                       pickedCards={pickedCards}
                       onSelect={(name) => {
-                        upsertPick.mutate({ slot: activeSlot.key, cardName: name });
+                        handleSelect(activeSlot.key, name);
                         setEditingSlotKey(nextUnfilledSlot(activeSlot.key, name));
                       }}
                     />
@@ -175,7 +211,7 @@ export function P0P1Page() {
               </div>
             )}
 
-            {user && cards && isPastDeadline && (
+            {cards && isPastDeadline && (
               <div className="mt-4">{slotList}</div>
             )}
           </main>
@@ -188,42 +224,27 @@ export function P0P1Page() {
           <main className="flex-1 flex flex-col mx-auto w-full max-w-[640px] px-5 pt-4 pb-5">
             <MobileRules />
 
-            {!authLoading && !user && !isPastDeadline && (
-              <div className="flex justify-center my-8">
-                <button
-                  type="button"
-                  onClick={signIn}
-                  className="bg-transparent border-0 cursor-pointer p-0"
-                >
-                  <CtaPill size="lg" icon={<DiscordIcon size={19} />}>
-                    LOG IN TO PARTICIPATE
-                  </CtaPill>
-                </button>
-              </div>
-            )}
-
-            {user && (
-              cards && picks ? (
-                <>
-                  {!isPastDeadline && (
-                    <ProgressBanner
-                      filled={filledCount}
-                      total={SLOTS.length}
-                      isComplete={isComplete}
-                      onClearAll={() => clearAll.mutate()}
-                      clearing={clearAll.isPending}
-                    />
-                  )}
-                  <div className="mt-4">{slotList}</div>
-                </>
-              ) : (
-                <>
-                  <div className="flex items-center justify-center px-4 py-3 border border-border2 bg-surface">
-                    <div className="h-3 w-24 bg-surface2 animate-pulse" />
-                  </div>
-                  <div className="mt-4"><SlotsListSkeleton /></div>
-                </>
-              )
+            {dataReady ? (
+              <>
+                {!isPastDeadline && (
+                  <ProgressBanner
+                    filled={filledCount}
+                    total={SLOTS.length}
+                    isComplete={isComplete}
+                    onClearAll={handleClearAll}
+                    clearing={user ? clearAll.isPending : false}
+                  />
+                )}
+                <div className="mt-4">{slotList}</div>
+                {loginCta && <div className="flex justify-center mt-6">{loginCta}</div>}
+              </>
+            ) : (
+              <>
+                <div className="flex items-center justify-center px-4 py-3 border border-border2 bg-surface">
+                  <div className="h-3 w-24 bg-surface2 animate-pulse" />
+                </div>
+                <div className="mt-4"><SlotsListSkeleton /></div>
+              </>
             )}
 
             <Footer className="mt-auto pt-8" />
