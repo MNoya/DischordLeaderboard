@@ -10,7 +10,7 @@ from uuid import uuid4
 from sqlalchemy import or_, select
 
 from bot.database import SessionLocal
-from bot.models import PodDraftEvent, PodDraftMatch, PodDraftReplay
+from bot.models import PodDraftEvent, PodDraftMatch, PodDraftParticipant, PodDraftReplay, Player
 from bot.services.seventeenlands import SeventeenLandsClient
 
 
@@ -45,6 +45,33 @@ async def fetch_and_persist_replays_for_player(
     except Exception:
         log.warning(f"persist_replays failed for player {player_id} in event {event_id}", exc_info=True)
         return 0
+
+
+async def capture_event_replays(client: SeventeenLandsClient, event_id: str) -> int:
+    """Fetch each participant's 17lands game history once and persist their replays. Called at
+    finalize, when every round's games already exist, so a single pull per player covers the whole
+    event — no re-fetching the same heavy history on every round's report."""
+    targets = await asyncio.to_thread(_event_replay_targets_sync, event_id)
+    total = 0
+    for player_id, seat_name, token in targets:
+        total += await fetch_and_persist_replays_for_player(client, event_id, player_id, seat_name, token)
+    log.info(f"[REPLAYS] event_capture done event={event_id} players={len(targets)} replays={total}")
+    return total
+
+
+def _event_replay_targets_sync(event_id: str) -> list[tuple[str, str, str]]:
+    """(player_id, draftmancer_name, token) for every participant of the event with a 17lands token."""
+    with SessionLocal() as session:
+        rows = session.execute(
+            select(
+                PodDraftParticipant.player_id,
+                PodDraftParticipant.draftmancer_name,
+                Player.seventeenlands_token,
+            )
+            .join(Player, Player.id == PodDraftParticipant.player_id)
+            .where(PodDraftParticipant.event_id == event_id)
+        ).all()
+    return [(pid, name, token) for pid, name, token in rows if pid and name and token]
 
 
 def attribute_games_to_rounds(

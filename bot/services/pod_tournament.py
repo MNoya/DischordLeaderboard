@@ -38,7 +38,7 @@ from bot.services.pod_deck_color import (
     SubmitDeckView,
 )
 from bot.services.player_stats import leaderboard_seat_order
-from bot.services.pod_replays import fetch_and_persist_replays_for_player
+from bot.services.pod_replays import capture_event_replays
 from bot.services.seventeenlands import SeventeenLandsClient
 from bot.services.pod_drafts import (
     DM_KIND_ROUND,
@@ -926,7 +926,9 @@ async def advance_to_round(manager: "PodDraftManager", round_num: int) -> None:
     if seats and manager.pairing_mode != "random":
         pairing_players = [replace(p, seat=seats.get(normalize_player_name(p.id))) for p in players]
     try:
-        pairings = pod_swiss.pair_round(pairing_players, prior, round_num)
+        pairings = pod_swiss.pair_round(
+            pairing_players, prior, round_num, final_round=round_num == TOTAL_ROUNDS,
+        )
     except ValueError as e:
         log.error("pairing for round %d failed for %s: %s", round_num, manager.event_id, e)
         await _alert_thread_and_owner(
@@ -1219,9 +1221,6 @@ async def _handle_result_submission(interaction: discord.Interaction, value: str
         result_phrase=format_result_change(result["a_name"], result["b_name"], winner_name, score),
     )
     if round_num >= TOTAL_ROUNDS:
-        asyncio.create_task(_fetch_replays_for_match_players(
-            event_id, result["a_name"], result["b_name"],
-        ))
         asyncio.create_task(_send_final_submit_deck_dms_for_match(
             interaction.client, event_id, result["a_name"], result["b_name"],
         ))
@@ -1419,15 +1418,6 @@ def _commit_result(match_id: str, winner_name: str, score: str):
         }
 
 
-async def _fetch_replays_for_match_players(event_id: str, a_name: str, b_name: str) -> None:
-    pairs = await asyncio.to_thread(_resolve_match_player_tokens_sync, event_id, a_name, b_name)
-    if not pairs:
-        return
-    client = SeventeenLandsClient()
-    for player_id, seat_name, token in pairs:
-        await fetch_and_persist_replays_for_player(client, event_id, player_id, seat_name, token)
-
-
 async def _r3_deck_recovery_scan(
     bot_client, event_id: str, a_name: str, b_name: str,
 ) -> None:
@@ -1497,29 +1487,6 @@ def _capture_recovery_sync(thread_id: str, discord_id: str, image_url: str, capt
     with SessionLocal() as session:
         capture_deck_screenshot(session, thread_id, discord_id, image_url, caption)
         session.commit()
-
-
-def _resolve_match_player_tokens_sync(
-    event_id: str, a_name: str, b_name: str,
-) -> list[tuple[str, str, str]]:
-    out: list[tuple[str, str, str]] = []
-    with SessionLocal() as session:
-        for seat_name in (a_name, b_name):
-            row = session.execute(
-                select(PodDraftParticipant.player_id, DbPlayer.seventeenlands_token)
-                .join(DbPlayer, DbPlayer.id == PodDraftParticipant.player_id)
-                .where(
-                    PodDraftParticipant.event_id == event_id,
-                    PodDraftParticipant.draftmancer_name == seat_name,
-                )
-            ).first()
-            if row is None:
-                continue
-            player_id, token = row
-            if not token:
-                continue
-            out.append((player_id, seat_name, token))
-    return out
 
 
 async def _maybe_advance(bot_client, event_id: str, round_num: int, is_edit: bool = False,
@@ -1638,6 +1605,8 @@ async def finalize_tournament(manager: "PodDraftManager") -> None:
 
     if hasattr(manager, "share_draft_log"):
         await manager.share_draft_log()
+
+    asyncio.create_task(capture_event_replays(SeventeenLandsClient(), manager.event_id))
 
     # thread champion callout + disconnect happen alongside the championship post
 
@@ -3033,6 +3002,7 @@ def _round1_lines(match_states: list[dict], seated: bool) -> list[str]:
         lines.append(_match_line(m, seat_label=label))
     lines.append("")
     lines.append(f"🎯{NBSP}{NBSP}Opponent DM'd. Report your match result using the dropdowns below")
+    lines.append(f"🚨{NBSP}{NBSP}Change your MTGA deck image before you play, or it leaks your P1P1")
     return lines
 
 

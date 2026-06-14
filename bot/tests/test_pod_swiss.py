@@ -103,6 +103,90 @@ def test_pair_down_for_6players():
     assert same_loss == 1
 
 
+def test_round_3_pairs_bottom_group_together_over_avoidable_pair_down():
+    """SOS Championship R3 regression: the two 0-2 players must meet rather than each floating up to
+    a 1-1, even when the proximal 1-1 pairing strands an earlier rivalry that can't rematch."""
+    roster = [Player(id=f"p{i}", name=f"p{i}", seat=i) for i in range(8)]
+    r1 = [
+        match(1, "p0", "p4", "p0"),
+        match(1, "p1", "p5", "p1"),
+        match(1, "p6", "p2", "p6"),
+        match(1, "p7", "p3", "p7"),
+    ]
+    r2 = [
+        match(2, "p0", "p6", "p0"),
+        match(2, "p7", "p1", "p7"),
+        match(2, "p2", "p4", "p2"),
+        match(2, "p3", "p5", "p3"),
+    ]
+
+    pair_set = pairset(pair_round(roster, r1 + r2, 3))
+
+    assert frozenset({"p0", "p7"}) in pair_set
+    assert frozenset({"p4", "p5"}) in pair_set
+    one_one = {"p1", "p2", "p3", "p6"}
+    assert sum(1 for p in pair_set if p <= one_one) == 2
+    assert frozenset({"p2", "p6"}) not in pair_set
+
+
+def test_final_round_pairs_by_standings_not_proximity():
+    """A non-final round seeds neighbours apart (half the group away); the final round drops proximity
+    and pairs the group in standings order, so fighting your neighbour is fine."""
+    roster = [Player(id=f"p{i}", name=f"p{i}", seat=i) for i in range(4)]
+
+    proximity = pairset(pair_round(roster, [], 2))
+    final = pairset(pair_round(roster, [], 3, final_round=True))
+
+    assert proximity == {frozenset({"p0", "p2"}), frozenset({"p1", "p3"})}
+    assert final == {frozenset({"p0", "p1"}), frozenset({"p2", "p3"})}
+
+
+def _championship_history(w1: str, l1: str, w2: str, l2: str) -> list:
+    """Two rounds leaving p0/p7 at 2-0, {w1,l1,w2,l2} at 1-1, p4/p5 at 0-2 — with w1-l1 and w2-l2
+    already having met, so R3 must keep the 1-1 group intact without replaying those pairs."""
+    return [
+        match(1, "p0", "p4", "p0"),
+        match(1, "p7", "p5", "p7"),
+        match(1, w1, l1, w1),
+        match(1, w2, l2, w2),
+        match(2, "p0", w1, "p0"),
+        match(2, "p7", w2, "p7"),
+        match(2, l1, "p4", l1),
+        match(2, l2, "p5", l2),
+    ]
+
+
+@pytest.mark.parametrize(
+    "w1, l1, w2, l2",
+    [
+        ("p1", "p2", "p3", "p6"),
+        ("p2", "p1", "p6", "p3"),
+        ("p1", "p3", "p2", "p6"),
+        ("p3", "p1", "p6", "p2"),
+        ("p1", "p6", "p2", "p3"),
+        ("p6", "p1", "p3", "p2"),
+    ],
+)
+def test_round_3_keeps_record_groups_intact_across_rematch_permutations(w1, l1, w2, l2):
+    """No matter which two 1-1 rivalries already happened, R3 pairs equal records, never rematches,
+    and never floats a player across record groups when an intra-group pairing exists."""
+    roster = [Player(id=f"p{i}", name=f"p{i}", seat=i) for i in range(8)]
+    prior = _championship_history(w1, l1, w2, l2)
+    wins = {f"p{i}": 0 for i in range(8)}
+    for m in prior:
+        wins[m.winner_id] += 1
+    played = pairset((m.player_a_id, m.player_b_id) for m in prior)
+
+    pairings = pair_round(roster, prior, 3)
+    pairs = pairset(pairings)
+
+    assert len(pairs) == 4
+    assert not (pairs & played)
+    assert all(wins[a] == wins[b] for a, b in pairings)
+    assert frozenset({"p0", "p7"}) in pairs
+    assert frozenset({"p4", "p5"}) in pairs
+
+
 def test_compute_standings_basic_records():
     roster = players(4)
     matches = [
