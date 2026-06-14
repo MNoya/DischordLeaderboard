@@ -181,7 +181,7 @@ export function P0P1Page() {
   return (
     <div className="bg-bg text-text min-h-screen flex flex-col animate-fadeIn">
       <div ref={navRef}>
-        <AppHeader subtitle="P0P1 Challenge" />
+        <AppHeader subtitle="P0 P1 Challenge" />
       </div>
 
       {isDesktop ? (
