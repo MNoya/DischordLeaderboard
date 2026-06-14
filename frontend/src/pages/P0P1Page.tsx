@@ -3,6 +3,9 @@ import { AppHeader } from "../components/AppHeader";
 import { Footer } from "../components/Footer";
 import { CtaPill } from "../components/CtaPill";
 import { DiscordIcon } from "../components/BrandIcons";
+import { SetGlyph, setGlyphCode } from "../components/Brand";
+import { SetSwitcherDesktop } from "../components/SetSwitcher";
+import { SectionLabel } from "../components/SectionLabel";
 import { SlotCard } from "../components/p0p1/SlotCard";
 import { CardSelectionGrid } from "../components/p0p1/CardSelectionGrid";
 import { useAuth } from "../auth/useAuth";
@@ -12,6 +15,7 @@ import {
   useP0P1Entries,
   useUpsertP0P1Entry,
   useDeleteAllP0P1Entries,
+  useSets,
 } from "../data/hooks";
 import {
   P0P1_SET_CODE as SET_CODE,
@@ -19,6 +23,7 @@ import {
   SLOTS,
   P0P1_SET_NAME,
 } from "../data/p0p1Slots";
+import { weekOfSet, fmtRange } from "../data/utils";
 import type { MshCard, SlotKey } from "../types/p0p1";
 const SEVENTEEN_LANDS_URL = "https://www.17lands.com/card_data";
 
@@ -99,16 +104,22 @@ export function P0P1Page() {
     </div>
   );
 
+  const { data: allSets } = useSets();
+  const p0p1Sets = useMemo(
+    () => allSets?.filter((s) => s.code === SET_CODE),
+    [allSets],
+  );
+  const setMeta = allSets?.find((s) => s.code === SET_CODE);
+
   return (
     <div className="bg-bg text-text min-h-screen flex flex-col animate-fadeIn">
       <AppHeader subtitle="P0P1" />
-      <main
-        className={`flex-1 flex flex-col mx-auto w-full px-5 md:px-10 pt-5 md:pt-10 pb-5 ${isDesktop ? "max-w-[1100px]" : "max-w-[640px]"}`}
-      >
-        {isDesktop ? (
-          <>
-            <CompactRules />
 
+      {isDesktop ? (
+        <>
+          <P0P1Hero setMeta={setMeta} sets={p0p1Sets} />
+
+          <main className="flex-1 flex flex-col px-10 pb-5">
             {!authLoading && !user && !isPastDeadline && (
               <div className="flex justify-center my-8">
                 <button
@@ -124,65 +135,11 @@ export function P0P1Page() {
             )}
 
             {user && cards && !isPastDeadline && (
-              <>
-                <div
-                  className="grid gap-6 mt-4"
-                  style={{ gridTemplateColumns: "340px minmax(0, 1fr)" }}
-                >
-                  <div className="sticky top-20 self-start">
-                    <ProgressBanner
-                    filled={filledCount}
-                    total={SLOTS.length}
-                    isComplete={isComplete}
-                    onClearAll={() => clearAll.mutate()}
-                    clearing={clearAll.isPending}
-                  />
-                  <div className="mt-4">
-
-                    {slotList}
-                  </div>
-                  </div>
-                  <CardSelectionGrid
-                    key={activeSlot.key}
-                    slot={activeSlot}
-                    cards={cards}
-                    pickedCards={pickedCards}
-                    dismissable={false}
-                    onSelect={(name) => {
-                      upsertVote.mutate({ slot: activeSlot.key, cardName: name });
-                      setEditingSlotKey(nextUnfilledSlot(activeSlot.key, name));
-                    }}
-                    onCancel={() => {}}
-                  />
-                </div>
-              </>
-            )}
-
-            {user && cards && isPastDeadline && (
-              <div className="mt-4">{slotList}</div>
-            )}
-          </>
-        ) : (
-          <>
-            <Rules />
-
-            {!authLoading && !user && !isPastDeadline && (
-              <div className="flex justify-center my-8">
-                <button
-                  type="button"
-                  onClick={signIn}
-                  className="bg-transparent border-0 cursor-pointer p-0"
-                >
-                  <CtaPill size="lg" icon={<DiscordIcon size={19} />}>
-                    LOG IN TO PARTICIPATE
-                  </CtaPill>
-                </button>
-              </div>
-            )}
-
-            {user && cards && (
-              <>
-                {!isPastDeadline && (
+              <div
+                className="grid gap-6 mt-4"
+                style={{ gridTemplateColumns: "350px minmax(0, 1fr)" }}
+              >
+                <div className="sticky top-20 self-start">
                   <ProgressBanner
                     filled={filledCount}
                     total={SLOTS.length}
@@ -190,41 +147,110 @@ export function P0P1Page() {
                     onClearAll={() => clearAll.mutate()}
                     clearing={clearAll.isPending}
                   />
-                )}
-                <div className="mt-4">{slotList}</div>
-              </>
+                  <div className="mt-4">{slotList}</div>
+                </div>
+                <CardSelectionGrid
+                  key={activeSlot.key}
+                  slot={activeSlot}
+                  cards={cards}
+                  pickedCards={pickedCards}
+                  dismissable={false}
+                  onSelect={(name) => {
+                    upsertVote.mutate({ slot: activeSlot.key, cardName: name });
+                    setEditingSlotKey(nextUnfilledSlot(activeSlot.key, name));
+                  }}
+                  onCancel={() => {}}
+                />
+              </div>
             )}
-          </>
-        )}
 
-        <Footer className="mt-auto pt-8" />
-      </main>
+            {user && cards && isPastDeadline && (
+              <div className="mt-4">{slotList}</div>
+            )}
+          </main>
+
+          <Footer className="mt-auto px-10 pt-5 pb-3" />
+        </>
+      ) : (
+        <main className="flex-1 flex flex-col mx-auto w-full max-w-[640px] px-5 pt-5 pb-5">
+          <Rules />
+
+          {!authLoading && !user && !isPastDeadline && (
+            <div className="flex justify-center my-8">
+              <button
+                type="button"
+                onClick={signIn}
+                className="bg-transparent border-0 cursor-pointer p-0"
+              >
+                <CtaPill size="lg" icon={<DiscordIcon size={19} />}>
+                  LOG IN TO PARTICIPATE
+                </CtaPill>
+              </button>
+            </div>
+          )}
+
+          {user && cards && (
+            <>
+              {!isPastDeadline && (
+                <ProgressBanner
+                  filled={filledCount}
+                  total={SLOTS.length}
+                  isComplete={isComplete}
+                  onClearAll={() => clearAll.mutate()}
+                  clearing={clearAll.isPending}
+                />
+              )}
+              <div className="mt-4">{slotList}</div>
+            </>
+          )}
+
+          <Footer className="mt-auto pt-8" />
+        </main>
+      )}
     </div>
   );
 }
 
-function CompactRules() {
+function P0P1Hero({
+  setMeta,
+  sets,
+}: {
+  setMeta: import("../types/leaderboard").SetSummary | undefined;
+  sets: import("../types/leaderboard").SetSummary[] | undefined;
+}) {
+  const week = setMeta ? weekOfSet(setMeta) : null;
   return (
-    <section className="mb-4">
-      <div className="flex items-baseline justify-between gap-4 mb-3">
-        <h2 className="font-display text-[18px] text-text tracking-[0.18em]">
-          Pack 0, Pick 1 Challenge - {P0P1_SET_NAME}
-        </h2>
-        <CountdownInline deadline={VOTING_DEADLINE} />
+    <div className="relative px-10 py-5 border-b border-border bg-surface flex items-center gap-6">
+      <SetGlyph code={SET_CODE} size={84} />
+      <div className="flex-1">
+        <SectionLabel size={13}>PACK 0, PICK 1</SectionLabel>
+        <div className="flex items-baseline gap-3.5 mt-0.5">
+          <span
+            className="font-display tracking-[0.04em]"
+            style={{ fontSize: 56, lineHeight: 0.9 }}
+          >
+            {SET_CODE}
+          </span>
+          <span className="font-display text-[22px] text-muted tracking-[0.06em]">
+            {P0P1_SET_NAME.toUpperCase()}
+          </span>
+        </div>
+        <div className="flex items-center gap-3 mt-1">
+          <span className="mono text-[11px] text-muted">
+            {setMeta && fmtRange(setMeta.startDate, setMeta.endDate)}
+            {week && ` · ${week}`}
+          </span>
+          <CountdownInline deadline={VOTING_DEADLINE} />
+        </div>
       </div>
-      <p className="text-[13px] text-muted leading-[1.6]">
-        Pick your best card for each slot. Teams ranked by{" "}
-        <a
-          href={SEVENTEEN_LANDS_URL}
-          target="_blank"
-          rel="noreferrer"
-          className="text-green hover:underline underline-offset-2"
-        >
-          17Lands GIH win rate
-        </a>{" "}
-        after six weeks. Slot 9 is tiebreaker only. Picks auto-save.
-      </p>
-    </section>
+      {sets && (
+        <SetSwitcherDesktop
+          sets={sets}
+          activeCode={SET_CODE}
+          onChange={() => {}}
+        />
+      )}
+    </div>
   );
 }
 
@@ -304,9 +330,7 @@ function ProgressBanner({
       }`}
     >
       <span className="flex-1 text-center">
-        {isComplete
-          ? "All slots filled. Your team is registered."
-          : `${filled}/${total} slots filled`}
+        {`${filled}/${total} slots filled`}
       </span>
       {showClear && (
         <button

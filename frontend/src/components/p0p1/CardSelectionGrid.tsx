@@ -77,7 +77,7 @@ export function CardSelectionGrid({
           No matching cards
         </div>
       ) : (
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-2">
           {filtered.map((card) => (
             <button
               type="button"
