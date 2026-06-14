@@ -7,6 +7,7 @@ import {
   Clock as LR_Clock,
   ExternalLink as LR_ExternalLink,
   Globe as LR_Globe,
+  Image as LR_Image,
   Info as LR_Info,
 } from "lucide-react";
 import { TbCards as R_TbCards } from "react-icons/tb";
@@ -44,6 +45,7 @@ export const ChevronRight = withShrink(LR_ChevronRight);
 export const Clock = withShrink(LR_Clock);
 export const ExternalLink = withShrink(LR_ExternalLink);
 export const Globe = withShrink(LR_Globe);
+export const ImageIcon = withShrink(LR_Image);
 export const Info = withShrink(LR_Info);
 export const TbCards = withShrink(R_TbCards);
 export const LuScrollText = withShrink(R_LuScrollText);

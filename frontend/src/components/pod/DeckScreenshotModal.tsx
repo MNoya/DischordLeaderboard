@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { ChevronLeft, ChevronRight, X, ZoomIn, ZoomOut } from "lucide-react";
-import { ArrowRight, GiRoundTable } from "../Icons";
+import { ArrowRight, GiRoundTable, ImageIcon, LuScrollText, TbCards } from "../Icons";
 import { ChamferedButton } from "../ChamferedButton";
 import { Pips } from "../ManaPips";
 import { Record } from "../Record";
@@ -26,6 +26,7 @@ export interface DeckLike {
   deckScreenshotCaption?: string | null;
   mainboard?: Mainboard | null;
   record?: string | null;
+  draftLogUrl?: string | null;
 }
 
 type DeckTab = "screenshot" | "decklist";
@@ -40,12 +41,10 @@ interface Props {
 
 export function DeckScreenshotModal({ participant, breakdownHref, onClose, onPrev, onNext }: Props) {
   const isMobile = useIsMobile();
-  const [zoomed, setZoomed] = useState(false);
-  const scrollerRef = useRef<HTMLDivElement | null>(null);
-  const imgRef = useRef<HTMLImageElement | null>(null);
 
   const hasScreenshot = participant.deckScreenshotUrl !== null;
   const hasDecklist = (participant.mainboard?.cards.length ?? 0) > 0;
+  const deckKey = `${participant.eventId ?? ""}::${participant.participantDisplayName ?? participant.displayName}`;
   const [tab, setTab] = useState<DeckTab>("screenshot");
   const effectiveTab: DeckTab =
     hasScreenshot && hasDecklist ? tab : hasDecklist ? "decklist" : "screenshot";
@@ -62,9 +61,10 @@ export function DeckScreenshotModal({ participant, breakdownHref, onClose, onPre
   const [isResolving, setIsResolving] = useState(needsRefresh);
   const [imgLoaded, setImgLoaded] = useState(false);
   const [imgFailed, setImgFailed] = useState(false);
+  const [zoomed, setZoomed] = useState(true);
 
   useEffect(() => {
-    setZoomed(false);
+    setZoomed(true);
     setResolvedUrl(needsRefresh ? null : participant.deckScreenshotUrl);
     setIsResolving(needsRefresh);
   }, [participant.deckScreenshotUrl, needsRefresh]);
@@ -125,41 +125,22 @@ export function DeckScreenshotModal({ participant, breakdownHref, onClose, onPre
     };
   }, [onClose, onPrev, onNext]);
 
-  const toggleZoom = () => {
-    if (!isMobile) return;
-    setZoomed((prev) => {
-      const next = !prev;
-      requestAnimationFrame(() => {
-        const scroller = scrollerRef.current;
-        const img = imgRef.current;
-        if (next && scroller && img) {
-          const target = Math.max(0, (img.scrollWidth - scroller.clientWidth) / 2);
-          scroller.scrollLeft = target;
-        } else if (!next && scroller) {
-          scroller.scrollLeft = 0;
-        }
-      });
-      return next;
-    });
-  };
-
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex flex-col lg:flex-row items-center justify-center gap-3 lg:gap-2 bg-black/80 backdrop-blur-sm animate-fadeIn px-4 md:px-6 py-6 lg:py-8"
+      className="fixed inset-0 z-50 flex flex-col items-center bg-black/80 backdrop-blur-sm animate-fadeIn px-[4px] md:px-6 pt-28 pb-6 lg:pt-28 lg:pb-8"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
       aria-label={`${participant.displayName}'s deck`}
     >
-      {onPrev && <NavButton side="left" onClick={onPrev} />}
       <div
-        className="relative bg-surface border border-border w-full lg:w-auto flex-1 max-w-[1400px] max-h-full flex flex-col"
+        className="relative bg-surface border border-border w-full max-w-[1400px] h-[70vh] shrink-0 flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex items-center gap-3 lg:gap-6 pl-9 pr-5 py-3 border-b border-border shrink-0">
           <Pips colors={participant.deckColors ?? ""} size={18} />
           <span
-            className="font-display text-text truncate flex-1 text-center lg:text-left lg:flex-initial"
+            className="font-display text-text truncate flex-1 text-center lg:text-left"
             style={{ fontSize: 26, lineHeight: 1, letterSpacing: "0.04em", fontFamily: "'Bebas Neue', sans-serif", paddingTop: 4 }}
           >
             {participant.displayName}
@@ -171,78 +152,83 @@ export function DeckScreenshotModal({ participant, breakdownHref, onClose, onPre
               className="mono text-[20px] shrink-0"
             />
           )}
-          {hasScreenshot && hasDecklist && (
-            <div className="hidden lg:flex shrink-0 border border-border lg:ml-auto" role="tablist">
-              <TabButton active={effectiveTab === "screenshot"} onClick={() => setTab("screenshot")}>
-                IMAGE
-              </TabButton>
-              <TabButton active={effectiveTab === "decklist"} onClick={() => setTab("decklist")}>
-                CARD POOL
-              </TabButton>
-            </div>
-          )}
           <button
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className={cn(
-              "text-muted hover:text-text transition-colors p-1 bg-transparent border-0 cursor-pointer shrink-0",
-              !(hasScreenshot && hasDecklist) && "lg:ml-auto",
-            )}
+            className="text-muted hover:text-text transition-colors p-1 bg-transparent border-0 cursor-pointer shrink-0"
           >
             <X size={18} />
           </button>
         </header>
 
-        <div
-          ref={scrollerRef}
-          className={`flex-1 min-h-0 themed-scrollbar ${
-            effectiveTab === "decklist" || !zoomed ? "overflow-y-auto overflow-x-hidden" : "overflow-auto"
-          }`}
-        >
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <div key={deckKey} className="h-full animate-fadeIn">
           {effectiveTab === "decklist" && participant.mainboard ? (
             <DecklistView mainboard={participant.mainboard} />
           ) : showSkeleton ? (
-            <div className="w-full aspect-[5/2] bg-surface2 animate-pulse" />
+            <div className="h-full p-4 md:p-5">
+              <div className="w-full h-full bg-surface2 animate-pulse" />
+            </div>
           ) : imgFailed ? (
-            <div className="px-5 py-16 text-center text-muted font-body">
+            <div className="h-full flex items-center justify-center px-5 text-center text-muted font-body">
               Deck screenshot failed to load
             </div>
           ) : resolvedUrl ? (
-            <img
-              ref={imgRef}
-              src={resolvedUrl}
-              alt={`${participant.displayName} deck screenshot`}
-              onClick={toggleZoom}
-              className={`block h-auto select-none ${
-                zoomed ? "w-auto max-w-none" : "w-full"
-              } ${isMobile ? (zoomed ? "cursor-zoom-out" : "cursor-zoom-in") : ""}`}
-              draggable={false}
-            />
+            isMobile ? (
+              <div className="relative h-full">
+                {zoomed ? (
+                  <div className="h-full overflow-x-auto overflow-y-hidden themed-scrollbar">
+                    <img
+                      src={resolvedUrl}
+                      alt={`${participant.displayName} deck screenshot`}
+                      className="block h-full w-auto max-w-none select-none"
+                      draggable={false}
+                    />
+                  </div>
+                ) : (
+                  <div className="h-full flex items-center justify-center overflow-hidden">
+                    <img
+                      src={resolvedUrl}
+                      alt={`${participant.displayName} deck screenshot`}
+                      className="block max-h-full max-w-full w-auto h-auto select-none"
+                      draggable={false}
+                    />
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setZoomed((z) => !z)}
+                  aria-label={zoomed ? "Fit deck to screen" : "Zoom deck"}
+                  className="absolute left-2 bottom-2 z-10 inline-flex items-center gap-1.5 rounded bg-bg/85 border border-border text-text px-2.5 py-1.5 font-display tracking-[0.14em] text-[11px] cursor-pointer backdrop-blur-sm"
+                >
+                  {zoomed ? <ZoomOut size={13} /> : <ZoomIn size={13} />}
+                  {zoomed ? "ZOOM OUT" : "ZOOM IN"}
+                </button>
+              </div>
+            ) : (
+              <div className="h-full flex items-center justify-center overflow-hidden px-4 py-6">
+                <img
+                  src={resolvedUrl}
+                  alt={`${participant.displayName} deck screenshot`}
+                  className="block max-h-full max-w-full w-auto h-auto select-none"
+                  draggable={false}
+                />
+              </div>
+            )
           ) : (
-            <div className="px-5 py-16 text-center text-muted font-body">
+            <div className="h-full flex items-center justify-center px-5 text-center text-muted font-body">
               No deck screenshot available
             </div>
           )}
+          </div>
         </div>
-        {effectiveTab === "screenshot" && isMobile && resolvedUrl && !showSkeleton && !imgFailed && (
-          <button
-            type="button"
-            onClick={toggleZoom}
-            aria-label={zoomed ? "Exit zoom" : "Zoom deck"}
-            className="absolute right-2 z-10 inline-flex items-center gap-1.5 bg-bg/85 border border-border text-text px-2.5 py-1.5 font-display tracking-[0.14em] text-[11px] cursor-pointer backdrop-blur-sm"
-            style={{ top: 60 }}
-          >
-            {zoomed ? <ZoomOut size={13} /> : <ZoomIn size={13} />}
-            {zoomed ? "FIT" : "ZOOM"}
-          </button>
-        )}
 
         {breakdownHref && (
           <Link to={breakdownHref} className="hidden lg:block no-underline border-t border-border shrink-0">
             <div className="flex items-center justify-between gap-4 px-4 py-3 bg-surface hover:bg-green/5 transition-colors cursor-pointer">
               {participant.deckScreenshotCaption ? (
-                <span className="text-muted text-[15px] font-body italic leading-none min-w-0 truncate pr-1 pl-5">
+                <span className="text-muted text-[15px] font-body italic leading-snug min-w-0 truncate pr-1 pl-5">
                   {participant.deckScreenshotCaption}
                 </span>
               ) : (
@@ -286,65 +272,64 @@ export function DeckScreenshotModal({ participant, breakdownHref, onClose, onPre
           </div>
         )}
       </div>
-      {onNext && <NavButton side="right" onClick={onNext} />}
-      {(onPrev || onNext || (hasScreenshot && hasDecklist) || breakdownHref) && (
+      <div className="flex-1 min-h-0 w-full max-w-[1400px] flex flex-col items-center justify-center gap-10 px-4 md:px-0">
         <div
           onClick={(e) => e.stopPropagation()}
-          className="lg:hidden shrink-0 flex items-center justify-center gap-3 rounded-2xl bg-surface border border-border shadow-lg px-3 py-2"
+          className="shrink-0 w-full lg:w-auto flex items-center justify-between gap-2 lg:gap-4 rounded-2xl bg-surface border border-border shadow-lg px-3 py-2 lg:px-4"
         >
-          {onPrev && <MobileChevron side="left" onClick={onPrev} />}
-          {(hasScreenshot && hasDecklist) || breakdownHref ? (
-            <div className="flex items-center gap-1.5">
-              {hasScreenshot && hasDecklist && (
-                <>
-                  <MobileTab active={effectiveTab === "screenshot"} onClick={() => setTab("screenshot")}>
-                    IMAGE
-                  </MobileTab>
-                  <MobileTab active={effectiveTab === "decklist"} onClick={() => setTab("decklist")}>
-                    CARD POOL
-                  </MobileTab>
-                </>
-              )}
-              {breakdownHref && (
-                <Link
-                  to={breakdownHref}
-                  aria-label="View breakdown"
-                  className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-green/15 border border-green/50 text-green hover:bg-green/25 transition-colors"
-                >
-                  <GiRoundTable size={26} />
-                </Link>
-              )}
-            </div>
-          ) : null}
-          {onNext && <MobileChevron side="right" onClick={onNext} />}
+          {onPrev ? <PanelChevron side="left" onClick={onPrev} /> : <span className="w-10 shrink-0" />}
+          <div className="flex items-center gap-1.5">
+            <PanelTab
+              active={effectiveTab === "screenshot"}
+              disabled={!hasScreenshot}
+              onClick={() => setTab("screenshot")}
+              icon={<ImageIcon size={16} />}
+            >
+              IMAGE
+            </PanelTab>
+            <PanelTab
+              active={effectiveTab === "decklist"}
+              disabled={!hasDecklist}
+              onClick={() => setTab("decklist")}
+              icon={<TbCards size={17} />}
+            >
+              <span className="lg:hidden">POOL</span>
+              <span className="hidden lg:inline">CARD POOL</span>
+            </PanelTab>
+            <PanelTab
+              disabled={!participant.draftLogUrl}
+              onClick={
+                participant.draftLogUrl
+                  ? () => window.open(participant.draftLogUrl!, "_blank", "noopener,noreferrer")
+                  : undefined
+              }
+              icon={<LuScrollText size={16} />}
+            >
+              <span className="lg:hidden">LOG</span>
+              <span className="hidden lg:inline">DRAFT LOG</span>
+            </PanelTab>
+          </div>
+          {onNext ? <PanelChevron side="right" onClick={onNext} /> : <span className="w-10 shrink-0" />}
         </div>
-      )}
+        {breakdownHref && (
+          <Link
+            to={breakdownHref}
+            onClick={(e) => e.stopPropagation()}
+            aria-label="View breakdown"
+            className="lg:hidden self-end inline-flex items-center gap-1.5 pr-1 text-green hover:text-green/80 no-underline font-display tracking-[0.18em] leading-none"
+            style={{ fontSize: 13 }}
+          >
+            VIEW BREAKDOWN
+            <ArrowRight size={13} />
+          </Link>
+        )}
+      </div>
     </div>,
     document.body,
   );
 }
 
-function NavButton({ side, onClick }: { side: "left" | "right"; onClick: () => void }) {
-  const Chevron = side === "left" ? ChevronLeft : ChevronRight;
-  const label = side === "left" ? "PREV" : "NEXT";
-  return (
-    <button
-      type="button"
-      onClick={(e) => {
-        e.stopPropagation();
-        onClick();
-      }}
-      aria-label={side === "left" ? "Previous deck" : "Next deck"}
-      className="hidden lg:inline-flex shrink-0 items-center gap-1 p-1.5 cursor-pointer bg-transparent border-0 text-green/80 hover:text-green transition-colors font-display tracking-[0.18em] text-[15px]"
-    >
-      {side === "left" && <Chevron size={34} strokeWidth={2.5} />}
-      <span className="hidden min-[1600px]:inline">{label}</span>
-      {side === "right" && <Chevron size={34} strokeWidth={2.5} />}
-    </button>
-  );
-}
-
-function MobileChevron({ side, onClick }: { side: "left" | "right"; onClick: () => void }) {
+function PanelChevron({ side, onClick }: { side: "left" | "right"; onClick: () => void }) {
   const Chevron = side === "left" ? ChevronLeft : ChevronRight;
   return (
     <button
@@ -354,39 +339,24 @@ function MobileChevron({ side, onClick }: { side: "left" | "right"; onClick: () 
         onClick();
       }}
       aria-label={side === "left" ? "Previous deck" : "Next deck"}
-      className="shrink-0 inline-flex items-center justify-center w-10 h-10 rounded-full bg-surface2 border border-border text-green/90 hover:text-green hover:border-green/50 transition-colors cursor-pointer"
+      className="shrink-0 inline-flex items-center justify-center w-10 h-10 rounded-full bg-surface2 border border-border text-green/90 hover:text-green hover:border-green/50 transition-colors cursor-pointer outline-none focus:outline-none focus-visible:outline-none"
     >
       <Chevron size={24} strokeWidth={2.5} />
     </button>
   );
 }
 
-function MobileTab({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      onClick={onClick}
-      className={cn(
-        "rounded-full border px-4 py-2 font-display tracking-[0.14em] leading-none cursor-pointer transition-colors",
-        "outline-none focus:outline-none focus-visible:outline-none",
-        active ? "bg-green/15 text-green border-green/50" : "bg-surface2 text-muted border-border hover:text-text",
-      )}
-      style={{ fontSize: 14 }}
-    >
-      {children}
-    </button>
-  );
-}
-
-function TabButton({
-  active,
+function PanelTab({
+  active = false,
   onClick,
+  disabled = false,
+  icon,
   children,
 }: {
-  active: boolean;
-  onClick: () => void;
+  active?: boolean;
+  onClick?: () => void;
+  disabled?: boolean;
+  icon?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -394,14 +364,28 @@ function TabButton({
       type="button"
       role="tab"
       aria-selected={active}
+      disabled={disabled}
       onClick={onClick}
       className={cn(
-        "font-display tracking-[0.16em] px-6 py-2.5 cursor-pointer transition-colors leading-none",
+        "inline-flex items-center gap-1.5 rounded-full border px-3 py-2 lg:px-4 lg:py-2.5 font-display tracking-[0.14em] leading-none transition-colors",
         "outline-none focus:outline-none focus-visible:outline-none",
-        active ? "bg-green/15 text-green" : "bg-transparent text-muted hover:text-text",
+        disabled
+          ? "bg-surface2 text-subtle border-border opacity-50 cursor-not-allowed"
+          : active
+            ? "bg-green/15 text-green border-green/50 cursor-pointer"
+            : "bg-surface2 text-muted border-border hover:text-text cursor-pointer",
       )}
-      style={{ fontSize: 19 }}
+      style={{ fontSize: 14 }}
     >
+      <span className="relative inline-flex items-center justify-center">
+        {icon}
+        {disabled && (
+          <span
+            aria-hidden
+            className="pointer-events-none absolute left-1/2 top-1/2 h-[1.5px] w-[150%] -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-full bg-current"
+          />
+        )}
+      </span>
       {children}
     </button>
   );
@@ -457,7 +441,7 @@ function DecklistView({ mainboard }: { mainboard: Mainboard }) {
   }, [mainboard]);
 
   return (
-    <div className="px-4 md:px-5 py-5 overflow-x-auto themed-scrollbar">
+    <div className="h-full overflow-auto themed-scrollbar px-4 md:px-5 py-5">
       <div className="flex gap-2 md:gap-3 items-start">
         {mvPiles.map((pile) => (
           <Pile key={pile.cmc} cards={pile.cards} deckSet={mainboard.set} />

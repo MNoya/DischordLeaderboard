@@ -659,7 +659,10 @@ const STANDING_COLS_CLASS =
   "[grid-template-columns:28px_1fr_60px_50px_38px] " +
   "lg:[grid-template-columns:44px_1fr_80px_70px_150px]";
 
+const MOBILE_STANDINGS_LIMIT = 4;
+
 function EventStandings({ event }: { event: PodEventSummary }) {
+  const isMobile = useIsMobile(1024);
   const { data: rows, isLoading } = usePodEventParticipants(event.eventId);
   const { data: profileBoard } = useLeaderboard(event.setCode);
   const linkableSlugs = useMemo(
@@ -679,11 +682,12 @@ function EventStandings({ event }: { event: PodEventSummary }) {
     if (!rows) return [];
     return [...rows].sort((a, b) => (a.placement ?? 99) - (b.placement ?? 99));
   }, [rows]);
+  const visible = isMobile ? sorted.slice(0, MOBILE_STANDINGS_LIMIT) : sorted;
   const cycleDeck = (direction: number) => {
-    if (!deckTarget || sorted.length === 0) return;
-    const index = sorted.indexOf(deckTarget);
+    if (!deckTarget || visible.length === 0) return;
+    const index = visible.indexOf(deckTarget);
     if (index === -1) return;
-    setDeckTarget(sorted[(index + direction + sorted.length) % sorted.length]);
+    setDeckTarget(visible[(index + direction + visible.length) % visible.length]);
   };
   return (
     <>
@@ -691,7 +695,7 @@ function EventStandings({ event }: { event: PodEventSummary }) {
         <div className="flex flex-col gap-[1px] pb-[1px] bg-bg">
           {isLoading
             ? Array.from({ length: 8 }).map((_, i) => <StandingRowSkeleton key={i} />)
-            : sorted.map((p) => (
+            : visible.map((p) => (
                 <StandingRow
                   key={`${p.eventId}-${p.displayName}`}
                   p={p}
@@ -730,6 +734,7 @@ function EventStandings({ event }: { event: PodEventSummary }) {
             deckScreenshotCaption: deckTarget.deckScreenshotCaption,
             mainboard: deckTargetMainboard,
             record: deckTarget.record,
+            draftLogUrl: deckTarget.draftLogUrl,
           }}
           breakdownHref={`/pods/${event.slug}?player=${encodeURIComponent(podDiscordName(deckTarget))}`}
           onClose={() => setDeckTarget(null)}
@@ -939,6 +944,7 @@ function MobileEventsBlock({
               event={e}
               index={i}
               nowMs={nowMs}
+              defaultOpen={i === 0}
             />
           ))}
         </div>

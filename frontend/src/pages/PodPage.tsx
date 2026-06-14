@@ -327,6 +327,7 @@ export function PodPage() {
               deckScreenshotCaption: deckTarget.deckScreenshotCaption,
               mainboard: deckTargetMainboard,
               record: deckTarget.record,
+              draftLogUrl: deckTarget.draftLogUrl,
             }}
             onClose={() => setDeckTarget(null)}
             onPrev={() => cycleDeck(-1)}
@@ -376,7 +377,7 @@ export function PodPage() {
             />
           </div>
           <div
-            className="min-w-0 shrink-0 flex flex-col min-h-0"
+            className="min-w-0 shrink-0 self-start max-h-full flex flex-col min-h-0"
             style={{
               width: open ? "45%" : "0%",
               opacity: open ? 1 : 0,
@@ -422,6 +423,7 @@ export function PodPage() {
             deckScreenshotCaption: deckTarget.deckScreenshotCaption,
             mainboard: deckTargetMainboard,
             record: deckTarget.record,
+            draftLogUrl: deckTarget.draftLogUrl,
           }}
           onClose={() => setDeckTarget(null)}
           onPrev={() => cycleDeck(-1)}
