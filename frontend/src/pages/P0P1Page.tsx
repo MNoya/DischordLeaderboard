@@ -23,7 +23,7 @@ import {
   SLOTS,
   P0P1_SET_NAME,
 } from "../data/p0p1Slots";
-import { weekOfSet, fmtRange } from "../data/utils";
+import { fmtRange } from "../data/utils";
 import type { MshCard, SlotKey } from "../types/p0p1";
 const SEVENTEEN_LANDS_URL = "https://www.17lands.com/card_data";
 
@@ -219,12 +219,11 @@ function P0P1Hero({
   setMeta: import("../types/leaderboard").SetSummary | undefined;
   sets: import("../types/leaderboard").SetSummary[] | undefined;
 }) {
-  const week = setMeta ? weekOfSet(setMeta) : null;
   return (
     <div className="relative px-10 py-5 border-b border-border bg-surface flex items-center gap-6">
       <SetGlyph code={SET_CODE} size={84} />
       <div className="flex-1">
-        <SectionLabel size={13}>PACK 0, PICK 1</SectionLabel>
+        <SectionLabel size={13}>PACK 0, PICK 1 Challenge</SectionLabel>
         <div className="flex items-baseline gap-3.5 mt-0.5">
           <span
             className="font-display tracking-[0.04em]"
@@ -237,10 +236,11 @@ function P0P1Hero({
           </span>
         </div>
         <div className="flex items-center gap-3 mt-1">
-          <span className="mono text-[11px] text-muted">
-            {setMeta && fmtRange(setMeta.startDate, setMeta.endDate)}
-            {week && ` · ${week}`}
-          </span>
+          {setMeta && (
+            <span className="mono text-[11px] text-muted">
+              {fmtRange(setMeta.startDate, setMeta.endDate)}
+            </span>
+          )}
           <CountdownInline deadline={VOTING_DEADLINE} />
         </div>
       </div>
@@ -373,13 +373,13 @@ function ProgressBanner({
 function CountdownInline({ deadline }: { deadline: Date }) {
   const diff = deadline.getTime() - Date.now();
   if (diff <= 0) {
-    return <span className="text-muted text-[13px]">Voting closed</span>;
+    return <span className="text-muted text-[13px]">Entries have closed</span>;
   }
   const days = Math.floor(diff / (1000 * 60 * 60 * 24));
   const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
   return (
     <span className="text-green text-[14px] whitespace-nowrap">
-      {days}d {hours}h remaining
+      Entries close in {days} days, {hours} hours
     </span>
   );
 }
@@ -390,7 +390,7 @@ function Countdown({ deadline }: { deadline: Date }) {
   if (diff <= 0) {
     return (
       <div className="px-4 py-3 border border-border2 bg-surface text-muted text-[13px] text-center">
-        Voting has closed.
+        Entries have closed
       </div>
     );
   }
@@ -401,7 +401,7 @@ function Countdown({ deadline }: { deadline: Date }) {
   return (
     <div className="px-4 py-3 border border-green bg-surface text-center">
       <span className="text-[14px] md:text-[16px] text-green">
-        {days} days, {hours} hours remaining
+        Entries close in {days} days, {hours} hours
       </span>
     </div>
   );
