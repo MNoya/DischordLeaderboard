@@ -1178,17 +1178,6 @@ export async function upsertP0P1Pick(
   if (error) throw error;
 }
 
-export async function deleteP0P1Pick(
-  setCode: string,
-  slot: SlotKey,
-): Promise<void> {
-  const { error } = await client()
-    .from("p0p1_entries")
-    .delete()
-    .eq("set_code", setCode)
-    .eq("slot", slot);
-  if (error) throw error;
-}
 
 export async function deleteAllP0P1Picks(setCode: string): Promise<void> {
   const { error } = await client()

@@ -420,12 +420,6 @@ export const upsertP0P1Pick = async (
   p0p1Picks.set(slot, { slot, cardName, lastUpdated: new Date().toISOString() });
 };
 
-export const deleteP0P1Pick = async (
-  _setCode: string,
-  slot: SlotKey,
-): Promise<void> => {
-  p0p1Picks.delete(slot);
-};
 
 export const deleteAllP0P1Picks = async (
   _setCode: string,

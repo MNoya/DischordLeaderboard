@@ -33,6 +33,5 @@ export const fetchPodSetCodes = impl.fetchPodSetCodes;
 export const fetchP0P1Cards = impl.fetchP0P1Cards;
 export const fetchP0P1Picks = impl.fetchP0P1Picks;
 export const upsertP0P1Pick = impl.upsertP0P1Pick;
-export const deleteP0P1Pick = impl.deleteP0P1Pick;
 export const deleteAllP0P1Picks = impl.deleteAllP0P1Picks;
 export const initialAuthUser = impl.initialAuthUser;
