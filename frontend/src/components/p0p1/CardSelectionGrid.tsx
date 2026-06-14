@@ -6,8 +6,6 @@ interface Props {
   cards: MshCard[];
   pickedCards: Set<string>;
   onSelect: (cardName: string) => void;
-  onCancel: () => void;
-  dismissable?: boolean;
 }
 
 export function CardSelectionGrid({
@@ -15,8 +13,6 @@ export function CardSelectionGrid({
   cards,
   pickedCards,
   onSelect,
-  onCancel,
-  dismissable = true,
 }: Props) {
   const [search, setSearch] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -24,15 +20,6 @@ export function CardSelectionGrid({
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
-
-  useEffect(() => {
-    if (!dismissable) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onCancel, dismissable]);
 
   const eligible = useMemo(
     () => cards.filter((c) => slot.filter(c, pickedCards)),
@@ -47,20 +34,10 @@ export function CardSelectionGrid({
 
   return (
     <div className="animate-fadeIn">
-      <header className="flex items-center justify-between mb-3">
+      <header className="mb-3">
         <span className="font-display text-text text-[18px] tracking-[0.1em]">
           {slot.label}
         </span>
-        {dismissable && (
-          <button
-            type="button"
-            onClick={onCancel}
-            aria-label="Cancel"
-            className="text-muted hover:text-text transition-colors p-1 bg-transparent border-0 cursor-pointer text-[20px] leading-none"
-          >
-            ×
-          </button>
-        )}
       </header>
 
       <input

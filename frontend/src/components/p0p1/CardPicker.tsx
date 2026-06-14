@@ -109,10 +109,7 @@ export function CardPicker({
                       loading="lazy"
                     />
                   </CardImagePreview>
-                  <div
-                    onClick={() => onSelect(card.name)}
-                    className="flex-1 min-w-0 text-left bg-transparent border-0 cursor-pointer p-0"
-                  >
+                  <div className="flex-1 min-w-0 text-left bg-transparent border-0 cursor-pointer p-0">
                     <div className="flex items-center gap-2">
                       <div className="text-text text-[14px] truncate group-hover:text-green transition-colors">
                         {card.name}

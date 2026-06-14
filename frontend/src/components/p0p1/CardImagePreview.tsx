@@ -1,6 +1,6 @@
 import { useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import {  ZoomInIcon } from "lucide-react";
+import { ZoomInIcon } from "lucide-react";
 import { useIsMobile } from "../../lib/use-is-mobile";
 
 const PREVIEW_W = 335;

@@ -31,7 +31,6 @@ import {
   fetchRecentTrophies,
   fetchSets,
   upsertP0P1Entry,
-  deleteP0P1Entry,
   deleteAllP0P1Entries,
 } from "./api";
 import type { P0P1Entry, SlotKey } from "../types/p0p1";
@@ -364,13 +363,7 @@ export function useUpsertP0P1Entry(setCode: string) {
   });
 }
 
-export function useDeleteP0P1Entry(setCode: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (slot: SlotKey) => deleteP0P1Entry(setCode, slot),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["p0p1-entries", setCode] }),
-  });
-}
+
 
 export function useDeleteAllP0P1Entries(setCode: string) {
   const qc = useQueryClient();

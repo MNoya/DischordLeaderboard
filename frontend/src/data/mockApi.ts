@@ -433,7 +433,6 @@ export const deleteAllP0P1Entries = async (
   p0p1Entries.clear();
 };
 
-export { type AuthUser } from "../auth/AuthContext";
 export const initialAuthUser = {
   id: "mock-user-id",
   discordId: "123456789",
