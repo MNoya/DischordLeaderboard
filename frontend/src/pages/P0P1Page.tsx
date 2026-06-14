@@ -215,7 +215,7 @@ function ProgressBanner({ filled, total, isComplete, onClearAll, clearing }: {
     onClearAll();
   }, [confirming, onClearAll]);
 
-  const showClear = filled > 0 && !isComplete && !clearing;
+  const showClear = filled > 0 && !clearing;
 
   return (
     <div
@@ -227,8 +227,8 @@ function ProgressBanner({ filled, total, isComplete, onClearAll, clearing }: {
     >
       <span className="flex-1 text-center">
         {isComplete
-          ? "Your roster is complete!"
-          : `${filled}/${total} slots filled — your roster is incomplete`}
+          ? "All slots filled. Your team is registered."
+          : `${filled}/${total} slots filled`}
       </span>
       {showClear && (
         <button
@@ -238,7 +238,7 @@ function ProgressBanner({ filled, total, isComplete, onClearAll, clearing }: {
             confirming ? "text-red font-semibold" : "text-muted hover:text-red"
           }`}
         >
-          {confirming ? "Sure?" : "Clear all picks"}
+          {confirming ? "Sure?" : "CLEAR ALL PICKS"}
         </button>
       )}
     </div>
