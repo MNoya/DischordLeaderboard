@@ -49,9 +49,11 @@ from bot.listeners.sesh_listener import reschedule_pending_events, setup as setu
 from bot.models import LeaderboardMessage, MagicSet, Player, PodDraftEvent
 from bot.services.bot_log import BotLog
 from bot.services.lobby_embed import LobbyReadyButtonView
+from bot.services.pod_draft_manager import rehydrate_active_lobbies
 from bot.services.pod_tournament import (
     reconcile_unannounced_championships,
     register_persistent_views as register_pod_views,
+    rehydrate_active_tournaments,
 )
 from bot.services.refresh import refresh_active_players
 from bot.services.seventeenlands import MinIntervalLimiter, SeventeenLandsClient
@@ -413,6 +415,8 @@ def build_bot(guild_id: int) -> commands.Bot:
         if not bot.startup_announced:
             bot.startup_announced = True
             await bot.bot_log.post_plain(_deploy_announcement())
+            await rehydrate_active_tournaments(bot)
+            await rehydrate_active_lobbies(bot)
             await reconcile_unannounced_championships(bot)
         if not settings.auto_refresh_enabled:
             log.info("AUTO_REFRESH_ENABLED=false; skipping the scheduled 17lands refresh tick")

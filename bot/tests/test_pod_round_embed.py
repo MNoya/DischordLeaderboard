@@ -8,6 +8,8 @@ from bot.services.pod_tournament import (
     PAIR_UP,
     TROPHY,
     WINNERS,
+    _ROUND_TITLE_RE,
+    _round_header,
     mark_trophy_match,
     round_embed,
     round_groups,
@@ -135,3 +137,19 @@ def _pairs(matches) -> set[frozenset[str]]:
 def _norm(desc: str) -> str:
     """Collapse NBSP / space runs so render assertions don't pin exact whitespace."""
     return re.sub(f"[ {NBSP}]+", " ", desc)
+
+
+def test_round_header_title_carries_round_number_for_recovery():
+    cases = [
+        (round_num, complete, seated)
+        for round_num in (1, 2, 3)
+        for complete in (True, False)
+        for seated in (True, False)
+    ]
+
+    for round_num, complete, seated in cases:
+        title = _round_header(round_num, complete, seated=seated)
+        match = _ROUND_TITLE_RE.search(title)
+
+        assert match is not None, f"recovery regex missed title {title!r}"
+        assert int(match.group(1)) == round_num

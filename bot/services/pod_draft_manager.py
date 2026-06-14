@@ -13,6 +13,7 @@ import json
 import logging
 import random
 import re
+from datetime import datetime, timedelta, timezone
 
 import discord
 import socketio
@@ -21,7 +22,13 @@ from discord.ext import commands
 from sqlalchemy import func, select
 
 from bot import emojis
-from bot.commands.messages import MSG_MOCK_COMPLETE, MSG_MOCK_LOBBY_COUNTER, MSG_MOCK_LOBBY_OPEN
+from bot.commands.messages import (
+    MSG_BOT_RECONNECTED,
+    MSG_LOBBY_FULL_PROMPT,
+    MSG_MOCK_COMPLETE,
+    MSG_MOCK_LOBBY_COUNTER,
+    MSG_MOCK_LOBBY_OPEN,
+)
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.discord_helpers import extract_avatar_hash
@@ -41,6 +48,7 @@ from bot.services.pod_seating_select import seating_mode_label
 from bot.services.pod_drafts import (
     normalize_player_name,
     classify_lobby_names,
+    draftmancer_url_for,
     finalize_mock_event,
     load_event_pairing_mode_sync,
     load_event_seating_mode_sync,
@@ -61,8 +69,11 @@ _BACKOFF_BASE_S = 1.0
 _BACKOFF_MAX_S = 30.0
 _BACKOFF_MAX_RETRIES = 8
 _BOT_USER_NAME = "DisChordBot"
+LOBBY_REHYDRATE_WINDOW = timedelta(hours=12)
 _READY_TIMEOUT_S = 90
 _READY_DEBOUNCE_S = 2.0
+_LOBBY_FULL_THRESHOLD = 8
+_LOBBY_FULL_PROMPT_DELAY_S = 10
 _AI_BOT_NAME_RE = re.compile(r"^Bot #\d+$")
 
 _SEEDING_REFRESH_HOOK = None
@@ -105,7 +116,8 @@ class PodDraftManager:
                  kind: str = "tournament",
                  mock_lobby_message: "discord.Message | None" = None,
                  rsvps_yes: list[str] | None = None,
-                 rsvps_maybe: list[str] | None = None) -> None:
+                 rsvps_maybe: list[str] | None = None,
+                 reconnect: bool = False) -> None:
         self.bot = bot
         self.event_id = event_id
         self.session_id = session_id
@@ -115,6 +127,8 @@ class PodDraftManager:
         self.event_name = event_name
         self.draftmancer_url = draftmancer_url
         self.kind = kind
+        self.reconnect = reconnect
+        self._lobby_card_adopt_attempted = False
         self.mock_lobby_message = mock_lobby_message
         self._thread_added_ids: set[str] = set()
         self.rsvps_yes: list[str] = list(rsvps_yes or [])
@@ -131,6 +145,9 @@ class PodDraftManager:
         self.ready_check_active = False
         self.ready_users: set[str] = set()
         self.expected_user_ids: set[str] = set()
+        self._lobby_full_prompt_task: asyncio.Task | None = None
+        self._lobby_full_prompt_message: "discord.Message | None" = None
+        self._lobby_full_prompted = False
         self._ready_check_started_at = 0.0
         self.lobby_status_message: object | None = None
         self.ready_check_progress_message: object | None = None
@@ -276,21 +293,18 @@ class PodDraftManager:
                         asyncio.create_task(self._claim_ownership_and_apply_settings())
                     break
 
-        non_bot_names = self.non_bot_session_names()
-        classified = await self._classify_users(non_bot_names) if non_bot_names else []
-        await self._refresh_lobby_status(classified)
+        await self._refresh_lobby_status()
 
         self._refresh_mock_lobby()
 
-        if self.seating_mode == "leaderboard":
-            if self.owner_claimed:
-                asyncio.create_task(self._apply_leaderboard_seating())
-            notify_seeding_change(self.bot, self.event_id)
+        self._sync_leaderboard_seeding()
 
         if self.ready_check_active:
-            current = {u.get("userID") for u in self.player_session_users()}
-            if current != self.expected_user_ids:
-                asyncio.create_task(self._invalidate_ready_check("Player list changed"))
+            present = {u.get("userID") for u in self.player_session_users()}
+            if not present <= self.expected_user_ids:
+                await self._invalidate_ready_check("Player list changed")
+            else:
+                await self._maybe_complete_ready_check()
 
     async def _on_session_spectators(self, spectators) -> None:
         self.session_spectators = list(spectators) if isinstance(spectators, list) else []
@@ -298,9 +312,7 @@ class PodDraftManager:
         log.info(f"draftmancer sessionSpectators for {self.session_id}: {self.spectator_names}")
         if self.draft_complete:
             return
-        non_bot_names = self.non_bot_session_names()
-        classified = await self._classify_users(non_bot_names) if non_bot_names else []
-        await self._refresh_lobby_status(classified)
+        await self._refresh_lobby_status()
 
     def _recompute_spectator_state(self) -> None:
         rows = self.session_spectators
@@ -327,6 +339,8 @@ class PodDraftManager:
             if not self.draft_complete:
                 await self.refresh_lobby_now()
                 self._refresh_mock_lobby()
+                if renamed_roster:
+                    self._sync_leaderboard_seeding()
 
     @staticmethod
     def _apply_user_update(rows: list[dict], user_id: str, updates: dict) -> bool:
@@ -382,6 +396,8 @@ class PodDraftManager:
         if not spectate_key:
             error_text = _ack_error_text(result)
             log.warning(f"[LIFECYCLE] spectators.enable_failed event={self.event_id} error={error_text!r}")
+            return
+        if self.reconnect:
             return
         thread = await self._fetch_thread()
         if thread is None:
@@ -460,6 +476,8 @@ class PodDraftManager:
         command passes a lower one so a small pod can be readied."""
         if not self.sio.connected:
             return "Draftmancer session is not connected."
+        if self.drafting or self.draft_complete:
+            return "The draft has already started."
         if self.ready_check_active:
             return "Ready check already in progress."
         non_bot = self.player_session_users()
@@ -469,11 +487,14 @@ class PodDraftManager:
         if len(non_bot) < min_players:
             return (
                 f"Ready check is only available with {min_players} or more players. "
-                f"Currently {len(non_bot)} in the Draftmancer lobby."
+                f"Currently {len(non_bot)} in the Draftmancer lobby.\n"
+                "Wait for more players to join, or run `/pod-start` to start the draft now, "
+                "skipping the ready check."
             )
         self.expected_user_ids = {u.get("userID") for u in non_bot}
         self.ready_users = set()
         self.ready_check_active = True
+        self._suppress_lobby_full_prompt()
         self._ready_check_started_at = asyncio.get_running_loop().time()
         self.initiated_by = initiated_by
         prior_decliner = self.last_decliner_name
@@ -536,7 +557,7 @@ class PodDraftManager:
         except Exception:
             log.warning("could not post ready-check progress card", exc_info=True)
 
-        await self._refresh_lobby_status(classified)
+        await self._refresh_lobby_status()
         return None
 
     async def _classify_users(self, names: list[str]) -> list[tuple[str, str | None]]:
@@ -586,13 +607,8 @@ class PodDraftManager:
     async def refresh_lobby_now(self) -> None:
         """Re-run classification and edit the lobby card. External hook for /pod-link-arena so the
         lobby reflects the new link immediately. Once the draft completes the roster is frozen:
-        renders the endDraft snapshot, not whoever is in the session now."""
-        if self.draft_complete and self.tournament_roster:
-            names = list(self.tournament_roster)
-        else:
-            names = self.non_bot_session_names()
-        classified = await self._classify_users(names) if names else []
-        await self._refresh_lobby_status(classified)
+        _refresh_lobby_status renders the endDraft snapshot, not whoever is in the session now."""
+        await self._refresh_lobby_status()
 
     async def _resolve_rsvp_mentions(self, guild: discord.Guild | None) -> dict[int, str]:
         """Resolve `<@id>` mentions in rsvps_yes/rsvps_maybe to guild member display names.
@@ -624,49 +640,74 @@ class PodDraftManager:
             "seating_label": seating_mode_label(self.seating_mode),
         }
 
-    async def _refresh_lobby_status(self, classified: list[tuple[str, str | None]]) -> None:
+    async def _refresh_lobby_status(self) -> None:
+        """Re-render the lobby card from the live session. Roster classification and the card edit run
+        together under _lobby_post_lock so concurrent sessionUsers / sessionSpectators broadcasts can't
+        clobber each other — without it, a handler that captured a pre-kick roster before its await
+        would edit last and resurrect the removed player."""
         thread = await self._fetch_thread()
         if thread is None:
             return
-        state = self._compute_state(classified)
-        ready_arena_names: set[str] | None = None
-        if state == "ready":
-            ready_arena_names = {
-                u.get("userName") for u in self.session_users
-                if u.get("userID") in self.ready_users and u.get("userName")
-            }
-        embed = render_lobby_embed(
-            title=self.event_name,
-            rsvps_yes=self.rsvps_yes,
-            rsvps_maybe=self.rsvps_maybe,
-            in_session=classified,
-            state=state,
-            draftmancer_url=self.draftmancer_url,
-            decliner_name=self.last_decliner_name,
-            cancel_reason=self.last_cancel_reason,
-            initiated_by=self.initiated_by,
-            display_name_by_mention_id=await self._resolve_rsvp_mentions(thread.guild),
-            spectators=self.spectator_names,
-            **self._settings_labels(),
-        )
-        has_unrecognized = any(dn is None for _, dn in classified)
-        view = (
-            None if state in ("drafting", "complete")
-            else LobbyReadyButtonView(
-                draftmancer_url=self.draftmancer_url,
-                ready_disabled=(state == "ready" or has_unrecognized),
-            )
-        )
         async with self._lobby_post_lock:
-            if self.lobby_status_message is None:
+            if self.draft_complete and self.tournament_roster:
+                names = list(self.tournament_roster)
+            else:
+                names = self.non_bot_session_names()
+            classified = await self._classify_users(names) if names else []
+            state = self._compute_state(classified)
+            ready_arena_names: set[str] | None = None
+            if state == "ready":
+                ready_arena_names = {
+                    u.get("userName") for u in self.session_users
+                    if u.get("userID") in self.ready_users and u.get("userName")
+                }
+            embed = render_lobby_embed(
+                title=self.event_name,
+                rsvps_yes=self.rsvps_yes,
+                rsvps_maybe=self.rsvps_maybe,
+                in_session=classified,
+                state=state,
+                draftmancer_url=self.draftmancer_url,
+                decliner_name=self.last_decliner_name,
+                cancel_reason=self.last_cancel_reason,
+                initiated_by=self.initiated_by,
+                display_name_by_mention_id=await self._resolve_rsvp_mentions(thread.guild),
+                spectators=self.spectator_names,
+                **self._settings_labels(),
+            )
+            has_unrecognized = any(dn is None for _, dn in classified)
+            self._maybe_schedule_lobby_full_prompt(classified)
+            view = (
+                None if state in ("drafting", "complete")
+                else LobbyReadyButtonView(
+                    draftmancer_url=self.draftmancer_url,
+                    ready_disabled=(state == "ready" or has_unrecognized),
+                )
+            )
+            suppress_empty_reconnect = self.reconnect and not classified
+            if (
+                self.lobby_status_message is None and self.reconnect and classified
+                and not self._lobby_card_adopt_attempted
+            ):
+                self._lobby_card_adopt_attempted = True
                 try:
-                    self.lobby_status_message = await thread.send(embed=embed, view=view)
-                    try:
-                        await self.lobby_status_message.pin()
-                    except Exception:
-                        log.warning(f"could not pin lobby status for {self.session_id}", exc_info=True)
+                    await thread.send(MSG_BOT_RECONNECTED)
                 except Exception:
-                    log.warning(f"could not post lobby status for {self.session_id}", exc_info=True)
+                    log.warning(f"could not post reconnect notice for {self.session_id}", exc_info=True)
+                adopted = await _find_pinned_lobby_card(thread, self.bot.user, self.event_name)
+                if adopted is not None:
+                    self.lobby_status_message = adopted
+                    log.info(f"[LIFECYCLE] rehydrate_lobby.adopted_card event={self.event_id} msg={adopted.id}")
+            if self.lobby_status_message is None:
+                if not suppress_empty_reconnect:
+                    try:
+                        self.lobby_status_message = await thread.send(embed=embed, view=view)
+                        try:
+                            await self.lobby_status_message.pin()
+                        except Exception:
+                            log.warning(f"could not pin lobby status for {self.session_id}", exc_info=True)
+                    except Exception:
+                        log.warning(f"could not post lobby status for {self.session_id}", exc_info=True)
             else:
                 try:
                     await self.lobby_status_message.edit(embed=embed, view=view)
@@ -988,7 +1029,17 @@ class PodDraftManager:
             await self._invalidate_ready_check("declined", decliner_name=decliner_name)
             return
         await self.refresh_lobby_now()
-        if self.ready_users >= self.expected_user_ids:
+        await self._maybe_complete_ready_check()
+
+    async def _maybe_complete_ready_check(self) -> None:
+        """Complete only when every player present at the check's start is still in the lobby and
+        ready. ready_users is pruned to the current lobby first, so a player who readied then left
+        can't satisfy the count — the check holds until they return, or the timeout cancels it."""
+        if not self.ready_check_active:
+            return
+        present = {u.get("userID") for u in self.player_session_users()}
+        self.ready_users &= present
+        if self.expected_user_ids <= present and self.ready_users >= self.expected_user_ids:
             await self._complete_ready_check()
 
     async def _complete_ready_check(self) -> None:
@@ -1043,6 +1094,7 @@ class PodDraftManager:
         self.drafting = True
         log.info(f"[DRAFT] started event={self.event_id} session_users={len(self.session_users)}")
         self._schedule_end_watchdog()
+        await self._retire_lobby_full_prompt()
         await asyncio.to_thread(self._seed_participants_at_draft_start)
         await self.refresh_lobby_now()
         thread = await self._fetch_thread()
@@ -1122,6 +1174,78 @@ class PodDraftManager:
             return "Could not remove the player."
         log.info(f"[KICK] removed event={self.event_id} user_id={user_id}")
         return None
+
+    def _sync_leaderboard_seeding(self) -> None:
+        """Re-apply leaderboard seating and refresh the posted seeding table after the player pool or a
+        name changes. No-op unless the pod is leaderboard-seated. Fires from both the sessionUsers and
+        the updateUser-rename paths so a name set after connect can't leave the seating one player behind."""
+        if self.seating_mode != "leaderboard":
+            return
+        if self.owner_claimed:
+            asyncio.create_task(self._apply_leaderboard_seating())
+        notify_seeding_change(self.bot, self.event_id)
+
+    @staticmethod
+    def _lobby_pod_full(classified: list[tuple[str, str | None]]) -> bool:
+        """A full, ready-checkable pod: a full pod's worth of players present and every one of them
+        linked. Unlinked players can't draft and disable the Ready Check, so they don't count."""
+        if any(display is None for _, display in classified):
+            return False
+        return len(classified) >= _LOBBY_FULL_THRESHOLD
+
+    def _suppress_lobby_full_prompt(self) -> None:
+        """Retire the auto-nudge for this lobby once a Ready Check has been initiated, so it can't fire
+        later even if that check is declined and the lobby returns to idle, and delete its posted message
+        so the stale Ready Check button can't be clicked."""
+        self._lobby_full_prompted = True
+        if self._lobby_full_prompt_task is not None:
+            self._lobby_full_prompt_task.cancel()
+            self._lobby_full_prompt_task = None
+        if self._lobby_full_prompt_message is not None:
+            asyncio.create_task(self._retire_lobby_full_prompt())
+
+    async def _retire_lobby_full_prompt(self) -> None:
+        """Delete the posted lobby-full nudge so its buttons can't outlive the lobby. Best-effort."""
+        message = self._lobby_full_prompt_message
+        self._lobby_full_prompt_message = None
+        if message is None:
+            return
+        try:
+            await message.delete()
+        except discord.HTTPException:
+            log.info(f"[LOBBY] full_prompt_delete_failed event={self.event_id}", exc_info=True)
+
+    def _maybe_schedule_lobby_full_prompt(self, classified: list[tuple[str, str | None]]) -> None:
+        """Arm a one-shot nudge to start a Ready Check once the lobby first fills with a full pod of
+        linked players. The delayed task re-validates before posting, so a transient dip-and-refill is
+        harmless and a sustained drop just lets it lapse. Sent at most once per lobby."""
+        if (self.kind == "mock" or self.draft_complete or self.drafting
+                or self.ready_check_active or self._lobby_full_prompted):
+            return
+        if not self._lobby_pod_full(classified):
+            return
+        if self._lobby_full_prompt_task is not None and not self._lobby_full_prompt_task.done():
+            return
+        self._lobby_full_prompt_task = asyncio.create_task(self._lobby_full_prompt_after_delay())
+
+    async def _lobby_full_prompt_after_delay(self) -> None:
+        try:
+            await asyncio.sleep(_LOBBY_FULL_PROMPT_DELAY_S)
+        except asyncio.CancelledError:
+            return
+        if self.draft_complete or self.drafting or self.ready_check_active or self._lobby_full_prompted:
+            return
+        if not self._lobby_pod_full(await self.classified_session_users()):
+            return
+        thread = await self._fetch_thread()
+        if thread is None:
+            return
+        self._lobby_full_prompted = True
+        try:
+            self._lobby_full_prompt_message = await thread.send(MSG_LOBBY_FULL_PROMPT, view=LobbyReadyButtonView())
+        except discord.HTTPException:
+            self._lobby_full_prompted = False
+            log.warning(f"[LOBBY] full_prompt_send_failed event={self.event_id}", exc_info=True)
 
     async def apply_seating_mode(self) -> None:
         """Push the current seating_mode to the live table. Leaderboard recomputes the seeded order
@@ -1338,8 +1462,46 @@ def apply_mainboards(session, event_id: str, log_payload: dict) -> None:
             log.info(f"mainboard: no participant matching {name!r} in {event_id}")
             continue
         row.mainboard_card_ids = list(main)
+        row.mainboard_cards = resolve_mainboard(main, decklist.get("lands"), log_payload.get("carddata"))
         matched += 1
     log.info(f"mainboard: applied to {matched} seats for {event_id}")
+
+
+_BASIC_LAND_NAMES = {"W": "Plains", "U": "Island", "B": "Swamp", "R": "Mountain", "G": "Forest"}
+
+
+def resolve_mainboard(main_ids: list[str], lands, carddata) -> dict | None:
+    """Resolve a Draftmancer decklist into the renderable shape the pod page consumes — nonbasic
+    spells grouped by name with counts, plus the basic-land tally. Returns None when carddata can't
+    resolve the ids, so the frontend falls back to the deck screenshot."""
+    if not isinstance(carddata, dict):
+        return None
+    grouped: dict[str, dict] = {}
+    for cid in main_ids:
+        card = carddata.get(cid)
+        if not isinstance(card, dict):
+            return None
+        name = card.get("name")
+        entry = grouped.get(name)
+        if entry is None:
+            grouped[name] = {
+                "name": name,
+                "set": card.get("set"),
+                "collectorNumber": card.get("collector_number"),
+                "colors": card.get("colors") or [],
+                "cmc": card.get("cmc"),
+                "type": card.get("type"),
+                "count": 1,
+            }
+        else:
+            entry["count"] += 1
+    cards = sorted(grouped.values(), key=lambda c: (c["cmc"] if c["cmc"] is not None else 99, c["name"]))
+    basics = {
+        _BASIC_LAND_NAMES[color]: count
+        for color, count in (lands or {}).items()
+        if color in _BASIC_LAND_NAMES and count
+    }
+    return {"cards": cards, "basics": basics}
 
 
 def apply_seat_indexes(session, event_id: str, seats: list[str]) -> None:
@@ -1403,6 +1565,7 @@ async def start_manager(
     mock_lobby_message: "discord.Message | None" = None,
     rsvps_yes: list[str] | None = None,
     rsvps_maybe: list[str] | None = None,
+    reconnect: bool = False,
 ) -> PodDraftManager | None:
     existing = ACTIVE_POD_MANAGERS.get(event_id)
     if existing is not None:
@@ -1412,7 +1575,7 @@ async def start_manager(
         bot, event_id, session_id, thread_id, set_code, expected_attendee_count,
         event_name=event_name, draftmancer_url=draftmancer_url, kind=kind,
         mock_lobby_message=mock_lobby_message,
-        rsvps_yes=rsvps_yes, rsvps_maybe=rsvps_maybe,
+        rsvps_yes=rsvps_yes, rsvps_maybe=rsvps_maybe, reconnect=reconnect,
     )
     persisted_mode = await asyncio.to_thread(load_event_pairing_mode_sync, event_id)
     if persisted_mode:
@@ -1497,6 +1660,85 @@ async def set_event_seating(event_id: str, ordered_user_names: list[str]) -> str
     if manager is None:
         return "No active Draftmancer session for this pod."
     return await manager.set_seating_order(ordered_user_names)
+
+
+async def rehydrate_active_lobbies(bot) -> None:
+    """Startup sweep: reconnect a manager to any pod whose Draftmancer socket was live (lobby or
+    drafting, tournament not yet started) when the bot last stopped, reclaiming ownership so ready
+    checks, kicks, seating, and draft start keep working after a restart. The bot's userID is
+    derived from the sessionID, so reconnecting to the same session re-lands as the same user and
+    setSessionOwner reclaims the chair without forcing players to rejoin a new session."""
+    rows = await asyncio.to_thread(_load_live_lobby_pods_sync)
+    restored = 0
+    for row in rows:
+        event_id = row["id"]
+        if event_id in ACTIVE_POD_MANAGERS:
+            continue
+        session_id = row["draftmancer_session"]
+        expected = await asyncio.to_thread(_count_participants_sync, event_id)
+        manager = await start_manager(
+            bot, event_id, session_id, int(row["discord_thread_id"]), row["set_code"], expected,
+            event_name=row["name"], draftmancer_url=draftmancer_url_for(session_id),
+            kind=row["kind"], reconnect=True,
+        )
+        if manager is None:
+            log.warning(f"[LIFECYCLE] rehydrate_lobby.connect_failed event={event_id} sid={session_id}")
+            continue
+        restored += 1
+        log.info(f"[LIFECYCLE] rehydrate_lobby.restored event={event_id} sid={session_id}")
+    if restored:
+        log.info(f"startup sweep reconnected {restored} live lobby/draft session(s)")
+
+
+def _load_live_lobby_pods_sync() -> list[dict]:
+    """Pod events whose Draftmancer socket was live but whose tournament hadn't started when the bot
+    last stopped — the rows the restart sweep reconnects a manager for."""
+    cutoff = datetime.now(timezone.utc) - LOBBY_REHYDRATE_WINDOW
+    with SessionLocal() as session:
+        rows = session.execute(
+            select(
+                PodDraftEvent.id,
+                PodDraftEvent.draftmancer_session,
+                PodDraftEvent.discord_thread_id,
+                PodDraftEvent.set_code,
+                PodDraftEvent.name,
+                PodDraftEvent.kind,
+            ).where(
+                PodDraftEvent.socket_status == "connected",
+                PodDraftEvent.finalized_at.is_(None),
+                PodDraftEvent.current_round.is_(None),
+                PodDraftEvent.event_time >= cutoff,
+            )
+        ).all()
+    return [dict(row._mapping) for row in rows]
+
+
+def _count_participants_sync(event_id: str) -> int:
+    with SessionLocal() as session:
+        return session.execute(
+            select(func.count()).select_from(PodDraftParticipant)
+            .where(PodDraftParticipant.event_id == event_id)
+        ).scalar_one()
+
+
+async def _find_pinned_lobby_card(thread, bot_user, event_name: str) -> "discord.Message | None":
+    """Rediscover the lobby status card pinned by an earlier manager (pre-restart) so a reconnect
+    edits it in place instead of posting and pinning a duplicate. The 🤖 Commands field is unique to
+    the lobby card, distinguishing it from a pinned standings or round-pairings embed."""
+    try:
+        pins = await thread.pins()
+    except discord.HTTPException:
+        log.warning(f"could not fetch pins to rediscover lobby card for {event_name}", exc_info=True)
+        return None
+    for msg in pins:
+        if bot_user is not None and msg.author.id != bot_user.id:
+            continue
+        for pinned_embed in msg.embeds:
+            if (pinned_embed.title or "") != event_name:
+                continue
+            if any("Commands" in (field.name or "") for field in pinned_embed.fields):
+                return msg
+    return None
 
 
 def _classify_names_sync(names: list[str]) -> list[tuple[str, str | None]]:

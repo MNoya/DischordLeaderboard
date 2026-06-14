@@ -40,7 +40,13 @@ from bot.services.pod_format_select import FormatSelectView
 from bot.services.pod_settings_view import PodSettingsView
 from bot.services.pod_drafts import normalize_player_name
 from bot.services.pod_swiss import Standing
-from bot.services.pod_tournament import ParticipantDeckData, actor_label, build_trophy_hype_view, start_tournament
+from bot.services.pod_tournament import (
+    ParticipantDeckData,
+    actor_label,
+    build_trophy_hype_view,
+    round_embed,
+    start_tournament,
+)
 from bot.slug import disambiguate_slug, slugify
 
 
@@ -102,7 +108,6 @@ def _seed_live_test_event_sync(
             set_code=ACTIVE_SET_CODE,
             name="Testlobby Live Pod",
             draftmancer_session=session_id,
-            draftmancer_url=f"{settings.draftmancer_web_url}/?session={session_id}",
             discord_thread_id=str(channel_id),
             sesh_message_id=f"testlobby-{channel_id}",
             socket_status=_LIVE_TEST_STATUS,
@@ -141,7 +146,6 @@ def _purge_live_test_pods_sync(channel_id: int) -> list[str]:
         ids = session.execute(
             select(PodDraftEvent.id).where(
                 PodDraftEvent.discord_thread_id == str(channel_id),
-                PodDraftEvent.socket_status == _LIVE_TEST_STATUS,
             )
         ).scalars().all()
         if ids:
@@ -309,6 +313,21 @@ def _trophy_hype_preview() -> discord.ui.LayoutView:
     )
 
 
+def _round1_preview_states(seated: bool) -> list[dict]:
+    """Round-1 match states from the fixture roster, fed through the prod `round_embed` builder.
+    Seated cross-pairs 1v5/2v6/... like real seat pairing; `seated=False` previews the random header."""
+    roster = _LIVE_TEST_ROSTER
+    states: list[dict] = []
+    for offset in range(4):
+        a, b = roster[offset], roster[offset + 4]
+        states.append({
+            "a_name": a, "a_display": a, "a_record": "0-0", "a_seat": offset + 1 if seated else None,
+            "b_name": b, "b_display": b, "b_record": "0-0", "b_seat": offset + 5 if seated else None,
+            "winner_name": None, "score": None,
+        })
+    return states
+
+
 _THREAD_NAME = "SOS Pod Draft #3 - May 15"
 _DRAFTMANCER_URL = f"{settings.draftmancer_web_url}/?session=LLUT-SOS-May-15-D"
 _RSVPS_YES = [
@@ -332,7 +351,7 @@ _LINKED_EIGHT: list[tuple[str, str]] = [
 _VALID_STATES = (
     "empty", "partial", "linked", "unlinked", "ready", "notready", "cancelled", "superseded",
     "drafting", "complete", "submit", "podbracket", "podswiss", "podrandom", "podlobby", "format",
-    "seeding", "trophyhype",
+    "seeding", "trophyhype", "round1",
 )
 
 _LIVE_POD_MODES = {"podbracket": "bracket", "podswiss": "swiss", "podrandom": "random"}
@@ -543,6 +562,10 @@ async def setup(bot: commands.Bot) -> None:
 
         if state == "trophyhype":
             await ctx.send(view=_trophy_hype_preview())
+            return
+
+        if state == "round1":
+            await ctx.send(embed=round_embed(1, _round1_preview_states(seated=extra != "random")))
             return
 
         if state == "format":

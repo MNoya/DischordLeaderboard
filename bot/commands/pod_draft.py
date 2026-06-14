@@ -54,6 +54,7 @@ from bot.services.pod_tournament import (
     build_replays_link_button,
     build_standings_embed_for_event,
     build_thread_link_button,
+    post_trophy_hype_for_event,
 )
 from bot.slug import disambiguate_slug, slugify
 
@@ -368,6 +369,7 @@ class PodDraft(commands.Cog):
 
         log.info(f"pod-champion: {interaction.user} re-posted champion announcement for event_id={event_id}")
         await interaction.followup.send(view=view)
+        await post_trophy_hype_for_event(event_id, interaction.guild)
 
     @pod_champion.autocomplete("event")
     async def _pod_champion_event_autocomplete(
@@ -863,9 +865,11 @@ async def refresh_seeding_table(bot, event_id: str) -> None:
                     await message.edit(embed=embed, attachments=attachments)
                 except discord.HTTPException:
                     log.warning("could not refresh the seeding table in place", exc_info=True)
+            log.info(f"pod-seeding: refreshed {len(existing)} seeding table(s) for event {event_id}")
             return
         if championship:
             await post_table(bot, channel, file, embed)
+            log.info(f"pod-seeding: posted championship seeding table for event {event_id}")
 
 
 async def repost_seeding_table(bot, event_id: str) -> None:
@@ -895,17 +899,27 @@ def _championship_waiting_embed() -> discord.Embed:
 
 async def _find_seeding_messages(channel, bot_user) -> list[discord.Message]:
     """Every bot-posted seeding table in the channel — the pinned anchor plus any on-demand re-post —
-    so the refresher keeps each one current rather than letting the pinned anchor drift stale."""
+    so the refresher keeps each one current rather than letting the pinned anchor drift stale.
+
+    Scans recent history for re-posts and the pins for the durable anchor: the anchor is posted at
+    registration and scrolls out of the history window long before the event, so a history-only scan
+    would leave it frozen."""
     if bot_user is None or not isinstance(channel, (discord.Thread, discord.TextChannel)):
         return []
-    found: list[discord.Message] = []
+    found: dict[int, discord.Message] = {}
     try:
         async for message in channel.history(limit=50):
             if message.author.id == bot_user.id and has_seeding_headers(message):
-                found.append(message)
+                found[message.id] = message
     except discord.HTTPException:
-        log.warning("could not scan for existing seeding tables", exc_info=True)
-    return found
+        log.warning("could not scan history for existing seeding tables", exc_info=True)
+    try:
+        for message in await channel.pins():
+            if message.author.id == bot_user.id and has_seeding_headers(message):
+                found[message.id] = message
+    except discord.HTTPException:
+        log.warning("could not scan pins for existing seeding tables", exc_info=True)
+    return list(found.values())
 
 
 def build_manual_seating_image(labels: list[str]) -> discord.File | None:

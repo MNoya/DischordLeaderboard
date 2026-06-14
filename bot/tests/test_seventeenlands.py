@@ -241,6 +241,44 @@ def test_verify_token_false_on_network_error():
     assert _client().verify_token(VALID_TOKEN) is False
 
 
+@responses.activate
+def test_fetch_user_games_returns_list():
+    games = [{"game_id": "g1", "event_name": "DirectGameLimited"}]
+    responses.add(
+        responses.GET,
+        f"{DEFAULT_BASE_URL}/data/user_game_list/{VALID_TOKEN}",
+        json=games,
+        status=200,
+    )
+
+    assert _client().fetch_user_games(VALID_TOKEN) == games
+
+
+def _games_client() -> SeventeenLandsClient:
+    return SeventeenLandsClient(limiter=MinIntervalLimiter(min_interval_s=0), games_retry_delay_s=0)
+
+
+@responses.activate
+def test_fetch_user_games_retries_after_timeout():
+    url = f"{DEFAULT_BASE_URL}/data/user_game_list/{VALID_TOKEN}"
+    games = [{"game_id": "g1"}]
+    responses.add(responses.GET, url, body=requests.Timeout("slow first hit"))
+    responses.add(responses.GET, url, json=games, status=200)
+
+    assert _games_client().fetch_user_games(VALID_TOKEN) == games
+
+
+@responses.activate
+def test_fetch_user_games_empty_when_timeout_exhausts_retries():
+    responses.add(
+        responses.GET,
+        f"{DEFAULT_BASE_URL}/data/user_game_list/{VALID_TOKEN}",
+        body=requests.Timeout("always slow"),
+    )
+
+    assert _games_client().fetch_user_games(VALID_TOKEN, retries=1) == []
+
+
 def test_client_invokes_limiter_once_per_call():
     calls = {"n": 0}
 

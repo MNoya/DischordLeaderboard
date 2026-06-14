@@ -120,12 +120,16 @@ class SeventeenLandsClient:
         limiter: MinIntervalLimiter | None = None,
         session: requests.Session | None = None,
         timeout_s: float = 30.0,
+        games_timeout_s: float = 60.0,
+        games_retry_delay_s: float = 60.0,
         base_url: str = DEFAULT_BASE_URL,
         cache_dir: Path | str | None = None,
     ) -> None:
         self.limiter = limiter or MinIntervalLimiter()
         self.session = session or requests.Session()
         self.timeout_s = timeout_s
+        self.games_timeout_s = games_timeout_s
+        self.games_retry_delay_s = games_retry_delay_s
         self.base_url = base_url.rstrip("/")
         self.cache_dir = Path(cache_dir) if cache_dir else None
 
@@ -204,27 +208,42 @@ class SeventeenLandsClient:
 
         return body["drafts"] or []
 
-    def fetch_user_games(self, token: str) -> list[dict]:
-        self.limiter.wait()
-        try:
-            resp = self.session.get(self._games_url(token), timeout=self.timeout_s)
-        except requests.RequestException:
-            logger.warning(f"17lands user_game_list network error for token tail …{token[-4:]}", exc_info=True)
+    def fetch_user_games(self, token: str, *, retries: int = 1) -> list[dict]:
+        """Game history for replay capture. Heavy users have a large, uncached history and the endpoint
+        is slow on a cold hit, so this uses a longer timeout than the interactive calls and retries
+        once on timeout — but only after a delay, since a timed-out request keeps warming 17lands'
+        cache server-side, so the retry lands on a ready response instead of timing out again."""
+        for attempt in range(retries + 1):
+            self.limiter.wait()
+            try:
+                resp = self.session.get(self._games_url(token), timeout=self.games_timeout_s)
+            except requests.Timeout:
+                logger.warning(
+                    f"17lands user_game_list timeout (attempt {attempt + 1}/{retries + 1}) "
+                    f"for token tail …{token[-4:]}"
+                )
+                if attempt < retries:
+                    time.sleep(self.games_retry_delay_s)
+                continue
+            except requests.RequestException:
+                logger.warning(f"17lands user_game_list network error for token tail …{token[-4:]}", exc_info=True)
+                return []
+            if resp.status_code != 200:
+                logger.warning(f"17lands user_game_list non-200 ({resp.status_code}) for token tail …{token[-4:]}")
+                return []
+            try:
+                body = resp.json()
+            except ValueError:
+                logger.warning(f"17lands user_game_list malformed JSON for token tail …{token[-4:]}")
+                return []
+            if isinstance(body, list):
+                return body
+            if isinstance(body, dict):
+                games = body.get("games")
+                if isinstance(games, list):
+                    return games
             return []
-        if resp.status_code != 200:
-            logger.warning(f"17lands user_game_list non-200 ({resp.status_code}) for token tail …{token[-4:]}")
-            return []
-        try:
-            body = resp.json()
-        except ValueError:
-            logger.warning(f"17lands user_game_list malformed JSON for token tail …{token[-4:]}")
-            return []
-        if isinstance(body, list):
-            return body
-        if isinstance(body, dict):
-            games = body.get("games")
-            if isinstance(games, list):
-                return games
+        logger.warning(f"17lands user_game_list timed out after {retries + 1} attempts for token tail …{token[-4:]}")
         return []
 
     def verify_token(self, token: str) -> bool:
