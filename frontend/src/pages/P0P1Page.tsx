@@ -7,8 +7,18 @@ import { SlotCard } from "../components/p0p1/SlotCard";
 import { CardSelectionGrid } from "../components/p0p1/CardSelectionGrid";
 import { useAuth } from "../auth/useAuth";
 import { useIsMobile } from "../lib/use-is-mobile";
-import { useP0P1Cards, useP0P1Entries, useUpsertP0P1Entry, useDeleteAllP0P1Entries } from "../data/hooks";
-import { P0P1_SET_CODE as SET_CODE, P0P1_VOTING_DEADLINE as VOTING_DEADLINE, SLOTS } from "../data/p0p1Slots";
+import {
+  useP0P1Cards,
+  useP0P1Entries,
+  useUpsertP0P1Entry,
+  useDeleteAllP0P1Entries,
+} from "../data/hooks";
+import {
+  P0P1_SET_CODE as SET_CODE,
+  P0P1_VOTING_DEADLINE as VOTING_DEADLINE,
+  SLOTS,
+  P0P1_SET_NAME,
+} from "../data/p0p1Slots";
 import type { MshCard, SlotKey } from "../types/p0p1";
 const SEVENTEEN_LANDS_URL = "https://www.17lands.com/card_data";
 
@@ -39,7 +49,9 @@ export function P0P1Page() {
   const filledCount = votesBySlot.size;
   const isComplete = filledCount === SLOTS.length;
   const isPastDeadline = new Date() > VOTING_DEADLINE;
-  const editingSlot = editingSlotKey ? SLOTS.find((s) => s.key === editingSlotKey) : undefined;
+  const editingSlot = editingSlotKey
+    ? SLOTS.find((s) => s.key === editingSlotKey)
+    : undefined;
 
   const slotList = (
     <div className="flex flex-col gap-2">
@@ -57,10 +69,12 @@ export function P0P1Page() {
             onSelect={(name) => {
               upsertVote.mutate({ slot: slot.key, cardName: name });
             }}
-            {...(isDesktop && !isPastDeadline ? {
-              onEdit: () => setEditingSlotKey(slot.key),
-              active: editingSlotKey === slot.key,
-            } : {})}
+            {...(isDesktop && !isPastDeadline
+              ? {
+                  onEdit: () => setEditingSlotKey(slot.key),
+                  active: editingSlotKey === slot.key,
+                }
+              : {})}
           />
         );
       })}
@@ -70,11 +84,16 @@ export function P0P1Page() {
   return (
     <div className="bg-bg text-text min-h-screen flex flex-col animate-fadeIn">
       <AppHeader subtitle="P0P1" />
-      <main className={`flex-1 flex flex-col mx-auto w-full px-5 md:px-10 pt-5 md:pt-10 pb-5 ${isDesktop ? "max-w-[1100px]" : "max-w-[640px]"}`}>
-
+      <main
+        className={`flex-1 flex flex-col mx-auto w-full px-5 md:px-10 pt-5 md:pt-10 pb-5 ${isDesktop ? "max-w-[1100px]" : "max-w-[640px]"}`}
+      >
         {!authLoading && !user && !isPastDeadline && (
           <div className="flex justify-center my-8">
-            <button type="button" onClick={signIn} className="bg-transparent border-0 cursor-pointer p-0">
+            <button
+              type="button"
+              onClick={signIn}
+              className="bg-transparent border-0 cursor-pointer p-0"
+            >
               <CtaPill size="lg" icon={<DiscordIcon size={19} />}>
                 LOG IN TO PARTICIPATE
               </CtaPill>
@@ -86,9 +105,18 @@ export function P0P1Page() {
           user && cards ? (
             <>
               {!isPastDeadline && (
-                <ProgressBanner filled={filledCount} total={SLOTS.length} isComplete={isComplete} onClearAll={() => clearAll.mutate()} clearing={clearAll.isPending} />
+                <ProgressBanner
+                  filled={filledCount}
+                  total={SLOTS.length}
+                  isComplete={isComplete}
+                  onClearAll={() => clearAll.mutate()}
+                  clearing={clearAll.isPending}
+                />
               )}
-              <div className="grid gap-6 mt-4" style={{ gridTemplateColumns: "minmax(0, 1fr) 340px" }}>
+              <div
+                className="grid gap-6 mt-4"
+                style={{ gridTemplateColumns: "minmax(0, 1fr) 340px" }}
+              >
                 <div>
                   {editingSlot ? (
                     <CardSelectionGrid
@@ -97,7 +125,10 @@ export function P0P1Page() {
                       cards={cards}
                       pickedCards={pickedCards}
                       onSelect={(name) => {
-                        upsertVote.mutate({ slot: editingSlot.key, cardName: name });
+                        upsertVote.mutate({
+                          slot: editingSlot.key,
+                          cardName: name,
+                        });
                         setEditingSlotKey(null);
                       }}
                       onCancel={() => setEditingSlotKey(null)}
@@ -106,9 +137,7 @@ export function P0P1Page() {
                     <Rules />
                   )}
                 </div>
-                <div className="sticky top-20 self-start">
-                  {slotList}
-                </div>
+                <div className="sticky top-20 self-start">{slotList}</div>
               </div>
             </>
           ) : (
@@ -120,7 +149,13 @@ export function P0P1Page() {
             {user && cards && (
               <>
                 {!isPastDeadline && (
-                  <ProgressBanner filled={filledCount} total={SLOTS.length} isComplete={isComplete} onClearAll={() => clearAll.mutate()} clearing={clearAll.isPending} />
+                  <ProgressBanner
+                    filled={filledCount}
+                    total={SLOTS.length}
+                    isComplete={isComplete}
+                    onClearAll={() => clearAll.mutate()}
+                    clearing={clearAll.isPending}
+                  />
                 )}
                 <div className="mt-4">{slotList}</div>
               </>
@@ -138,13 +173,13 @@ function Rules() {
   return (
     <section className="mb-6">
       <h2 className="font-display text-[16px] md:text-[18px] text-text tracking-[0.18em] mb-3">
-        PACK 0, PICK 1
+        Pack 0, Pick 1 Challenge - {P0P1_SET_NAME}
       </h2>
       <Countdown deadline={VOTING_DEADLINE} />
       <div className="flex flex-col gap-3 text-[13px] md:text-[14px] text-muted leading-[1.6] mt-3">
         <p>
-          Pick one card for each of 9 slots. After 6 weeks, rosters are ranked by the
-          sum of slots 1–8's{" "}
+          Pick a team of the cards you think will perform best in each of eight
+          slots. After six weeks, teams will be ranked by the sum of the cards'{" "}
           <a
             href={SEVENTEEN_LANDS_URL}
             target="_blank"
@@ -155,39 +190,88 @@ function Rules() {
           </a>
           .
         </p>
-        <p>Slot 9 will only be used in case of a tie.</p>
+        <p>
+          You will pick a card for the ninth slot, but it will only be used in
+          case of a tie.
+        </p>
         <div className="bg-surface border border-border2 px-4 py-3">
           <table className="w-full text-[12px] md:text-[13px]">
             <thead>
               <tr className="text-left text-muted">
-                <th className="font-display tracking-[0.1em] pb-1.5 font-normal">#</th>
-                <th className="font-display tracking-[0.1em] pb-1.5 font-normal">SLOT</th>
-                <th className="font-display tracking-[0.1em] pb-1.5 font-normal">CONSTRAINT</th>
+                <th className="font-display tracking-[0.1em] pb-1.5 font-normal">
+                  #
+                </th>
+                <th className="font-display tracking-[0.1em] pb-1.5 font-normal">
+                  SLOT
+                </th>
+                <th className="font-display tracking-[0.1em] pb-1.5 font-normal">
+                  CONSTRAINT
+                </th>
               </tr>
             </thead>
             <tbody className="text-text">
-              <SlotRow n={1} slot="White Common" constraint="Mono-white commons" />
-              <SlotRow n={2} slot="Blue Common" constraint="Mono-blue commons" />
-              <SlotRow n={3} slot="Black Common" constraint="Mono-black commons" />
+              <SlotRow
+                n={1}
+                slot="White Common"
+                constraint="Mono-white commons"
+              />
+              <SlotRow
+                n={2}
+                slot="Blue Common"
+                constraint="Mono-blue commons"
+              />
+              <SlotRow
+                n={3}
+                slot="Black Common"
+                constraint="Mono-black commons"
+              />
               <SlotRow n={4} slot="Red Common" constraint="Mono-red commons" />
-              <SlotRow n={5} slot="Green Common" constraint="Mono-green commons" />
-              <SlotRow n={6} slot="Multicolor Uncommon" constraint="2+ color uncommons" />
-              <SlotRow n={7} slot="Wildcard Common" constraint="Any common not already picked" />
-              <SlotRow n={8} slot="Wildcard Uncommon" constraint="Any uncommon not already picked" />
-              <SlotRow n={9} slot="Best Hero" constraint="Any Hero creature card below mythic as a tiebreaker - NOT included in score" />
+              <SlotRow
+                n={5}
+                slot="Green Common"
+                constraint="Mono-green commons"
+              />
+              <SlotRow
+                n={6}
+                slot="Multicolor Uncommon"
+                constraint="2+ color uncommons"
+              />
+              <SlotRow
+                n={7}
+                slot="Wildcard Common"
+                constraint="Any common not already picked"
+              />
+              <SlotRow
+                n={8}
+                slot="Wildcard Uncommon"
+                constraint="Any uncommon not already picked"
+              />
+              <SlotRow
+                n={9}
+                slot="Best Hero"
+                constraint="Any Hero creature card below mythic as a tiebreaker - NOT included in score"
+              />
             </tbody>
           </table>
         </div>
         <p className="text-[12px] text-muted">
-          No card may appear in more than one slot. Picks auto-save and can be changed
-          until the deadline.
+          No card may appear in more than one slot. Picks auto-save and can be
+          changed until the deadline.
         </p>
       </div>
     </section>
   );
 }
 
-function SlotRow({ n, slot, constraint }: { n: number; slot: string; constraint: string }) {
+function SlotRow({
+  n,
+  slot,
+  constraint,
+}: {
+  n: number;
+  slot: string;
+  constraint: string;
+}) {
   return (
     <tr className="border-t border-border">
       <td className="py-1.5 text-dim pr-2">{n}</td>
@@ -197,9 +281,18 @@ function SlotRow({ n, slot, constraint }: { n: number; slot: string; constraint:
   );
 }
 
-function ProgressBanner({ filled, total, isComplete, onClearAll, clearing }: {
-  filled: number; total: number; isComplete: boolean;
-  onClearAll: () => void; clearing: boolean;
+function ProgressBanner({
+  filled,
+  total,
+  isComplete,
+  onClearAll,
+  clearing,
+}: {
+  filled: number;
+  total: number;
+  isComplete: boolean;
+  onClearAll: () => void;
+  clearing: boolean;
 }) {
   const [confirming, setConfirming] = useState(false);
 
@@ -210,7 +303,10 @@ function ProgressBanner({ filled, total, isComplete, onClearAll, clearing }: {
   }, [confirming]);
 
   const handleClear = useCallback(() => {
-    if (!confirming) { setConfirming(true); return; }
+    if (!confirming) {
+      setConfirming(true);
+      return;
+    }
     setConfirming(false);
     onClearAll();
   }, [confirming, onClearAll]);

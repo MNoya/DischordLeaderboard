@@ -1,6 +1,8 @@
 import type { MshCard, SlotDefinition } from "../types/p0p1";
 
+// TODO: get this data from the database instead of hardcoding to support other sets
 export const P0P1_SET_CODE = "MSH";
+export const P0P1_SET_NAME = "Marvel Super Heroes";
 export const P0P1_VOTING_DEADLINE = new Date("2026-06-23T15:00:00Z");
 
 function monoColor(color: string) {
