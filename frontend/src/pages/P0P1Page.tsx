@@ -194,67 +194,7 @@ function Rules() {
           You will pick a card for the ninth slot, but it will only be used in
           case of a tie.
         </p>
-        <div className="bg-surface border border-border2 px-4 py-3">
-          <table className="w-full text-[12px] md:text-[13px]">
-            <thead>
-              <tr className="text-left text-muted">
-                <th className="font-display tracking-[0.1em] pb-1.5 font-normal">
-                  #
-                </th>
-                <th className="font-display tracking-[0.1em] pb-1.5 font-normal">
-                  SLOT
-                </th>
-                <th className="font-display tracking-[0.1em] pb-1.5 font-normal">
-                  CONSTRAINT
-                </th>
-              </tr>
-            </thead>
-            <tbody className="text-text">
-              <SlotRow
-                n={1}
-                slot="White Common"
-                constraint="Mono-white commons"
-              />
-              <SlotRow
-                n={2}
-                slot="Blue Common"
-                constraint="Mono-blue commons"
-              />
-              <SlotRow
-                n={3}
-                slot="Black Common"
-                constraint="Mono-black commons"
-              />
-              <SlotRow n={4} slot="Red Common" constraint="Mono-red commons" />
-              <SlotRow
-                n={5}
-                slot="Green Common"
-                constraint="Mono-green commons"
-              />
-              <SlotRow
-                n={6}
-                slot="Multicolor Uncommon"
-                constraint="2+ color uncommons"
-              />
-              <SlotRow
-                n={7}
-                slot="Wildcard Common"
-                constraint="Any common not already picked"
-              />
-              <SlotRow
-                n={8}
-                slot="Wildcard Uncommon"
-                constraint="Any uncommon not already picked"
-              />
-              <SlotRow
-                n={9}
-                slot="Best Hero"
-                constraint="Any Hero creature card below mythic as a tiebreaker - NOT included in score"
-              />
-            </tbody>
-          </table>
-        </div>
-        <p className="text-[12px] text-muted">
+        <p className="text-[12px] text-dim">
           No card may appear in more than one slot. Picks auto-save and can be
           changed until the deadline.
         </p>
@@ -263,23 +203,6 @@ function Rules() {
   );
 }
 
-function SlotRow({
-  n,
-  slot,
-  constraint,
-}: {
-  n: number;
-  slot: string;
-  constraint: string;
-}) {
-  return (
-    <tr className="border-t border-border">
-      <td className="py-1.5 text-dim pr-2">{n}</td>
-      <td className="py-1.5 pr-3 whitespace-nowrap">{slot}</td>
-      <td className="py-1.5 text-muted">{constraint}</td>
-    </tr>
-  );
-}
 
 function ProgressBanner({
   filled,

@@ -41,7 +41,7 @@ export const SLOTS: SlotDefinition[] = [
   },
   {
     key: "tiebreaker",
-    label: "Best Hero",
+    label: "Tiebreaker - Best Hero",
     filter: (card, picked) =>
       card.typeLine.includes("Hero") &&
       !picked.has(card.name),
