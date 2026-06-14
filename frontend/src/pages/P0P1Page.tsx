@@ -4,7 +4,7 @@ import { Footer } from "../components/Footer";
 import { CtaPill } from "../components/CtaPill";
 import { DiscordIcon } from "../components/BrandIcons";
 import { SetGlyph, setGlyphCode } from "../components/Brand";
-import { SetSwitcherDesktop } from "../components/SetSwitcher";
+import { SetSwitcherDesktop, SetSwitcherMobile } from "../components/SetSwitcher";
 import { SectionLabel } from "../components/SectionLabel";
 import { SlotCard } from "../components/p0p1/SlotCard";
 import { CardSelectionGrid } from "../components/p0p1/CardSelectionGrid";
@@ -173,40 +173,43 @@ export function P0P1Page() {
           <Footer className="mt-auto px-10 pt-5 pb-3" />
         </>
       ) : (
-        <main className="flex-1 flex flex-col mx-auto w-full max-w-[640px] px-5 pt-5 pb-5">
-          <Rules />
+        <>
+          <MobileSetStrip sets={p0p1Sets} />
+          <main className="flex-1 flex flex-col mx-auto w-full max-w-[640px] px-5 pt-4 pb-5">
+            <MobileRules />
 
-          {!authLoading && !user && !isPastDeadline && (
-            <div className="flex justify-center my-8">
-              <button
-                type="button"
-                onClick={signIn}
-                className="bg-transparent border-0 cursor-pointer p-0"
-              >
-                <CtaPill size="lg" icon={<DiscordIcon size={19} />}>
-                  LOG IN TO PARTICIPATE
-                </CtaPill>
-              </button>
-            </div>
-          )}
+            {!authLoading && !user && !isPastDeadline && (
+              <div className="flex justify-center my-8">
+                <button
+                  type="button"
+                  onClick={signIn}
+                  className="bg-transparent border-0 cursor-pointer p-0"
+                >
+                  <CtaPill size="lg" icon={<DiscordIcon size={19} />}>
+                    LOG IN TO PARTICIPATE
+                  </CtaPill>
+                </button>
+              </div>
+            )}
 
-          {user && cards && (
-            <>
-              {!isPastDeadline && (
-                <ProgressBanner
-                  filled={filledCount}
-                  total={SLOTS.length}
-                  isComplete={isComplete}
-                  onClearAll={() => clearAll.mutate()}
-                  clearing={clearAll.isPending}
-                />
-              )}
-              <div className="mt-4">{slotList}</div>
-            </>
-          )}
+            {user && cards && (
+              <>
+                {!isPastDeadline && (
+                  <ProgressBanner
+                    filled={filledCount}
+                    total={SLOTS.length}
+                    isComplete={isComplete}
+                    onClearAll={() => clearAll.mutate()}
+                    clearing={clearAll.isPending}
+                  />
+                )}
+                <div className="mt-4">{slotList}</div>
+              </>
+            )}
 
-          <Footer className="mt-auto pt-8" />
-        </main>
+            <Footer className="mt-auto pt-8" />
+          </main>
+        </>
       )}
     </div>
   );
@@ -277,35 +280,61 @@ function RulesBar() {
   );
 }
 
-function Rules() {
+function MobileSetStrip({
+  sets,
+}: {
+  sets: import("../types/leaderboard").SetSummary[] | undefined;
+}) {
   return (
-    <section className="mb-6">
-      <h2 className="font-display text-[16px] md:text-[18px] text-text tracking-[0.18em] mb-3">
-        Pack 0, Pick 1 Challenge - {P0P1_SET_NAME}
-      </h2>
-      <Countdown deadline={VOTING_DEADLINE} />
-      <div className="flex flex-col gap-3 text-[13px] md:text-[14px] text-muted leading-[1.6] mt-3">
-        <p>
-          Pick a team of the cards you think will perform best in each of eight
-          slots. After six weeks, teams will be ranked by the sum of the cards'{" "}
-          <a
-            href={SEVENTEEN_LANDS_URL}
-            target="_blank"
-            rel="noreferrer"
-            className="text-green hover:underline underline-offset-2"
-          >
-            17Lands.com's GIH win rate metric
-          </a>
-          .
-        </p>
-        <p>
-          You will pick a card for the ninth slot, but it will only be used in
-          case of a tie.
-        </p>
-        <p className="text-[12px] text-dim">
-          No card may appear in more than one slot. Picks auto-save and can be
-          changed until the deadline.
-        </p>
+    <div className="px-3 pt-2 pb-1 border-b border-border bg-surface flex items-center gap-3">
+      <div className="pl-1 pr-1">
+        <SetGlyph
+          code={setGlyphCode(sets?.find((s) => s.code === SET_CODE) ?? { code: SET_CODE })}
+          size={32}
+        />
+      </div>
+      <span
+        className="font-display text-text tracking-[0.04em]"
+        style={{ fontSize: 28, lineHeight: 1 }}
+      >
+        {SET_CODE}
+      </span>
+      {sets && sets.length > 0 && (
+        <div className="ml-auto basis-[34%] min-w-0">
+          <SetSwitcherMobile
+            sets={sets}
+            activeCode={SET_CODE}
+            onChange={() => {}}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MobileRules() {
+  return (
+    <section className="mb-4">
+      <div className="flex items-baseline justify-between mb-1.5">
+        <span className="font-display text-[15px] text-text tracking-[0.15em]">
+          P0, P1 CHALLENGE
+        </span>
+        <CountdownInline deadline={VOTING_DEADLINE} />
+      </div>
+      <div className="text-[13px] text-muted leading-[1.6]">
+        Pick your best card for each slot. Teams ranked by{" "}
+        <a
+          href={SEVENTEEN_LANDS_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="text-green hover:underline underline-offset-2"
+        >
+          17Lands GIH win rate
+        </a>{" "}
+        after six weeks.
+      </div>
+      <div className="text-[11px] text-dim mt-1">
+        Slot 9 = tiebreaker only · No duplicates · Auto-saves
       </div>
     </section>
   );
@@ -379,30 +408,8 @@ function CountdownInline({ deadline }: { deadline: Date }) {
   const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
   return (
     <span className="text-green text-[14px] whitespace-nowrap">
-      Entries close in {days} days, {hours} hours
+      Closes in {days} days, {hours} hours
     </span>
   );
 }
 
-function Countdown({ deadline }: { deadline: Date }) {
-  const now = new Date();
-  const diff = deadline.getTime() - now.getTime();
-  if (diff <= 0) {
-    return (
-      <div className="px-4 py-3 border border-border2 bg-surface text-muted text-[13px] text-center">
-        Entries have closed
-      </div>
-    );
-  }
-
-  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-  const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
-
-  return (
-    <div className="px-4 py-3 border border-green bg-surface text-center">
-      <span className="text-[14px] md:text-[16px] text-green">
-        Entries close in {days} days, {hours} hours
-      </span>
-    </div>
-  );
-}
