@@ -54,6 +54,7 @@ from bot.services.pod_tournament import (
     build_replays_link_button,
     build_standings_embed_for_event,
     build_thread_link_button,
+    post_trophy_hype_for_event,
 )
 from bot.slug import disambiguate_slug, slugify
 
@@ -368,6 +369,7 @@ class PodDraft(commands.Cog):
 
         log.info(f"pod-champion: {interaction.user} re-posted champion announcement for event_id={event_id}")
         await interaction.followup.send(view=view)
+        await post_trophy_hype_for_event(event_id, interaction.guild)
 
     @pod_champion.autocomplete("event")
     async def _pod_champion_event_autocomplete(

@@ -2023,15 +2023,10 @@ async def build_standings_embed_for_event(event_id: str) -> discord.Embed | None
     )
 
 
-async def build_champion_announcement_view_for_event(
-    event_id: str,
-    *,
-    guild_id: int | None = None,
-) -> ui.LayoutView | None:
-    """Manager-free builder for the channel-level champion announcement view. Returns None when the
-    trophy match has no winner yet, nobody is undefeated, or the event has neither pairings nor
-    stored placements. Used by /pod-champion to re-post the announcement after the fact (e.g. when
-    finalization was missed, or for a record-only backfill)."""
+async def _resolve_announcement_standings(event_id: str):
+    """Standings for the post-finalize champion announcement, or None when the trophy match has no
+    winner yet. Prefers live pairings; falls back to stored placements for record-only backfills.
+    Returns (standings, match_states), with match_states empty on the stored-placements path."""
     players = await asyncio.to_thread(_load_tournament_players_sync, event_id)
     if not players:
         return None
@@ -2041,20 +2036,34 @@ async def build_champion_announcement_view_for_event(
         trophy = [m for m in match_states if m.get("is_trophy_match")]
         if not trophy or not all(m.get("winner_name") for m in trophy):
             return None
-
         prior = await asyncio.to_thread(_load_matches, event_id)
         standings = pod_swiss.compute_standings(players, prior)
         if not standings:
             return None
-        if not any(s.losses == 0 for s in standings):
-            # No undefeated player; wait for every R3 match to resolve before crowning rank 1
-            if not all(m.get("winner_name") for m in match_states):
-                return None
-    else:
-        standings = await asyncio.to_thread(_load_participant_standings_sync, event_id)
-        if not standings or not any(s.rank == 1 for s in standings):
+        nobody_undefeated = not any(s.losses == 0 for s in standings)
+        round_three_open = not all(m.get("winner_name") for m in match_states)
+        if nobody_undefeated and round_three_open:
             return None
+        return standings, match_states
+    standings = await asyncio.to_thread(_load_participant_standings_sync, event_id)
+    if not standings or not any(s.rank == 1 for s in standings):
+        return None
+    return standings, []
 
+
+async def build_champion_announcement_view_for_event(
+    event_id: str,
+    *,
+    guild_id: int | None = None,
+) -> ui.LayoutView | None:
+    """Manager-free builder for the channel-level champion announcement view. Returns None when the
+    trophy match has no winner yet, nobody is undefeated, or the event has neither pairings nor
+    stored placements. Used by /pod-champion to re-post the announcement after the fact (e.g. when
+    finalization was missed, or for a record-only backfill)."""
+    resolved = await _resolve_announcement_standings(event_id)
+    if resolved is None:
+        return None
+    standings, match_states = resolved
     displays = await asyncio.to_thread(_load_participant_displays, event_id)
     deck_data = await asyncio.to_thread(_load_event_deck_data_sync, event_id)
     player_colors = _colors_only(deck_data)
@@ -2471,7 +2480,7 @@ async def maybe_post_championship(manager, *, force: bool = False) -> None:
     await _send_champion_thread_ping(manager, champions, player_colors)
     await _react_trophy_on_champion_screenshots(manager, deck_data, dm_info)
     await _post_trophy_hype(
-        manager, target, champions,
+        event_id, getattr(target, "guild", None), thread_id, champions,
         event_name=event_name, displays=displays,
         player_colors=player_colors, deck_data=deck_data, dm_info=dm_info,
     )
@@ -2586,20 +2595,40 @@ def build_trophy_hype_view(
     return view
 
 
+async def post_trophy_hype_for_event(event_id: str, guild) -> None:
+    """Manager-free #trophy-hype post so /pod-champion fires the same champion card the automatic
+    finalize would, resolving champions from the announcement standings."""
+    resolved = await _resolve_announcement_standings(event_id)
+    if resolved is None:
+        return
+    standings, _ = resolved
+    champions = [s for s in standings if s.losses == 0] or [standings[0]]
+    deck_data = await asyncio.to_thread(_load_event_deck_data_sync, event_id)
+    displays = await asyncio.to_thread(_load_participant_displays, event_id)
+    dm_info = await asyncio.to_thread(_load_dm_info_sync, event_id)
+    event_name = await asyncio.to_thread(load_event_name_sync, event_id)
+    thread_id_str = await asyncio.to_thread(load_event_thread_id_sync, event_id)
+    thread_id = int(thread_id_str) if thread_id_str else None
+    await _post_trophy_hype(
+        event_id, guild, thread_id, champions,
+        event_name=event_name, displays=displays,
+        player_colors=_colors_only(deck_data), deck_data=deck_data, dm_info=dm_info,
+    )
+
+
 async def _post_trophy_hype(
-    manager, target, champions, *,
+    event_id: str, guild, thread_id: int | None, champions, *,
     event_name: str,
     displays: dict[str, dict],
     player_colors: dict[str, str | None],
     deck_data: dict[str, "ParticipantDeckData"],
     dm_info: dict,
 ) -> None:
-    guild = getattr(target, "guild", None)
     channel = _find_trophy_hype_channel(guild)
     if channel is None:
-        log.info(f"[FINALIZE] trophy_hype.skip event={manager.event_id} reason=no_channel")
+        log.info(f"[FINALIZE] trophy_hype.skip event={event_id} reason=no_channel")
         return
-    started_at = await asyncio.to_thread(_load_event_started_at_sync, manager.event_id)
+    started_at = await asyncio.to_thread(_load_event_started_at_sync, event_id)
     self_post_authors = await _trophy_hype_image_authors(channel, started_at)
     remaining = []
     for standing in champions:
@@ -2607,15 +2636,14 @@ async def _post_trophy_hype(
         discord_id = info.discord_id if info else None
         if discord_id and discord_id in self_post_authors:
             log.info(
-                f"[FINALIZE] trophy_hype.skip_champion event={manager.event_id} "
+                f"[FINALIZE] trophy_hype.skip_champion event={event_id} "
                 f"champion={standing.player_name!r} reason=already_posted"
             )
             continue
         remaining.append(standing)
     if not remaining:
-        log.info(f"[FINALIZE] trophy_hype.skip event={manager.event_id} reason=champions_already_posted")
+        log.info(f"[FINALIZE] trophy_hype.skip event={event_id} reason=champions_already_posted")
         return
-    thread_id = int(manager.thread_id) if isinstance(manager.thread_id, (int, str)) else None
     hype_view = build_trophy_hype_view(
         remaining, event_name=event_name, displays=displays,
         player_colors=player_colors, deck_data=deck_data,
@@ -2623,9 +2651,9 @@ async def _post_trophy_hype(
     )
     try:
         await channel.send(view=hype_view)
-        log.info(f"[FINALIZE] trophy_hype.posted event={manager.event_id} channel={channel.id}")
+        log.info(f"[FINALIZE] trophy_hype.posted event={event_id} channel={channel.id}")
     except Exception:
-        log.warning(f"[FINALIZE] trophy_hype.post_error event={manager.event_id}", exc_info=True)
+        log.warning(f"[FINALIZE] trophy_hype.post_error event={event_id}", exc_info=True)
 
 
 def _find_trophy_hype_channel(guild: discord.Guild | None) -> discord.TextChannel | None:
