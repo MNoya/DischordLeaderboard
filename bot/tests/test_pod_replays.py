@@ -1,13 +1,32 @@
 """Tests for the score-pattern + time-window attribution algorithm. No live API/DB hits."""
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 from bot.models import PodDraftMatch
+from bot.services import pod_replays
 from bot.services.pod_replays import attribute_games_to_rounds
 
 
 _POD = "DirectGameTournamentLimited"
+
+
+def test_capture_event_replays_fetches_each_participant_once(monkeypatch):
+    targets = [("p1", "Alice#1", "tokenA"), ("p2", "Bram#2", "tokenB")]
+    monkeypatch.setattr(pod_replays, "_event_replay_targets_sync", lambda event_id: targets)
+    calls = []
+
+    async def _fake_fetch(client, event_id, player_id, seat_name, token):
+        calls.append((player_id, seat_name, token))
+        return 3
+
+    monkeypatch.setattr(pod_replays, "fetch_and_persist_replays_for_player", _fake_fetch)
+
+    total = asyncio.run(pod_replays.capture_event_replays(object(), "evt"))
+
+    assert total == 6
+    assert calls == targets
 
 
 def test_attributes_each_match_when_data_is_clean() -> None:

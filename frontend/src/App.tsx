@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { Provider as TooltipProvider } from "@radix-ui/react-tooltip";
+import { DocumentTitle } from "./components/DocumentTitle";
 import { LeaderboardPage } from "./pages/LeaderboardPage";
 import { PlayerPage } from "./pages/PlayerPage";
 import { PodDraftsPage, PodsRoute } from "./pages/PodDraftsPage";
@@ -28,6 +29,7 @@ export function App() {
   }, []);
   return (
     <TooltipProvider delayDuration={150} skipDelayDuration={0} disableHoverableContent>
+    <DocumentTitle />
     <Routes>
       <Route path="/" element={<Navigate to="/leaderboard" replace />} />
 

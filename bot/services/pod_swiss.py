@@ -64,14 +64,16 @@ def pair_round(
     round_num: int,
     *,
     rng: random.Random | None = None,
+    final_round: bool = False,
 ) -> list[tuple[str, str]]:
     """Return pairings for round_num as a list of (player_a_id, player_b_id).
 
     Round 1 pairs by seat distance — seat N faces seat N+half, so each player meets whoever sat
     furthest from them at the table. When seats are unknown it falls back to a random shuffle.
-    Later rounds pair within each record group by seat distance (top seed vs the player half the group
-    away, furthest from the neighbour), pairing down across groups and never re-pairing two players who
-    have already met.
+    Later rounds pair within each record group, pairing down across groups only when forced and never
+    re-pairing two players who have already met. Proximity (top seed vs the player half the group away,
+    furthest from the neighbour) breaks ties between equal pairings — except in the final round, where
+    standings decide everything and a neighbour rematch from the seating no longer matters.
     Raises ValueError if no rematch-free pairing exists.
     """
     if len(players) < 2:
@@ -92,38 +94,59 @@ def pair_round(
     ordered = sorted(players, key=lambda p: (-wins[p.id], _seat_key(p)))
     played: set[frozenset[str]] = {frozenset((m.player_a_id, m.player_b_id)) for m in prior_matches}
 
-    result = _pair_proximity(ordered, wins, played)
+    result = _pair_proximity(ordered, wins, played, final_round)
     if result is None:
         raise ValueError(f"no valid pairing for round {round_num}")
     return result
 
 
 def _pair_proximity(
-    queue: list[Player], wins: dict[str, int], played: set[frozenset[str]],
+    queue: list[Player], wins: dict[str, int], played: set[frozenset[str]], final_round: bool,
 ) -> list[tuple[str, str]] | None:
-    """Pair queue[0] within its record group by seat distance — top seed vs the player half the group
-    away — then pair down to the next group, backtracking to stay rematch-free. queue stays sorted by
-    record then seat across the recursion, so each call re-derives the leading record group from it."""
+    """Pair within each record group, pairing down to the next group only as a last resort and never
+    re-pairing two players who have already met. queue stays sorted by record then seat across the
+    recursion."""
+    best = _best_pairing(queue, wins, played, final_round)
+    return best[1] if best is not None else None
+
+
+def _best_pairing(
+    queue: list[Player], wins: dict[str, int], played: set[frozenset[str]], final_round: bool,
+) -> tuple[int, list[tuple[str, str]]] | None:
+    """Return (float_cost, pairing) for the rematch-free pairing that floats the fewest players across
+    record groups, tie-broken by seat proximity. float_cost sums each pair's win-count gap, so a
+    within-group pair costs 0; minimizing it keeps a record group intact rather than pairing two of its
+    members down just because a proximal choice stranded a rivalry. None when no rematch-free pairing
+    exists. queue is sorted by record then seat, so each call re-derives the leading record group. In
+    the final round proximity is dropped — the group is paired in standings order, neighbours and all."""
     if not queue:
-        return []
+        return (0, [])
     if len(queue) % 2 != 0:
         return None
     a = queue[0]
     group_size = 1
     while group_size < len(queue) and wins[queue[group_size].id] == wins[a.id]:
         group_size += 1
-    half = group_size // 2
-    same_record = sorted(range(1, group_size), key=lambda i: (abs(i - half), -i))
+    if final_round:
+        same_record = list(range(1, group_size))
+    else:
+        half = group_size // 2
+        same_record = sorted(range(1, group_size), key=lambda i: (abs(i - half), -i))
     pair_down = list(range(group_size, len(queue)))
+    best: tuple[int, list[tuple[str, str]]] | None = None
     for i in same_record + pair_down:
         b = queue[i]
         if frozenset((a.id, b.id)) in played:
             continue
-        remaining = queue[1:i] + queue[i + 1:]
-        sub = _pair_proximity(remaining, wins, played)
-        if sub is not None:
-            return [(a.id, b.id)] + sub
-    return None
+        sub = _best_pairing(queue[1:i] + queue[i + 1:], wins, played, final_round)
+        if sub is None:
+            continue
+        cost = (wins[a.id] - wins[b.id]) + sub[0]
+        if best is None or cost < best[0]:
+            best = (cost, [(a.id, b.id)] + sub[1])
+            if cost == 0:
+                break
+    return best
 
 
 def compute_standings(

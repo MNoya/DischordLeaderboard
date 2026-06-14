@@ -2,7 +2,7 @@
 
 A community leaderboard for an MTG Arena Discord server (**LLU** — Limited Level-Ups). Players link their [17lands](https://17lands.com) profile through a Discord bot; their drafts are pulled, scored with a custom formula, and ranked on a public site.
 
-- **Site**: https://dischord.pages.dev/leaderboard/
+- **Site**: https://dischord.pages.dev/ (`limitedlevelups.com` at launch)
 - **Bot**: invite-only to the LLU server; commands work in-server and in DM
 - **Stack**: Python `discord.py` bot · React + Vite frontend · Supabase Postgres · Railway + Cloudflare Pages
 
@@ -40,7 +40,7 @@ cp .env.example .env  # then fill in DISCORD_BOT_TOKEN, DISCORD_GUILD_ID
 
 Frontend:
 ```bash
-cd frontend && npm install && npm run dev   # http://localhost:5173/leaderboard/
+cd frontend && npm install && npm run dev   # http://localhost:5173/
 ```
 
 Without `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY`, the frontend runs against bundled fixtures.

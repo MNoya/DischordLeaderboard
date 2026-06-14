@@ -3,6 +3,11 @@
 // Active set fallback when the live set isn't yet known from the network
 export const ACTIVE_SET_CODE = "SOS";
 
+// Site name and the title separator. functions/_middleware.ts imports these too, so the
+// browser tab (set by DocumentTitle) and the link-unfurl title render the exact same string.
+export const SITE_NAME = "Limited Level-Ups";
+export const TITLE_SEPARATOR = " | ";
+
 // LLU community Discord guild
 export const DISCORD_GUILD_ID = "775371722065051658";
 

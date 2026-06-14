@@ -64,6 +64,18 @@ Preserve the column-aligned formatting of surrounding rows in `ALL_SETS` (visual
 3. Do **not** adjust any other row's `end_date` — existing dates are already correct for sets surrounding a backfilled entry.
 4. If the user reports the set was tracked in 17lands under a non-matching expansion code, also pass `expansion_match="<17lands expansion string>"`. Otherwise omit it.
 
+### 4b. Generate the set symbol
+
+Run:
+
+```
+python -m bot.scripts.generate_set_symbols <CODE>
+```
+
+This pulls the keyrune glyph, recolors it white, and writes `frontend/public/set-symbols/<code>.png` (served on the site and used as the Discord-unfurl thumbnail for the set's routes). Requires `inkscape` and `pngquant` on PATH.
+
+If the script reports `no keyrune glyph, skipped: <CODE>` — keyrune has no symbol for that code (e.g. `CUBE`, or a brand-new set keyrune hasn't published yet) — there is simply no symbol and the leaderboard falls back to the LLU logo. Tell the user; do **not** treat it as an error or block the commit.
+
 ### 5. Show diff
 
 Run `git diff bot/sets.py` and display it to the user.
@@ -89,9 +101,11 @@ python -m bot.scripts.refresh_stats
 After both scripts succeed:
 
 ```
-git add bot/sets.py
+git add bot/sets.py frontend/public/set-symbols/<code>.png
 git commit -m "<subject>"
 ```
+
+Omit the PNG from `git add` if no glyph was generated (the `skipped` case above).
 
 Subject lines (must start with uppercase — memory: `feedback_commit_subject_uppercase.md`):
 
