@@ -3,8 +3,8 @@
     DATABASE_URL=... [MPT_API_KEY=...] python -m bot.scripts.ingest_pod_draft_log \\
         <event_id> <path/to/DraftLog.txt> [--no-mpt]
 
-Idempotent — re-running overwrites draft_log_gz, re-applies mainboards, and re-aligns names from
-the same log. Pass --no-mpt to skip the MagicProTools submission step.
+Idempotent — re-running overwrites the stored draft log and re-aligns names from the same log. Pass
+--no-mpt to skip the MagicProTools submission step.
 """
 from __future__ import annotations
 
