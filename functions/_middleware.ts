@@ -135,9 +135,10 @@ const resolveMeta = async (pathname: string): Promise<RouteMeta> => {
     if (rest[1] === "player" && rest[2]) {
       return playerMeta(await fetchPlayer(rest[2]));
     }
+    const setName = await fetchSetName(setCode);
     return page(
       `${setCode} Leaderboard`,
-      `Check ${setCode} ranks and trophies on the leaderboard.`,
+      `Check ${setName} ranks and trophies on the leaderboard.`,
       { kind: "setSymbol", code: setCode },
     );
   }
