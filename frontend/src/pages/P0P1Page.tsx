@@ -111,7 +111,7 @@ export function P0P1Page() {
 
   return (
     <div className="bg-bg text-text min-h-screen flex flex-col animate-fadeIn">
-      <AppHeader subtitle="P0P1" />
+      <AppHeader subtitle="Pack 0, Pick 1" />
 
       {isDesktop ? (
         <>
