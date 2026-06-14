@@ -34,20 +34,19 @@ export function CardSelectionGrid({
 
   return (
     <div className="animate-fadeIn">
-      <header className="mb-3">
-        <span className="font-display text-text text-[18px] tracking-[0.1em]">
+      <header className="flex items-center gap-3 mb-3">
+        <span className="font-display text-text text-[18px] tracking-[0.1em] shrink-0">
           {slot.label}
         </span>
+        <input
+          ref={inputRef}
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search..."
+          className="ml-auto w-60 bg-surface border border-border2 px-2.5 py-1.5 text-text text-[13px] placeholder:text-dim outline-none focus:border-green transition-colors"
+        />
       </header>
-
-      <input
-        ref={inputRef}
-        type="text"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        placeholder="Search cards..."
-        className="w-full bg-surface border border-border2 px-3 py-2 text-text text-[14px] placeholder:text-dim outline-none focus:border-green transition-colors mb-3"
-      />
 
       {filtered.length === 0 ? (
         <div className="py-8 text-center text-muted text-[14px]">

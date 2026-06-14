@@ -442,8 +442,10 @@ function SlotCardSkeleton({ index }: { index: number }) {
 function CardGridSkeleton() {
   return (
     <div>
-      <div className="h-4 w-32 bg-surface2 animate-pulse mb-3" />
-      <div className="h-9 w-full bg-surface2 animate-pulse mb-3" />
+      <div className="flex items-center gap-3 mb-3">
+        <div className="h-4 w-32 bg-surface2 animate-pulse" />
+        <div className="ml-auto h-7 w-60 bg-surface2 animate-pulse" />
+      </div>
       <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-2">
         {Array.from({ length: 8 }, (_, i) => (
           <div
