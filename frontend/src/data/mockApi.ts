@@ -19,6 +19,7 @@ import type {
   PlayerFormatBreakdown,
   PlayerIdentity,
   PlayerProfile,
+  PodDraftArtifact,
   PodEventMatchRow,
   PodEventParticipantRow,
   PodEventReplayRow,
@@ -29,6 +30,7 @@ import type {
   SetSummary,
 } from "../types/leaderboard";
 import {
+  podDraftArtifactFixture,
   podEventsFixture,
   podEventMatchesFixture,
   podEventParticipantsFixture,
@@ -360,6 +362,10 @@ export const fetchPodEventParticipants = (
   eventId: string,
 ): Promise<PodEventParticipantRow[]> => {
   return wait(podEventParticipantsFixture.filter((p) => p.eventId === eventId));
+};
+
+export const fetchPodDraftArtifact = (eventId: string): Promise<PodDraftArtifact | null> => {
+  return wait(podDraftArtifactFixture[eventId] ?? null);
 };
 
 export const fetchPodEventBySlug = (slug: string): Promise<PodEventSummary | null> => {

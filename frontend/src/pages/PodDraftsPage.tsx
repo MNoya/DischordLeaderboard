@@ -13,6 +13,7 @@ import { ArrowRight, GiRoundTable, LuScrollText, TbCards } from "../components/I
 import { DiscordIcon } from "../components/BrandIcons";
 import { CtaPill } from "../components/CtaPill";
 import { ChamferedButton } from "../components/ChamferedButton";
+import { Tooltip } from "../components/Tooltip";
 import { BREAKDOWN_CAPTION, DeckScreenshotModal } from "../components/pod/DeckScreenshotModal";
 import { Pips } from "../components/ManaPips";
 import { Record } from "../components/Record";
@@ -30,12 +31,14 @@ import { cleanPodEventName, fmtRange, playerPath, podDiscordName, stripDiscrimin
 import { ACTIVE_SET_CODE, DISCORD_GUILD_ID } from "../data/constants";
 import {
   useLeaderboard,
+  usePodDraftArtifact,
   usePodEventParticipants,
   usePodEvents,
   usePodLeaderboard,
   usePodSetCodes,
   useSets,
 } from "../data/hooks";
+import { resolveDeck } from "../data/draft-artifact";
 import type {
   PodEventParticipantRow,
   PodEventSummary,
@@ -664,10 +667,24 @@ function EventStandings({ event }: { event: PodEventSummary }) {
     [profileBoard],
   );
   const [deckTarget, setDeckTarget] = useState<PodEventParticipantRow | null>(null);
+  const { data: draftArtifact } = usePodDraftArtifact(event.eventId);
+  const deckTargetMainboard = useMemo(
+    () =>
+      draftArtifact && deckTarget?.seatIndex != null
+        ? resolveDeck(draftArtifact, deckTarget.seatIndex)
+        : null,
+    [draftArtifact, deckTarget],
+  );
   const sorted = useMemo(() => {
     if (!rows) return [];
     return [...rows].sort((a, b) => (a.placement ?? 99) - (b.placement ?? 99));
   }, [rows]);
+  const cycleDeck = (direction: number) => {
+    if (!deckTarget || sorted.length === 0) return;
+    const index = sorted.indexOf(deckTarget);
+    if (index === -1) return;
+    setDeckTarget(sorted[(index + direction + sorted.length) % sorted.length]);
+  };
   return (
     <>
       <div className="border-t border-dashed border-border2">
@@ -711,10 +728,13 @@ function EventStandings({ event }: { event: PodEventSummary }) {
             deckColors: deckTarget.deckColors,
             deckScreenshotUrl: deckTarget.deckScreenshotUrl,
             deckScreenshotCaption: deckTarget.deckScreenshotCaption,
+            mainboard: deckTargetMainboard,
             record: deckTarget.record,
           }}
           breakdownHref={`/pods/${event.slug}?player=${encodeURIComponent(podDiscordName(deckTarget))}`}
           onClose={() => setDeckTarget(null)}
+          onPrev={() => cycleDeck(-1)}
+          onNext={() => cycleDeck(1)}
         />
       )}
     </>
@@ -751,19 +771,21 @@ function StandingRow({
     >
       <span className="mono text-[13px] text-muted text-center">{p.placement ?? ""}</span>
       {profileHref ? (
-        <Link
-          to={profileHref}
-          onClick={(e) => e.stopPropagation()}
-          className="group/name peer/name flex items-center gap-2 lg:gap-2.5 min-w-0 no-underline text-text hover:text-green transition-colors"
-        >
-          <AAvatar displayName={name} avatarUrl={p.avatarUrl} size={28} />
-          <span
-            className="font-display leading-none tracking-[0.04em] whitespace-nowrap overflow-hidden text-ellipsis"
-            style={{ fontSize: 16 }}
+        <Tooltip label={`View ${name}'s Profile`} side="top" align="start" delayDuration={0}>
+          <Link
+            to={profileHref}
+            onClick={(e) => e.stopPropagation()}
+            className="group/name peer/name flex items-center gap-2 lg:gap-2.5 min-w-0 max-w-full justify-self-start w-fit no-underline text-text hover:text-green transition-colors"
           >
-            {name.toUpperCase()}
-          </span>
-        </Link>
+            <AAvatar displayName={name} avatarUrl={p.avatarUrl} size={28} />
+            <span
+              className="font-display leading-none tracking-[0.04em] whitespace-nowrap overflow-hidden text-ellipsis"
+              style={{ fontSize: 16 }}
+            >
+              {name.toUpperCase()}
+            </span>
+          </Link>
+        </Tooltip>
       ) : (
         <div className="flex items-center gap-2 lg:gap-2.5 min-w-0">
           <AAvatar displayName={name} avatarUrl={p.avatarUrl} size={28} />
@@ -790,20 +812,16 @@ function StandingRow({
             e.stopPropagation();
             onShowDeck?.();
           }}
-          className="group/action inline-flex items-center justify-center gap-2 bg-bg border border-border hover:border-green/60 hover:bg-green/10 group-hover/row:border-green/60 group-hover/row:bg-green/10 peer-hover/name:!border-border peer-hover/name:!bg-bg transition-colors px-1.5 lg:px-3 cursor-pointer whitespace-nowrap"
+          className="group/action inline-flex items-center justify-center gap-2 bg-bg border border-border text-text hover:border-green/60 hover:bg-green/10 hover:text-green group-hover/row:border-green/60 group-hover/row:bg-green/10 group-hover/row:text-green peer-hover/name:!border-border peer-hover/name:!bg-bg peer-hover/name:!text-text transition-colors px-1.5 lg:px-3 cursor-pointer whitespace-nowrap"
           style={{ height: 34 }}
         >
           <span
-            className="hidden lg:inline font-display tracking-[0.16em] text-text group-hover/action:text-green group-hover/row:text-green peer-hover/name:!text-text transition-colors leading-none"
+            className="hidden lg:inline font-display tracking-[0.16em] transition-colors leading-none"
             style={{ fontSize: 14 }}
           >
             VIEW DECK
           </span>
-          <TbCards
-            size={17}
-            aria-hidden="true"
-            className="text-text group-hover/action:text-green group-hover/row:text-green peer-hover/name:!text-text transition-colors"
-          />
+          <TbCards size={17} aria-hidden="true" className="transition-colors" />
         </button>
       ) : draftLogUrl ? (
         <a
@@ -811,20 +829,16 @@ function StandingRow({
           target="_blank"
           rel="noreferrer noopener"
           onClick={(e) => e.stopPropagation()}
-          className="group/action inline-flex items-center justify-center gap-2 bg-bg border border-border hover:border-green/60 hover:bg-green/10 group-hover/row:border-green/60 group-hover/row:bg-green/10 peer-hover/name:!border-border peer-hover/name:!bg-bg transition-colors px-1.5 lg:px-3 no-underline whitespace-nowrap"
+          className="group/action inline-flex items-center justify-center gap-2 bg-bg border border-border text-text hover:border-green/60 hover:bg-green/10 hover:text-green group-hover/row:border-green/60 group-hover/row:bg-green/10 group-hover/row:text-green peer-hover/name:!border-border peer-hover/name:!bg-bg peer-hover/name:!text-text transition-colors px-1.5 lg:px-3 no-underline whitespace-nowrap"
           style={{ height: 34 }}
         >
           <span
-            className="hidden lg:inline font-display tracking-[0.16em] text-text group-hover/action:text-green group-hover/row:text-green peer-hover/name:!text-text transition-colors leading-none"
+            className="hidden lg:inline font-display tracking-[0.16em] transition-colors leading-none"
             style={{ fontSize: 14 }}
           >
             DRAFT LOG
           </span>
-          <LuScrollText
-            size={16}
-            aria-hidden="true"
-            className="text-text group-hover/action:text-green group-hover/row:text-green peer-hover/name:!text-text transition-colors"
-          />
+          <LuScrollText size={16} aria-hidden="true" className="transition-colors" />
         </a>
       ) : (
         <span />

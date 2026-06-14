@@ -6,10 +6,17 @@ import type { SetSummary } from "../types/leaderboard";
 
 const RIGHTMOST_PIN = "CUBE";
 
+const FUTURE_RELEASE_RANK = "9999-99-99";
+const NO_RELEASE_RANK = "";
+
+function releaseRank(s: SetSummary): string {
+  return s.startDate || (s.custom ? NO_RELEASE_RANK : FUTURE_RELEASE_RANK);
+}
+
 function partitionSets(sets: SetSummary[], selectedCode: string, cap: number) {
   const pinRight = sets.find((s) => s.code === RIGHTMOST_PIN);
   const others = sets.filter((s) => s.code !== RIGHTMOST_PIN);
-  const sorted = [...others].sort((a, b) => b.startDate.localeCompare(a.startDate));
+  const sorted = [...others].sort((a, b) => releaseRank(b).localeCompare(releaseRank(a)));
   const totalWithPin = sorted.length + (pinRight ? 1 : 0);
   if (totalWithPin <= cap) {
     const visible = pinRight ? [...sorted, pinRight] : sorted;
@@ -28,7 +35,7 @@ function partitionSets(sets: SetSummary[], selectedCode: string, cap: number) {
     if (visible.length >= effectiveCap) break;
     if (!pinned.has(s.code)) visible.push(s);
   }
-  visible.sort((a, b) => b.startDate.localeCompare(a.startDate));
+  visible.sort((a, b) => releaseRank(b).localeCompare(releaseRank(a)));
   if (pinRight) visible.push(pinRight);
 
   const visibleCodes = new Set(visible.map((s) => s.code));

@@ -12,12 +12,14 @@ import { MobileSeatStack, MobileSeatStackSkeleton } from "../components/pod/Mobi
 import { DeckScreenshotModal } from "../components/pod/DeckScreenshotModal";
 import {
   useLeaderboard,
+  usePodDraftArtifact,
   usePodEventBySlug,
   usePodEventMatches,
   usePodEventParticipants,
   usePodEventReplays,
   usePodEvents,
 } from "../data/hooks";
+import { resolveDeck } from "../data/draft-artifact";
 import { cleanPodEventName, podDiscordName, podSeatName } from "../data/utils";
 import type {
   PodEventParticipantRow,
@@ -98,6 +100,17 @@ export function PodPage() {
   const { data: event, isLoading: eventLoading } = usePodEventBySlug(slug);
   const eventId = event?.eventId;
   const { data: participantRows, isLoading: participantsLoading } = usePodEventParticipants(eventId);
+  const { data: draftArtifact } = usePodDraftArtifact(eventId);
+  const deckTargetMainboard = useMemo(
+    () => (draftArtifact && deckTarget ? resolveDeck(draftArtifact, deckTarget.seatIndex) : null),
+    [draftArtifact, deckTarget],
+  );
+  const cycleDeck = (direction: number) => {
+    if (!deckTarget || seats.length === 0) return;
+    const index = seats.findIndex((s) => s.seatIndex === deckTarget.seatIndex);
+    if (index === -1) return;
+    setDeckTarget(seats[(index + direction + seats.length) % seats.length]);
+  };
   const { data: matches, isLoading: matchesLoading } = usePodEventMatches(eventId);
   const { data: replays, isLoading: replaysLoading } = usePodEventReplays(eventId);
   const { data: setEvents } = usePodEvents(event?.setCode);
@@ -126,6 +139,7 @@ export function PodPage() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (deckTarget) return;
       if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
       const t = e.target;
       if (t instanceof HTMLElement) {
@@ -141,7 +155,7 @@ export function PodPage() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [prevTo, nextTo, navigate]);
+  }, [prevTo, nextTo, navigate, deckTarget]);
 
   const seats = useMemo<PodSeat[]>(
     () => (participantRows ? assignSeats(participantRows) : []),
@@ -311,9 +325,12 @@ export function PodPage() {
               deckColors: deckTarget.deckColors,
               deckScreenshotUrl: deckTarget.deckScreenshotUrl,
               deckScreenshotCaption: deckTarget.deckScreenshotCaption,
+              mainboard: deckTargetMainboard,
               record: deckTarget.record,
             }}
             onClose={() => setDeckTarget(null)}
+            onPrev={() => cycleDeck(-1)}
+            onNext={() => cycleDeck(1)}
           />
         )}
       </div>
@@ -403,9 +420,12 @@ export function PodPage() {
             deckColors: deckTarget.deckColors,
             deckScreenshotUrl: deckTarget.deckScreenshotUrl,
             deckScreenshotCaption: deckTarget.deckScreenshotCaption,
+            mainboard: deckTargetMainboard,
             record: deckTarget.record,
           }}
           onClose={() => setDeckTarget(null)}
+          onPrev={() => cycleDeck(-1)}
+          onNext={() => cycleDeck(1)}
         />
       )}
     </div>

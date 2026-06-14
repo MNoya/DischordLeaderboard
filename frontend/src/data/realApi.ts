@@ -33,6 +33,7 @@ import type {
   PlayerFormatBreakdown,
   PlayerIdentity,
   PlayerProfile,
+  PodDraftArtifact,
   PodEventMatchRow,
   PodEventParticipantRow,
   PodEventReplayRow,
@@ -856,6 +857,16 @@ export async function fetchPodEventParticipants(
     .eq("event_id", eventId);
   if (error) throw error;
   return (data ?? []).map((r) => adaptPodEventParticipant(r as Record<string, unknown>));
+}
+
+export async function fetchPodDraftArtifact(eventId: string): Promise<PodDraftArtifact | null> {
+  const { data, error } = await client()
+    .from("public_pod_draft_log")
+    .select("draft_log")
+    .eq("event_id", eventId)
+    .limit(1);
+  if (error) throw error;
+  return (data?.[0]?.draft_log ?? null) as PodDraftArtifact | null;
 }
 
 export async function fetchPodEventBySlug(slug: string): Promise<PodEventSummary | null> {

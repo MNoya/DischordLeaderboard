@@ -19,6 +19,7 @@ import {
   fetchPlayerDraftEvents,
   fetchPlayerIdentity,
   fetchPlayerProfile,
+  fetchPodDraftArtifact,
   fetchPodEventBySlug,
   fetchPodEventMatches,
   fetchPodEventParticipants,
@@ -265,6 +266,15 @@ export function usePodEventParticipants(eventId: string | undefined) {
   return useQuery({
     queryKey: ["pod-event-participants", eventId],
     queryFn: () => fetchPodEventParticipants(eventId!),
+    enabled: !!eventId,
+    staleTime: FIVE_MINUTES,
+  });
+}
+
+export function usePodDraftArtifact(eventId: string | undefined) {
+  return useQuery({
+    queryKey: ["pod-draft-artifact", eventId],
+    queryFn: () => fetchPodDraftArtifact(eventId!),
     enabled: !!eventId,
     staleTime: FIVE_MINUTES,
   });

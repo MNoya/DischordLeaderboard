@@ -23,6 +23,7 @@ _ALLOWED_VIEWS = {
     "public_pod_draft_event_matches",
     "public_pod_draft_event_participants",
     "public_pod_draft_events",
+    "public_pod_draft_log",
     "public_pod_draft_replays",
     "public_pod_scoring",
     "public_recent_trophies",
