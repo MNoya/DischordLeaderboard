@@ -11,7 +11,7 @@ import { P0P1_SET_CODE, P0P1_VOTING_DEADLINE, SLOTS } from "../data/p0p1Slots";
 // that a future LLU site shell can wrap or omit it cleanly.
 
 const NAV: Array<{ label: string; badge?: (props: { active: boolean }) => JSX.Element | null; to: string; match: (path: string) => boolean }> = [
-  { label: "P0P1", badge: P0P1Badge, to: "/p0p1", match: (p) => p.startsWith("/p0p1") },
+  { label: "P0・P1", badge: P0P1Badge, to: "/p0p1", match: (p) => p.startsWith("/p0p1") },
   { label: "LEADERBOARD", to: "/leaderboard", match: (p) => p === "/" || p === "/leaderboard" || p.startsWith("/leaderboard/") },
   { label: "POD DRAFTS", to: "/pods", match: (p) => p.startsWith("/pods") },
   { label: "ABOUT", to: "/about", match: (p) => p.startsWith("/about") },
