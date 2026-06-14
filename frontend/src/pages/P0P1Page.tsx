@@ -41,7 +41,7 @@ export function P0P1Page() {
       <main className="flex-1 flex flex-col mx-auto w-full max-w-[640px] px-5 md:px-10 pt-5 md:pt-10 pb-5">
         <Rules />
 
-        {!authLoading && !user && (
+        {!authLoading && !user && !isPastDeadline && (
           <div className="flex justify-center my-8">
             <button type="button" onClick={signIn} className="bg-transparent border-0 cursor-pointer p-0">
               <CtaPill size="lg" icon={<DiscordIcon size={19} />}>
@@ -53,7 +53,9 @@ export function P0P1Page() {
 
         {user && cards && (
           <>
-            <ProgressBanner filled={filledCount} total={SLOTS.length} isComplete={isComplete} />
+            {!isPastDeadline && (
+              <ProgressBanner filled={filledCount} total={SLOTS.length} isComplete={isComplete} />
+            )}
 
             <div className="flex flex-col gap-2 mt-4">
               {SLOTS.map((slot) => {
@@ -66,8 +68,8 @@ export function P0P1Page() {
                     selectedCard={selectedCard}
                     allCards={cards}
                     pickedCards={pickedCards}
+                    locked={isPastDeadline}
                     onSelect={(name) => {
-                      if (isPastDeadline) return;
                       upsertVote.mutate({ slot: slot.key, cardName: name });
                     }}
                   />
@@ -75,11 +77,6 @@ export function P0P1Page() {
               })}
             </div>
 
-            {isPastDeadline && (
-              <div className="mt-4 px-4 py-3 border border-border2 bg-surface text-muted text-[13px] text-center">
-                Voting has closed.
-              </div>
-            )}
           </>
         )}
 
