@@ -1,6 +1,6 @@
-import type { MshCard } from "../../types/p0p1";
+import type { Card } from "../../types/p0p1";
 
-export const cardsMshFixture: MshCard[] = [
+export const cardsMshFixture: Card[] = [
   {
     name: "Agent 13, Sharon Carter",
     manaCost: "{2}{W}",

@@ -24,7 +24,7 @@ import {
   P0P1_SET_NAME,
 } from "../data/p0p1Slots";
 import { fmtRange } from "../data/utils";
-import type { MshCard, SlotKey } from "../types/p0p1";
+import type { Card, SlotKey } from "../types/p0p1";
 const SEVENTEEN_LANDS_URL = "https://www.17lands.com/card_data";
 
 export function P0P1Page() {
@@ -37,7 +37,7 @@ export function P0P1Page() {
   const [editingSlotKey, setEditingSlotKey] = useState<SlotKey | null>(null);
 
   const cardsByName = useMemo(() => {
-    if (!cards) return new Map<string, MshCard>();
+    if (!cards) return new Map<string, Card>();
     return new Map(cards.map((c) => [c.name, c]));
   }, [cards]);
 

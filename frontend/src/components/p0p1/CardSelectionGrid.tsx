@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { MshCard, SlotDefinition } from "../../types/p0p1";
+import type { Card, SlotDefinition } from "../../types/p0p1";
 
 interface Props {
   slot: SlotDefinition;
-  cards: MshCard[];
+  cards: Card[];
   pickedCards: Set<string>;
   onSelect: (cardName: string) => void;
 }

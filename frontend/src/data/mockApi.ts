@@ -28,7 +28,7 @@ import type {
   RecentTrophy,
   SetSummary,
 } from "../types/leaderboard";
-import type { MshCard, P0P1Pick, SlotKey } from "../types/p0p1";
+import type { Card, P0P1Pick, SlotKey } from "../types/p0p1";
 import {
   podEventsFixture,
   podEventMatchesFixture,
@@ -406,7 +406,7 @@ import { cardsMshFixture } from "./fixtures/cards-msh";
 
 const p0p1Picks = new Map<string, P0P1Pick>();
 
-export const fetchP0P1Cards = (_setCode: string): Promise<MshCard[]> =>
+export const fetchP0P1Cards = (_setCode: string): Promise<Card[]> =>
   wait(cardsMshFixture);
 
 export const fetchP0P1Picks = (_setCode: string): Promise<P0P1Pick[]> =>

@@ -1143,10 +1143,10 @@ function adaptPodLeaderboardRow(row: Record<string, unknown>): PodLeaderboardRow
 
 // --- P0P1 contest (stubs — wired to Supabase later) ---
 
-import type { MshCard, P0P1Pick, SlotKey } from "../types/p0p1";
+import type { Card, P0P1Pick, SlotKey } from "../types/p0p1";
 import { cardsMshFixture } from "./fixtures/cards-msh";
 
-export const fetchP0P1Cards = (_setCode: string): Promise<MshCard[]> =>
+export const fetchP0P1Cards = (_setCode: string): Promise<Card[]> =>
   Promise.resolve(cardsMshFixture);
 
 export async function fetchP0P1Picks(setCode: string): Promise<P0P1Pick[]> {

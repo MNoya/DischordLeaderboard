@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { MshCard, SlotDefinition } from "../../types/p0p1";
+import type { Card, SlotDefinition } from "../../types/p0p1";
 import { ManaCost } from "../ManaPips";
 import { CardImagePreview } from "./CardImagePreview";
 
 interface Props {
   slot: SlotDefinition;
-  cards: MshCard[];
+  cards: Card[];
   pickedCards: Set<string>;
   onSelect: (cardName: string) => void;
   onClose: () => void;

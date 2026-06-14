@@ -1,4 +1,4 @@
-export interface MshCard {
+export interface Card {
   name: string;
   manaCost: string;
   cmc: number;
@@ -31,5 +31,5 @@ export type SlotKey =
 export interface SlotDefinition {
   key: SlotKey;
   label: string;
-  filter: (card: MshCard, pickedCards: Set<string>) => boolean;
+  filter: (card: Card, pickedCards: Set<string>) => boolean;
 }

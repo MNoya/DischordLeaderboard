@@ -1,13 +1,13 @@
 import { useState } from "react";
-import type { MshCard, SlotDefinition } from "../../types/p0p1";
+import type { Card, SlotDefinition } from "../../types/p0p1";
 import { ManaCost } from "../ManaPips";
 import { CardImagePreview } from "./CardImagePreview";
 import { CardPicker } from "./CardPicker";
 
 interface Props {
   slot: SlotDefinition;
-  selectedCard: MshCard | undefined;
-  allCards: MshCard[];
+  selectedCard: Card | undefined;
+  allCards: Card[];
   pickedCards: Set<string>;
   onSelect: (cardName: string) => void;
   locked?: boolean;
