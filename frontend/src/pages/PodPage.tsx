@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { AppHeader } from "../components/AppHeader";
@@ -157,32 +157,7 @@ export function PodPage() {
   const selectedParticipant =
     selectedSeat == null ? null : seats.find((p) => p.seatIndex === selectedSeat) ?? null;
 
-  const shellRef = useRef<HTMLDivElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
-
   const [displayParticipant, setDisplayParticipant] = useState<PodSeat | null>(selectedParticipant);
-
-  useLayoutEffect(() => {
-    const shell = shellRef.current;
-    const content = contentRef.current;
-    if (!shell || !content) return;
-    let restoreTimeout: number | null = null;
-    const apply = () => {
-      shell.style.overflowY = "hidden";
-      shell.style.height = `${content.offsetHeight + 2}px`;
-      if (restoreTimeout !== null) clearTimeout(restoreTimeout);
-      restoreTimeout = window.setTimeout(() => {
-        shell.style.overflowY = "";
-      }, 320);
-    };
-    apply();
-    const obs = new ResizeObserver(apply);
-    obs.observe(content);
-    return () => {
-      obs.disconnect();
-      if (restoreTimeout !== null) clearTimeout(restoreTimeout);
-    };
-  }, []);
 
   useEffect(() => {
     if (selectedParticipant) {
@@ -384,7 +359,7 @@ export function PodPage() {
             />
           </div>
           <div
-            className="min-w-0 shrink-0 self-start max-h-full"
+            className="min-w-0 shrink-0 flex flex-col min-h-0"
             style={{
               width: open ? "45%" : "0%",
               opacity: open ? 1 : 0,
@@ -393,11 +368,8 @@ export function PodPage() {
                 : "none",
             }}
           >
-            <div
-              ref={shellRef}
-              className="pod-panel-shell bg-surface border border-border max-h-full overflow-y-auto overflow-x-hidden themed-scrollbar"
-            >
-              <div ref={contentRef} style={{ minWidth: 360 }}>
+            <div className="pod-panel-shell bg-surface border border-border flex flex-col min-h-0 flex-1 overflow-hidden">
+              <div className="flex flex-col min-h-0 flex-1" style={{ minWidth: 360 }}>
                 {displayParticipant && (
                   <PlayerSeatPanel
                     key={displayParticipant.displayName}
