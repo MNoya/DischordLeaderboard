@@ -9,7 +9,7 @@ as a static bundle; reads from a (mocked-for-now) Supabase-shaped API.
 ```bash
 cd dboard-frontend
 npm install
-npm run dev      # http://localhost:5173/leaderboard/
+npm run dev      # http://localhost:5173/
 npm run build    # → dist/ static bundle
 ```
 
@@ -70,5 +70,5 @@ Hook signatures already match the spec's view boundaries 1:1.
 
 ## Deploy
 
-`npm run build` emits a static `dist/`. `vite.config.ts` sets `base: "/leaderboard/"`
-so the existing LLU site can serve it under a subpath without rewrites.
+`npm run build` emits a static `dist/`. `vite.config.ts` sets `base: "/"`, so the
+app serves from the domain root with the leaderboard as one section (`/leaderboard`).

@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A Discord bot + public website for an MTGA community leaderboard called **LLU**. Players link their 17lands profile through Discord; the bot pulls draft data, computes a custom score, and ranks them within the current Magic set. Multi-server-capable (single shared leaderboard across all guilds the bot is invited to). Fully automated — no manual score submission.
 
 - **Bot** (`bot/`): Python, `discord.py`, SQLAlchemy 2.0 + Alembic, deployed on Railway from `master`
-- **Frontend** (`frontend/`): React 18 + Vite + TanStack Query + Tailwind, deployed on Cloudflare Pages at `https://dischord.pages.dev/leaderboard/`
+- **Frontend** (`frontend/`): React 18 + Vite + TanStack Query + Tailwind, deployed on Cloudflare Pages from the domain root (`https://dischord.pages.dev/` today, `limitedlevelups.com` at launch)
 - **Database**: Postgres — local Docker for dev, Supabase (project `yrecdosksgigpceholjl`) for prod
 
 Spec documents live under `spec/` (original project spec, frontend contract, pod-draft design).
@@ -42,7 +42,7 @@ DATABASE_URL=postgresql://postgres:devpw@localhost:5433/dischord .venv/bin/pytho
 
 ```bash
 cd frontend
-npm run dev       # http://localhost:5173/leaderboard/
+npm run dev       # http://localhost:5173/
 npm run build     # tsc -b && vite build → dist/
 npm run preview
 ```
@@ -144,7 +144,7 @@ Every interaction `send_message`/`followup.send` uses `ephemeral=(interaction.gu
 
 Selects backend at module-load time via `useSupabase` from `data/supabase.ts`, driven by **`VITE_DATA_MODE`** (`prod` | `local` | `mock`; default `prod`). `prod`/`local` run `realApi.ts` against the prod public config or the `local_supabase_proxy` on `:3001`; `mock` runs the fixture-backed `mockApi.ts`. An explicit `VITE_SUPABASE_URL` + `VITE_SUPABASE_PUBLISHABLE_KEY` pair overrides prod/local for staging; `mock` always wins. The hook layer (`data/hooks.ts`) imports from `api.ts` and never knows which is live.
 
-Vite `base: "/leaderboard/"` + React Router `basename="/leaderboard"` so the site matches the future LLU subpath today. SPA fallback for CF Pages is **`functions/_middleware.ts`** (a Pages Function), not `_redirects` — `_redirects 200`-rewrites are over-greedy on Cloudflare.
+Vite `base: "/"` + React Router at the domain root: the app serves from `/`, with the leaderboard as one section (`/leaderboard`) alongside `/tier-list`, `/episodes`, `/community`, `/pods`, `/about`. Static assets in `frontend/public/` (e.g. `set-symbols/<code>.png`) serve from the root too. SPA fallback for CF Pages is **`functions/_middleware.ts`** (a Pages Function), not `_redirects` — `_redirects 200`-rewrites are over-greedy on Cloudflare.
 
 ### CI — `.github/workflows/ci.yml`
 

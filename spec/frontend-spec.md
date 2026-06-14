@@ -45,7 +45,7 @@ Public read-only at launch. Discord OAuth slated as a follow-up so signed-in use
 | 11 | Mobile-first; desktop shows wider layout / extra columns |
 | 12 | Component library / styling stack deferred — picked once Claude Design output suggests one |
 | 13 | Cloudflare Pages as deploy target; SPA with React Router |
-| 14 | Vite `base = '/leaderboard/'` so today's `dischord.pages.dev/leaderboard/...` already matches the future LLU subpath |
+| 14 | Vite `base = '/'`: the app serves from the domain root with the leaderboard as one section (`/leaderboard`) alongside `/tier-list`, `/episodes`, `/pods` |
 
 ---
 
