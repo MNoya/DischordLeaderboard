@@ -49,14 +49,14 @@ export function PlayerSeatPanel({
     slug && linkableSlugs.has(slug) ? playerPath(slug, setCode) : null;
 
   return (
-    <div>
+    <div className="flex flex-col min-h-0 flex-1">
       <SeatHeader
         participant={participant}
         profileHref={profileHref(participant.playerSlug)}
         onViewDeck={() => onShowDeck(participant)}
         isMock={isMock}
       />
-      <div className="flex flex-col">
+      <div className="flex flex-col flex-1 min-h-0 overflow-y-auto themed-scrollbar">
         {isMock ? (
           participant.deckScreenshotUrl ? (
             <>
@@ -180,7 +180,7 @@ function SeatHeader({
 
   if (isMobile) {
     return (
-      <header className="flex flex-col gap-4 px-4 md:px-5 xl:px-8 py-7 border-b border-border">
+      <header className="shrink-0 flex flex-col gap-4 px-4 md:px-5 xl:px-8 py-7 border-b border-border">
         <div className="flex items-center gap-4 min-w-0">
           <AAvatar displayName={participant.discordName} avatarUrl={participant.avatarUrl} size={60} green={isChampion} />
           <div className="min-w-0 flex-1 flex items-start justify-between gap-3">
@@ -238,7 +238,7 @@ function SeatHeader({
   }
 
   return (
-    <header className="flex items-center gap-4 px-4 md:px-5 xl:px-8 py-7 border-b border-border">
+    <header className="shrink-0 flex items-center gap-4 px-4 md:px-5 xl:px-8 py-7 border-b border-border">
       <AAvatar displayName={participant.discordName} avatarUrl={participant.avatarUrl} size={60} green={isChampion} />
       <div className="min-w-0 flex-1 flex flex-col gap-2">
         {nameLink}
