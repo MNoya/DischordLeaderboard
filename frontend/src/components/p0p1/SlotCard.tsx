@@ -11,6 +11,8 @@ interface Props {
   pickedCards: Set<string>;
   onSelect: (cardName: string) => void;
   locked?: boolean;
+  active?: boolean;
+  onEdit?: () => void;
 }
 
 export function SlotCard({
@@ -20,6 +22,8 @@ export function SlotCard({
   pickedCards,
   onSelect,
   locked,
+  active,
+  onEdit,
 }: Props) {
   const [pickerOpen, setPickerOpen] = useState(false);
 
@@ -75,20 +79,24 @@ export function SlotCard({
     <>
       <button
         type="button"
-        onClick={() => setPickerOpen(true)}
-        className="w-full flex items-center gap-4 px-4 py-3 bg-surface border border-border2 hover:border-green transition-colors cursor-pointer text-left group"
+        onClick={() => onEdit ? onEdit() : setPickerOpen(true)}
+        className={`w-full flex items-center gap-4 px-4 py-3 bg-surface border transition-colors cursor-pointer text-left group ${
+          active ? "border-green bg-green/5" : "border-border2 hover:border-green"
+        }`}
       >
         {filledContent ? (
           <>
             {filledContent}
-            <span className="text-dim text-[12px] group-hover:text-green transition-colors shrink-0">
+            <span className={`text-[12px] transition-colors shrink-0 ${
+              active ? "text-green" : "text-dim group-hover:text-green"
+            }`}>
               CHANGE
             </span>
           </>
         ) : emptyContent}
       </button>
 
-      {pickerOpen && (
+      {!onEdit && pickerOpen && (
         <CardPicker
           slot={slot}
           cards={allCards}

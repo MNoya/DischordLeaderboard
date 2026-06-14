@@ -1,13 +1,15 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { AppHeader } from "../components/AppHeader";
 import { Footer } from "../components/Footer";
 import { CtaPill } from "../components/CtaPill";
 import { DiscordIcon } from "../components/BrandIcons";
 import { SlotCard } from "../components/p0p1/SlotCard";
+import { CardSelectionGrid } from "../components/p0p1/CardSelectionGrid";
 import { useAuth } from "../auth/useAuth";
+import { useIsMobile } from "../lib/use-is-mobile";
 import { useP0P1Cards, useP0P1Entries, useUpsertP0P1Entry } from "../data/hooks";
 import { P0P1_SET_CODE as SET_CODE, P0P1_VOTING_DEADLINE as VOTING_DEADLINE, SLOTS } from "../data/p0p1Slots";
-import type { MshCard } from "../types/p0p1";
+import type { MshCard, SlotKey } from "../types/p0p1";
 const SEVENTEEN_LANDS_URL = "https://www.17lands.com/card_data";
 
 export function P0P1Page() {
@@ -15,6 +17,8 @@ export function P0P1Page() {
   const { data: cards } = useP0P1Cards(SET_CODE);
   const { data: votes } = useP0P1Entries(user ? SET_CODE : undefined);
   const upsertVote = useUpsertP0P1Entry(SET_CODE);
+  const isDesktop = !useIsMobile(1024);
+  const [editingSlotKey, setEditingSlotKey] = useState<SlotKey | null>(null);
 
   const cardsByName = useMemo(() => {
     if (!cards) return new Map<string, MshCard>();
@@ -34,12 +38,38 @@ export function P0P1Page() {
   const filledCount = votesBySlot.size;
   const isComplete = filledCount === SLOTS.length;
   const isPastDeadline = new Date() > VOTING_DEADLINE;
+  const editingSlot = editingSlotKey ? SLOTS.find((s) => s.key === editingSlotKey) : undefined;
+
+  const slotList = (
+    <div className="flex flex-col gap-2">
+      {SLOTS.map((slot) => {
+        const cardName = votesBySlot.get(slot.key);
+        const selectedCard = cardName ? cardsByName.get(cardName) : undefined;
+        return (
+          <SlotCard
+            key={slot.key}
+            slot={slot}
+            selectedCard={selectedCard}
+            allCards={cards!}
+            pickedCards={pickedCards}
+            locked={isPastDeadline}
+            onSelect={(name) => {
+              upsertVote.mutate({ slot: slot.key, cardName: name });
+            }}
+            {...(isDesktop && !isPastDeadline ? {
+              onEdit: () => setEditingSlotKey(slot.key),
+              active: editingSlotKey === slot.key,
+            } : {})}
+          />
+        );
+      })}
+    </div>
+  );
 
   return (
     <div className="bg-bg text-text min-h-screen flex flex-col animate-fadeIn">
       <AppHeader subtitle="P0P1" />
-      <main className="flex-1 flex flex-col mx-auto w-full max-w-[640px] px-5 md:px-10 pt-5 md:pt-10 pb-5">
-        <Rules />
+      <main className={`flex-1 flex flex-col mx-auto w-full px-5 md:px-10 pt-5 md:pt-10 pb-5 ${isDesktop ? "max-w-[1100px]" : "max-w-[640px]"}`}>
 
         {!authLoading && !user && !isPastDeadline && (
           <div className="flex justify-center my-8">
@@ -51,32 +81,49 @@ export function P0P1Page() {
           </div>
         )}
 
-        {user && cards && (
+        {isDesktop ? (
+          user && cards ? (
+            <>
+              {!isPastDeadline && (
+                <ProgressBanner filled={filledCount} total={SLOTS.length} isComplete={isComplete} />
+              )}
+              <div className="grid gap-6 mt-4" style={{ gridTemplateColumns: "minmax(0, 1fr) 340px" }}>
+                <div>
+                  {editingSlot ? (
+                    <CardSelectionGrid
+                      key={editingSlot.key}
+                      slot={editingSlot}
+                      cards={cards}
+                      pickedCards={pickedCards}
+                      onSelect={(name) => {
+                        upsertVote.mutate({ slot: editingSlot.key, cardName: name });
+                        setEditingSlotKey(null);
+                      }}
+                      onCancel={() => setEditingSlotKey(null)}
+                    />
+                  ) : (
+                    <Rules />
+                  )}
+                </div>
+                <div className="sticky top-20 self-start">
+                  {slotList}
+                </div>
+              </div>
+            </>
+          ) : (
+            <Rules />
+          )
+        ) : (
           <>
-            {!isPastDeadline && (
-              <ProgressBanner filled={filledCount} total={SLOTS.length} isComplete={isComplete} />
+            <Rules />
+            {user && cards && (
+              <>
+                {!isPastDeadline && (
+                  <ProgressBanner filled={filledCount} total={SLOTS.length} isComplete={isComplete} />
+                )}
+                <div className="mt-4">{slotList}</div>
+              </>
             )}
-
-            <div className="flex flex-col gap-2 mt-4">
-              {SLOTS.map((slot) => {
-                const cardName = votesBySlot.get(slot.key);
-                const selectedCard = cardName ? cardsByName.get(cardName) : undefined;
-                return (
-                  <SlotCard
-                    key={slot.key}
-                    slot={slot}
-                    selectedCard={selectedCard}
-                    allCards={cards}
-                    pickedCards={pickedCards}
-                    locked={isPastDeadline}
-                    onSelect={(name) => {
-                      upsertVote.mutate({ slot: slot.key, cardName: name });
-                    }}
-                  />
-                );
-              })}
-            </div>
-
           </>
         )}
 
