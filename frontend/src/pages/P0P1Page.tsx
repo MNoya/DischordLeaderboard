@@ -39,14 +39,12 @@ export function P0P1Page() {
   const [editingSlotKey, setEditingSlotKey] = useState<SlotKey | null>(null);
 
   // Sync local picks to server after login
-  const hadLocalPicks = useRef(false);
   const syncDone = useRef(false);
   useEffect(() => {
     if (!user || !serverPicks || syncDone.current) return;
     syncDone.current = true;
     const local = getLocalPicks(SET_CODE);
     if (local.length === 0) return;
-    hadLocalPicks.current = true;
     const serverSlots = new Set(serverPicks.map((p) => p.slot));
     const toSync = local.filter((p) => !serverSlots.has(p.slot));
     for (const p of toSync) {
@@ -55,12 +53,8 @@ export function P0P1Page() {
     clearLocalPicks(SET_CODE);
   }, [user, serverPicks, upsertPick]);
 
-  // Show skeleton while auth is resolving with pending local picks, or while syncing
-  const hasLocalPicks = getLocalPicks(SET_CODE).length > 0;
-  const pendingAuth = authLoading && hasLocalPicks;
-  const syncing = user && !syncDone.current && hasLocalPicks;
-  const activePicks = (pendingAuth || syncing) ? undefined : (user ? serverPicks : localPicks);
-  const dataReady = cards && !pendingAuth && (user ? (serverPicks && !syncing) : true);
+  const activePicks = authLoading ? undefined : (user ? serverPicks : localPicks);
+  const dataReady = cards && activePicks !== undefined;
 
   const handleSelect = useCallback(
     (slot: SlotKey, cardName: string) => {
