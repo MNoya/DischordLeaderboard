@@ -12,7 +12,8 @@ export function ManaCost({ cost, size = 14 }: { cost: string; size?: number }) {
       {symbols.map((s, i) => (
         <i
           key={i}
-          className={`ms ms-${s.toLowerCase()} ms-cost ms-shadow shrink-0`}
+          // replace is for hybrid mana symbols
+          className={`ms ms-${s.replace("/", "").toLowerCase()} ms-cost ms-shadow shrink-0`}
           style={{ fontSize: size, letterSpacing: 0 }}
           aria-label={s}
         />
