@@ -133,6 +133,47 @@ export interface PodEventSummary {
   discordEventId: string | null;
 }
 
+export interface MainboardCard {
+  name: string;
+  cn: string | null;
+  set?: string; // present only when the card's set differs from the deck-level set
+  colors?: string[]; // omitted when colorless
+  cmc: number | null;
+  type: string | null;
+  count?: number; // omitted when 1
+}
+
+// A built deck resolved for rendering: nonbasic spells grouped by name with counts, sorted by mana
+// value. Derived client-side from a draft artifact; basics are absent (they are never drafted).
+export interface Mainboard {
+  set: string | null; // deck-level default set; cards inherit it unless they carry their own
+  cards: MainboardCard[];
+  sideboard: MainboardCard[];
+}
+
+// One entry of the artifact card table, addressed by its position in `cards`.
+export interface ArtifactCard {
+  n: string | null; // name
+  cn: string | null; // collector number
+  s: string | null; // set
+  r: string | null; // rarity
+  c: string[] | null; // colors
+  cmc: number | null;
+  type: string | null;
+}
+
+// The canonical pod draft artifact from public_pod_draft_log. Everything references the card table
+// by index. `decks` is null for events drafted before deck capture existed.
+export interface PodDraftArtifact {
+  v: number;
+  set: string | null;
+  seats: string[]; // Draftmancer names; array index === participant seatIndex
+  cards: ArtifactCard[];
+  packs: number[][]; // boosters as card indices
+  picks: number[][][]; // [seat][pack][pickOrder] -> card index
+  decks: { main: number[]; side: number[] }[] | null;
+}
+
 export interface PodEventParticipantRow {
   eventId: string;
   displayName: string;
