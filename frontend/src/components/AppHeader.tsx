@@ -10,7 +10,7 @@ import { P0P1_SET_CODE, P0P1_VOTING_DEADLINE, SLOTS } from "../data/p0p1Slots";
 // Top-of-page chrome. Designed to feel like its own product but small enough
 // that a future LLU site shell can wrap or omit it cleanly.
 
-const NAV: Array<{ label: string; badge?: () => JSX.Element | null; to: string; match: (path: string) => boolean }> = [
+const NAV: Array<{ label: string; badge?: (props: { active: boolean }) => JSX.Element | null; to: string; match: (path: string) => boolean }> = [
   { label: "P0P1", badge: P0P1Badge, to: "/p0p1", match: (p) => p.startsWith("/p0p1") },
   { label: "LEADERBOARD", to: "/leaderboard", match: (p) => p === "/" || p === "/leaderboard" || p.startsWith("/leaderboard/") },
   { label: "POD DRAFTS", to: "/pods", match: (p) => p.startsWith("/pods") },
@@ -126,13 +126,14 @@ export function AppHeader({ subtitle = "LEADERBOARD" }: { subtitle?: string }) {
                   to={n.to}
                   className={cn(
                     NAV_ITEM_CLASS,
+                    n.badge && "relative",
                     active
                       ? "text-bg bg-green border-green"
                       : "text-text border-transparent hover:bg-surface",
                   )}
                 >
                   {n.label}
-                  {n.badge && !active && <n.badge />}
+                  {n.badge && <n.badge active={active} />}
                 </Link>
               );
             })}
@@ -256,11 +257,12 @@ function MobileMenu({ pathname, onClose }: { pathname: string; onClose: () => vo
               role="menuitem"
               className={cn(
                 "flex items-center min-h-[54px] px-5 no-underline font-display text-[17px] tracking-[0.14em] border-b border-border transition-colors",
+                n.badge && "relative",
                 active ? "bg-green text-bg" : "text-text bg-transparent hover:bg-surface",
               )}
             >
               {n.label}
-              {n.badge && !active && <n.badge />}
+              {n.badge && <n.badge active={active} />}
             </Link>
           );
         })}
@@ -289,44 +291,37 @@ function MobileMenu({ pathname, onClose }: { pathname: string; onClose: () => vo
   );
 }
 
-function P0P1Badge() {
+function P0P1Badge({ active }: { active: boolean }) {
   const { user } = useAuth();
   const { data: votes } = useP0P1Entries(user ? P0P1_SET_CODE : undefined);
   const isPastDeadline = new Date() > P0P1_VOTING_DEADLINE;
 
   if (isPastDeadline) return null;
 
-  if (!user) {
-    return (
-      <span className="ml-1.5 inline-flex items-center gap-1 text-sm tracking-normal text-green font-sans font-medium">
-        <span className="w-1.5 h-1.5 rounded-full bg-green inline-block" />
-        OPEN
-      </span>
-    );
-  }
+  const pill = cn(
+    "absolute -top-2 -left-4 inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] leading-none tracking-normal font-sans font-semibold",
+    active ? "bg-bg/50 text-white" : "bg-green/15 text-green",
+  );
+  const dot = cn("w-1.5 h-1.5 rounded-full inline-block", active ? "bg-white" : "bg-green");
 
-  const filled = votes?.length ?? 0;
+  const filled = user ? (votes?.length ?? 0) : 0;
   const total = SLOTS.length;
 
-  if (filled === 0) {
+  if (!user || filled === 0) {
     return (
-      <span className="ml-1.5 inline-flex items-center gap-1 text-sm tracking-normal text-green font-sans font-medium">
-        <span className="w-1.5 h-1.5 rounded-full bg-green inline-block" />
+      <span className={pill}>
+        <span className={dot} />
         OPEN
       </span>
     );
   }
 
   if (filled === total) {
-    return (
-      <span className="ml-1.5 text-sm tracking-normal text-green font-sans font-medium">
-        ✓
-      </span>
-    );
+    return <span className={pill}>✓</span>;
   }
 
   return (
-    <span className="ml-1.5 text-sm tracking-normal text-muted font-sans font-medium">
+    <span className={cn(pill)}>
       {filled}/{total}
     </span>
   );
