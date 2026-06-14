@@ -118,6 +118,7 @@ export function P0P1Page() {
       {isDesktop ? (
         <>
           <P0P1Hero setMeta={setMeta} sets={p0p1Sets} />
+          <RulesBar />
 
           <main className="flex-1 flex flex-col px-10 pb-5">
             {!authLoading && !user && !isPastDeadline && (
@@ -250,6 +251,28 @@ function P0P1Hero({
           onChange={() => {}}
         />
       )}
+    </div>
+  );
+}
+
+function RulesBar() {
+  return (
+    <div className="px-10 py-2.5 bg-surface border-b border-border flex items-center gap-6">
+      <span className="text-[13px] text-muted leading-[1.6]">
+        Pick your best card for each slot. Teams ranked by{" "}
+        <a
+          href={SEVENTEEN_LANDS_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="text-green hover:underline underline-offset-2"
+        >
+          17Lands GIH win rate
+        </a>{" "}
+        after six weeks.
+      </span>
+      <span className="text-[12px] text-dim whitespace-nowrap">
+        Slot 9 = tiebreaker only · No duplicates · Auto-saves
+      </span>
     </div>
   );
 }
