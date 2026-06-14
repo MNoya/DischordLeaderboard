@@ -25,8 +25,7 @@ export type SlotKey =
   | "green_common"
   | "multicolor_uncommon"
   | "wildcard_common"
-  | "wildcard_uncommon"
-  | "tiebreaker";
+  | "wildcard_uncommon";
 
 export interface SlotDefinition {
   key: SlotKey;

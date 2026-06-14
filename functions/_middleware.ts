@@ -165,7 +165,7 @@ const resolveMeta = async (pathname: string): Promise<RouteMeta> => {
   }
 
   if (section === "p0p1") {
-    return page("Pack 0, Pick 1", "Pick a team of the cards you think will perform best from the upcoming set.");
+    return page("P0P1 Challenge", "Pick a team of the cards you think will perform best from the upcoming set.");
   }
   if (section === "episodes") {
     return page("Episodes", "Check out the latest episodes, or search the archive.");

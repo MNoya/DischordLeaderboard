@@ -1,6 +1,5 @@
 import { useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ZoomInIcon } from "lucide-react";
 import { useIsMobile } from "../../lib/use-is-mobile";
 
 const PREVIEW_W = 335;
@@ -11,6 +10,7 @@ interface Props {
   imageUrl: string;
   alt: string;
   children: ReactNode;
+  className?: string;
 }
 
 interface PreviewAnchor {
@@ -20,7 +20,7 @@ interface PreviewAnchor {
   edge: number;
 }
 
-export function CardImagePreview({ imageUrl, alt, children }: Props) {
+export function CardImagePreview({ imageUrl, alt, children, className }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const mobile = useIsMobile();
   const [anchor, setAnchor] = useState<PreviewAnchor | null>(null);
@@ -43,15 +43,12 @@ export function CardImagePreview({ imageUrl, alt, children }: Props) {
     <>
       <div
         ref={ref}
-        className="relative shrink-0 cursor-zoom-in"
+        className={`relative shrink-0 cursor-zoom-in ${className ?? ""}`}
         onMouseEnter={mobile ? undefined : openPreview}
         onMouseLeave={mobile ? undefined : () => setAnchor(null)}
         onClick={mobile ? (e) => { e.stopPropagation(); setModalOpen(true); } : undefined}
       >
         {children}
-        <div className="absolute bottom-0 right-0 bg-black/60 p-0.5 flex items-center justify-center">
-          <ZoomInIcon size={16} className="text-white" />
-        </div>
       </div>
       {anchor && createPortal(
         <div

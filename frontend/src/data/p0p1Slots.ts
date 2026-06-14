@@ -39,11 +39,4 @@ export const SLOTS: SlotDefinition[] = [
     filter: (card, picked) =>
       card.rarity === "uncommon" && !picked.has(card.name),
   },
-  {
-    key: "tiebreaker",
-    label: "Tiebreaker - non-mythic Hero",
-    filter: (card, picked) =>
-      card.typeLine.includes("Hero") &&
-      !picked.has(card.name),
-  },
 ];
