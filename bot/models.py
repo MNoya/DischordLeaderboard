@@ -9,16 +9,32 @@ from sqlalchemy import (
     Index,
     Integer,
     LargeBinary,
+    PrimaryKeyConstraint,
     String,
+    Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, relationship
 from sqlalchemy.sql import func, text
 
 
 class Base(DeclarativeBase):
     pass
+
+
+class P0P1Entry(Base):
+    __tablename__ = "p0p1_entries"
+
+    user_id    = Column(UUID(as_uuid=True), nullable=False)
+    set_code   = Column(Text, nullable=False)
+    slot       = Column(Text, nullable=False)
+    card_name  = Column(Text, nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        PrimaryKeyConstraint("user_id", "set_code", "slot"),
+    )
 
 
 class Player(Base):
