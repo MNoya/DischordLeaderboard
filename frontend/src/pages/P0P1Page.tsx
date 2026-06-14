@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppHeader } from "../components/AppHeader";
 import { Footer } from "../components/Footer";
 import { CtaPill } from "../components/CtaPill";
@@ -7,7 +7,7 @@ import { SlotCard } from "../components/p0p1/SlotCard";
 import { CardSelectionGrid } from "../components/p0p1/CardSelectionGrid";
 import { useAuth } from "../auth/useAuth";
 import { useIsMobile } from "../lib/use-is-mobile";
-import { useP0P1Cards, useP0P1Entries, useUpsertP0P1Entry } from "../data/hooks";
+import { useP0P1Cards, useP0P1Entries, useUpsertP0P1Entry, useDeleteAllP0P1Entries } from "../data/hooks";
 import { P0P1_SET_CODE as SET_CODE, P0P1_VOTING_DEADLINE as VOTING_DEADLINE, SLOTS } from "../data/p0p1Slots";
 import type { MshCard, SlotKey } from "../types/p0p1";
 const SEVENTEEN_LANDS_URL = "https://www.17lands.com/card_data";
@@ -17,6 +17,7 @@ export function P0P1Page() {
   const { data: cards } = useP0P1Cards(SET_CODE);
   const { data: votes } = useP0P1Entries(user ? SET_CODE : undefined);
   const upsertVote = useUpsertP0P1Entry(SET_CODE);
+  const clearAll = useDeleteAllP0P1Entries(SET_CODE);
   const isDesktop = !useIsMobile(1024);
   const [editingSlotKey, setEditingSlotKey] = useState<SlotKey | null>(null);
 
@@ -85,7 +86,7 @@ export function P0P1Page() {
           user && cards ? (
             <>
               {!isPastDeadline && (
-                <ProgressBanner filled={filledCount} total={SLOTS.length} isComplete={isComplete} />
+                <ProgressBanner filled={filledCount} total={SLOTS.length} isComplete={isComplete} onClearAll={() => clearAll.mutate()} clearing={clearAll.isPending} />
               )}
               <div className="grid gap-6 mt-4" style={{ gridTemplateColumns: "minmax(0, 1fr) 340px" }}>
                 <div>
@@ -119,7 +120,7 @@ export function P0P1Page() {
             {user && cards && (
               <>
                 {!isPastDeadline && (
-                  <ProgressBanner filled={filledCount} total={SLOTS.length} isComplete={isComplete} />
+                  <ProgressBanner filled={filledCount} total={SLOTS.length} isComplete={isComplete} onClearAll={() => clearAll.mutate()} clearing={clearAll.isPending} />
                 )}
                 <div className="mt-4">{slotList}</div>
               </>
@@ -196,18 +197,50 @@ function SlotRow({ n, slot, constraint }: { n: number; slot: string; constraint:
   );
 }
 
-function ProgressBanner({ filled, total, isComplete }: { filled: number; total: number; isComplete: boolean }) {
+function ProgressBanner({ filled, total, isComplete, onClearAll, clearing }: {
+  filled: number; total: number; isComplete: boolean;
+  onClearAll: () => void; clearing: boolean;
+}) {
+  const [confirming, setConfirming] = useState(false);
+
+  useEffect(() => {
+    if (!confirming) return;
+    const id = setTimeout(() => setConfirming(false), 3000);
+    return () => clearTimeout(id);
+  }, [confirming]);
+
+  const handleClear = useCallback(() => {
+    if (!confirming) { setConfirming(true); return; }
+    setConfirming(false);
+    onClearAll();
+  }, [confirming, onClearAll]);
+
+  const showClear = filled > 0 && !isComplete && !clearing;
+
   return (
     <div
-      className={`px-4 py-3 border text-[13px] text-center ${
+      className={`flex items-center justify-between px-4 py-3 border text-[13px] ${
         isComplete
           ? "border-green bg-green/10 text-green"
           : "border-border2 bg-surface text-muted"
       }`}
     >
-      {isComplete
-        ? "Your roster is complete!"
-        : `${filled}/${total} slots filled — your roster is incomplete`}
+      <span className="flex-1 text-center">
+        {isComplete
+          ? "Your roster is complete!"
+          : `${filled}/${total} slots filled — your roster is incomplete`}
+      </span>
+      {showClear && (
+        <button
+          type="button"
+          onClick={handleClear}
+          className={`ml-3 shrink-0 bg-transparent border-0 text-[12px] cursor-pointer transition-colors ${
+            confirming ? "text-red font-semibold" : "text-muted hover:text-red"
+          }`}
+        >
+          {confirming ? "Sure?" : "Clear all picks"}
+        </button>
+      )}
     </div>
   );
 }

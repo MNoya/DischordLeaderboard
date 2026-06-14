@@ -1190,4 +1190,12 @@ export async function deleteP0P1Entry(
   if (error) throw error;
 }
 
+export async function deleteAllP0P1Entries(setCode: string): Promise<void> {
+  const { error } = await client()
+    .from("p0p1_entries")
+    .delete()
+    .eq("set_code", setCode);
+  if (error) throw error;
+}
+
 export const initialAuthUser = null;

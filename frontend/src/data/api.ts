@@ -34,4 +34,5 @@ export const fetchP0P1Cards = impl.fetchP0P1Cards;
 export const fetchP0P1Entries = impl.fetchP0P1Entries;
 export const upsertP0P1Entry = impl.upsertP0P1Entry;
 export const deleteP0P1Entry = impl.deleteP0P1Entry;
+export const deleteAllP0P1Entries = impl.deleteAllP0P1Entries;
 export const initialAuthUser = impl.initialAuthUser;

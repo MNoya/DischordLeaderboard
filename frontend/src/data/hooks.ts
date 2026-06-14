@@ -32,6 +32,7 @@ import {
   fetchSets,
   upsertP0P1Entry,
   deleteP0P1Entry,
+  deleteAllP0P1Entries,
 } from "./api";
 import type { P0P1Entry, SlotKey } from "../types/p0p1";
 import { MULTI, OTHER } from "./filters";
@@ -368,5 +369,23 @@ export function useDeleteP0P1Entry(setCode: string) {
   return useMutation({
     mutationFn: (slot: SlotKey) => deleteP0P1Entry(setCode, slot),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["p0p1-entries", setCode] }),
+  });
+}
+
+export function useDeleteAllP0P1Entries(setCode: string) {
+  const qc = useQueryClient();
+  const queryKey = ["p0p1-entries", setCode];
+  return useMutation({
+    mutationFn: () => deleteAllP0P1Entries(setCode),
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey });
+      const prev = qc.getQueryData<P0P1Entry[]>(queryKey);
+      qc.setQueryData<P0P1Entry[]>(queryKey, []);
+      return { prev };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(queryKey, ctx.prev);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey }),
   });
 }

@@ -427,6 +427,12 @@ export const deleteP0P1Entry = async (
   p0p1Entries.delete(slot);
 };
 
+export const deleteAllP0P1Entries = async (
+  _setCode: string,
+): Promise<void> => {
+  p0p1Entries.clear();
+};
+
 export { type AuthUser } from "../auth/AuthContext";
 export const initialAuthUser = {
   id: "mock-user-id",
