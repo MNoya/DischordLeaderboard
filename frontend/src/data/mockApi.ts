@@ -29,6 +29,7 @@ import type {
   RecentTrophy,
   SetSummary,
 } from "../types/leaderboard";
+import type { Card, P0P1Pick, SlotKey } from "../types/p0p1";
 import {
   podDraftArtifactFixture,
   podEventsFixture,
@@ -404,3 +405,37 @@ export const fetchPodLeaderboard = (setCode: string): Promise<PodLeaderboardRow[
 };
 
 export const fetchPodSetCodes = (): Promise<PodSetCode[]> => wait(podSetCodesFixture);
+
+// --- P0P1 contest ---
+
+import { cardsMshFixture } from "./fixtures/cards-msh";
+
+const p0p1Picks = new Map<string, P0P1Pick>();
+
+export const fetchP0P1Cards = (_setCode: string): Promise<Card[]> =>
+  wait(cardsMshFixture);
+
+export const fetchP0P1Picks = (_setCode: string): Promise<P0P1Pick[]> =>
+  wait([...p0p1Picks.values()]);
+
+export const upsertP0P1Pick = async (
+  _setCode: string,
+  slot: SlotKey,
+  cardName: string,
+): Promise<void> => {
+  p0p1Picks.set(slot, { slot, cardName, lastUpdated: new Date().toISOString() });
+};
+
+
+export const deleteAllP0P1Picks = async (
+  _setCode: string,
+): Promise<void> => {
+  p0p1Picks.clear();
+};
+
+export const initialAuthUser = {
+  id: "mock-user-id",
+  discordId: "123456789",
+  username: "MockPlayer",
+  avatarUrl: null,
+};

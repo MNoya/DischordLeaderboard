@@ -1,0 +1,159 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAuth } from "../auth/useAuth";
+import {
+  useP0P1Cards,
+  useP0P1Picks,
+  useUpsertP0P1Pick,
+  useDeleteAllP0P1Picks,
+  useSets,
+} from "./hooks";
+import { P0P1_SET_CODE as SET_CODE, P0P1_VOTING_DEADLINE as VOTING_DEADLINE, SLOTS } from "./p0p1Slots";
+import { useLocalP0P1Picks, setLocalPick, clearLocalPicks, getLocalPicks } from "./localPicks";
+import type { Card, SlotKey } from "../types/p0p1";
+
+export function useP0P1Ballot() {
+  const { user, loading: authLoading, signIn } = useAuth();
+  const useServerPicks = Boolean(user);
+  const { data: cards } = useP0P1Cards(SET_CODE);
+  const { data: serverPicks } = useP0P1Picks(useServerPicks ? SET_CODE : undefined);
+  const localPicks = useLocalP0P1Picks(SET_CODE);
+  const upsertPick = useUpsertP0P1Pick(SET_CODE);
+  const clearAll = useDeleteAllP0P1Picks(SET_CODE);
+  const [editingSlotKey, setEditingSlotKey] = useState<SlotKey | null>(null);
+
+  const syncDone = useRef(false);
+  useEffect(() => {
+    if (!useServerPicks || !serverPicks || syncDone.current) return;
+    syncDone.current = true;
+    const local = getLocalPicks(SET_CODE);
+    if (local.length === 0) return;
+    const serverSlots = new Set(serverPicks.map((p) => p.slot));
+    const toSync = local.filter((p) => !serverSlots.has(p.slot));
+    for (const p of toSync) {
+      upsertPick.mutate({ slot: p.slot, cardName: p.cardName });
+    }
+    clearLocalPicks(SET_CODE);
+  }, [user, serverPicks, upsertPick]);
+
+  const activePicks = authLoading ? undefined : useServerPicks ? serverPicks : localPicks;
+  const dataReady = Boolean(cards) && activePicks !== undefined;
+
+  const persistPick = useCallback(
+    (slot: SlotKey, cardName: string) => {
+      if (useServerPicks) {
+        upsertPick.mutate({ slot, cardName });
+      } else {
+        setLocalPick(SET_CODE, slot, cardName);
+      }
+    },
+    [useServerPicks, upsertPick],
+  );
+
+  const handleClearAll = useCallback(() => {
+    if (useServerPicks) {
+      clearAll.mutate();
+    } else {
+      clearLocalPicks(SET_CODE);
+    }
+  }, [useServerPicks, clearAll]);
+
+  const cardsByName = useMemo(() => {
+    if (!cards) return new Map<string, Card>();
+    return new Map(cards.map((c) => [c.name, c]));
+  }, [cards]);
+
+  const picksBySlot = useMemo(() => {
+    if (!activePicks) return new Map<string, string>();
+    return new Map(activePicks.map((v) => [v.slot, v.cardName]));
+  }, [activePicks]);
+
+  const pickedCards = useMemo(() => new Set(picksBySlot.values()), [picksBySlot]);
+
+  const pickedSlotLabels = useMemo(() => {
+    const labels = new Map<string, string>();
+    for (const slot of SLOTS) {
+      const name = picksBySlot.get(slot.key);
+      if (name) labels.set(name, slot.label);
+    }
+    return labels;
+  }, [picksBySlot]);
+
+  const pickedExcept = useCallback(
+    (slotKey: SlotKey) => {
+      const own = picksBySlot.get(slotKey);
+      if (!own) return pickedCards;
+      const rest = new Set(pickedCards);
+      rest.delete(own);
+      return rest;
+    },
+    [pickedCards, picksBySlot],
+  );
+
+  const scoringFilled = SLOTS.filter((s) => picksBySlot.has(s.key)).length;
+  const isComplete = scoringFilled === SLOTS.length;
+  const isPastDeadline = new Date() > VOTING_DEADLINE;
+
+  const defaultSlotKey = useMemo(
+    () => SLOTS.find((s) => !picksBySlot.has(s.key))?.key ?? SLOTS[0].key,
+    [picksBySlot],
+  );
+  const activeSlotKey = editingSlotKey ?? defaultSlotKey;
+  const activeSlot = SLOTS.find((s) => s.key === activeSlotKey)!;
+
+  const nextUnfilledSlot = useCallback(
+    (afterKey: SlotKey) => {
+      const idx = SLOTS.findIndex((s) => s.key === afterKey);
+      if (idx === -1) return afterKey;
+      for (let i = 1; i < SLOTS.length; i++) {
+        const candidate = SLOTS[(idx + i) % SLOTS.length];
+        if (!picksBySlot.has(candidate.key)) return candidate.key;
+      }
+      return afterKey;
+    },
+    [picksBySlot],
+  );
+
+  const selectAdvance = useCallback(
+    (slot: SlotKey, cardName: string) => {
+      persistPick(slot, cardName);
+      setEditingSlotKey(nextUnfilledSlot(slot));
+    },
+    [persistPick, nextUnfilledSlot],
+  );
+
+  const selectAndClose = useCallback(
+    (slot: SlotKey, cardName: string) => {
+      persistPick(slot, cardName);
+      setEditingSlotKey(null);
+    },
+    [persistPick],
+  );
+
+  const { data: allSets } = useSets();
+  const p0p1Sets = useMemo(() => allSets?.filter((s) => s.code === SET_CODE), [allSets]);
+
+  return {
+    cards,
+    cardsByName,
+    dataReady,
+    user,
+    authLoading,
+    signIn,
+    picksBySlot,
+    pickedExcept,
+    pickedSlotLabels,
+    scoringFilled,
+    isComplete,
+    isPastDeadline,
+    persistPick,
+    handleClearAll,
+    clearPending: useServerPicks ? clearAll.isPending : false,
+    editingSlotKey,
+    setEditingSlotKey,
+    activeSlotKey,
+    activeSlot,
+    selectAdvance,
+    selectAndClose,
+    p0p1Sets,
+  };
+}

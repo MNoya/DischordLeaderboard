@@ -1151,3 +1151,51 @@ function adaptPodLeaderboardRow(row: Record<string, unknown>): PodLeaderboardRow
     lastFinishedAt: (row.last_finished_at ?? null) as string | null,
   };
 }
+
+// --- P0P1 contest (stubs — wired to Supabase later) ---
+
+import type { Card, P0P1Pick, SlotKey } from "../types/p0p1";
+import { cardsMshFixture } from "./fixtures/cards-msh";
+
+export const fetchP0P1Cards = (_setCode: string): Promise<Card[]> =>
+  Promise.resolve(cardsMshFixture);
+
+export async function fetchP0P1Picks(setCode: string): Promise<P0P1Pick[]> {
+  const { data, error } = await client()
+    .from("p0p1_entries")
+    .select("slot, card_name, updated_at")
+    .eq("set_code", setCode);
+  if (error) throw error;
+  return (data ?? []).map((r) => ({
+    slot: r.slot as SlotKey,
+    cardName: r.card_name,
+    lastUpdated: r.updated_at,
+  }));
+}
+
+export async function upsertP0P1Pick(
+  setCode: string,
+  slot: SlotKey,
+  cardName: string,
+): Promise<void> {
+  const { data: { user } } = await client().auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+  const { error } = await client()
+    .from("p0p1_entries")
+    .upsert(
+      { user_id: user.id, set_code: setCode, slot, card_name: cardName, updated_at: new Date().toISOString() },
+      { onConflict: "user_id,set_code,slot" },
+    );
+  if (error) throw error;
+}
+
+
+export async function deleteAllP0P1Picks(setCode: string): Promise<void> {
+  const { error } = await client()
+    .from("p0p1_entries")
+    .delete()
+    .eq("set_code", setCode);
+  if (error) throw error;
+}
+
+export const initialAuthUser = null;

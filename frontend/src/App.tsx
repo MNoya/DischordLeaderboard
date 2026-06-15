@@ -8,6 +8,9 @@ import { PodDraftsPage, PodsRoute } from "./pages/PodDraftsPage";
 import { AboutPage } from "./pages/AboutPage";
 import { TierListPage } from "./pages/TierListPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
+import { P0P1Page } from "./pages/P0P1Page";
+import { P0P1V1Page } from "./pages/P0P1V1Page";
+import { P0P1MocksPage } from "./pages/P0P1MocksPage";
 import { preloadGuildLogos } from "./data/guild-art";
 
 // Browser routes. The leaderboard is one section of the site, mounted at the
@@ -45,6 +48,10 @@ export function App() {
 
       <Route path="/tier-list" element={<TierListPage />} />
       <Route path="/tier-list/:setCode" element={<TierListPage />} />
+
+      <Route path="/p0p1" element={<P0P1Page />} />
+      <Route path="/p0p1-v1" element={<P0P1V1Page />} />
+      <Route path="/p0p1-mocks" element={<P0P1MocksPage />} />
 
       {/* Legacy archetype routes redirect to the leaderboard — the archetype
           picker now lives there inline. */}

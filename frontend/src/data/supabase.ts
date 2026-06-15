@@ -29,7 +29,9 @@ function resolveConfig(): { url: string; key: string } | null {
 const config = resolveConfig();
 
 export const supabase: SupabaseClient | null = config
-  ? createClient(config.url, config.key, { auth: { persistSession: false } })
+  ? createClient(config.url, config.key, {
+      auth: { persistSession: true, flowType: "pkce" },
+    })
   : null;
 
 export const useSupabase = supabase !== null;
