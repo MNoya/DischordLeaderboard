@@ -45,9 +45,13 @@ class EventGroup:
     end: datetime = None
     start_local: datetime = None
     end_local: datetime = None
+    flashback: bool = False
+    cube: bool = False
 
 
 ARENA_TAG = "arena"
+FLASHBACK_TAG = "flashback"
+CUBE_TAG = "cube"
 
 
 def fetch_events(start_date: date, *, arena_only: bool = True) -> list[ScribeEvent]:
@@ -60,9 +64,13 @@ def fetch_events(start_date: date, *, arena_only: bool = True) -> list[ScribeEve
     ``arena_only`` keeps MTG Arena client events (the ``arena`` tag) and drops tabletop
     programs. The Limited-vs-Constructed cut is left to the caller, so the Midweek view
     can surface constructed queues.
+
+    The cache-bust is per-invocation, not daily: a daily bucket let a stale-date copy (a
+    corrected end date, a duplicate queue) persist on the CDN for the rest of the day. This is
+    an on-demand command, so a fresh origin fetch each call is cheap and always matches the site.
     """
     events: list[ScribeEvent] = []
-    cache_bust = time.strftime("%Y%m%d")
+    cache_bust = time.strftime("%Y%m%d%H%M%S")
     page = 1
     while True:
         payload = _get_page(start_date, page, cache_bust)
@@ -93,6 +101,10 @@ def group_events(events: list[ScribeEvent]) -> list[EventGroup]:
             groups[key] = group
         if event.format_label and event.format_label not in group.formats:
             group.formats.append(event.format_label)
+        if FLASHBACK_TAG in event.tag_slugs:
+            group.flashback = True
+        if any(CUBE_TAG in tag for tag in event.tag_slugs):
+            group.cube = True
     return list(groups.values())
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -25,9 +26,16 @@ UPCOMING_HORIZON = timedelta(days=45)
 
 IN_PROGRESS_EMOJI = "⚡"
 COMING_UP_EMOJI = "🗓️"
+FLASHBACK_HEADING = "🪦 Flashback"
+QUICK_DRAFT_HEADING = "🤖 Quick Draft"
 
 MTGA_EMOJI_NAME = "mtga"
 SET_LABEL_ALIASES: dict[str, str] = {"Arena Cube": "CUBE"}
+
+ROSTER_LINE_MAX_WIDTH = 62
+TREE_PREFIX_WIDTH = 4
+TIMESTAMP_TOKEN = re.compile(r"<t:\d+:[a-zA-Z]>")
+LEADING_ARTICLES = {"the", "a", "an"}
 
 ARENA_DIRECT_TAG = "arena-direct"
 MIDWEEK_TAG = "midweek-magic"
@@ -144,18 +152,43 @@ def render_schedule_embed(in_progress: list, upcoming: list, emojis: dict, logo_
     sections = [title]
     if in_progress:
         sections.append(f"### {IN_PROGRESS_EMOJI} In Progress")
-        sections.extend(_set_block(label, windows, emojis, upcoming=False)
-                        for label, windows in _by_set(in_progress).items())
+        sections.extend(_section_blocks(in_progress, emojis, upcoming=False))
     if upcoming:
         sections.append(f"### {COMING_UP_EMOJI} Coming Up")
-        sections.extend(_set_block(label, windows, emojis, upcoming=True)
-                        for label, windows in _by_set(upcoming).items())
+        sections.extend(_section_blocks(upcoming, emojis, upcoming=True))
     if not in_progress and not upcoming:
         sections.append("No Limited events right now.")
     embed.description = "\n".join(sections)
     if logo_url:
         embed.set_thumbnail(url=logo_url)
     return embed
+
+
+def _section_blocks(groups: list, emojis: dict, *, upcoming: bool) -> list:
+    """One block per set, plus a collapsed roster for formats that rotate one-set-per-window —
+    Flashback reruns and (upcoming only) Quick Draft. Those would otherwise scatter a header per set,
+    so they fold into a single "<format>" block listing each set."""
+    rosters: dict[str, list] = {}
+    standalone: list = []
+    for group in groups:
+        heading = _roster_heading(group, upcoming=upcoming)
+        if heading:
+            rosters.setdefault(heading, []).append(group)
+        else:
+            standalone.append(group)
+    blocks = [_set_block(label, windows, emojis, upcoming=upcoming)
+              for label, windows in _by_set(standalone).items()]
+    blocks.extend(_roster_block(heading, members, emojis, upcoming=upcoming)
+                  for heading, members in rosters.items())
+    return blocks
+
+
+def _roster_heading(group: mtgscribe.EventGroup, *, upcoming: bool) -> str | None:
+    if group.flashback:
+        return FLASHBACK_HEADING
+    if upcoming and group.formats == ["Quick Draft"]:
+        return QUICK_DRAFT_HEADING
+    return None
 
 
 def _by_set(groups: list) -> dict:
@@ -166,9 +199,57 @@ def _by_set(groups: list) -> dict:
     return ordered
 
 
+def _roster_block(heading: str, members: list, emojis: dict, *, upcoming: bool) -> str:
+    members = sorted(members, key=lambda group: group.start)
+    lines = [f"**{heading}**"]
+    for index, group in enumerate(members):
+        corner = "└" if index == len(members) - 1 else "├"
+        lines.append(f"{NBSP}{corner}{NBSP}{NBSP}{_roster_line(group, emojis, upcoming=upcoming)}")
+    return "\n".join(lines)
+
+
+def _roster_line(group: mtgscribe.EventGroup, emojis: dict, *, upcoming: bool) -> str:
+    prefix = _set_emoji_prefix(group, emojis)
+    timing = _timing(group, upcoming=upcoming)
+    return f"{prefix}{_fit_set_name(group, prefix, timing)} · {timing}"
+
+
+def _fit_set_name(group: mtgscribe.EventGroup, emoji_prefix: str, timing: str) -> str:
+    """Keep a roster line from wrapping: prefer the full set name, fall back to the name with its colon
+    subtitle and any leading article dropped, then to the set code as a last resort. "Duskmourn: House
+    of Horror" trims to "Duskmourn"; "The Lost Caverns of Ixalan" trims to a name that still wraps, so
+    it collapses to "LCI"."""
+    name = group.label
+    if not _would_wrap(emoji_prefix, name, timing):
+        return name
+    trimmed = _trim_set_name(name)
+    if trimmed != name and not _would_wrap(emoji_prefix, trimmed, timing):
+        return trimmed
+    seed = _seed_for_label(name)
+    return seed.code if seed else trimmed
+
+
+def _trim_set_name(name: str) -> str:
+    head = name.split(":", 1)[0].strip()
+    words = head.split()
+    if len(words) > 1 and words[0].lower() in LEADING_ARTICLES:
+        words = words[1:]
+    return " ".join(words)
+
+
+def _would_wrap(emoji_prefix: str, name: str, timing: str) -> bool:
+    """Estimate a roster line's rendered column width and flag overflow. The custom set emoji and the
+    ``<t::R>`` countdown render far shorter than their source text, so each is approximated: ~2 columns
+    for the emoji, a representative phrase for the countdown."""
+    countdown = TIMESTAMP_TOKEN.sub("in 2 months", timing)
+    emoji_cols = 2 if emoji_prefix else 0
+    width = TREE_PREFIX_WIDTH + emoji_cols + len(f"{name} · {countdown}")
+    return width > ROSTER_LINE_MAX_WIDTH
+
+
 def _set_block(label: str, windows: list, emojis: dict, *, upcoming: bool) -> str:
     items = [_format_line(group, emojis, upcoming=upcoming) for group in _by_format(windows)]
-    lines = [f"{_set_emoji_prefix(label, emojis)}**{label}**"]
+    lines = [f"{_set_emoji_prefix(windows[0], emojis)}**{label}**"]
     for index, item in enumerate(items):
         corner = "└" if index == len(items) - 1 else "├"
         lines.append(f"{NBSP}{corner}{NBSP}{NBSP}{item}")
@@ -195,10 +276,14 @@ def _format_line(windows: list, emojis: dict, *, upcoming: bool) -> str:
         lead = f"{label}{suffix} "
     else:
         lead = f"{label} · "
+    return f"{lead}{_timing(first, upcoming=upcoming)}"
+
+
+def _timing(group: mtgscribe.EventGroup, *, upcoming: bool) -> str:
     if upcoming:
-        window = _date_range(first.start_local, first.end_local)
-        return f"{lead}{window} · starts {format_dt(first.start, 'R')}"
-    return f"{lead}ends {first.end_local:%B %-d} {format_dt(first.end, 'R')}"
+        window = _date_range(group.start_local, group.end_local)
+        return f"{window} · starts {format_dt(group.start, 'R')}"
+    return f"ends {group.end_local:%B %-d} {format_dt(group.end, 'R')}"
 
 
 def _decorate_arena_champ(formats: str, emojis: dict) -> str:
@@ -226,7 +311,7 @@ def _format_label(group: mtgscribe.EventGroup) -> str:
         return group.formats[0]
     if len(group.formats) > 3:
         ranked = sorted(group.formats, key=lambda label: FORMAT_PRIORITY.get(label, 99))
-        return f"{_join_formats(ranked[:2])} and others"
+        return f"{_join_formats(ranked[:2])}, others"
     return _join_formats(group.formats)
 
 
@@ -238,14 +323,20 @@ def _join_formats(formats: list) -> str:
 def _date_range(start: datetime, end: datetime) -> str:
     if (start.year, start.month) == (end.year, end.month):
         return f"{start:%B %-d}–{end:%-d}"
-    return f"{start:%B %-d}–{end:%B %-d}"
+    return f"{start:%b %-d}–{end:%b %-d}"
 
 
-def _set_emoji_prefix(label: str, emojis: dict) -> str:
-    seed = _seed_for_label(label)
-    code = SET_LABEL_ALIASES.get(label) or (seed.code if seed else None)
+def _set_emoji_prefix(group: mtgscribe.EventGroup, emojis: dict) -> str:
+    code = _emoji_code(group)
     emoji = emojis.get(code.lower()) if code else None
     return f"{emoji} " if emoji else ""
+
+
+def _emoji_code(group: mtgscribe.EventGroup) -> str | None:
+    if group.cube:
+        return "CUBE"
+    seed = _seed_for_label(group.label)
+    return SET_LABEL_ALIASES.get(group.label) or (seed.code if seed else None)
 
 
 def _clean_set_label(label: str) -> str:
@@ -256,9 +347,13 @@ def _clean_set_label(label: str) -> str:
 
 
 def _seed_for_label(label: str):
+    """Match either way: a queue label may carry the full set name ("Secrets of Strixhaven") or, on
+    flashback/quick reruns, just the short name Arena uses ("Duskmourn" for "Duskmourn: House of
+    Horror"), which is a substring of the seed name rather than a superstring of it."""
     lowered = label.lower()
     for seed in ALL_SETS:
-        if seed.name.lower() in lowered:
+        name = seed.name.lower()
+        if name in lowered or lowered in name:
             return seed
     return None
 
@@ -322,13 +417,15 @@ def normalize_event(event: mtgscribe.ScribeEvent) -> mtgscribe.ScribeEvent:
 
 
 def _normalize_midweek(event: mtgscribe.ScribeEvent) -> mtgscribe.ScribeEvent:
-    """Set-bearing Midweeks ("Midweek Magic: SoS Phantom Sealed") group under the set with the real
-    format; set-less ones ("Midweek Magic: Brawl", crossovers) group under a "Midweek Magic" header."""
+    """Set-bearing Midweeks ("Midweek Magic: SoS Phantom Sealed") group under the set, with the format
+    kept "Midweek"-prefixed so a Midweek never reads as a regular queue; set-less ones
+    ("Midweek Magic: Brawl", crossovers) group under a "Midweek Magic" header."""
     label = event.group_label
     seed = None if "+" in label else _seed_for_label(label)
     if seed:
         leftover = label.replace(seed.name, "").strip()
-        return replace(event, group_label=seed.name, format_label=leftover or event.format_label)
+        format_label = f"Midweek {leftover}" if leftover else "Midweek Magic"
+        return replace(event, group_label=seed.name, format_label=format_label)
     return replace(event, group_label="Midweek Magic", format_label=label)
 
 

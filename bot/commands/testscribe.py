@@ -42,6 +42,14 @@ def _fixture_events(now: datetime) -> list:
         _arena_direct("Play Booster Boxes", "play-boosters", now, 10, 13),
         _arena_direct("Collector Booster Boxes", "collector-booster", now, 5, 8),
         _arena_direct("Collector Booster Boxes", "collector-booster", now, 17, 20),
+        _flashback("Aetherdrift", now, 14, 21),
+        _flashback("Duskmourn", now, 21, 28),
+        _flashback("Bloomburrow", now, 28, 35),
+        _quick_draft("Wilds of Eldraine", now, 4, 11),
+        _quick_draft("Outlaws of Thunder Junction", now, 11, 18),
+        _quick_draft("The Lost Caverns of Ixalan", now, 43, 49),
+        _midweek("Secrets of Strixhaven Phantom Sealed", "Phantom Sealed", ("sealed",), now, 6, 8),
+        _cube("Some Kind of new Cube", now, 13, 16),
     ]
     return in_progress + coming_up
 
@@ -57,6 +65,27 @@ def _arena_direct(product: str, booster_slug: str, now: datetime,
                   f"Secrets of Strixhaven {product}",
                   ("arena", "arena-direct", "limited", "sealed", booster_slug, "secrets-of-strixhaven"),
                   now, start_off, end_off)
+
+
+def _flashback(set_name: str, now: datetime, start_off: int, end_off: int) -> mtgscribe.ScribeEvent:
+    return _event(f"Premier Draft: {set_name}", "Premier Draft", set_name,
+                  ("arena", "limited", "flashback", "premier-draft"), now, start_off, end_off)
+
+
+def _quick_draft(set_name: str, now: datetime, start_off: int, end_off: int) -> mtgscribe.ScribeEvent:
+    return _event(f"Quick Draft: {set_name}", "Quick Draft", set_name,
+                  ("arena", "limited", "quick-draft"), now, start_off, end_off)
+
+
+def _midweek(label: str, fmt: str, extra_tags: tuple, now: datetime,
+             start_off: int, end_off: int) -> mtgscribe.ScribeEvent:
+    return _event(f"Midweek Magic: {label}", fmt, label,
+                  ("arena", "limited", "midweek-magic", *extra_tags), now, start_off, end_off)
+
+
+def _cube(set_name: str, now: datetime, start_off: int, end_off: int) -> mtgscribe.ScribeEvent:
+    return _event(f"Premier Draft: {set_name}", "Premier Draft", set_name,
+                  ("arena", "limited", "premier-draft", "cube"), now, start_off, end_off)
 
 
 def _event(title: str, format_label: str, group_label: str, tag_slugs: tuple,
