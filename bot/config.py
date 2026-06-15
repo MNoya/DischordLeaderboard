@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     def leaderboard_url(self) -> str:
         return f"{self.public_site_url.rstrip('/')}/leaderboard"
 
+    @property
+    def scribe_proxy_url(self) -> str:
+        return f"{self.public_site_url.rstrip('/')}/api/scribe"
+
     pod_draft_channel_id: int = 1028072146645295125
     pod_draft_target_players: int = 8
     pod_schedule_enabled: bool = True

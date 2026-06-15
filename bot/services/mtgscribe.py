@@ -4,6 +4,12 @@ Source is The Events Calendar REST API on mtgscribe.com, which returns each
 queue with ``utc_start_date``/``utc_end_date`` — the stock ``/events/feed/`` RSS
 only carries a start date, so the REST endpoint is the one worth consuming.
 
+The bot does not hit mtgscribe.com directly. The site is on SiteGround, whose
+anti-bot layer (``/.well-known/sgcaptcha/``) challenges datacenter egress IPs
+with a 202 HTML page, so a fetch from Railway never reaches the API. The request
+goes through a Cloudflare Pages Function (``functions/api/scribe.ts``) on a clean
+IP that proxies to the upstream; ``settings.scribe_proxy_url`` is that endpoint.
+
 Queues that share a set and a calendar-day window collapse into one group: the
 three Secrets of Strixhaven drafts become a single ``EventGroup`` listing all
 three formats, instead of three near-duplicate callouts. Grouping keys on the
@@ -18,11 +24,17 @@ from datetime import date, datetime, timezone
 
 import requests
 
+from bot.config import settings
+
 logger = logging.getLogger(__name__)
 
-EVENTS_URL = "https://mtgscribe.com/wp-json/tribe/events/v1/events"
 PER_PAGE = 50
 REQUEST_TIMEOUT = 15
+REQUEST_HEADERS = {"Accept": "application/json"}
+
+
+class ScribeUnavailable(RuntimeError):
+    """The upstream returned a 2xx whose body was not JSON — a bot-challenge or block page."""
 
 
 @dataclass(frozen=True)
@@ -73,7 +85,7 @@ def fetch_events(start_date: date, *, arena_only: bool = True) -> list[ScribeEve
     cache_bust = time.strftime("%Y%m%d%H%M%S")
     page = 1
     while True:
-        payload = _get_page(start_date, page, cache_bust)
+        payload = _get_page(settings.scribe_proxy_url, start_date, page, cache_bust)
         batch = payload.get("events", [])
         events.extend(_parse_event(raw) for raw in batch)
         total_pages = payload.get("total_pages", page)
@@ -128,13 +140,20 @@ def partition_by_now(groups: list[EventGroup], now: datetime) -> tuple[list[Even
     return in_progress, upcoming
 
 
-def _get_page(start_date: date, page: int, cache_bust: str) -> dict:
+def _get_page(base_url: str, start_date: date, page: int, cache_bust: str) -> dict:
     """``_cb`` busts MTG Scribe's CDN cache, which keys on the query string and otherwise
     serves stale dates (a Cache-Control header doesn't reach origin, a unique param does)."""
     params = {"start_date": start_date.isoformat(), "per_page": PER_PAGE, "page": page, "_cb": cache_bust}
-    response = requests.get(EVENTS_URL, params=params, timeout=REQUEST_TIMEOUT)
+    response = requests.get(base_url, params=params, headers=REQUEST_HEADERS, timeout=REQUEST_TIMEOUT)
     response.raise_for_status()
-    return response.json()
+    try:
+        return response.json()
+    except ValueError as exc:
+        snippet = response.text[:200].replace("\n", " ")
+        raise ScribeUnavailable(
+            f"non-JSON body from {response.url} (status {response.status_code}, "
+            f"content-type {response.headers.get('content-type')!r}): {snippet!r}"
+        ) from exc
 
 
 def _parse_event(raw: dict) -> ScribeEvent:
