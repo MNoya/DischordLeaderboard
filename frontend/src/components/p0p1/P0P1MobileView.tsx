@@ -360,7 +360,7 @@ function MobilePickerSheet({
           takenBy={takenBy}
           selectedName={selectedName}
           onSelect={onSelect}
-          minColW={150}
+          minColW={200}
           showLabel={false}
         />
       </div>

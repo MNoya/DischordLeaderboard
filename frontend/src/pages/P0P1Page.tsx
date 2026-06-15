@@ -92,7 +92,7 @@ export function P0P1Page() {
                 takenBy={pickedSlotLabels}
                 selectedName={picksBySlot.get(activeSlot.key)}
                 onSelect={(name) => selectAdvance(activeSlot.key, name)}
-                minColW={170}
+                minColW={200}
                 footerRight={
                   <ClearAll
                     onClear={handleClearAll}
