@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Search } from "lucide-react";
 import type { Card, SlotDefinition } from "../../types/p0p1";
 import { Pip } from "../ManaPips";
@@ -7,40 +7,50 @@ import { SlotPip } from "./slotVisuals";
 const WUBRG = ["W", "U", "B", "R", "G"] as const;
 type Color = (typeof WUBRG)[number];
 
+const NO_PICKS: Set<string> = new Set();
+
 interface Props {
   slot: SlotDefinition;
   cards: Card[];
   pickedCards: Set<string>;
+  takenBy?: Map<string, string>;
   onSelect: (cardName: string) => void;
   selectedName?: string;
   minColW?: number;
   showLabel?: boolean;
+  leftLabel?: ReactNode;
+  footerRight?: ReactNode;
+  autoFocusSearch?: boolean;
 }
 
 export function CardSelectionGrid({
   slot,
   cards,
   pickedCards,
+  takenBy,
   onSelect,
   selectedName,
   minColW = 200,
   showLabel = true,
+  leftLabel,
+  footerRight,
+  autoFocusSearch = true,
 }: Props) {
   const [search, setSearch] = useState("");
   const [color, setColor] = useState<Color | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
+    if (autoFocusSearch) inputRef.current?.focus();
+  }, [autoFocusSearch]);
 
   const isWildcard = slot.key === "wildcard_common" || slot.key === "wildcard_uncommon";
 
   const toggleColor = (c: Color) => setColor((prev) => (prev === c ? null : c));
 
   const eligible = useMemo(
-    () => cards.filter((c) => slot.filter(c, pickedCards)),
-    [cards, slot, pickedCards],
+    () => cards.filter((c) => slot.filter(c, NO_PICKS)),
+    [cards, slot],
   );
 
   const filtered = useMemo(() => {
@@ -54,6 +64,8 @@ export function CardSelectionGrid({
     }
     return list;
   }, [eligible, search, isWildcard, color]);
+
+  const availableCount = filtered.filter((c) => !pickedCards.has(c.name)).length;
 
   const colorFilter = isWildcard ? (
     <div className="flex items-center gap-1">
@@ -77,7 +89,7 @@ export function CardSelectionGrid({
   ) : null;
 
   const searchBox = (
-    <div className="relative ml-auto w-full max-w-[280px]">
+    <div className={`relative ${leftLabel ? "w-1/2 max-w-[260px] shrink-0" : "ml-auto w-full max-w-[280px]"}`}>
       <Search size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-dim pointer-events-none" />
       <input
         ref={inputRef}
@@ -101,6 +113,14 @@ export function CardSelectionGrid({
           <div className="flex justify-center">{colorFilter}</div>
           {searchBox}
         </header>
+      ) : leftLabel ? (
+        <div className="mb-3">
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 min-w-0 mr-auto pl-1">{leftLabel}</div>
+            {searchBox}
+          </div>
+          {colorFilter ? <div className="flex justify-center mt-2">{colorFilter}</div> : null}
+        </div>
       ) : (
         <header className="flex items-center gap-2 mb-3">
           {colorFilter}
@@ -115,6 +135,28 @@ export function CardSelectionGrid({
       ) : (
         <div className="grid gap-3.5" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${minColW}px, 1fr))` }}>
           {filtered.map((card) => {
+            const taken = pickedCards.has(card.name);
+            if (taken) {
+              return (
+                <div
+                  key={card.name}
+                  className="relative p-0 rounded-[3%] overflow-hidden outline outline-1 -outline-offset-1 outline-white/10"
+                >
+                  <img
+                    src={card.imageNormal}
+                    alt={card.name}
+                    className="w-full block grayscale brightness-[0.45]"
+                    style={{ aspectRatio: "488 / 680" }}
+                    loading="lazy"
+                  />
+                  <div className="absolute inset-0 flex items-center justify-center overflow-hidden pointer-events-none px-2">
+                    <span className="font-display text-white text-[14px] tracking-[0.1em] uppercase text-center [text-shadow:0_1px_5px_rgba(0,0,0,0.95)]">
+                      {takenBy?.get(card.name) ?? "Already"} pick
+                    </span>
+                  </div>
+                </div>
+              );
+            }
             const selected = card.name === selectedName;
             return (
               <button
@@ -138,10 +180,11 @@ export function CardSelectionGrid({
         </div>
       )}
 
-      <footer className="mt-3">
+      <footer className="mt-3 flex items-center justify-between gap-3">
         <span className="text-muted text-[12px]">
-          {filtered.length} card{filtered.length !== 1 ? "s" : ""} available
+          {availableCount} card{availableCount !== 1 ? "s" : ""} available
         </span>
+        {footerRight}
       </footer>
     </div>
   );

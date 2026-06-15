@@ -5,6 +5,8 @@ import type { SlotKey } from "../../types/p0p1";
 
 type Color = "W" | "U" | "B" | "R" | "G";
 
+const UNCOMMON_SILVER_GRADIENT = "linear-gradient(90deg, #8a94a3 0%, #e6e9ef 50%, #8a94a3 100%)";
+
 export const SLOT_ACCENT: Record<SlotKey, string> = {
   white_common: "#e8e4cf",
   blue_common: "#5aa9e6",
@@ -12,8 +14,8 @@ export const SLOT_ACCENT: Record<SlotKey, string> = {
   red_common: "#e0625c",
   green_common: "#54b87a",
   multicolor_uncommon: "#ffc63a",
-  wildcard_common: "#7a8395",
-  wildcard_uncommon: "#9aa3b5",
+  wildcard_common: "#ffffff",
+  wildcard_uncommon: UNCOMMON_SILVER_GRADIENT,
 };
 
 const MONO: Partial<Record<SlotKey, Color>> = {

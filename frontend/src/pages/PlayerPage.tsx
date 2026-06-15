@@ -6,7 +6,6 @@ import { useIsMobile } from "../lib/use-is-mobile";
 import { AAvatar, ALogo, SetGlyph, Trophy, fmtPts } from "../components/Brand";
 import {
   ArrowRight,
-  ArrowUp,
   BsAsterisk,
   BsPaletteFill,
   ChevronLeft,
@@ -28,6 +27,7 @@ import { ArenaChampBadge, isArenaChampionshipFormat } from "../components/ArenaC
 import { SetCodeDropdown } from "../components/SetCodeDropdown";
 import { MobilePageHeader } from "../components/PageNav";
 import { RankBadge } from "../components/RankBadge";
+import { GoToTopButton } from "../components/GoToTopButton";
 import { Tooltip } from "../components/Tooltip";
 
 import { useAvailableFormats, useColorChips, useDraftEvents, useLeaderboard, usePlayerIdentity, usePlayerProfile, useSets } from "../data/hooks";
@@ -1148,39 +1148,6 @@ function DraftLogDesktop({
         <GoToTopButton onClick={scrollToTop} />
       </div>
     </section>
-  );
-}
-
-function GoToTopButton({
-  onClick,
-  threshold = 600,
-  compact = false,
-}: {
-  onClick: () => void;
-  threshold?: number;
-  compact?: boolean;
-}) {
-  const [visible, setVisible] = useState(false);
-  useEffect(() => {
-    const onScroll = () => setVisible(window.scrollY > threshold);
-    onScroll();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
-  }, [threshold]);
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label="Go to top"
-      className={cn(
-        "fixed z-30 left-1/2 -translate-x-1/2 bottom-4 md:bottom-6 inline-flex items-center gap-2 bg-surface border border-border2 text-text font-display tracking-[0.18em] shadow-lg cursor-pointer transition-opacity hover:bg-surface2",
-        compact ? "px-3 py-2 text-[11px]" : "px-4 py-2.5 text-[12px]",
-        visible ? "opacity-100" : "opacity-0 pointer-events-none",
-      )}
-    >
-      <ArrowUp size={compact ? 14 : 14} />
-      TOP
-    </button>
   );
 }
 

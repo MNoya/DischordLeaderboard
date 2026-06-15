@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { ChevronDown, LogOut } from "lucide-react";
+import { DiscordIcon } from "./BrandIcons";
 import { ALogo, AWordmark } from "./Brand";
 import { cn } from "../lib/utils";
 import { useIsMobile } from "../lib/use-is-mobile";
@@ -84,14 +86,14 @@ export function AppHeader({ subtitle = "LEADERBOARD" }: { subtitle?: string }) {
         to={brandHref}
         className={cn(
           "flex items-center no-underline shrink-0",
-          isMobile ? "gap-3" : "gap-6 pl-[13px]",
+          isMobile ? "gap-3 pl-2" : "gap-6 pl-[13px]",
         )}
       >
         <div
           className="flex items-center justify-center shrink-0 overflow-visible"
-          style={{ height: isMobile ? 40 : 64 }}
+          style={{ height: isMobile ? 44 : 64 }}
         >
-          <ALogo size={isMobile ? 36 : 55} />
+          <ALogo size={isMobile ? 42 : 55} />
         </div>
         <AWordmark size={isMobile ? "sm" : "lg"} subtitle={subtitle} />
       </Link>
@@ -116,7 +118,7 @@ export function AppHeader({ subtitle = "LEADERBOARD" }: { subtitle?: string }) {
       </span>
 
       {!navCollapsed && (
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-1">
           <nav className="flex gap-2 font-display text-[19px] tracking-[0.14em]">
             {NAV.map((n) => {
               const active = n.match(loc.pathname);
@@ -187,36 +189,51 @@ function DesktopAuth() {
         onClick={signIn}
         className={cn(
           NAV_ITEM_CLASS,
-          "font-display text-[19px] tracking-[0.14em] cursor-pointer text-text border-border hover:bg-surface bg-transparent",
+          "inline-flex items-center gap-2.5 font-display text-[19px] tracking-[0.14em] cursor-pointer text-text border-border hover:bg-surface bg-transparent",
         )}
       >
+        <DiscordIcon size={19} />
         LOG IN
       </button>
     );
   }
+
+  const avatar = (size: string, text: string) =>
+    user.avatarUrl ? (
+      <img src={user.avatarUrl} alt="" className={cn(size, "rounded-full")} />
+    ) : (
+      <div className={cn(size, "rounded-full bg-surface2 flex items-center justify-center text-subtle font-semibold", text)}>
+        {user.username.charAt(0).toUpperCase()}
+      </div>
+    );
 
   return (
     <div ref={ref} className="relative">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 cursor-pointer bg-transparent border-none px-2 py-1"
-      >
-        {user.avatarUrl ? (
-          <img src={user.avatarUrl} alt="" className="w-7 h-7 rounded-full" />
-        ) : (
-          <div className="w-7 h-7 rounded-full bg-surface" />
+        className={cn(
+          "flex items-center gap-2.5 cursor-pointer bg-transparent border rounded-full pl-1.5 pr-2.5 py-1.5 transition-colors",
+          open ? "bg-surface border-border" : "border-transparent hover:bg-surface hover:border-border",
         )}
-        <span className="text-text text-sm max-w-[120px] truncate">{user.username}</span>
+      >
+        {avatar("w-9 h-9", "text-[15px]")}
+        <span className="text-text text-[15px] font-medium max-w-[160px] truncate">{user.username}</span>
+        <ChevronDown size={16} className={cn("text-muted transition-transform", open && "rotate-180")} />
       </button>
       {open && (
-        <div className="absolute right-0 top-full mt-1 bg-bg border border-border z-50 min-w-[120px]">
+        <div className="absolute right-0 top-full mt-2 w-60 bg-surface border border-border2 rounded-lg shadow-xl shadow-black/40 overflow-hidden z-50 animate-fadeUpIn">
+          <div className="flex items-center gap-2.5 px-3 py-3 border-b border-border">
+            {avatar("w-8 h-8", "text-sm")}
+            <span className="text-text text-sm font-medium truncate">{user.username}</span>
+          </div>
           <button
             type="button"
             onClick={() => { signOut(); setOpen(false); }}
-            className="w-full text-left px-4 py-2.5 text-sm text-muted hover:bg-surface hover:text-text cursor-pointer bg-transparent border-none"
+            className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-subtle hover:bg-surface2 hover:text-text cursor-pointer bg-transparent border-none transition-colors"
           >
-            LOG OUT
+            <LogOut size={16} />
+            Log out
           </button>
         </div>
       )}
@@ -304,29 +321,13 @@ function P0P1Badge({ active }: { active: boolean }) {
   if (isPastDeadline) return null;
 
   const pill = cn(
-    "absolute -top-2 -left-4 inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] leading-none tracking-normal font-sans font-semibold",
-    active ? "bg-bg/50 text-white" : "bg-green/15 text-green",
+    "absolute -top-1.5 -right-1.5 z-10 rounded-full border border-green px-1.5 py-0.5 text-[9px] leading-none font-sans font-bold tracking-wide",
+    active ? "bg-bg text-green" : "bg-green text-bg",
   );
-  const dot = cn("w-1.5 h-1.5 rounded-full inline-block", active ? "bg-white" : "bg-green");
 
-  if (!user || filled === 0) {
-    return (
-      <span className={pill}>
-        <span className={dot} />
-        OPEN
-      </span>
-    );
-  }
-
-  if (filled === total) {
-    return <span className={pill}>✓</span>;
-  }
-
-  return (
-    <span className={cn(pill)}>
-      {filled}/{total}
-    </span>
-  );
+  if (!user || filled === 0) return <span className={pill}>OPEN</span>;
+  if (filled === total) return <span className={pill}>✓</span>;
+  return <span className={pill}>{filled}/{total}</span>;
 }
 
 function MobileBadgeSlot({ active }: { active: boolean }) {
@@ -334,11 +335,9 @@ function MobileBadgeSlot({ active }: { active: boolean }) {
 
   if (isPastDeadline) return null;
 
-  const color = active ? "text-bg/80" : "text-green";
+  const wrap = cn("ml-2 text-[10px] font-semibold font-sans tracking-normal", active ? "text-bg/80" : "text-green");
 
-  const commonClasses = "ml-2 text-[10px] font-semibold font-sans tracking-normal";
-
-  if (!user || filled === 0) return <span className={cn(commonClasses, color)}>・OPEN</span>;
-  if (filled === total) return <span className={cn(commonClasses, color)}>✓</span>;
-  return <span className={cn(commonClasses, color)}>{filled}/{total}</span>;
+  if (!user || filled === 0) return <span className={wrap}>・OPEN</span>;
+  if (filled === total) return <span className={wrap}>✓</span>;
+  return <span className={wrap}>{filled}/{total}</span>;
 }

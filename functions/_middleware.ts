@@ -17,6 +17,7 @@ import {
   PUBLIC_SUPABASE_PUBLISHABLE_KEY,
 } from "../frontend/src/data/public-supabase-config";
 import { SITE_NAME as SITE, TITLE_SEPARATOR, TIER_LIST_PREVIEW_SETS } from "../frontend/src/data/constants";
+import { P0P1_SET_CODE } from "../frontend/src/data/p0p1Slots";
 
 const LEADERBOARD_DESCRIPTION =
   "Check ranks and trophies from the community. /join on Discord to share your drafts and climb the leaderboard";
@@ -164,8 +165,12 @@ const resolveMeta = async (pathname: string): Promise<RouteMeta> => {
     return page("Pod Drafts", "Check community pod draft results and standings.");
   }
 
-  if (section === "p0p1") {
-    return page("P0 P1 Challenge", "Pick a team of the cards you think will perform best from the upcoming set.");
+  if (section === "p0p1" || section === "p0p1-v1") {
+    return page(
+      "P0P1 Challenge",
+      "Pick a team of eight cards you think will perform best from the upcoming set.",
+      { kind: "setSymbol", code: P0P1_SET_CODE },
+    );
   }
   if (section === "episodes") {
     return page("Episodes", "Check out the latest episodes, or search the archive.");

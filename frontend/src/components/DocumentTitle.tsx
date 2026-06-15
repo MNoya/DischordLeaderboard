@@ -83,7 +83,7 @@ const resolvePageTitle = (
   if (section === "pods") {
     return rest[0] ? titleCaseSlug(rest[0], setCodes) : "Pod Drafts";
   }
-  if (section === "p0p1") {
+  if (section === "p0p1" || section === "p0p1-v1" || section === "p0p1-mocks") {
     return "P0P1";
   }
   if (section === "episodes") {
