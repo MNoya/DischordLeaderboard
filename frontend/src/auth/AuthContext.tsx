@@ -61,14 +61,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signIn = () => {
-    supabase?.auth.signInWithOAuth({
+    if (!supabase) {
+      setUser(initialAuthUser);
+      return;
+    }
+    supabase.auth.signInWithOAuth({
       provider: "discord",
       options: { redirectTo: window.location.href },
     });
   };
 
   const signOut = () => {
-    supabase?.auth.signOut();
+    if (!supabase) {
+      setUser(null);
+      return;
+    }
+    supabase.auth.signOut();
   };
 
   return (
