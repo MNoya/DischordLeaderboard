@@ -17,6 +17,7 @@ from discord.ext import commands, tasks
 from sqlalchemy import func, select
 
 from bot.commands.delete_account import setup as setup_delete_account
+from bot.commands.event_scribe import setup as setup_event_scribe
 from bot.commands.help import setup as setup_help
 from bot.commands.link_17lands import setup as setup_link_17lands
 from bot.commands.leaderboard_visibility import setup as setup_leaderboard_visibility
@@ -43,6 +44,7 @@ from bot.commands.testchampionship import setup as setup_testchampionship
 from bot.commands.testcomponent import setup as setup_testcomponent
 from bot.commands.testlobby import setup as setup_testlobby
 from bot.commands.testschedule import setup as setup_testschedule
+from bot.commands.testscribe import setup as setup_testscribe
 from bot.listeners.auto_link_listener import setup as setup_auto_link_listener
 from bot.listeners.pod_screenshots import setup as setup_pod_screenshots
 from bot.listeners.sesh_listener import reschedule_pending_events, setup as setup_sesh_listener
@@ -157,6 +159,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_leaderboard(bot)
         await setup_stats(bot)
         await setup_help(bot)
+        await setup_event_scribe(bot)
         await setup_link_17lands(bot)
         await setup_leaderboard_visibility(bot)
         await setup_pod_draft(bot)
@@ -172,6 +175,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_testcomponent(bot)
         await setup_testawards(bot)
         await setup_testschedule(bot)
+        await setup_testscribe(bot)
         await setup_testchampionship(bot)
         reschedule_pending_events(bot)
         register_pod_views(bot)
