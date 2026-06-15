@@ -21,6 +21,7 @@ interface Props {
   leftLabel?: ReactNode;
   footerRight?: ReactNode;
   autoFocusSearch?: boolean;
+  animateMount?: boolean;
 }
 
 export function CardSelectionGrid({
@@ -35,6 +36,7 @@ export function CardSelectionGrid({
   leftLabel,
   footerRight,
   autoFocusSearch = true,
+  animateMount = true,
 }: Props) {
   const [search, setSearch] = useState("");
   const [color, setColor] = useState<Color | null>(null);
@@ -103,7 +105,7 @@ export function CardSelectionGrid({
   );
 
   return (
-    <div className="animate-fadeIn">
+    <div className={animateMount ? "animate-fadeIn" : undefined}>
       {showLabel ? (
         <header className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 mb-3">
           <div className="flex items-center gap-2 min-w-0 pl-3">

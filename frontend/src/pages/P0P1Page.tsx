@@ -1,3 +1,4 @@
+import { useEffect, useState, type ReactNode } from "react";
 import { AppHeader } from "../components/AppHeader";
 import { CtaPill } from "../components/CtaPill";
 import { DiscordIcon } from "../components/BrandIcons";
@@ -84,24 +85,27 @@ export function P0P1Page() {
         {!isPastDeadline && (
           <div className="mt-4">
             {dataReady && cards ? (
-              <CardSelectionGrid
-                key={activeSlot.key}
-                slot={activeSlot}
-                cards={cards}
-                pickedCards={pickedExcept(activeSlot.key)}
-                takenBy={pickedSlotLabels}
-                selectedName={picksBySlot.get(activeSlot.key)}
-                onSelect={(name) => selectAdvance(activeSlot.key, name)}
-                minColW={200}
-                footerRight={
-                  <ClearAll
-                    onClear={handleClearAll}
-                    clearing={clearPending}
-                    visible={scoringFilled > 0}
-                    className="shrink-0"
-                  />
-                }
-              />
+              <SlotTransition slotKey={activeSlot.key}>
+                <CardSelectionGrid
+                  key={activeSlot.key}
+                  animateMount={false}
+                  slot={activeSlot}
+                  cards={cards}
+                  pickedCards={pickedExcept(activeSlot.key)}
+                  takenBy={pickedSlotLabels}
+                  selectedName={picksBySlot.get(activeSlot.key)}
+                  onSelect={(name) => selectAdvance(activeSlot.key, name)}
+                  minColW={200}
+                  footerRight={
+                    <ClearAll
+                      onClear={handleClearAll}
+                      clearing={clearPending}
+                      visible={scoringFilled > 0}
+                      className="shrink-0"
+                    />
+                  }
+                />
+              </SlotTransition>
             ) : (
               <CardGridSkeleton />
             )}
@@ -110,6 +114,39 @@ export function P0P1Page() {
       </main>
 
       <GoToTopButton onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} />
+    </div>
+  );
+}
+
+const SLOT_CROSSFADE_MS = 220;
+
+type SlotLayer = { key: string; content: ReactNode };
+
+function SlotTransition({ slotKey, children }: { slotKey: string; children: ReactNode }) {
+  const [current, setCurrent] = useState<SlotLayer>({ key: slotKey, content: children });
+  const [outgoing, setOutgoing] = useState<SlotLayer | null>(null);
+
+  useEffect(() => {
+    if (slotKey === current.key) {
+      setCurrent({ key: slotKey, content: children });
+      return;
+    }
+    setOutgoing(current);
+    setCurrent({ key: slotKey, content: children });
+    const timer = setTimeout(() => setOutgoing(null), SLOT_CROSSFADE_MS);
+    return () => clearTimeout(timer);
+  }, [slotKey, children, current.key]);
+
+  return (
+    <div className="relative">
+      <div key={current.key} className="animate-fadeIn">
+        {current.content}
+      </div>
+      {outgoing ? (
+        <div key={outgoing.key} className="animate-fadeOut absolute inset-x-0 top-0 pointer-events-none">
+          {outgoing.content}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -171,7 +208,7 @@ function RosterTile({
           <SlotPip slotKey={slot.key} size={48} />
         )}
       </div>
-      <div className={`px-2.5 shrink-0 transition-[padding] duration-150 ${active ? "py-2.5" : "py-1.5 group-hover:py-2.5"}`}>
+      <div className={`pl-4 pr-2.5 shrink-0 transition-[padding] duration-150 ${active ? "py-2.5" : "py-1.5 group-hover:py-2.5"}`}>
         <div className="text-subtle text-[12px] tracking-[0.12em] font-display truncate mb-1">
           {slot.label.toUpperCase()}
         </div>

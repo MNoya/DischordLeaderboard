@@ -49,6 +49,10 @@ const config: Config = {
           "0%": { opacity: "0" },
           "100%": { opacity: "1" },
         },
+        fadeOut: {
+          "0%": { opacity: "1" },
+          "100%": { opacity: "0" },
+        },
         fadeUpIn: {
           "0%": { opacity: "0", transform: "translateY(4px)" },
           "100%": { opacity: "1", transform: "translateY(0)" },
@@ -73,6 +77,7 @@ const config: Config = {
       animation: {
         pulse: "pulse 1.4s infinite",
         fadeIn: "fadeIn 220ms ease-out both",
+        fadeOut: "fadeOut 220ms ease-out both",
         fadeUpIn: "fadeUpIn 260ms ease-out both",
         slideInRight: "slideInRight 280ms cubic-bezier(0.22, 1, 0.36, 1) both",
         slideInUp: "slideInUp 280ms cubic-bezier(0.22, 1, 0.36, 1) both",

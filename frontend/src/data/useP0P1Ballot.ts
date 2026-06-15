@@ -11,6 +11,8 @@ import { P0P1_SET_CODE as SET_CODE, P0P1_VOTING_DEADLINE as VOTING_DEADLINE, SLO
 import { useLocalP0P1Picks, setLocalPick, clearLocalPicks, getLocalPicks } from "./localPicks";
 import type { Card, SlotKey } from "../types/p0p1";
 
+const ADVANCE_BEAT_MS = 260;
+
 export function useP0P1Ballot() {
   const { user, loading: authLoading, signIn } = useAuth();
   const useServerPicks = Boolean(user);
@@ -113,10 +115,14 @@ export function useP0P1Ballot() {
     [picksBySlot],
   );
 
+  const advanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => clearTimeout(advanceTimer.current ?? undefined), []);
+
   const selectAdvance = useCallback(
     (slot: SlotKey, cardName: string) => {
       persistPick(slot, cardName);
-      setEditingSlotKey(nextUnfilledSlot(slot));
+      clearTimeout(advanceTimer.current ?? undefined);
+      advanceTimer.current = setTimeout(() => setEditingSlotKey(nextUnfilledSlot(slot)), ADVANCE_BEAT_MS);
     },
     [persistPick, nextUnfilledSlot],
   );
