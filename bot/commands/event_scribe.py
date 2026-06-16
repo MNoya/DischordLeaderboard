@@ -60,6 +60,7 @@ class EventScribe(commands.Cog):
     @app_commands.choices(format=[
         app_commands.Choice(name="Premier", value="premier"),
         app_commands.Choice(name="Quick", value="quick"),
+        app_commands.Choice(name="Flashback", value="flashback"),
         app_commands.Choice(name="Draft (all draft formats)", value="draft"),
         app_commands.Choice(name="Sealed (incl. Arena Direct)", value="sealed"),
         app_commands.Choice(name="Midweek", value="midweek"),
@@ -70,7 +71,7 @@ class EventScribe(commands.Cog):
     async def event_scribe(self, interaction: discord.Interaction,
                            format: app_commands.Choice[str] | None = None,
                            set: str | None = None) -> None:
-        await interaction.response.defer()
+        await interaction.response.defer(ephemeral=not _posts_publicly(interaction))
         start_date = date.today() - LOOKBACK
         selected = format.value if format else None
         try:
@@ -100,6 +101,16 @@ class EventScribe(commands.Cog):
         matches = [app_commands.Choice(name=seed.name, value=seed.name)
                    for seed in ALL_SETS if lowered in seed.name.lower()]
         return matches[:25]
+
+
+def _posts_publicly(interaction: discord.Interaction) -> bool:
+    """A moderator (Manage Messages) posts the schedule to the channel for everyone; everyone else
+    gets an ephemeral copy. Permission rather than a role name so it holds across guilds. In a DM
+    there is no one to shield it from, so the reply is never ephemeral."""
+    if interaction.guild is None:
+        return True
+    permissions = getattr(interaction.user, "guild_permissions", None)
+    return bool(permissions and permissions.manage_messages)
 
 
 def process_events(events: list, selected: str | None = None, set_query: str | None = None) -> tuple[list, list]:
@@ -440,6 +451,8 @@ def _passes_format(event: mtgscribe.ScribeEvent, selected: str | None) -> bool:
         return event.format_label in PREMIER_FORMATS
     if selected == "quick":
         return event.format_label == "Quick Draft"
+    if selected == "flashback":
+        return mtgscribe.FLASHBACK_TAG in event.tag_slugs
     if selected == "draft":
         return any("draft" in tag for tag in event.tag_slugs)
     if selected == "sealed":
@@ -462,6 +475,7 @@ def _passes_set(event: mtgscribe.ScribeEvent, set_query: str | None) -> bool:
 FORMAT_TITLES = {
     "premier": "Premier Draft",
     "quick": "Quick Draft",
+    "flashback": "Flashback",
     "draft": "Draft",
     "sealed": "Sealed",
     "midweek": "Midweek",
