@@ -223,7 +223,8 @@ def build_bot(guild_id: int) -> commands.Bot:
     async def sync_commands(ctx: commands.Context, scope: str = "all") -> None:
         """Owner-only. Sync slash commands to Discord.
 
-        `!sync`        — full sync: server-visible commands to the guild, DM-only ones (link-17lands, exile) to global
+        `!sync`        — full sync: DM-capable commands (allowed_contexts dms=True) go global so they
+                         reach DMs; the rest stay guild-scoped, where schema changes appear instantly
         `!sync guild`  — guild sync only (skip the global publish)
         `!sync clear`  — wipe every command registration (recovery only)
         """
@@ -235,14 +236,15 @@ def build_bot(guild_id: int) -> commands.Bot:
             await _reply_quietly(ctx, "✅ Cleared all command registrations.")
             return
 
-        # Commands registered globally (their allowed_contexts decides where they're visible).
-        # Only /refresh is guild-scoped (admin command) — everything else goes global.
-        GLOBAL_COMMANDS = {"leaderboard", "join", "retire", "exile", "stats", "help",
-                           "link-17lands", "link-arena", "opt-out", "event-scribe"}
+        # A command goes global — the only registration DMs can see — when its allowed_contexts
+        # permits DMs; the rest stay guild-scoped, where schema changes appear instantly. Each
+        # command's decorator is the source of truth, so a new DM command needs no list to edit here.
+        global_names = {command.name for command in bot.tree.get_commands()
+                        if getattr(command, "allowed_contexts", None) and command.allowed_contexts.dm_channel}
 
         bot.tree.copy_global_to(guild=guild)
         # Strip globally-registered commands from the guild tree to avoid duplicate registration
-        for name in GLOBAL_COMMANDS:
+        for name in global_names:
             bot.tree.remove_command(name, guild=guild)
         synced_guild = await bot.tree.sync(guild=guild)
 
@@ -250,9 +252,7 @@ def build_bot(guild_id: int) -> commands.Bot:
             await _reply_quietly(ctx, f"✅ Synced {len(synced_guild)} guild commands.")
             return
 
-        # Global sync: only GLOBAL_COMMANDS go in
-        all_global = list(bot.tree.get_commands())
-        hidden = [c for c in all_global if c.name not in GLOBAL_COMMANDS]
+        hidden = [c for c in bot.tree.get_commands() if c.name not in global_names]
         for c in hidden:
             bot.tree.remove_command(c.name)
         try:
