@@ -67,7 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     supabase.auth.signInWithOAuth({
       provider: "discord",
-      options: { redirectTo: window.location.href },
+      options: { redirectTo: window.location.href, scopes: "identify" },
     });
   };
 
