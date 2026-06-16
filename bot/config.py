@@ -30,6 +30,7 @@ class Settings(BaseSettings):
         return f"{self.public_site_url.rstrip('/')}/leaderboard"
 
     scribe_cache_bust: bool = False
+    format_schedule_enabled: bool = True
 
     pod_draft_channel_id: int = 1028072146645295125
     pod_draft_target_players: int = 8

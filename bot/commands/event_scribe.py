@@ -29,13 +29,14 @@ FLASHBACK_HEADING = "🪦 Flashback"
 QUICK_DRAFT_HEADING = "🤖 Quick Draft"
 
 MTGA_EMOJI_NAME = "mtga"
-SET_LABEL_ALIASES: dict[str, str] = {"Arena Cube": "CUBE"}
+CUBE_LIST_URLS: dict[str, str] = {"CUBE": "https://cubecobra.com/cube/about/mtgapc"}
 
 LINE_MAX_WIDTH = 50
 SAFE_STARTS_WIDTH = 44
 TREE_PREFIX_WIDTH = 4
 TIMESTAMP_TOKEN = re.compile(r"<t:(\d+):[a-zA-Z]>")
 CUSTOM_EMOJI_TOKEN = re.compile(r"<a?:\w+:\d+>")
+BEST_OF_TOKEN = re.compile(r"\bBo\d\b")
 LEADING_ARTICLES = {"the", "a", "an"}
 
 ARENA_DIRECT_TAG = "arena-direct"
@@ -113,20 +114,43 @@ def _posts_publicly(interaction: discord.Interaction) -> bool:
     return bool(permissions and permissions.manage_messages)
 
 
-def process_events(events: list, selected: str | None = None, set_query: str | None = None) -> tuple[list, list]:
-    """The shared event-scribe pipeline: scope → filter → normalize → group → partition. Both the
-    /event-scribe command and `!test scribe` route through this so they can't drift. The unfiltered
-    view drops upcoming events past the horizon; an explicit filter shows everything it matches."""
+def select_groups(events: list, filters: list | None, set_query: str | None = None,
+                  *, apply_horizon: bool) -> tuple[list, list]:
+    """Run the event-scribe pipeline for an OR'd set of format filters, or the unfiltered Limited view
+    when ``filters`` is falsy: normalize → scope → filter → group → partition. ``apply_horizon`` drops
+    upcoming groups past ``UPCOMING_HORIZON`` — the command keeps everything an explicit filter matches,
+    the daily schedule tick always trims."""
     normalized = [normalize_event(event) for event in events]
     kept = [event for event in normalized
-            if _in_scope(event, selected) and _passes_format(event, selected) and _passes_set(event, set_query)]
+            if _scope_matches(event, filters) and _format_matches(event, filters)
+            and _passes_set(event, set_query)]
     groups = mtgscribe.group_events(kept)
     now = datetime.now(timezone.utc)
     in_progress, upcoming = mtgscribe.partition_by_now(groups, now)
-    if selected is None and set_query is None:
+    if apply_horizon:
         horizon = now + UPCOMING_HORIZON
         upcoming = [group for group in upcoming if group.start <= horizon]
     return in_progress, upcoming
+
+
+def process_events(events: list, selected: str | None = None, set_query: str | None = None) -> tuple[list, list]:
+    """The shared /event-scribe + `!test scribe` entry: a single optional filter, with the horizon
+    trim applied only to the fully unfiltered view."""
+    filters = [selected] if selected else None
+    apply_horizon = selected is None and set_query is None
+    return select_groups(events, filters, set_query, apply_horizon=apply_horizon)
+
+
+def _scope_matches(event: mtgscribe.ScribeEvent, filters: list | None) -> bool:
+    if not filters:
+        return _in_scope(event, None)
+    return any(_in_scope(event, selected) for selected in filters)
+
+
+def _format_matches(event: mtgscribe.ScribeEvent, filters: list | None) -> bool:
+    if not filters:
+        return True
+    return any(_passes_format(event, selected) for selected in filters)
 
 
 def _in_scope(event: mtgscribe.ScribeEvent, selected: str | None) -> bool:
@@ -144,7 +168,7 @@ def build_schedule_payload(in_progress: list, upcoming: list, emojis: dict, scop
 def build_schedule_view(in_progress: list, upcoming: list, emojis: dict,
                         scope: str = "Limited") -> discord.ui.LayoutView:
     """A Components V2 layout: a divider underlines the title before the schedule body."""
-    container = discord.ui.Container(accent_color=discord.Color.blurple())
+    container = discord.ui.Container(accent_color=discord.Color.green())
     container.add_item(discord.ui.TextDisplay(_title_text(emojis, scope)))
     container.add_item(discord.ui.Separator(visible=True))
     container.add_item(discord.ui.TextDisplay(_schedule_body(in_progress, upcoming, emojis)))
@@ -159,12 +183,93 @@ def build_schedule_view(in_progress: list, upcoming: list, emojis: dict,
     return view
 
 
+def build_announcement(group: mtgscribe.EventGroup, emojis: dict, *, format_word: str,
+                       next_group: mtgscribe.EventGroup | None = None) -> discord.Embed:
+    """A single rotation callout for the daily schedule tick: a "**<set>** <format> is live!" heading
+    over the availability window, with the set logo as the embed thumbnail. ``format_word`` is the
+    rotation type ("Flashback", "Quick Draft", …); empty for self-naming sets like a cube. When
+    ``next_group`` is set, a "Next Up" line previews the rotation already scheduled after this one."""
+    suffix = f" {format_word}" if format_word else ""
+    lines = [
+        f"### **{group.label}**{suffix} is live!",
+        f"Ends {group.end_local:%B %-d} ({format_dt(group.end, 'R')})",
+    ]
+    if next_group is not None:
+        lines.append(f"\n**Next Up:** {_set_emoji_prefix(next_group, emojis)}{next_group.label}")
+    cube_url = _cube_list_url(group)
+    if cube_url is not None:
+        lines.append(f"<{cube_url}>")
+    embed = discord.Embed(description="\n".join(lines), color=discord.Color.green())
+    emoji = _set_emoji(group, emojis)
+    if emoji is not None:
+        embed.set_thumbnail(url=emoji.url)
+    return embed
+
+
+def _cube_list_url(group: mtgscribe.EventGroup) -> str | None:
+    """The cube's decklist URL, or ``None`` for a non-cube event or a cube without a known list."""
+    if not group.cube:
+        return None
+    seed = _seed_for_label(group.label)
+    return CUBE_LIST_URLS.get(seed.code) if seed else None
+
+
+def build_competitive_reminder(group: mtgscribe.EventGroup, emojis: dict) -> discord.Embed:
+    """A reminder for a competitive event (Qualifier Play-In, ACQ, Arena Championship), distinct from
+    the rotation announcements: the event type heads it, the full Sealed/Bo format and closing date
+    follow. Limited-scoped competitive events are Sealed (the Constructed ones fall out of scope)."""
+    event_type, best_of = _competitive_parts(group)
+    heading_type = _competitive_heading_type(event_type, emojis)
+    best_of_suffix = f" {best_of}" if best_of else ""
+    seed = _seed_for_label(group.label)
+    set_code = seed.code if seed else group.label
+    lines = [
+        f"### {heading_type} is now open",
+        f"Format: **{set_code} Sealed{best_of_suffix}**",
+        f"\nEnds {group.end_local:%B %-d} ({format_dt(group.end, 'R')})",
+    ]
+    embed = discord.Embed(description="\n".join(lines), color=discord.Color.green())
+    emoji = _set_emoji(group, emojis)
+    if emoji is not None:
+        embed.set_thumbnail(url=emoji.url)
+    return embed
+
+
+def _competitive_parts(group: mtgscribe.EventGroup) -> tuple[str, str]:
+    """Split a competitive group's format into the event type and its best-of(s): "Qualifier Play-In
+    Bo3" → ("Qualifier Play-In", "Bo3"). Bo1 and Bo3 queues sharing a window collapse to "Bo1/Bo3"."""
+    best_ofs: list[str] = []
+    event_type = ""
+    for fmt in group.formats:
+        for token in BEST_OF_TOKEN.findall(fmt):
+            if token not in best_ofs:
+                best_ofs.append(token)
+        if not event_type:
+            event_type = BEST_OF_TOKEN.sub("", fmt).strip()
+    return event_type or "Competitive event", "/".join(best_ofs)
+
+
+def _competitive_heading_type(event_type: str, emojis: dict) -> str:
+    """The event type as it leads the reminder heading. An Arena Championship event swaps the literal
+    "Arena Championship" for its :arenachamp: emoji and drops the generic mtga lead; everything else
+    keeps the mtga lead."""
+    if ARENA_CHAMP_TEXT in event_type:
+        return _decorate_arena_champ(event_type, emojis)
+    mtga = emojis.get(MTGA_EMOJI_NAME)
+    return f"{mtga} {event_type}" if mtga else event_type
+
+
+def schedule_title_marker(scope: str) -> str:
+    """The stable text inside a schedule title, used to recognise an already-pinned schedule on edit."""
+    return f"{scope} Event Schedule"
+
+
 def _title_text(emojis: dict, scope: str) -> str:
     mtga = emojis.get(MTGA_EMOJI_NAME)
     scribe = emojis.get(SCRIBE_EMOJI_NAME)
     lead = f"{mtga} " if mtga else ""
     mark = f" {scribe}" if scribe else ""
-    return f"## {lead}{scope} Event Schedule{mark}"
+    return f"## {lead}{schedule_title_marker(scope)}{mark}"
 
 
 def _schedule_body(in_progress: list, upcoming: list, emojis: dict) -> str:
@@ -413,16 +518,20 @@ def _date_range(start: datetime, end: datetime) -> str:
 
 
 def _set_emoji_prefix(group: mtgscribe.EventGroup, emojis: dict) -> str:
-    code = _emoji_code(group)
-    emoji = emojis.get(code.lower()) if code else None
+    emoji = _set_emoji(group, emojis)
     return f"{emoji} " if emoji else ""
+
+
+def _set_emoji(group: mtgscribe.EventGroup, emojis: dict):
+    code = _emoji_code(group)
+    return emojis.get(code.lower()) if code else None
 
 
 def _emoji_code(group: mtgscribe.EventGroup) -> str | None:
     if group.cube:
         return "CUBE"
     seed = _seed_for_label(group.label)
-    return SET_LABEL_ALIASES.get(group.label) or (seed.code if seed else None)
+    return seed.code if seed else None
 
 
 def _clean_set_label(label: str) -> str:
@@ -457,6 +566,8 @@ def _passes_format(event: mtgscribe.ScribeEvent, selected: str | None) -> bool:
         return any("draft" in tag for tag in event.tag_slugs)
     if selected == "sealed":
         return any(tag in ("sealed", "traditional-sealed") for tag in event.tag_slugs)
+    if selected == "cube":
+        return any(mtgscribe.CUBE_TAG in tag for tag in event.tag_slugs)
     if selected == "midweek":
         return MIDWEEK_TAG in event.tag_slugs
     if selected == "competitive":

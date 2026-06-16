@@ -44,6 +44,7 @@ from bot.commands.testchampionship import setup as setup_testchampionship
 from bot.commands.testcomponent import setup as setup_testcomponent
 from bot.commands.testlobby import setup as setup_testlobby
 from bot.commands.testschedule import setup as setup_testschedule
+from bot.commands.testformatschedule import setup as setup_testformatschedule
 from bot.commands.testscribe import setup as setup_testscribe
 from bot.listeners.auto_link_listener import setup as setup_auto_link_listener
 from bot.listeners.pod_screenshots import setup as setup_pod_screenshots
@@ -61,6 +62,7 @@ from bot.services.refresh import refresh_active_players
 from bot.services.seventeenlands import MinIntervalLimiter, SeventeenLandsClient
 from bot.sets import ACTIVE_SET_CODE
 from bot.tasks.pod_draft_reminder import init_reminder
+from bot.tasks.format_schedule_post import init_format_schedule
 from bot.tasks.pod_schedule_post import init_schedule_post
 from bot.tasks.pod_underfill import init_underfill
 
@@ -150,6 +152,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         init_reminder(bot)
         init_underfill(bot)
         init_schedule_post(bot)
+        init_format_schedule(bot)
 
         # Load cogs into memory and mirror to the guild tree so dispatch works.
         # Discord-side sync is handled by the owner-only `!sync` text command, not on startup.
@@ -176,6 +179,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_testawards(bot)
         await setup_testschedule(bot)
         await setup_testscribe(bot)
+        await setup_testformatschedule(bot)
         await setup_testchampionship(bot)
         reschedule_pending_events(bot)
         register_pod_views(bot)
