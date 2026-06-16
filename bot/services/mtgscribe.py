@@ -4,11 +4,10 @@ Source is The Events Calendar REST API on mtgscribe.com, which returns each
 queue with ``utc_start_date``/``utc_end_date`` — the stock ``/events/feed/`` RSS
 only carries a start date, so the REST endpoint is the one worth consuming.
 
-The bot does not hit mtgscribe.com directly. The site is on SiteGround, whose
-anti-bot layer (``/.well-known/sgcaptcha/``) challenges datacenter egress IPs
-with a 202 HTML page, so a fetch from Railway never reaches the API. The request
-goes through a Cloudflare Pages Function (``functions/api/scribe.ts``) on a clean
-IP that proxies to the upstream; ``settings.scribe_proxy_url`` is that endpoint.
+mtgscribe.com is on SiteGround, whose account-level anti-bot
+(``/.well-known/sgcaptcha/``) intermittently challenges datacenter egress IPs with
+a 202 HTML page. The request carries a stable ``User-Agent`` so the site owner can
+allowlist it; until then a blocked window surfaces as ``ScribeUnavailable``.
 
 Queues that share a set and a calendar-day window collapse into one group: the
 three Secrets of Strixhaven drafts become a single ``EventGroup`` listing all
@@ -28,9 +27,13 @@ from bot.config import settings
 
 logger = logging.getLogger(__name__)
 
+EVENTS_URL = "https://mtgscribe.com/wp-json/tribe/events/v1/events"
 PER_PAGE = 50
 REQUEST_TIMEOUT = 15
-REQUEST_HEADERS = {"Accept": "application/json"}
+REQUEST_HEADERS = {
+    "User-Agent": "LimitedLevelUps-Bot/1.0 (+https://limitedlevelups.com)",
+    "Accept": "application/json",
+}
 
 
 class ScribeUnavailable(RuntimeError):
@@ -59,11 +62,13 @@ class EventGroup:
     end_local: datetime = None
     flashback: bool = False
     cube: bool = False
+    competitive: bool = False
 
 
 ARENA_TAG = "arena"
 FLASHBACK_TAG = "flashback"
 CUBE_TAG = "cube"
+COMPETITIVE_TAGS = ("play-in", "qualifier", "arena-championship", "arena-limited-championship-qualifier")
 
 
 def fetch_events(start_date: date, *, arena_only: bool = True) -> list[ScribeEvent]:
@@ -77,15 +82,15 @@ def fetch_events(start_date: date, *, arena_only: bool = True) -> list[ScribeEve
     programs. The Limited-vs-Constructed cut is left to the caller, so the Midweek view
     can surface constructed queues.
 
-    The cache-bust is per-invocation, not daily: a daily bucket let a stale-date copy (a
-    corrected end date, a duplicate queue) persist on the CDN for the rest of the day. This is
-    an on-demand command, so a fresh origin fetch each call is cheap and always matches the site.
+    A per-invocation ``_cb`` cache-bust forces a fresh origin fetch (otherwise a stale-date copy
+    can persist on the CDN), gated behind ``scribe_cache_bust`` so it can be left off while the
+    upstream bot-challenge is being sorted out.
     """
     events: list[ScribeEvent] = []
-    cache_bust = time.strftime("%Y%m%d%H%M%S")
+    cache_bust = time.strftime("%Y%m%d%H%M%S") if settings.scribe_cache_bust else None
     page = 1
     while True:
-        payload = _get_page(settings.scribe_proxy_url, start_date, page, cache_bust)
+        payload = _get_page(start_date, page, cache_bust)
         batch = payload.get("events", [])
         events.extend(_parse_event(raw) for raw in batch)
         total_pages = payload.get("total_pages", page)
@@ -117,6 +122,8 @@ def group_events(events: list[ScribeEvent]) -> list[EventGroup]:
             group.flashback = True
         if any(CUBE_TAG in tag for tag in event.tag_slugs):
             group.cube = True
+        if any(tag in COMPETITIVE_TAGS for tag in event.tag_slugs):
+            group.competitive = True
     return list(groups.values())
 
 
@@ -140,11 +147,13 @@ def partition_by_now(groups: list[EventGroup], now: datetime) -> tuple[list[Even
     return in_progress, upcoming
 
 
-def _get_page(base_url: str, start_date: date, page: int, cache_bust: str) -> dict:
+def _get_page(start_date: date, page: int, cache_bust: str | None) -> dict:
     """``_cb`` busts MTG Scribe's CDN cache, which keys on the query string and otherwise
     serves stale dates (a Cache-Control header doesn't reach origin, a unique param does)."""
-    params = {"start_date": start_date.isoformat(), "per_page": PER_PAGE, "page": page, "_cb": cache_bust}
-    response = requests.get(base_url, params=params, headers=REQUEST_HEADERS, timeout=REQUEST_TIMEOUT)
+    params = {"start_date": start_date.isoformat(), "per_page": PER_PAGE, "page": page}
+    if cache_bust:
+        params["_cb"] = cache_bust
+    response = requests.get(EVENTS_URL, params=params, headers=REQUEST_HEADERS, timeout=REQUEST_TIMEOUT)
     response.raise_for_status()
     try:
         return response.json()

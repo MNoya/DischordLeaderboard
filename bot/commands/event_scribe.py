@@ -5,7 +5,6 @@ import logging
 import re
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
-from pathlib import Path
 
 import discord
 from discord import app_commands
@@ -32,14 +31,15 @@ QUICK_DRAFT_HEADING = "🤖 Quick Draft"
 MTGA_EMOJI_NAME = "mtga"
 SET_LABEL_ALIASES: dict[str, str] = {"Arena Cube": "CUBE"}
 
-ROSTER_LINE_MAX_WIDTH = 62
+LINE_MAX_WIDTH = 50
+SAFE_STARTS_WIDTH = 44
 TREE_PREFIX_WIDTH = 4
-TIMESTAMP_TOKEN = re.compile(r"<t:\d+:[a-zA-Z]>")
+TIMESTAMP_TOKEN = re.compile(r"<t:(\d+):[a-zA-Z]>")
+CUSTOM_EMOJI_TOKEN = re.compile(r"<a?:\w+:\d+>")
 LEADING_ARTICLES = {"the", "a", "an"}
 
 ARENA_DIRECT_TAG = "arena-direct"
 MIDWEEK_TAG = "midweek-magic"
-COMPETITIVE_TAGS = ("play-in", "qualifier", "arena-championship", "arena-limited-championship-qualifier")
 PREMIER_FORMATS = ("Premier Draft", "Contender Draft")
 BOOSTER_LABELS = {"play-boosters": "Play", "collector-booster": "Collector"}
 PACKAGE_EMOJI = "📦"
@@ -47,8 +47,7 @@ COLLECTOR_EMOJI_NAME = "8000gems"
 ARENA_CHAMP_TEXT = "Arena Championship"
 ARENA_CHAMP_EMOJI_NAME = "arenachamp"
 
-SCRIBE_LOGO = Path(__file__).resolve().parents[2] / "bot" / "assets" / "mtg-scribe.png"
-SCRIBE_LOGO_FILENAME = "mtg-scribe.png"
+SCRIBE_EMOJI_NAME = "scribe"
 SCRIBE_URL = "https://mtgscribe.com/events/"
 
 
@@ -90,8 +89,8 @@ class EventScribe(commands.Cog):
             in_progress=len(in_progress),
             upcoming=len(upcoming),
         )
-        subtitle = _subtitle(set, selected)
-        await interaction.followup.send(**build_schedule_payload(in_progress, upcoming, emojis, subtitle))
+        scope = _heading_scope(set, selected)
+        await interaction.followup.send(**build_schedule_payload(in_progress, upcoming, emojis, scope))
 
     @event_scribe.autocomplete("set")
     async def event_scribe_set_autocomplete(
@@ -127,41 +126,47 @@ def _in_scope(event: mtgscribe.ScribeEvent, selected: str | None) -> bool:
     return "limited" in event.tag_slugs
 
 
-def build_schedule_payload(in_progress: list, upcoming: list, emojis: dict, subtitle: str | None = None) -> dict:
-    logo_url = f"attachment://{SCRIBE_LOGO_FILENAME}" if SCRIBE_LOGO.exists() else None
-    view = discord.ui.View()
-    view.add_item(discord.ui.Button(
+def build_schedule_payload(in_progress: list, upcoming: list, emojis: dict, scope: str = "Limited") -> dict:
+    return {"view": build_schedule_view(in_progress, upcoming, emojis, scope)}
+
+
+def build_schedule_view(in_progress: list, upcoming: list, emojis: dict,
+                        scope: str = "Limited") -> discord.ui.LayoutView:
+    """A Components V2 layout: a divider underlines the title before the schedule body."""
+    container = discord.ui.Container(accent_color=discord.Color.blurple())
+    container.add_item(discord.ui.TextDisplay(_title_text(emojis, scope)))
+    container.add_item(discord.ui.Separator(visible=True))
+    container.add_item(discord.ui.TextDisplay(_schedule_body(in_progress, upcoming, emojis)))
+    view = discord.ui.LayoutView()
+    view.add_item(container)
+    view.add_item(discord.ui.ActionRow(discord.ui.Button(
         style=discord.ButtonStyle.link,
         label="View on MTG Scribe",
         url=SCRIBE_URL,
-        emoji=emojis.get("scribe"),
-    ))
-    embed = render_schedule_embed(in_progress, upcoming, emojis, logo_url, subtitle)
-    payload = {"embed": embed, "view": view}
-    if logo_url:
-        payload["file"] = discord.File(SCRIBE_LOGO, filename=SCRIBE_LOGO_FILENAME)
-    return payload
+        emoji=emojis.get(SCRIBE_EMOJI_NAME),
+    )))
+    return view
 
 
-def render_schedule_embed(in_progress: list, upcoming: list, emojis: dict, logo_url: str | None,
-                          subtitle: str | None = None) -> discord.Embed:
-    embed = discord.Embed(color=discord.Color.blurple())
+def _title_text(emojis: dict, scope: str) -> str:
     mtga = emojis.get(MTGA_EMOJI_NAME)
-    heading = f"Limited Event Schedule - {subtitle}" if subtitle else "Limited Event Schedule"
-    title = f"### {mtga} {heading}" if mtga else f"### {heading}"
-    sections = [title]
+    scribe = emojis.get(SCRIBE_EMOJI_NAME)
+    lead = f"{mtga} " if mtga else ""
+    mark = f" {scribe}" if scribe else ""
+    return f"## {lead}{scope} Event Schedule{mark}"
+
+
+def _schedule_body(in_progress: list, upcoming: list, emojis: dict) -> str:
+    sections: list[str] = []
     if in_progress:
         sections.append(f"### {IN_PROGRESS_EMOJI} In Progress")
         sections.extend(_section_blocks(in_progress, emojis, upcoming=False))
     if upcoming:
         sections.append(f"### {COMING_UP_EMOJI} Coming Up")
         sections.extend(_section_blocks(upcoming, emojis, upcoming=True))
-    if not in_progress and not upcoming:
-        sections.append("No Limited events right now.")
-    embed.description = "\n".join(sections)
-    if logo_url:
-        embed.set_thumbnail(url=logo_url)
-    return embed
+    if not sections:
+        return "No Limited events right now."
+    return "\n".join(sections)
 
 
 def _section_blocks(groups: list, emojis: dict, *, upcoming: bool) -> list:
@@ -210,8 +215,9 @@ def _roster_block(heading: str, members: list, emojis: dict, *, upcoming: bool) 
 
 def _roster_line(group: mtgscribe.EventGroup, emojis: dict, *, upcoming: bool) -> str:
     prefix = _set_emoji_prefix(group, emojis)
-    timing = _timing(group, upcoming=upcoming)
-    return f"{prefix}{_fit_set_name(group, prefix, timing)} · {timing}"
+    name = _fit_set_name(group, prefix, _timing(group, upcoming=upcoming, compact=True))
+    lead = f"{prefix}{name} · "
+    return f"{lead}{_fit_timing(group, _estimate_cols(lead), upcoming=upcoming)}"
 
 
 def _fit_set_name(group: mtgscribe.EventGroup, emoji_prefix: str, timing: str) -> str:
@@ -238,13 +244,39 @@ def _trim_set_name(name: str) -> str:
 
 
 def _would_wrap(emoji_prefix: str, name: str, timing: str) -> bool:
-    """Estimate a roster line's rendered column width and flag overflow. The custom set emoji and the
-    ``<t::R>`` countdown render far shorter than their source text, so each is approximated: ~2 columns
-    for the emoji, a representative phrase for the countdown."""
-    countdown = TIMESTAMP_TOKEN.sub("in 2 months", timing)
-    emoji_cols = 2 if emoji_prefix else 0
-    width = TREE_PREFIX_WIDTH + emoji_cols + len(f"{name} · {countdown}")
-    return width > ROSTER_LINE_MAX_WIDTH
+    return _estimate_cols(f"{emoji_prefix}{name} · {timing}") > LINE_MAX_WIDTH
+
+
+def _text_cols(text: str) -> int:
+    """Estimated rendered width of a fragment. A ``<t::R>`` token renders as its current relative
+    phrase (the widest it will be, since a countdown only shrinks as the event nears), and a custom
+    emoji renders ~2 columns."""
+    text = TIMESTAMP_TOKEN.sub(lambda match: _countdown_phrase(int(match.group(1))), text)
+    text = CUSTOM_EMOJI_TOKEN.sub("xx", text)
+    return len(text)
+
+
+def _countdown_phrase(unix: int) -> str:
+    """Approximate Discord's ``:R`` rendering of a timestamp, for width estimation only."""
+    delta = unix - datetime.now(timezone.utc).timestamp()
+    seconds = abs(delta)
+    if seconds < 3600:
+        count, unit, article = round(seconds / 60), "minute", "a"
+    elif seconds < 86400:
+        count, unit, article = round(seconds / 3600), "hour", "an"
+    elif seconds < 2629800:
+        count, unit, article = round(seconds / 86400), "day", "a"
+    elif seconds < 31557600:
+        count, unit, article = round(seconds / 2629800), "month", "a"
+    else:
+        count, unit, article = round(seconds / 31557600), "year", "a"
+    count = max(1, count)
+    phrase = f"{article} {unit}" if count == 1 else f"{count} {unit}s"
+    return f"in {phrase}" if delta >= 0 else f"{phrase} ago"
+
+
+def _estimate_cols(text: str) -> int:
+    return TREE_PREFIX_WIDTH + _text_cols(text)
 
 
 def _set_block(label: str, windows: list, emojis: dict, *, upcoming: bool) -> str:
@@ -265,25 +297,67 @@ def _by_format(windows: list) -> list:
 
 
 def _format_line(windows: list, emojis: dict, *, upcoming: bool) -> str:
-    """Render one format's line content (no branch). When a format recurs across several windows,
-    only the soonest is shown, with its countdown."""
+    """Render one format's line content. When a format recurs across several windows, only the
+    soonest is shown, with its countdown. The Arena Direct product word is dropped in favour of its
+    booster emoji, and an overflowing Midweek line shortens its prefix to ``MWM``."""
     first = windows[0]
-    label = _decorate_arena_champ(_format_label(first), emojis)
+    label = _decorate_arena_champ(_format_label(first), emojis).replace("Traditional", "Trad")
     suffix = _booster_emoji_suffix(first, emojis)
+    if suffix:
+        label = "Arena Direct"
+    if label.startswith("Midweek") and _midweek_overflows(label, first, upcoming=upcoming):
+        label = label.replace("Midweek", "MWM", 1)
+    lead = _lead(label, suffix)
+    return f"{lead}{_fit_timing(first, _estimate_cols(lead), upcoming=upcoming)}"
+
+
+def _lead(label: str, suffix: str) -> str:
     if not label:
-        lead = ""
-    elif suffix:
-        lead = f"{label}{suffix} "
-    else:
-        lead = f"{label} · "
-    return f"{lead}{_timing(first, upcoming=upcoming)}"
+        return ""
+    if suffix:
+        return f"{label}{suffix} "
+    return f"{label} · "
 
 
-def _timing(group: mtgscribe.EventGroup, *, upcoming: bool) -> str:
+def _midweek_overflows(label: str, group: mtgscribe.EventGroup, *, upcoming: bool) -> bool:
+    compact = _timing(group, upcoming=upcoming, compact=True)
+    return _estimate_cols(f"{label} · ") + _text_cols(compact) > LINE_MAX_WIDTH
+
+
+def _timing(group: mtgscribe.EventGroup, *, upcoming: bool, compact: bool = False) -> str:
     if upcoming:
         window = _date_range(group.start_local, group.end_local)
-        return f"{window} · starts {format_dt(group.start, 'R')}"
-    return f"ends {group.end_local:%B %-d} {format_dt(group.end, 'R')}"
+        countdown = format_dt(group.start, "R")
+        if compact:
+            return f"{window} · {countdown}"
+        return f"{window} · starts {countdown}"
+    countdown = format_dt(group.end, "R")
+    if compact:
+        return f"ends {countdown}"
+    return f"ends {group.end_local:%B %-d} {countdown}"
+
+
+def _fit_timing(group: mtgscribe.EventGroup, lead_cols: int, *, upcoming: bool) -> str:
+    """The timing tail for an event line, trimmed to fit. Upcoming: keep ``starts`` only while the
+    whole line stays well clear of the wrap point, then drop it, then drop the date range. Competitive
+    events invert that — their short window is the point, so the range is kept and the countdown is
+    dropped instead. In progress: drop the explicit end date (keeping ``ends {countdown}``) on overflow."""
+    if upcoming:
+        with_range = _timing(group, upcoming=True, compact=True)
+        if group.competitive:
+            if lead_cols + _text_cols(with_range) <= LINE_MAX_WIDTH:
+                return with_range
+            return _date_range(group.start_local, group.end_local)
+        with_starts = _timing(group, upcoming=True, compact=False)
+        if lead_cols + _text_cols(with_starts) <= SAFE_STARTS_WIDTH:
+            return with_starts
+        if lead_cols + _text_cols(with_range) <= LINE_MAX_WIDTH:
+            return with_range
+        return format_dt(group.start, "R")
+    full = _timing(group, upcoming=False, compact=False)
+    if lead_cols + _text_cols(full) <= LINE_MAX_WIDTH:
+        return full
+    return _timing(group, upcoming=False, compact=True)
 
 
 def _decorate_arena_champ(formats: str, emojis: dict) -> str:
@@ -311,7 +385,8 @@ def _format_label(group: mtgscribe.EventGroup) -> str:
         return group.formats[0]
     if len(group.formats) > 3:
         ranked = sorted(group.formats, key=lambda label: FORMAT_PRIORITY.get(label, 99))
-        return f"{_join_formats(ranked[:2])}, others"
+        names = [short_format(label).removesuffix(" Draft") for label in ranked[:2]]
+        return f"{', '.join(names)} and others"
     return _join_formats(group.formats)
 
 
@@ -377,20 +452,33 @@ def _passes_format(event: mtgscribe.ScribeEvent, selected: str | None) -> bool:
 
 
 def _is_competitive(tag_slugs: tuple) -> bool:
-    return any(tag in tag_slugs for tag in COMPETITIVE_TAGS)
+    return any(tag in tag_slugs for tag in mtgscribe.COMPETITIVE_TAGS)
 
 
 def _passes_set(event: mtgscribe.ScribeEvent, set_query: str | None) -> bool:
     return not set_query or set_query.lower() in event.group_label.lower()
 
 
-def _subtitle(set_query: str | None, selected: str | None) -> str | None:
+FORMAT_TITLES = {
+    "premier": "Premier Draft",
+    "quick": "Quick Draft",
+    "draft": "Draft",
+    "sealed": "Sealed",
+    "midweek": "Midweek",
+    "competitive": "Competitive",
+}
+
+
+def _heading_scope(set_query: str | None, selected: str | None) -> str:
+    """The descriptor before "Event Schedule": the set, the format, both, or "Limited" when neither
+    is filtered. The Midweek and Competitive filters surface Constructed queues, so the default
+    Limited framing only holds when nothing is selected."""
     parts = []
     if set_query:
         parts.append(set_query)
     if selected:
-        parts.append(selected.capitalize())
-    return " · ".join(parts) if parts else None
+        parts.append(FORMAT_TITLES.get(selected, selected.capitalize()))
+    return " ".join(parts) if parts else "Limited"
 
 
 def normalize_event(event: mtgscribe.ScribeEvent) -> mtgscribe.ScribeEvent:

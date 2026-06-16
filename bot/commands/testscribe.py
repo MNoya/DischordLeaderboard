@@ -24,19 +24,22 @@ async def setup(bot: commands.Bot) -> None:
         """Owner-only. Render the schedule embed from synthetic events through the real pipeline."""
         in_progress, upcoming = process_events(_fixture_events(datetime.now(timezone.utc)))
         emojis = {emoji.name: emoji for emoji in await ctx.bot.fetch_application_emojis()}
-        await ctx.send(**build_schedule_payload(in_progress, upcoming, emojis))
+        await ctx.send(**build_schedule_payload(in_progress, upcoming, emojis, scope="Marvel Super Heroes"))
 
 
 def _fixture_events(now: datetime) -> list:
     in_progress = [
-        _scribe_event("Premier Draft", now, -30, 8),
-        _scribe_event("Pick Two", now, -30, 8),
-        _scribe_event("Traditional Draft", now, -30, 8),
+        _scribe_event("Premier Draft", now, -30, 26 / 24),
+        _scribe_event("Pick Two", now, -30, 26 / 24),
+        _scribe_event("Traditional Draft", now, -30, 26 / 24),
         _scribe_event("Sealed", now, -10, 5),
         _scribe_event("Quick Draft", now, -5, 2),
         _arena_direct("Play Booster Boxes", "play-boosters", now, -2, 4),
     ]
     coming_up = [
+        _scribe_event("Premier Draft", now, 33, 40),
+        _scribe_event("Pick Two", now, 33, 40),
+        _scribe_event("Traditional Draft", now, 33, 40),
         _scribe_event("Premier Draft", now, 9, 16),
         _arena_direct("Play Booster Boxes", "play-boosters", now, 3, 6),
         _arena_direct("Play Booster Boxes", "play-boosters", now, 10, 13),
