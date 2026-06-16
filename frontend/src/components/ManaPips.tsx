@@ -1,7 +1,7 @@
 // Mana symbols backed by Andrew Gioia's Mana Font (loaded from CDN in
 // index.html). Sized via font-size — `ms-cost` tracks it.
 
-type Color = "W" | "U" | "B" | "R" | "G";
+type Color = "W" | "U" | "B" | "R" | "G" | "C";
 
 // ManaCost is used for rendering the mana cost of a card, based on the {W}{U}{2} style cost string from Scryfall.
 export function ManaCost({ cost, size = 14 }: { cost: string; size?: number }) {
