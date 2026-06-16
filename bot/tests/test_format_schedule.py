@@ -196,7 +196,7 @@ def test_next_rotation_is_none_when_nothing_follows():
 
 
 def test_select_groups_ors_flashback_and_quick():
-    now = datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
     events = [
         _event("Premier Draft", "Aetherdrift", ("arena", "limited", "flashback", "premier-draft"), now, 1, 8),
         _event("Quick Draft", "Bloomburrow", ("arena", "limited", "quick-draft"), now, 1, 8),
@@ -210,7 +210,7 @@ def test_select_groups_ors_flashback_and_quick():
 
 
 def test_select_groups_cube_filter_matches_cube_tag():
-    now = datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
     events = [
         _event("Premier Draft", "Arena Powered Cube", ("arena", "limited", "premier-draft", "cube"), now, 1, 8),
         _event("Premier Draft", "Secrets of Strixhaven", ("arena", "limited", "premier-draft"), now, 1, 8),
