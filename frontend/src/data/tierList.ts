@@ -3,18 +3,24 @@ import { useQueries } from "@tanstack/react-query";
 import {
   TIER_LIST_DATA_BASE,
   TIER_LIST_DATA_BASE_OVERRIDES,
+  TIER_LIST_GRADERS,
   TIER_LIST_PREVIEW_SETS,
   TIER_LIST_UIDS,
 } from "./constants";
 import type { SetSummary } from "../types/leaderboard";
 
+// A set has a tier list if it has a consensus list of its own or grader lists to compare.
+export function hasTierList(code: string): boolean {
+  return Boolean(TIER_LIST_UIDS[code]) || (TIER_LIST_GRADERS[code]?.length ?? 0) > 0;
+}
+
 // Sets that have a tier list (live feed or preview snapshot), newest first.
 // The first entry is the latest available tier list.
 export function buildTierListSets(sets: SetSummary[] | undefined): SetSummary[] {
-  const live = (sets ?? []).filter((s) => TIER_LIST_UIDS[s.code]);
+  const live = (sets ?? []).filter((s) => hasTierList(s.code));
   const liveCodes = new Set(live.map((s) => s.code));
   const previews = Object.entries(TIER_LIST_PREVIEW_SETS)
-    .filter(([code]) => TIER_LIST_UIDS[code] && !liveCodes.has(code))
+    .filter(([code]) => hasTierList(code) && !liveCodes.has(code))
     .map(
       ([code, info]): SetSummary => ({
         code,

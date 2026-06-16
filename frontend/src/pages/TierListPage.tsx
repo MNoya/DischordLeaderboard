@@ -50,9 +50,11 @@ export function TierListPage() {
   const setMeta = tierListSets.find((s) => s.code === current);
   const uid = TIER_LIST_UIDS[current];
   const graders = TIER_LIST_GRADERS[current] ?? [];
+  const comparison = !uid && graders.length > 0;
+  const effectiveUid = uid || graders[0]?.uid;
   const glyphCode = setMeta ? setGlyphCode(setMeta) : current;
 
-  const { data: tierData, lastUpdated } = useTierList(uid);
+  const { data: tierData, lastUpdated } = useTierList(effectiveUid);
   const filterOptions = useMemo(
     () => tierFilterOptions(tierData ?? []),
     [tierData],
@@ -61,7 +63,7 @@ export function TierListPage() {
 
   useEffect(() => {
     setFilters(EMPTY_FILTERS);
-  }, [uid]);
+  }, [effectiveUid]);
 
   useEffect(() => {
     const header = headerRef.current;
@@ -92,7 +94,7 @@ export function TierListPage() {
                   />
                 </h1>
 
-                {uid && (
+                {effectiveUid && (
                   <button
                     type="button"
                     onClick={() => setFiltersOpen((open) => !open)}
@@ -143,7 +145,7 @@ export function TierListPage() {
                 className="mt-1.5 whitespace-nowrap text-[clamp(8px,2.8vw,11px)]"
               />
 
-              {uid && filtersReady && filtersOpen && (
+              {effectiveUid && filtersReady && filtersOpen && (
                 <div className="pt-3">
                   <TierFilterBar
                     filters={filters}
@@ -174,7 +176,7 @@ export function TierListPage() {
                 <ListMeta lastUpdated={lastUpdated} className="mt-1 pl-[2px] text-[11px]" />
               </div>
 
-              {uid && filtersReady ? (
+              {effectiveUid && filtersReady ? (
                 <div className="justify-self-center -translate-y-1">
                   <TierFilterBar
                     filters={filters}
@@ -194,10 +196,11 @@ export function TierListPage() {
           )}
         </div>
 
-        {uid ? (
+        {effectiveUid ? (
           <TierGrid
-            uid={uid}
+            uid={effectiveUid}
             graders={graders}
+            comparison={comparison}
             filters={filters}
             hideArt={hideArt}
             stickyTop={headerHeight}
@@ -210,7 +213,7 @@ export function TierListPage() {
 
         <div className="pt-2 text-right">
           <a
-            href={`https://www.17lands.com/tier_list/${uid ?? ""}`}
+            href={`https://www.17lands.com/tier_list/${effectiveUid ?? ""}`}
             target="_blank"
             rel="noreferrer"
             className="mono text-[10px] md:text-[12px] text-muted hover:text-green transition-colors no-underline"

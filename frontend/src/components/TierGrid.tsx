@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, Fragment, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "../lib/utils";
 import { useIsMobile } from "../lib/use-is-mobile";
@@ -62,15 +62,21 @@ function tierColor(tier: string): string {
   return `hsl(${hue}, 62%, 47%)`;
 }
 
+// When a set has no consensus list, the grid is built from grader lists alone: the popup
+// compares each grader's grade instead of showing a single consensus grade.
+const ComparisonContext = createContext(false);
+
 export function TierGrid({
   uid,
   graders,
+  comparison = false,
   filters,
   hideArt,
   stickyTop,
 }: {
   uid: string;
   graders: Grader[];
+  comparison?: boolean;
   filters: TierFilters;
   hideArt: boolean;
   stickyTop: number;
@@ -104,10 +110,14 @@ export function TierGrid({
     });
   }
 
-  return isMobile ? (
-    <MobileTiers byKey={byKey} filters={filters} hideArt={hideArt} />
-  ) : (
-    <DesktopGrid byKey={byKey} filters={filters} hideArt={hideArt} stickyTop={stickyTop} />
+  return (
+    <ComparisonContext.Provider value={comparison}>
+      {isMobile ? (
+        <MobileTiers byKey={byKey} filters={filters} hideArt={hideArt} />
+      ) : (
+        <DesktopGrid byKey={byKey} filters={filters} hideArt={hideArt} stickyTop={stickyTop} />
+      )}
+    </ComparisonContext.Provider>
   );
 }
 
@@ -494,7 +504,17 @@ function trendGlyphStack(card: TierCard): string[] {
 }
 
 function GradesPanel({ card }: { card: TierCard }) {
+  const comparison = useContext(ComparisonContext);
   const graders = card.graders ?? [];
+  if (comparison && graders.length > 0) {
+    return (
+      <div className="flex items-stretch px-3 py-2.5">
+        {graders.map((grade) => (
+          <GradeCell key={grade.name} caption={grade.name} tier={grade.tier} />
+        ))}
+      </div>
+    );
+  }
   return (
     <div className="flex items-stretch px-3 py-2.5">
       <GradeCell caption="Set review" tier={card.trend_from ?? card.tier} />

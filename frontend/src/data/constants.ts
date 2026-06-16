@@ -14,22 +14,22 @@ export const DISCORD_GUILD_ID = "775371722065051658";
 // 17Lands tier-list ids per set, taken from a tier list's share link
 // (https://www.17lands.com/tier_list/<uid>). Add one as each set rotates in.
 export const TIER_LIST_UIDS: Record<string, string> = {
-  MSH: "11bab60203f2410a94a41bb7981bae09",
   SOS: "e195401b1eaa48e3b5d6670e0ae338e9",
   TMT: "fd5499ae88854ca0ac1bc2ad95ade9b2",
   ECL: "1745e64176864bb2bec132cbd601b604",
   TLA: "efdfa8408fb448be846ac06f9d9192ff",
 };
 
-// Per-set host graders whose locked set-review lists join onto the consensus by card
-// name; shown in the card popup until a card gets its first regrade.
+// Per-set host graders. With a consensus list their grades join onto it by card name and
+// show in the popup; with no consensus list the first grader drives grid placement and the
+// popup compares all graders side by side.
 export const TIER_LIST_GRADERS: Record<
   string,
   Array<{ name: string; uid: string }>
 > = {
   MSH: [
-    { name: "Alex", uid: "4806ce67270a4ea392fd1736bb8e708f" },
-    { name: "Marc", uid: "a3c1255425a44f5b866a967f0a5b131e" },
+    { name: "Alex", uid: "b07c077b8c8145288f75d71bf4f90d65" },
+    { name: "Marc", uid: "e0c4c50e90914ac390a1f792e0717ed2" },
   ],
 };
 
@@ -49,7 +49,4 @@ export const TIER_LIST_DATA_BASE = "/api/tier-list";
 
 // Per-uid full fetch URLs for tier lists not served by 17Lands (e.g. a fixture
 // snapshot under public/tier-fixtures for a set not yet public upstream).
-export const TIER_LIST_DATA_BASE_OVERRIDES: Record<string, string> = {
-  "11bab60203f2410a94a41bb7981bae09":
-    "/tier-fixtures/11bab60203f2410a94a41bb7981bae09.json",
-};
+export const TIER_LIST_DATA_BASE_OVERRIDES: Record<string, string> = {};
