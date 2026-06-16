@@ -238,7 +238,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         # Commands registered globally (their allowed_contexts decides where they're visible).
         # Only /refresh is guild-scoped (admin command) — everything else goes global.
         GLOBAL_COMMANDS = {"leaderboard", "join", "retire", "exile", "stats", "help",
-                           "link-17lands", "link-arena", "opt-out"}
+                           "link-17lands", "link-arena", "opt-out", "event-scribe"}
 
         bot.tree.copy_global_to(guild=guild)
         # Strip globally-registered commands from the guild tree to avoid duplicate registration
