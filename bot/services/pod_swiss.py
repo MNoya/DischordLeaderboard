@@ -168,9 +168,11 @@ def compute_standings(
         if m.winner_id == a:
             wins[a] += 1
             losses[b] += 1
-        else:
+        elif m.winner_id == b:
             wins[b] += 1
             losses[a] += 1
+        else:
+            continue
         a_won, a_lost = m.games_for(a)
         b_won, b_lost = m.games_for(b)
         games_won[a] += a_won

@@ -205,6 +205,22 @@ def test_compute_standings_basic_records():
     assert standings[0].player_id == "p0"
 
 
+def test_compute_standings_excludes_skipped_match():
+    roster = players(4)
+    matches = [
+        match(1, "p0", "p2", "p0", "2-0"),
+        match(1, "p1", "p3", "p1", "2-0"),
+        match(2, "p0", "p1", "(skipped)", "0-0"),
+    ]
+
+    standings = compute_standings(roster, matches)
+
+    by_id = {s.player_id: s for s in standings}
+    assert (by_id["p0"].wins, by_id["p0"].losses) == (1, 0)
+    assert (by_id["p1"].wins, by_id["p1"].losses) == (1, 0)
+    assert (by_id["p0"].gw_pct, by_id["p1"].gw_pct) == (1.0, 1.0)
+
+
 def test_compute_standings_omw_pct_breaks_tie():
     roster = players(4)
     # p0 and p2 both go 1-0. p0 beats p1 (who is otherwise 0-1). p2 beats p3 (who beats p1 in a different match).

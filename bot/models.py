@@ -9,16 +9,32 @@ from sqlalchemy import (
     Index,
     Integer,
     LargeBinary,
+    PrimaryKeyConstraint,
     String,
+    Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, relationship
 from sqlalchemy.sql import func, text
 
 
 class Base(DeclarativeBase):
     pass
+
+
+class P0P1Entry(Base):
+    __tablename__ = "p0p1_entries"
+
+    user_id    = Column(UUID(as_uuid=True), nullable=False)
+    set_code   = Column(Text, nullable=False)
+    slot       = Column(Text, nullable=False)
+    card_name  = Column(Text, nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        PrimaryKeyConstraint("user_id", "set_code", "slot"),
+    )
 
 
 class Player(Base):
@@ -174,6 +190,7 @@ class PodDraftEvent(Base):
     seating_mode        = Column(String, nullable=False, server_default="random")
     current_round       = Column(Integer, nullable=True)
     draft_log_gz        = Column(LargeBinary, nullable=True)
+    draft_log           = Column(JSONB, nullable=True)
     discord_event_id    = Column(String, nullable=True)
     created_at          = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     finalized_at        = Column(DateTime(timezone=True), nullable=True)
@@ -207,8 +224,6 @@ class PodDraftParticipant(Base):
     record              = Column(String, nullable=True)
     eliminated_round    = Column(Integer, nullable=True)
     draft_log_url       = Column(String, nullable=True)
-    mainboard_card_ids  = Column(JSONB, nullable=True)
-    mainboard_cards     = Column(JSONB, nullable=True)
     deck_colors             = Column(String, nullable=True)
     deck_screenshot_url     = Column(String, nullable=True)
     deck_screenshot_caption = Column(String, nullable=True)

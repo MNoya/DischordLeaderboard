@@ -5,6 +5,7 @@ from sqlalchemy import select
 
 from bot.config import settings
 from bot.models import MagicSet, Player, PodDraftEvent, PodDraftParticipant
+from bot.scripts.draftmancer_log import build_compact
 from bot.services.pod_drafts import (
     FinalStanding,
     ParsedSeshEvent,
@@ -583,62 +584,52 @@ def test_set_participant_review_choice_rejects_non_participant(session):
     assert set_participant_review_choice(session, "thread-42", "99", True) is False
 
 
-def test_apply_mainboards_writes_when_decklist_present_and_skips_others(session):
-    from bot.services.pod_draft_manager import apply_mainboards
-
-    _seed_set(session)
-    event = record_event(session, _parsed_event(attendees=("Alice", "Bob", "Carl", "Dee")))
-    upsert_participant(session, event.id, display_name="Alice", draftmancer_name="Alice#1")
-    upsert_participant(session, event.id, display_name="Bob", draftmancer_name="Bob#2")
-    upsert_participant(session, event.id, display_name="Carl", draftmancer_name="Carl#3")
-    upsert_participant(session, event.id, display_name="Dee", draftmancer_name=None)
-    session.flush()
-
-    log_payload = {
-        "users": {
-            "u1": {"userName": "Alice#1", "decklist": {"main": ["c-a1", "c-a2", "c-a3"]}},
-            "u2": {"userName": "Bob#2"},
-            "u3": {"userName": "Carl#3", "decklist": {"main": ["c-c1"]}, "isBot": True},
-            "u4": {"userName": "Dee", "decklist": {"main": ["c-d1", "c-d2"]}},
-            "u5": {"userName": "DisChordBot", "decklist": {"main": ["junk"]}},
-            "u6": {"userName": "Bot #1", "decklist": {"main": ["junk"]}},
-        },
-    }
-    apply_mainboards(session, event.id, log_payload)
-    session.flush()
-
-    by_name = {
-        r.display_name: r
-        for r in session.execute(
-            select(PodDraftParticipant).where(PodDraftParticipant.event_id == event.id)
-        ).scalars().all()
-    }
-    assert by_name["Alice"].mainboard_card_ids == ["c-a1", "c-a2", "c-a3"]
-    assert by_name["Bob"].mainboard_card_ids is None
-    assert by_name["Carl"].mainboard_card_ids is None
-    assert by_name["Dee"].mainboard_card_ids == ["c-d1", "c-d2"]
-
-
-def test_resolve_mainboard_groups_nonbasics_and_tallies_basics():
-    from bot.services.pod_draft_manager import resolve_mainboard
-
+def _draft_log_payload():
     carddata = {
-        "id-bolt": {"name": "Bolt", "set": "sos", "collector_number": "1", "colors": ["R"], "cmc": 1},
-        "id-bear": {"name": "Bear", "set": "sos", "collector_number": "2", "colors": ["G"], "cmc": 2},
+        "a": {"name": "Bolt", "collector_number": "1", "set": "sos", "rarity": "common",
+              "colors": ["R"], "cmc": 1, "type": "Instant"},
+        "b": {"name": "Bear", "collector_number": "2", "set": "sos", "rarity": "common",
+              "colors": ["G"], "cmc": 2, "type": "Creature"},
+        "c": {"name": "Forest", "collector_number": "3", "set": "sos", "rarity": "common",
+              "colors": [], "cmc": 0, "type": "Land"},
+        "d": {"name": "Drake", "collector_number": "4", "set": "sos", "rarity": "uncommon",
+              "colors": ["U"], "cmc": 3, "type": "Creature"},
+    }
+    users = {
+        "u1": {"userName": "Alice#1", "picks": [], "decklist": {"main": ["a", "c"], "side": ["b"]}},
+        "u2": {"userName": "Bob#2", "picks": []},
+    }
+    return {
+        "sessionID": "S1", "time": "t", "setRestriction": ["SOS"],
+        "carddata": carddata, "users": users, "boosters": [["a", "b"], ["c", "d"]],
     }
 
-    resolved = resolve_mainboard(["id-bear", "id-bolt", "id-bolt"], {"R": 0, "G": 9, "U": 0}, carddata)
 
-    assert resolved["basics"] == {"Forest": 9}
-    assert [(c["name"], c["count"]) for c in resolved["cards"]] == [("Bolt", 2), ("Bear", 1)]
-    assert resolved["cards"][0]["collectorNumber"] == "1"
+def test_build_compact_card_table_drops_id_and_carries_cmc_and_type():
+    compact = build_compact(_draft_log_payload())
+
+    assert compact["v"] == 2
+    first = compact["cards"][0]
+    assert "id" not in first
+    assert set(first) == {"n", "cn", "s", "r", "c", "cmc", "type"}
+    assert (first["cmc"], first["type"]) == (1, "Instant")
 
 
-def test_resolve_mainboard_returns_none_when_ids_unresolvable():
-    from bot.services.pod_draft_manager import resolve_mainboard
+def test_build_compact_decks_are_card_indices_aligned_to_seats():
+    compact = build_compact(_draft_log_payload())
 
-    assert resolve_mainboard(["missing"], None, {"present": {"name": "X"}}) is None
-    assert resolve_mainboard(["x"], None, None) is None
+    assert len(compact["decks"]) == len(compact["seats"])
+    assert compact["decks"][0] == {"main": [0, 2], "side": [1]}
+    assert compact["decks"][1] == {"main": [], "side": []}
+
+
+def test_build_compact_decklist_ids_absent_from_card_table_are_dropped():
+    payload = _draft_log_payload()
+    payload["users"]["u1"]["decklist"]["main"].append("missing-card")
+
+    compact = build_compact(payload)
+
+    assert compact["decks"][0]["main"] == [0, 2]
 
 
 @pytest.mark.parametrize(

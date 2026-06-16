@@ -10,6 +10,7 @@ export function Tooltip({
   className,
   open,
   onOpenChange,
+  delayDuration,
 }: {
   label: string;
   side?: "top" | "right" | "bottom" | "left";
@@ -18,9 +19,10 @@ export function Tooltip({
   className?: string;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  delayDuration?: number;
 }) {
   return (
-    <Root open={open} onOpenChange={onOpenChange}>
+    <Root open={open} onOpenChange={onOpenChange} delayDuration={delayDuration}>
       <Trigger asChild>{children}</Trigger>
       <Portal>
         <Content

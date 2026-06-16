@@ -1,4 +1,5 @@
 import type {
+  PodDraftArtifact,
   PodEventMatchRow,
   PodEventParticipantRow,
   PodEventReplayRow,
@@ -199,6 +200,31 @@ export const podEventParticipantsFixture: PodEventParticipantRow[] = [
   ...peasantParticipants,
   ...mockParticipants,
 ];
+
+const mockArtifactCards: PodDraftArtifact["cards"] = [
+  { n: "Galvanic Discharge", cn: "131", s: "sos", r: "common", c: ["R"], cmc: 1, type: "Instant" },
+  { n: "Iridescent Vinelasher", cn: "98", s: "sos", r: "uncommon", c: ["G"], cmc: 2, type: "Creature" },
+  { n: "Sentinel of the Nameless City", cn: "201", s: "sos", r: "rare", c: ["G"], cmc: 3, type: "Creature" },
+  { n: "Heated Argument", cn: "118", s: "sos", r: "common", c: ["R"], cmc: 3, type: "Instant" },
+  { n: "Wystan, Trinket Trapper", cn: "224", s: "sos", r: "rare", c: ["R", "G"], cmc: 4, type: "Creature" },
+  { n: "Drakeskin Construct", cn: "247", s: "sos", r: "common", c: [], cmc: 5, type: "Artifact Creature" },
+  { n: "Mountain", cn: "279", s: "sos", r: "common", c: [], cmc: 0, type: "Basic Land" },
+  { n: "Forest", cn: "281", s: "sos", r: "common", c: [], cmc: 0, type: "Basic Land" },
+];
+
+export const podDraftArtifactFixture: Record<string, PodDraftArtifact> = {
+  "mock-sos-mock-1": {
+    v: 2,
+    set: "sos",
+    seats: mockParticipants.map((p) => p.draftmancerName ?? p.displayName),
+    cards: mockArtifactCards,
+    packs: [],
+    picks: [],
+    decks: mockParticipants.map((_, i) =>
+      i === 0 ? { main: [0, 1, 1, 2, 3, 4, 5, 6, 7], side: [2, 3, 5] } : { main: [], side: [] },
+    ),
+  },
+};
 
 export const podEventMatchesFixture: PodEventMatchRow[] = [
   ...podSos3Fixture.matches.map((m) => ({

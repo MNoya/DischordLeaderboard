@@ -54,8 +54,8 @@ MSG_CHAMPIONSHIP_WEEK = (
 )
 
 MSG_SEASON_OVER = (
-    "🏁 That's a wrap on **{set_code}** — the champion's crowned and the season's done. Regular pods are paused "
-    "until **{next_name}** drops <t:{unix}:R>."
+    "🏁 That's a wrap on **{set_code}** — the champion's crowned and the season's done.\n"
+    "Regular pods are paused until **{next_name}** drops <t:{unix}:R>."
 )
 
 MSG_UNDERFILL = (

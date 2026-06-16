@@ -73,6 +73,10 @@ const config: Config = {
           "0%": { transform: "translateX(0)" },
           "100%": { transform: "translateX(-50%)" },
         },
+        drawCheck: {
+          "0%": { strokeDashoffset: "24" },
+          "100%": { strokeDashoffset: "0" },
+        },
       },
       animation: {
         pulse: "pulse 1.4s infinite",
@@ -83,6 +87,7 @@ const config: Config = {
         slideInUp: "slideInUp 280ms cubic-bezier(0.22, 1, 0.36, 1) both",
         loadingBar: "loadingBar 1.1s ease-in-out infinite",
         marquee: "marquee 40s linear infinite",
+        drawCheck: "drawCheck 420ms cubic-bezier(0.65, 0, 0.35, 1) 160ms both",
       },
     },
   },

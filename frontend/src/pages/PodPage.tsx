@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { AppHeader } from "../components/AppHeader";
@@ -12,12 +12,14 @@ import { MobileSeatStack, MobileSeatStackSkeleton } from "../components/pod/Mobi
 import { DeckScreenshotModal } from "../components/pod/DeckScreenshotModal";
 import {
   useLeaderboard,
+  usePodDraftArtifact,
   usePodEventBySlug,
   usePodEventMatches,
   usePodEventParticipants,
   usePodEventReplays,
   usePodEvents,
 } from "../data/hooks";
+import { resolveDeck } from "../data/draft-artifact";
 import { cleanPodEventName, podDiscordName, podSeatName } from "../data/utils";
 import type {
   PodEventParticipantRow,
@@ -98,6 +100,17 @@ export function PodPage() {
   const { data: event, isLoading: eventLoading } = usePodEventBySlug(slug);
   const eventId = event?.eventId;
   const { data: participantRows, isLoading: participantsLoading } = usePodEventParticipants(eventId);
+  const { data: draftArtifact } = usePodDraftArtifact(eventId);
+  const deckTargetMainboard = useMemo(
+    () => (draftArtifact && deckTarget ? resolveDeck(draftArtifact, deckTarget.seatIndex) : null),
+    [draftArtifact, deckTarget],
+  );
+  const cycleDeck = (direction: number) => {
+    if (!deckTarget || seats.length === 0) return;
+    const index = seats.findIndex((s) => s.seatIndex === deckTarget.seatIndex);
+    if (index === -1) return;
+    setDeckTarget(seats[(index + direction + seats.length) % seats.length]);
+  };
   const { data: matches, isLoading: matchesLoading } = usePodEventMatches(eventId);
   const { data: replays, isLoading: replaysLoading } = usePodEventReplays(eventId);
   const { data: setEvents } = usePodEvents(event?.setCode);
@@ -126,6 +139,7 @@ export function PodPage() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (deckTarget) return;
       if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
       const t = e.target;
       if (t instanceof HTMLElement) {
@@ -141,7 +155,7 @@ export function PodPage() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [prevTo, nextTo, navigate]);
+  }, [prevTo, nextTo, navigate, deckTarget]);
 
   const seats = useMemo<PodSeat[]>(
     () => (participantRows ? assignSeats(participantRows) : []),
@@ -157,32 +171,7 @@ export function PodPage() {
   const selectedParticipant =
     selectedSeat == null ? null : seats.find((p) => p.seatIndex === selectedSeat) ?? null;
 
-  const shellRef = useRef<HTMLDivElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
-
   const [displayParticipant, setDisplayParticipant] = useState<PodSeat | null>(selectedParticipant);
-
-  useLayoutEffect(() => {
-    const shell = shellRef.current;
-    const content = contentRef.current;
-    if (!shell || !content) return;
-    let restoreTimeout: number | null = null;
-    const apply = () => {
-      shell.style.overflowY = "hidden";
-      shell.style.height = `${content.offsetHeight + 2}px`;
-      if (restoreTimeout !== null) clearTimeout(restoreTimeout);
-      restoreTimeout = window.setTimeout(() => {
-        shell.style.overflowY = "";
-      }, 320);
-    };
-    apply();
-    const obs = new ResizeObserver(apply);
-    obs.observe(content);
-    return () => {
-      obs.disconnect();
-      if (restoreTimeout !== null) clearTimeout(restoreTimeout);
-    };
-  }, []);
 
   useEffect(() => {
     if (selectedParticipant) {
@@ -336,9 +325,13 @@ export function PodPage() {
               deckColors: deckTarget.deckColors,
               deckScreenshotUrl: deckTarget.deckScreenshotUrl,
               deckScreenshotCaption: deckTarget.deckScreenshotCaption,
+              mainboard: deckTargetMainboard,
               record: deckTarget.record,
+              draftLogUrl: deckTarget.draftLogUrl,
             }}
             onClose={() => setDeckTarget(null)}
+            onPrev={() => cycleDeck(-1)}
+            onNext={() => cycleDeck(1)}
           />
         )}
       </div>
@@ -384,7 +377,7 @@ export function PodPage() {
             />
           </div>
           <div
-            className="min-w-0 shrink-0 self-start max-h-full"
+            className="min-w-0 shrink-0 self-start max-h-full flex flex-col min-h-0"
             style={{
               width: open ? "45%" : "0%",
               opacity: open ? 1 : 0,
@@ -393,11 +386,8 @@ export function PodPage() {
                 : "none",
             }}
           >
-            <div
-              ref={shellRef}
-              className="pod-panel-shell bg-surface border border-border max-h-full overflow-y-auto overflow-x-hidden themed-scrollbar"
-            >
-              <div ref={contentRef} style={{ minWidth: 360 }}>
+            <div className="pod-panel-shell bg-surface border border-border flex flex-col min-h-0 flex-1 overflow-hidden">
+              <div className="flex flex-col min-h-0 flex-1" style={{ minWidth: 360 }}>
                 {displayParticipant && (
                   <PlayerSeatPanel
                     key={displayParticipant.displayName}
@@ -431,9 +421,13 @@ export function PodPage() {
             deckColors: deckTarget.deckColors,
             deckScreenshotUrl: deckTarget.deckScreenshotUrl,
             deckScreenshotCaption: deckTarget.deckScreenshotCaption,
+            mainboard: deckTargetMainboard,
             record: deckTarget.record,
+            draftLogUrl: deckTarget.draftLogUrl,
           }}
           onClose={() => setDeckTarget(null)}
+          onPrev={() => cycleDeck(-1)}
+          onNext={() => cycleDeck(1)}
         />
       )}
     </div>

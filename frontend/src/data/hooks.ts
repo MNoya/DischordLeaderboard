@@ -4,13 +4,15 @@
 // fetch logic, fixtures, or supabase. Wired through TanStack Query so caching
 // keys, stale-time, and idle prefetch sit in one place.
 
-import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 
 import {
   fetchAvailableFormats,
   fetchColorsLeaderboard,
   fetchColorsSummary,
+  fetchP0P1Cards,
+  fetchP0P1Picks,
   fetchFormatColorsLeaderboard,
   fetchFormatLeaderboard,
   fetchFormatRecentTrophies,
@@ -19,6 +21,7 @@ import {
   fetchPlayerDraftEvents,
   fetchPlayerIdentity,
   fetchPlayerProfile,
+  fetchPodDraftArtifact,
   fetchPodEventBySlug,
   fetchPodEventMatches,
   fetchPodEventParticipants,
@@ -28,9 +31,12 @@ import {
   fetchPodSetCodes,
   fetchRecentTrophies,
   fetchSets,
+  upsertP0P1Pick,
+  deleteAllP0P1Picks,
 } from "./api";
 import { fetchEpisodes } from "./episodes";
 import { fetchYouTubeVideos, mergeMedia } from "./youtube";
+import type { P0P1Pick, SlotKey } from "../types/p0p1";
 import { MULTI, OTHER } from "./filters";
 const FIVE_MINUTES = 5 * 60 * 1000;
 const ONE_HOUR = 60 * 60 * 1000;
@@ -306,6 +312,15 @@ export function usePodEventParticipants(eventId: string | undefined) {
   });
 }
 
+export function usePodDraftArtifact(eventId: string | undefined) {
+  return useQuery({
+    queryKey: ["pod-draft-artifact", eventId],
+    queryFn: () => fetchPodDraftArtifact(eventId!),
+    enabled: !!eventId,
+    staleTime: FIVE_MINUTES,
+  });
+}
+
 export function usePodEventBySlug(slug: string | undefined) {
   return useQuery({
     queryKey: ["pod-event-by-slug", slug],
@@ -347,5 +362,67 @@ export function usePodSetCodes() {
     queryKey: ["pod-set-codes"],
     queryFn: fetchPodSetCodes,
     staleTime: FIVE_MINUTES,
+  });
+}
+
+// --- P0P1 contest ---
+
+export function useP0P1Cards(setCode: string | undefined) {
+  return useQuery({
+    queryKey: ["p0p1-cards", setCode],
+    queryFn: () => fetchP0P1Cards(setCode!),
+    enabled: !!setCode,
+    staleTime: FIVE_MINUTES,
+  });
+}
+
+export function useP0P1Picks(setCode: string | undefined) {
+  return useQuery({
+    queryKey: ["p0p1-picks", setCode],
+    queryFn: () => fetchP0P1Picks(setCode!),
+    enabled: !!setCode,
+    staleTime: FIVE_MINUTES,
+  });
+}
+
+export function useUpsertP0P1Pick(setCode: string) {
+  const qc = useQueryClient();
+  const queryKey = ["p0p1-picks", setCode];
+  return useMutation({
+    mutationFn: ({ slot, cardName }: { slot: SlotKey; cardName: string }) =>
+      upsertP0P1Pick(setCode, slot, cardName),
+    onMutate: async ({ slot, cardName }) => {
+      await qc.cancelQueries({ queryKey });
+      const prev = qc.getQueryData<P0P1Pick[]>(queryKey);
+      qc.setQueryData<P0P1Pick[]>(queryKey, (old = []) => {
+        const next = old.filter((v) => v.slot !== slot);
+        next.push({ slot, cardName, lastUpdated: new Date().toISOString() });
+        return next;
+      });
+      return { prev };
+    },
+    // TODO: surface failure to the user (toast or inline banner)
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(queryKey, ctx.prev);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey }),
+  });
+}
+
+export function useDeleteAllP0P1Picks(setCode: string) {
+  const qc = useQueryClient();
+  const queryKey = ["p0p1-picks", setCode];
+  return useMutation({
+    mutationFn: () => deleteAllP0P1Picks(setCode),
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey });
+      const prev = qc.getQueryData<P0P1Pick[]>(queryKey);
+      qc.setQueryData<P0P1Pick[]>(queryKey, []);
+      return { prev };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(queryKey, ctx.prev);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey }),
   });
 }
