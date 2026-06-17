@@ -1,16 +1,16 @@
-# Pack 0, Pick 1 — Post-Voting Display
+# Pack 0, Pick 1 — Post-Submission Display
 
 ## Overview
 
-Once the voting deadline passes (~June 23 for MSH), the P0P1 page locks picks and enters a waiting period until the scoring date (~4 weeks after set release). During this window the page should show community pick statistics so users have a reason to come back.
+Once the submission deadline passes (~June 23 for MSH), the P0P1 page locks picks and enters a waiting period until the scoring date (~4 weeks after set release). During this window the page should show community pick statistics so users have a reason to come back.
 
-This spec covers **only the post-voting display**. Scoring mechanics, the results leaderboard, and the highlights reel (best possible team, overrated/underrated cards, etc.) are a separate phase.
+This spec covers **only the post-submission display**. Scoring mechanics, the results leaderboard, and the highlights reel (best possible team, overrated/underrated cards, etc.) are a separate phase.
 
 ## What the page shows after the deadline
 
 ### 1. Hero section adapts
 
-- The countdown switches from "Closes in X days" to "Scoring in X days, Y hours" targeting the scoring date.
+- The countdown switches from "Closes in X days" to "Results in X days" targeting the scoring date. Show hours when it's less than 2 days remaining.
 - Intro text updates to something like: "Picks are locked. Scoring begins when 17Lands data is finalized."
 - The progress bar (`belowIntro` slot) is replaced with a total voter count: "87 players submitted picks."
 - Logged-out users still see aggregate stats but no personal pick comparison.
@@ -19,12 +19,18 @@ This spec covers **only the post-voting display**. Scoring mechanics, the result
 
 The RosterStrip / SlotCard tiles remain in locked mode showing the user's picks. Each tile gains a small inline badge: **"Picked by X%"** — showing what percentage of other players chose the same card for that slot. Only visible for logged-in users who have picks.
 
+Some other situations we might want to account for:
+
+- User who has submitted some picks but not the whole thing
+- User who has logged in but not submitted any picks
+- Non-logged in user - we could show something to drive engagement for the next round
+
 ### 3. Per-slot popularity
 
 Exact design pending mockups. Initial idea — for each of the 8 slots, show:
 
 - **Most popular card**: art crop, card name, mana cost, pick count and percentage.
-- **Least popular card**: same display, but the card with the fewest picks among cards that were actually chosen. (Not "cards nobody picked" — that's the unpicked pool, which is less interesting.)
+- **Least popular card**: same display, but the card with the fewest picks among cards that were actually chosen. (Not "cards nobody picked" — that's the unpicked pool, which is less interesting.) - "rogue picks"
 
 Presented as a grid matching the RosterStrip layout (8 columns on desktop, stacked on mobile). Reuses existing visual components (`ManaCost`, `SlotPip`, `CardImagePreview`, `SectionLabel`). Layout and presentation may change after mockups.
 
