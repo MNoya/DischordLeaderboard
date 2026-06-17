@@ -1732,7 +1732,7 @@ class Leaderboard(commands.Cog):
     @app_commands.describe(
         format="Show only one queue (Premier, Trad, Sealed, Quick, LCQ, Pod, Direct)",
         color="Filter by archetype: guilds, shards/wedges, or Soup (4+ colors)",
-        set="A set code (CUBE shows the latest season, CUBE-ALL all-time), or ALL for your lifetime standings",
+        set="A set code, or ALL for your lifetime standings",
     )
     @app_commands.choices(
         format=[
@@ -1940,8 +1940,8 @@ class Leaderboard(commands.Cog):
             matches.append(app_commands.Choice(name="ALL — Lifetime Sets", value=LIFETIME_SET))
         if cur in CUBE_CODE or (cube_name and cur in cube_name):
             matches.append(app_commands.Choice(name=f"{CUBE_CODE} — Latest Season", value=CUBE_CODE))
-        if cur in CUBE_LIFETIME or cur in "CUBE ALL-TIME":
-            matches.append(app_commands.Choice(name=f"{CUBE_LIFETIME} — Cube all-time", value=CUBE_LIFETIME))
+        if cur in CUBE_LIFETIME or cur in "CUBE LIFETIME":
+            matches.append(app_commands.Choice(name=f"{CUBE_LIFETIME} — Cube Lifetime", value=CUBE_LIFETIME))
         if cur in PEASANT_CODE or cur in PEASANT_LABEL.upper():
             matches.append(app_commands.Choice(name=f"{PEASANT_CODE} — {PEASANT_LABEL}", value=PEASANT_CODE))
         matches += [
