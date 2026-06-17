@@ -15,7 +15,7 @@ from bot import audit, emojis
 from bot.commands import descriptions as desc
 from bot.commands.messages import MSG_NOT_REGISTERED
 from bot.services.player_stats import (
-    process_stats, rank_players_for_set, render_embed as render_stats_embed, resolve_player,
+    process_stats, rank_cube_season, rank_players_for_set, render_embed as render_stats_embed, resolve_player,
 )
 from bot.config import settings
 from bot.database import SessionLocal
@@ -167,6 +167,52 @@ def process_leaderboard(
         viewer=viewer_entry,
         last_updated=last_updated,
         drafter_count=drafter_count,
+    )
+
+
+def process_cube_season(
+    session: Session, viewer_discord_id: str | None, top_n: int = 10,
+) -> LeaderboardData | None:
+    """Latest CUBE season board — cube drafts windowed to the set live when they were played.
+
+    set_code is the virtual season code (e.g. ``CUBE-SOS``) so the embed title and site link land
+    on that season's page. No pod points (seasons are 17lands-cube only).
+    """
+    result = rank_cube_season(session)
+    if result is None:
+        return None
+    ranked, label = result
+
+    top = [
+        LeaderboardEntry(
+            rank=r.rank, player_id=r.player_id, slug=r.slug,
+            display_name=r.display_name, score=r.score, trophies=r.trophies,
+        )
+        for r in ranked[:top_n]
+    ]
+    viewer_entry: LeaderboardEntry | None = None
+    if viewer_discord_id is not None:
+        for r in ranked:
+            if r.discord_id == viewer_discord_id:
+                viewer_entry = LeaderboardEntry(
+                    rank=r.rank, player_id=r.player_id, slug=r.slug,
+                    display_name=r.display_name, score=r.score, trophies=r.trophies,
+                )
+                break
+
+    last_updated = session.execute(
+        select(func.max(PlayerStats.last_fetched_at))
+        .join(MagicSet, MagicSet.id == PlayerStats.set_id)
+        .where(MagicSet.code == CUBE_CODE)
+    ).scalar()
+
+    return LeaderboardData(
+        set_code=f"{CUBE_CODE}-{label}",
+        set_name=f"Arena Powered Cube — {label} Season",
+        top=top,
+        viewer=viewer_entry,
+        last_updated=last_updated,
+        drafter_count=len(ranked),
     )
 
 
@@ -604,6 +650,8 @@ def _pod_board(
 PERSONAL_STANDINGS_LIMIT = 10
 DIRECT_FILTER = "Direct"
 LIFETIME_SET = "ALL"
+CUBE_CODE = "CUBE"
+CUBE_LIFETIME = "CUBE-ALL"
 
 
 def process_personal_standings(
@@ -1684,7 +1732,7 @@ class Leaderboard(commands.Cog):
     @app_commands.describe(
         format="Show only one queue (Premier, Trad, Sealed, Quick, LCQ, Pod, Direct)",
         color="Filter by archetype: guilds, shards/wedges, or Soup (4+ colors)",
-        set="A set code, or ALL for your lifetime standings across every set",
+        set="A set code, or ALL for your lifetime standings",
     )
     @app_commands.choices(
         format=[
@@ -1772,11 +1820,17 @@ class Leaderboard(commands.Cog):
             )
             return
         filter_type, filter_value = encode_filter(format_value, color_value)
+        # set:CUBE defaults to the latest cube season; set:CUBE-ALL is the all-time cube board.
+        cube_lifetime = set is not None and set.upper() == CUBE_LIFETIME
 
         await interaction.response.defer()
 
         with SessionLocal() as session:
-            if set is not None:
+            if cube_lifetime:
+                magic_set = session.execute(
+                    select(MagicSet).where(MagicSet.code == CUBE_CODE)
+                ).scalar_one_or_none()
+            elif set is not None:
                 magic_set = session.execute(
                     select(MagicSet).where(func.upper(MagicSet.code) == set.upper())
                 ).scalar_one_or_none()
@@ -1792,11 +1846,14 @@ class Leaderboard(commands.Cog):
                 await interaction.followup.send(msg, ephemeral=ephemeral)
                 return
 
-            data, suffix = render_filtered_data(
-                session,
-                filter_type=filter_type, filter_value=filter_value,
-                viewer_discord_id=user_id, magic_set=magic_set,
-            )
+            if magic_set.code == CUBE_CODE and not cube_lifetime and filter_type is None:
+                data, suffix = process_cube_season(session, viewer_discord_id=user_id), None
+            else:
+                data, suffix = render_filtered_data(
+                    session,
+                    filter_type=filter_type, filter_value=filter_value,
+                    viewer_discord_id=user_id, magic_set=magic_set,
+                )
 
         if data is None:
             await interaction.followup.send(
@@ -1872,15 +1929,25 @@ class Leaderboard(commands.Cog):
         self, interaction: discord.Interaction, current: str,
     ) -> list[app_commands.Choice[str]]:
         cur = current.upper()
+        cube_name = ""
+        for s in ALL_SETS:
+            if s.code == CUBE_CODE:
+                cube_name = s.name.upper()
+                break
+
         matches: list[app_commands.Choice[str]] = []
         if cur in LIFETIME_SET:
             matches.append(app_commands.Choice(name="ALL — Lifetime Sets", value=LIFETIME_SET))
+        if cur in CUBE_CODE or (cube_name and cur in cube_name):
+            matches.append(app_commands.Choice(name=f"{CUBE_CODE} — Latest Season", value=CUBE_CODE))
+        if cur in CUBE_LIFETIME or cur in "CUBE LIFETIME":
+            matches.append(app_commands.Choice(name=f"{CUBE_LIFETIME} — Cube Lifetime", value=CUBE_LIFETIME))
         if cur in PEASANT_CODE or cur in PEASANT_LABEL.upper():
             matches.append(app_commands.Choice(name=f"{PEASANT_CODE} — {PEASANT_LABEL}", value=PEASANT_CODE))
         matches += [
             app_commands.Choice(name=f"{s.code} — {s.name}", value=s.code)
             for s in reversed(ALL_SETS)
-            if cur in s.code.upper() or cur in s.name.upper()
+            if s.code != CUBE_CODE and (cur in s.code.upper() or cur in s.name.upper())
         ]
         return matches[:25]
 

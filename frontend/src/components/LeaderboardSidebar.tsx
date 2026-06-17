@@ -60,6 +60,7 @@ function lcqCashForRow(t: RecentTrophy): number {
 
 export function LeaderboardSidebar({
   setCode,
+  playerSetCode,
   colors = "ALL",
   format = "ALL",
   otherCombos = [],
@@ -68,6 +69,7 @@ export function LeaderboardSidebar({
   stats,
 }: {
   setCode: string;
+  playerSetCode?: string;
   colors?: string;
   format?: string;
   otherCombos?: string[];
@@ -75,6 +77,7 @@ export function LeaderboardSidebar({
   searchParams?: URLSearchParams;
   stats?: { players: number; events: string; updated: string };
 }) {
+  const linkSetCode = playerSetCode ?? setCode;
   const qs = searchParams?.toString() ?? "";
   const colorsScoped = colors !== "ALL";
   const formatScoped = !colorsScoped && format !== "ALL";
@@ -273,7 +276,7 @@ export function LeaderboardSidebar({
             ) : (
               <Link
                 key={key}
-                to={{ pathname: playerPath(t.slug, setCode), search: qs }}
+                to={{ pathname: playerPath(t.slug, linkSetCode), search: qs }}
                 className={cls}
               >
                 {inner}

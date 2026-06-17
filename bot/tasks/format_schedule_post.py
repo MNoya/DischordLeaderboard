@@ -93,8 +93,9 @@ async def fire_window() -> None:
             in_progress, upcoming, scope = select_pin(events, pin)
             await _refresh_pin(channel, scope, in_progress, upcoming, emojis)
         if pin.announce != ANNOUNCE_NONE:
-            fresh = newly_opened(announce_groups(events, pin), since, now)
-            await _announce(channel, pin, fresh, emojis)
+            scheduled = announce_groups(events, pin)
+            fresh = newly_opened(scheduled, since, now)
+            await _announce(channel, pin, fresh, scheduled, emojis)
 
 
 def select_pin(events: list, pin: SchedulePin) -> tuple[list, list, str]:
@@ -174,12 +175,15 @@ def _component_text(components) -> str:
     return "\n".join(parts)
 
 
-async def _announce(channel: discord.TextChannel, pin: SchedulePin, groups: list, emojis: dict) -> None:
-    if not groups:
+async def _announce(channel: discord.TextChannel, pin: SchedulePin, fresh: list,
+                    scheduled: list, emojis: dict) -> None:
+    """Announce each freshly-opened group. ``scheduled`` is the full filtered schedule (in-progress +
+    upcoming), so the Next Up preview can look past ``fresh`` to the rotation that follows."""
+    if not fresh:
         return
     recent = await _recent_bot_messages(channel)
-    for group in groups:
-        embed, marker = announcement_for(pin, group, groups, emojis)
+    for group in fresh:
+        embed, marker = announcement_for(pin, group, scheduled, emojis)
         if already_announced(recent, marker, group.label):
             continue
         try:

@@ -171,6 +171,23 @@ def test_next_rotation_returns_soonest_after_current():
     assert next_rotation([current, later, soon], current) is soon
 
 
+def test_announcement_previews_next_rotation_beyond_the_freshly_opened_slice():
+    now = datetime(2026, 6, 16, 12, 0, tzinfo=timezone.utc)
+    since = now - timedelta(hours=6)
+    flashback_pin = next(pin for pin in SCHEDULE_PINS if pin.key == "flashback")
+    live = _group("Final Fantasy", ("flashback",), ["Premier Draft"], now - timedelta(hours=1), now + timedelta(days=7))
+    later_start = now + timedelta(days=7)
+    upcoming = _group("Bloomburrow", ("flashback",), ["Premier Draft"], later_start, later_start + timedelta(days=7))
+    scheduled = [live, upcoming]
+
+    fresh = newly_opened(scheduled, since, now)
+    embed, _ = announcement_for(flashback_pin, fresh[0], scheduled, {})
+
+    assert fresh == [live]
+    assert "Next Up:" in embed.description
+    assert "Bloomburrow" in embed.description
+
+
 def test_next_rotation_is_none_when_nothing_follows():
     now = datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc)
     current = _group("Arena Powered Cube", ("cube",), ["Premier Draft"], now, now + timedelta(days=6))
@@ -179,7 +196,7 @@ def test_next_rotation_is_none_when_nothing_follows():
 
 
 def test_select_groups_ors_flashback_and_quick():
-    now = datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
     events = [
         _event("Premier Draft", "Aetherdrift", ("arena", "limited", "flashback", "premier-draft"), now, 1, 8),
         _event("Quick Draft", "Bloomburrow", ("arena", "limited", "quick-draft"), now, 1, 8),
@@ -193,7 +210,7 @@ def test_select_groups_ors_flashback_and_quick():
 
 
 def test_select_groups_cube_filter_matches_cube_tag():
-    now = datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
     events = [
         _event("Premier Draft", "Arena Powered Cube", ("arena", "limited", "premier-draft", "cube"), now, 1, 8),
         _event("Premier Draft", "Secrets of Strixhaven", ("arena", "limited", "premier-draft"), now, 1, 8),

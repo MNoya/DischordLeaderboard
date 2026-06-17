@@ -11,6 +11,7 @@ import {
   fetchAvailableFormats,
   fetchColorsLeaderboard,
   fetchColorsSummary,
+  fetchCubeSeasons,
   fetchP0P1Cards,
   fetchP0P1Picks,
   fetchFormatColorsLeaderboard,
@@ -78,6 +79,14 @@ export function useSets() {
   return useQuery({
     queryKey: ["sets"],
     queryFn: fetchSets,
+    staleTime: FIVE_MINUTES,
+  });
+}
+
+export function useCubeSeasons() {
+  return useQuery({
+    queryKey: ["cube-seasons"],
+    queryFn: fetchCubeSeasons,
     staleTime: FIVE_MINUTES,
   });
 }

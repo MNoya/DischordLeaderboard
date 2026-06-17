@@ -6,4 +6,5 @@ requests>=2.31,<3.0
 discord.py>=2.3,<3.0
 python-socketio[asyncio_client]>=5.11,<6.0
 APScheduler>=3.10,<4.0
+tzlocal>=3.0,<5.4
 Pillow>=10,<12

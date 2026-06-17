@@ -136,11 +136,17 @@ const resolveMeta = async (pathname: string): Promise<RouteMeta> => {
     if (rest[1] === "player" && rest[2]) {
       return playerMeta(await fetchPlayer(rest[2]));
     }
-    const setName = await fetchSetName(setCode);
+    // CUBE is a word, not an acronym, and its seasons are virtual CUBE-<SET> codes;
+    // render "Cube" / "Cube SOS" but resolve the symbol/name from the base CUBE set.
+    const baseCode = setCode.startsWith("CUBE-") ? "CUBE" : setCode;
+    const label = setCode === "CUBE" ? "Cube"
+      : setCode.startsWith("CUBE-") ? `Cube ${setCode.slice("CUBE-".length)}`
+      : setCode;
+    const setName = await fetchSetName(baseCode);
     return page(
-      `${setCode} Leaderboard`,
+      `${label} Leaderboard`,
       `Check ${setName} ranks and trophies on the leaderboard.`,
-      { kind: "setSymbol", code: setCode },
+      { kind: "setSymbol", code: baseCode },
     );
   }
 

@@ -37,14 +37,16 @@ import {
   usePlayerProfile,
   usePrefetchers,
   useSets,
+  useCubeSeasons,
 } from "../data/hooks";
-import { canonicalSetCode, colorsOf, effectiveColorCount, eventDate, fmtRange, lastUpdated, leaderboardPath, playerPath, prettyFormat, relativeTime, sumEvents, weekOfSet, winPct } from "../data/utils";
+import { baseSetCode, canonicalSetCode, colorsOf, CUBE_BASE, CUBE_LIFETIME, cubeSeasonLabel, effectiveColorCount, eventDate, fmtRange, isCubeSeasonCode, lastUpdated, leaderboardPath, playerPath, prettyFormat, relativeTime, sumEvents, weekOfSet, winPct } from "../data/utils";
+import { CubeSeasonSelector } from "../components/CubeSeasonSelector";
 import { colorsDisplayName, FORMAT_LABEL_GROUPS, FORMAT_OPTIONS, matchesFormatFilter, MULTI, OTHER } from "../data/filters";
 import { FMT_COLORS, FMT_DEFAULT_COLOR, renderFormatOption, shortFormat } from "../data/format-display";
 import { guildLogoTransform, guildSvgUrl } from "../data/guild-art";
 import { ACTIVE_SET_CODE } from "../data/constants";
 import { cn } from "../lib/utils";
-import type { LeaderboardRow, PlayerDraftEvent, PlayerFormatBreakdown, SetSummary } from "../types/leaderboard";
+import type { CubeSeason, LeaderboardRow, PlayerDraftEvent, PlayerFormatBreakdown, SetSummary } from "../types/leaderboard";
 import type { LeaderboardTableRow } from "../components/LeaderboardTable";
 
 // ─── Page entry ────────────────────────────────────────────────────────────
@@ -56,8 +58,12 @@ export function LeaderboardPage() {
   const { data: sets } = useSets();
   const liveSetCode = sets?.find((s) => s.isActive)?.code;
   const requestedSet = params.setCode ? canonicalSetCode(params.setCode, sets) : undefined;
-  const activeSet = requestedSet ?? liveSetCode ?? ACTIVE_SET_CODE;
-  const setMeta = sets?.find((s) => s.code === activeSet);
+  const routeSet = requestedSet ?? liveSetCode ?? ACTIVE_SET_CODE;
+  // CUBE-ALL is the lifetime sentinel; every data read scores it as the bare lifetime board.
+  const activeSet = routeSet === CUBE_LIFETIME ? CUBE_BASE : routeSet;
+  const setMeta = sets?.find((s) => s.code === baseSetCode(activeSet));
+  const { data: cubeSeasons } = useCubeSeasons();
+  const latestCubeSeason = cubeSeasons?.[0]?.setCode;
 
   // Filters live in the URL as query params (?format=Premier or ?colors=WR).
   // Per spec they're mutually exclusive, so picking a non-ALL value in one
@@ -65,12 +71,14 @@ export function LeaderboardPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
     if (!params.setCode) return;
-    if (activeSet === liveSetCode) {
+    if (routeSet === liveSetCode) {
       navigate({ pathname: leaderboardPath(), search: searchParams.toString() }, { replace: true });
-    } else if (activeSet !== params.setCode) {
-      navigate({ pathname: leaderboardPath(activeSet), search: searchParams.toString() }, { replace: true });
+    } else if (requestedSet === CUBE_BASE && latestCubeSeason) {
+      navigate({ pathname: leaderboardPath(latestCubeSeason), search: searchParams.toString() }, { replace: true });
+    } else if (routeSet !== params.setCode) {
+      navigate({ pathname: leaderboardPath(routeSet), search: searchParams.toString() }, { replace: true });
     }
-  }, [params.setCode, activeSet, liveSetCode, navigate, searchParams]);
+  }, [params.setCode, requestedSet, routeSet, liveSetCode, latestCubeSeason, navigate, searchParams]);
   const format = searchParams.get("format") ?? "ALL";
   const colors = searchParams.get("colors") ?? "ALL";
   const colorsMode = colors !== "ALL";
@@ -181,6 +189,8 @@ export function LeaderboardPage() {
     <Mobile
       activeSet={activeSet}
       sets={sets}
+      cubeSeasons={cubeSeasons}
+      latestCubeSeason={latestCubeSeason}
       rows={rows}
       isLoading={isLoading}
       error={error}
@@ -196,6 +206,8 @@ export function LeaderboardPage() {
       activeSet={activeSet}
       sets={sets}
       setMeta={setMeta}
+      cubeSeasons={cubeSeasons}
+      latestCubeSeason={latestCubeSeason}
       rows={rows}
       isLoading={isLoading}
       error={error}
@@ -243,6 +255,8 @@ function Desktop({
   activeSet,
   sets,
   setMeta,
+  cubeSeasons,
+  latestCubeSeason,
   rows,
   isLoading,
   error,
@@ -256,6 +270,8 @@ function Desktop({
   activeSet: string;
   sets: SetSummary[] | undefined;
   setMeta: SetSummary | undefined;
+  cubeSeasons: CubeSeason[] | undefined;
+  latestCubeSeason: string | undefined;
   rows: LeaderboardTableRow[] | undefined;
   isLoading: boolean;
   error: Error | null;
@@ -268,6 +284,7 @@ function Desktop({
 }) {
   const navigate = useNavigate();
   const { prefetchSet, prefetchPlayer } = usePrefetchers();
+  const profileSet = baseSetCode(activeSet);
   return (
     <div className="bg-bg text-text min-h-screen flex flex-col animate-fadeIn">
       <AppHeader subtitle="LEADERBOARD" />
@@ -275,7 +292,9 @@ function Desktop({
         activeSet={activeSet}
         setMeta={setMeta}
         sets={sets}
-        onSelectSet={(c) => goToSet(navigate, c, sets, searchParams)}
+        cubeSeasons={cubeSeasons}
+        onSelectSet={(c) => goToSet(navigate, c, sets, searchParams, latestCubeSeason)}
+        onSelectSeason={(c) => navigate({ pathname: leaderboardPath(c), search: searchParams.toString() })}
         onPrefetchSet={prefetchSet}
         format={filters.format}
         colors={filters.colors}
@@ -291,12 +310,12 @@ function Desktop({
           mode={boardModeFor(filters.format)}
           sort={sort}
           onSort={onSort}
-          onRowPrefetch={(r) => prefetchPlayer(r.slug, r.setCode)}
+          onRowPrefetch={(r) => prefetchPlayer(r.slug, profileSet)}
           renderExpanded={(r) => (
             <DesktopExpandedRow
               row={r}
               to={{
-                pathname: playerPath(r.slug, activeSet),
+                pathname: playerPath(r.slug, profileSet),
                 search: searchParams.toString(),
               }}
               activeFormat={filters.format}
@@ -308,6 +327,7 @@ function Desktop({
         <div className="pt-4">
           <LeaderboardSidebar
             setCode={activeSet}
+            playerSetCode={profileSet}
             colors={filters.colors}
             format={filters.format}
             otherCombos={otherCombos}
@@ -330,7 +350,9 @@ function SetHero({
   activeSet,
   setMeta,
   sets,
+  cubeSeasons,
   onSelectSet,
+  onSelectSeason,
   onPrefetchSet,
   format,
   colors,
@@ -338,38 +360,72 @@ function SetHero({
   activeSet: string;
   setMeta: SetSummary | undefined;
   sets: SetSummary[] | undefined;
+  cubeSeasons: CubeSeason[] | undefined;
   onSelectSet: (code: string) => void;
+  onSelectSeason: (code: string) => void;
   onPrefetchSet?: (code: string) => void;
   format: string;
   colors: string;
 }) {
+  const base = baseSetCode(activeSet);
+  const isCube = base === CUBE_BASE;
   const week = weekOfSet(setMeta);
-  const isActive = setMeta?.isActive ?? false;
   const filterActive = format !== "ALL" || colors !== "ALL";
   const tightHero = useIsMobile(1400);
+  const seasonLabel = cubeSeasonLabel(activeSet);
+  const seasonSet = seasonLabel ? sets?.find((s) => s.code === seasonLabel) : undefined;
+  const cubeSeason = isCube ? cubeSeasons?.find((s) => s.setCode === activeSet) : undefined;
+  // Start at the actual cube burst (cube opens after release); end at the set's planned rotation
+  // date rather than the latest event, so a live season doesn't read "— <today>". EOE is the
+  // exception — its cube ran after the set already rotated — so never end before the last event.
+  let seasonRange: string | null = null;
+  if (cubeSeason) {
+    const setEnd = seasonSet?.endDate;
+    const end = setEnd && setEnd >= cubeSeason.lastEvent ? setEnd : cubeSeason.lastEvent;
+    seasonRange = fmtRange(cubeSeason.firstEvent, end);
+  } else if (isCube && setMeta) {
+    seasonRange = fmtRange(setMeta.startDate, setMeta.endDate);
+  }
+  // The live marker shows on the active set; for CUBE that's only when the selected season is the
+  // live one, and it reads "LIVE" rather than "CURRENT SET" (a season is a window, not the set).
+  const isActive = isCube ? Boolean(seasonSet?.isActive) : (setMeta?.isActive ?? false);
+  const liveLabel = isCube ? "LIVE" : "CURRENT SET";
   return (
     <div className="relative px-10 py-5 border-b border-border bg-surface flex items-center gap-6">
-      <SetGlyph code={activeSet} size={84} />
+      <SetGlyph code={base} size={84} />
       <div>
-        <SectionLabel size={13} className={isActive ? "" : "invisible"}>CURRENT SET</SectionLabel>
+        <SectionLabel size={13} className={isActive ? "" : "invisible"}>{liveLabel}</SectionLabel>
         <div className="flex items-baseline gap-3.5 mt-0.5">
           <span className="font-display tracking-[0.04em]" style={{ fontSize: 56, lineHeight: 0.9 }}>
-            {activeSet}
+            {base}
           </span>
           <span className="font-display text-[22px] text-muted tracking-[0.06em]">
             {setMeta?.name?.toUpperCase() ?? ""}
           </span>
         </div>
-        <div className="mono text-[11px] text-muted mt-1">
-          {setMeta && fmtRange(setMeta.startDate, setMeta.endDate)}
-          {week && ` · ${week}`}
-        </div>
+        {isCube ? (
+          // Height is driven by the same text-[11px] date element a normal set uses, so the hero
+          // matches exactly; the larger selector floats over it and doesn't affect layout height.
+          <div className="relative mono text-[11px] text-muted mt-1 tracking-[0.04em]">
+            {/* inset-y-0 + flex centers without a transform — a transform here would create a
+                stacking context and trap the dropdown's z-index below the filter row. */}
+            <div className="absolute left-0 inset-y-0 flex items-center">
+              <CubeSeasonSelector activeSet={activeSet} seasons={cubeSeasons} onSelect={onSelectSeason} />
+            </div>
+            <div className="text-right whitespace-nowrap">{seasonRange || " "}</div>
+          </div>
+        ) : (
+          <div className="mono text-[11px] text-muted mt-1">
+            {setMeta && fmtRange(setMeta.startDate, setMeta.endDate)}
+            {week && ` · ${week}`}
+          </div>
+        )}
       </div>
       {filterActive ? <FilterHero format={format} colors={colors} /> : <div className="flex-1" />}
       {sets && (
         <SetSwitcherDesktop
           sets={sets}
-          activeCode={activeSet}
+          activeCode={base}
           onChange={onSelectSet}
           onPrefetch={onPrefetchSet}
           extraHide={filterActive ? (tightHero ? 3 : 2) : 0}
@@ -516,6 +572,8 @@ function FilterRow({
 function Mobile({
   activeSet,
   sets,
+  cubeSeasons,
+  latestCubeSeason,
   rows,
   isLoading,
   error,
@@ -528,6 +586,8 @@ function Mobile({
 }: {
   activeSet: string;
   sets: SetSummary[] | undefined;
+  cubeSeasons: CubeSeason[] | undefined;
+  latestCubeSeason: string | undefined;
   rows: LeaderboardTableRow[] | undefined;
   isLoading: boolean;
   otherCombos: string[];
@@ -540,6 +600,8 @@ function Mobile({
 }) {
   const navigate = useNavigate();
   const { prefetchSet, prefetchPlayer } = usePrefetchers();
+  const profileSet = baseSetCode(activeSet);
+  const isCube = profileSet === CUBE_BASE;
   return (
     <div className="bg-bg text-text min-h-screen flex flex-col overflow-x-hidden animate-fadeIn">
       <div className="sticky top-0 z-10 bg-bg">
@@ -561,13 +623,23 @@ function Mobile({
             <div className="basis-[40%] min-w-0">
               <SetSwitcherMobile
                 sets={sets}
-                activeCode={activeSet}
-                onChange={(code) => goToSet(navigate, code, sets, searchParams)}
+                activeCode={profileSet}
+                onChange={(code) => goToSet(navigate, code, sets, searchParams, latestCubeSeason)}
                 onPrefetch={prefetchSet}
               />
             </div>
           )}
         </div>
+        {isCube && (
+          <div className="px-3 py-1.5 border-b border-border bg-surface flex">
+            <CubeSeasonSelector
+              activeSet={activeSet}
+              seasons={cubeSeasons}
+              onSelect={(c) => navigate({ pathname: leaderboardPath(c), search: searchParams.toString() })}
+              variant="mobile"
+            />
+          </div>
+        )}
         <div className="px-3 py-1.5 border-b border-border bg-bg">
           <ColorsSwitcher
             activeCode={filters.colors}
@@ -589,12 +661,12 @@ function Mobile({
         error={error}
         showHeader={false}
         mode={boardModeFor(filters.format)}
-        onRowPrefetch={(r) => prefetchPlayer(r.slug, r.setCode)}
+        onRowPrefetch={(r) => prefetchPlayer(r.slug, profileSet)}
         renderExpanded={(r) => (
           <MobileExpandedRow
             row={r}
             to={{
-              pathname: playerPath(r.slug, activeSet),
+              pathname: playerPath(r.slug, profileSet),
               search: searchParams.toString(),
             }}
             activeFormat={filters.format}
@@ -1091,7 +1163,11 @@ function goToSet(
   code: string,
   sets: SetSummary[] | undefined,
   searchParams: URLSearchParams,
+  latestCubeSeason?: string,
 ) {
+  // The CUBE chip drops into the newest season; LIFETIME (CUBE-ALL) is reached
+  // only from the in-header season selector.
+  if (code === CUBE_BASE && latestCubeSeason) code = latestCubeSeason;
   const activeCode = sets?.find((s) => s.isActive)?.code;
   navigate({
     pathname: code === activeCode ? leaderboardPath() : leaderboardPath(code),
