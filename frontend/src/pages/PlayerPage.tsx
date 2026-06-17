@@ -32,7 +32,7 @@ import { Tooltip } from "../components/Tooltip";
 
 import { useAvailableFormats, useColorChips, useDraftEvents, useLeaderboard, usePlayerIdentity, usePlayerProfile, useSets } from "../data/hooks";
 import { computeScore, type ScoringStatRow } from "../data/scoring";
-import { canonicalSetCode, colorsOf, effectiveColorCount, eventDate, eventDisplayLabel, fmtShortDate, formatTag, isFlashbackEvent, LEADERBOARD_BASE, lcqCashPrize, leaderboardPath, mainColors, playerPath, prettyFormat, winPct } from "../data/utils";
+import { canonicalSetCode, colorsOf, eventDate, eventDisplayLabel, fmtShortDate, formatTag, isCubeCode, isFlashbackEvent, isSoup, LEADERBOARD_BASE, lcqCashPrize, leaderboardPath, mainColors, playerPath, prettyFormat, winPct } from "../data/utils";
 import { ACTIVE_SET_CODE } from "../data/constants";
 import {
   colorsDisplayName,
@@ -612,6 +612,7 @@ function Desktop({
     useUrlFilters();
 
   const { chips: colorChips, otherCombos } = useColorChips(profile.setCode);
+  const cube = isCubeCode(profile.setCode);
   const colorOptions = useMemo<FilterOption[]>(() => {
     const opts: FilterOption[] = [{ value: "ALL", label: "ALL COLORS" }];
     for (const c of colorChips) {
@@ -639,15 +640,15 @@ function Desktop({
         if (formatFilter !== "ALL" && !matchesFormatFilter(e.format, formatFilter)) return false;
         if (colorsFilter !== "ALL") {
           if (colorsFilter === MULTI) {
-            if (effectiveColorCount(e.colors) < 4) return false;
+            if (!isSoup(e.colors, cube)) return false;
           } else if (colorsFilter === OTHER) {
-            if (effectiveColorCount(e.colors) >= 4) return false;
+            if (isSoup(e.colors, cube)) return false;
             if (!otherSet.has(colorsOf(e.colors))) return false;
           } else if (colorsOf(e.colors) !== colorsFilter) return false;
         }
         return true;
       }),
-    [events, formatFilter, colorsFilter, otherSet]
+    [events, formatFilter, colorsFilter, otherSet, cube]
   );
 
   const filtersActive = formatFilter !== "ALL" || colorsFilter !== "ALL";
@@ -1507,6 +1508,7 @@ function Mobile({
     useUrlFilters();
 
   const { chips: colorChips, otherCombos } = useColorChips(profile.setCode);
+  const cube = isCubeCode(profile.setCode);
   const colorOptions = useMemo<FilterOption[]>(() => {
     const opts: FilterOption[] = [{ value: "ALL", label: "ALL COLORS" }];
     for (const c of colorChips) {
@@ -1534,15 +1536,15 @@ function Mobile({
         if (formatFilter !== "ALL" && !matchesFormatFilter(e.format, formatFilter)) return false;
         if (colorsFilter !== "ALL") {
           if (colorsFilter === MULTI) {
-            if (effectiveColorCount(e.colors) < 4) return false;
+            if (!isSoup(e.colors, cube)) return false;
           } else if (colorsFilter === OTHER) {
-            if (effectiveColorCount(e.colors) >= 4) return false;
+            if (isSoup(e.colors, cube)) return false;
             if (!otherSet.has(colorsOf(e.colors))) return false;
           } else if (colorsOf(e.colors) !== colorsFilter) return false;
         }
         return true;
       }),
-    [events, formatFilter, colorsFilter, otherSet]
+    [events, formatFilter, colorsFilter, otherSet, cube]
   );
 
   const filtersActive = formatFilter !== "ALL" || colorsFilter !== "ALL";

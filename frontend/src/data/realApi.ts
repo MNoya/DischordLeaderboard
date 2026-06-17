@@ -22,7 +22,7 @@ import {
   type GroupTotals,
   type ScoringStatRow,
 } from "./scoring";
-import { baseSetCode, colorsOf, CUBE_BASE, effectiveColorCount, isCubeSeasonCode } from "./utils";
+import { baseSetCode, colorsOf, CUBE_BASE, isCubeCode, isCubeSeasonCode, isSoup } from "./utils";
 import { formatsForBucket } from "./format-buckets";
 import { FORMAT_LABEL_GROUPS, FORMAT_RAW_GROUPS, MULTI, OTHER } from "./filters";
 import type {
@@ -104,10 +104,11 @@ export async function fetchFormatColorsLeaderboard(
   const archs = Array.isArray(archetypes) ? archetypes : [archetypes];
   if (archs.length === 0) return [];
   const archSet = new Set(archs);
+  const cube = isCubeCode(setCode);
   // A deck matches its main-color archetype regardless of splashes, and Soup (MULTI)
-  // when it plays 4+ effective colors — so a 2-main + 2-splash deck lands in both.
+  // by the color-count rule — so a qualifying deck lands in both.
   const matcher = (c: string) =>
-    archSet.has(colorsOf(c)) || (archSet.has(MULTI) && effectiveColorCount(c) >= 4);
+    archSet.has(colorsOf(c)) || (archSet.has(MULTI) && isSoup(c, cube));
   const bucketLabel = archs.length === 1 ? archs[0] : archs.join(",");
   return aggregateColorsFromEvents(setCode, bucketLabel, matcher, format);
 }
@@ -594,16 +595,17 @@ export async function fetchColorsSummary(setCode: string): Promise<ColorsSummary
     }
   }
 
+  const cube = isCubeCode(setCode);
   const agg = new Map<string, { trophies: number; events: number; players: Set<string> }>();
   for (const raw of allEvents) {
     const colors = (raw.colors as string | null) ?? "";
     const slug = raw.slug as string;
     // Overlapping tally: a deck counts toward its main-color archetype and, when it
-    // plays 4+ effective colors, also toward Soup — matching the boards' filters.
+    // qualifies as Soup, also toward Soup — matching the boards' filters.
     const keys: string[] = [];
     const main = colorsOf(colors);
     if (main) keys.push(main);
-    if (effectiveColorCount(colors) >= 4) keys.push(MULTI);
+    if (isSoup(colors, cube)) keys.push(MULTI);
     for (const key of keys) {
       const cur = agg.get(key) ?? { trophies: 0, events: 0, players: new Set<string>() };
       cur.events += 1;
@@ -621,8 +623,9 @@ export async function fetchColorsLeaderboard(
   setCode: string,
   colors: string,
 ): Promise<ColorsLeaderboardRow[]> {
+  const cube = isCubeCode(setCode);
   const matcher = colors === MULTI
-    ? (c: string) => effectiveColorCount(c) >= 4
+    ? (c: string) => isSoup(c, cube)
     : (c: string) => colorsOf(c) === colors;
   return aggregateColorsFromEvents(setCode, colors, matcher, null);
 }
@@ -1155,12 +1158,13 @@ async function fetchPodColorsLeaderboard(
   otherCombos: string[] | null,
 ): Promise<ColorsLeaderboardRow[]> {
   const parts = await fetchPodParticipantsForSet(setCode);
+  const cube = isCubeCode(setCode);
   const otherSet = otherCombos ? new Set(otherCombos) : null;
   const colorMatches = (deckColors: string | null): boolean => {
     if (!deckColors) return false;
-    if (colorsFilter === MULTI) return effectiveColorCount(deckColors) >= 4;
+    if (colorsFilter === MULTI) return isSoup(deckColors, cube);
     if (colorsFilter === OTHER) {
-      if (effectiveColorCount(deckColors) >= 4) return false;
+      if (isSoup(deckColors, cube)) return false;
       return otherSet ? otherSet.has(colorsOf(deckColors)) : false;
     }
     return colorsOf(deckColors) === colorsFilter;
