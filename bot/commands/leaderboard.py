@@ -411,7 +411,7 @@ def process_leaderboard_for_archetype(
     for r in events:
         if allowed is not None and r.format not in allowed:
             continue
-        if not _archetype_matches(r.colors, archetype):
+        if not _archetype_matches(r.colors, archetype, magic_set.code == CUBE_CODE):
             continue
         b = bucket.setdefault(r.id, {
             "slug": r.slug, "display_name": r.display_name, "discord_id": r.discord_id,
@@ -1472,7 +1472,8 @@ def _drafter_count(
         ).all()
         players = {
             r.player_id for r in rows
-            if (allowed is None or r.format in allowed) and _archetype_matches(r.colors, color_value)
+            if (allowed is None or r.format in allowed)
+            and _archetype_matches(r.colors, color_value, magic_set.code == CUBE_CODE)
         }
         return len(players)
 
@@ -2008,7 +2009,18 @@ def _effective_color_count(colors: str | None) -> int:
     return len({c.upper() for c in colors if c.upper() in _WUBRG})
 
 
-def _archetype_matches(colors: str | None, archetype: str) -> bool:
+def _is_soup(colors: str | None, is_cube: bool) -> bool:
+    """Standard limited counts any 4+ color deck (2 base + 2 splash). Cube affords freer
+    splashing, so the bar rises to 3+ base colors plus a splash (or 4+ base outright).
+    """
+    if _effective_color_count(colors) < 4:
+        return False
+    if not is_cube:
+        return True
+    return len(_normalize_archetype(colors)) >= 3
+
+
+def _archetype_matches(colors: str | None, archetype: str, is_cube: bool = False) -> bool:
     if archetype == _MULTI_ARCHETYPE:
-        return _effective_color_count(colors) >= 4
+        return _is_soup(colors, is_cube)
     return _normalize_archetype(colors) == archetype

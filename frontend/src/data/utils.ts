@@ -64,6 +64,14 @@ export function effectiveColorCount(colors: string | null | undefined): number {
   return seen.size;
 }
 
+// A deck is "Soup" (MULTI) when it plays enough colors to escape a normal archetype.
+// Standard limited: 4+ effective colors (2 base + 2 splash counts). Cube affords freer
+// splashing, so the bar rises to 3+ base colors plus a splash (or 4+ base outright).
+export function isSoup(colors: string | null | undefined, isCube: boolean): boolean {
+  if (effectiveColorCount(colors) < 4) return false;
+  return isCube ? colorsOf(colors).length >= 3 : true;
+}
+
 function parseLocalDate(iso: string): Date {
   const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
   return new Date(y, m - 1, d);
@@ -243,6 +251,11 @@ export const CUBE_LIFETIME = `${CUBE_BASE}-ALL`;
 
 export function isCubeSeasonCode(code: string): boolean {
   return code.startsWith(`${CUBE_BASE}-`);
+}
+
+// True for the lifetime board (`CUBE`) and any season (`CUBE-SOS`).
+export function isCubeCode(code: string): boolean {
+  return baseSetCode(code) === CUBE_BASE;
 }
 
 export function baseSetCode(code: string): string {

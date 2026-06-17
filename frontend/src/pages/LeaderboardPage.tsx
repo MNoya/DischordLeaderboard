@@ -39,7 +39,7 @@ import {
   useSets,
   useCubeSeasons,
 } from "../data/hooks";
-import { baseSetCode, canonicalSetCode, colorsOf, CUBE_BASE, CUBE_LIFETIME, cubeSeasonLabel, effectiveColorCount, eventDate, fmtRange, isCubeSeasonCode, lastUpdated, leaderboardPath, playerPath, prettyFormat, relativeTime, sumEvents, weekOfSet, winPct } from "../data/utils";
+import { baseSetCode, canonicalSetCode, colorsOf, CUBE_BASE, CUBE_LIFETIME, cubeSeasonLabel, eventDate, fmtRange, isCubeCode, isCubeSeasonCode, isSoup, lastUpdated, leaderboardPath, playerPath, prettyFormat, relativeTime, sumEvents, weekOfSet, winPct } from "../data/utils";
 import { CubeSeasonSelector } from "../components/CubeSeasonSelector";
 import { colorsDisplayName, FORMAT_LABEL_GROUPS, FORMAT_OPTIONS, matchesFormatFilter, MULTI, OTHER } from "../data/filters";
 import { FMT_COLORS, FMT_DEFAULT_COLOR, renderFormatOption, shortFormat } from "../data/format-display";
@@ -720,16 +720,17 @@ function DesktopExpandedRow({
   const { profile, events } = useDelayedExpandedData(row.slug, row.setCode);
   const { lastTrophies, biggestStreak } = useHighlights(events);
   const filtersActive = activeFormat !== "ALL" || activeColors !== "ALL";
+  const cube = isCubeCode(row.setCode);
   const filteredTrophies = useMemo(
-    () => filterTrophyEvents(events, activeFormat, activeColors, otherCombos).slice(0, 3),
-    [events, activeFormat, activeColors, otherCombos],
+    () => filterTrophyEvents(events, activeFormat, activeColors, otherCombos, cube).slice(0, 3),
+    [events, activeFormat, activeColors, otherCombos, cube],
   );
   const trophiesToShow = filtersActive ? filteredTrophies : lastTrophies;
   const scopedDecks = useMemo(
     () => trophiesToShow.length === 0 && events
-      ? filterScopedEvents(events, activeFormat, activeColors, otherCombos).slice(0, 3)
+      ? filterScopedEvents(events, activeFormat, activeColors, otherCombos, cube).slice(0, 3)
       : [],
-    [trophiesToShow.length, events, activeFormat, activeColors, otherCombos],
+    [trophiesToShow.length, events, activeFormat, activeColors, otherCombos, cube],
   );
 
   return (
@@ -874,6 +875,7 @@ function filterTrophyEvents(
   activeFormat: string,
   activeColors: string,
   otherCombos: string[],
+  cube: boolean,
 ): PlayerDraftEvent[] {
   if (!events) return [];
   const otherSet = new Set(otherCombos);
@@ -882,9 +884,9 @@ function filterTrophyEvents(
     if (!matchesFormatFilter(e.format, activeFormat)) return false;
     if (activeColors !== "ALL") {
       if (activeColors === MULTI) {
-        if (effectiveColorCount(e.colors) < 4) return false;
+        if (!isSoup(e.colors, cube)) return false;
       } else if (activeColors === OTHER) {
-        if (effectiveColorCount(e.colors) >= 4) return false;
+        if (isSoup(e.colors, cube)) return false;
         if (!otherSet.has(colorsOf(e.colors))) return false;
       } else if (colorsOf(e.colors) !== activeColors) return false;
     }
@@ -898,6 +900,7 @@ function filterScopedEvents(
   activeFormat: string,
   activeColors: string,
   otherCombos: string[],
+  cube: boolean,
 ): PlayerDraftEvent[] {
   if (!events) return [];
   const otherSet = new Set(otherCombos);
@@ -905,9 +908,9 @@ function filterScopedEvents(
     if (!matchesFormatFilter(e.format, activeFormat)) return false;
     if (activeColors !== "ALL") {
       if (activeColors === MULTI) {
-        if (effectiveColorCount(e.colors) < 4) return false;
+        if (!isSoup(e.colors, cube)) return false;
       } else if (activeColors === OTHER) {
-        if (effectiveColorCount(e.colors) >= 4) return false;
+        if (isSoup(e.colors, cube)) return false;
         if (!otherSet.has(colorsOf(e.colors))) return false;
       } else if (colorsOf(e.colors) !== activeColors) return false;
     }
@@ -1093,6 +1096,7 @@ function MobileExpandedRow({
   otherCombos: string[];
 }) {
   const { events } = useDelayedExpandedData(row.slug, row.setCode);
+  const cube = isCubeCode(row.setCode);
   // events are DESC-sorted by finishedAt — first matching trophy is the most recent
   const lastTrophy = useMemo(() => {
     if (!events) return null;
@@ -1101,12 +1105,12 @@ function MobileExpandedRow({
       for (const e of events) if (e.isTrophy) return e;
       return null;
     }
-    return filterTrophyEvents(events, activeFormat, activeColors, otherCombos)[0] ?? null;
-  }, [events, activeFormat, activeColors, otherCombos]);
+    return filterTrophyEvents(events, activeFormat, activeColors, otherCombos, cube)[0] ?? null;
+  }, [events, activeFormat, activeColors, otherCombos, cube]);
   const lastDeck = useMemo(() => {
     if (!events || lastTrophy) return null;
-    return filterScopedEvents(events, activeFormat, activeColors, otherCombos)[0] ?? null;
-  }, [events, lastTrophy, activeFormat, activeColors, otherCombos]);
+    return filterScopedEvents(events, activeFormat, activeColors, otherCombos, cube)[0] ?? null;
+  }, [events, lastTrophy, activeFormat, activeColors, otherCombos, cube]);
 
   return (
     <Link

@@ -1,11 +1,14 @@
 from datetime import date, datetime, timezone
 
+import pytest
+
 from bot.commands.leaderboard import (
     LcqExtras,
     LeaderboardData,
     LeaderboardEntry,
     PersonalStanding,
     PersonalStandingsData,
+    _is_soup,
     decode_filter,
     encode_filter,
     process_leaderboard,
@@ -655,3 +658,23 @@ def test_peasant_board_filters_to_peasant_pods(session):
     assert data.set_code == "PEASANT"
     assert data.show_score is False
     assert [(e.slug, e.trophies, e.events) for e in data.top] == [(alice.slug, 1, 1)]
+
+
+@pytest.mark.parametrize(
+    "colors, is_cube, expected",
+    [
+        ("WUbr", False, True),
+        ("WUBR", False, True),
+        ("WUB", False, False),
+        ("WUBr", False, True),
+        ("WUbr", True, False),
+        ("WUBr", True, True),
+        ("WUBR", True, True),
+        ("WUB", True, False),
+        ("WUBRg", True, True),
+        ("", True, False),
+        (None, True, False),
+    ],
+)
+def test_is_soup_cube_requires_three_base_colors(colors, is_cube, expected):
+    assert _is_soup(colors, is_cube) is expected
