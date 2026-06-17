@@ -51,6 +51,15 @@ const titleCaseSlug = (slug: string, setCodes: Set<string>): string =>
     })
     .join(" ");
 
+// Set codes are acronyms (SOS, ECL) so they stay uppercase, but CUBE is a word —
+// render "Cube" and its seasons as "Cube SOS".
+const setTitleLabel = (code: string): string => {
+  const upper = code.toUpperCase();
+  if (upper === "CUBE") return "Cube";
+  if (upper.startsWith("CUBE-")) return `Cube ${upper.slice("CUBE-".length)}`;
+  return upper;
+};
+
 const resolvePageTitle = (
   segments: string[],
   playerName: string | undefined,
@@ -74,7 +83,7 @@ const resolvePageTitle = (
     if (rest[1] === "player" && rest[2]) {
       return playerName ?? titleCaseSlug(rest[2], setCodes);
     }
-    return `${rest[0].toUpperCase()} Leaderboard`;
+    return `${setTitleLabel(rest[0])} Leaderboard`;
   }
 
   if (section === "tier-list") {

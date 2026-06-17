@@ -14,6 +14,7 @@
 import type {
   ColorsLeaderboardRow,
   ColorsSummary,
+  CubeSeason,
   LeaderboardRow,
   PlayerDraftEvent,
   PlayerFormatBreakdown,
@@ -89,6 +90,8 @@ const wait = <T,>(value: T): Promise<T> =>
 
 // ─── public_sets ─────────────────────────────────────────────────────────────
 export const fetchSets = (): Promise<SetSummary[]> => wait(setsFixture);
+
+export const fetchCubeSeasons = (): Promise<CubeSeason[]> => wait([]);
 
 export const fetchAvailableFormats = (_setCode: string): Promise<string[]> =>
   wait(["Premier", "Trad", "Sealed", "Quick", "LCQ Draft 1", "LCQ Draft 2"]);

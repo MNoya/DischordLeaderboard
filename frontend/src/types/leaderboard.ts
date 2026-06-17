@@ -16,6 +16,17 @@ export interface PodSetCode {
   label: string | null; // format_label — non-null only for custom cube formats
 }
 
+export interface CubeSeason {
+  setCode: string; // virtual code, e.g. "CUBE-SOS"
+  label: string; // the season's set code, e.g. "SOS"
+  name: string;
+  startDate: string; // the set's release date
+  firstEvent: string; // first cube event of the season's burst (cube opens after release)
+  lastEvent: string; // latest cube event in the season
+  events: number;
+  players: number;
+}
+
 export interface LeaderboardRow {
   setCode: string;
   slug: string;
