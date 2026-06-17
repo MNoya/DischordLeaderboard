@@ -32,3 +32,11 @@ export interface SlotDefinition {
   label: string;
   filter: (card: Card, pickedCards: Set<string>) => boolean;
 }
+
+export interface P0P1PickStat {
+  setCode: string;
+  slot: SlotKey;
+  cardName: string;
+  pickCount: number;
+  pickPct: number;
+}

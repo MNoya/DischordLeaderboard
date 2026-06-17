@@ -29,7 +29,7 @@ import type {
   RecentTrophy,
   SetSummary,
 } from "../types/leaderboard";
-import type { Card, P0P1Pick, SlotKey } from "../types/p0p1";
+import type { Card, P0P1Pick, P0P1PickStat, SlotKey } from "../types/p0p1";
 import {
   podDraftArtifactFixture,
   podEventsFixture,
@@ -412,6 +412,24 @@ import { cardsMshFixture } from "./fixtures/cards-msh";
 
 const p0p1Picks = new Map<string, P0P1Pick>();
 
+// Seed mock picks so post-voting "picked by X%" badges show up
+{
+  const slotFilters: Record<string, (c: Card) => boolean> = {
+    white_common: (c) => c.rarity === "common" && c.colors.length === 1 && c.colors[0] === "W",
+    blue_common: (c) => c.rarity === "common" && c.colors.length === 1 && c.colors[0] === "U",
+    black_common: (c) => c.rarity === "common" && c.colors.length === 1 && c.colors[0] === "B",
+    red_common: (c) => c.rarity === "common" && c.colors.length === 1 && c.colors[0] === "R",
+    green_common: (c) => c.rarity === "common" && c.colors.length === 1 && c.colors[0] === "G",
+    multicolor_uncommon: (c) => c.rarity === "uncommon" && c.colors.length >= 2,
+    wildcard_common: (c) => c.rarity === "common" && !c.typeLine.startsWith("Basic Land"),
+    wildcard_uncommon: (c) => c.rarity === "uncommon",
+  };
+  for (const [slot, filter] of Object.entries(slotFilters)) {
+    const card = cardsMshFixture.find(filter);
+    if (card) p0p1Picks.set(slot, { slot: slot as SlotKey, cardName: card.name, lastUpdated: "2026-06-10T00:00:00Z" });
+  }
+}
+
 export const fetchP0P1Cards = (_setCode: string): Promise<Card[]> =>
   wait(cardsMshFixture);
 
@@ -431,6 +449,55 @@ export const deleteAllP0P1Picks = async (
   _setCode: string,
 ): Promise<void> => {
   p0p1Picks.clear();
+};
+
+export const fetchP0P1PickStats = (_setCode: string): Promise<P0P1PickStat[]> => {
+  const stats: P0P1PickStat[] = [];
+  const slotKeys: SlotKey[] = [
+    "white_common", "blue_common", "black_common", "red_common",
+    "green_common", "multicolor_uncommon", "wildcard_common", "wildcard_uncommon",
+  ];
+  const slotFilters: Record<string, (c: Card) => boolean> = {
+    white_common: (c) => c.rarity === "common" && c.colors.length === 1 && c.colors[0] === "W",
+    blue_common: (c) => c.rarity === "common" && c.colors.length === 1 && c.colors[0] === "U",
+    black_common: (c) => c.rarity === "common" && c.colors.length === 1 && c.colors[0] === "B",
+    red_common: (c) => c.rarity === "common" && c.colors.length === 1 && c.colors[0] === "R",
+    green_common: (c) => c.rarity === "common" && c.colors.length === 1 && c.colors[0] === "G",
+    multicolor_uncommon: (c) => c.rarity === "uncommon" && c.colors.length >= 2,
+    wildcard_common: (c) => c.rarity === "common" && !c.typeLine.startsWith("Basic Land"),
+    wildcard_uncommon: (c) => c.rarity === "uncommon",
+  };
+  let seed = 42;
+  const rng = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  const TOTAL_VOTERS = 87;
+
+  for (const slotKey of slotKeys) {
+    const eligible = cardsMshFixture.filter(slotFilters[slotKey]);
+    const count = Math.min(eligible.length, 3 + Math.floor(rng() * 6));
+    const picked = eligible.slice(0, count);
+    let remaining = TOTAL_VOTERS;
+    const counts: number[] = [];
+    for (let i = 0; i < picked.length; i++) {
+      if (i === picked.length - 1) {
+        counts.push(remaining);
+      } else {
+        const share = Math.max(1, Math.floor(remaining * (0.15 + rng() * 0.45)));
+        counts.push(share);
+        remaining -= share;
+      }
+    }
+    counts.sort((a, b) => b - a);
+    for (let i = 0; i < picked.length; i++) {
+      stats.push({
+        setCode: "MSH",
+        slot: slotKey,
+        cardName: picked[i].name,
+        pickCount: counts[i],
+        pickPct: Math.round(counts[i] * 1000 / TOTAL_VOTERS) / 10,
+      });
+    }
+  }
+  return wait(stats);
 };
 
 export const initialAuthUser = {

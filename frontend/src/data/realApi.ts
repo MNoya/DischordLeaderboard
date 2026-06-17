@@ -1154,7 +1154,7 @@ function adaptPodLeaderboardRow(row: Record<string, unknown>): PodLeaderboardRow
 
 // --- P0P1 contest (stubs — wired to Supabase later) ---
 
-import type { Card, P0P1Pick, SlotKey } from "../types/p0p1";
+import type { Card, P0P1Pick, P0P1PickStat, SlotKey } from "../types/p0p1";
 import { cardsMshFixture } from "./fixtures/cards-msh";
 
 export const fetchP0P1Cards = (_setCode: string): Promise<Card[]> =>
@@ -1196,6 +1196,21 @@ export async function deleteAllP0P1Picks(setCode: string): Promise<void> {
     .delete()
     .eq("set_code", setCode);
   if (error) throw error;
+}
+
+export async function fetchP0P1PickStats(setCode: string): Promise<P0P1PickStat[]> {
+  const { data, error } = await client()
+    .from("public_p0p1_pick_stats")
+    .select("*")
+    .eq("set_code", setCode);
+  if (error) throw error;
+  return (data ?? []).map((r) => ({
+    setCode: r.set_code as string,
+    slot: r.slot as SlotKey,
+    cardName: r.card_name as string,
+    pickCount: r.pick_count as number,
+    pickPct: Number(r.pick_pct),
+  }));
 }
 
 export const initialAuthUser = null;
