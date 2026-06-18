@@ -144,10 +144,11 @@ export function SetGlyph({ code, size = 18 }: { code: string; size?: number }) {
       style={{ width: size, height: size }}
       aria-hidden="true"
     >
-      <i
-        className={`ss ss-${keyruneClass(code)} text-white`}
-        style={{ fontSize: size, lineHeight: 1 }}
-      />
+      {code === "EVG" ? (
+        <img src={LLU_LOGO_SRC} alt="" style={{ width: size, height: size }} className="block object-contain" />
+      ) : (
+        <i className={`ss ss-${keyruneClass(code)} text-white`} style={{ fontSize: size, lineHeight: 1 }} />
+      )}
     </span>
   );
 }

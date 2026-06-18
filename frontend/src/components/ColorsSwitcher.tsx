@@ -3,6 +3,7 @@ import { BsAsterisk, BsPaletteFill } from "./Icons";
 import { Pip } from "./ManaPips";
 import { cn } from "../lib/utils";
 import { MULTI, OTHER, colorsDisplayName } from "../data/filters";
+import { TOGGLE_ACTIVE, TOGGLE_INACTIVE } from "../lib/toggle-styles";
 
 export function ColorsSwitcher({
   activeCode,
@@ -71,9 +72,9 @@ function Chip({
         onClick={onClick}
         className={cn(
           "shrink-0 h-[26px] px-2.5 border inline-flex items-center gap-1.5 cursor-pointer transition-colors font-display tracking-[0.18em] text-[13px]",
-          activeAccent && "border-green bg-green/10 text-green",
+          activeAccent && TOGGLE_ACTIVE,
           activeAll && "border-border2 bg-surface text-text",
-          !active && "border-border2 bg-transparent text-muted hover:bg-surface",
+          !active && TOGGLE_INACTIVE,
         )}
       >
         {code === MULTI && <BsPaletteFill size={pipSize} aria-hidden="true" />}
@@ -87,7 +88,7 @@ function Chip({
       onClick={onClick}
       className={cn(
         "shrink-0 h-[26px] px-[7px] border inline-flex items-center gap-0.5 cursor-pointer transition-colors",
-        active ? "border-green bg-green/10" : "border-border2 bg-transparent hover:bg-surface",
+        active ? TOGGLE_ACTIVE : TOGGLE_INACTIVE,
       )}
       aria-label={code}
     >

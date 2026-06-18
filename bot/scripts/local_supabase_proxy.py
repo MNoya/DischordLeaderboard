@@ -18,6 +18,7 @@ _ALLOWED_VIEWS = {
     "public_cube_seasons",
     "public_cube_season_breakdown",
     "public_cube_season_events",
+    "public_episodes",
     "public_leaderboard",
     "public_player",
     "public_player_draft_events",
@@ -125,9 +126,9 @@ def main() -> None:
     app.router.add_get("/rest/v1/{view}", _handle_view)
     app.router.add_route("OPTIONS", "/rest/v1/{view}", _handle_view)
 
-    log.info("local supabase proxy → docker postgres, listening on http://localhost:3001")
+    log.info("local supabase proxy → docker postgres, listening on http://0.0.0.0:3001")
     log.info("set VITE_SUPABASE_URL=http://localhost:3001 in frontend/.env.local")
-    web.run_app(app, host="localhost", port=3001, print=None)
+    web.run_app(app, host="0.0.0.0", port=3001, print=None)
 
 
 if __name__ == "__main__":

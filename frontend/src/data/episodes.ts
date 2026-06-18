@@ -5,17 +5,36 @@
 export const LIBSYN_FEED_URL = "https://feeds.libsyn.com/limitedlevelups/rss";
 
 export const EPISODE_CATEGORIES = [
-  "Set Primer",
+  "First Impressions",
   "Set Review",
-  "Draft-along",
-  "Sunset",
-  "Q&A",
-  "Strategy",
+  "Draft",
+  "Metagame",
+  "Evergreen",
 ] as const;
 
 export type EpisodeCategory = (typeof EPISODE_CATEGORIES)[number];
 
 export type MediaKind = "episode" | "video";
+
+// The set bucket for content not tied to any release — general limited skills, draft coaching,
+// Top 10s. The bot tags these EVG; live overlay items with no set fall here too.
+export const EVERGREEN_SET = { code: "EVG", name: "Evergreen" } as const;
+
+// YouTube Shorts are vertical, ≤3min. This channel's cluster at ≤90s; longer ones (up to 3min)
+// are Shorts only when the title carries the hashtag run ("#draft #mtg") that long-form lacks.
+const SHORT_MAX_SECONDS = 90;
+const SHORT_HASHTAG_MAX_SECONDS = 180;
+const SHORT_HASHTAG = /#\w/;
+
+export function isShortMedia(kind: MediaKind, durationSeconds: number, title: string): boolean {
+  if (kind !== "video" || durationSeconds <= 0) {
+    return false;
+  }
+  if (durationSeconds <= SHORT_MAX_SECONDS) {
+    return true;
+  }
+  return durationSeconds <= SHORT_HASHTAG_MAX_SECONDS && SHORT_HASHTAG.test(title);
+}
 
 export interface Episode {
   id: string;
@@ -33,6 +52,10 @@ export interface Episode {
   summary: string;
   youtubeId?: string;
   videoUrl?: string;
+  setCode?: string | null;
+  setName?: string | null;
+  setReleasedAt?: string | null;
+  isShort: boolean;
 }
 
 export async function fetchEpisodes(): Promise<Episode[]> {
@@ -63,15 +86,15 @@ export async function fetchEpisodes(): Promise<Episode[]> {
       image: tagHref(item, "itunes:image"),
       category: inferCategory(rawTitle),
       summary: stripHtml(tagText(item, "itunes:summary") || text(item, "description")),
+      isShort: false,
     };
   });
 }
 
 const CATEGORY_KEYWORDS: Array<[EpisodeCategory, RegExp]> = [
-  ["Set Primer", /primer|first impressions|first look/i],
-  ["Sunset", /sunset|send-?off|goodbye|state of the format|farewell|wrap-?up/i],
-  ["Q&A", /mailbag|q&a|listener|questions/i],
-  ["Draft-along", /draft-?along|draft log|live draft|drafting with/i],
+  ["First Impressions", /primer|first impressions|first look/i],
+  ["Metagame", /state of the format|format address|format update|metagame|meta update|mid-?format|what we got wrong|late format/i],
+  ["Draft", /draft-?along|draft log|live draft|drafting with/i],
   ["Set Review", /set review|ranking|tier list|best|underrated|overrated|commons|uncommons|rares|mythics|cards/i],
 ];
 
@@ -81,7 +104,7 @@ export function inferCategory(title: string): EpisodeCategory {
       return category;
     }
   }
-  return "Strategy";
+  return "Evergreen";
 }
 
 export function parseEpisodeNumber(title: string): number | null {
@@ -137,4 +160,49 @@ function tagText(item: Element, qualifiedName: string): string {
 
 function tagHref(item: Element, qualifiedName: string): string {
   return item.getElementsByTagName(qualifiedName)[0]?.getAttribute("href")?.trim() ?? "";
+}
+
+export interface DbEpisodeRow {
+  guid: string;
+  kind: MediaKind;
+  number: number | null;
+  title: string;
+  link: string;
+  summary: string | null;
+  image: string | null;
+  published_at: string;
+  duration_seconds: number;
+  audio_url: string | null;
+  youtube_id: string | null;
+  category: string;
+  set_code: string | null;
+  set_name: string | null;
+  set_released_at: string | null;
+}
+
+// Authoritative episode rows from the public_episodes view, already categorized and
+// set-tagged by the bot's playlist sync. Keyed on guid so the live RSS/YouTube overlay
+// can dedupe against them by the same id.
+export function adaptDbEpisode(row: DbEpisodeRow): Episode {
+  return {
+    id: row.guid,
+    kind: row.kind,
+    number: row.number,
+    title: row.title,
+    link: row.link,
+    audioUrl: row.audio_url ?? "",
+    pubDate: row.published_at,
+    publishedLabel: formatPublished(row.published_at),
+    durationLabel: formatDuration(row.duration_seconds),
+    durationSeconds: row.duration_seconds,
+    image: row.image ?? "",
+    category: row.category as EpisodeCategory,
+    summary: row.summary ?? "",
+    youtubeId: row.youtube_id ?? undefined,
+    videoUrl: row.youtube_id ? `https://www.youtube.com/watch?v=${row.youtube_id}` : undefined,
+    setCode: row.set_code,
+    setName: row.set_name,
+    setReleasedAt: row.set_released_at,
+    isShort: isShortMedia(row.kind, row.duration_seconds, row.title),
+  };
 }

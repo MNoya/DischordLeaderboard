@@ -2,12 +2,11 @@ import type { EpisodeCategory } from "../data/episodes";
 import { cn } from "../lib/utils";
 
 const CATEGORY_STYLE: Record<EpisodeCategory, string> = {
-  "Set Primer": "bg-green text-bg",
+  "First Impressions": "bg-green text-bg",
   "Set Review": "bg-teal text-bg",
-  "Draft-along": "bg-red text-bg",
-  Sunset: "bg-gold text-bg",
-  "Q&A": "bg-border2 text-text",
-  Strategy: "bg-border2 text-text",
+  Draft: "bg-red text-bg",
+  Metagame: "bg-gold text-bg",
+  Evergreen: "bg-border2 text-text",
 };
 
 export function CategoryTag({ category, className }: { category: EpisodeCategory; className?: string }) {

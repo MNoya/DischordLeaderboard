@@ -297,3 +297,44 @@ class PodDraftReplay(Base):
         Index("ix_pod_draft_replays_event_player", "event_id", "player_id"),
         Index("ix_pod_draft_replays_event_time", "event_id", "game_time"),
     )
+
+
+class Episode(Base):
+    """One row per published piece of content — a podcast episode, a YouTube video, or both
+    when a video matches its episode.
+
+    Synced from the Libsyn RSS feed and the YouTube channel; ``category`` and ``set_code``
+    come from the channel's curated playlists, falling back to title inference for podcast-only
+    entries with no matching video. Derived state, rebuilt on each sync — the feeds stay the
+    source of truth. ``playlists`` keeps the raw membership so a future manual override has
+    something to correct against, and transcripts can land as a new column without reshaping.
+    """
+    __tablename__ = "episodes"
+
+    id               = Column(String, primary_key=True, default=lambda: str(uuid4()))
+    guid             = Column(String, nullable=False, unique=True)
+    kind             = Column(String, nullable=False)
+    number           = Column(Integer, nullable=True)
+
+    title            = Column(String, nullable=False)
+    link             = Column(String, nullable=False)
+    summary          = Column(Text, nullable=True)
+    image            = Column(String, nullable=True)
+    published_at     = Column(DateTime(timezone=True), nullable=False)
+    duration_seconds = Column(Integer, nullable=False, server_default="0")
+
+    audio_url        = Column(String, nullable=True)
+    youtube_id       = Column(String, nullable=True)
+
+    category         = Column(String, nullable=False)
+    set_code         = Column(String, nullable=True)
+    set_name         = Column(String, nullable=True)
+    set_released_at  = Column(Date, nullable=True)
+    playlists        = Column(JSONB, nullable=True)
+
+    synced_at        = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_episodes_published_at", "published_at"),
+        Index("ix_episodes_set_code", "set_code"),
+    )

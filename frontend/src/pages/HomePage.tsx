@@ -32,8 +32,8 @@ import {
   usePodEvents,
   useSets,
 } from "../data/hooks";
-import { buildTierListSets, TIER_ORDER, useTierList, type TierCard } from "../data/tierList";
-import { ACTIVE_SET_CODE, TIER_LIST_GRADERS, TIER_LIST_UIDS } from "../data/constants";
+import { buildTierListSets, resolveTierList, TIER_ORDER, useTierList, type TierCard } from "../data/tierList";
+import { ACTIVE_SET_CODE } from "../data/constants";
 import { FMT_COLORS, shortFormat } from "../data/format-display";
 import { FORMAT_OPTIONS } from "../data/filters";
 import { discordEventLink, HOST, SITE_LINKS } from "../data/site";
@@ -60,7 +60,11 @@ export function HomePage() {
           <TierPanel />
         </div>
 
-        <EpisodesHero episodes={episodes?.slice(0, 4) ?? []} loading={!episodes} thumbnailsPending={thumbnailsPending} />
+        <EpisodesHero
+          episodes={episodes?.filter((ep) => !ep.isShort).slice(0, 4) ?? []}
+          loading={!episodes}
+          thumbnailsPending={thumbnailsPending}
+        />
 
         <div className="contents lg:flex lg:flex-col lg:gap-4 lg:min-h-0 lg:h-full">
           <LeaderboardPanel setCode={setCode} />
@@ -197,9 +201,8 @@ function TierPanel() {
   const [picked, setPicked] = useState<string | undefined>();
   const current = picked ?? tierSets[0]?.code ?? ACTIVE_SET_CODE;
   const setMeta = tierSets.find((s) => s.code === current);
-  const uid = TIER_LIST_UIDS[current];
-  const graders = TIER_LIST_GRADERS[current] ?? [];
-  const { data } = useTierList(uid, graders);
+  const { graders, effectiveUid } = resolveTierList(current);
+  const { data } = useTierList(effectiveUid, graders);
   const rows = useMemo(() => sampleTiers(data?.filter((card) => card.inclusion_type === "Main Set")), [data]);
   const allCards = useMemo(() => rows.flatMap((row) => row.cards).sort(comparePagerOrder), [rows]);
 
@@ -488,28 +491,20 @@ function HeroEpisodeCard({
     .join(" · ");
   return (
     <a
-      href={episode.link}
+      href={episode.videoUrl ?? episode.link}
       target="_blank"
       rel="noreferrer"
       className={cn(
-        "group/ep flex flex-col min-h-0 border border-border rounded-lg overflow-hidden bg-surface2 no-underline transition-colors hover:border-green",
+        "group/ep flex flex-col min-h-0 border border-border rounded-lg overflow-hidden bg-surface2 no-underline transition-[border-color,box-shadow] duration-150 hover:border-green hover:shadow-[0_0_11px_2px_rgba(46,232,92,0.55)]",
         className,
       )}
     >
-      <div className="relative aspect-video lg:aspect-auto lg:flex-1 lg:min-h-0 bg-surface">
-        <EpisodeThumbnail src={episode.image} pending={thumbnailPending} />
-        {!compact ? <CategoryTag category={episode.category} className="absolute top-2 left-2" /> : null}
-        {episode.kind === "video" ? (
-          compact ? (
-            <span className="absolute bottom-2 right-2 inline-flex items-center bg-red text-text px-1 py-0.5">
-              <SiYoutube className="text-[12px]" />
-            </span>
-          ) : (
-            <span className="absolute top-2 right-2 inline-flex items-center gap-1 mono text-[10px] tracking-[0.08em] text-text bg-red px-1.5 py-0.5">
-              <SiYoutube className="text-[11px]" /> VIDEO
-            </span>
-          )
-        ) : null}
+      <div className="relative aspect-video lg:aspect-auto lg:flex-1 lg:min-h-0 overflow-hidden bg-surface">
+        <EpisodeThumbnail
+          src={episode.image}
+          pending={thumbnailPending}
+          className="transition-transform duration-300 group-hover/ep:scale-[1.07]"
+        />
         {!compact && episode.durationLabel ? (
           <span className="absolute bottom-2 right-2 mono text-[10px] text-text bg-bg/85 px-1.5 py-0.5">
             {episode.durationLabel}
@@ -520,7 +515,10 @@ function HeroEpisodeCard({
         </span>
       </div>
       <div className="p-3 shrink-0">
-        <div className="mono text-[12px] tracking-[0.1em] text-muted">{meta}</div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="mono text-[12px] tracking-[0.1em] text-muted truncate">{meta}</span>
+          <CategoryTag category={episode.category} className="shrink-0" />
+        </div>
         <h3 className="font-body text-text text-[16px] font-medium leading-snug mt-1 line-clamp-2 transition-colors group-hover/ep:text-green">
           {episode.title}
         </h3>

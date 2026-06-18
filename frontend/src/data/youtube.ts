@@ -10,6 +10,7 @@ import {
   formatDuration,
   formatPublished,
   inferCategory,
+  isShortMedia,
   parseEpisodeNumber,
   type Episode,
 } from "./episodes";
@@ -57,6 +58,16 @@ export function mergeMedia(episodes: Episode[], videos: YouTubeVideo[]): Episode
   return [...enriched, ...standalone].sort(
     (a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime(),
   );
+}
+
+// DB rows are authoritative (categorized, set-tagged, thumbnails matched). Live RSS/YouTube
+// items not yet synced overlay on top so a just-dropped episode shows up before the next sync,
+// deduped against the DB by guid and by matched youtube id.
+export function overlayLiveMedia(db: Episode[], live: Episode[]): Episode[] {
+  const dbIds = new Set(db.map((e) => e.id));
+  const dbYoutubeIds = new Set(db.map((e) => e.youtubeId).filter(Boolean));
+  const fresh = live.filter((e) => !dbIds.has(e.id) && !(e.youtubeId && dbYoutubeIds.has(e.youtubeId)));
+  return [...db, ...fresh].sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime());
 }
 
 function findMatch(episode: Episode, videos: YouTubeVideo[], claimed: Set<string>): YouTubeVideo | null {
@@ -109,6 +120,7 @@ function toVideoEpisode(video: YouTubeVideo): Episode {
     summary: video.description,
     youtubeId: video.id,
     videoUrl: watchUrl(video.id),
+    isShort: isShortMedia("video", durationSeconds, video.title),
   };
 }
 

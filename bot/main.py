@@ -58,6 +58,7 @@ from bot.services.pod_tournament import (
     register_persistent_views as register_pod_views,
     rehydrate_active_tournaments,
 )
+from bot.services.media_sync import sync_media, SyncResult
 from bot.services.refresh import refresh_active_players
 from bot.services.seventeenlands import MinIntervalLimiter, SeventeenLandsClient
 from bot.sets import ACTIVE_SET_CODE
@@ -79,6 +80,8 @@ AUTO_REFRESH_TIMES = [
     dtime(hour=20, minute=0, tzinfo=AUTO_REFRESH_TZ),
 ]
 AUTO_REFRESH_17L_INTERVAL_S = 3.0
+
+MEDIA_SYNC_TIME = dtime(hour=3, minute=30, tzinfo=AUTO_REFRESH_TZ)
 
 MSG_GENERIC_ERROR = "⚠️ Something went wrong handling that command. The bot owner has been notified."
 
@@ -411,6 +414,38 @@ def build_bot(guild_id: int) -> commands.Bot:
     async def _before_auto_refresh() -> None:
         await bot.wait_until_ready()
 
+    async def run_media_sync() -> SyncResult:
+        def _do_sync() -> SyncResult:
+            with SessionLocal() as session:
+                return sync_media(session)
+
+        return await asyncio.to_thread(_do_sync)
+
+    @bot.command(name="sync-media")
+    @commands.is_owner()
+    async def sync_media_cmd(ctx: commands.Context) -> None:
+        """Owner-only. Pull the podcast feed + YouTube channel into the episodes table."""
+        await _reply_quietly(ctx, "⏳ Syncing episodes…")
+        result = await run_media_sync()
+        await _reply_quietly(
+            ctx,
+            f"✅ Synced {result.total} episodes ({result.matched} matched, {result.videos_only} video-only, "
+            f"{result.podcasts_only} podcast-only, {result.with_set} with a set).",
+        )
+
+    @tasks.loop(time=MEDIA_SYNC_TIME)
+    async def media_sync_tick() -> None:
+        try:
+            log.info("media-sync: scheduled tick firing")
+            await run_media_sync()
+        except Exception:
+            log.exception("media-sync tick failed")
+            await _notify_owner(bot, "⚠️ media-sync tick crashed:", traceback.format_exc())
+
+    @media_sync_tick.before_loop
+    async def _before_media_sync() -> None:
+        await bot.wait_until_ready()
+
     bot.startup_announced = False
 
     @bot.event
@@ -431,6 +466,8 @@ def build_bot(guild_id: int) -> commands.Bot:
             return
         if not auto_refresh_tick.is_running():
             auto_refresh_tick.start()
+        if settings.media_sync_enabled and not media_sync_tick.is_running():
+            media_sync_tick.start()
 
     return bot
 

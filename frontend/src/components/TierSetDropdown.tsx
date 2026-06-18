@@ -156,7 +156,7 @@ export function TierSetDropdown({
               />
             </div>
           )}
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="menu-scrollbar min-h-0 flex-1 overflow-y-auto">
             {filtered.map((s) => {
               const active = s.code === activeCode;
               return (

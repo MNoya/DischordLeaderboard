@@ -6,9 +6,8 @@ type Platform = (typeof COMMUNITY_PLATFORMS)[number];
 
 const BADGE: Record<string, string> = {
   youtube: "YT",
+  podcast: "PC",
   twitch: "TW",
-  bluesky: "BS",
-  reddit: "RD",
   patreon: "PT",
 };
 

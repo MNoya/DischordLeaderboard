@@ -9,16 +9,12 @@ import { useSets } from "../data/hooks";
 import { relativeTime } from "../data/utils";
 import { cn } from "../lib/utils";
 import { useIsMobile } from "../lib/use-is-mobile";
-import {
-  ACTIVE_SET_CODE,
-  TIER_LIST_GRADERS,
-  TIER_LIST_PREVIEW_SETS,
-  TIER_LIST_UIDS,
-} from "../data/constants";
+import { ACTIVE_SET_CODE, TIER_LIST_PREVIEW_SETS } from "../data/constants";
 import {
   buildTierListSets,
   EMPTY_FILTERS,
   hasActiveFilters,
+  resolveTierList,
   tierFilterOptions,
   useHideArt,
   useTierList,
@@ -48,10 +44,7 @@ export function TierListPage() {
   const current = setCode?.toUpperCase() ?? tierListSets[0]?.code ?? liveSet;
   const pickSet = (code: string) => navigate(`/tier-list/${code}`);
   const setMeta = tierListSets.find((s) => s.code === current);
-  const uid = TIER_LIST_UIDS[current];
-  const graders = TIER_LIST_GRADERS[current] ?? [];
-  const comparison = !uid && graders.length > 0;
-  const effectiveUid = uid || graders[0]?.uid;
+  const { graders, comparison, effectiveUid } = resolveTierList(current);
   const glyphCode = setMeta ? setGlyphCode(setMeta) : current;
 
   const { data: tierData, lastUpdated } = useTierList(effectiveUid);

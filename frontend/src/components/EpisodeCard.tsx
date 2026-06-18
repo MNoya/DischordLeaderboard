@@ -1,4 +1,3 @@
-import { SiYoutube } from "react-icons/si";
 import type { Episode } from "../data/episodes";
 import { CategoryTag } from "./CategoryTag";
 import { EpisodeThumbnail } from "./EpisodeThumbnail";
@@ -7,15 +6,15 @@ export function EpisodeCard({ episode, thumbnailPending = false }: { episode: Ep
   const meta = [episode.publishedLabel.toUpperCase(), episode.number ? `EP ${episode.number}` : null]
     .filter(Boolean)
     .join(" · ");
+
   return (
-    <a href={episode.link} target="_blank" rel="noreferrer" className="group flex flex-col no-underline">
-      <div className="relative aspect-video bg-surface border border-border overflow-hidden transition-colors group-hover:border-green">
-        <EpisodeThumbnail src={episode.image} pending={thumbnailPending} />
-        {episode.kind === "video" ? (
-          <span className="absolute top-2 right-2 inline-flex items-center gap-1 mono text-[10px] tracking-[0.08em] text-text bg-red px-1.5 py-0.5">
-            <SiYoutube className="text-[11px]" /> VIDEO
-          </span>
-        ) : null}
+    <a href={episode.videoUrl ?? episode.link} target="_blank" rel="noreferrer" className="group flex flex-col no-underline">
+      <div className="relative aspect-video bg-surface border border-border rounded-lg overflow-hidden transition-[border-color,box-shadow] duration-150 group-hover:border-green group-hover:shadow-[0_0_11px_2px_rgba(46,232,92,0.55)]">
+        <EpisodeThumbnail
+          src={episode.image}
+          pending={thumbnailPending}
+          className="transition-transform duration-300 group-hover:scale-[1.07]"
+        />
         {episode.durationLabel ? (
           <span className="absolute bottom-2 right-2 mono text-[11px] text-text bg-bg/85 px-1.5 py-0.5">
             {episode.durationLabel}
@@ -27,13 +26,13 @@ export function EpisodeCard({ episode, thumbnailPending = false }: { episode: Ep
           </span>
         </span>
       </div>
-      <div className="mono text-[11px] tracking-[0.12em] text-muted mt-3">{meta}</div>
+      <div className="flex items-center justify-between gap-2 mt-3">
+        <span className="mono text-[11px] tracking-[0.12em] text-muted">{meta}</span>
+        <CategoryTag category={episode.category} />
+      </div>
       <h3 className="font-body text-text text-[15px] md:text-[16px] font-medium leading-snug mt-1.5 line-clamp-2 transition-colors group-hover:text-green">
         {episode.title}
       </h3>
-      <div className="mt-2.5">
-        <CategoryTag category={episode.category} />
-      </div>
     </a>
   );
 }

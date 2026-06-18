@@ -1106,7 +1106,6 @@ function DraftLogDesktop({
         </SectionLabel>
         <div className="flex gap-2">
           <FilterDropdown
-            label="FORMAT"
             value={formatFilter}
             onChange={setFormatFilter}
             options={formatOptions}
@@ -1637,7 +1636,6 @@ function Mobile({
         <div className="flex items-stretch gap-2 mb-3">
           <div className="flex-1 min-w-0 flex">
             <FilterDropdown
-              label="FORMAT"
               value={formatFilter}
               onChange={setFormatFilter}
               options={formatOptions}

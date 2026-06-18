@@ -14,6 +14,21 @@ export function hasTierList(code: string): boolean {
   return Boolean(TIER_LIST_UIDS[code]) || (TIER_LIST_GRADERS[code]?.length ?? 0) > 0;
 }
 
+export interface ResolvedTierList {
+  uid: string | undefined;
+  graders: Grader[];
+  comparison: boolean;
+  effectiveUid: string | undefined;
+}
+
+// Resolves a set code to the list that should drive grid placement. With no consensus list
+// the first grader stands in, and comparison mode shows every grader's grade side by side.
+export function resolveTierList(code: string): ResolvedTierList {
+  const uid = TIER_LIST_UIDS[code];
+  const graders = TIER_LIST_GRADERS[code] ?? [];
+  return { uid, graders, comparison: !uid && graders.length > 0, effectiveUid: uid || graders[0]?.uid };
+}
+
 // Sets that have a tier list (live feed or preview snapshot), newest first.
 // The first entry is the latest available tier list.
 export function buildTierListSets(sets: SetSummary[] | undefined): SetSummary[] {

@@ -1,7 +1,10 @@
 // Single source of truth for the community site's static content — external
-// links, host bio, support tiers, show-format legend, and the off-site
+// links, the mission blurbs, hosts, show-format legend, and the off-site
 // platforms. Pages and the footer read from here so a copy or URL change
 // cascades everywhere instead of being duplicated per page.
+//
+// Counts here are verified snapshots; bump them when they drift. The Discord
+// member count and the episode count render live (invite API + RSS feed).
 
 export const SITE_LINKS = {
   discord: "https://discord.com/invite/XWNVT9mxvU",
@@ -11,88 +14,79 @@ export const SITE_LINKS = {
   podcast: "https://limitedlevelups.libsyn.com",
   youtube: "https://www.youtube.com/@limitedlevel-ups",
   twitch: "https://www.twitch.tv/chord_o_calls",
-  bluesky: "https://bsky.app/profile/limitedlevelups.bsky.social",
-  reddit: "https://www.reddit.com/r/limitedlevelups",
-  apple: "https://podcasts.apple.com/podcast/limited-level-ups",
-  spotify: "https://open.spotify.com/show/limited-level-ups",
+  apple: "https://podcasts.apple.com/us/podcast/limited-level-ups/id1486488039",
+  spotify: "https://open.spotify.com/show/7LUZexiWvU1LM5xBpA7h2X",
   rss: "https://feeds.libsyn.com/limitedlevelups/rss",
-  mailbag: "mailto:hello@limitedlevelups.com",
+  contact: "mailto:chordocoach@gmail.com",
 } as const;
 
+export const CONTACT_EMAIL = "chordocoach@gmail.com";
+
 export const DISCORD_GUILD_ID = "775371722065051658";
+export const DISCORD_INVITE_CODE = "XWNVT9mxvU";
 
 export function discordEventLink(eventId: string): string {
   return `https://discord.com/events/${DISCORD_GUILD_ID}/${eventId}`;
 }
 
-export const SITE_TAGLINE = "Get better at draft. One set at a time.";
+export const SITE_TAGLINE = "Level up your Limited game.";
 
-export const SITE_PITCH =
-  "Every format, covered from first impressions through sunset. Primers, set reviews, draft-alongs — straight talk for players who want to level up.";
+export const SITE_BLURB =
+  "Limited Level-Ups is a YouTube channel, podcast, and Discord community for Magic: The Gathering players who want " +
+  "to improve at Limited. Whether you're chasing your first trophy, sharpening your fundamentals, or competing at " +
+  "the highest level, Limited Level-Ups is here to help you level up your game.";
 
-export const SITE_STATS: Array<{ value: string; label: string }> = [
-  { value: "240+", label: "Episodes" },
-  { value: "16", label: "Sets covered" },
-  { value: "5+ yrs", label: "Since 2020" },
-  { value: "4.2k", label: "Discord members" },
-];
+export const DISCORD_BLURB =
+  "A home for Limited players of all skill levels. Whether you want to improve your drafting, discuss formats, share " +
+  "your latest trophies, or just chat with other Limited enthusiasts, you'll find a welcoming group of players here.";
+
+export const COMMUNITY_STATS = {
+  youtubeSubscribers: "17K",
+  patreonSupporters: "918",
+  sinceYear: "2020",
+} as const;
 
 export const SHOW_FORMAT: Array<{ name: string; blurb: string }> = [
-  { name: "Set Primer", blurb: "Release-week overview" },
-  { name: "Set Review", blurb: "Commons / uncommons / rares" },
-  { name: "Draft-along", blurb: "Pick-by-pick breakdown" },
-  { name: "Strategy", blurb: "Evergreen skill topics" },
-  { name: "Sunset Show", blurb: "Format farewell" },
+  { name: "First Impressions", blurb: "Release-week overview" },
+  { name: "Set Review", blurb: "Commons & uncommons, graded" },
+  { name: "Draft", blurb: "Pick-by-pick breakdown" },
+  { name: "Metagame", blurb: "Per-set meta & format updates" },
+  { name: "Evergreen", blurb: "Timeless skill topics" },
 ];
 
-export const HOST = {
-  name: "Alex",
-  handle: "Chord_O_Calls",
-  bio: "Host since 2020. Drafts every format, writes deep dives on archetypes and signals, has strong opinions about mana bases. Also streams on Twitch and runs pod drafts on Discord most weekends.",
-  socials: [
-    { label: "YouTube", url: SITE_LINKS.youtube },
-    { label: "Twitch", url: SITE_LINKS.twitch },
-    { label: "Bluesky", url: SITE_LINKS.bluesky },
-  ],
-};
-
-export const SUPPORT_TIERS: Array<{
+export interface Host {
   name: string;
-  price: string;
-  perks: string[];
-  cta: string;
-  featured?: boolean;
-}> = [
+  handle: string;
+  role: string;
+  bio: string;
+  links: Array<{ label: string; url: string }>;
+}
+
+export const HOSTS: Host[] = [
   {
-    name: "Drafter",
-    price: "$3",
-    perks: ["Ad-free feed", "Patron-only Discord role", "Early episode access (24h)"],
-    cta: "Become a Drafter",
+    name: "Alex Nikolic",
+    handle: "Chord_O_Calls",
+    role: "Host & Founder",
+    bio:
+      "Started Limited Level-Ups in 2020 and has hosted every week since — primers, set reviews, draft-alongs, and " +
+      "strategy deep-dives on whatever format is live. Also streams drafts on Twitch and coaches.",
+    links: [
+      { label: "Twitch", url: SITE_LINKS.twitch },
+      { label: "YouTube", url: SITE_LINKS.youtube },
+    ],
   },
   {
-    name: "Deckbuilder",
-    price: "$7",
-    perks: [
-      "Everything in Drafter",
-      "Monthly bonus episode",
-      "Private #patron-drafts channel",
-      "Name in episode credits",
-    ],
-    cta: "Most popular",
-    featured: true,
-  },
-  {
-    name: "Mythic",
-    price: "$20",
-    perks: [
-      "Everything in Deckbuilder",
-      "Quarterly group draft w/ hosts",
-      "Submit questions to bonus mailbag",
-      "Signed swag once a year",
-    ],
-    cta: "Become a Mythic",
+    name: "Marc Anderson",
+    handle: "NEO_MTG",
+    role: "Set Review co-host",
+    bio:
+      "Former National Champion and Face2Face Games pro-team co-founder. Joins Alex for the set-review episodes, " +
+      "grading every common and uncommon before each format goes live.",
+    links: [{ label: "Twitter", url: "https://x.com/NEO_MTG" }],
   },
 ];
+
+export const HOST = HOSTS[0];
 
 export const COMMUNITY_PLATFORMS: Array<{
   key: string;
@@ -105,40 +99,32 @@ export const COMMUNITY_PLATFORMS: Array<{
   {
     key: "youtube",
     name: "YouTube",
-    blurb: "Video version of every episode, plus draft-along gameplay clips and guest interviews that don't make the audio feed.",
-    stat: "14.2k subscribers · new video weekly",
+    blurb: "Every episode in video, plus draft-along gameplay and guest sessions that don't make the audio feed.",
+    stat: `${COMMUNITY_STATS.youtubeSubscribers} subscribers`,
     action: "Subscribe",
     url: SITE_LINKS.youtube,
   },
   {
+    key: "podcast",
+    name: "Podcast",
+    blurb: "Listen on Apple, Spotify, or any podcast app — a new deep-dive episode most weeks.",
+    stat: `Since ${COMMUNITY_STATS.sinceYear}`,
+    action: "Listen",
+    url: SITE_LINKS.apple,
+  },
+  {
     key: "twitch",
     name: "Twitch",
-    blurb: "Live drafts, co-streams during Pro Tours, and the occasional listener Q&A stream.",
-    stat: "Streaming 2× per week",
+    blurb: "Live drafts and ladder runs with Alex, plus the occasional listener Q&A stream.",
+    stat: "twitch.tv/chord_o_calls",
     action: "Follow",
     url: SITE_LINKS.twitch,
   },
   {
-    key: "bluesky",
-    name: "Bluesky",
-    blurb: "Hot takes, spoiler reactions, episode drops. Short-form and fast-moving.",
-    stat: "@limitedlevelups.bsky.social",
-    action: "Follow",
-    url: SITE_LINKS.bluesky,
-  },
-  {
-    key: "reddit",
-    name: "Subreddit",
-    blurb: "Longer-form discussion threads, draft pool deckbuilding help, episode commentary.",
-    stat: "r/limitedlevelups · 1.1k readers",
-    action: "Visit",
-    url: SITE_LINKS.reddit,
-  },
-  {
     key: "patreon",
     name: "Patreon",
-    blurb: "The show is listener-supported. Backers get bonus episodes, early access, ad-free feeds, and a private Discord channel.",
-    stat: "From $3/month",
+    blurb: "The show is listener-supported. Back it to help keep new episodes coming every week.",
+    stat: `${COMMUNITY_STATS.patreonSupporters} supporters · from $4/mo`,
     action: "Become a patron",
     url: SITE_LINKS.patreon,
   },

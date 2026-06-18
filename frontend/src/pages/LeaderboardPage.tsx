@@ -552,9 +552,8 @@ function FilterRow({
   formatOptions,
 }: FilterRowProps) {
   return (
-    <div className="px-10 py-3.5 border-b border-border flex items-center gap-4 flex-wrap">
+    <div className="px-10 py-3 border-b border-border flex items-center gap-4 flex-wrap">
       <FilterDropdown
-        label="FORMAT"
         value={format}
         options={formatOptions}
         onChange={setFormat}
@@ -610,7 +609,6 @@ function Mobile({
         <div className="px-3 py-2 border-b border-border bg-surface flex items-stretch gap-2">
           <div className="basis-[60%] min-w-0 flex">
             <FilterDropdown
-              label="FORMAT"
               value={filters.format}
               options={filters.formatOptions}
               onChange={filters.setFormat}
