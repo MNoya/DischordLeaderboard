@@ -8,11 +8,13 @@ export function TiedCardsModal({
   label,
   stats,
   cardsByName,
+  n,
   onClose,
 }: {
   label: string;
   stats: P0P1PickStat[];
   cardsByName: Map<string, Card>;
+  n: number;
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -57,7 +59,7 @@ export function TiedCardsModal({
                   <span className="text-text text-[13.5px] truncate">{stat.cardName}</span>
                   {card && <ManaCost cost={card.manaCost} size={12} />}
                 </div>
-                <span className="text-dim text-[13px] font-mono tabular-nums shrink-0">{stat.pickPct}%</span>
+                <span className="text-dim text-[13px] font-mono tabular-nums shrink-0">{stat.pickCount} / {n}</span>
               </div>
             );
           })}

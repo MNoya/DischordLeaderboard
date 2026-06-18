@@ -3,7 +3,7 @@ import { SlotPip } from "./slotVisuals";
 import { CardImagePreview } from "./CardImagePreview";
 import { TiedCardsModal } from "./TiedCardsModal";
 import { SectionLabel } from "../SectionLabel";
-import { groupBySlot, findExtremes } from "../../data/p0p1Stats";
+import { groupBySlot, findExtremes, participantCount } from "../../data/p0p1Stats";
 import { SLOTS } from "../../data/p0p1Slots";
 import type { Card, P0P1PickStat, SlotKey } from "../../types/p0p1";
 
@@ -18,6 +18,7 @@ export function CommunityGrid({
 }) {
   const grouped = groupBySlot(pickStats);
   const extremesBySlot = new Map(SLOTS.map((slot) => [slot.key, findExtremes(grouped.get(slot.key) ?? [])]));
+  const n = participantCount(pickStats);
 
   return (
     <div className="flex flex-col gap-6">
@@ -26,12 +27,14 @@ export function CommunityGrid({
         tone="green"
         entries={SLOTS.map((slot) => ({ slotKey: slot.key, label: slot.label, stats: extremesBySlot.get(slot.key)!.most }))}
         cardsByName={cardsByName}
+        n={n}
       />
       <PickRow
         title="LEAST PICKED CARDS"
         tone="red"
         entries={SLOTS.map((slot) => ({ slotKey: slot.key, label: slot.label, stats: extremesBySlot.get(slot.key)!.least }))}
         cardsByName={cardsByName}
+        n={n}
       />
     </div>
   );
@@ -42,11 +45,13 @@ function PickRow({
   tone,
   entries,
   cardsByName,
+  n,
 }: {
   title: string;
   tone: "green" | "red";
   entries: { slotKey: SlotKey; label: string; stats: P0P1PickStat[] }[];
   cardsByName: Map<string, Card>;
+  n: number;
 }) {
   return (
     <div>
@@ -55,7 +60,7 @@ function PickRow({
       </SectionLabel>
       <div className="grid grid-cols-8 gap-2">
         {entries.map(({ slotKey, label, stats }) => (
-          <PickTile key={slotKey} slotKey={slotKey} label={label} stats={stats} tone={tone} cardsByName={cardsByName} />
+          <PickTile key={slotKey} slotKey={slotKey} label={label} stats={stats} tone={tone} cardsByName={cardsByName} n={n} />
         ))}
       </div>
     </div>
@@ -68,12 +73,14 @@ function PickTile({
   stats,
   tone,
   cardsByName,
+  n,
 }: {
   slotKey: SlotKey;
   label: string;
   stats: P0P1PickStat[];
   cardsByName: Map<string, Card>;
   tone: "green" | "red";
+  n: number;
 }) {
   const [modalOpen, setModalOpen] = useState(false);
   const toneClass = tone === "green" ? "text-green" : "text-red";
@@ -95,7 +102,7 @@ function PickTile({
             {stats.length > 1 ? `${stats.length}-way tie` : stats[0].cardName}
           </span>
           <span className={`text-[13px] font-mono tabular-nums font-semibold shrink-0 ${toneClass}`}>
-            {stats[0].pickPct}%
+            {stats[0].pickCount} / {n}
           </span>
         </div>
       )}
@@ -104,6 +111,7 @@ function PickTile({
           label={label}
           stats={stats}
           cardsByName={cardsByName}
+          n={n}
           onClose={() => setModalOpen(false)}
         />
       )}

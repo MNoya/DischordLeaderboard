@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { ManaCost } from "../ManaPips";
 import { SlotPip } from "./slotVisuals";
 import { CardImagePreview } from "./CardImagePreview";
-import { globalRanked } from "../../data/p0p1Stats";
+import { globalRanked, participantCount } from "../../data/p0p1Stats";
 import { SLOTS } from "../../data/p0p1Slots";
 import type { Card, P0P1PickStat, SlotKey } from "../../types/p0p1";
 
@@ -17,6 +17,7 @@ export function FullBreakdownList({
   const ranked = useMemo(() => globalRanked(pickStats), [pickStats]);
   const rows = filter === "all" ? ranked : ranked.filter((s) => s.slot === filter);
   const slotLabels = useMemo(() => new Map(SLOTS.map((s) => [s.key, s.label])), []);
+  const n = participantCount(pickStats);
 
   return (
     <div className="flex flex-col gap-2">
@@ -54,10 +55,9 @@ export function FullBreakdownList({
                   <span className="truncate">{slotLabels.get(stat.slot)}</span>
                 </div>
               </div>
-              <span className="hidden lg:inline text-dim text-[12px] font-mono tabular-nums shrink-0">
-                {stat.pickCount} picks
+              <span className="text-text text-[14px] font-mono tabular-nums shrink-0">
+                {stat.pickCount} / {n}
               </span>
-              <span className="text-text text-[14px] font-mono tabular-nums shrink-0">{stat.pickPct}%</span>
             </div>
           );
         })}

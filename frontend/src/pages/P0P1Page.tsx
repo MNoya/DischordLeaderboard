@@ -16,18 +16,8 @@ import { PostVotingStats } from "../components/p0p1/PostVotingStats";
 import { useIsMobile } from "../lib/use-is-mobile";
 import { useP0P1Ballot } from "../data/useP0P1Ballot";
 import { SLOTS } from "../data/p0p1Slots";
-import { groupBySlot, findExtremes, classifyYourPick } from "../data/p0p1Stats";
+import { groupBySlot, findExtremes, classifyYourPick, participantCount } from "../data/p0p1Stats";
 import type { Card, P0P1PickStat, SlotDefinition, SlotKey } from "../types/p0p1";
-
-function totalEntries(stats: P0P1PickStat[]): number {
-  const totalsPerSlot = new Map<string, number>();
-  for (const s of stats) {
-    totalsPerSlot.set(s.slot, (totalsPerSlot.get(s.slot) ?? 0) + s.pickCount);
-  }
-  if (totalsPerSlot.size === 0) return 0;
-  // NOTE: currently this is only counting entries that have a pick for each slot
-  return Math.min(...totalsPerSlot.values());
-}
 
 export function P0P1Page() {
   const ballot = useP0P1Ballot();
@@ -69,7 +59,7 @@ export function P0P1Page() {
 
   const heroCta = loginCta || (user && !isPastDeadline ? <AutoSaveBadge complete={isComplete} /> : null);
 
-  const entryCount = pickStats ? totalEntries(pickStats) : null;
+  const entryCount = pickStats ? participantCount(pickStats) : null;
 
   const belowIntro = isPastDeadline ? (
     entryCount !== null && entryCount > 0 ? (
@@ -197,6 +187,7 @@ function RosterStrip({
   onSelect: (key: SlotKey) => void;
 }) {
   const groupedStats = pickStats ? groupBySlot(pickStats) : undefined;
+  const n = pickStats ? participantCount(pickStats) : 0;
 
   return (
     <div className="grid grid-cols-8 gap-2">
@@ -215,6 +206,7 @@ function RosterStrip({
             locked={locked}
             yourStat={stat}
             slotStats={slotStats}
+            n={n}
             onClick={() => onSelect(slot.key)}
           />
         );
@@ -230,6 +222,7 @@ function RosterTile({
   locked,
   yourStat,
   slotStats,
+  n,
   onClick,
 }: {
   slot: SlotDefinition;
@@ -238,6 +231,7 @@ function RosterTile({
   locked: boolean;
   yourStat?: P0P1PickStat;
   slotStats?: P0P1PickStat[];
+  n: number;
   onClick: () => void;
 }) {
   const accent = SLOT_ACCENT[slot.key];
@@ -288,14 +282,17 @@ function RosterTile({
       </div>
       {yourStat && classification && (
         <div className="pl-4 pr-2.5 pt-2 pb-2.5 shrink-0 border-t border-border2">
-          <div className={`font-mono tabular-nums text-[26px] leading-none font-semibold ${stateColor}`}>
-            {yourStat.pickPct}%
+          <div className={`font-mono tabular-nums text-[22px] leading-none font-semibold ${stateColor}`}>
+            {yourStat.pickCount}<span className="text-muted text-[14px]"> / {n}</span>
           </div>
           <div className={`text-[9px] tracking-[0.1em] font-display mt-1 ${stateColor}`}>
             {classification.qualifier}
           </div>
           <div className="h-1 w-full bg-surface2 rounded-sm overflow-hidden mt-1.5">
-            <div className={`h-full rounded-sm ${stateBg}`} style={{ width: `${Math.min(100, yourStat.pickPct)}%` }} />
+            <div
+              className={`h-full rounded-sm ${stateBg}`}
+              style={{ width: `${n > 0 ? Math.min(100, (yourStat.pickCount / n) * 100) : 0}%` }}
+            />
           </div>
         </div>
       )}

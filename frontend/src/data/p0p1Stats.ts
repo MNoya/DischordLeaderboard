@@ -27,6 +27,15 @@ export function globalRanked(stats: P0P1PickStat[]): P0P1PickStat[] {
   return [...stats].sort((a, b) => b.pickCount - a.pickCount);
 }
 
+export function participantCount(stats: P0P1PickStat[]): number {
+  const totalsPerSlot = new Map<SlotKey, number>();
+  for (const s of stats) {
+    totalsPerSlot.set(s.slot, (totalsPerSlot.get(s.slot) ?? 0) + s.pickCount);
+  }
+  if (totalsPerSlot.size === 0) return 0;
+  return Math.max(...totalsPerSlot.values());
+}
+
 export type PickClassification = {
   state: "most" | "minority" | "rogue";
   qualifier: string;
