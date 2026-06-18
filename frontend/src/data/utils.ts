@@ -139,6 +139,30 @@ export function relativeTime(iso: string, now: Date = new Date()): string {
   return `${years}y`;
 }
 
+const AGE_UNITS: Array<{ unit: string; seconds: number }> = [
+  { unit: "year", seconds: 31_536_000 },
+  { unit: "month", seconds: 2_592_000 },
+  { unit: "week", seconds: 604_800 },
+  { unit: "day", seconds: 86_400 },
+  { unit: "hour", seconds: 3_600 },
+  { unit: "minute", seconds: 60 },
+];
+
+export function relativeAge(iso: string, now: Date = new Date()): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) {
+    return "";
+  }
+  const seconds = Math.floor((now.getTime() - then) / 1000);
+  for (const { unit, seconds: unitSeconds } of AGE_UNITS) {
+    const value = Math.floor(seconds / unitSeconds);
+    if (value >= 1) {
+      return `${value} ${unit}${value === 1 ? "" : "s"} ago`;
+    }
+  }
+  return "just now";
+}
+
 // Maps any raw 17lands format string OR a backend `format_label` group
 // (Premier / Trad / Quick / Sealed / LCQ Draft 1 / LCQ Draft 2) to a
 // presentation-ready name. Unknowns fall through unchanged.

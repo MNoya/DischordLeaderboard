@@ -1,34 +1,74 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { SiApplepodcasts, SiRss, SiSpotify, SiYoutube } from "react-icons/si";
 import type { IconType } from "react-icons";
+import {
+  BarChart3,
+  BookOpen,
+  CalendarArrowDown,
+  CalendarArrowUp,
+  ChevronsLeft,
+  GraduationCap,
+  Headphones,
+  Layers,
+  LayoutGrid,
+  Leaf,
+  Library,
+  ListOrdered,
+  Mic,
+  Package,
+  Search,
+  SlidersHorizontal,
+  Zap,
+  type LucideIcon,
+} from "lucide-react";
 import { PageShell } from "../components/PageShell";
 import { EpisodeCard } from "../components/EpisodeCard";
 import { ShortCard } from "../components/ShortCard";
 import { FilterDropdown, type FilterOption } from "../components/FilterDropdown";
 import { GoToTopButton } from "../components/GoToTopButton";
+import { SwipeableDrawer } from "../components/SwipeableDrawer";
+import { Tooltip } from "../components/Tooltip";
+import { CUT_CORNER_CHAMFER } from "../components/ChamferCta";
+import { Crossfade } from "../components/Crossfade";
 import { SetGlyph } from "../components/Brand";
 import { useMediaFeed } from "../data/hooks";
-import { EPISODE_CATEGORIES, type Episode, type EpisodeCategory } from "../data/episodes";
+import { EPISODE_CATEGORIES, categoryFromSlug, categorySlug, type Episode, type EpisodeCategory } from "../data/episodes";
 import { LISTEN_ON } from "../data/site";
 import { cn } from "../lib/utils";
+import { useIsMobile } from "../lib/use-is-mobile";
 import { TOGGLE_ACTIVE, TOGGLE_INACTIVE } from "../lib/toggle-styles";
 
-const SORT_OPTIONS: FilterOption[] = [
-  { value: "newest", label: "Newest" },
-  { value: "oldest", label: "Oldest" },
-  { value: "longest", label: "Longest" },
+const SORT_OPTIONS: { value: SortKey; label: string; icon: LucideIcon }[] = [
+  { value: "newest", label: "Newest", icon: CalendarArrowDown },
+  { value: "oldest", label: "Oldest", icon: CalendarArrowUp },
 ];
 
-const renderSetValue = (option: FilterOption) =>
-  option.value ? (
-    <span className="flex items-center gap-2 truncate">
-      <SetGlyph code={option.value} size={20} />
-      {option.label}
-    </span>
-  ) : (
-    option.label
-  );
+const renderSetValue = (option: FilterOption) => (
+  <span className="flex min-w-0 items-center gap-2">
+    <span className="hidden shrink-0 text-[11px] tracking-[0.22em] text-muted sm:inline">SET</span>
+    <span className="hidden h-3.5 w-px shrink-0 bg-border2 sm:block" />
+    {option.value ? (
+      <span className="flex min-w-0 items-center gap-1.5 truncate text-text">
+        <SetGlyph code={option.value} size={18} />
+        {option.value}
+      </span>
+    ) : (
+      <span className="truncate text-subtle">All sets</span>
+    )}
+  </span>
+);
+
+const CATEGORY_ICON: Record<EpisodeCategory, LucideIcon> = {
+  "Set Review": BookOpen,
+  Metagame: BarChart3,
+  Draft: Layers,
+  Sealed: Package,
+  Rankings: ListOrdered,
+  Coaching: GraduationCap,
+  Guest: Mic,
+  Evergreen: Leaf,
+};
 
 const LISTEN_ICONS: Record<string, IconType> = {
   Apple: SiApplepodcasts,
@@ -37,7 +77,7 @@ const LISTEN_ICONS: Record<string, IconType> = {
   RSS: SiRss,
 };
 
-type SortKey = "newest" | "oldest" | "longest";
+type SortKey = "newest" | "oldest";
 
 const PAGE_SIZE = 12;
 
@@ -46,16 +86,47 @@ const setNameOf = (ep: Episode) => ep.setName ?? ep.setCode ?? "";
 
 export function EpisodesPage() {
   const { data: episodes, isLoading, isError, thumbnailsPending } = useMediaFeed();
+  const { categorySlug: slug } = useParams<{ categorySlug?: string }>();
+  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("newest");
   const [visible, setVisible] = useState(PAGE_SIZE);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [railCollapsed, setRailCollapsed] = useState(false);
+  const isMobile = useIsMobile();
   const sentinelRef = useRef<HTMLDivElement>(null);
 
-  const shortsView = params.get("type") === "shorts";
-  const activeCategory = (params.get("category") as EpisodeCategory | null) ?? null;
+  const shortsView = slug === "shorts";
+  const audioView = slug === "audio";
+  const activeCategory = slug ? categoryFromSlug(slug) : null;
   const activeSet = params.get("set");
 
+  useEffect(() => {
+    const legacyCategory = params.get("category");
+    const legacyShorts = params.get("type") === "shorts";
+    if (legacyCategory || legacyShorts) {
+      const next = new URLSearchParams(params);
+      next.delete("category");
+      next.delete("type");
+      const matched = EPISODE_CATEGORIES.find((category) => category === legacyCategory);
+      const pathname = legacyShorts
+        ? "/episodes/shorts"
+        : matched
+          ? `/episodes/${categorySlug(matched)}`
+          : "/episodes";
+      navigate({ pathname, search: next.toString() }, { replace: true });
+      return;
+    }
+    if (slug && slug !== "shorts" && slug !== "audio" && !categoryFromSlug(slug)) {
+      navigate({ pathname: "/episodes", search: params.toString() }, { replace: true });
+    }
+  }, [params, slug, navigate]);
+
+  const goTo = (pathname: string) => {
+    navigate({ pathname, search: params.toString() });
+    setVisible(PAGE_SIZE);
+  };
   const setParam = (key: string, value: string | null) => {
     const next = new URLSearchParams(params);
     if (value) {
@@ -67,28 +138,16 @@ export function EpisodesPage() {
     setVisible(PAGE_SIZE);
   };
   const setCategory = (category: EpisodeCategory | null) => {
-    const next = new URLSearchParams(params);
-    next.delete("type");
-    if (category) {
-      next.set("category", category);
-    } else {
-      next.delete("category");
-    }
-    setParams(next, { replace: true });
-    setVisible(PAGE_SIZE);
+    goTo(category ? `/episodes/${categorySlug(category)}` : "/episodes");
   };
-  const showShorts = () => {
-    const next = new URLSearchParams(params);
-    next.set("type", "shorts");
-    next.delete("category");
-    setParams(next, { replace: true });
-    setVisible(PAGE_SIZE);
-  };
+  const showShorts = () => goTo("/episodes/shorts");
+  const showAudio = () => goTo("/episodes/audio");
 
   const all = episodes ?? [];
   const longform = useMemo(() => all.filter((ep) => !ep.isShort), [all]);
   const shorts = useMemo(() => all.filter((ep) => ep.isShort), [all]);
-  const pool = shortsView ? shorts : longform;
+  const withAudio = useMemo(() => longform.filter((ep) => Boolean(ep.audioUrl)), [longform]);
+  const pool = shortsView ? shorts : audioView ? withAudio : longform;
 
   const longformInSet = useMemo(
     () => (activeSet ? longform.filter((ep) => setCodeOf(ep) === activeSet) : longform),
@@ -98,14 +157,23 @@ export function EpisodesPage() {
     () => (activeSet ? shorts.filter((ep) => setCodeOf(ep) === activeSet) : shorts),
     [shorts, activeSet],
   );
+  const audioInSet = useMemo(
+    () => (activeSet ? withAudio.filter((ep) => setCodeOf(ep) === activeSet) : withAudio),
+    [withAudio, activeSet],
+  );
+
+  const needle = query.trim().toLowerCase();
+  const scopedLongform = useMemo(() => longformInSet.filter((ep) => matchesQuery(ep, needle)), [longformInSet, needle]);
+  const scopedShorts = useMemo(() => shortsInSet.filter((ep) => matchesQuery(ep, needle)), [shortsInSet, needle]);
+  const scopedAudio = useMemo(() => audioInSet.filter((ep) => matchesQuery(ep, needle)), [audioInSet, needle]);
 
   const counts = useMemo(() => {
     const map = new Map<EpisodeCategory, number>();
-    for (const ep of longformInSet) {
+    for (const ep of scopedLongform) {
       map.set(ep.category, (map.get(ep.category) ?? 0) + 1);
     }
     return map;
-  }, [longformInSet]);
+  }, [scopedLongform]);
 
   const setMeta = useMemo(() => {
     const map = new Map<string, { name: string; count: number; released: string | null }>();
@@ -144,22 +212,24 @@ export function EpisodesPage() {
     );
   };
 
+  const setFilterDropdown = (
+    <FilterDropdown
+      value={activeSet ?? ""}
+      options={setFilterOptions}
+      onChange={(v) => setParam("set", v || null)}
+      renderValue={renderSetValue}
+      renderOption={renderSetOption}
+      searchPlaceholder="Search sets or codes…"
+      triggerClassName="!min-w-[124px] md:!min-w-[200px] !h-10 !py-0 hover:!bg-surface2"
+      mobileCentered
+    />
+  );
+
   const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    const rows = pool.filter((ep) => {
-      if (!shortsView && activeCategory && ep.category !== activeCategory) {
-        return false;
-      }
-      if (activeSet && setCodeOf(ep) !== activeSet) {
-        return false;
-      }
-      if (needle && !ep.title.toLowerCase().includes(needle) && !ep.summary.toLowerCase().includes(needle)) {
-        return false;
-      }
-      return true;
-    });
+    const base = shortsView ? scopedShorts : audioView ? scopedAudio : scopedLongform;
+    const rows = !shortsView && !audioView && activeCategory ? base.filter((ep) => ep.category === activeCategory) : base;
     return sortEpisodes(rows, sort);
-  }, [pool, shortsView, activeCategory, activeSet, query, sort]);
+  }, [shortsView, audioView, scopedShorts, scopedAudio, scopedLongform, activeCategory, sort]);
 
   useEffect(() => {
     if (visible >= filtered.length) {
@@ -181,126 +251,399 @@ export function EpisodesPage() {
     return () => observer.disconnect();
   }, [visible, filtered.length]);
 
+  const chooseAll = () => {
+    setCategory(null);
+    setDrawerOpen(false);
+  };
+  const chooseCategory = (category: EpisodeCategory) => {
+    setCategory(category);
+    setDrawerOpen(false);
+  };
+  const chooseShorts = () => {
+    showShorts();
+    setDrawerOpen(false);
+  };
+  const chooseAudio = () => {
+    showAudio();
+    setDrawerOpen(false);
+  };
+
+  const mobileFilter = shortsView
+    ? { label: "Shorts", icon: Zap }
+    : audioView
+      ? { label: "Audio", icon: Headphones }
+      : activeCategory
+        ? { label: activeCategory, icon: CATEGORY_ICON[activeCategory] }
+        : null;
+
+  const railProps = {
+    allCount: scopedLongform.length,
+    shortsCount: scopedShorts.length,
+    shortsExist: shorts.length > 0,
+    audioCount: scopedAudio.length,
+    audioExist: withAudio.length > 0,
+    counts,
+    activeCategory,
+    shortsView,
+    audioView,
+    onAll: chooseAll,
+    onCategory: chooseCategory,
+    onShorts: chooseShorts,
+    onAudio: chooseAudio,
+  };
+
   return (
     <PageShell subtitle="EPISODES">
-      <div className="border-b border-border bg-surface px-4 md:px-10 py-4 flex flex-col gap-3">
-        <div className="flex flex-wrap items-center gap-3">
-          <FilterDropdown
-            label="SET"
-            value={activeSet ?? ""}
-            options={setFilterOptions}
-            onChange={(v) => setParam("set", v || null)}
-            renderValue={renderSetValue}
-            renderOption={renderSetOption}
-            searchPlaceholder="Search sets or codes…"
-            className="order-1 flex-1 min-w-0 md:flex-none"
-            triggerClassName={cn("w-full !min-w-0 md:!min-w-[240px]", activeSet && TOGGLE_ACTIVE)}
-          />
-          <SortControl
-            value={sort}
-            onChange={setSort}
-            className="order-2 md:order-3 flex-1 min-w-0 md:flex-none"
-          />
-          <input
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setVisible(PAGE_SIZE);
-            }}
-            placeholder="Search episodes, sets, or guests…"
-            className="order-3 w-full md:order-2 md:flex-1 md:w-auto bg-bg border border-border2 px-3.5 py-2 text-[14px] text-text placeholder:text-dim outline-none transition-colors focus:border-green"
-          />
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <FilterPill
-            label="All"
-            count={longformInSet.length}
-            active={!shortsView && !activeCategory}
-            onClick={() => setCategory(null)}
-          />
-          {(!activeSet || (counts.get("Evergreen") ?? 0) > 0) && (
-            <FilterPill
-              label="Evergreen"
-              count={counts.get("Evergreen") ?? 0}
-              active={!shortsView && activeCategory === "Evergreen"}
-              onClick={() => setCategory("Evergreen")}
-            />
+      <div className="flex min-h-full flex-1">
+        <aside
+          className={cn(
+            "hidden lg:block shrink-0 self-start sticky top-0 h-screen overflow-x-hidden overflow-y-auto",
+            "border-r border-border bg-surface",
+            "transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
+            railCollapsed ? "w-[57px]" : "w-[clamp(196px,18vw,244px)]",
           )}
-          {EPISODE_CATEGORIES.filter((category) => category !== "Evergreen").map((category) => (
-            <FilterPill
-              key={category}
-              label={category}
-              count={counts.get(category) ?? 0}
-              active={!shortsView && activeCategory === category}
-              onClick={() => setCategory(category)}
-            />
-          ))}
-          {shorts.length ? (
-            <FilterPill label="Shorts" count={shortsInSet.length} active={shortsView} onClick={showShorts} />
-          ) : null}
-          <div className="ml-auto hidden md:flex items-center gap-2.5">
-            <span className="mono text-[11px] tracking-[0.16em] text-dim uppercase hidden lg:inline">Listen on</span>
-            {LISTEN_ON.map(({ label, url }) => {
-              const Icon = LISTEN_ICONS[label];
-              return (
-                <a
-                  key={label}
-                  href={url}
-                  target="_blank"
-                  rel="noreferrer"
-                  aria-label={label}
-                  className="inline-flex h-8 w-8 items-center justify-center border border-border2 text-subtle no-underline transition-colors hover:border-green hover:text-green"
-                >
-                  {Icon ? <Icon className="text-[15px]" size={15} /> : label}
-                </a>
-              );
-            })}
+        >
+          <CategoryRail
+            {...railProps}
+            collapsed={railCollapsed}
+            onCollapse={() => setRailCollapsed(true)}
+            onExpand={() => setRailCollapsed(false)}
+          />
+        </aside>
+
+        <div className="min-w-0 flex-1">
+          <div className="sticky top-0 z-10 flex h-[60px] items-center gap-2.5 border-b border-border bg-surface px-4 md:px-6">
+            <button
+              type="button"
+              onClick={() => setDrawerOpen(true)}
+              className={cn(
+                "lg:hidden shrink-0 flex h-10 items-center gap-2 border px-3 py-0 font-display text-[13px] tracking-[0.12em] transition-colors",
+                mobileFilter ? TOGGLE_ACTIVE : "border-border2 text-text hover:bg-surface2",
+              )}
+            >
+              {mobileFilter ? (
+                <>
+                  <mobileFilter.icon size={14} strokeWidth={2} className="shrink-0" />
+                  <span className="uppercase">{mobileFilter.label}</span>
+                </>
+              ) : (
+                <>
+                  <SlidersHorizontal size={14} strokeWidth={2} className="shrink-0" />
+                  <span>CATEGORIES</span>
+                </>
+              )}
+            </button>
+            {isMobile ? (
+              <span className="shrink-0">{setFilterDropdown}</span>
+            ) : (
+              <Tooltip label="Filter by set" side="bottom">
+                <span className="shrink-0">{setFilterDropdown}</span>
+              </Tooltip>
+            )}
+            <div className="relative min-w-0 flex-1">
+              <Search
+                size={15}
+                strokeWidth={2}
+                className={cn(
+                  "pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 transition-colors",
+                  query.trim() ? "text-green" : "text-dim",
+                )}
+              />
+              <input
+                value={query}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  setVisible(PAGE_SIZE);
+                }}
+                placeholder="Search"
+                className={cn(
+                  "w-full h-10 bg-bg border pl-9 pr-3.5 text-[14px] text-text placeholder:text-dim outline-none transition-colors focus:border-green",
+                  query.trim() ? "border-green" : "border-border2",
+                )}
+              />
+            </div>
+            <SortControl value={sort} onChange={setSort} className="hidden sm:flex shrink-0" />
+            <div className="ml-1 hidden xl:flex items-center gap-2.5">
+              {LISTEN_ON.map(({ label, url }) => {
+                const Icon = LISTEN_ICONS[label];
+                return (
+                  <Tooltip key={label} label={label} side="bottom">
+                    <a
+                      href={url}
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-label={label}
+                      className="inline-flex h-10 w-10 items-center justify-center bg-surface2 text-subtle no-underline transition-colors hover:bg-border hover:text-green"
+                      style={{ clipPath: CUT_CORNER_CHAMFER }}
+                    >
+                      {Icon ? <Icon className="text-[15px]" size={15} /> : label}
+                    </a>
+                  </Tooltip>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="px-4 md:px-6 pt-6 pb-4">
+            {isLoading ? (
+              <Grid>
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="aspect-video bg-surface border border-border animate-pulse" />
+                ))}
+              </Grid>
+            ) : isError ? (
+              <p className="text-muted text-[14px] py-8">Couldn't reach the podcast feed. Refresh to try again.</p>
+            ) : filtered.length ? (
+              <>
+                <Crossfade transitionKey={`${slug ?? "all"}:${activeSet ?? ""}`}>
+                  {shortsView ? (
+                    <ShortGrid>
+                      {filtered.slice(0, visible).map((ep) => (
+                        <ShortCard key={ep.id} episode={ep} thumbnailPending={thumbnailsPending} />
+                      ))}
+                    </ShortGrid>
+                  ) : (
+                    <Grid>
+                      {filtered.slice(0, visible).map((ep) => (
+                        <EpisodeCard
+                          key={ep.id}
+                          episode={ep}
+                          thumbnailPending={thumbnailsPending}
+                          audioMode={audioView}
+                        />
+                      ))}
+                    </Grid>
+                  )}
+                </Crossfade>
+                {visible < filtered.length ? (
+                  <div ref={sentinelRef} className="h-10 flex items-center justify-center mt-10">
+                    <span className="mono text-[11px] tracking-[0.16em] text-dim uppercase animate-pulse">Loading…</span>
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <p className="text-muted text-[14px] py-8">
+                No {shortsView ? "shorts" : audioView ? "audio episodes" : "episodes"} match that search.
+              </p>
+            )}
           </div>
         </div>
       </div>
 
-      <div className="px-4 md:px-10 pt-8 pb-4">
-        {isLoading ? (
-          <Grid>
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="aspect-video bg-surface border border-border animate-pulse" />
-            ))}
-          </Grid>
-        ) : isError ? (
-          <p className="text-muted text-[14px] py-8">Couldn't reach the podcast feed. Refresh to try again.</p>
-        ) : filtered.length ? (
-          <>
-            {shortsView ? (
-              <ShortGrid>
-                {filtered.slice(0, visible).map((ep) => (
-                  <ShortCard key={ep.id} episode={ep} thumbnailPending={thumbnailsPending} />
-                ))}
-              </ShortGrid>
-            ) : (
-              <Grid>
-                {filtered.slice(0, visible).map((ep) => (
-                  <EpisodeCard key={ep.id} episode={ep} thumbnailPending={thumbnailsPending} />
-                ))}
-              </Grid>
-            )}
-            {visible < filtered.length ? (
-              <div ref={sentinelRef} className="h-10 flex items-center justify-center mt-10">
-                <span className="mono text-[11px] tracking-[0.16em] text-dim uppercase animate-pulse">Loading…</span>
-              </div>
-            ) : null}
-          </>
-        ) : (
-          <p className="text-muted text-[14px] py-8">No {shortsView ? "shorts" : "episodes"} match that search.</p>
-        )}
-      </div>
+      <SwipeableDrawer open={drawerOpen} onOpenChange={setDrawerOpen} closeLabel="Close categories">
+        <CategoryRail {...railProps} />
+      </SwipeableDrawer>
+
       <GoToTopButton onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} />
     </PageShell>
   );
 }
 
+function CategoryRail({
+  allCount,
+  shortsCount,
+  shortsExist,
+  audioCount,
+  audioExist,
+  counts,
+  activeCategory,
+  shortsView,
+  audioView,
+  onAll,
+  onCategory,
+  onShorts,
+  onAudio,
+  collapsed = false,
+  onCollapse,
+  onExpand,
+}: {
+  allCount: number;
+  shortsCount: number;
+  shortsExist: boolean;
+  audioCount: number;
+  audioExist: boolean;
+  counts: Map<EpisodeCategory, number>;
+  activeCategory: EpisodeCategory | null;
+  shortsView: boolean;
+  audioView: boolean;
+  onAll: () => void;
+  onCategory: (category: EpisodeCategory) => void;
+  onShorts: () => void;
+  onAudio: () => void;
+  collapsed?: boolean;
+  onCollapse?: () => void;
+  onExpand?: () => void;
+}) {
+  return (
+    <nav>
+      {collapsed ? (
+        <Tooltip label="View Categories" side="bottom">
+          <button
+            type="button"
+            onClick={onExpand}
+            aria-label="View Categories"
+            className="flex h-[60px] w-full items-center justify-center border-b border-border text-muted transition-colors hover:text-green"
+          >
+            <Library size={22} strokeWidth={2} />
+          </button>
+        </Tooltip>
+      ) : onCollapse ? (
+        <Tooltip label="Collapse Library" side="bottom" align="end">
+          <button
+            type="button"
+            onClick={onCollapse}
+            aria-label="Collapse Library"
+            className="group flex h-[60px] w-full items-center gap-2.5 border-b border-border px-4 text-left transition-colors"
+          >
+            <Library size={22} strokeWidth={2} className="shrink-0 text-green" />
+            <span className="font-display text-[25px] leading-none tracking-[0.12em] text-text transition-colors group-hover:text-green">
+              LIBRARY
+            </span>
+            <ChevronsLeft
+              size={20}
+              strokeWidth={2}
+              className="ml-auto -mr-1 shrink-0 text-muted transition-colors group-hover:text-green"
+            />
+          </button>
+        </Tooltip>
+      ) : (
+        <div className="flex h-[60px] items-center gap-2.5 border-b border-border px-4">
+          <Library size={22} strokeWidth={2} className="shrink-0 text-green" />
+          <span className="font-display text-[25px] leading-none tracking-[0.12em] text-text">LIBRARY</span>
+        </div>
+      )}
+      <div>
+        <RailRow
+          label="All"
+          icon={LayoutGrid}
+          count={allCount}
+          active={!shortsView && !audioView && !activeCategory}
+          collapsed={collapsed}
+          onClick={onAll}
+        />
+        <div>
+          <RailRow
+            label="Evergreen"
+            icon={CATEGORY_ICON.Evergreen}
+            count={counts.get("Evergreen") ?? 0}
+            active={!shortsView && activeCategory === "Evergreen"}
+            collapsed={collapsed}
+            onClick={() => onCategory("Evergreen")}
+          />
+          {EPISODE_CATEGORIES.filter((category) => category !== "Evergreen").map((category) => (
+            <RailRow
+              key={category}
+              label={category}
+              icon={CATEGORY_ICON[category]}
+              count={counts.get(category) ?? 0}
+              active={!shortsView && activeCategory === category}
+              collapsed={collapsed}
+              onClick={() => onCategory(category)}
+            />
+          ))}
+        </div>
+        {shortsExist || audioExist ? <div className="mx-4 my-2 border-t border-border" /> : null}
+        {shortsExist ? (
+          <RailRow
+            label="Shorts"
+            icon={Zap}
+            count={shortsCount}
+            active={shortsView}
+            collapsed={collapsed}
+            onClick={onShorts}
+          />
+        ) : null}
+        {audioExist ? (
+          <RailRow
+            label="Audio"
+            icon={Headphones}
+            count={audioCount}
+            active={audioView}
+            collapsed={collapsed}
+            onClick={onAudio}
+          />
+        ) : null}
+      </div>
+    </nav>
+  );
+}
+
+function RailRow({
+  label,
+  icon: Icon,
+  count,
+  active,
+  collapsed = false,
+  onClick,
+}: {
+  label: string;
+  icon: LucideIcon;
+  count: number;
+  active: boolean;
+  collapsed?: boolean;
+  onClick: () => void;
+}) {
+  const button = (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={collapsed ? label : undefined}
+      className={cn(
+        "group relative flex w-full items-center text-left transition-colors",
+        collapsed ? "justify-center py-3.5" : "gap-3 px-4 py-3.5",
+        active ? "bg-surface2" : "hover:bg-bg/40",
+      )}
+    >
+      <span
+        className={cn(
+          "absolute left-0 top-0 h-full w-[3px] origin-center bg-green transition-all duration-200",
+          active ? "opacity-100" : "opacity-0 scale-y-50 group-hover:opacity-100 group-hover:scale-y-100",
+        )}
+      />
+      <Icon
+        size={18}
+        strokeWidth={2}
+        className={cn(
+          "shrink-0 transition-colors",
+          active ? "text-green" : "text-muted group-hover:text-green",
+        )}
+      />
+      {collapsed ? null : (
+        <>
+          <span
+            className={cn(
+              "flex-1 font-display uppercase tracking-[0.08em] text-[16px] transition-colors",
+              active ? "text-green" : "text-text group-hover:text-green",
+            )}
+          >
+            {label}
+          </span>
+          <span
+            className={cn(
+              "mono text-[13px] tabular-nums transition-colors",
+              active ? "text-green" : "text-muted group-hover:text-green",
+            )}
+          >
+            {count || "–"}
+          </span>
+        </>
+      )}
+    </button>
+  );
+
+  if (collapsed) {
+    return (
+      <Tooltip label={`${label} (${count || "–"})`} side="right">
+        {button}
+      </Tooltip>
+    );
+  }
+  return button;
+}
+
 function Grid({ children }: { children: ReactNode }) {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-x-4 gap-y-7">
+    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-x-4 gap-y-7">
       {children}
     </div>
   );
@@ -324,52 +667,38 @@ function SortControl({
   className?: string;
 }) {
   return (
-    <div className={cn("flex border border-border divide-x divide-border", className)}>
+    <div className={cn("flex h-10 border border-border divide-x divide-border", className)}>
       {SORT_OPTIONS.map((option) => {
         const active = option.value === value;
+        const Icon = option.icon;
         return (
-          <button
-            key={option.value}
-            type="button"
-            onClick={() => onChange(option.value as SortKey)}
-            className={cn(
-              "flex-1 px-3.5 py-2 font-display tracking-[0.06em] text-[14px] transition-colors md:flex-none",
-              active ? TOGGLE_ACTIVE : TOGGLE_INACTIVE,
-            )}
-          >
-            {option.label}
-          </button>
+          <Tooltip key={option.value} label={`Sort by ${option.label}`} side="bottom">
+            <button
+              type="button"
+              onClick={() => onChange(option.value)}
+              className={cn(
+                "flex items-center gap-1.5 px-3 font-display tracking-[0.06em] text-[14px] transition-colors md:px-3.5",
+                active ? TOGGLE_ACTIVE : TOGGLE_INACTIVE,
+              )}
+            >
+              <Icon size={15} strokeWidth={2} className="shrink-0" />
+              {option.label}
+            </button>
+          </Tooltip>
         );
       })}
     </div>
   );
 }
 
-function FilterPill({
-  label,
-  count,
-  active,
-  onClick,
-}: {
-  label: string;
-  count: number;
-  active: boolean;
-  onClick: () => void;
-}) {
+function matchesQuery(ep: Episode, needle: string): boolean {
+  if (!needle) {
+    return true;
+  }
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "inline-flex items-center gap-2 border px-3.5 py-1.5 font-display tracking-[0.06em] text-[14px] transition-colors",
-        active
-          ? "bg-green text-bg border-green"
-          : "bg-transparent text-text border-border hover:border-green",
-      )}
-    >
-      {label}
-      <span className={cn("mono text-[11px] tabular-nums", active ? "text-bg/70" : "text-muted")}>{count}</span>
-    </button>
+    ep.title.toLowerCase().includes(needle) ||
+    (ep.setName?.toLowerCase().includes(needle) ?? false) ||
+    (ep.setCode?.toLowerCase().includes(needle) ?? false)
   );
 }
 
@@ -388,10 +717,6 @@ function compareReleaseDesc(a: string | null, b: string | null): number {
 
 function sortEpisodes(rows: Episode[], sort: SortKey): Episode[] {
   const sorted = [...rows];
-  if (sort === "longest") {
-    sorted.sort((a, b) => b.durationSeconds - a.durationSeconds);
-    return sorted;
-  }
   sorted.sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime());
   if (sort === "oldest") {
     sorted.reverse();

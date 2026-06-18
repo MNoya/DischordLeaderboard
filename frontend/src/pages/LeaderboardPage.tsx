@@ -3,7 +3,7 @@ import React, { Fragment, useEffect, useMemo, useState } from "react";
 
 import { AppHeader } from "../components/AppHeader";
 import { useIsMobile } from "../lib/use-is-mobile";
-import { SetGlyph, Trophy } from "../components/Brand";
+import { SetGlyph, setGlyphCode, Trophy } from "../components/Brand";
 import {
   ArrowRight,
   BsAsterisk,
@@ -12,8 +12,9 @@ import {
 } from "../components/Icons";
 import { Footer } from "../components/Footer";
 import { Pip, Pips } from "../components/ManaPips";
-import { SetSwitcherDesktop, SetSwitcherMobile } from "../components/SetSwitcher";
+import { SetSwitcherDesktop } from "../components/SetSwitcher";
 import { FilterDropdown } from "../components/FilterDropdown";
+import { SetFilterDropdown, type SetFilterOption } from "../components/SetFilterDropdown";
 import { ColorsSwitcher } from "../components/ColorsSwitcher";
 import { LeaderboardSidebar } from "../components/LeaderboardSidebar";
 import { boardModeFor, DEFAULT_SORT, DEFAULT_SORT_NOSCORE, defaultSortFor, LeaderboardColumnHeader, LeaderboardTable, sortRows } from "../components/LeaderboardTable";
@@ -598,9 +599,10 @@ function Mobile({
   onSort: (key: SortKey) => void;
 }) {
   const navigate = useNavigate();
-  const { prefetchSet, prefetchPlayer } = usePrefetchers();
+  const { prefetchPlayer } = usePrefetchers();
   const profileSet = baseSetCode(activeSet);
   const isCube = profileSet === CUBE_BASE;
+  const setOptions = useMemo<SetFilterOption[]>(() => (sets ? setFilterOptionsFrom(sets) : []), [sets]);
   return (
     <div className="bg-bg text-text min-h-screen flex flex-col overflow-x-hidden animate-fadeIn">
       <div className="sticky top-0 z-10 bg-bg">
@@ -618,12 +620,14 @@ function Mobile({
             />
           </div>
           {sets && (
-            <div className="basis-[40%] min-w-0">
-              <SetSwitcherMobile
-                sets={sets}
-                activeCode={profileSet}
+            <div className="basis-[40%] min-w-0 flex">
+              <SetFilterDropdown
+                value={profileSet}
+                options={setOptions}
                 onChange={(code) => goToSet(navigate, code, sets, searchParams, latestCubeSeason)}
-                onPrefetch={prefetchSet}
+                variant="mobile"
+                align="right"
+                searchable
               />
             </div>
           )}
@@ -1159,6 +1163,22 @@ function MobileExpandedRow({
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
+
+function setFilterOptionsFrom(sets: SetSummary[]): SetFilterOption[] {
+  const ordered = [...sets].sort((a, b) => setReleaseRank(b).localeCompare(setReleaseRank(a)));
+  return ordered.map((s) => ({
+    value: s.code,
+    label: s.name,
+    glyphCode: setGlyphCode(s),
+    meta: s.isActive ? (
+      <span className="mono text-[10px] tracking-[0.18em] text-green shrink-0">LIVE</span>
+    ) : undefined,
+  }));
+}
+
+function setReleaseRank(s: SetSummary): string {
+  return s.startDate || (s.custom ? "" : "9999-99-99");
+}
 
 function goToSet(
   navigate: ReturnType<typeof useNavigate>,

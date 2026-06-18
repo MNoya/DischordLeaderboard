@@ -16,7 +16,9 @@ export function ALogo({ size = 32 }: { size?: number }) {
   );
 }
 
-// Wordmark — Bebas Neue stack of "LIMITED LEVEL-UPS" + a coloured subtitle.
+// Wordmark — Bebas Neue "LIMITED LEVEL-UPS" + the section label. Mobile (`sm`)
+// lays them on one row split by a vertical hairline; wider sizes stack the
+// section label under the title so the brand stays narrow next to the nav.
 export function AWordmark({
   size = "md",
   subtitle = "LEADERBOARD",
@@ -24,16 +26,27 @@ export function AWordmark({
   size?: "sm" | "md" | "lg";
   subtitle?: string;
 }) {
-  const s =
-    size === "sm" ? { lg: 15, sm: 9 } :
-    size === "lg" ? { lg: 28, sm: "clamp(11px, 3.2vw, 14px)" } :
-    { lg: 18, sm: 9 };
+  if (size === "sm") {
+    return (
+      <div className="flex items-center font-display whitespace-nowrap" style={{ gap: 10 }}>
+        <span className="text-text leading-none" style={{ fontSize: 18, letterSpacing: "0.07em" }}>
+          LIMITED LEVEL-UPS
+        </span>
+        <span className="bg-border2 shrink-0" style={{ width: 1, height: 16 }} />
+        <span className="text-green leading-none" style={{ fontSize: 15, letterSpacing: "0.14em" }}>
+          {subtitle}
+        </span>
+      </div>
+    );
+  }
+  const title = size === "lg" ? 26 : 18;
+  const sub = size === "lg" ? 14 : 10;
   return (
     <div className="flex flex-col font-display whitespace-nowrap" style={{ lineHeight: 0.95 }}>
-      <span className="text-text tracking-[0.1em]" style={{ fontSize: s.lg }}>
+      <span className="text-text" style={{ fontSize: title, letterSpacing: "0.09em" }}>
         LIMITED LEVEL-UPS
       </span>
-      <span className="text-green tracking-[0.32em] mt-[3px]" style={{ fontSize: s.sm }}>
+      <span className="text-green" style={{ fontSize: sub, letterSpacing: "0.28em", marginTop: 4 }}>
         {subtitle}
       </span>
     </div>
@@ -137,7 +150,7 @@ export function setGlyphCode(set: { code: string; custom?: boolean }): string {
   return set.custom ? "CUBE" : set.code;
 }
 
-export function SetGlyph({ code, size = 18 }: { code: string; size?: number }) {
+export function SetGlyph({ code, size = 18, className = "text-white" }: { code: string; size?: number; className?: string }) {
   return (
     <span
       className="inline-flex items-center justify-center shrink-0 overflow-visible"
@@ -147,7 +160,7 @@ export function SetGlyph({ code, size = 18 }: { code: string; size?: number }) {
       {code === "EVG" ? (
         <img src={LLU_LOGO_SRC} alt="" style={{ width: size, height: size }} className="block object-contain" />
       ) : (
-        <i className={`ss ss-${keyruneClass(code)} text-white`} style={{ fontSize: size, lineHeight: 1 }} />
+        <i className={`ss ss-${keyruneClass(code)} ${className}`} style={{ fontSize: size, lineHeight: 1 }} />
       )}
     </span>
   );

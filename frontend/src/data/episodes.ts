@@ -5,20 +5,32 @@
 export const LIBSYN_FEED_URL = "https://feeds.libsyn.com/limitedlevelups/rss";
 
 export const EPISODE_CATEGORIES = [
-  "First Impressions",
   "Set Review",
-  "Draft",
   "Metagame",
+  "Draft",
+  "Sealed",
+  "Rankings",
+  "Coaching",
+  "Guest",
   "Evergreen",
 ] as const;
 
 export type EpisodeCategory = (typeof EPISODE_CATEGORIES)[number];
 
+export function categorySlug(category: EpisodeCategory): string {
+  return category.toLowerCase().replace(/\s+/g, "-");
+}
+
+const SLUG_TO_CATEGORY: ReadonlyMap<string, EpisodeCategory> = new Map(
+  EPISODE_CATEGORIES.map((category) => [categorySlug(category), category]),
+);
+
+export function categoryFromSlug(slug: string): EpisodeCategory | null {
+  return SLUG_TO_CATEGORY.get(slug.toLowerCase()) ?? null;
+}
+
 export type MediaKind = "episode" | "video";
 
-// The set bucket for content not tied to any release — general limited skills, draft coaching,
-// Top 10s. The bot tags these EVG; live overlay items with no set fall here too.
-export const EVERGREEN_SET = { code: "EVG", name: "Evergreen" } as const;
 
 // YouTube Shorts are vertical, ≤3min. This channel's cluster at ≤90s; longer ones (up to 3min)
 // are Shorts only when the title carries the hashtag run ("#draft #mtg") that long-form lacks.
@@ -91,20 +103,51 @@ export async function fetchEpisodes(): Promise<Episode[]> {
   });
 }
 
-const CATEGORY_KEYWORDS: Array<[EpisodeCategory, RegExp]> = [
-  ["First Impressions", /primer|first impressions|first look/i],
-  ["Metagame", /state of the format|format address|format update|metagame|meta update|mid-?format|what we got wrong|late format/i],
-  ["Draft", /draft-?along|draft log|live draft|drafting with/i],
-  ["Set Review", /set review|ranking|tier list|best|underrated|overrated|commons|uncommons|rares|mythics|cards/i],
-];
+const COACHING = /coach/i;
+const GUEST = /\bconversation with\b|\bjoins (?:me|us)\b|\bft\.?\b|featuring|sits down with|\binterview\b/i;
+const RANKINGS = /top \d|top ten|tier ?list|\brank(?:ing|ed)\b|best and worst|props and slops|ranked every|best of \d|worst of/i;
+const SET_REVIEW = /set review|set overview|card evaluation|archetype deep dive|commons|uncommons|\brares\b|mythics|signpost|the list/i;
+const SEALED = /sealed|pre-?release/i;
+const METAGAME = /state of the format|format (?:address|update|breakdown|send|recap)|metagame|\bmeta\b|what we got wrong|win ?rate|tournament report|pro tour/i;
+const LEVEL_UP = /level-?up|gameplay mistake|deckbuilding|deck building|mulligan|manabase|mana ?base|fundamentals|\bhabits\b|intuition|mental game|\bsignals\b|card advantage|navigation/i;
+const DRAFT = /draft|drafting|\bdeck\b|archetype/i;
 
+// Fallback only — episodes in the LLM-labeled map use that; this covers live/future titles.
 export function inferCategory(title: string): EpisodeCategory {
-  for (const [category, pattern] of CATEGORY_KEYWORDS) {
-    if (pattern.test(title)) {
-      return category;
-    }
+  if (COACHING.test(title)) {
+    return "Coaching";
+  }
+  if (GUEST.test(title)) {
+    return "Guest";
+  }
+  if (RANKINGS.test(title)) {
+    return "Rankings";
+  }
+  if (SET_REVIEW.test(title)) {
+    return "Set Review";
+  }
+  if (SEALED.test(title)) {
+    return "Sealed";
+  }
+  if (METAGAME.test(title)) {
+    return "Metagame";
+  }
+  if (LEVEL_UP.test(title)) {
+    return "Evergreen";
+  }
+  if (DRAFT.test(title)) {
+    return "Draft";
   }
   return "Evergreen";
+}
+
+const VALID_CATEGORIES: ReadonlySet<string> = new Set(EPISODE_CATEGORIES);
+
+export function categoryFor(title: string, rawCategory: string | null): EpisodeCategory {
+  if (rawCategory && VALID_CATEGORIES.has(rawCategory)) {
+    return rawCategory as EpisodeCategory;
+  }
+  return inferCategory(title);
 }
 
 export function parseEpisodeNumber(title: string): number | null {
@@ -196,7 +239,7 @@ export function adaptDbEpisode(row: DbEpisodeRow): Episode {
     durationLabel: formatDuration(row.duration_seconds),
     durationSeconds: row.duration_seconds,
     image: row.image ?? "",
-    category: row.category as EpisodeCategory,
+    category: categoryFor(row.title, row.category),
     summary: row.summary ?? "",
     youtubeId: row.youtube_id ?? undefined,
     videoUrl: row.youtube_id ? `https://www.youtube.com/watch?v=${row.youtube_id}` : undefined,

@@ -4,9 +4,11 @@ import { Link } from "react-router-dom";
 import { PageShell } from "../components/PageShell";
 import { ChamferCta, CUT_CORNER_CHAMFER } from "../components/ChamferCta";
 import { DiscordIcon } from "../components/BrandIcons";
-import { ArrowRight, ChevronLeft, ChevronRight } from "../components/Icons";
-import { CategoryTag } from "../components/CategoryTag";
+import { ArrowRight, ChevronDown, ChevronLeft, ChevronRight, Music, Play, Trophy } from "../components/Icons";
+import { EpisodeTag } from "../components/CategoryTag";
 import { EpisodeThumbnail } from "../components/EpisodeThumbnail";
+import { EpisodeEmbed, episodePlayability } from "../components/PlayableThumbnail";
+import { PlayBadge } from "../components/PlayBadge";
 import { Pips } from "../components/ManaPips";
 import { GiRoundTable } from "react-icons/gi";
 import { SiPatreon, SiTwitch, SiYoutube } from "react-icons/si";
@@ -37,7 +39,7 @@ import { ACTIVE_SET_CODE } from "../data/constants";
 import { FMT_COLORS, shortFormat } from "../data/format-display";
 import { FORMAT_OPTIONS } from "../data/filters";
 import { discordEventLink, HOST, SITE_LINKS } from "../data/site";
-import { cleanPodEventName, leaderboardPath, playerPath } from "../data/utils";
+import { cleanPodEventName, leaderboardPath, playerPath, relativeAge } from "../data/utils";
 import type { Episode } from "../data/episodes";
 import type { LeaderboardRow, PodEventSummary, SetSummary } from "../types/leaderboard";
 import { cn } from "../lib/utils";
@@ -52,7 +54,7 @@ export function HomePage() {
       <div
         className={cn(
           "p-4 lg:p-5 grid gap-4 grid-cols-1 lg:h-full",
-          "lg:grid-cols-[minmax(300px,360px)_1fr_minmax(300px,340px)] lg:[grid-template-rows:minmax(0,1fr)]",
+          "lg:grid-cols-[minmax(300px,360px)_minmax(0,1fr)_clamp(300px,22vw,340px)] lg:[grid-template-rows:minmax(0,1fr)]",
         )}
       >
         <div className="contents lg:flex lg:flex-col lg:gap-4 lg:min-h-0 lg:h-full">
@@ -83,6 +85,7 @@ function Panel({
   action,
   actionBorder = false,
   headerBorder = false,
+  linkBody = false,
   className,
   bodyClassName,
   children,
@@ -94,12 +97,26 @@ function Panel({
   action?: string;
   actionBorder?: boolean;
   headerBorder?: boolean;
+  linkBody?: boolean;
   className?: string;
   bodyClassName?: string;
   children: ReactNode;
 }) {
   return (
-    <section className={cn("group bg-surface border border-border rounded-xl p-4 flex flex-col min-h-0", className)}>
+    <section
+      className={cn(
+        "group bg-surface border border-border rounded-xl p-4 flex flex-col min-h-0",
+        linkBody && "relative",
+        className,
+      )}
+    >
+      {linkBody ? (
+        <Link
+          to={to}
+          aria-label={action ?? title}
+          className="peer/cta absolute inset-0 z-0 rounded-xl transition-colors hover:bg-green/[0.03]"
+        />
+      ) : null}
       <div
         className={cn(
           "flex items-center gap-3 shrink-0",
@@ -108,7 +125,7 @@ function Panel({
       >
         <Link
           to={to}
-          className="font-display text-text text-[20px] tracking-[0.05em] no-underline hover:text-green transition-colors shrink-0"
+          className="font-display text-text text-[20px] tracking-[0.05em] no-underline hover:text-green transition-colors shrink-0 whitespace-nowrap"
         >
           {title}
         </Link>
@@ -124,7 +141,8 @@ function Panel({
         <Link
           to={to}
           className={cn(
-            "-mx-4 -mb-4 shrink-0 flex w-[calc(100%+2rem)] items-center justify-end gap-1.5 rounded-b-xl px-4 py-2.5 font-display tracking-[0.08em] text-[13px] text-green no-underline transition-colors hover:bg-green/5 hover:text-green-2",
+            "relative z-0 -mx-4 -mb-4 shrink-0 flex w-[calc(100%+2rem)] items-center justify-end gap-1.5 rounded-b-xl px-4 py-2.5 font-display tracking-[0.08em] text-[13px] text-green no-underline transition-colors hover:bg-green/5 hover:text-green-2",
+            linkBody && "peer-hover/cta:bg-green/5 peer-hover/cta:text-green-2",
             actionBorder && "border-t border-border",
           )}
         >
@@ -172,7 +190,15 @@ function IdentityPanel() {
         }
       />
       <p className="mono text-[12px] tracking-[0.04em] text-subtle text-center">
-        Hosted by {HOST.name} <i>@{HOST.handle}</i>
+        Hosted by {HOST.name}{" "}
+        <a
+          href={`https://x.com/${HOST.handle}`}
+          target="_blank"
+          rel="noreferrer"
+          className="text-subtle italic no-underline hover:text-green transition-colors"
+        >
+          @{HOST.handle}
+        </a>
       </p>
       <div className="grid grid-cols-3 gap-2">
         {socials.map(({ label, url, Icon }) => (
@@ -446,9 +472,12 @@ function EpisodesHero({
               ))}
             </div>
           </div>
-          <div className="hidden lg:grid grid-cols-2 gap-4 flex-1 min-h-0">
+          <div className="hidden lg:grid grid-cols-1 xl:grid-cols-2 gap-4 flex-1 min-h-0">
             {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="bg-surface2 border border-border rounded-lg animate-pulse" />
+              <div
+                key={i}
+                className={cn("bg-surface2 border border-border rounded-lg animate-pulse", i >= 2 && "hidden xl:block")}
+              />
             ))}
           </div>
         </>
@@ -464,9 +493,14 @@ function EpisodesHero({
               </div>
             ) : null}
           </div>
-          <div className="hidden lg:grid grid-cols-2 gap-4 flex-1 min-h-0">
-            {episodes.map((ep) => (
-              <HeroEpisodeCard key={ep.id} episode={ep} thumbnailPending={thumbnailsPending} />
+          <div className="hidden lg:grid grid-cols-1 xl:grid-cols-2 gap-4 flex-1 min-h-0">
+            {episodes.map((ep, i) => (
+              <HeroEpisodeCard
+                key={ep.id}
+                episode={ep}
+                thumbnailPending={thumbnailsPending}
+                className={i >= 2 ? "hidden xl:flex" : undefined}
+              />
             ))}
           </div>
         </>
@@ -486,44 +520,65 @@ function HeroEpisodeCard({
   compact?: boolean;
   thumbnailPending?: boolean;
 }) {
-  const meta = [episode.publishedLabel.toUpperCase(), episode.number ? `EP ${episode.number}` : null]
-    .filter(Boolean)
-    .join(" · ");
+  const [playing, setPlaying] = useState(false);
+  const { canPlayAudio, playable } = episodePlayability(episode);
+  const play = () => setPlaying(true);
+
+  const thumbnail = (
+    <>
+      <EpisodeThumbnail
+        src={episode.image}
+        pending={thumbnailPending}
+        className="transition-transform duration-300 group-hover/ep:scale-[1.07]"
+      />
+      {!compact ? (
+        <span className="absolute bottom-2 left-2 text-[10px] font-medium text-white bg-black/60 rounded px-1.5 py-0.5">
+          {relativeAge(episode.pubDate)}
+        </span>
+      ) : null}
+      {!compact && episode.durationLabel ? (
+        <span className="absolute bottom-2 right-2 text-[10px] font-medium text-white bg-black/60 rounded px-1.5 py-0.5">
+          {episode.durationLabel}
+        </span>
+      ) : null}
+      <span className="absolute inset-0 flex items-center justify-center bg-bg/30 opacity-0 transition-opacity group-hover/ep:opacity-100">
+        <PlayBadge>{canPlayAudio ? <Music size={28} /> : <Play size={32} />}</PlayBadge>
+      </span>
+    </>
+  );
+
   return (
-    <a
-      href={episode.videoUrl ?? episode.link}
-      target="_blank"
-      rel="noreferrer"
+    <div
       className={cn(
-        "group/ep flex flex-col min-h-0 border border-border rounded-lg overflow-hidden bg-surface2 no-underline transition-[border-color,box-shadow] duration-150 hover:border-green hover:shadow-[0_0_11px_2px_rgba(46,232,92,0.55)]",
+        "group/ep flex flex-col min-h-0 border border-border rounded-lg overflow-hidden bg-surface2 transition-[border-color,box-shadow] duration-150 hover:border-green hover:shadow-[0_0_8px_1px_rgba(46,232,92,0.32)]",
         className,
       )}
     >
-      <div className="relative aspect-video lg:aspect-auto lg:flex-1 lg:min-h-0 overflow-hidden bg-surface">
-        <EpisodeThumbnail
-          src={episode.image}
-          pending={thumbnailPending}
-          className="transition-transform duration-300 group-hover/ep:scale-[1.07]"
-        />
-        {!compact && episode.durationLabel ? (
-          <span className="absolute bottom-2 right-2 mono text-[10px] text-text bg-bg/85 px-1.5 py-0.5">
-            {episode.durationLabel}
-          </span>
-        ) : null}
-        <span className="absolute inset-0 flex items-center justify-center bg-bg/40 opacity-0 transition-opacity group-hover/ep:opacity-100">
-          <span className="flex h-11 w-11 items-center justify-center rounded-full bg-green text-bg pl-0.5 text-[16px]">▶</span>
-        </span>
+      <div className="relative z-10 aspect-video lg:aspect-auto lg:flex-1 lg:min-h-0 overflow-hidden bg-surface">
+        {playing ? (
+          <EpisodeEmbed episode={episode} thumbnailPending={thumbnailPending} />
+        ) : playable ? (
+          <button
+            type="button"
+            onClick={play}
+            aria-label={`Play ${episode.title}`}
+            className="absolute inset-0 block w-full cursor-pointer"
+          >
+            {thumbnail}
+          </button>
+        ) : (
+          <a href={episode.link} target="_blank" rel="noreferrer" className="absolute inset-0 block w-full">
+            {thumbnail}
+          </a>
+        )}
       </div>
-      <div className="p-3 shrink-0">
-        <div className="flex items-center justify-between gap-2">
-          <span className="mono text-[12px] tracking-[0.1em] text-muted truncate">{meta}</span>
-          <CategoryTag category={episode.category} className="shrink-0" />
-        </div>
-        <h3 className="font-body text-text text-[16px] font-medium leading-snug mt-1 line-clamp-2 transition-colors group-hover/ep:text-green">
+      <div className="p-3 shrink-0 flex items-start justify-between gap-2">
+        <h3 className="flex-1 min-w-0 font-body text-text text-[16px] font-medium leading-snug truncate transition-colors group-hover/ep:text-green">
           {episode.title}
         </h3>
+        <EpisodeTag episode={episode} className="mt-0.5" />
       </div>
-    </a>
+    </div>
   );
 }
 
@@ -633,7 +688,7 @@ function LeaderboardPanel({ setCode }: { setCode: string }) {
       title="LEADERBOARD"
       to={to}
       corner={
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           {setDropdown}
           <FormatDropdown formats={formats} current={current} onPick={pickFormat} />
         </div>
@@ -658,11 +713,17 @@ function LeaderboardPanel({ setCode }: { setCode: string }) {
                 {layers.back.rows.map((row) => (
                   <LeaderboardMiniRow key={row.slug} row={row} setCode={layers.back!.setCode} />
                 ))}
+                {emptyRowKeys(maxRows - layers.back.rows.length).map((key) => (
+                  <LeaderboardEmptyRow key={key} />
+                ))}
               </div>
             ) : null}
             <div key={layers.front.key} className="absolute inset-0 flex h-full flex-col animate-fadeIn">
               {layers.front.rows.map((row) => (
                 <LeaderboardMiniRow key={row.slug} row={row} setCode={layers.front.setCode} />
+              ))}
+              {emptyRowKeys(maxRows - layers.front.rows.length).map((key) => (
+                <LeaderboardEmptyRow key={key} />
               ))}
             </div>
           </>
@@ -719,7 +780,11 @@ function FormatDropdown({
         )}
       >
         <span key={current} className="animate-fadeIn truncate">{shortFormat(current)}</span>
-        <span className={cn("absolute right-1.5 text-[12px] transition-transform", open && "rotate-180")}>▾</span>
+        <ChevronDown
+          size={14}
+          strokeWidth={2.5}
+          className={cn("absolute right-1.5 transition-transform", open && "rotate-180")}
+        />
       </button>
       {open ? (
         <div className="absolute right-0 top-[calc(100%+6px)] z-30 w-max overflow-hidden border border-border2 bg-surface shadow-xl">
@@ -766,6 +831,20 @@ function LeaderboardMiniRow({ row, setCode }: { row: LeaderboardRow; setCode: st
         {Number.isFinite(row.score) ? fmtPts(row.score) : "—"}
       </span>
     </Link>
+  );
+}
+
+function emptyRowKeys(count: number): string[] {
+  return Array.from({ length: Math.max(0, count) }, (_, i) => `empty-${i}`);
+}
+
+function LeaderboardEmptyRow() {
+  return (
+    <div
+      className="flex flex-1 items-center border-t border-border first:border-t-0"
+      style={{ minHeight: LB_ROW_HEIGHT }}
+      aria-hidden
+    />
   );
 }
 
@@ -826,7 +905,7 @@ function PodRow({ entry }: { entry: PodEntry }) {
   } else if (championName) {
     sub = (
       <>
-        <span className="shrink-0">🏆</span>
+        <Trophy size={13} strokeWidth={2} className="text-gold" />
         <span className="truncate text-[12px] font-bold text-text">{championName}</span>
         {event.championRecord ? <span className="shrink-0">{event.championRecord}</span> : null}
         {event.championDeckColors ? <Pips colors={event.championDeckColors} size={11} /> : null}

@@ -21,13 +21,13 @@ const NAV: Array<{ label: string; badge?: (props: { active: boolean }) => JSX.El
   { label: "COMMUNITY", to: "/community", match: (p) => p.startsWith("/community") },
 ];
 
-const NAV_ITEM_CLASS = "py-2.5 px-5 no-underline border transition-colors whitespace-nowrap";
+const NAV_ITEM_CLASS = "h-12 px-5 inline-flex items-center no-underline border transition-colors whitespace-nowrap";
 
 export function AppHeader({ subtitle = "LEADERBOARD", fill = false }: { subtitle?: string; fill?: boolean }) {
   const loc = useLocation();
   const isMobile = useIsMobile();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [navCollapsed, setNavCollapsed] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(NAV.length);
   const brandHref = "/";
 
   const headerRef = useRef<HTMLElement>(null);
@@ -50,22 +50,43 @@ export function AppHeader({ subtitle = "LEADERBOARD", fill = false }: { subtitle
     };
   }, [menuOpen]);
 
-  // Collapse the inline nav to a menu whenever brand + nav can't share one row,
-  // so adding categories never needs a hand-tuned breakpoint.
+  // Show as many leading nav tabs as share the row with brand + auth; the rest
+  // spill into the menu. So adding categories never needs a hand-tuned breakpoint.
   useLayoutEffect(() => {
     const header = headerRef.current;
     const brand = brandRef.current;
     const measure = navMeasureRef.current;
     const authMeasure = authMeasureRef.current;
     if (!header || !brand || !measure) return;
-    const GAP_BETWEEN = 32;
-    const GAP_NAV_AUTH = 16;
+    const GAP_BRAND = 32;
+    const GROUP_GAP = 4;
+    const NAV_GAP = 8;
+    const MENU_BUTTON = 48;
     const evaluate = () => {
+      if (isMobile) {
+        setVisibleCount(0);
+        return;
+      }
       const styles = getComputedStyle(header);
       const avail = header.clientWidth - parseFloat(styles.paddingLeft) - parseFloat(styles.paddingRight);
-      const authWidth = authMeasure ? authMeasure.scrollWidth + GAP_NAV_AUTH : 0;
-      const required = brand.scrollWidth + measure.scrollWidth + authWidth + GAP_BETWEEN;
-      setNavCollapsed(required > avail);
+      const authWidth = authMeasure ? authMeasure.scrollWidth : 0;
+      const itemWidths = Array.from(measure.children).map((el) => (el as HTMLElement).scrollWidth);
+      const navWidth = (k: number) =>
+        k === 0 ? 0 : itemWidths.slice(0, k).reduce((sum, w) => sum + w, 0) + NAV_GAP * (k - 1);
+      const fits = (k: number, withMenu: boolean) => {
+        const tabs = navWidth(k) + (k > 0 ? GROUP_GAP : 0);
+        const menu = withMenu ? GROUP_GAP + MENU_BUTTON : 0;
+        return brand.scrollWidth + GAP_BRAND + tabs + authWidth + menu <= avail;
+      };
+      if (fits(itemWidths.length, false)) {
+        setVisibleCount(itemWidths.length);
+        return;
+      }
+      let count = itemWidths.length - 1;
+      while (count > 0 && !fits(count, true)) {
+        count--;
+      }
+      setVisibleCount(count);
     };
     const ro = new ResizeObserver(evaluate);
     ro.observe(header);
@@ -74,6 +95,12 @@ export function AppHeader({ subtitle = "LEADERBOARD", fill = false }: { subtitle
     evaluate();
     return () => ro.disconnect();
   }, [isMobile, subtitle]);
+
+  const hasMenu = isMobile || visibleCount < NAV.length;
+
+  useEffect(() => {
+    if (!hasMenu) setMenuOpen(false);
+  }, [hasMenu]);
 
   return (
     <header
@@ -120,42 +147,40 @@ export function AppHeader({ subtitle = "LEADERBOARD", fill = false }: { subtitle
         LOG IN
       </span>
 
-      <div className="flex items-center gap-3 md:gap-4">
-        {!navCollapsed && (
-          <div className="flex items-center gap-1">
-            <nav className="flex gap-2 font-display text-[19px] tracking-[0.14em]">
-              {NAV.map((n) => {
-                const active = n.match(loc.pathname);
-                return (
-                  <Link
-                    key={n.label}
-                    to={n.to}
-                    className={cn(
-                      NAV_ITEM_CLASS,
-                      n.badge && "relative",
-                      active
-                        ? "text-bg bg-green border-green"
-                        : "text-text border-transparent hover:bg-surface hover:text-green",
-                    )}
-                  >
-                    {n.label}
-                    {n.badge && <n.badge active={active} />}
-                  </Link>
-                );
-              })}
-            </nav>
-            <DesktopAuth />
-          </div>
+      <div className="flex items-center gap-1">
+        {!isMobile && visibleCount > 0 && (
+          <nav className="flex gap-2 font-display text-[19px] tracking-[0.14em]">
+            {NAV.slice(0, visibleCount).map((n) => {
+              const active = n.match(loc.pathname);
+              return (
+                <Link
+                  key={n.label}
+                  to={n.to}
+                  className={cn(
+                    NAV_ITEM_CLASS,
+                    n.badge && "relative",
+                    active
+                      ? "text-bg bg-green border-green"
+                      : "text-text border-transparent hover:bg-surface hover:text-green",
+                  )}
+                >
+                  {n.label}
+                  {n.badge && <n.badge active={active} />}
+                </Link>
+              );
+            })}
+          </nav>
         )}
+        {!isMobile && <DesktopAuth />}
 
-        {navCollapsed && (
+        {hasMenu && (
           <button
             type="button"
             onClick={() => setMenuOpen((o) => !o)}
             aria-label={menuOpen ? "Close menu" : "Open menu"}
             aria-expanded={menuOpen}
             className={cn(
-              "w-11 h-11 border flex items-center justify-center cursor-pointer transition-colors",
+              "w-12 h-12 border flex items-center justify-center cursor-pointer transition-colors",
               menuOpen ? "border-green text-green bg-surface" : "border-border2 text-muted bg-transparent",
             )}
           >
@@ -164,8 +189,13 @@ export function AppHeader({ subtitle = "LEADERBOARD", fill = false }: { subtitle
         )}
       </div>
 
-      {navCollapsed && menuOpen && (
-        <MobileMenu pathname={loc.pathname} onClose={() => setMenuOpen(false)} />
+      {hasMenu && menuOpen && (
+        <MobileMenu
+          items={isMobile ? NAV : NAV.slice(visibleCount)}
+          includeAuth={isMobile}
+          pathname={loc.pathname}
+          onClose={() => setMenuOpen(false)}
+        />
       )}
     </header>
   );
@@ -246,7 +276,17 @@ function DesktopAuth() {
   );
 }
 
-function MobileMenu({ pathname, onClose }: { pathname: string; onClose: () => void }) {
+function MobileMenu({
+  items,
+  includeAuth,
+  pathname,
+  onClose,
+}: {
+  items: typeof NAV;
+  includeAuth: boolean;
+  pathname: string;
+  onClose: () => void;
+}) {
   const { user, loading, signIn, signOut } = useAuth();
 
   return (
@@ -260,7 +300,7 @@ function MobileMenu({ pathname, onClose }: { pathname: string; onClose: () => vo
         className="absolute top-full right-0 left-0 bg-bg border-b border-border z-40 flex flex-col"
         role="menu"
       >
-        {!loading && user && (
+        {includeAuth && !loading && user && (
           <div className="flex items-center gap-3 px-5 min-h-[54px] border-b border-border">
             {user.avatarUrl ? (
               <img src={user.avatarUrl} alt="" className="w-6 h-6 rounded-full" />
@@ -270,7 +310,7 @@ function MobileMenu({ pathname, onClose }: { pathname: string; onClose: () => vo
             <span className="text-text text-sm truncate">{user.username}</span>
           </div>
         )}
-        {NAV.map((n) => {
+        {items.map((n) => {
           const active = n.match(pathname);
           return (
             <Link
@@ -287,7 +327,7 @@ function MobileMenu({ pathname, onClose }: { pathname: string; onClose: () => vo
             </Link>
           );
         })}
-        {!loading && !user && (
+        {includeAuth && !loading && !user && (
           <button
             type="button"
             onClick={() => { signIn(); onClose(); }}
@@ -297,7 +337,7 @@ function MobileMenu({ pathname, onClose }: { pathname: string; onClose: () => vo
             LOG IN
           </button>
         )}
-        {!loading && user && (
+        {includeAuth && !loading && user && (
           <button
             type="button"
             onClick={() => { signOut(); onClose(); }}

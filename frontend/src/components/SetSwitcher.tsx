@@ -1,5 +1,6 @@
 import React from "react";
 import { keyruneClass, setGlyphCode, SetGlyph } from "./Brand";
+import { ChevronDown } from "./Icons";
 import { cn } from "../lib/utils";
 import { useSetVisibleCap } from "../lib/use-is-mobile";
 import type { SetSummary } from "../types/leaderboard";
@@ -169,7 +170,10 @@ function SetOverflow({
           <span className="text-[20px] tracking-[0.06em] leading-none">
             +{sets.length} {sets.length === 1 ? "SET" : "SETS"}
           </span>
-          <span className="text-muted text-[12px] leading-none">▾</span>
+          <ChevronDown
+            strokeWidth={2.5}
+            className={cn("text-muted h-4 w-4 transition-transform", open && "rotate-180")}
+          />
         </span>
       </button>
       {open && (
@@ -243,7 +247,10 @@ export function SetSwitcherMobile({
           <span className="text-muted text-[10px] tracking-[0.18em]">· LIVE</span>
         )}
         <span className="flex-1" />
-        <span className="text-muted text-[10px]">▾</span>
+        <ChevronDown
+          strokeWidth={2.5}
+          className={cn("text-muted h-3.5 w-3.5 transition-transform", open && "rotate-180")}
+        />
       </button>
       {open && (
         <div className="absolute left-0 right-0 top-[calc(100%+4px)] bg-surface border border-border2 z-20">

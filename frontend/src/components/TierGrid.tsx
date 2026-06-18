@@ -84,12 +84,15 @@ export function TierGrid({
   const { data, isLoading, isError } = useTierList(uid, graders);
   const isMobile = useIsMobile();
 
-  if (isLoading || isError || !data) {
-    return (
-      <div className="border border-border bg-surface py-16 text-center text-muted text-[14px]">
-        {isLoading ? "Loading tier list…" : "Couldn't load this tier list."}
-      </div>
-    );
+  if (isLoading || !data) {
+    if (isError) {
+      return (
+        <div className="border border-border bg-surface py-16 text-center text-muted text-[14px]">
+          Couldn't load this tier list.
+        </div>
+      );
+    }
+    return <TierGridSkeleton isMobile={isMobile} stickyTop={stickyTop} />;
   }
 
   const byKey = new Map<string, TierCard[]>();
@@ -118,6 +121,108 @@ export function TierGrid({
         <DesktopGrid byKey={byKey} filters={filters} hideArt={hideArt} stickyTop={stickyTop} />
       )}
     </ComparisonContext.Provider>
+  );
+}
+
+const SKELETON_TIERS = ["A", "B", "C", "D", "F", "SB"];
+
+// Deterministic 0–3 bars per cell so the skeleton mimics a populated grid without flicker.
+const skeletonBarCount = (row: number, col: number) => (row * 3 + col * 2) % 4;
+
+function TierGridSkeleton({
+  isMobile,
+  stickyTop,
+}: {
+  isMobile: boolean;
+  stickyTop: number;
+}) {
+  if (isMobile) {
+    return (
+      <div className="flex flex-col gap-[5px]">
+        {SKELETON_TIERS.map((tier, row) => (
+          <div key={tier} className="border border-border bg-surface">
+            <div className="bg-bg border-b border-border py-1.5 text-center font-display text-[18px] leading-none text-muted">
+              {tier}
+            </div>
+            <div
+              className="border-l-4 border-border"
+              style={{ borderLeftColor: tierColor(tier) }}
+            >
+              {[0, 1, 2].map((col, idx) => (
+                <div
+                  key={col}
+                  className={cn("flex", idx > 0 && "border-t border-border")}
+                >
+                  <div className="w-[44px] shrink-0 flex items-center justify-center">
+                    <span className="h-4 w-4 rounded-full bg-surface2 animate-pulse" />
+                  </div>
+                  <div className="grid min-w-0 flex-1 grid-cols-1 min-[450px]:grid-cols-2 gap-1 p-1">
+                    {Array.from({ length: skeletonBarCount(row, col) + 1 }).map(
+                      (_, i) => (
+                        <SkeletonBar key={i} />
+                      ),
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  const headerCell = {
+    position: "sticky",
+    top: stickyTop,
+    zIndex: 10,
+  } as const;
+
+  return (
+    <div className="border-x border-b border-border bg-surface">
+      <div
+        className="grid"
+        style={{ gridTemplateColumns: "48px repeat(7, minmax(0, 1fr))" }}
+      >
+        <div className="border-t border-b border-border bg-bg" style={headerCell} />
+        {COLUMN_CODES.map((code) => (
+          <div
+            key={code}
+            className="border-t border-b border-border bg-bg flex items-center justify-center py-2"
+            style={headerCell}
+          >
+            <span className="h-4 w-4 rounded-full bg-surface2 animate-pulse" />
+          </div>
+        ))}
+
+        {SKELETON_TIERS.map((tier, row) => (
+          <Fragment key={tier}>
+            <div
+              className="border-b border-l-4 border-border bg-bg flex items-center justify-center font-display text-[20px] leading-none text-muted"
+              style={{ borderLeftColor: tierColor(tier) }}
+            >
+              {tier}
+            </div>
+            {COLUMN_CODES.map((code, col) => (
+              <div
+                key={code}
+                className="border-b border-border p-1 flex flex-col gap-1 min-h-[26px]"
+              >
+                {Array.from({ length: skeletonBarCount(row, col) }).map((_, i) => (
+                  <SkeletonBar key={i} />
+                ))}
+              </div>
+            ))}
+          </Fragment>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SkeletonBar() {
+  return (
+    <div className="min-h-[28px] rounded-[5px] border-l-4 border-border2 bg-surface2 animate-pulse" />
   );
 }
 

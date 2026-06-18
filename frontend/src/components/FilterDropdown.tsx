@@ -1,5 +1,6 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "../lib/utils";
+import { ChevronDown } from "./Icons";
 
 // Custom click-to-open dropdown — same family as SetSwitcherMobile so styled
 // content (color swatches, mana pips, etc) renders cleanly in both the closed
@@ -22,32 +23,48 @@ export function FilterDropdown({
   options,
   onChange,
   variant = "desktop",
+  align = "left",
   renderValue,
   renderOption,
   searchable,
   searchPlaceholder = "Search…",
   triggerClassName,
   className,
+  mobileCentered = false,
 }: {
   label?: string;
   value: string;
   options: FilterOption[];
   onChange: (next: string) => void;
   variant?: "desktop" | "mobile";
+  align?: "left" | "right";
   renderValue?: (option: FilterOption) => React.ReactNode;
   renderOption?: (option: FilterOption) => React.ReactNode;
   searchable?: boolean;
   searchPlaceholder?: string;
   triggerClassName?: string;
   className?: string;
+  mobileCentered?: boolean;
 }) {
   const isMobile = variant === "mobile";
   const selected = options.find((o) => o.value === value) ?? options[0];
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [menuTop, setMenuTop] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   const showSearch = searchable ?? options.length > SEARCH_THRESHOLD;
+
+  useLayoutEffect(() => {
+    if (!open || !mobileCentered) {
+      return;
+    }
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (rect) {
+      setMenuTop(rect.bottom + 4);
+    }
+  }, [open, mobileCentered]);
 
   useEffect(() => {
     if (!open) {
@@ -78,6 +95,7 @@ export function FilterDropdown({
   return (
     <div ref={ref} className={cn("relative", isMobile ? "flex-1 min-w-0" : "", className)}>
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
         className={cn(
@@ -98,12 +116,22 @@ export function FilterDropdown({
           {renderValue ? renderValue(selected) : selected.label}
         </span>
         <span className="flex-1" />
-        <span className="text-muted text-[11px]">{open ? "▴" : "▾"}</span>
+        <ChevronDown
+          size={isMobile ? 18 : 16}
+          strokeWidth={2.5}
+          className={cn("text-muted transition-transform", open && "rotate-180")}
+        />
       </button>
 
       {open && (
         <div
-          className="absolute left-0 top-[calc(100%+4px)] min-w-full w-max max-w-[calc(100vw-24px)] flex max-h-[min(60vh,420px)] flex-col bg-surface border border-border2 z-20 shadow-lg"
+          className={cn(
+            "absolute top-[calc(100%+4px)] min-w-full w-max max-w-[calc(100vw-24px)] flex max-h-[min(60vh,420px)] flex-col bg-surface border border-border2 z-20 shadow-lg",
+            align === "right" ? "right-0" : "left-0",
+            mobileCentered &&
+              "max-sm:!fixed max-sm:!left-1/2 max-sm:!right-auto max-sm:!-translate-x-1/2 max-sm:!top-[var(--menu-top)]",
+          )}
+          style={mobileCentered ? ({ "--menu-top": `${menuTop}px` } as React.CSSProperties) : undefined}
           role="listbox"
         >
           {showSearch && (

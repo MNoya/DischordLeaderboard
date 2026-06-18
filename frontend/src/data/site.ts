@@ -47,11 +47,14 @@ export const COMMUNITY_STATS = {
 } as const;
 
 export const SHOW_FORMAT: Array<{ name: string; blurb: string }> = [
-  { name: "First Impressions", blurb: "Release-week overview" },
-  { name: "Set Review", blurb: "Commons & uncommons, graded" },
+  { name: "Set Review", blurb: "Release-week takes & card grades" },
   { name: "Draft", blurb: "Pick-by-pick breakdown" },
+  { name: "Sealed", blurb: "Prerelease & sealed prep" },
+  { name: "Rankings", blurb: "Top 10s & tier lists" },
   { name: "Metagame", blurb: "Per-set meta & format updates" },
-  { name: "Evergreen", blurb: "Timeless skill topics" },
+  { name: "Coaching", blurb: "Leveling up players through real drafts" },
+  { name: "Guest", blurb: "Interviews & conversations with pros" },
+  { name: "Evergreen", blurb: "Timeless skills, retros & extras" },
 ];
 
 export interface Host {
@@ -131,8 +134,8 @@ export const COMMUNITY_PLATFORMS: Array<{
 ];
 
 export const LISTEN_ON: Array<{ label: string; url: string }> = [
+  { label: "YouTube", url: SITE_LINKS.youtube },
   { label: "Apple", url: SITE_LINKS.apple },
   { label: "Spotify", url: SITE_LINKS.spotify },
-  { label: "YouTube", url: SITE_LINKS.youtube },
   { label: "RSS", url: SITE_LINKS.rss },
 ];

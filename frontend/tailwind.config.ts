@@ -31,6 +31,10 @@ const config: Config = {
         teal: "#22d4c0",
         gold: "#ffc63a",
         red: "#ff5e5e",
+        blue: "#4aa8ff",
+        purple: "#a98eff",
+        orange: "#ff9d42",
+        pink: "#ff79c6",
       },
       fontFamily: {
         display: ["'Bebas Neue'", "sans-serif"],

@@ -1,6 +1,7 @@
 import React from "react";
 import { cn } from "../lib/utils";
 import { SetGlyph } from "./Brand";
+import { ChevronDown } from "./Icons";
 import type { SetSummary } from "../types/leaderboard";
 
 const CHAMFER = "polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%)";
@@ -42,7 +43,6 @@ export function SetCodeDropdown({
 
   const isSm = size === "sm";
   const labelFs = isSm ? "text-[22px]" : "text-[26px]";
-  const caretFs = isSm ? "text-[13px]" : "text-[15px]";
   const padL = isSm ? "pl-[14px]" : "pl-[16px]";
   const padR = isSm ? "pr-[18px]" : "pr-[20px]";
   const heightOuter = isSm ? 38 : 46;
@@ -71,7 +71,10 @@ export function SetCodeDropdown({
         >
           <SetGlyph code={activeCode} size={glyphSize} />
           <span className={cn(labelFs, "leading-none")}>{activeCode}</span>
-          <span className={cn(caretFs, "text-muted leading-none")}>▾</span>
+          <ChevronDown
+            strokeWidth={2.5}
+            className={cn("text-muted transition-transform", isSm ? "h-4 w-4" : "h-[18px] w-[18px]", open && "rotate-180")}
+          />
         </span>
       </button>
       {open && (

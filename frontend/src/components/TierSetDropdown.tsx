@@ -1,5 +1,6 @@
 import React from "react";
 import { SetGlyph, setGlyphCode } from "./Brand";
+import { ChevronDown, ChevronRight } from "./Icons";
 import { cn } from "../lib/utils";
 import { TIER_LIST_PREVIEW_SETS } from "../data/constants";
 import type { SetSummary } from "../types/leaderboard";
@@ -37,6 +38,7 @@ export function TierSetDropdown({
   const ref = React.useRef<HTMLDivElement>(null);
   const glyphSize = compact ? 20 : isMobile ? 26 : 38;
   const labelSize = compact ? "text-[18px]" : "text-[17px] md:text-[30px]";
+  const chevronSize = compact ? "h-4 w-4" : "h-4 w-4 md:h-5 md:w-5";
 
   const close = () => {
     setOpen(false);
@@ -120,15 +122,14 @@ export function TierSetDropdown({
       >
         <SetGlyph code={glyphCode} size={glyphSize} />
         <span className={cn("flex-1 min-w-0 truncate font-display tracking-[0.06em]", labelSize)}>{label}</span>
-        <span
-          className={cn(
-            "shrink-0 transition-transform",
-            compact ? "text-[12px]" : "text-[14px] md:text-[18px]",
-            open && !sideRight && "rotate-180",
-          )}
-        >
-          {sideRight ? (open ? "▸" : "▾") : "▾"}
-        </span>
+        {sideRight && open ? (
+          <ChevronRight strokeWidth={2.5} className={chevronSize} />
+        ) : (
+          <ChevronDown
+            strokeWidth={2.5}
+            className={cn("transition-transform", chevronSize, open && !sideRight && "rotate-180")}
+          />
+        )}
       </button>
 
       {open && (

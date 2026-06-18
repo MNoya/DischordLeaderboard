@@ -14,6 +14,7 @@ export const DISCORD_GUILD_ID = "775371722065051658";
 // 17Lands tier-list ids per set, taken from a tier list's share link
 // (https://www.17lands.com/tier_list/<uid>). Add one as each set rotates in.
 export const TIER_LIST_UIDS: Record<string, string> = {
+  MSH: "1c86af8656f7432c83d9f9bb9c92f9df",
   SOS: "e195401b1eaa48e3b5d6670e0ae338e9",
   TMT: "fd5499ae88854ca0ac1bc2ad95ade9b2",
   ECL: "1745e64176864bb2bec132cbd601b604",

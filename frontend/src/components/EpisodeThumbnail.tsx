@@ -2,7 +2,17 @@ import { useEffect, useState } from "react";
 import { LLU_LOGO_SRC } from "./Brand";
 import { cn } from "../lib/utils";
 
-export function EpisodeThumbnail({ src, pending, className }: { src?: string; pending?: boolean; className?: string }) {
+export function EpisodeThumbnail({
+  src,
+  pending,
+  className,
+  portrait,
+}: {
+  src?: string;
+  pending?: boolean;
+  className?: string;
+  portrait?: boolean;
+}) {
   const [loaded, setLoaded] = useState(false);
   const [revealed, setRevealed] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -24,18 +34,20 @@ export function EpisodeThumbnail({ src, pending, className }: { src?: string; pe
   const ready = !!src && !failed;
   const showBranded = (!src && !pending) || failed;
   const showSkeleton = !showBranded && !revealed;
+  const skeletonLogoClass = portrait ? "w-[70%] max-w-[220px]" : "w-[42%] max-w-[220px]";
+  const brandedLogoClass = portrait ? "w-1/2 max-w-[180px]" : "w-[34%] max-w-[180px]";
 
   return (
     <>
       {showSkeleton ? (
         <div className="absolute inset-0 flex items-center justify-center overflow-hidden bg-surface">
-          <img src={LLU_LOGO_SRC} alt="" className="w-[70%] max-w-[220px] opacity-[0.06] grayscale-[0.6]" />
+          <img src={LLU_LOGO_SRC} alt="" className={cn(skeletonLogoClass, "opacity-[0.06] grayscale-[0.6]")} />
           <div className="pointer-events-none absolute inset-0 animate-[thumbSweep_1.8s_ease-in-out_infinite] bg-[linear-gradient(100deg,transparent_25%,rgba(255,255,255,0.13)_50%,transparent_75%)]" />
         </div>
       ) : null}
       {showBranded ? (
         <div className="absolute inset-0 flex items-center justify-center bg-surface">
-          <img src={LLU_LOGO_SRC} alt="" className="w-1/2 max-w-[180px] opacity-90" />
+          <img src={LLU_LOGO_SRC} alt="" className={cn(brandedLogoClass, "opacity-90", className)} />
         </div>
       ) : null}
       {ready ? (

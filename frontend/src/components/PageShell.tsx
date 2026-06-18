@@ -46,7 +46,7 @@ export function PageShell({
       )}
     >
       <AppHeader subtitle={subtitle} fill={fill} />
-      <main className={cn("flex-1", fill && "lg:min-h-0 lg:overflow-hidden")}>{children}</main>
+      <main className={cn("flex-1", fill ? "lg:min-h-0 lg:overflow-hidden" : "flex flex-col")}>{children}</main>
       <SiteFooter flush={fill} />
     </div>
   );

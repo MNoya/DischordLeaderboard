@@ -62,12 +62,44 @@ export function mergeMedia(episodes: Episode[], videos: YouTubeVideo[]): Episode
 
 // DB rows are authoritative (categorized, set-tagged, thumbnails matched). Live RSS/YouTube
 // items not yet synced overlay on top so a just-dropped episode shows up before the next sync,
-// deduped against the DB by guid and by matched youtube id.
+// deduped against the DB by guid and by matched youtube id, and stamped with the latest release
+// set as a best guess until the bot resolves the real one.
 export function overlayLiveMedia(db: Episode[], live: Episode[]): Episode[] {
   const dbIds = new Set(db.map((e) => e.id));
   const dbYoutubeIds = new Set(db.map((e) => e.youtubeId).filter(Boolean));
-  const fresh = live.filter((e) => !dbIds.has(e.id) && !(e.youtubeId && dbYoutubeIds.has(e.youtubeId)));
+  const assumedSet = latestReleaseSet(db);
+  const fresh = live
+    .filter((e) => !dbIds.has(e.id) && !(e.youtubeId && dbYoutubeIds.has(e.youtubeId)))
+    .map((e) => withAssumedSet(e, assumedSet));
   return [...db, ...fresh].sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime());
+}
+
+// The set the newest set-tagged episode belongs to — what the bot's resolve_set would give a
+// brand-new same-era drop. Tracks the previewing set, not the leaderboard's active set, which
+// keeps running the prior set through a release window. Set-agnostic content has a null set_code.
+function latestReleaseSet(db: Episode[]): Episode | undefined {
+  let latest: Episode | undefined;
+  for (const episode of db) {
+    if (!episode.setCode) {
+      continue;
+    }
+    if (!latest || new Date(episode.pubDate).getTime() > new Date(latest.pubDate).getTime()) {
+      latest = episode;
+    }
+  }
+  return latest;
+}
+
+function withAssumedSet(episode: Episode, source: Episode | undefined): Episode {
+  if (!source || episode.setCode || episode.category === "Evergreen") {
+    return episode;
+  }
+  return {
+    ...episode,
+    setCode: source.setCode,
+    setName: source.setName,
+    setReleasedAt: source.setReleasedAt,
+  };
 }
 
 function findMatch(episode: Episode, videos: YouTubeVideo[], claimed: Set<string>): YouTubeVideo | null {
