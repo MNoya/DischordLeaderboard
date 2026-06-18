@@ -18,7 +18,8 @@ import {
   P0P1_SCORING_DATE as SCORING_DATE,
   SLOTS,
 } from "../../data/p0p1Slots";
-import type { Card, SlotDefinition, SlotKey } from "../../types/p0p1";
+import { groupBySlot, findExtremes, classifyYourPick, participantCount } from "../../data/p0p1Stats";
+import type { Card, P0P1PickStat, SlotDefinition, SlotKey } from "../../types/p0p1";
 import type { SetSummary } from "../../types/leaderboard";
 
 const SEVENTEEN_LANDS_URL = "https://www.17lands.com/card_data";
@@ -139,6 +140,8 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
   } = ballot;
 
   const loginBarVisible = !authLoading && !user && !isPastDeadline;
+  const groupedStats = hasParticipated && pickStats ? groupBySlot(pickStats) : undefined;
+  const n = hasParticipated && pickStats ? participantCount(pickStats) : 0;
 
   return (
     <div className="bg-bg text-text min-h-screen flex flex-col animate-fadeIn">
@@ -164,12 +167,17 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
                 <div className="grid grid-cols-4 landscape:grid-cols-8 gap-1.5">
                   {SLOTS.map((slot) => {
                     const cardName = picksBySlot.get(slot.key);
+                    const slotStats = groupedStats?.get(slot.key);
+                    const yourStat = cardName && slotStats ? slotStats.find((s) => s.cardName === cardName) : undefined;
                     return (
                       <MobileChip
                         key={slot.key}
                         slot={slot}
                         card={cardName ? cardsByName.get(cardName) : undefined}
                         active={!isPastDeadline && activeSlotKey === slot.key}
+                        yourStat={yourStat}
+                        slotStats={slotStats}
+                        n={n}
                         onClick={() => setEditingSlotKey(slot.key)}
                       />
                     );
@@ -244,14 +252,31 @@ function MobileChip({
   slot,
   card,
   active,
+  yourStat,
+  slotStats,
+  n,
   onClick,
 }: {
   slot: SlotDefinition;
   card: Card | undefined;
   active: boolean;
+  yourStat?: P0P1PickStat;
+  slotStats?: P0P1PickStat[];
+  n?: number;
   onClick: () => void;
 }) {
   const accent = SLOT_ACCENT[slot.key];
+  let classification: ReturnType<typeof classifyYourPick> | undefined;
+  if (yourStat && slotStats) {
+    const { most, least } = findExtremes(slotStats);
+    classification = classifyYourPick(yourStat, most, least);
+  }
+  const stateColor = classification?.state === "most"
+    ? "text-cyan"
+    : classification?.state === "rogue"
+    ? "text-magenta"
+    : "text-violet";
+
   return (
     <button
       type="button"
@@ -271,6 +296,11 @@ function MobileChip({
         <span className="absolute inset-0 flex items-center justify-center">
           <SlotPip slotKey={slot.key} size={20} />
         </span>
+      )}
+      {yourStat && classification && n !== undefined && (
+        <div className={`absolute bottom-0 left-0 right-0 text-center font-mono tabular-nums text-[10px] py-0.5 bg-bg/75 ${stateColor}`}>
+          {yourStat.pickCount}/{n}
+        </div>
       )}
     </button>
   );
