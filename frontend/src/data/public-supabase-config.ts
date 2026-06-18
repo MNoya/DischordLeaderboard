@@ -33,6 +33,6 @@ export const PUBLIC_SUPABASE_PUBLISHABLE_KEY =
 // overrides for an off-box proxy.
 const localProxyHost = typeof window !== "undefined" ? window.location.hostname : "localhost";
 export const LOCAL_SUPABASE_URL =
-  import.meta.env.VITE_LOCAL_SUPABASE_URL ?? `http://${localProxyHost}:3001`;
+  import.meta.env?.VITE_LOCAL_SUPABASE_URL ?? `http://${localProxyHost}:3001`;
 
 export const LOCAL_SUPABASE_PUBLISHABLE_KEY = "dev-anon-key";
