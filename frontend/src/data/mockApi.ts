@@ -451,6 +451,15 @@ export const deleteAllP0P1Picks = async (
   p0p1Picks.clear();
 };
 
+function forceTrailingTie(counts: number[], tieCount: number, value: number) {
+  let surplus = 0;
+  for (let i = counts.length - tieCount; i < counts.length; i++) {
+    surplus += counts[i] - value;
+    counts[i] = value;
+  }
+  counts[0] += surplus;
+}
+
 export const fetchP0P1PickStats = (_setCode: string): Promise<P0P1PickStat[]> => {
   const stats: P0P1PickStat[] = [];
   const slotKeys: SlotKey[] = [
@@ -487,6 +496,12 @@ export const fetchP0P1PickStats = (_setCode: string): Promise<P0P1PickStat[]> =>
       }
     }
     counts.sort((a, b) => b - a);
+    if (slotKey === "black_common" && counts.length >= 3) {
+      forceTrailingTie(counts, 3, 4);
+    }
+    if (slotKey === "wildcard_common" && counts.length >= 4) {
+      forceTrailingTie(counts, 4, 5);
+    }
     for (let i = 0; i < picked.length; i++) {
       stats.push({
         setCode: "MSH",
