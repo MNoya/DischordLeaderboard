@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from typing import NamedTuple, Sequence
 
 import discord
-from sqlalchemy import func, select
+from sqlalchemy import Date, case, cast, func, select
 from sqlalchemy.orm import Session
 
 from bot.models import DraftEvent, MagicSet, Player, PlayerStats
@@ -188,6 +188,102 @@ def rank_players_for_set(session: Session, set_id: str) -> list[RankedPlayer]:
 
     standings.sort(key=lambda p: (-p.score, p.display_name.lower()))
     return [p._replace(rank=rank) for rank, p in enumerate(standings, start=1)]
+
+
+CUBE_CODE = "CUBE"
+
+
+def latest_cube_season(session: Session) -> tuple[str, str, date, date | None] | None:
+    """The most recent CUBE season: (cube_set_id, season label, window_start, window_end_exclusive).
+
+    A season is the cube drafts played while a regular set was live — the window is
+    [set.start, next regular set's start), matching the public_cube_season_* views. The latest
+    season is the one that contains the most recent cube draft. None if no cube drafts exist.
+    """
+    cube_id = session.execute(select(MagicSet.id).where(MagicSet.code == CUBE_CODE)).scalar_one_or_none()
+    if cube_id is None:
+        return None
+    latest = session.execute(
+        select(func.max(DraftEvent.started_at))
+        .where(DraftEvent.set_id == cube_id, DraftEvent.started_at.isnot(None))
+    ).scalar()
+    if latest is None:
+        return None
+    latest_date = latest.date()
+
+    sets = session.execute(
+        select(MagicSet.code, MagicSet.start_date)
+        .where(MagicSet.code != CUBE_CODE)
+        .order_by(MagicSet.start_date)
+    ).all()
+    for i, s in enumerate(sets):
+        next_start = sets[i + 1].start_date if i + 1 < len(sets) else None
+        if s.start_date <= latest_date and (next_start is None or latest_date < next_start):
+            return cube_id, s.code, s.start_date, next_start
+    return None
+
+
+def rank_cube_season(session: Session) -> tuple[list[RankedPlayer], str] | None:
+    """Rank active, opted-in players for the latest cube season; returns (standings, season label).
+
+    Scored from draft_events windowed to the season (cube only — no pod points), so the standings
+    match the site's CUBE-<set> board. None if there is no cube data.
+    """
+    info = latest_cube_season(session)
+    if info is None:
+        return None
+    cube_id, label, window_start, window_end = info
+
+    conds = [
+        DraftEvent.set_id == cube_id,
+        DraftEvent.started_at.isnot(None),
+        cast(DraftEvent.started_at, Date) >= window_start,
+        Player.active.is_(True),
+        Player.leaderboard_opt_in.is_(True),
+    ]
+    if window_end is not None:
+        conds.append(cast(DraftEvent.started_at, Date) < window_end)
+
+    rows = session.execute(
+        select(
+            DraftEvent.player_id, DraftEvent.format,
+            func.count().label("events"),
+            func.sum(DraftEvent.wins).label("wins"),
+            func.sum(DraftEvent.losses).label("losses"),
+            func.sum(case((DraftEvent.is_trophy, 1), else_=0)).label("trophies"),
+        )
+        .join(Player, Player.id == DraftEvent.player_id)
+        .where(*conds)
+        .group_by(DraftEvent.player_id, DraftEvent.format)
+    ).all()
+
+    by_player: dict[str, list[dict]] = {}
+    for r in rows:
+        by_player.setdefault(r.player_id, []).append({
+            "format": r.format, "events": int(r.events or 0),
+            "wins": int(r.wins or 0), "losses": int(r.losses or 0),
+            "trophies": int(r.trophies or 0),
+        })
+    if not by_player:
+        return None
+
+    identities = {
+        p.id: (p.slug, p.display_name, p.discord_id)
+        for p in session.execute(
+            select(Player.id, Player.slug, Player.display_name, Player.discord_id)
+            .where(Player.id.in_(by_player.keys()))
+        ).all()
+    }
+
+    standings: list[RankedPlayer] = []
+    for pid, stat_rows in by_player.items():
+        slug, name, did = identities[pid]
+        standings.append(RankedPlayer(
+            rank=0, player_id=pid, slug=slug, display_name=name, discord_id=did,
+            score=compute_score(stat_rows), trophies=sum(r["trophies"] for r in stat_rows),
+        ))
+    standings.sort(key=lambda p: (-p.score, p.display_name.lower()))
+    return [p._replace(rank=rank) for rank, p in enumerate(standings, start=1)], label
 
 
 @dataclass

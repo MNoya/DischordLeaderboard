@@ -15,6 +15,10 @@ from sqlalchemy import create_engine, text
 log = logging.getLogger(__name__)
 
 _ALLOWED_VIEWS = {
+    "public_cube_seasons",
+    "public_cube_season_breakdown",
+    "public_cube_season_events",
+    "public_episodes",
     "public_leaderboard",
     "public_player",
     "public_player_draft_events",
@@ -30,7 +34,7 @@ _ALLOWED_VIEWS = {
     "public_sets",
 }
 
-_OP_PATTERN = re.compile(r"^(eq|neq|lt|lte|gt|gte|like|ilike)\.(.+)$")
+_OP_PATTERN = re.compile(r"^(eq|neq|lt|lte|gt|gte|like|ilike|in)\.(.+)$", re.DOTALL)
 
 
 def _json_default(value: Any) -> Any:
@@ -49,6 +53,20 @@ def _build_where(query: dict[str, str]) -> tuple[str, dict[str, Any]]:
         if not m:
             continue
         op, value = m.group(1), m.group(2)
+        if op == "in":
+            items = value.strip()
+            if items.startswith("(") and items.endswith(")"):
+                items = items[1:-1]
+            parts = [p.strip().strip('"') for p in items.split(",") if p.strip()]
+            if not parts:
+                continue
+            binds = []
+            for part in parts:
+                bind = f"p{len(params)}"
+                params[bind] = part
+                binds.append(f":{bind}")
+            clauses.append(f'"{key}" IN ({", ".join(binds)})')
+            continue
         sql_op = {"eq": "=", "neq": "!=", "lt": "<", "lte": "<=", "gt": ">", "gte": ">=",
                   "like": "LIKE", "ilike": "ILIKE"}[op]
         bind = f"p{len(params)}"
@@ -108,9 +126,9 @@ def main() -> None:
     app.router.add_get("/rest/v1/{view}", _handle_view)
     app.router.add_route("OPTIONS", "/rest/v1/{view}", _handle_view)
 
-    log.info("local supabase proxy → docker postgres, listening on http://localhost:3001")
+    log.info("local supabase proxy → docker postgres, listening on http://0.0.0.0:3001")
     log.info("set VITE_SUPABASE_URL=http://localhost:3001 in frontend/.env.local")
-    web.run_app(app, host="localhost", port=3001, print=None)
+    web.run_app(app, host="0.0.0.0", port=3001, print=None)
 
 
 if __name__ == "__main__":

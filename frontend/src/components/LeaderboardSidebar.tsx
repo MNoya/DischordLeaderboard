@@ -11,18 +11,19 @@ import { Record } from "./Record";
 import { useColorsSummary, useFormatScopedTrophies, useRecentTrophies } from "../data/hooks";
 import { lcqDraft2Earnings } from "../data/scoring";
 import { formatsForBucket } from "../data/format-buckets";
-import { colorsOf, effectiveColorCount, mainColors, playerPath, relativeTime } from "../data/utils";
+import { colorsOf, isCubeCode, isSoup, mainColors, playerPath, relativeTime } from "../data/utils";
 import { FMT_COLORS, FMT_DEFAULT_COLOR, shortFormat } from "../data/format-display";
 import { colorsDisplayName, MULTI, OTHER } from "../data/filters";
 import { guildLogoTransform, guildSvgUrl } from "../data/guild-art";
 import type { ColorsSummary, RecentTrophy } from "../types/leaderboard";
 
 // Derive a Top Colors summary from a list of trophy events. Each trophy is
-// bucketed into MULTI (≥4 effective colors) or its main archetype (splash
+// bucketed into MULTI (see isSoup) or its main archetype (splash
 // stripped). Used for the format-scoped sidebar where no precomputed per-format
 // summary view exists. LCQ Day 2 runs count their cash payout; a paying run
 // without a trophy still enters the table on cash alone.
 function topColorsFromTrophies(setCode: string, trophies: RecentTrophy[]): ColorsSummary[] {
+  const cube = isCubeCode(setCode);
   const counts = new Map<string, { trophies: number; earnings: number; players: Set<string> }>();
   for (const t of trophies) {
     const isTrophy = t.isTrophy !== false;
@@ -31,7 +32,7 @@ function topColorsFromTrophies(setCode: string, trophies: RecentTrophy[]): Color
     const keys: string[] = [];
     const main = colorsOf(t.colors);
     if (main) keys.push(main);
-    if (effectiveColorCount(t.colors) >= 4) keys.push(MULTI);
+    if (isSoup(t.colors, cube)) keys.push(MULTI);
     for (const key of keys) {
       const cur = counts.get(key) ?? { trophies: 0, earnings: 0, players: new Set<string>() };
       if (isTrophy) cur.trophies += 1;
@@ -60,6 +61,7 @@ function lcqCashForRow(t: RecentTrophy): number {
 
 export function LeaderboardSidebar({
   setCode,
+  playerSetCode,
   colors = "ALL",
   format = "ALL",
   otherCombos = [],
@@ -68,6 +70,7 @@ export function LeaderboardSidebar({
   stats,
 }: {
   setCode: string;
+  playerSetCode?: string;
   colors?: string;
   format?: string;
   otherCombos?: string[];
@@ -75,6 +78,8 @@ export function LeaderboardSidebar({
   searchParams?: URLSearchParams;
   stats?: { players: number; events: string; updated: string };
 }) {
+  const linkSetCode = playerSetCode ?? setCode;
+  const cube = isCubeCode(setCode);
   const qs = searchParams?.toString() ?? "";
   const colorsScoped = colors !== "ALL";
   const formatScoped = !colorsScoped && format !== "ALL";
@@ -98,7 +103,7 @@ export function LeaderboardSidebar({
     ? (recentSource ? recentSource.slice(0, 10) : undefined)
     : (recentSource ?? [])
         .filter((t) => {
-          if (colors === MULTI) return effectiveColorCount(t.colors) >= 4;
+          if (colors === MULTI) return isSoup(t.colors, cube);
           if (colors === OTHER) return otherCombos.includes(colorsOf(t.colors));
           return colorsOf(t.colors) === colors;
         })
@@ -222,7 +227,7 @@ export function LeaderboardSidebar({
             const inner = (
               <>
                 {showRowPips && (
-                  effectiveColorCount(t.colors) >= 4
+                  isSoup(t.colors, cube)
                     ? (
                       <span className="inline-flex items-center gap-px shrink-0">
                         <Pips colors={mainColors(t.colors).slice(0, 3)} size={10} />
@@ -273,7 +278,7 @@ export function LeaderboardSidebar({
             ) : (
               <Link
                 key={key}
-                to={{ pathname: playerPath(t.slug, setCode), search: qs }}
+                to={{ pathname: playerPath(t.slug, linkSetCode), search: qs }}
                 className={cls}
               >
                 {inner}

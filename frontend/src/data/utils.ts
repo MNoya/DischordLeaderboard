@@ -64,6 +64,14 @@ export function effectiveColorCount(colors: string | null | undefined): number {
   return seen.size;
 }
 
+// A deck is "Soup" (MULTI) when it plays enough colors to escape a normal archetype.
+// Standard limited: 4+ effective colors (2 base + 2 splash counts). Cube affords freer
+// splashing, so the bar rises to 3+ base colors plus a splash (or 4+ base outright).
+export function isSoup(colors: string | null | undefined, isCube: boolean): boolean {
+  if (effectiveColorCount(colors) < 4) return false;
+  return isCube ? colorsOf(colors).length >= 3 : true;
+}
+
 function parseLocalDate(iso: string): Date {
   const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
   return new Date(y, m - 1, d);
@@ -73,7 +81,10 @@ export function fmtRange(start: string, end: string | null | undefined, today: D
   if (!start) return "";
   const s = parseLocalDate(start);
   const startStr = `${MONTHS[s.getMonth()]} ${s.getDate()}`;
-  if (!end) return `${startStr} — CURRENT SEASON`;
+  if (!end) {
+    const startWithYear = s.getFullYear() !== today.getFullYear() ? `${startStr}, ${s.getFullYear()}` : startStr;
+    return `${startWithYear} — NOW`;
+  }
   const e = parseLocalDate(end);
   const base = `${startStr} — ${MONTHS[e.getMonth()]} ${e.getDate()}`;
   return e.getFullYear() !== today.getFullYear() ? `${base}, ${e.getFullYear()}` : base;
@@ -225,6 +236,34 @@ export function cleanPodEventName(name: string, setCode: string): string {
 export function canonicalSetCode(raw: string, sets: SetSummary[] | undefined): string {
   const known = sets?.find((s) => s.code.toLowerCase() === raw.toLowerCase());
   return known?.code ?? raw.toUpperCase();
+}
+
+// CUBE recurs every set, so its board splits into seasons addressed as virtual set
+// codes (`CUBE-SOS`). Bare `CUBE` is the lifetime board; a `CUBE-<SET>` code scopes
+// to that set's release window. The base code drives the glyph, title, and switcher
+// chip — they all read "CUBE" regardless of which season is open.
+export const CUBE_BASE = "CUBE";
+
+// The lifetime board is deprioritised: bare `/leaderboard/CUBE` redirects to the newest
+// season, so lifetime gets its own explicit sentinel code. The page collapses it back to
+// bare CUBE for every data read, so the data layer never sees this code.
+export const CUBE_LIFETIME = `${CUBE_BASE}-ALL`;
+
+export function isCubeSeasonCode(code: string): boolean {
+  return code.startsWith(`${CUBE_BASE}-`);
+}
+
+// True for the lifetime board (`CUBE`) and any season (`CUBE-SOS`).
+export function isCubeCode(code: string): boolean {
+  return baseSetCode(code) === CUBE_BASE;
+}
+
+export function baseSetCode(code: string): string {
+  return isCubeSeasonCode(code) ? CUBE_BASE : code;
+}
+
+export function cubeSeasonLabel(code: string): string | null {
+  return isCubeSeasonCode(code) ? code.slice(CUBE_BASE.length + 1) : null;
 }
 
 // The leaderboard is a lowercase section; set codes stay uppercase under it (/leaderboard/SOS).

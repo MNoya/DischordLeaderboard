@@ -17,6 +17,7 @@ from discord.ext import commands, tasks
 from sqlalchemy import func, select
 
 from bot.commands.delete_account import setup as setup_delete_account
+from bot.commands.event_scribe import setup as setup_event_scribe
 from bot.commands.help import setup as setup_help
 from bot.commands.link_17lands import setup as setup_link_17lands
 from bot.commands.leaderboard_visibility import setup as setup_leaderboard_visibility
@@ -43,6 +44,8 @@ from bot.commands.testchampionship import setup as setup_testchampionship
 from bot.commands.testcomponent import setup as setup_testcomponent
 from bot.commands.testlobby import setup as setup_testlobby
 from bot.commands.testschedule import setup as setup_testschedule
+from bot.commands.testformatschedule import setup as setup_testformatschedule
+from bot.commands.testscribe import setup as setup_testscribe
 from bot.listeners.auto_link_listener import setup as setup_auto_link_listener
 from bot.listeners.pod_screenshots import setup as setup_pod_screenshots
 from bot.listeners.sesh_listener import reschedule_pending_events, setup as setup_sesh_listener
@@ -55,10 +58,12 @@ from bot.services.pod_tournament import (
     register_persistent_views as register_pod_views,
     rehydrate_active_tournaments,
 )
+from bot.services.media_sync import sync_media, SyncResult
 from bot.services.refresh import refresh_active_players
 from bot.services.seventeenlands import MinIntervalLimiter, SeventeenLandsClient
 from bot.sets import ACTIVE_SET_CODE
 from bot.tasks.pod_draft_reminder import init_reminder
+from bot.tasks.format_schedule_post import init_format_schedule
 from bot.tasks.pod_schedule_post import init_schedule_post
 from bot.tasks.pod_underfill import init_underfill
 
@@ -75,6 +80,8 @@ AUTO_REFRESH_TIMES = [
     dtime(hour=20, minute=0, tzinfo=AUTO_REFRESH_TZ),
 ]
 AUTO_REFRESH_17L_INTERVAL_S = 3.0
+
+MEDIA_SYNC_TIME = dtime(hour=3, minute=30, tzinfo=AUTO_REFRESH_TZ)
 
 MSG_GENERIC_ERROR = "⚠️ Something went wrong handling that command. The bot owner has been notified."
 
@@ -148,6 +155,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         init_reminder(bot)
         init_underfill(bot)
         init_schedule_post(bot)
+        init_format_schedule(bot)
 
         # Load cogs into memory and mirror to the guild tree so dispatch works.
         # Discord-side sync is handled by the owner-only `!sync` text command, not on startup.
@@ -157,6 +165,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_leaderboard(bot)
         await setup_stats(bot)
         await setup_help(bot)
+        await setup_event_scribe(bot)
         await setup_link_17lands(bot)
         await setup_leaderboard_visibility(bot)
         await setup_pod_draft(bot)
@@ -172,6 +181,8 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_testcomponent(bot)
         await setup_testawards(bot)
         await setup_testschedule(bot)
+        await setup_testscribe(bot)
+        await setup_testformatschedule(bot)
         await setup_testchampionship(bot)
         reschedule_pending_events(bot)
         register_pod_views(bot)
@@ -219,7 +230,8 @@ def build_bot(guild_id: int) -> commands.Bot:
     async def sync_commands(ctx: commands.Context, scope: str = "all") -> None:
         """Owner-only. Sync slash commands to Discord.
 
-        `!sync`        — full sync: server-visible commands to the guild, DM-only ones (link-17lands, exile) to global
+        `!sync`        — full sync: DM-capable commands (allowed_contexts dms=True) go global so they
+                         reach DMs; the rest stay guild-scoped, where schema changes appear instantly
         `!sync guild`  — guild sync only (skip the global publish)
         `!sync clear`  — wipe every command registration (recovery only)
         """
@@ -231,14 +243,15 @@ def build_bot(guild_id: int) -> commands.Bot:
             await _reply_quietly(ctx, "✅ Cleared all command registrations.")
             return
 
-        # Commands registered globally (their allowed_contexts decides where they're visible).
-        # Only /refresh is guild-scoped (admin command) — everything else goes global.
-        GLOBAL_COMMANDS = {"leaderboard", "join", "retire", "exile", "stats", "help",
-                           "link-17lands", "link-arena", "opt-out"}
+        # A command goes global — the only registration DMs can see — when its allowed_contexts
+        # permits DMs; the rest stay guild-scoped, where schema changes appear instantly. Each
+        # command's decorator is the source of truth, so a new DM command needs no list to edit here.
+        global_names = {command.name for command in bot.tree.get_commands()
+                        if getattr(command, "allowed_contexts", None) and command.allowed_contexts.dm_channel}
 
         bot.tree.copy_global_to(guild=guild)
         # Strip globally-registered commands from the guild tree to avoid duplicate registration
-        for name in GLOBAL_COMMANDS:
+        for name in global_names:
             bot.tree.remove_command(name, guild=guild)
         synced_guild = await bot.tree.sync(guild=guild)
 
@@ -246,9 +259,7 @@ def build_bot(guild_id: int) -> commands.Bot:
             await _reply_quietly(ctx, f"✅ Synced {len(synced_guild)} guild commands.")
             return
 
-        # Global sync: only GLOBAL_COMMANDS go in
-        all_global = list(bot.tree.get_commands())
-        hidden = [c for c in all_global if c.name not in GLOBAL_COMMANDS]
+        hidden = [c for c in bot.tree.get_commands() if c.name not in global_names]
         for c in hidden:
             bot.tree.remove_command(c.name)
         try:
@@ -403,6 +414,38 @@ def build_bot(guild_id: int) -> commands.Bot:
     async def _before_auto_refresh() -> None:
         await bot.wait_until_ready()
 
+    async def run_media_sync() -> SyncResult:
+        def _do_sync() -> SyncResult:
+            with SessionLocal() as session:
+                return sync_media(session)
+
+        return await asyncio.to_thread(_do_sync)
+
+    @bot.command(name="sync-media")
+    @commands.is_owner()
+    async def sync_media_cmd(ctx: commands.Context) -> None:
+        """Owner-only. Pull the podcast feed + YouTube channel into the episodes table."""
+        await _reply_quietly(ctx, "⏳ Syncing episodes…")
+        result = await run_media_sync()
+        await _reply_quietly(
+            ctx,
+            f"✅ Synced {result.total} episodes ({result.matched} matched, {result.videos_only} video-only, "
+            f"{result.podcasts_only} podcast-only, {result.with_set} with a set).",
+        )
+
+    @tasks.loop(time=MEDIA_SYNC_TIME)
+    async def media_sync_tick() -> None:
+        try:
+            log.info("media-sync: scheduled tick firing")
+            await run_media_sync()
+        except Exception:
+            log.exception("media-sync tick failed")
+            await _notify_owner(bot, "⚠️ media-sync tick crashed:", traceback.format_exc())
+
+    @media_sync_tick.before_loop
+    async def _before_media_sync() -> None:
+        await bot.wait_until_ready()
+
     bot.startup_announced = False
 
     @bot.event
@@ -423,6 +466,8 @@ def build_bot(guild_id: int) -> commands.Bot:
             return
         if not auto_refresh_tick.is_running():
             auto_refresh_tick.start()
+        if settings.media_sync_enabled and not media_sync_tick.is_running():
+            media_sync_tick.start()
 
     return bot
 

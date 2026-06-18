@@ -4,8 +4,8 @@ import type { Card, SlotDefinition } from "../../types/p0p1";
 import { Pip } from "../ManaPips";
 import { SlotPip } from "./slotVisuals";
 
-const WUBRG = ["W", "U", "B", "R", "G"] as const;
-type Color = (typeof WUBRG)[number];
+const WILDCARD_COLORS = ["W", "U", "B", "R", "G", "C"] as const;
+type Color = (typeof WILDCARD_COLORS)[number];
 
 const NO_PICKS: Set<string> = new Set();
 
@@ -62,7 +62,9 @@ export function CardSelectionGrid({
       list = list.filter((c) => c.name.toLowerCase().includes(q));
     }
     if (isWildcard && color) {
-      list = list.filter((c) => c.colors.includes(color));
+      list = color === "C"
+        ? list.filter((c) => c.colors.length === 0)
+        : list.filter((c) => c.colors.includes(color));
     }
     return list;
   }, [eligible, search, isWildcard, color]);
@@ -71,7 +73,7 @@ export function CardSelectionGrid({
 
   const colorFilter = isWildcard ? (
     <div className="flex items-center gap-1">
-      {WUBRG.map((c) => {
+      {WILDCARD_COLORS.map((c) => {
         const on = color === c;
         return (
           <button
@@ -80,7 +82,7 @@ export function CardSelectionGrid({
             onClick={() => toggleColor(c)}
             aria-label={c}
             className={`flex items-center justify-center w-7 h-7 transition ${
-              on ? "opacity-100" : "opacity-35 hover:opacity-100"
+              on ? "opacity-100" : "opacity-35 hover:opacity-65"
             }`}
           >
             <Pip c={c} size={17} />

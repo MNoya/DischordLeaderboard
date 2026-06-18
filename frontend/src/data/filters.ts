@@ -45,7 +45,8 @@ export function matchesFormatFilter(rawFormat: string, filter: string): boolean 
 }
 
 
-// Cross-cutting bucket — any deck with ≥4 effective colors. Display label: "SOUP"
+// Cross-cutting bucket — decks too many-colored for a normal archetype (see isSoup).
+// Display label: "SOUP"
 export const MULTI = "MULTI";
 
 // Client-side catchall for sub-threshold combos. Display label: "OTHER"

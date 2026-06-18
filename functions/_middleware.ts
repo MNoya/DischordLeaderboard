@@ -136,11 +136,17 @@ const resolveMeta = async (pathname: string): Promise<RouteMeta> => {
     if (rest[1] === "player" && rest[2]) {
       return playerMeta(await fetchPlayer(rest[2]));
     }
-    const setName = await fetchSetName(setCode);
+    // CUBE is a word, not an acronym, and its seasons are virtual CUBE-<SET> codes;
+    // render "Cube" / "Cube SOS" but resolve the symbol/name from the base CUBE set.
+    const baseCode = setCode.startsWith("CUBE-") ? "CUBE" : setCode;
+    const label = setCode === "CUBE" ? "Cube"
+      : setCode.startsWith("CUBE-") ? `Cube ${setCode.slice("CUBE-".length)}`
+      : setCode;
+    const setName = await fetchSetName(baseCode);
     return page(
-      `${setCode} Leaderboard`,
+      `${label} Leaderboard`,
       `Check ${setName} ranks and trophies on the leaderboard.`,
-      { kind: "setSymbol", code: setCode },
+      { kind: "setSymbol", code: baseCode },
     );
   }
 
@@ -197,7 +203,9 @@ export const onRequest: PagesFunction = async (context) => {
 
   const meta = await resolveMeta(url.pathname);
   const ogUrl = `${url.origin}${url.pathname}`;
-  const imageUrl = await resolveImageUrl(meta.image, url.origin, context.env.ASSETS);
+  const isMetaCrawler = /whatsapp|facebookexternalhit/i.test(context.request.headers.get("user-agent") ?? "");
+  const image = isMetaCrawler ? metaCrawlerImage(meta.image, url.origin) : meta.image;
+  const imageUrl = await resolveImageUrl(image, url.origin, context.env.ASSETS);
 
   const setContent = (value: string): HTMLRewriterElementContentHandlers => ({
     element: (el) => el.setAttribute("content", value),
@@ -209,6 +217,7 @@ export const onRequest: PagesFunction = async (context) => {
 
   const headers = new Headers(indexResp.headers);
   headers.set("Cache-Control", "public, max-age=0, must-revalidate");
+  headers.set("Vary", "User-Agent");
   const baseResponse = new Response(indexResp.body, { status: 200, headers });
 
   let rewriter = new HTMLRewriter()
@@ -221,16 +230,27 @@ export const onRequest: PagesFunction = async (context) => {
     .on('meta[property="og:description"]', descriptionHandler)
     .on('meta[name="twitter:description"]', descriptionHandler);
 
+  const dimensionHandler = isMetaCrawler ? setContent(String(META_CRAWLER_THUMB_SIZE)) : remove;
+
   if (imageUrl) {
     rewriter = rewriter
       .on('meta[property="og:image"]', setContent(imageUrl))
       .on('meta[name="twitter:image"]', setContent(imageUrl))
-      .on('meta[property="og:image:width"]', remove)
-      .on('meta[property="og:image:height"]', remove)
+      .on('meta[property="og:image:width"]', dimensionHandler)
+      .on('meta[property="og:image:height"]', dimensionHandler)
       .on('meta[property="og:image:alt"]', setContent(meta.ogTitle));
   }
 
   return rewriter.transform(baseResponse);
+};
+
+// Untapped's value; a small declared square makes WhatsApp render the compact thumbnail instead of a full-bleed square
+const META_CRAWLER_THUMB_SIZE = 245;
+
+// Meta crawlers (WhatsApp, FB) flatten transparency to white and lose white-on-transparent set symbols; serve the opaque logo, keep opaque avatars
+const metaCrawlerImage = (image: ImageIntent, origin: string): ImageIntent => {
+  if (image !== null && image.kind === "url") return image;
+  return { kind: "url", url: `${origin}/llu-logo.png` };
 };
 
 const resolveImageUrl = async (image: ImageIntent, origin: string, assets: Fetcher): Promise<string | null> => {

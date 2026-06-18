@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     def leaderboard_url(self) -> str:
         return f"{self.public_site_url.rstrip('/')}/leaderboard"
 
+    scribe_cache_bust: bool = False
+    format_schedule_enabled: bool = True
+
     pod_draft_channel_id: int = 1028072146645295125
     pod_draft_target_players: int = 8
     pod_schedule_enabled: bool = True
@@ -44,6 +47,11 @@ class Settings(BaseSettings):
     draftmancer_ws_url: str = f"wss://{DRAFTMANCER_HOST}"
     draftmancer_web_url: str = f"https://{DRAFTMANCER_HOST}"
     mpt_api_key: SecretStr | None = None
+
+    youtube_api_key: SecretStr | None = None
+    youtube_channel_handle: str = "limitedlevel-ups"
+    libsyn_feed_url: str = "https://feeds.libsyn.com/limitedlevelups/rss"
+    media_sync_enabled: bool = True
 
 
 settings = Settings()
