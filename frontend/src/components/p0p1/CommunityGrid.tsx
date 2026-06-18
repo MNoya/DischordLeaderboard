@@ -55,10 +55,10 @@ function PickRow({
 }) {
   return (
     <div>
-      <SectionLabel size={13} color={tone === "cyan" ? "#00e5ff" : "#ff2cdf"} className="mb-2">
+      <SectionLabel size={16} color={'white'} className="mb-2">
         {title}
       </SectionLabel>
-      <div className="grid grid-cols-8 gap-2">
+      <div className="grid grid-cols-4 lg:grid-cols-8 gap-2">
         {entries.map(({ slotKey, label, stats }) => (
           <PickTile key={slotKey} slotKey={slotKey} label={label} stats={stats} tone={tone} cardsByName={cardsByName} n={n} />
         ))}
@@ -102,7 +102,7 @@ function PickTile({
             {stats.length > 1 ? `${stats.length}-way tie` : stats[0].cardName}
           </span>
           <span className={`text-[13px] font-mono tabular-nums font-semibold shrink-0 ${toneClass}`}>
-            {stats[0].pickCount} / {n}
+            {stats[0].pickCount} <span className="text-muted">/ {n}</span>
           </span>
         </div>
       )}
