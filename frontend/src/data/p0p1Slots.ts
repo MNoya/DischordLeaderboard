@@ -4,6 +4,9 @@ import type { Card, SlotDefinition } from "../types/p0p1";
 export const P0P1_SET_CODE = "MSH";
 export const P0P1_SET_NAME = "Marvel Super Heroes";
 export const P0P1_VOTING_DEADLINE = new Date("2026-06-23T15:00:00Z");
+export const P0P1_SCORING_DATE = new Date(
+  P0P1_VOTING_DEADLINE.getTime() + 28 * 24 * 60 * 60 * 1000,
+);
 
 function isBasicLand(card: Card) {
   return card.typeLine.startsWith("Basic Land");

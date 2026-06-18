@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../auth/useAuth";
 import {
   useP0P1Cards,
+  useP0P1PickStats,
   useP0P1Picks,
   useUpsertP0P1Pick,
   useDeleteAllP0P1Picks,
@@ -94,6 +95,8 @@ export function useP0P1Ballot() {
   const scoringFilled = SLOTS.filter((s) => picksBySlot.has(s.key)).length;
   const isComplete = scoringFilled === SLOTS.length;
   const isPastDeadline = new Date() > VOTING_DEADLINE;
+  const hasParticipated = isPastDeadline && Boolean(user) && scoringFilled > 0;
+  const { data: pickStats } = useP0P1PickStats(SET_CODE, isPastDeadline);
 
   const defaultSlotKey = useMemo(
     () => SLOTS.find((s) => !picksBySlot.has(s.key))?.key ?? SLOTS[0].key,
@@ -151,6 +154,8 @@ export function useP0P1Ballot() {
     scoringFilled,
     isComplete,
     isPastDeadline,
+    hasParticipated,
+    pickStats,
     persistPick,
     handleClearAll,
     clearPending: useServerPicks ? clearAll.isPending : false,

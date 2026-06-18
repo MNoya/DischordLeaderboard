@@ -12,10 +12,22 @@ import { P0P1Hero } from "../components/p0p1/P0P1Hero";
 import { AutoSaveBadge } from "../components/p0p1/AutoSaveBadge";
 import { P0P1MobileSelector } from "../components/p0p1/P0P1MobileView";
 import { GoToTopButton } from "../components/GoToTopButton";
+import { PostVotingStats } from "../components/p0p1/PostVotingStats";
 import { useIsMobile } from "../lib/use-is-mobile";
 import { useP0P1Ballot } from "../data/useP0P1Ballot";
 import { SLOTS } from "../data/p0p1Slots";
-import type { Card, SlotDefinition, SlotKey } from "../types/p0p1";
+import { groupBySlot, findExtremes, classifyYourPick } from "../data/p0p1Stats";
+import type { Card, P0P1PickStat, SlotDefinition, SlotKey } from "../types/p0p1";
+
+function totalEntries(stats: P0P1PickStat[]): number {
+  const totalsPerSlot = new Map<string, number>();
+  for (const s of stats) {
+    totalsPerSlot.set(s.slot, (totalsPerSlot.get(s.slot) ?? 0) + s.pickCount);
+  }
+  if (totalsPerSlot.size === 0) return 0;
+  // NOTE: currently this is only counting entries that have a pick for each slot
+  return Math.min(...totalsPerSlot.values());
+}
 
 export function P0P1Page() {
   const ballot = useP0P1Ballot();
@@ -32,6 +44,8 @@ export function P0P1Page() {
     scoringFilled,
     isComplete,
     isPastDeadline,
+    hasParticipated,
+    pickStats,
     handleClearAll,
     clearPending,
     setEditingSlotKey,
@@ -55,7 +69,15 @@ export function P0P1Page() {
 
   const heroCta = loginCta || (user && !isPastDeadline ? <AutoSaveBadge complete={isComplete} /> : null);
 
-  const teamProgress = !isPastDeadline && (
+  const entryCount = pickStats ? totalEntries(pickStats) : null;
+
+  const belowIntro = isPastDeadline ? (
+    entryCount !== null && entryCount > 0 ? (
+      <div className="text-subtle text-[14px]">
+        {entryCount} player{entryCount !== 1 ? "s" : ""} submitted picks.
+      </div>
+    ) : null
+  ) : (
     <div className="flex items-center gap-3 w-full max-w-[420px]">
       <SectionLabel size={13}>PICKS</SectionLabel>
       <div className="flex-1">
@@ -67,22 +89,30 @@ export function P0P1Page() {
   return (
     <div className="bg-bg text-text min-h-screen flex flex-col animate-fadeIn">
       <AppHeader subtitle="P0 P1 Challenge" />
-      <P0P1Hero cta={heroCta} belowIntro={teamProgress} />
+      <P0P1Hero cta={heroCta} belowIntro={belowIntro} isPastDeadline={isPastDeadline} />
 
       <main className="flex-1 px-10 pb-5 pt-5">
-        {dataReady ? (
-          <RosterStrip
-            activeSlotKey={activeSlotKey}
-            picksBySlot={picksBySlot}
-            cardsByName={cardsByName}
-            locked={isPastDeadline}
-            onSelect={(key) => setEditingSlotKey(key)}
-          />
-        ) : (
-          <RosterStripSkeleton />
-        )}
+        {(!isPastDeadline || hasParticipated) &&
+          (dataReady ? (
+            <RosterStrip
+              activeSlotKey={activeSlotKey}
+              picksBySlot={picksBySlot}
+              cardsByName={cardsByName}
+              locked={isPastDeadline}
+              pickStats={hasParticipated ? pickStats : undefined}
+              onSelect={(key) => setEditingSlotKey(key)}
+            />
+          ) : (
+            <RosterStripSkeleton />
+          ))}
 
-        {!isPastDeadline && (
+        {isPastDeadline ? (
+          pickStats && pickStats.length > 0 && (
+            <div className="mt-6">
+              <PostVotingStats pickStats={pickStats} cardsByName={cardsByName} />
+            </div>
+          )
+        ) : (
           <div className="mt-4">
             {dataReady && cards ? (
               <SlotTransition slotKey={activeSlot.key}>
@@ -156,18 +186,26 @@ function RosterStrip({
   picksBySlot,
   cardsByName,
   locked,
+  pickStats,
   onSelect,
 }: {
   activeSlotKey: SlotKey;
   picksBySlot: Map<string, string>;
   cardsByName: Map<string, Card>;
   locked: boolean;
+  pickStats?: P0P1PickStat[];
   onSelect: (key: SlotKey) => void;
 }) {
+  const groupedStats = pickStats ? groupBySlot(pickStats) : undefined;
+
   return (
     <div className="grid grid-cols-8 gap-2">
       {SLOTS.map((slot) => {
         const cardName = picksBySlot.get(slot.key);
+        const stat = cardName && groupedStats
+          ? groupedStats.get(slot.key)?.find((s) => s.cardName === cardName)
+          : undefined;
+        const slotStats = groupedStats?.get(slot.key);
         return (
           <RosterTile
             key={slot.key}
@@ -175,6 +213,8 @@ function RosterStrip({
             card={cardName ? cardsByName.get(cardName) : undefined}
             active={!locked && activeSlotKey === slot.key}
             locked={locked}
+            yourStat={stat}
+            slotStats={slotStats}
             onClick={() => onSelect(slot.key)}
           />
         );
@@ -188,15 +228,29 @@ function RosterTile({
   card,
   active,
   locked,
+  yourStat,
+  slotStats,
   onClick,
 }: {
   slot: SlotDefinition;
   card: Card | undefined;
   active: boolean;
   locked: boolean;
+  yourStat?: P0P1PickStat;
+  slotStats?: P0P1PickStat[];
   onClick: () => void;
 }) {
   const accent = SLOT_ACCENT[slot.key];
+  let classification: ReturnType<typeof classifyYourPick> | undefined;
+  if (yourStat && slotStats) {
+    const { most, least } = findExtremes(slotStats);
+    classification = classifyYourPick(yourStat, most, least);
+  }
+  const stateColor = classification?.state === "most"
+    ? "text-green"
+    : classification?.state === "rogue"
+    ? "text-red"
+    : "text-gold";
   const stripClass = `w-full shrink-0 transition-[height] duration-150 ${active ? "h-2" : "h-1 group-hover:h-2"}`;
   const body = (
     <>
@@ -213,12 +267,38 @@ function RosterTile({
           {slot.label.toUpperCase()}
         </div>
         {card ? (
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className="text-text text-[14px] truncate min-w-0">{card.name}</span>
-            <span className="ml-auto shrink-0">
-              <ManaCost cost={card.manaCost} size={13} />
-            </span>
-          </div>
+          <>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-text text-[14px] truncate min-w-0">{card.name}</span>
+              <span className="ml-auto shrink-0">
+                <ManaCost cost={card.manaCost} size={13} />
+              </span>
+            </div>
+            {yourStat && classification && (
+              <div className="mt-1">
+                <div className="flex items-baseline gap-1">
+                  <span className={`font-mono tabular-nums text-[20px] leading-none ${stateColor}`}>
+                    {yourStat.pickPct}%
+                  </span>
+                </div>
+                <div className={`text-[9px] tracking-[0.08em] font-display mt-0.5 ${stateColor}`}>
+                  {classification.qualifier}
+                </div>
+                <div className="h-[3px] bg-surface2 mt-1 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full ${
+                      classification.state === "most"
+                        ? "bg-green"
+                        : classification.state === "rogue"
+                        ? "bg-red"
+                        : "bg-gold"
+                    }`}
+                    style={{ width: `${Math.min(100, yourStat.pickPct)}%` }}
+                  />
+                </div>
+              </div>
+            )}
+          </>
         ) : (
           <span className={locked ? "text-dim text-[14px]" : "italic text-dim text-[13px]"}>
             {locked ? "—" : "Select a card"}
