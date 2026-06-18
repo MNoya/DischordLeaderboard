@@ -7,6 +7,8 @@ import { groupBySlot, findExtremes } from "../../data/p0p1Stats";
 import { SLOTS } from "../../data/p0p1Slots";
 import type { Card, P0P1PickStat, SlotKey } from "../../types/p0p1";
 
+const MAX_MOSAIC = 4;
+
 export function CommunityGrid({
   pickStats,
   cardsByName,
@@ -85,7 +87,17 @@ function PickTile({
       {stats.length === 0 ? (
         <div className="aspect-square bg-surface2" />
       ) : (
-        <PickArt stats={stats} cardsByName={cardsByName} toneClass={toneClass} onExpand={() => setModalOpen(true)} />
+        <Mosaic stats={stats} cardsByName={cardsByName} onExpand={() => setModalOpen(true)} />
+      )}
+      {stats.length > 0 && (
+        <div className="px-1.5 py-1.5 flex items-center justify-between gap-1.5 min-w-0">
+          <span className="text-subtle text-[10.5px] truncate min-w-0">
+            {stats.length > 1 ? `${stats.length}-way tie` : stats[0].cardName}
+          </span>
+          <span className={`text-[13px] font-mono tabular-nums font-semibold shrink-0 ${toneClass}`}>
+            {stats[0].pickPct}%
+          </span>
+        </div>
       )}
       {modalOpen && (
         <TiedCardsModal
@@ -99,45 +111,59 @@ function PickTile({
   );
 }
 
-function PickArt({
+function Mosaic({
   stats,
   cardsByName,
-  toneClass,
   onExpand,
 }: {
   stats: P0P1PickStat[];
   cardsByName: Map<string, Card>;
-  toneClass: string;
   onExpand: () => void;
 }) {
   const tied = stats.length > 1;
-  const top = stats[0];
-  const card = cardsByName.get(top.cardName);
+  const shown = stats.slice(0, MAX_MOSAIC);
+  const overflow = stats.length - shown.length;
+  const gridCls = shown.length === 2 ? "grid-cols-2" : "grid-cols-2 grid-rows-2";
 
   return (
     <div className="relative aspect-square group">
-      {card ? (
-        <CardImagePreview imageUrl={card.imageNormal} alt={card.name} className="w-full h-full">
-          <img src={card.imageArtCrop} alt={card.name} className="w-full h-full object-cover" />
-        </CardImagePreview>
+      {tied ? (
+        <div className={`grid ${gridCls} gap-px h-full w-full bg-border2`}>
+          {shown.map((stat, i) => {
+            const card = cardsByName.get(stat.cardName);
+            const spanLast = shown.length === 3 && i === shown.length - 1 ? "col-span-2" : "";
+            return card ? (
+              <CardImagePreview key={stat.cardName} imageUrl={card.imageNormal} alt={card.name} className={`overflow-hidden ${spanLast}`}>
+                <img src={card.imageArtCrop} alt={card.name} className="w-full h-full object-cover" />
+              </CardImagePreview>
+            ) : (
+              <div key={stat.cardName} className={`bg-surface2 ${spanLast}`} />
+            );
+          })}
+        </div>
       ) : (
-        <div className="w-full h-full bg-surface2" />
+        (() => {
+          const card = cardsByName.get(stats[0].cardName);
+          return card ? (
+            <CardImagePreview imageUrl={card.imageNormal} alt={card.name} className="w-full h-full">
+              <img src={card.imageArtCrop} alt={card.name} className="w-full h-full object-cover" />
+            </CardImagePreview>
+          ) : (
+            <div className="w-full h-full bg-surface2" />
+          );
+        })()
       )}
 
       {tied && (
         <button
           type="button"
           onClick={onExpand}
-          className="absolute top-1 right-1 text-[10px] font-mono px-1 py-0.5 rounded bg-black/60 text-white border border-white/20 cursor-pointer pointer-events-auto"
+          className="absolute bottom-1 right-1 text-[10px] bg-bg/80 rounded-sm px-1 text-dim cursor-pointer pointer-events-auto"
+          title={`${stats.length} cards tied — view all`}
         >
-          {stats.length > 4 ? `+${stats.length}` : `${stats.length}-way`}
+          &#128269;{overflow > 0 ? ` +${overflow}` : ""}
         </button>
       )}
-
-      <div className="absolute bottom-0 left-0 right-0 px-1.5 py-1 bg-gradient-to-t from-black/70 to-transparent pointer-events-none flex items-center justify-between gap-1">
-        <span className="text-white text-[11px] truncate">{tied ? `${stats.length}-way tie` : top.cardName}</span>
-        <span className={`text-[12px] font-mono tabular-nums shrink-0 ${toneClass}`}>{top.pickPct}%</span>
-      </div>
     </div>
   );
 }
