@@ -241,15 +241,15 @@ function RosterTile({
     classification = classifyYourPick(yourStat, most, least);
   }
   const stateColor = classification?.state === "most"
-    ? "text-green"
+    ? "text-cyan"
     : classification?.state === "rogue"
-    ? "text-red"
-    : "text-gold";
+    ? "text-magenta"
+    : "text-violet";
   const stateBg = classification?.state === "most"
-    ? "bg-green"
+    ? "bg-cyan"
     : classification?.state === "rogue"
-    ? "bg-red"
-    : "bg-gold";
+    ? "bg-magenta"
+    : "bg-violet";
   const stripClass = locked
     ? "w-full shrink-0 h-1"
     : `w-full shrink-0 transition-[height] duration-150 ${active ? "h-2" : "h-1 group-hover:h-2"}`;

@@ -24,14 +24,14 @@ export function CommunityGrid({
     <div className="flex flex-col gap-6">
       <PickRow
         title="MOST PICKED CARDS"
-        tone="green"
+        tone="cyan"
         entries={SLOTS.map((slot) => ({ slotKey: slot.key, label: slot.label, stats: extremesBySlot.get(slot.key)!.most }))}
         cardsByName={cardsByName}
         n={n}
       />
       <PickRow
         title="LEAST PICKED CARDS"
-        tone="red"
+        tone="magenta"
         entries={SLOTS.map((slot) => ({ slotKey: slot.key, label: slot.label, stats: extremesBySlot.get(slot.key)!.least }))}
         cardsByName={cardsByName}
         n={n}
@@ -48,14 +48,14 @@ function PickRow({
   n,
 }: {
   title: string;
-  tone: "green" | "red";
+  tone: "cyan" | "magenta";
   entries: { slotKey: SlotKey; label: string; stats: P0P1PickStat[] }[];
   cardsByName: Map<string, Card>;
   n: number;
 }) {
   return (
     <div>
-      <SectionLabel size={13} color={tone === "green" ? "#2ee85c" : "#ff5e5e"} className="mb-2">
+      <SectionLabel size={13} color={tone === "cyan" ? "#00e5ff" : "#ff2cdf"} className="mb-2">
         {title}
       </SectionLabel>
       <div className="grid grid-cols-8 gap-2">
@@ -79,11 +79,11 @@ function PickTile({
   label: string;
   stats: P0P1PickStat[];
   cardsByName: Map<string, Card>;
-  tone: "green" | "red";
+  tone: "cyan" | "magenta";
   n: number;
 }) {
   const [modalOpen, setModalOpen] = useState(false);
-  const toneClass = tone === "green" ? "text-green" : "text-red";
+  const toneClass = tone === "cyan" ? "text-cyan" : "text-magenta";
 
   return (
     <div className="flex flex-col border border-border2 bg-surface overflow-hidden min-w-0">
