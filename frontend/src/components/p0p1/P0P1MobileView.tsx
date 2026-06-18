@@ -1,9 +1,7 @@
-import { useEffect } from "react";
 import { AppHeader } from "../AppHeader";
 import { CtaPill } from "../CtaPill";
 import { DiscordIcon } from "../BrandIcons";
 import { SetGlyph, setGlyphCode } from "../Brand";
-import { SlotCard } from "./SlotCard";
 import { CardSelectionGrid } from "./CardSelectionGrid";
 import { SlotPip, SLOT_ACCENT } from "./slotVisuals";
 import { P0P1ProgressBar } from "./ProgressBar";
@@ -16,100 +14,12 @@ import {
   P0P1_VOTING_DEADLINE as VOTING_DEADLINE,
   SLOTS,
 } from "../../data/p0p1Slots";
-import type { Card, SlotDefinition, SlotKey } from "../../types/p0p1";
+import type { Card, SlotDefinition } from "../../types/p0p1";
 import type { SetSummary } from "../../types/leaderboard";
 
 const SEVENTEEN_LANDS_URL = "https://www.17lands.com/card_data";
 
 type Ballot = ReturnType<typeof useP0P1Ballot>;
-
-export function P0P1MobileView({ ballot }: { ballot: Ballot }) {
-  const {
-    cards,
-    cardsByName,
-    dataReady,
-    user,
-    authLoading,
-    signIn,
-    picksBySlot,
-    pickedExcept,
-    pickedSlotLabels,
-    scoringFilled,
-    isComplete,
-    isPastDeadline,
-    handleClearAll,
-    clearPending,
-    editingSlotKey,
-    setEditingSlotKey,
-    selectAndClose,
-    p0p1Sets,
-  } = ballot;
-
-  const slotCard = (slotKey: SlotKey) => {
-    const slot = SLOTS.find((s) => s.key === slotKey)!;
-    const cardName = picksBySlot.get(slotKey);
-    return (
-      <SlotCard
-        key={slotKey}
-        slot={slot}
-        selectedCard={cardName ? cardsByName.get(cardName) : undefined}
-        locked={isPastDeadline}
-        active={false}
-        onEdit={() => setEditingSlotKey(slotKey)}
-      />
-    );
-  };
-
-  const loginBarVisible = !authLoading && !user && !isPastDeadline;
-
-  return (
-    <div className="bg-bg text-text min-h-screen flex flex-col animate-fadeIn">
-      <AppHeader subtitle="P0 P1 Challenge" />
-
-      <main className={`flex-1 flex flex-col w-full px-4 pt-4 ${loginBarVisible ? "pb-20" : "pb-4"}`}>
-        <MobileIntro sets={p0p1Sets} />
-        {dataReady ? (
-          <>
-            {!isPastDeadline && (
-              <div className="mb-3">
-                <P0P1ProgressBar filled={scoringFilled} total={SLOTS.length} isComplete={isComplete} />
-              </div>
-            )}
-            <div className="flex-1 min-h-0 flex flex-col gap-1.5">
-              {SLOTS.map((s) => (
-                <div key={s.key} className="flex-1 min-h-[56px]">
-                  {slotCard(s.key)}
-                </div>
-              ))}
-            </div>
-            {!isPastDeadline && (
-              <ClearAll onClear={handleClearAll} clearing={clearPending} visible={scoringFilled > 0} />
-            )}
-          </>
-        ) : (
-          <>
-            <div className="h-3 w-40 bg-surface2 animate-pulse mb-3" />
-            <SlotsListSkeleton />
-          </>
-        )}
-      </main>
-
-      <MobileLoginBar show={loginBarVisible} signIn={signIn} />
-
-      {!isPastDeadline && editingSlotKey && cards && (
-        <MobilePickerSheet
-          slotKey={editingSlotKey}
-          cards={cards}
-          pickedCards={pickedExcept(editingSlotKey)}
-          takenBy={pickedSlotLabels}
-          selectedName={picksBySlot.get(editingSlotKey)}
-          onSelect={(name) => selectAndClose(editingSlotKey, name)}
-          onClose={() => setEditingSlotKey(null)}
-        />
-      )}
-    </div>
-  );
-}
 
 export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
   const {
@@ -304,86 +214,6 @@ function MobileIntro({ sets }: { sets: SetSummary[] | undefined }) {
         .
       </p>
     </section>
-  );
-}
-
-function MobilePickerSheet({
-  slotKey,
-  cards,
-  pickedCards,
-  takenBy,
-  selectedName,
-  onSelect,
-  onClose,
-}: {
-  slotKey: SlotKey;
-  cards: Card[];
-  pickedCards: Set<string>;
-  takenBy: Map<string, string>;
-  selectedName: string | undefined;
-  onSelect: (name: string) => void;
-  onClose: () => void;
-}) {
-  const slot = SLOTS.find((s) => s.key === slotKey)!;
-  useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => {
-      document.body.style.overflow = prev;
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [onClose]);
-
-  return (
-    <div className="fixed inset-0 z-50 bg-bg flex flex-col animate-fadeIn">
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-border shrink-0">
-        <SlotPip slotKey={slotKey} size={15} />
-        <span className="font-display text-[18px] tracking-[0.06em]">{slot.label}</span>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close"
-          className="ml-auto text-muted hover:text-text text-[22px] leading-none bg-transparent border-0 cursor-pointer p-1"
-        >
-          ×
-        </button>
-      </div>
-      <div className="flex-1 overflow-y-auto themed-scrollbar px-4 py-3">
-        <CardSelectionGrid
-          slot={slot}
-          cards={cards}
-          pickedCards={pickedCards}
-          takenBy={takenBy}
-          selectedName={selectedName}
-          onSelect={onSelect}
-          minColW={200}
-          showLabel={false}
-        />
-      </div>
-    </div>
-  );
-}
-
-const SKEL_LABEL_W = [90, 75, 85, 65, 80, 120, 100, 110, 130];
-const SKEL_NAME_W = [120, 100, 110, 95, 105, 130, 115, 125, 140];
-
-export function SlotsListSkeleton() {
-  return (
-    <div className="flex flex-col gap-1.5">
-      {Array.from({ length: 8 }, (_, i) => (
-        <div key={i} className="w-full flex items-center gap-4 px-4 py-3 bg-surface border border-border2">
-          <div className="w-20 h-12 bg-surface2 animate-pulse shrink-0" />
-          <div className="flex-1 flex flex-col gap-1.5">
-            <div className="h-2 bg-surface2 animate-pulse" style={{ width: SKEL_LABEL_W[i % SKEL_LABEL_W.length] }} />
-            <div className="h-3 bg-surface2 animate-pulse" style={{ width: SKEL_NAME_W[i % SKEL_NAME_W.length] }} />
-          </div>
-        </div>
-      ))}
-    </div>
   );
 }
 
