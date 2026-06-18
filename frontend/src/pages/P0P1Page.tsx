@@ -251,64 +251,56 @@ function RosterTile({
     : classification?.state === "rogue"
     ? "text-red"
     : "text-gold";
+  const stateBg = classification?.state === "most"
+    ? "bg-green"
+    : classification?.state === "rogue"
+    ? "bg-red"
+    : "bg-gold";
   const stripClass = `w-full shrink-0 transition-[height] duration-150 ${active ? "h-2" : "h-1 group-hover:h-2"}`;
   const body = (
     <>
       <div className={stripClass} style={{ background: accent }} />
-      <div className="flex-1 min-h-0 bg-surface2 flex items-center justify-center overflow-hidden">
+      <div className="aspect-square shrink-0 bg-surface2 flex items-center justify-center overflow-hidden">
         {card ? (
           <img src={card.imageArtCrop} alt={card.name} className="w-full h-full object-cover" />
         ) : (
           <SlotPip slotKey={slot.key} size={48} />
         )}
       </div>
-      <div className={`pl-4 pr-2.5 shrink-0 transition-[padding] duration-150 ${active ? "py-2.5" : "py-1.5 group-hover:py-2.5"}`}>
+      <div className="pl-4 pr-2.5 pt-2 pb-1.5 shrink-0">
         <div className="text-subtle text-[12px] tracking-[0.12em] font-display truncate mb-1">
           {slot.label.toUpperCase()}
         </div>
         {card ? (
-          <>
-            <div className="flex items-center gap-1.5 min-w-0">
-              <span className="text-text text-[14px] truncate min-w-0">{card.name}</span>
-              <span className="ml-auto shrink-0">
-                <ManaCost cost={card.manaCost} size={13} />
-              </span>
-            </div>
-            {yourStat && classification && (
-              <div className="mt-1">
-                <div className="flex items-baseline gap-1">
-                  <span className={`font-mono tabular-nums text-[20px] leading-none ${stateColor}`}>
-                    {yourStat.pickPct}%
-                  </span>
-                </div>
-                <div className={`text-[9px] tracking-[0.08em] font-display mt-0.5 ${stateColor}`}>
-                  {classification.qualifier}
-                </div>
-                <div className="h-[3px] bg-surface2 mt-1 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full ${
-                      classification.state === "most"
-                        ? "bg-green"
-                        : classification.state === "rogue"
-                        ? "bg-red"
-                        : "bg-gold"
-                    }`}
-                    style={{ width: `${Math.min(100, yourStat.pickPct)}%` }}
-                  />
-                </div>
-              </div>
-            )}
-          </>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="text-text text-[14px] truncate min-w-0">{card.name}</span>
+            <span className="ml-auto shrink-0">
+              <ManaCost cost={card.manaCost} size={13} />
+            </span>
+          </div>
         ) : (
           <span className={locked ? "text-dim text-[14px]" : "italic text-dim text-[13px]"}>
             {locked ? "—" : "Select a card"}
           </span>
         )}
       </div>
+      {yourStat && classification && (
+        <div className="pl-4 pr-2.5 pt-2 pb-2.5 shrink-0 border-t border-border2">
+          <div className={`font-mono tabular-nums text-[26px] leading-none font-semibold ${stateColor}`}>
+            {yourStat.pickPct}%
+          </div>
+          <div className={`text-[9px] tracking-[0.1em] font-display mt-1 ${stateColor}`}>
+            {classification.qualifier}
+          </div>
+          <div className="h-1 w-full bg-surface2 rounded-sm overflow-hidden mt-1.5">
+            <div className={`h-full rounded-sm ${stateBg}`} style={{ width: `${Math.min(100, yourStat.pickPct)}%` }} />
+          </div>
+        </div>
+      )}
     </>
   );
 
-  const base = "group relative flex flex-col aspect-square border border-t-0 overflow-hidden text-left min-w-0";
+  const base = "group relative flex flex-col border border-t-0 overflow-hidden text-left min-w-0";
   if (locked) {
     return <div className={`${base} bg-surface border-border2`}>{body}</div>;
   }
@@ -329,9 +321,9 @@ function RosterStripSkeleton() {
   return (
     <div className="grid grid-cols-8 gap-2">
       {Array.from({ length: SLOTS.length }, (_, i) => (
-        <div key={i} className="flex flex-col aspect-square border-t-0 bg-surface border border-border2">
+        <div key={i} className="flex flex-col border-t-0 bg-surface border border-border2">
           <div className="h-1 w-full bg-surface2" />
-          <div className="flex-1 min-h-0 bg-surface2 animate-pulse" />
+          <div className="aspect-square shrink-0 bg-surface2 animate-pulse" />
           <div className="px-2.5 py-1.5 shrink-0 flex flex-col gap-1">
             <div className="h-2 w-12 bg-surface2 animate-pulse" />
             <div className="h-2.5 w-16 bg-surface2 animate-pulse" />
