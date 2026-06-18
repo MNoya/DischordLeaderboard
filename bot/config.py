@@ -48,5 +48,10 @@ class Settings(BaseSettings):
     draftmancer_web_url: str = f"https://{DRAFTMANCER_HOST}"
     mpt_api_key: SecretStr | None = None
 
+    youtube_api_key: SecretStr | None = None
+    youtube_channel_handle: str = "limitedlevel-ups"
+    libsyn_feed_url: str = "https://feeds.libsyn.com/limitedlevelups/rss"
+    media_sync_enabled: bool = True
+
 
 settings = Settings()
