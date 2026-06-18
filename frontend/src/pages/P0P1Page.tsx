@@ -256,7 +256,9 @@ function RosterTile({
     : classification?.state === "rogue"
     ? "bg-red"
     : "bg-gold";
-  const stripClass = `w-full shrink-0 transition-[height] duration-150 ${active ? "h-2" : "h-1 group-hover:h-2"}`;
+  const stripClass = locked
+    ? "w-full shrink-0 h-1"
+    : `w-full shrink-0 transition-[height] duration-150 ${active ? "h-2" : "h-1 group-hover:h-2"}`;
   const body = (
     <>
       <div className={stripClass} style={{ background: accent }} />
