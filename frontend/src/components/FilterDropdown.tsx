@@ -26,6 +26,7 @@ export function FilterDropdown({
   align = "left",
   renderValue,
   renderOption,
+  renderTrigger,
   searchable,
   searchPlaceholder = "Search…",
   triggerClassName,
@@ -40,6 +41,7 @@ export function FilterDropdown({
   align?: "left" | "right";
   renderValue?: (option: FilterOption) => React.ReactNode;
   renderOption?: (option: FilterOption) => React.ReactNode;
+  renderTrigger?: (state: { open: boolean; selected: FilterOption; toggle: () => void }) => React.ReactNode;
   searchable?: boolean;
   searchPlaceholder?: string;
   triggerClassName?: string;
@@ -55,6 +57,7 @@ export function FilterDropdown({
   const triggerRef = useRef<HTMLButtonElement>(null);
 
   const showSearch = searchable ?? options.length > SEARCH_THRESHOLD;
+  const toggle = () => setOpen((o) => !o);
 
   useLayoutEffect(() => {
     if (!open || !mobileCentered) {
@@ -94,34 +97,38 @@ export function FilterDropdown({
 
   return (
     <div ref={ref} className={cn("relative", isMobile ? "flex-1 min-w-0" : "", className)}>
-      <button
-        ref={triggerRef}
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className={cn(
-          "flex items-center gap-2 w-full bg-transparent border border-border2 font-display text-text cursor-pointer transition-colors hover:bg-surface",
-          isMobile
-            ? "px-2.5 py-1.5 text-[15px] tracking-[0.1em]"
-            : "px-3.5 py-1.5 min-w-[220px] text-[15px] tracking-[0.12em]",
-          open && "bg-surface",
-          triggerClassName,
-        )}
-      >
-        {label ? (
-          <span className={cn("text-muted tracking-[0.22em]", isMobile ? "text-[11px]" : "text-[12px]")}>
-            {label}
+      {renderTrigger ? (
+        renderTrigger({ open, selected, toggle })
+      ) : (
+        <button
+          ref={triggerRef}
+          type="button"
+          onClick={toggle}
+          className={cn(
+            "flex items-center gap-2 w-full bg-transparent border border-border2 font-display text-text cursor-pointer transition-colors hover:bg-surface",
+            isMobile
+              ? "px-2.5 py-1.5 text-[15px] tracking-[0.1em]"
+              : "px-3.5 py-1.5 min-w-[220px] text-[15px] tracking-[0.12em]",
+            open && "bg-surface",
+            triggerClassName,
+          )}
+        >
+          {label ? (
+            <span className={cn("text-muted tracking-[0.22em]", isMobile ? "text-[11px]" : "text-[12px]")}>
+              {label}
+            </span>
+          ) : null}
+          <span className="flex items-center gap-1.5 min-w-0 truncate">
+            {renderValue ? renderValue(selected) : selected.label}
           </span>
-        ) : null}
-        <span className="flex items-center gap-1.5 min-w-0 truncate">
-          {renderValue ? renderValue(selected) : selected.label}
-        </span>
-        <span className="flex-1" />
-        <ChevronDown
-          size={isMobile ? 18 : 16}
-          strokeWidth={2.5}
-          className={cn("text-muted transition-transform", open && "rotate-180")}
-        />
-      </button>
+          <span className="flex-1" />
+          <ChevronDown
+            size={isMobile ? 18 : 16}
+            strokeWidth={2.5}
+            className={cn("text-muted transition-transform", open && "rotate-180")}
+          />
+        </button>
+      )}
 
       {open && (
         <div
