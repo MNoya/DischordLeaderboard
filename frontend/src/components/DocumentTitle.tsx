@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useLocation } from "react-router-dom";
 import { usePlayerProfile, useSets } from "../data/hooks";
+import { categoryFromSlug } from "../data/episodes";
 import { ACTIVE_SET_CODE, SITE_NAME, TITLE_SEPARATOR } from "../data/constants";
 
 // Mirrors functions/_middleware.ts so the in-app tab title matches the crawler/unfurl title.
@@ -96,7 +97,21 @@ const resolvePageTitle = (
     return "P0P1";
   }
   if (section === "episodes") {
-    return "Episodes";
+    const slug = rest[0];
+    if (!slug) {
+      return "Episodes";
+    }
+    if (slug === "shorts") {
+      return "Shorts";
+    }
+    if (slug === "audio") {
+      return "Audio";
+    }
+    const category = categoryFromSlug(slug);
+    if (category) {
+      return `${category} Episodes`;
+    }
+    return `${setTitleLabel(slug)} Episodes`;
   }
   if (section === "community") {
     return "Community";

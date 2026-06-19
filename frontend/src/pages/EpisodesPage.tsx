@@ -83,12 +83,13 @@ const PAGE_SIZE = 12;
 
 const setCodeOf = (ep: Episode) => ep.setCode ?? null;
 const setNameOf = (ep: Episode) => ep.setName ?? ep.setCode ?? "";
+const setLandingPath = (code: string) => `/episodes/${code.toLowerCase()}`;
 
 export function EpisodesPage() {
   const { data: episodes, isLoading, isError, thumbnailsPending } = useMediaFeed();
   const { categorySlug: slug } = useParams<{ categorySlug?: string }>();
   const navigate = useNavigate();
-  const [params, setParams] = useSearchParams();
+  const [params] = useSearchParams();
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("newest");
   const [visible, setVisible] = useState(PAGE_SIZE);
@@ -97,10 +98,23 @@ export function EpisodesPage() {
   const isMobile = useIsMobile();
   const sentinelRef = useRef<HTMLDivElement>(null);
 
-  const shortsView = slug === "shorts";
-  const audioView = slug === "audio";
+  const all = episodes ?? [];
+  const setCodesBySlug = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const ep of episodes ?? []) {
+      if (ep.setCode) {
+        map.set(ep.setCode.toLowerCase(), ep.setCode);
+      }
+    }
+    return map;
+  }, [episodes]);
+
+  const slugLower = slug?.toLowerCase() ?? null;
+  const shortsView = slugLower === "shorts";
+  const audioView = slugLower === "audio";
   const activeCategory = slug ? categoryFromSlug(slug) : null;
-  const activeSet = params.get("set");
+  const pathSet = slugLower && !shortsView && !audioView && !activeCategory ? setCodesBySlug.get(slugLower) ?? null : null;
+  const activeSet = pathSet ?? params.get("set");
 
   useEffect(() => {
     const legacyCategory = params.get("category");
@@ -118,32 +132,59 @@ export function EpisodesPage() {
       navigate({ pathname, search: next.toString() }, { replace: true });
       return;
     }
-    if (slug && slug !== "shorts" && slug !== "audio" && !categoryFromSlug(slug)) {
+    if (!episodes) {
+      return;
+    }
+    const querySet = params.get("set");
+    if (!slug && querySet && setCodesBySlug.has(querySet.toLowerCase())) {
+      const next = new URLSearchParams(params);
+      next.delete("set");
+      navigate({ pathname: setLandingPath(querySet), search: next.toString() }, { replace: true });
+      return;
+    }
+    if (slugLower && !shortsView && !audioView && !activeCategory && !setCodesBySlug.has(slugLower)) {
       navigate({ pathname: "/episodes", search: params.toString() }, { replace: true });
     }
-  }, [params, slug, navigate]);
+  }, [params, slug, slugLower, navigate, episodes, setCodesBySlug, shortsView, audioView, activeCategory]);
 
-  const goTo = (pathname: string) => {
-    navigate({ pathname, search: params.toString() });
-    setVisible(PAGE_SIZE);
-  };
-  const setParam = (key: string, value: string | null) => {
+  const categoryPath = shortsView
+    ? "/episodes/shorts"
+    : audioView
+      ? "/episodes/audio"
+      : activeCategory
+        ? `/episodes/${categorySlug(activeCategory)}`
+        : null;
+
+  const navTo = (pathname: string, querySet: string | null) => {
     const next = new URLSearchParams(params);
-    if (value) {
-      next.set(key, value);
-    } else {
-      next.delete(key);
+    next.delete("set");
+    if (querySet) {
+      next.set("set", querySet);
     }
-    setParams(next, { replace: true });
+    navigate({ pathname, search: next.toString() });
     setVisible(PAGE_SIZE);
   };
   const setCategory = (category: EpisodeCategory | null) => {
-    goTo(category ? `/episodes/${categorySlug(category)}` : "/episodes");
+    if (category) {
+      navTo(`/episodes/${categorySlug(category)}`, activeSet);
+    } else if (activeSet) {
+      navTo(setLandingPath(activeSet), null);
+    } else {
+      navTo("/episodes", null);
+    }
   };
-  const showShorts = () => goTo("/episodes/shorts");
-  const showAudio = () => goTo("/episodes/audio");
+  const chooseSet = (code: string | null) => {
+    if (!code) {
+      navTo(categoryPath ?? "/episodes", null);
+    } else if (categoryPath) {
+      navTo(categoryPath, code);
+    } else {
+      navTo(setLandingPath(code), null);
+    }
+  };
+  const showShorts = () => navTo("/episodes/shorts", activeSet);
+  const showAudio = () => navTo("/episodes/audio", activeSet);
 
-  const all = episodes ?? [];
   const longform = useMemo(() => all.filter((ep) => !ep.isShort), [all]);
   const shorts = useMemo(() => all.filter((ep) => ep.isShort), [all]);
   const withAudio = useMemo(() => longform.filter((ep) => Boolean(ep.audioUrl)), [longform]);
@@ -216,7 +257,7 @@ export function EpisodesPage() {
     <FilterDropdown
       value={activeSet ?? ""}
       options={setFilterOptions}
-      onChange={(v) => setParam("set", v || null)}
+      onChange={(v) => chooseSet(v || null)}
       renderValue={renderSetValue}
       renderOption={renderSetOption}
       searchPlaceholder="Search sets or codes…"
