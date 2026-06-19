@@ -22,14 +22,12 @@ export function CommunityGrid({
     <div className="flex flex-col gap-6">
       <PickRow
         title="Crowd Favorites"
-        tone="cyan"
         entries={SLOTS.map((slot) => ({ slotKey: slot.key, label: slot.label, stats: extremesBySlot.get(slot.key)!.most }))}
         cardsByName={cardsByName}
         n={n}
       />
       <PickRow
         title="Rogue Picks"
-        tone="magenta"
         entries={SLOTS.map((slot) => ({ slotKey: slot.key, label: slot.label, stats: extremesBySlot.get(slot.key)!.least }))}
         cardsByName={cardsByName}
         n={n}
@@ -40,13 +38,11 @@ export function CommunityGrid({
 
 function PickRow({
   title,
-  tone,
   entries,
   cardsByName,
   n,
 }: {
   title: string;
-  tone: "cyan" | "magenta";
   entries: { slotKey: SlotKey; label: string; stats: P0P1PickStat[] }[];
   cardsByName: Map<string, Card>;
   n: number;
@@ -58,7 +54,7 @@ function PickRow({
       </SectionLabel>
       <div className="grid grid-cols-4 lg:grid-cols-8 gap-2">
         {entries.map(({ slotKey, label, stats }) => (
-          <PickTile key={slotKey} slotKey={slotKey} label={label} stats={stats} tone={tone} cardsByName={cardsByName} n={n} />
+          <PickTile key={slotKey} slotKey={slotKey} label={label} stats={stats} cardsByName={cardsByName} n={n} />
         ))}
       </div>
     </div>
@@ -69,7 +65,6 @@ function PickTile({
   slotKey,
   label,
   stats,
-  tone,
   cardsByName,
   n,
 }: {
@@ -77,11 +72,9 @@ function PickTile({
   label: string;
   stats: P0P1PickStat[];
   cardsByName: Map<string, Card>;
-  tone: "cyan" | "magenta";
   n: number;
 }) {
   const [modalOpen, setModalOpen] = useState(false);
-  const toneClass = tone === "cyan" ? "text-cyan" : "text-magenta";
   const hasStats = stats.length > 0;
   const tied = stats.length > 1;
   const card = hasStats ? cardsByName.get(stats[0].cardName) : undefined;
@@ -105,8 +98,8 @@ function PickTile({
           <SlotPip slotKey={slotKey} size={12} />
         </div>
         {hasStats && (
-          <span className={`absolute top-1 right-1 text-[9px] font-mono tabular-nums px-1 rounded-sm bg-bg/85 ${toneClass}`}>
-            {stats[0].pickCount}
+          <span className={`absolute top-1 right-1 text-[9px] font-mono tabular-nums px-1 rounded-sm bg-bg/85`}>
+            {stats[0].pickCount} picks
           </span>
         )}
         {tied && (
