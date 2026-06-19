@@ -22,12 +22,14 @@ export function CommunityGrid({
     <div className="flex flex-col gap-6">
       <PickRow
         title="Crowd Favorites"
+        subtitle="Most popular picks by slot"
         entries={SLOTS.map((slot) => ({ slotKey: slot.key, label: slot.label, stats: extremesBySlot.get(slot.key)!.most }))}
         cardsByName={cardsByName}
         n={n}
       />
       <PickRow
         title="Rogue Picks"
+        subtitle="Least popular picks by slot"
         entries={SLOTS.map((slot) => ({ slotKey: slot.key, label: slot.label, stats: extremesBySlot.get(slot.key)!.least }))}
         cardsByName={cardsByName}
         n={n}
@@ -38,20 +40,27 @@ export function CommunityGrid({
 
 function PickRow({
   title,
+  subtitle,
   entries,
   cardsByName,
   n,
 }: {
   title: string;
+  subtitle: string;
   entries: { slotKey: SlotKey; label: string; stats: P0P1PickStat[] }[];
   cardsByName: Map<string, Card>;
   n: number;
 }) {
   return (
     <div>
-      <SectionLabel size={16} color={'white'} className="mb-2">
-        {title}
-      </SectionLabel>
+      <div className="flex flex-col mb-2">
+        <SectionLabel size={16} color={'white'}>
+          {title}
+        </SectionLabel>
+        <p className="text-dim text-[12px]">
+          {subtitle}
+        </p>
+      </div>
       <div className="grid grid-cols-4 lg:grid-cols-8 gap-2">
         {entries.map(({ slotKey, label, stats }) => (
           <PickTile key={slotKey} slotKey={slotKey} label={label} stats={stats} cardsByName={cardsByName} n={n} />
