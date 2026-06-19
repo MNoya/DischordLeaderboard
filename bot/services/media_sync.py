@@ -7,27 +7,47 @@ run — the feeds stay the source of truth.
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from email.utils import parsedate_to_datetime
+from pathlib import Path
 
 import requests
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from bot.config import settings
-from bot.media_sets import EVERGREEN, resolve_set
+from bot.media_sets import EVERGREEN, by_code, resolve_set
 from bot.models import Episode
 from bot.services.youtube import YouTubeClient, YouTubeVideo
 
 log = logging.getLogger(__name__)
 
-CATEGORIES = ("First Impressions", "Set Review", "Draft", "Metagame", "Evergreen")
+CATEGORIES = ("Set Review", "Draft", "Sealed", "Rankings", "Metagame", "Coaching", "Guest", "Evergreen")
+
+# Per-guid classification seed: a one-time LLM pass over the back catalog plus hand-corrections,
+# consulted before the rules so a resync reproduces it. Each value is a category string, or
+# {"category"?, "set"?} when an episode also needs a manual set the title can't yield.
+_SEED_RAW: dict[str, str | dict[str, str]] = json.loads(
+    Path(__file__).with_name("episode_category_seed.json").read_text(encoding="utf-8")
+)
+_SEED_CATEGORY: dict[str, str] = {}
+_SEED_SET: dict[str, str] = {}
+for _guid, _value in _SEED_RAW.items():
+    if isinstance(_value, str):
+        _SEED_CATEGORY[_guid] = _value
+    else:
+        if "category" in _value:
+            _SEED_CATEGORY[_guid] = _value["category"]
+        if "set" in _value:
+            _SEED_SET[_guid] = _value["set"]
 
 _MATCH_WINDOW_S = 3 * 24 * 60 * 60
+_DURATION_MATCH_RATIO = 0.1
 
 
 @dataclass
@@ -71,8 +91,8 @@ def sync_media(session: Session) -> SyncResult:
 
     items = _merge(podcasts, videos)
     for item in items:
-        item.category = classify_category(item.playlists, item.title, item.kind)
-        media_set = resolve_set(item.playlists, item.title)
+        item.category = classify_category(item.playlists, item.title, item.kind, item.guid)
+        media_set = resolve_episode_set(item.guid, item.playlists, item.title, item.published_at)
         if media_set is EVERGREEN:
             item.set_code = item.set_name = None
             item.set_released_at = None
@@ -84,8 +104,24 @@ def sync_media(session: Session) -> SyncResult:
     return _upsert(session, items)
 
 
-def classify_category(playlists: list[str], title: str, kind: str) -> str:
-    return _category_from_playlists(playlists) or _category_from_title(title) or _default_category(kind)
+def classify_category(playlists: list[str], title: str, kind: str, guid: str = "") -> str:
+    override = _category_from_title_overrides(title)
+    if override:
+        return override
+    seeded = _SEED_CATEGORY.get(guid)
+    category = seeded or _category_from_playlists(playlists) or _category_from_title(title) or _default_category(kind)
+    # Draft is YouTube-only draft VODs; a numbered podcast episode is format talk, not a Draft-Along
+    if category == "Draft" and kind == "episode":
+        return "Metagame"
+    return category
+
+
+def resolve_episode_set(guid: str, playlists: list[str], title: str, published: date | None):
+    """Set resolution with the per-guid seed override applied first (for sets the title can't yield)."""
+    forced = _SEED_SET.get(guid)
+    if forced:
+        return by_code(forced)
+    return resolve_set(playlists, title, published)
 
 
 def _default_category(kind: str) -> str:
@@ -132,7 +168,38 @@ def _find_match(podcast: _Item, videos: list[YouTubeVideo], claimed: set[str]) -
         if gap <= closest_gap and _title_overlap(podcast.title, video.title):
             closest = video
             closest_gap = gap
+    if closest is not None:
+        return closest
+
+    return _same_date_match(podcast, available)
+
+
+def _same_date_match(podcast: _Item, available: list[YouTubeVideo]) -> YouTubeVideo | None:
+    """Pair a podcast with the video sharing its publish date when their titles diverge — the audio
+    and video cuts of one recording, named differently. Duration-guarded so an unrelated draft VOD
+    uploaded the same day isn't absorbed."""
+    podcast_date = podcast.published_at.astimezone(timezone.utc).date()
+    closest: YouTubeVideo | None = None
+    closest_gap = _MATCH_WINDOW_S
+    for video in available:
+        video_time = _parse_iso(video.published_at)
+        if video_time is None:
+            continue
+        if video_time.astimezone(timezone.utc).date() != podcast_date:
+            continue
+        if not _durations_match(podcast.duration_seconds, video.duration_seconds):
+            continue
+        gap = abs((video_time - podcast.published_at).total_seconds())
+        if gap <= closest_gap:
+            closest = video
+            closest_gap = gap
     return closest
+
+
+def _durations_match(a: int, b: int) -> bool:
+    if a <= 0 or b <= 0:
+        return False
+    return abs(a - b) / max(a, b) <= _DURATION_MATCH_RATIO
 
 
 def _video_item(video: YouTubeVideo) -> _Item:
@@ -229,29 +296,62 @@ def _category_from_playlists(playlists: list[str]) -> str | None:
     lowered = [p.lower() for p in playlists]
     if any("set review" in p for p in lowered):
         return "Set Review"
-    if any("draft" in p or "coaching" in p for p in lowered):
+    if any("coaching" in p or "draft class" in p for p in lowered):
+        return "Coaching"
+    if any("sealed" in p for p in lowered):
+        return "Sealed"
+    if any("top 10" in p or "tier list" in p or "ranking" in p for p in lowered):
+        return "Rankings"
+    if any(re.search(r"\bdraft\b", p) and "coaching" not in p and "class" not in p for p in lowered):
         return "Draft"
-    if any("evergreen" in p or "mini level" in p or "top 10" in p for p in lowered):
+    if any("evergreen" in p or "mini level" in p for p in lowered):
         return "Evergreen"
     return None
 
 
+_TITLE_OVERRIDES: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("Set Review", re.compile(r"first impressions?", re.I)),
+    ("Metagame", re.compile(r"draft primer|draft guide|limited guide|win ?rate|tips for success", re.I)),
+)
+
 _TITLE_CATEGORY_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("First Impressions", re.compile(r"primer|first impressions|first look", re.I)),
+    ("Coaching", re.compile(r"coaching|draft class", re.I)),
+    ("Guest", re.compile(
+        r"conversation with|\bjoins (?:me|us)\b|\bft\.?\b|featuring|sits down with|\binterview\b",
+        re.I,
+    )),
+    ("Rankings", re.compile(r"tier ?list|\branking\b|best and worst|props and slops|ranked every", re.I)),
+    ("Set Review", re.compile(
+        r"set review|set overview|card evaluation|primer|first impressions|first look",
+        re.I,
+    )),
+    ("Sealed", re.compile(r"sealed|pre-?release", re.I)),
     ("Metagame", re.compile(
         r"state of the format|format address|format update|metagame|meta update"
         r"|mid-?format|what we got wrong|late format",
         re.I,
     )),
     ("Draft", re.compile(r"draft-?along|draft log|live draft|drafting with", re.I)),
-    ("Set Review", re.compile(r"set review|tier list|ranking", re.I)),
 )
+
+_TOP_LIST = re.compile(r"\btop \d+", re.I)
+_TOP_LIST_RANK_CONTEXT = re.compile(r"mythic|competitor|\bplayer\b|pro tour|\bpt\b|qualifier|arena direct", re.I)
+_TOP_LIST_SKILL = re.compile(r"top \d+\s+(?:ways|tips|things|reasons|habits|mistakes|plays|lessons)", re.I)
+
+
+def _category_from_title_overrides(title: str) -> str | None:
+    for category, pattern in _TITLE_OVERRIDES:
+        if pattern.search(title):
+            return category
+    return None
 
 
 def _category_from_title(title: str) -> str | None:
     for category, pattern in _TITLE_CATEGORY_RULES:
         if pattern.search(title):
             return category
+    if _TOP_LIST.search(title) and not _TOP_LIST_RANK_CONTEXT.search(title) and not _TOP_LIST_SKILL.search(title):
+        return "Rankings"
     return None
 
 

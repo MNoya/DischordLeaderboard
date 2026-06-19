@@ -1,4 +1,4 @@
-import { Fragment, useRef, useState } from "react";
+import { createContext, Fragment, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "../lib/utils";
 import { useIsMobile } from "../lib/use-is-mobile";
@@ -6,7 +6,12 @@ import {
   hasActiveFilters,
   isCardFilteredOut,
   TIER_ORDER,
+  TREND_COLOR,
+  TREND_GLYPH,
+  TREND_LABEL,
+  trendSteps,
   useTierList,
+  type Grader,
   type TierCard,
   type TierFilters,
 } from "../data/tierList";
@@ -20,7 +25,15 @@ const RARITY_ACCENT: Record<string, string> = {
 
 // Grid columns: lands fold into the colorless column, so there are seven, not eight.
 const COLUMN_CODES = ["W", "U", "B", "R", "G", "M", "C"];
-const COLUMN_MS: Record<string, string> = { W: "w", U: "u", B: "b", R: "r", G: "g", M: "multicolor", C: "c" };
+const COLUMN_MS: Record<string, string> = {
+  W: "w",
+  U: "u",
+  B: "b",
+  R: "r",
+  G: "g",
+  M: "multicolor",
+  C: "c",
+};
 const COLUMN_NAMES: Record<string, string> = {
   W: "White",
   U: "Blue",
@@ -48,16 +61,37 @@ function tierColor(tier: string): string {
   return `hsl(${hue}, 62%, 47%)`;
 }
 
-export function TierGrid({ uid, filters, stickyTop }: { uid: string; filters: TierFilters; stickyTop: number }) {
-  const { data, isLoading, isError } = useTierList(uid);
+// When a set has no consensus list, the grid is built from grader lists alone: the popup
+// compares each grader's grade instead of showing a single consensus grade.
+const ComparisonContext = createContext(false);
+
+export function TierGrid({
+  uid,
+  graders,
+  comparison = false,
+  filters,
+  hideArt,
+  stickyTop,
+}: {
+  uid: string;
+  graders: Grader[];
+  comparison?: boolean;
+  filters: TierFilters;
+  hideArt: boolean;
+  stickyTop: number;
+}) {
+  const { data, isLoading, isError } = useTierList(uid, graders);
   const isMobile = useIsMobile();
 
-  if (isLoading || isError || !data) {
-    return (
-      <div className="border border-border bg-surface py-16 text-center text-muted text-[14px]">
-        {isLoading ? "Loading tier list…" : "Couldn't load this tier list."}
-      </div>
-    );
+  if (isLoading || !data) {
+    if (isError) {
+      return (
+        <div className="border border-border bg-surface py-16 text-center text-muted text-[14px]">
+          Couldn't load this tier list.
+        </div>
+      );
+    }
+    return <TierGridSkeleton isMobile={isMobile} stickyTop={stickyTop} />;
   }
 
   const byKey = new Map<string, TierCard[]>();
@@ -78,37 +112,163 @@ export function TierGrid({ uid, filters, stickyTop }: { uid: string; filters: Ti
     });
   }
 
-  return isMobile ? (
-    <MobileTiers byKey={byKey} filters={filters} />
-  ) : (
-    <DesktopGrid byKey={byKey} filters={filters} stickyTop={stickyTop} />
+  return (
+    <ComparisonContext.Provider value={comparison}>
+      {isMobile ? (
+        <MobileTiers byKey={byKey} filters={filters} hideArt={hideArt} />
+      ) : (
+        <DesktopGrid byKey={byKey} filters={filters} hideArt={hideArt} stickyTop={stickyTop} />
+      )}
+    </ComparisonContext.Provider>
+  );
+}
+
+const SKELETON_TIERS = ["A", "B", "C", "D", "F", "SB"];
+
+// Deterministic 0–3 bars per cell so the skeleton mimics a populated grid without flicker.
+const skeletonBarCount = (row: number, col: number) => (row * 3 + col * 2) % 4;
+
+function TierGridSkeleton({
+  isMobile,
+  stickyTop,
+}: {
+  isMobile: boolean;
+  stickyTop: number;
+}) {
+  if (isMobile) {
+    return (
+      <div className="flex flex-col gap-[5px]">
+        {SKELETON_TIERS.map((tier, row) => (
+          <div key={tier} className="border border-border bg-surface">
+            <div className="bg-bg border-b border-border py-1.5 text-center font-display text-[18px] leading-none text-muted">
+              {tier}
+            </div>
+            <div
+              className="border-l-4 border-border"
+              style={{ borderLeftColor: tierColor(tier) }}
+            >
+              {[0, 1, 2].map((col, idx) => (
+                <div
+                  key={col}
+                  className={cn("flex", idx > 0 && "border-t border-border")}
+                >
+                  <div className="w-[44px] shrink-0 flex items-center justify-center">
+                    <span className="h-4 w-4 rounded-full bg-surface2 animate-pulse" />
+                  </div>
+                  <div className="grid min-w-0 flex-1 grid-cols-1 min-[450px]:grid-cols-2 gap-1 p-1">
+                    {Array.from({ length: skeletonBarCount(row, col) + 1 }).map(
+                      (_, i) => (
+                        <SkeletonBar key={i} />
+                      ),
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  const headerCell = {
+    position: "sticky",
+    top: stickyTop,
+    zIndex: 10,
+  } as const;
+
+  return (
+    <div className="border-x border-b border-border bg-surface">
+      <div
+        className="grid"
+        style={{ gridTemplateColumns: "48px repeat(7, minmax(0, 1fr))" }}
+      >
+        <div className="border-t border-b border-border bg-bg" style={headerCell} />
+        {COLUMN_CODES.map((code) => (
+          <div
+            key={code}
+            className="border-t border-b border-border bg-bg flex items-center justify-center py-2"
+            style={headerCell}
+          >
+            <span className="h-4 w-4 rounded-full bg-surface2 animate-pulse" />
+          </div>
+        ))}
+
+        {SKELETON_TIERS.map((tier, row) => (
+          <Fragment key={tier}>
+            <div
+              className="border-b border-l-4 border-border bg-bg flex items-center justify-center font-display text-[20px] leading-none text-muted"
+              style={{ borderLeftColor: tierColor(tier) }}
+            >
+              {tier}
+            </div>
+            {COLUMN_CODES.map((code, col) => (
+              <div
+                key={code}
+                className="border-b border-border p-1 flex flex-col gap-1 min-h-[26px]"
+              >
+                {Array.from({ length: skeletonBarCount(row, col) }).map((_, i) => (
+                  <SkeletonBar key={i} />
+                ))}
+              </div>
+            ))}
+          </Fragment>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SkeletonBar() {
+  return (
+    <div className="min-h-[28px] rounded-[5px] border-l-4 border-border2 bg-surface2 animate-pulse" />
   );
 }
 
 function DesktopGrid({
   byKey,
   filters,
+  hideArt,
   stickyTop,
 }: {
   byKey: Map<string, TierCard[]>;
   filters: TierFilters;
+  hideArt: boolean;
   stickyTop: number;
 }) {
   const filtering = hasActiveFilters(filters);
+  const pager = useCardPager(byKey, filters);
   const columnHasHit = (code: string) => {
     if (!filtering) return true;
     return TIER_ORDER.some((tier) =>
-      (byKey.get(`${code}|${tier}`) ?? []).some((card) => !isCardFilteredOut(card, filters)),
+      (byKey.get(`${code}|${tier}`) ?? []).some(
+        (card) => !isCardFilteredOut(card, filters),
+      ),
     );
   };
-  const headerCell = { position: "sticky", top: stickyTop, zIndex: 10 } as const;
-  const tierHasAnyCard = (tier: string) => COLUMN_CODES.some((code) => (byKey.get(`${code}|${tier}`) ?? []).length > 0);
-  const tiers = TIER_ORDER.filter((tier) => tier !== "TBD" || tierHasAnyCard(tier));
+  const headerCell = {
+    position: "sticky",
+    top: stickyTop,
+    zIndex: 10,
+  } as const;
+  const tierHasAnyCard = (tier: string) =>
+    COLUMN_CODES.some(
+      (code) => (byKey.get(`${code}|${tier}`) ?? []).length > 0,
+    );
+  const tiers = TIER_ORDER.filter(
+    (tier) => tier !== "TBD" || tierHasAnyCard(tier),
+  );
 
   return (
     <div className="border-x border-b border-border bg-surface">
-      <div className="grid" style={{ gridTemplateColumns: "48px repeat(7, minmax(0, 1fr))" }}>
-        <div className="border-t border-b border-border bg-bg" style={headerCell} />
+      <div
+        className="grid"
+        style={{ gridTemplateColumns: "48px repeat(7, minmax(0, 1fr))" }}
+      >
+        <div
+          className="border-t border-b border-border bg-bg"
+          style={headerCell}
+        />
         {COLUMN_CODES.map((code) => (
           <div
             key={code}
@@ -117,8 +277,15 @@ function DesktopGrid({
             style={headerCell}
           >
             <i
-              className={cn(columnPipClass(code), "transition-opacity", !columnHasHit(code) && "opacity-20")}
-              style={{ fontSize: code === "M" ? 21 : 14, filter: columnHasHit(code) ? undefined : "grayscale(1)" }}
+              className={cn(
+                columnPipClass(code),
+                "transition-opacity",
+                !columnHasHit(code) && "opacity-20",
+              )}
+              style={{
+                fontSize: code === "M" ? 21 : 14,
+                filter: columnHasHit(code) ? undefined : "grayscale(1)",
+              }}
               aria-label={COLUMN_NAMES[code]}
             />
           </div>
@@ -135,11 +302,20 @@ function DesktopGrid({
             {COLUMN_CODES.map((code) => {
               const bucket = byKey.get(`${code}|${tier}`) ?? [];
               return (
-                <div key={code} className="border-b border-border p-1 flex flex-col gap-1 min-h-[26px]">
+                <div
+                  key={code}
+                  className="border-b border-border p-1 flex flex-col gap-1 min-h-[26px]"
+                >
                   {bucket
                     .filter((card) => !isCardFilteredOut(card, filters))
                     .map((card) => (
-                      <CardBar key={card.card_id} card={card} mobile={false} />
+                      <CardBar
+                        key={card.card_id}
+                        card={card}
+                        mobile={false}
+                        hideArt={hideArt}
+                        onOpen={() => pager.open(card.card_id)}
+                      />
                     ))}
                 </div>
               );
@@ -147,18 +323,30 @@ function DesktopGrid({
           </Fragment>
         ))}
       </div>
+      <CardPagerModal pager={pager} />
     </div>
   );
 }
 
-function MobileTiers({ byKey, filters }: { byKey: Map<string, TierCard[]>; filters: TierFilters }) {
+function MobileTiers({
+  byKey,
+  filters,
+  hideArt,
+}: {
+  byKey: Map<string, TierCard[]>;
+  filters: TierFilters;
+  hideArt: boolean;
+}) {
   const filtering = hasActiveFilters(filters);
+  const pager = useCardPager(byKey, filters);
   const visibleTiers = TIER_ORDER.map((tier) => ({
     tier,
     colors: COLUMN_CODES.filter((code) => {
       const bucket = byKey.get(`${code}|${tier}`) ?? [];
       if (bucket.length === 0) return false;
-      return filtering ? bucket.some((card) => !isCardFilteredOut(card, filters)) : true;
+      return filtering
+        ? bucket.some((card) => !isCardFilteredOut(card, filters))
+        : true;
     }),
   })).filter((t) => t.colors.length > 0);
 
@@ -169,62 +357,162 @@ function MobileTiers({ byKey, filters }: { byKey: Map<string, TierCard[]>; filte
           <div className="bg-bg border-b border-border py-1.5 text-center font-display text-[18px] leading-none text-text">
             {tier}
           </div>
-          <div className="border-l-4 border-border" style={{ borderLeftColor: tierColor(tier) }}>
+          <div
+            className="border-l-4 border-border"
+            style={{ borderLeftColor: tierColor(tier) }}
+          >
             {colors.map((code, idx) => (
-                <div key={code} className={cn("flex", idx > 0 && "border-t border-border")}>
-                  <div className="w-[44px] shrink-0 flex items-center justify-center">
-                    <i
-                      className={columnPipClass(code)}
-                      style={{ fontSize: code === "M" ? 24 : 16 }}
-                      aria-label={COLUMN_NAMES[code]}
-                    />
-                  </div>
-                  <div className="grid min-w-0 flex-1 grid-cols-1 min-[450px]:grid-cols-2 gap-1 p-1">
-                    {(byKey.get(`${code}|${tier}`) ?? [])
-                      .filter((card) => !isCardFilteredOut(card, filters))
-                      .map((card) => (
-                        <CardBar key={card.card_id} card={card} mobile />
-                      ))}
-                  </div>
+              <div
+                key={code}
+                className={cn("flex", idx > 0 && "border-t border-border")}
+              >
+                <div className="w-[44px] shrink-0 flex items-center justify-center">
+                  <i
+                    className={columnPipClass(code)}
+                    style={{ fontSize: code === "M" ? 24 : 16 }}
+                    aria-label={COLUMN_NAMES[code]}
+                  />
                 </div>
-              ))}
-            </div>
+                <div className="grid min-w-0 flex-1 grid-cols-1 min-[450px]:grid-cols-2 gap-1 p-1">
+                  {(byKey.get(`${code}|${tier}`) ?? [])
+                    .filter((card) => !isCardFilteredOut(card, filters))
+                    .map((card) => (
+                      <CardBar
+                        key={card.card_id}
+                        card={card}
+                        mobile
+                        hideArt={hideArt}
+                        onOpen={() => pager.open(card.card_id)}
+                      />
+                    ))}
+                </div>
+              </div>
+            ))}
           </div>
+        </div>
       ))}
+      <CardPagerModal pager={pager} />
     </div>
   );
 }
 
-const PREVIEW_W = 232;
-const PREVIEW_RATIO = 1.4;
-const PREVIEW_GAP = 12;
+const COLUMN_INDEX: Record<string, number> = Object.fromEntries(COLUMN_CODES.map((code, i) => [code, i]));
 
-interface PreviewAnchor {
-  left: number;
-  below: boolean;
-  arrowLeft: number;
-  edge: number;
+// Pager walks by color column (W→U→B→R→G→multi→colorless), then keeps each
+// expansion's block contiguous, then printed number. Expansion matters because a
+// merged list reuses collector numbers across sets. Alt-art "PROMO-12" sorts last.
+export function comparePagerOrder(a: TierCard, b: TierCard): number {
+  const da = COLUMN_INDEX[columnOf(a.color)] ?? COLUMN_CODES.length;
+  const db = COLUMN_INDEX[columnOf(b.color)] ?? COLUMN_CODES.length;
+  if (da !== db) return da - db;
+  if (a.expansion !== b.expansion) return a.expansion.localeCompare(b.expansion);
+  const ca = parseCollectorNumber(a.collector_number);
+  const cb = parseCollectorNumber(b.collector_number);
+  if (ca.altRank !== cb.altRank) return ca.altRank - cb.altRank;
+  if (ca.base !== cb.base) return ca.base - cb.base;
+  return ca.suffix.localeCompare(cb.suffix);
 }
 
-function CardBar({ card, mobile }: { card: TierCard; mobile: boolean }) {
+function parseCollectorNumber(num?: string | null) {
+  if (!num) return { base: 0, suffix: "", altRank: 0 };
+  const alt = num.match(/^([A-Za-z]+)-(\d+)$/);
+  if (alt) return { base: parseInt(alt[2], 10), suffix: "", altRank: 1 };
+  const norm = num.match(/^(\d+)([A-Za-z]*)$/);
+  return { base: parseInt(norm?.[1] ?? "0", 10), suffix: (norm?.[2] ?? "").toUpperCase(), altRank: 0 };
+}
+
+// Click-to-open card modal with Prev/Next over the visible cards, in pager order.
+// Selecting a card filtered out of view collapses to no selection, closing the modal.
+function useCardPager(byKey: Map<string, TierCard[]>, filters: TierFilters) {
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const visibleCards = useMemo(() => {
+    const cards: TierCard[] = [];
+    for (const bucket of byKey.values()) {
+      for (const card of bucket) {
+        if (!isCardFilteredOut(card, filters)) cards.push(card);
+      }
+    }
+    return cards.sort(comparePagerOrder);
+  }, [byKey, filters]);
+  const selectedIndex = visibleCards.findIndex((card) => card.card_id === selectedId);
+  return {
+    visibleCards,
+    selectedIndex,
+    selectedCard: selectedIndex === -1 ? null : visibleCards[selectedIndex],
+    open: (cardId: number) => setSelectedId(cardId),
+    close: () => setSelectedId(null),
+    stepTo: (index: number) => setSelectedId(visibleCards[index].card_id),
+  };
+}
+
+function CardPagerModal({ pager }: { pager: ReturnType<typeof useCardPager> }) {
+  const { selectedCard, selectedIndex, visibleCards, close, stepTo } = pager;
+  if (!selectedCard) return null;
+  return createPortal(
+    <CardModal
+      card={selectedCard}
+      onClose={close}
+      onPrev={selectedIndex > 0 ? () => stepTo(selectedIndex - 1) : undefined}
+      onNext={selectedIndex < visibleCards.length - 1 ? () => stepTo(selectedIndex + 1) : undefined}
+      position={`${selectedIndex + 1} / ${visibleCards.length}`}
+    />,
+    document.body,
+  );
+}
+
+export const PREVIEW_W = 260;
+export const PREVIEW_RATIO = 1.4;
+export const PREVIEW_GAP = 12;
+export const PREVIEW_EXTRAS_H = 60;
+const PREVIEW_MAT = "#161b26";
+
+const TEXT_OUTLINE =
+  "[text-shadow:1px_1px_1px_rgba(0,0,0,0.85),-1px_-1px_1px_rgba(0,0,0,0.85),1px_-1px_1px_rgba(0,0,0,0.85),-1px_1px_1px_rgba(0,0,0,0.85)]";
+
+export interface PreviewAnchor {
+  left: number;
+  top: number;
+  onRight: boolean;
+  arrowTop: number;
+}
+
+function CardBar({
+  card,
+  mobile,
+  hideArt = false,
+  onOpen,
+}: {
+  card: TierCard;
+  mobile: boolean;
+  hideArt?: boolean;
+  onOpen?: () => void;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const [anchor, setAnchor] = useState<PreviewAnchor | null>(null);
-  const [modalOpen, setModalOpen] = useState(false);
   const accent = RARITY_ACCENT[card.rarity] ?? RARITY_ACCENT.C;
   const art = card.url.replace("/large/", "/art_crop/");
   const badges = `${card.comment ? "💬" : ""}${card.flags.synergy ? "🤝" : ""}${card.flags.buildaround ? "🛠️" : ""}`;
+  const trendLabel = card.trend
+    ? `${TREND_LABEL[card.trend]}${card.trend_from ? ` (${card.trend_from} → ${card.tier})` : ""}`
+    : "";
 
   const openPreview = () => {
     const el = ref.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
-    const previewH = PREVIEW_W * PREVIEW_RATIO;
-    const below = window.innerHeight - rect.bottom >= previewH + PREVIEW_GAP + 8;
-    const centerX = rect.left + rect.width / 2;
-    const left = Math.min(Math.max(centerX - PREVIEW_W / 2, 8), window.innerWidth - PREVIEW_W - 8);
-    const edge = below ? rect.bottom + PREVIEW_GAP : window.innerHeight - rect.top + PREVIEW_GAP;
-    const arrowLeft = Math.min(Math.max(centerX - left, 14), PREVIEW_W - 14);
-    setAnchor({ left, below, arrowLeft, edge });
+    const previewH = PREVIEW_W * PREVIEW_RATIO + PREVIEW_EXTRAS_H;
+    const centerY = rect.top + rect.height / 2;
+    const top = Math.min(
+      Math.max(centerY - previewH / 2, 8),
+      Math.max(window.innerHeight - previewH - 8, 8),
+    );
+    const onRight =
+      rect.right + PREVIEW_GAP + PREVIEW_W <= window.innerWidth - 8;
+    const left = onRight
+      ? rect.right + PREVIEW_GAP
+      : rect.left - PREVIEW_GAP - PREVIEW_W;
+    const arrowTop = Math.min(Math.max(centerY - top, 14), previewH - 14);
+    setAnchor({ left, top, onRight, arrowTop });
   };
 
   return (
@@ -232,80 +520,324 @@ function CardBar({ card, mobile }: { card: TierCard; mobile: boolean }) {
       ref={ref}
       onMouseEnter={mobile ? undefined : openPreview}
       onMouseLeave={mobile ? undefined : () => setAnchor(null)}
-      onClick={mobile ? () => setModalOpen(true) : undefined}
-      className={cn("relative min-[450px]:max-w-[300px] rounded-[5px] border-l-4", mobile && "cursor-pointer")}
+      onClick={() => {
+        setAnchor(null);
+        onOpen?.();
+      }}
+      className="relative min-[450px]:max-w-[300px] cursor-pointer rounded-[5px] border-l-4"
       style={{ borderLeftColor: accent }}
     >
-      <div className="relative min-h-[28px] overflow-hidden rounded-r-[5px]">
-        <img
-          src={art}
-          alt=""
-          loading="lazy"
-          className="absolute inset-0 h-full w-full object-cover"
-          style={{ objectPosition: "center 22%" }}
-        />
-        <div className="absolute inset-0 bg-gradient-to-r from-black/85 via-black/55 to-black/30" />
+      <div
+        className={cn(
+          "relative min-h-[28px] overflow-hidden rounded-r-[5px]",
+          hideArt && "bg-surface2",
+        )}
+      >
+        {!hideArt && (
+          <>
+            <img
+              src={art}
+              alt=""
+              loading="lazy"
+              className="absolute inset-0 h-full w-full object-cover"
+              style={{ objectPosition: "center 22%" }}
+            />
+            <div className="absolute inset-0 bg-gradient-to-r from-black/85 via-black/55 to-black/30" />
+          </>
+        )}
         <div className="relative flex min-h-[28px] items-center justify-between gap-1 px-2 py-0.5">
-          <span
-            className={cn(
-              "min-w-0 flex-1 line-clamp-2 text-[13px] font-medium leading-tight text-white [text-shadow:1px_1px_1px_rgba(0,0,0,0.85),-1px_-1px_1px_rgba(0,0,0,0.85),1px_-1px_1px_rgba(0,0,0,0.85),-1px_1px_1px_rgba(0,0,0,0.85)]",
-              mobile && "underline decoration-dotted underline-offset-2",
+          <span className="flex min-w-0 flex-1 items-center gap-1">
+            {card.trend && (
+              <span
+                className={cn(
+                  "flex shrink-0 flex-col items-center",
+                  TEXT_OUTLINE,
+                )}
+                style={{ color: TREND_COLOR[card.trend] }}
+                title={trendLabel}
+                aria-label={trendLabel}
+              >
+                {trendGlyphStack(card).map((char, i, stack) => (
+                  <span
+                    key={i}
+                    className={cn(
+                      "relative text-[13px] leading-none",
+                      i > 0 && "-mt-[6px]",
+                    )}
+                    style={{ zIndex: stack.length - i }}
+                  >
+                    {char}
+                  </span>
+                ))}
+              </span>
             )}
-          >
-            {card.name}
+            <span
+              className={cn(
+                "min-w-0 line-clamp-2 text-[13px] font-medium leading-tight text-white",
+                TEXT_OUTLINE,
+              )}
+            >
+              {card.name}
+            </span>
           </span>
-          {badges && <span className="shrink-0 text-[11px] leading-none">{badges}</span>}
+          {badges && (
+            <span className="shrink-0 text-[14px] leading-none">{badges}</span>
+          )}
         </div>
       </div>
-      {anchor && createPortal(<CardPreview card={card} anchor={anchor} />, document.body)}
-      {modalOpen && createPortal(<CardModal card={card} onClose={() => setModalOpen(false)} />, document.body)}
+      {anchor &&
+        createPortal(
+          <CardPreview card={card} anchor={anchor} />,
+          document.body,
+        )}
     </div>
   );
 }
 
-function CardPreview({ card, anchor }: { card: TierCard; anchor: PreviewAnchor }) {
+function trendGlyphStack(card: TierCard): string[] {
+  if (!card.trend) return [];
+  const char = TREND_GLYPH[card.trend];
+  return Array.from({ length: Math.min(trendSteps(card), 3) }, () => char);
+}
+
+function GradesPanel({ card }: { card: TierCard }) {
+  const comparison = useContext(ComparisonContext);
+  const graders = card.graders ?? [];
+  if (comparison && graders.length > 0) {
+    return (
+      <div className="flex items-stretch px-3 py-2.5">
+        {graders.map((grade) => (
+          <GradeCell key={grade.name} caption={grade.name} tier={grade.tier} />
+        ))}
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-stretch px-3 py-2.5">
+      <GradeCell caption="Set review" tier={card.trend_from ?? card.tier} />
+      {card.trend ? (
+        <GradeCell caption="Updated" tier={card.tier} trendCard={card} />
+      ) : (
+        graders.length > 0 && (
+          <span className="grid flex-1 grid-cols-[auto_auto] content-center items-center justify-center gap-x-4 gap-y-1.5">
+            {graders.map((grade) => (
+              <Fragment key={grade.name}>
+                <span
+                  className={cn(
+                    "text-[13px] font-semibold leading-none text-white",
+                    TEXT_OUTLINE,
+                  )}
+                >
+                  {grade.name}
+                </span>
+                <span
+                  className={cn(
+                    "justify-self-start font-display text-[17px] leading-none",
+                    TEXT_OUTLINE,
+                  )}
+                  style={{ color: tierColor(grade.tier) }}
+                >
+                  {grade.tier}
+                </span>
+              </Fragment>
+            ))}
+          </span>
+        )
+      )}
+    </div>
+  );
+}
+
+function GradeCell({
+  caption,
+  tier,
+  trendCard,
+}: {
+  caption: string;
+  tier: string;
+  trendCard?: TierCard;
+}) {
+  const stack = trendCard?.trend ? trendGlyphStack(trendCard) : [];
+  return (
+    <span className="flex flex-1 flex-col items-center gap-2">
+      <span
+        className={cn(
+          "text-[12px] font-semibold uppercase tracking-[0.1em] leading-none text-white",
+          TEXT_OUTLINE,
+        )}
+      >
+        {caption}
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span
+          className={cn("font-display text-[26px] leading-none", TEXT_OUTLINE)}
+          style={{ color: tierColor(tier) }}
+        >
+          {tier}
+        </span>
+        {trendCard?.trend && (
+          <span
+            className={cn("flex flex-col items-center", TEXT_OUTLINE)}
+            style={{ color: TREND_COLOR[trendCard.trend] }}
+          >
+            {stack.map((char, i, arr) => (
+              <span
+                key={i}
+                className={cn("text-[11px] leading-none", i > 0 && "-mt-[5px]")}
+                style={{ zIndex: arr.length - i }}
+              >
+                {char}
+              </span>
+            ))}
+          </span>
+        )}
+      </span>
+    </span>
+  );
+}
+
+export function CardPreview({
+  card,
+  anchor,
+}: {
+  card: TierCard;
+  anchor: PreviewAnchor;
+}) {
   const g = PREVIEW_GAP;
-  const triangle = anchor.below ? `M0 ${g} L11 0 L22 ${g} Z` : `M0 0 L11 ${g} L22 0 Z`;
+  const triangle = anchor.onRight
+    ? `M${g} 0 L0 11 L${g} 22 Z`
+    : `M0 0 L${g} 11 L0 22 Z`;
+  const triangleInner = anchor.onRight
+    ? `M${g} 1.4 L1.6 11 L${g} 20.6 Z`
+    : `M0 1.4 L${g - 1.6} 11 L0 20.6 Z`;
   return (
     <div
       className="pointer-events-none fixed z-[100]"
-      style={{ left: anchor.left, width: PREVIEW_W, ...(anchor.below ? { top: anchor.edge } : { bottom: anchor.edge }) }}
+      style={{ left: anchor.left, top: anchor.top, width: PREVIEW_W }}
     >
       <svg
-        width="22"
-        height={g}
-        viewBox={`0 0 22 ${g}`}
-        className="absolute"
-        style={anchor.below ? { top: -(g - 1), left: anchor.arrowLeft - 11 } : { bottom: -(g - 1), left: anchor.arrowLeft - 11 }}
+        width={g}
+        height="22"
+        viewBox={`0 0 ${g} 22`}
+        className="absolute z-10"
+        style={{
+          top: anchor.arrowTop - 11,
+          ...(anchor.onRight ? { left: -(g - 1) } : { right: -(g - 1) }),
+        }}
       >
-        <path d={triangle} fill="#3b4458" />
+        <path d={triangle} fill="#fff" fillOpacity="0.6" />
+        <path d={triangleInner} fill={PREVIEW_MAT} />
       </svg>
-      <div className={cn("flex flex-col overflow-hidden rounded-lg border border-border2 bg-surface shadow-2xl", !anchor.below && "flex-col-reverse")}>
-        <img src={card.url} alt="" className="w-full" />
-        {card.comment && <p className="whitespace-pre-line px-2.5 py-2 text-[12px] leading-snug text-text">{card.comment}</p>}
+      <div
+        className="flex flex-col rounded-xl border border-white/60 p-[6px] shadow-2xl"
+        style={{ backgroundColor: PREVIEW_MAT }}
+      >
+        <GradesPanel card={card} />
+        <img src={card.url} alt="" className="w-full rounded-[10px]" />
+        {card.comment && (
+          <p className="whitespace-pre-line px-3 py-2.5 text-center text-[14px] leading-snug text-text">
+            {card.comment}
+          </p>
+        )}
       </div>
     </div>
   );
 }
 
-function CardModal({ card, onClose }: { card: TierCard; onClose: () => void }) {
+export function CardModal({
+  card,
+  onClose,
+  onPrev,
+  onNext,
+  position,
+}: {
+  card: TierCard;
+  onClose: () => void;
+  onPrev?: () => void;
+  onNext?: () => void;
+  position?: string;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "ArrowLeft") onPrev?.();
+      else if (e.key === "ArrowRight") onNext?.();
+      else if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onPrev, onNext, onClose]);
+
   return (
     <div
-      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 p-6"
+      className="fixed inset-0 z-[200] flex items-start justify-center bg-black/70 p-6 pt-[max(24px,calc((100dvh-620px)/2))]"
       onClick={(e) => {
         e.stopPropagation();
         onClose();
       }}
     >
       <div
-        className="w-full max-w-[320px] overflow-hidden rounded-xl border border-border2 bg-surface shadow-2xl"
+        className="w-full max-w-[320px] rounded-xl border border-white/60 p-[6px] shadow-2xl"
+        style={{ backgroundColor: PREVIEW_MAT }}
         onClick={(e) => e.stopPropagation()}
       >
-        <img src={card.url} alt={card.name} className="w-full" />
+        <GradesPanel card={card} />
+        <img src={card.url} alt={card.name} className="w-full rounded-[10px]" />
+        <div
+          className={cn(
+            "flex items-center justify-between px-3 py-3.5",
+            !card.comment && "-mb-[6px]",
+          )}
+        >
+          <ModalNavButton label="Previous card" dir="prev" onClick={onPrev} />
+          {position && (
+            <span className="mono text-[12px] tracking-[0.1em] text-white/70">
+              {position}
+            </span>
+          )}
+          <ModalNavButton label="Next card" dir="next" onClick={onNext} />
+        </div>
         {card.comment && (
-          <p className="whitespace-pre-line px-3 py-2.5 text-[13px] leading-snug text-text">{card.comment}</p>
+          <p className="-mx-[6px] -mb-[6px] whitespace-pre-line border-t border-white/60 px-3 py-3.5 text-center text-[14px] leading-snug text-text">
+            {card.comment}
+          </p>
         )}
       </div>
     </div>
+  );
+}
+
+function ModalNavButton({
+  label,
+  dir,
+  onClick,
+}: {
+  label: string;
+  dir: "prev" | "next";
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!onClick}
+      aria-label={label}
+      className={cn(
+        "flex h-9 w-9 items-center justify-center rounded border border-white/40 text-text transition-colors",
+        onClick ? "hover:bg-white/10" : "opacity-30",
+      )}
+    >
+      <svg
+        width="15"
+        height="15"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d={dir === "prev" ? "M15 18l-6-6 6-6" : "M9 6l6 6 -6 6"} />
+      </svg>
+    </button>
   );
 }

@@ -30,10 +30,8 @@ EVERGREEN = MediaSet("EVG", "Evergreen")
 # YouTube playlist / episode-title phrasing so playlist- and title-based tagging resolve them.
 _EXTRA_MEDIA_SETS: tuple[MediaSet, ...] = (
     MediaSet("NEO", "Kamigawa: Neon Dynasty", start_date=date(2022, 2, 10)),
-    MediaSet("SNC", "Streets of New Capenna", start_date=date(2022, 4, 28)),
+    MediaSet("SNC", "Streets of New Capenna", aliases=("new capenna",), start_date=date(2022, 4, 28)),
     MediaSet("MH3", "Modern Horizons 3", start_date=date(2024, 6, 11)),
-    MediaSet("SPM", "Marvel's Spider-Man", aliases=("spider-man", "spiderman", "through the omenpaths"),
-             start_date=date(2025, 9, 26)),
     MediaSet("PIO", "Pioneer Masters", start_date=date(2024, 12, 10)),
     MediaSet("ZNR", "Zendikar Rising", aliases=("zendikar rising", "zendikar"), start_date=date(2020, 9, 17)),
     MediaSet("THB", "Theros Beyond Death", aliases=("theros beyond death", "theros", "thb"),
@@ -65,6 +63,7 @@ _ALIASES_BY_CODE: dict[str, tuple[str, ...]] = {
     "OTJ": ("thunder junction",),
     "MKM": ("karlov manor",),
     "SNC": ("new capenna",),
+    "SPM": ("spider-man", "spiderman", "through the omenpaths"),
     "TMT": ("ninja turtles", "tmnt"),
     "LCI": ("lost caverns of ixalan", "lost caverns"),
 }
@@ -83,10 +82,18 @@ _PLAYLIST_SUFFIXES: tuple[str, ...] = (
 )
 
 
-def resolve_set(playlists: list[str], title: str) -> MediaSet:
+def resolve_set(playlists: list[str], title: str, published: date | None = None) -> MediaSet:
     """The title names the episode's own subject; playlists are the fallback for generically
     titled videos, and can cross-list one episode under several sets, so the title wins."""
-    return _from_title(title) or _from_playlists(playlists) or EVERGREEN
+    media_set = _from_title(title) or _from_playlists(playlists) or EVERGREEN
+    # "Strixhaven" is shared by STX (2021) and SOS (2026) — 2026 content is Secrets of Strixhaven
+    if media_set.code == "STX" and published is not None and published.year >= 2026:
+        return _BY_CODE["SOS"]
+    return media_set
+
+
+def by_code(code: str) -> MediaSet:
+    return _BY_CODE[code]
 
 
 def display_name(code: str | None) -> str:

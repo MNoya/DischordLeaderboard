@@ -37,6 +37,7 @@ ALL_SETS: tuple[SetSeed, ...] = (
     SetSeed("TDM", "Tarkir: Dragonstorm", date(2025, 4, 8), date(2025, 6, 8)),
     SetSeed("FIN", "Final Fantasy", date(2025, 6, 9), date(2025, 7, 28)),
     SetSeed("EOE", "Edge of Eternities", date(2025, 7, 29), date(2025, 9, 23)),
+    SetSeed("SPM", "Marvel's Spider-Man", date(2025, 9, 23), date(2025, 11, 15), expansion_match="OM1"),
     SetSeed("CUBE", "Arena Powered Cube", date(2025, 10, 28), None, expansion_match="Cube - Powered"),
     SetSeed("TLA", "Avatar: The Last Airbender", date(2025, 11, 16), date(2026, 1, 19)),
     SetSeed("ECL", "Lorwyn Eclipsed", date(2026, 1, 20), date(2026, 3, 2)),

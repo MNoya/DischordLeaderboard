@@ -1,5 +1,7 @@
 import React from "react";
 import { keyruneClass, setGlyphCode, SetGlyph } from "./Brand";
+import { ChevronDown } from "./Icons";
+import { FilterDropdown, type FilterOption } from "./FilterDropdown";
 import { cn } from "../lib/utils";
 import { useSetVisibleCap } from "../lib/use-is-mobile";
 import type { SetSummary } from "../types/leaderboard";
@@ -69,9 +71,7 @@ export function SetSwitcherDesktop({
           onHover={onPrefetch ? () => onPrefetch(s.code) : undefined}
         />
       ))}
-      {overflow.length > 0 && (
-        <SetOverflow sets={overflow} activeCode={activeCode} onChange={onChange} onPrefetch={onPrefetch} />
-      )}
+      {overflow.length > 0 && <SetOverflow sets={overflow} activeCode={activeCode} onChange={onChange} />}
     </div>
   );
 }
@@ -124,78 +124,52 @@ function SetOverflow({
   sets,
   activeCode,
   onChange,
-  onPrefetch,
 }: {
   sets: SetSummary[];
   activeCode: string;
   onChange: (code: string) => void;
-  onPrefetch?: (code: string) => void;
 }) {
-  const [open, setOpen] = React.useState(false);
-  const ref = React.useRef<HTMLDivElement>(null);
-
-  React.useEffect(() => {
-    if (!open) return;
-    const onClickOutside = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onClickOutside);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onClickOutside);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
+  const options: FilterOption[] = sets.map((s) => ({ value: s.code, label: s.name }));
+  const renderOption = (option: FilterOption) => {
+    const set = sets.find((s) => s.code === option.value);
+    return (
+      <span className="flex w-full min-w-0 items-center gap-3">
+        <SetGlyph code={set ? setGlyphCode(set) : option.value} size={22} />
+        <span className="text-[20px] leading-none">{option.value}</span>
+        <span className="text-muted text-[13px] tracking-[0.06em] truncate">{option.label}</span>
+      </span>
+    );
+  };
   return (
-    <div ref={ref} className="relative">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="group block cursor-pointer transition-colors"
-        style={{
-          clipPath: CHAMFER,
-          background: "#3b4458",
-          padding: 1,
-          minHeight: 42,
-        }}
-      >
-        <span
-          className="flex items-center gap-2 min-w-[98px] pl-[17px] pr-[21px] font-display transition-colors h-full bg-surface text-text group-hover:bg-surface2"
-          style={{ clipPath: CHAMFER, minHeight: 40 }}
+    <FilterDropdown
+      value={activeCode}
+      options={options}
+      onChange={onChange}
+      align="right"
+      searchable
+      renderOption={renderOption}
+      renderTrigger={({ open, toggle }) => (
+        <button
+          type="button"
+          onClick={toggle}
+          className="group block cursor-pointer transition-colors"
+          style={{ clipPath: CHAMFER, background: "#3b4458", padding: 1, minHeight: 42 }}
         >
-          <span className="text-[20px] tracking-[0.06em] leading-none">
-            +{sets.length} {sets.length === 1 ? "SET" : "SETS"}
+          <span
+            className="flex items-center gap-2 min-w-[98px] pl-[17px] pr-[21px] font-display transition-colors h-full bg-surface text-text group-hover:bg-surface2"
+            style={{ clipPath: CHAMFER, minHeight: 40 }}
+          >
+            <span className="text-[20px] tracking-[0.06em] leading-none">
+              +{sets.length} {sets.length === 1 ? "SET" : "SETS"}
+            </span>
+            <ChevronDown
+              strokeWidth={2.5}
+              className={cn("text-muted h-4 w-4 transition-transform", open && "rotate-180")}
+            />
           </span>
-          <span className="text-muted text-[12px] leading-none">▾</span>
-        </span>
-      </button>
-      {open && (
-        <div className="absolute right-0 top-[calc(100%+4px)] w-max bg-surface border border-border2 z-20">
-          {sets.map((s) => (
-            <button
-              key={s.code}
-              onClick={() => {
-                onChange(s.code);
-                setOpen(false);
-              }}
-              onMouseEnter={onPrefetch ? () => onPrefetch(s.code) : undefined}
-              onFocus={onPrefetch ? () => onPrefetch(s.code) : undefined}
-              className={cn(
-                "w-full py-[11px] px-3.5 flex items-center gap-3 border-b border-border text-text font-display tracking-[0.06em] cursor-pointer text-left transition-colors",
-                s.code === activeCode ? "bg-surface2" : "bg-transparent hover:bg-surface2",
-              )}
-            >
-              <SetGlyph code={setGlyphCode(s)} size={22} />
-              <span className="text-[20px] leading-none">{s.code}</span>
-              <span className="text-muted text-[13px] tracking-[0.06em] whitespace-nowrap">{s.name}</span>
-            </button>
-          ))}
-        </div>
+        </button>
       )}
-    </div>
+    />
   );
 }
 
@@ -243,7 +217,10 @@ export function SetSwitcherMobile({
           <span className="text-muted text-[10px] tracking-[0.18em]">· LIVE</span>
         )}
         <span className="flex-1" />
-        <span className="text-muted text-[10px]">▾</span>
+        <ChevronDown
+          strokeWidth={2.5}
+          className={cn("text-muted h-3.5 w-3.5 transition-transform", open && "rotate-180")}
+        />
       </button>
       {open && (
         <div className="absolute left-0 right-0 top-[calc(100%+4px)] bg-surface border border-border2 z-20">

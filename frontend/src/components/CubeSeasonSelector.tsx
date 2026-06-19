@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { SetGlyph } from "./Brand";
+import { ChevronDown } from "./Icons";
 import { CUBE_BASE, CUBE_LIFETIME, isCubeSeasonCode } from "../data/utils";
 import { cn } from "../lib/utils";
 import type { CubeSeason } from "../types/leaderboard";
@@ -66,7 +67,10 @@ export function CubeSeasonSelector({
         <SetGlyph code={selected.glyph} size={hero ? 22 : 20} />
         <span className={cn(hero ? "text-text" : "")}>{selected.label}</span>
         {!hero && <span className="flex-1" />}
-        <span className={cn("leading-none", hero ? "text-[11px]" : "text-[9px]")}>{open ? "▴" : "▾"}</span>
+        <ChevronDown
+          strokeWidth={2.5}
+          className={cn("transition-transform", hero ? "h-3.5 w-3.5" : "h-3 w-3", open && "rotate-180")}
+        />
       </button>
 
       {open && (
