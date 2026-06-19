@@ -176,7 +176,7 @@ def refresh_player(
     }
 
 
-def claim_orphan_drafts(session: Session, magic_set: MagicSet) -> set[str]:
+def claim_orphan_drafts(session: Session, magic_set: MagicSet, expansion_alias: str | None = None) -> set[str]:
     """Attach unrouted ``draft_events`` rows to ``magic_set`` when their expansion now matches.
 
     Run this after adding a set to ``bot/sets.py`` (and seeding it). Returns
@@ -185,8 +185,17 @@ def claim_orphan_drafts(session: Session, magic_set: MagicSet) -> set[str]:
 
     Match rule mirrors the ingest path: ``magic_set.code`` substring of the
     normalized expansion. ``expansion_match`` aliases are normalized at ingest,
-    so by the time the row is here ``expansion`` already equals the canonical code.
+    so freshly ingested rows already carry the canonical code. Rows ingested
+    before the alias existed still hold the raw 17lands string (``OM1`` for
+    SPM), so when ``expansion_alias`` is given they are normalized to the code
+    first, restoring the invariant and letting the substring claim pick them up.
     """
+    if expansion_alias is not None:
+        session.execute(
+            text("UPDATE draft_events SET expansion = :code WHERE set_id IS NULL AND expansion = :alias"),
+            {"code": magic_set.code, "alias": expansion_alias},
+        )
+
     affected = session.execute(
         select(DraftEvent.player_id).where(
             DraftEvent.set_id.is_(None),

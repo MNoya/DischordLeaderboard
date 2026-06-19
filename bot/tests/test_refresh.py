@@ -274,6 +274,22 @@ def test_claim_orphan_drafts_leaves_non_matching_orphans_alone(session):
     assert row.set_id is None
 
 
+def test_claim_orphan_drafts_normalizes_legacy_alias_rows(session):
+    """A row ingested before its alias existed (raw alias string, no code match) is normalized and claimed."""
+    ecl = _seed_set(session, code="ECL")
+    p = _seed_player(session)
+    bulk_upsert_draft_events(session, p.id, [_draft("a", expansion="RAWALIAS")], [ecl])
+    session.flush()
+
+    canon = _seed_set(session, code="CANON", start_date=date(2026, 7, 1))
+    affected = claim_orphan_drafts(session, canon, expansion_alias="RAWALIAS")
+
+    [row] = session.execute(select(DraftEvent)).scalars().all()
+    assert row.set_id == canon.id
+    assert row.expansion == "CANON"
+    assert affected == {p.id}
+
+
 # ---------------------------------------------------------------------------
 # refresh_player
 # ---------------------------------------------------------------------------

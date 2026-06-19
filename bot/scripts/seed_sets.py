@@ -58,8 +58,8 @@ def main() -> None:
         seeded_sets = [(seed, upsert_set(session, seed)) for seed in ALL_SETS]
         session.commit()
 
-        for _, magic_set in seeded_sets:
-            affected_players = claim_orphan_drafts(session, magic_set)
+        for seed, magic_set in seeded_sets:
+            affected_players = claim_orphan_drafts(session, magic_set, seed.expansion_match)
             if not affected_players:
                 continue
             log.info(f"claiming orphan drafts for {magic_set.code}: {len(affected_players)} player(s)")
