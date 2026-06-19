@@ -163,7 +163,7 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
                 />
               </div>
             )}
-            {(!isPastDeadline || hasParticipated) && (
+            {!isPastDeadline && (
               <div className="sticky top-0 z-20 -mx-3 px-2 pt-3 pb-2 bg-bg/95 backdrop-blur border-b border-border">
                 <SectionLabel size={11} className="mb-1.5 text-white">YOUR PICKS</SectionLabel>
                 <div className="grid grid-cols-4 landscape:grid-cols-8 gap-1.5">
@@ -176,7 +176,7 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
                         key={slot.key}
                         slot={slot}
                         card={cardName ? cardsByName.get(cardName) : undefined}
-                        active={!isPastDeadline && activeSlotKey === slot.key}
+                        active={activeSlotKey === slot.key}
                         yourStat={yourStat}
                         slotStats={slotStats}
                         n={n}
@@ -185,6 +185,13 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
                     );
                   })}
                 </div>
+              </div>
+            )}
+
+            {isPastDeadline && hasParticipated && (
+              <div className="mb-3">
+                <SectionLabel size={18} className="mb-2 text-white">YOUR PICKS</SectionLabel>
+                <YourPicksCarousel picksBySlot={picksBySlot} cardsByName={cardsByName} groupedStats={groupedStats} n={n} />
               </div>
             )}
 
@@ -305,6 +312,78 @@ function MobileChip({
         </div>
       )}
     </button>
+  );
+}
+
+function YourPicksCarousel({
+  picksBySlot,
+  cardsByName,
+  groupedStats,
+  n,
+}: {
+  picksBySlot: Map<string, string>;
+  cardsByName: Map<string, Card>;
+  groupedStats: Map<SlotKey, P0P1PickStat[]> | undefined;
+  n: number;
+}) {
+  return (
+    <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1" style={{ scrollSnapType: "x mandatory" }}>
+      {SLOTS.map((slot) => {
+        const cardName = picksBySlot.get(slot.key);
+        const card = cardName ? cardsByName.get(cardName) : undefined;
+        const slotStats = groupedStats?.get(slot.key);
+        const yourStat = cardName && slotStats ? slotStats.find((s) => s.cardName === cardName) : undefined;
+        let classification: ReturnType<typeof classifyYourPick> | undefined;
+        if (yourStat && slotStats) {
+          const { most, least } = findExtremes(slotStats);
+          classification = classifyYourPick(yourStat, most, least);
+        }
+        const stateColor = classification?.state === "most"
+          ? "text-cyan"
+          : classification?.state === "rogue"
+          ? "text-magenta"
+          : "text-white";
+
+        return (
+          <div
+            key={slot.key}
+            className="shrink-0 w-[122px] border border-border2 bg-surface overflow-hidden rounded-lg"
+            style={{ scrollSnapAlign: "start" }}
+          >
+            <div className="relative bg-surface2 overflow-hidden" style={{ aspectRatio: "3 / 4" }}>
+              {card ? (
+                <img src={card.imageArtCrop} alt="" className="w-full h-full object-cover" />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center">
+                  <SlotPip slotKey={slot.key} size={24} />
+                </div>
+              )}
+              <div
+                className="absolute top-1 left-1 w-5 h-5 rounded-full flex items-center justify-center bg-bg/85"
+                title={slot.label}
+              >
+                <SlotPip slotKey={slot.key} size={12} />
+              </div>
+            </div>
+            <div className="px-1.5 pt-1.5 pb-2">
+              <span className="text-text text-[11px] truncate block mb-1">{card?.name ?? slot.label}</span>
+              {yourStat && classification && (
+                <div className="flex items-baseline justify-between gap-1">
+                  <span className={`font-mono tabular-nums text-[15px] font-semibold ${stateColor}`}>
+                    {yourStat.pickCount}
+                  </span>
+                  {classification.qualifier && (
+                    <span className={`text-[7px] tracking-[0.06em] font-display text-right ${stateColor}`}>
+                      {classification.qualifier}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
