@@ -42,7 +42,7 @@ export function EpisodeThumbnail({
       {showSkeleton ? (
         <div className="absolute inset-0 flex items-center justify-center overflow-hidden bg-surface">
           <img src={LLU_LOGO_SRC} alt="" className={cn(skeletonLogoClass, "opacity-[0.06] grayscale-[0.6]")} />
-          <div className="pointer-events-none absolute inset-0 animate-[thumbSweep_1.8s_ease-in-out_infinite] bg-[linear-gradient(100deg,transparent_25%,rgba(255,255,255,0.13)_50%,transparent_75%)]" />
+          <div className="pointer-events-none absolute inset-0 animate-[thumbSweep_1.8s_ease-in-out_-0.64s_infinite] bg-[linear-gradient(100deg,transparent_25%,rgba(255,255,255,0.13)_50%,transparent_75%)]" />
         </div>
       ) : null}
       {showBranded ? (
