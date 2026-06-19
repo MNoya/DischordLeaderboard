@@ -1,156 +1,144 @@
-import type { ReactNode } from "react";
-import { SiDiscord, SiYoutube } from "react-icons/si";
-import { FaPodcast } from "react-icons/fa6";
-import type { IconType } from "react-icons";
+import { Mic } from "lucide-react";
 import { PageShell } from "../components/PageShell";
 import { Container } from "../components/Container";
-import { DiscordBand } from "../components/DiscordBand";
-import { HostCard } from "../components/HostCard";
-import { PlatformCard } from "../components/PlatformCard";
-import { ArrowRight } from "../components/Icons";
+import { ChamferCta } from "../components/ChamferCta";
+import { DiscordIcon } from "../components/BrandIcons";
+import { CommunityHeading, HostBlock, EventCard, SectionPanel, ShowTopics, SupportCard } from "../components/CommunityBits";
 import {
-  COMMUNITY_PLATFORMS,
-  COMMUNITY_STATS,
-  CONTACT_EMAIL,
-  HOSTS,
-  SHOW_FORMAT,
-  SITE_BLURB,
-  SITE_LINKS,
-} from "../data/site";
-
-const PILLARS: Array<{ name: string; blurb: string; Icon: IconType; url: string }> = [
-  {
-    name: "YouTube",
-    blurb: "Every episode in video, plus draft-along gameplay and set-review breakdowns.",
-    Icon: SiYoutube,
-    url: SITE_LINKS.youtube,
-  },
-  {
-    name: "Podcast",
-    blurb: "A weekly deep-dive on the live format — listen on Apple, Spotify, or any app.",
-    Icon: FaPodcast,
-    url: SITE_LINKS.apple,
-  },
-  {
-    name: "Discord",
-    blurb: "Where the community lives — drafts, deck checks, trophies, and the leaderboard.",
-    Icon: SiDiscord,
-    url: SITE_LINKS.discord,
-  },
-];
+  COMMUNITY_DISCORD_HEADING,
+  COMMUNITY_EVENTS,
+  COMMUNITY_HIGHLIGHTS,
+  COMMUNITY_INTRO_PARAGRAPHS,
+  COMMUNITY_SHOW_NOTE,
+  COMMUNITY_SHOW_TOPICS,
+  useCommunityStats,
+} from "../data/community";
+import { HOSTS, SITE_LINKS } from "../data/site";
 
 export function CommunityPage() {
+  const { members, online } = useCommunityStats();
+
   return (
     <PageShell subtitle="COMMUNITY">
-      <DiscordBand />
+      <section
+        className="border-b border-border"
+        style={{ background: "linear-gradient(180deg, #14181f 0%, #0a0c10 100%)" }}
+      >
+        <Container className="pt-4 pb-10 md:py-10">
+          <div className="flex flex-col items-center gap-10 lg:flex-row lg:items-center lg:justify-between lg:gap-12 xl:max-w-[1600px] xl:pr-6">
+            <div className="flex flex-col gap-6 max-w-[600px] mx-auto text-center lg:text-left lg:mx-0">
+              <h1 className="font-display text-text text-[34px] md:text-[48px] leading-[1.02] tracking-[0.01em]">
+                {COMMUNITY_DISCORD_HEADING}
+              </h1>
+              <div className="flex flex-col gap-4">
+                {COMMUNITY_INTRO_PARAGRAPHS.map((paragraph) => (
+                  <p key={paragraph.slice(0, 16)} className="text-subtle text-[15px] md:text-[16px] leading-[1.7]">
+                    {highlightBrand(paragraph)}
+                  </p>
+                ))}
+              </div>
+            </div>
+            <div className="flex flex-col items-center gap-8 shrink-0 xl:contents">
+              <div className="flex flex-col items-center gap-4 shrink-0">
+                <ChamferCta
+                  label="JOIN THE DISCHORD"
+                  href={SITE_LINKS.discord}
+                  target="_blank"
+                  size="lg"
+                  grow
+                  className="whitespace-nowrap"
+                  icon={
+                    <span className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-bg text-white shrink-0">
+                      <DiscordIcon size={20} />
+                    </span>
+                  }
+                />
+                <MemberCount members={members} online={online} />
+              </div>
+              <div className="shrink-0 flex justify-center">
+                <ul className="inline-flex flex-col gap-4">
+                  {COMMUNITY_HIGHLIGHTS.map((highlight) => (
+                    <li key={highlight.text} className="flex items-center gap-3 text-subtle text-[15px] leading-[1.4]">
+                      <highlight.Icon size={18} strokeWidth={2} className="shrink-0 text-muted" />
+                      {highlight.text}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </div>
+        </Container>
+      </section>
 
-      <Container className="pt-12 md:pt-16">
-        <Heading>What is Limited Level-Ups?</Heading>
-        <p className="text-muted text-[15px] md:text-[16px] leading-[1.7] max-w-[760px]">{SITE_BLURB}</p>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-7">
-          {PILLARS.map((pillar) => (
-            <a
-              key={pillar.name}
-              href={pillar.url}
-              target="_blank"
-              rel="noreferrer"
-              className="group bg-surface border border-border p-5 no-underline transition-colors hover:border-green"
-            >
-              <span className="inline-flex h-10 w-10 items-center justify-center border border-border2 text-subtle transition-colors group-hover:border-green group-hover:text-green">
-                <pillar.Icon className="text-[18px]" size={18} />
-              </span>
-              <div className="font-display text-text text-[19px] tracking-[0.04em] mt-3.5">{pillar.name}</div>
-              <p className="text-muted text-[13px] leading-[1.6] mt-1.5">{pillar.blurb}</p>
-            </a>
+      <Container className="pt-10 md:pt-12">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {COMMUNITY_EVENTS.map((event) => (
+            <EventCard key={event.to} event={event} />
           ))}
         </div>
       </Container>
 
-      <Container className="pt-12 md:pt-16">
-        <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-8 lg:gap-12 items-start">
-          <div>
-            <Heading>Meet the hosts</Heading>
-            <div className="flex flex-col gap-4">
-              {HOSTS.map((host) => (
-                <HostCard key={host.handle} host={host} />
-              ))}
+      <Container className="pt-6 md:pt-8 pb-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <SectionPanel title="THE SHOW" icon={<Mic size={30} />}>
+            <p className="text-subtle text-[14.5px] leading-[1.7] mb-5">{COMMUNITY_SHOW_NOTE}</p>
+            <ShowTopics topics={COMMUNITY_SHOW_TOPICS} />
+            <div className="mt-6 pt-6 border-t border-border">
+              <CommunityHeading>SUPPORT</CommunityHeading>
+              <div className="mt-4">
+                <SupportCard />
+              </div>
             </div>
-          </div>
-          <div>
-            <Heading>How the show works</Heading>
-            <div className="bg-surface border border-border px-5 py-2">
-              {SHOW_FORMAT.map((f) => (
-                <div key={f.name} className="flex items-baseline gap-2 py-2.5 border-b border-border last:border-b-0">
-                  <span className="font-display text-text text-[15px] tracking-[0.04em] shrink-0">{f.name}</span>
-                  <span className="flex-1 border-b border-dotted border-dim relative -top-1" />
-                  <span className="text-muted text-[13px] shrink-0">{f.blurb}</span>
-                </div>
-              ))}
-            </div>
-          </div>
+          </SectionPanel>
+          <SectionPanel title="THE HOSTS">
+            {HOSTS.map((host, i) => (
+              <div key={host.handle} className={i > 0 ? "border-t border-border pt-5 mt-5" : undefined}>
+                <HostBlock host={host} />
+              </div>
+            ))}
+          </SectionPanel>
         </div>
       </Container>
 
-      <Container className="pt-12 md:pt-16 pb-4">
-        <Heading>Find us everywhere</Heading>
-        <p className="text-muted text-[14px] -mt-1 mb-5 max-w-[680px]">
-          Discord is the primary hangout — but the show has a footprint across every platform.
-        </p>
-        <div className="grid grid-cols-1 lg:grid-cols-[1.5fr_1fr] gap-5 items-start">
-          <div className="flex flex-col gap-4">
-            {COMMUNITY_PLATFORMS.map((platform) => (
-              <PlatformCard key={platform.key} platform={platform} />
-            ))}
-          </div>
-          <div className="flex flex-col gap-5">
-            <SideCard title="Support the show">
-              <p className="text-muted text-[13px] leading-[1.6]">
-                Limited Level-Ups is listener-supported. {COMMUNITY_STATS.patreonSupporters} patrons keep new episodes
-                coming every week, with bonus content and a patron-only Discord role from $4/month.
-              </p>
-              <a
-                href={SITE_LINKS.patreon}
-                target="_blank"
-                rel="noreferrer"
-                className="self-start mt-4 inline-flex items-center gap-1.5 font-display tracking-[0.1em] text-[13px] text-green no-underline hover:text-green-2 transition-colors"
-              >
-                Become a patron <ArrowRight size={13} />
-              </a>
-            </SideCard>
-            <SideCard title="Get in touch">
-              <p className="text-muted text-[13px] leading-[1.6]">
-                For coaching or business inquiries, email{" "}
-                <a href={SITE_LINKS.contact} className="text-green hover:underline underline-offset-2">
-                  {CONTACT_EMAIL}
-                </a>
-                . For everything else, the{" "}
-                <a
-                  href={SITE_LINKS.discord}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-green hover:underline underline-offset-2"
-                >
-                  Discord
-                </a>{" "}
-                is the fastest way to reach the community.
-              </p>
-            </SideCard>
-          </div>
-        </div>
-      </Container>
     </PageShell>
   );
 }
 
-function Heading({ children }: { children: ReactNode }) {
-  return <h2 className="font-display text-text text-[22px] md:text-[26px] tracking-[0.05em] mb-4">{children}</h2>;
+function highlightBrand(text: string) {
+  return text.split(/(Limited Level-Ups|level up your game)/g).map((part, i) => {
+    if (part === "Limited Level-Ups") {
+      return (
+        <span key={i} className="text-green font-medium">
+          {part}
+        </span>
+      );
+    }
+    if (part === "level up your game") {
+      return (
+        <strong key={i} className="text-text font-semibold">
+          {part}
+        </strong>
+      );
+    }
+    return part;
+  });
 }
 
-function SideCard({ title, children }: { title: string; children: ReactNode }) {
+function MemberCount({ members, online }: { members?: number; online?: number }) {
+  if (members == null) {
+    return null;
+  }
   return (
-    <section className="bg-surface border border-border p-5 flex flex-col">
-      <div className="font-display text-text text-[17px] tracking-[0.04em] mb-2.5">{title}</div>
-      {children}
-    </section>
+    <div className="mono text-[12px] tracking-[0.12em] text-muted flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
+      <span>
+        <span className="text-text">{members.toLocaleString()}</span> MEMBERS
+      </span>
+      {online != null ? (
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-1.5 w-1.5 rounded-full bg-green" />
+          {online.toLocaleString()} ONLINE NOW
+        </span>
+      ) : null}
+    </div>
   );
 }

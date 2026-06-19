@@ -3,7 +3,8 @@ import { ChamferCta } from "./ChamferCta";
 import { SectionLabel } from "./SectionLabel";
 import { DiscordIcon } from "./BrandIcons";
 import { useDiscordStats } from "../data/hooks";
-import { DISCORD_BLURB, SITE_LINKS } from "../data/site";
+import { COMMUNITY_DISCORD_PITCH } from "../data/community";
+import { SITE_LINKS } from "../data/site";
 
 // The "join the Discord" call-to-action band on the community page
 export function DiscordBand() {
@@ -20,7 +21,7 @@ export function DiscordBand() {
           <h2 className="font-display text-text text-[30px] md:text-[40px] leading-[1.05] tracking-[0.01em] mt-2">
             The Limited Level-Ups <span className="text-green">Discord</span>
           </h2>
-          <p className="text-subtle text-[14px] md:text-[15px] leading-[1.6] max-w-[560px] mt-3">{DISCORD_BLURB}</p>
+          <p className="text-subtle text-[14px] md:text-[15px] leading-[1.6] max-w-[560px] mt-3">{COMMUNITY_DISCORD_PITCH}</p>
           {stats ? (
             <div className="mono text-[11px] tracking-[0.14em] text-muted mt-4 flex flex-wrap items-center gap-x-2 gap-y-1">
               <span className="text-subtle">{stats.memberCount.toLocaleString()}</span> MEMBERS

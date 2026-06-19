@@ -13,6 +13,17 @@ const CATEGORY_STYLE: Record<EpisodeCategory, string> = {
   Evergreen: "bg-green text-bg",
 };
 
+export const CATEGORY_COLOR: Record<EpisodeCategory, string> = {
+  "Set Review": "text-teal",
+  Draft: "text-red",
+  Sealed: "text-blue",
+  Rankings: "text-purple",
+  Metagame: "text-gold",
+  Coaching: "text-pink",
+  Guest: "text-orange",
+  Evergreen: "text-green",
+};
+
 export function CategoryTag({ category, className }: { category: EpisodeCategory; className?: string }) {
   return (
     <span

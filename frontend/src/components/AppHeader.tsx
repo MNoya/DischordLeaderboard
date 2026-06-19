@@ -107,9 +107,9 @@ export function AppHeader({ subtitle = "LEADERBOARD", fill = false }: { subtitle
       ref={headerRef}
       className={cn(
         "border-b border-border flex items-center justify-between bg-bg shrink-0 relative",
-        isMobile ? "py-1.5 px-3" : "py-4 pl-10 pr-6",
+        isMobile ? "py-1.5 px-3" : "py-4 pl-10 pr-10",
       )}
-      style={fill && !isMobile ? { paddingRight: "calc(1.5rem + var(--app-scrollbar, 0px))" } : undefined}
+      style={fill && !isMobile ? { paddingRight: "calc(2.5rem + var(--app-scrollbar, 0px))" } : undefined}
     >
       <Link
         ref={brandRef}
