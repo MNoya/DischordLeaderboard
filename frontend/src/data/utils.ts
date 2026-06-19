@@ -23,12 +23,20 @@ export function eventDate(e: { finishedAt: string | null; startedAt: string | nu
   return e.finishedAt ?? e.startedAt ?? "";
 }
 
+// The new set goes live the evening of its start date, so the changeover day still carries the old
+// set's drafts. Treat events as flashback only once a full day past the end date has elapsed.
 export function isFlashbackEvent(
   finishedAt: string | null | undefined,
   setEndDate: string | null | undefined,
 ): boolean {
   if (!finishedAt || !setEndDate) return false;
-  return finishedAt.slice(0, 10) > setEndDate;
+  return finishedAt.slice(0, 10) > dayAfter(setEndDate);
+}
+
+function dayAfter(isoDate: string): string {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
 }
 
 // Win percentage as a fixed-precision string, safe against zero-game players.
