@@ -5,7 +5,6 @@ import { useIsMobile } from "../lib/use-is-mobile";
 import {
   hasActiveFilters,
   isCardFilteredOut,
-  isCardTrendDimmed,
   TIER_ORDER,
   TREND_COLOR,
   TREND_GLYPH,
@@ -315,7 +314,6 @@ function DesktopGrid({
                         card={card}
                         mobile={false}
                         hideArt={hideArt}
-                        dimmed={isCardTrendDimmed(card, filters)}
                         onOpen={() => pager.open(card.card_id)}
                       />
                     ))}
@@ -384,7 +382,6 @@ function MobileTiers({
                         card={card}
                         mobile
                         hideArt={hideArt}
-                        dimmed={isCardTrendDimmed(card, filters)}
                         onOpen={() => pager.open(card.card_id)}
                       />
                     ))}
@@ -483,13 +480,11 @@ function CardBar({
   card,
   mobile,
   hideArt = false,
-  dimmed = false,
   onOpen,
 }: {
   card: TierCard;
   mobile: boolean;
   hideArt?: boolean;
-  dimmed?: boolean;
   onOpen?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -529,10 +524,7 @@ function CardBar({
         setAnchor(null);
         onOpen?.();
       }}
-      className={cn(
-        "relative min-[450px]:max-w-[300px] cursor-pointer rounded-[5px] border-l-4",
-        dimmed && "opacity-35 grayscale",
-      )}
+      className="relative min-[450px]:max-w-[300px] cursor-pointer rounded-[5px] border-l-4"
       style={{ borderLeftColor: accent }}
     >
       <div

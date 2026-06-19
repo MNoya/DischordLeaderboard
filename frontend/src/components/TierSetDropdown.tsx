@@ -2,7 +2,6 @@ import React from "react";
 import { SetGlyph, setGlyphCode } from "./Brand";
 import { ChevronDown, ChevronRight } from "./Icons";
 import { cn } from "../lib/utils";
-import { TIER_LIST_PREVIEW_SETS } from "../data/constants";
 import type { SetSummary } from "../types/leaderboard";
 
 export function TierSetDropdown({
@@ -16,7 +15,6 @@ export function TierSetDropdown({
   compact = false,
   menuAlign = "left",
   openOnHover = false,
-  square = false,
   triggerClassName,
 }: {
   sets: SetSummary[];
@@ -29,13 +27,13 @@ export function TierSetDropdown({
   compact?: boolean;
   menuAlign?: "left" | "right" | "center" | "side-right";
   openOnHover?: boolean;
-  square?: boolean;
   triggerClassName?: string;
 }) {
   const [open, setOpen] = React.useState(false);
   const [locked, setLocked] = React.useState(false);
   const [query, setQuery] = React.useState("");
   const ref = React.useRef<HTMLDivElement>(null);
+  const today = new Date().toISOString().slice(0, 10);
   const glyphSize = compact ? 20 : isMobile ? 26 : 38;
   const labelSize = compact ? "text-[18px]" : "text-[17px] md:text-[30px]";
   const chevronSize = compact ? "h-4 w-4" : "h-4 w-4 md:h-5 md:w-5";
@@ -110,24 +108,21 @@ export function TierSetDropdown({
         onClick={onButtonClick}
         aria-expanded={open}
         className={cn(
-          "group flex max-w-full min-w-0 items-center border transition-colors",
-          square ? "" : "rounded-md",
+          "group flex max-w-full min-w-0 items-center border border-border2 text-text transition-colors",
           compact ? "h-7 gap-1.5 px-2" : "gap-2 px-3 py-1.5 md:gap-3",
-          open
-            ? "border-green text-green"
-            : "border-border2 text-text",
-          hasOptions && !open && "cursor-pointer hover:border-green hover:text-green",
+          open && "bg-surface",
+          hasOptions && "cursor-pointer hover:bg-surface",
           triggerClassName,
         )}
       >
         <SetGlyph code={glyphCode} size={glyphSize} />
         <span className={cn("flex-1 min-w-0 truncate font-display tracking-[0.06em]", labelSize)}>{label}</span>
         {sideRight && open ? (
-          <ChevronRight strokeWidth={2.5} className={chevronSize} />
+          <ChevronRight strokeWidth={2.5} className={cn("text-muted", chevronSize)} />
         ) : (
           <ChevronDown
             strokeWidth={2.5}
-            className={cn("transition-transform", chevronSize, open && !sideRight && "rotate-180")}
+            className={cn("text-muted transition-transform", chevronSize, open && !sideRight && "rotate-180")}
           />
         )}
       </button>
@@ -136,7 +131,6 @@ export function TierSetDropdown({
         <div
           className={cn(
             "absolute z-30 flex max-h-[min(60vh,400px)] w-max max-w-[80vw] flex-col overflow-hidden border border-border2 bg-surface shadow-xl",
-            square ? "" : "rounded-md",
             menuAlign === "side-right"
               ? "left-full top-0"
               : menuAlign === "right"
@@ -153,12 +147,12 @@ export function TierSetDropdown({
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search sets…"
-                className="w-full rounded-sm border border-border bg-surface2 px-2 py-1 font-body text-[13px] text-text placeholder:text-muted outline-none focus:border-green"
+                className="w-full border border-border bg-bg px-2.5 py-1.5 font-body text-[14px] text-text placeholder:text-dim outline-none focus:border-green"
               />
             </div>
           )}
           <div className="menu-scrollbar min-h-0 flex-1 overflow-y-auto">
-            {filtered.map((s) => {
+            {filtered.map((s, i) => {
               const active = s.code === activeCode;
               return (
                 <button
@@ -170,9 +164,10 @@ export function TierSetDropdown({
                   }}
                   className={cn(
                     "flex w-full items-center gap-3 border-l-2 px-3.5 py-2.5 text-left font-display tracking-[0.06em] transition-colors",
+                    i > 0 && "border-t border-border",
                     active
-                      ? "border-green bg-surface2 text-green"
-                      : "border-transparent text-text hover:bg-surface2 hover:text-green",
+                      ? "border-l-green bg-surface2 text-green"
+                      : "border-l-transparent text-text hover:bg-surface2",
                   )}
                 >
                   <SetGlyph code={setGlyphCode(s)} size={24} />
@@ -182,7 +177,7 @@ export function TierSetDropdown({
                       LIVE
                     </span>
                   ) : (
-                    TIER_LIST_PREVIEW_SETS[s.code] && (
+                    s.startDate > today && (
                       <span className="text-[10px] tracking-[0.18em]" style={{ color: "#cca54e" }}>
                         PREVIEW
                       </span>
@@ -192,7 +187,7 @@ export function TierSetDropdown({
               );
             })}
             {filtered.length === 0 && (
-              <div className="px-3.5 py-3 font-body text-[13px] text-muted">No sets match</div>
+              <div className="px-3.5 py-3 font-body text-[14px] text-muted">No sets match</div>
             )}
           </div>
         </div>

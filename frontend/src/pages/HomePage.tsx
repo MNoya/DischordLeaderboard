@@ -256,7 +256,6 @@ function TierPanel() {
       label={current}
       isMobile={false}
       compact
-      square
       triggerClassName="w-[92px]"
       openOnHover
       loading={!sets}
@@ -675,7 +674,6 @@ function LeaderboardPanel({ setCode }: { setCode: string }) {
       label={set}
       isMobile={false}
       compact
-      square
       menuAlign="right"
       triggerClassName="w-[92px]"
       loading={!sets}

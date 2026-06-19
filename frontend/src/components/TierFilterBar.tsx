@@ -36,18 +36,26 @@ export function TierFilterBar({
   };
 
   const [trendTipOpen, setTrendTipOpen] = useState(false);
-  const trendState = filters.trends.length === 1 ? (filters.trends[0] as "up" | "down") : null;
+  const trendMode =
+    filters.trends.length === 2
+      ? "both"
+      : filters.trends.length === 1
+        ? (filters.trends[0] as "up" | "down")
+        : "off";
   const cycleTrend = () => {
-    const next = trendState === null ? ["up"] : trendState === "up" ? ["down"] : [];
+    const next =
+      trendMode === "off" ? ["up", "down"] : trendMode === "both" ? ["up"] : trendMode === "up" ? ["down"] : [];
     setFilters({ ...filters, trends: next });
     setTrendTipOpen(true);
   };
   const trendCycleLabel =
-    trendState === null
-      ? `Show only cards that moved up (${options.trends.up})`
-      : trendState === "up"
-        ? `Show only cards that moved down (${options.trends.down})`
-        : "Show all cards";
+    trendMode === "off"
+      ? `Show cards that moved (${options.trends.up + options.trends.down})`
+      : trendMode === "both"
+        ? `Show only cards that moved up (${options.trends.up})`
+        : trendMode === "up"
+          ? `Show only cards that moved down (${options.trends.down})`
+          : "Show all cards";
 
   const rarityGroup = (
     <FilterGroup label="RARITY" stacked={stacked} joined>
@@ -129,7 +137,7 @@ export function TierFilterBar({
   const trendGroup = (
     <FilterGroup label="TREND" stacked={stacked} joined>
       <IconToggle
-        active={trendState !== null}
+        active={trendMode !== "off"}
         onClick={cycleTrend}
         label={trendCycleLabel}
         narrow
@@ -137,14 +145,14 @@ export function TierFilterBar({
         onTooltipOpenChange={setTrendTipOpen}
       >
         <span className="flex w-[28px] items-center justify-center">
-          {trendState === null ? (
-            <span className="flex gap-0.5 text-[12px] leading-none opacity-70">
-              <span style={{ color: TREND_COLOR.up }}>{TREND_GLYPH.up}</span>
-              <span style={{ color: TREND_COLOR.down }}>{TREND_GLYPH.down}</span>
+          {trendMode === "up" || trendMode === "down" ? (
+            <span className="text-[15px] leading-none" style={{ color: TREND_COLOR[trendMode] }}>
+              {TREND_GLYPH[trendMode]}
             </span>
           ) : (
-            <span className="text-[15px] leading-none" style={{ color: TREND_COLOR[trendState] }}>
-              {TREND_GLYPH[trendState]}
+            <span className={cn("flex gap-0.5 text-[12px] leading-none", trendMode === "off" && "opacity-70")}>
+              <span style={{ color: TREND_COLOR.up }}>{TREND_GLYPH.up}</span>
+              <span style={{ color: TREND_COLOR.down }}>{TREND_GLYPH.down}</span>
             </span>
           )}
         </span>
@@ -269,7 +277,7 @@ function IconToggle({
           roomy ? "min-w-[40px] px-2.5" : narrow ? "min-w-[34px] px-1.5" : "min-w-[40px] px-2",
           active
             ? activeClass
-            : "border-border2 bg-transparent text-muted hover:bg-surface hover:text-text",
+            : "border-border2 bg-transparent text-muted hover:bg-surface2 hover:text-text",
         )}
       >
         {children}

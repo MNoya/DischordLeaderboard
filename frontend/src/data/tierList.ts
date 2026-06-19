@@ -185,9 +185,8 @@ export function hasActiveFilters(f: TierFilters): boolean {
   );
 }
 
-// Selecting both trends keeps unchanged cards visible but dimmed (isCardTrendDimmed)
 function cardMatchesFilters(card: TierCard, f: TierFilters): boolean {
-  if (f.trends.length === 1 && card.trend !== f.trends[0]) return false;
+  if (f.trends.length > 0 && (!card.trend || !f.trends.includes(card.trend))) return false;
   if (f.sets.length > 0 && !f.sets.includes(card.expansion)) return false;
   if (
     f.manaValues.length > 0 &&
@@ -208,10 +207,6 @@ function cardMatchesFilters(card: TierCard, f: TierFilters): boolean {
 export function isCardFilteredOut(card: TierCard, f: TierFilters): boolean {
   if (!hasActiveFilters(f)) return false;
   return !cardMatchesFilters(card, f);
-}
-
-export function isCardTrendDimmed(card: TierCard, f: TierFilters): boolean {
-  return f.trends.length === 2 && !card.trend;
 }
 
 export const RARITY_ORDER = ["C", "U", "R", "M"];
@@ -303,6 +298,19 @@ interface TierListPayload {
   lastUpdated: string | null;
 }
 
+// 17Lands ships trend as a signed step count; the renderer keys off "up"/"down"
+function normalizeTrend(raw: unknown): "up" | "down" | null {
+  if (typeof raw === "number") {
+    if (raw > 0) return "up";
+    if (raw < 0) return "down";
+    return null;
+  }
+  return raw === "up" || raw === "down" ? raw : null;
+}
+
+const normalizeCards = (cards: TierCard[]): TierCard[] =>
+  cards.map((card) => ({ ...card, trend: normalizeTrend(card.trend) }));
+
 // Bare-array responses are card ratings only; the dict shape adds list metadata
 // including `last_updated` (UTC, space-separated).
 async function fetchTierList(uid: string): Promise<TierListPayload> {
@@ -313,12 +321,12 @@ async function fetchTierList(uid: string): Promise<TierListPayload> {
   }
   const json = await res.json();
   if (Array.isArray(json)) {
-    return { cards: json, lastUpdated: null };
+    return { cards: normalizeCards(json), lastUpdated: null };
   }
   const lastUpdated = json?.last_updated
     ? `${String(json.last_updated).replace(" ", "T")}Z`
     : null;
-  return { cards: json?.ratings ?? [], lastUpdated };
+  return { cards: normalizeCards(json?.ratings ?? []), lastUpdated };
 }
 
 // The consensus list updates every few days; grader review lists are locked and never change,

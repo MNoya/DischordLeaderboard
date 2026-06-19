@@ -19,6 +19,20 @@ export const TIER_LIST_UIDS: Record<string, string> = {
   TMT: "fd5499ae88854ca0ac1bc2ad95ade9b2",
   ECL: "1745e64176864bb2bec132cbd601b604",
   TLA: "efdfa8408fb448be846ac06f9d9192ff",
+  SPM: "4f9e6dc9c48c4052805dcfa65568c964",
+  EOE: "4f34ccc070464c6c90f85c78972ee6ac",
+  FIN: "90be207ac0e34b8ea20ae396c434cbae",
+  TDM: "dd9c5b6db6b94ce0bbf3fd285625ceb9",
+  DFT: "b0f9dbffd24843d5b8b693f30bc8b1e9",
+  FDN: "597d29e75d704ecf9877fc0e4b2c4116",
+  DSK: "edec3f514f264753bf4a46a8a2fc7d82",
+  BLB: "6057e51272c94a7cb304bd511b7c3bcf",
+  OTJ: "143d2e366f3d4fcc8f308fd053c6598a",
+  MH3: "1775dc0b2fed451cbc5ad4441e2ab9c3",
+  WOE: "87b40a05e0974eafa368be44e1d3e0c4",
+  MOM: "a7daeb6a90b246e895c8634e34734090",
+  VOW: "c12298e565ac4e2dbc9d35ce1a597c8d",
+  STX: "a2753035da8646038f55b7321de1dfc9",
 };
 
 // Per-set host graders. With a consensus list their grades join onto it by card name and
@@ -32,15 +46,49 @@ export const TIER_LIST_GRADERS: Record<
     { name: "Alex", uid: "b07c077b8c8145288f75d71bf4f90d65" },
     { name: "Marc", uid: "e0c4c50e90914ac390a1f792e0717ed2" },
   ],
+  SOS: [
+    { name: "Alex", uid: "3dda4b67b4b0403caeb0a744887b0208" },
+    { name: "Marc", uid: "09ccc33bf4d6461f9c73de01bd8efe0c" },
+  ],
+  TMT: [
+    { name: "Alex", uid: "c1489602e3d544d9aa90718692f16a32" },
+    { name: "Marc", uid: "a8a502ee50d84a31b6a501bb6b4d5920" },
+  ],
+  ECL: [
+    { name: "Alex", uid: "4f09f4891cc148f0bb7afe510d4605ec" },
+    { name: "Marc", uid: "0fef073a7db5401ba7e260e8649f2bea" },
+  ],
+  TLA: [
+    { name: "Alex", uid: "6554520225504ef9a3d5360c062a8274" },
+    { name: "Marc", uid: "10ab962ac03b4774b7cd2cb8bec152af" },
+  ],
+  SPM: [
+    { name: "Alex", uid: "78638999335b4900b961503d6f58c4a9" },
+    { name: "Marc", uid: "796eb012eb3b4081929da9679ea577d0" },
+  ],
+  EOE: [
+    { name: "Alex", uid: "13384ec719b74936b0c700126469a22a" },
+    { name: "Marc", uid: "969006b0242e4ab4bfd9b85e3fe4c73e" },
+  ],
+  FIN: [
+    { name: "Alex", uid: "9f907d1c51834c4696383aa30f65523a" },
+    { name: "Marc", uid: "35157ab6c45a48a2aabc92853e389af3" },
+  ],
+  TDM: [
+    { name: "Alex", uid: "b13d129e71b8467dab4de66f770c6b10" },
+    { name: "Marc", uid: "bb8970942c3d4e42bd0fe91528befada" },
+  ],
 };
 
-// Tier lists can publish before a set is registered backend-side (preview window).
-// These supply name/date for such codes until they show up in the live sets feed.
+// Name/date for tier-list sets absent from the live feed; future startDate shows a PREVIEW badge
 export const TIER_LIST_PREVIEW_SETS: Record<
   string,
   { name: string; startDate: string }
 > = {
   MSH: { name: "Marvel Super Heroes", startDate: "2026-06-23" },
+  MH3: { name: "Modern Horizons 3", startDate: "2024-06-11" },
+  MOM: { name: "March of the Machine", startDate: "2023-04-18" },
+  VOW: { name: "Innistrad: Crimson Vow", startDate: "2021-11-11" },
 };
 
 // Same-origin proxy to 17Lands' dict-shaped tier-list endpoint (ratings +
