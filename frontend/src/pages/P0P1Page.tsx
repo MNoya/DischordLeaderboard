@@ -191,7 +191,6 @@ function RosterStrip({
   onSelect: (key: SlotKey) => void;
 }) {
   const groupedStats = pickStats ? groupBySlot(pickStats) : undefined;
-  const n = pickStats ? participantCount(pickStats) : 0;
 
   return (
     <div className="grid grid-cols-8 gap-2">
@@ -210,7 +209,6 @@ function RosterStrip({
             locked={locked}
             yourStat={stat}
             slotStats={slotStats}
-            n={n}
             onClick={() => onSelect(slot.key)}
           />
         );
@@ -226,7 +224,6 @@ function RosterTile({
   locked,
   yourStat,
   slotStats,
-  n,
   onClick,
 }: {
   slot: SlotDefinition;
@@ -235,7 +232,6 @@ function RosterTile({
   locked: boolean;
   yourStat?: P0P1PickStat;
   slotStats?: P0P1PickStat[];
-  n: number;
   onClick: () => void;
 }) {
   const accent = SLOT_ACCENT[slot.key];
@@ -249,22 +245,22 @@ function RosterTile({
     : classification?.state === "rogue"
     ? "text-magenta"
     : "text-white";
-  const stateBg = classification?.state === "most"
-    ? "bg-cyan"
-    : classification?.state === "rogue"
-    ? "bg-magenta"
-    : "bg-white";
   const stripClass = locked
     ? "w-full shrink-0 h-1"
     : `w-full shrink-0 transition-[height] duration-150 ${active ? "h-2" : "h-1 group-hover:h-2"}`;
   const body = (
     <>
       <div className={stripClass} style={{ background: accent }} />
-      <div className="aspect-square shrink-0 bg-surface2 flex items-center justify-center overflow-hidden">
+      <div className="relative aspect-square shrink-0 bg-surface2 flex items-center justify-center overflow-hidden">
         {card ? (
           <img src={card.imageArtCrop} alt={card.name} className="w-full h-full object-cover" />
         ) : (
           <SlotPip slotKey={slot.key} size={48} />
+        )}
+        {classification?.qualifier && (
+          <span className={`absolute top-1.5 right-1.5 text-[10px] font-display tracking-wide px-2 py-1 rounded-sm bg-bg/85 ${stateColor}`}>
+            {classification.qualifier}
+          </span>
         )}
       </div>
       <div className="pl-4 pr-2.5 pt-2 pb-1.5 shrink-0">
@@ -285,21 +281,17 @@ function RosterTile({
         )}
       </div>
       {yourStat && classification && (
-        <div className="pl-4 pr-2.5 pt-2 pb-2.5 shrink-0 border-t border-border2">
-          <div className={`font-mono tabular-nums text-[22px] leading-none font-semibold ${stateColor}`}>
-            {yourStat.pickCount}<span className="text-muted text-[14px]"> / {n}</span>
-          </div>
-          {classification.qualifier && (
-            <div className={`text-[9px] tracking-[0.1em] font-display mt-1 ${stateColor}`}>
-              {classification.qualifier}
-            </div>
-          )}
-          <div className="h-1 w-full bg-surface2 rounded-sm overflow-hidden mt-1.5">
-            <div
-              className={`h-full rounded-sm ${stateBg}`}
-              style={{ width: `${n > 0 ? Math.min(100, (yourStat.pickCount / n) * 100) : 0}%` }}
-            />
-          </div>
+        <div className="pl-4 pr-2.5 pt-2 pb-2.5 shrink-0 border-t border-border2 flex items-baseline gap-1.5">
+          <span className={`font-mono tabular-nums text-[22px] leading-none font-semibold ${stateColor}`}>
+            {yourStat.pickCount}
+          </span>
+          <span className="text-muted text-[12px] leading-none">
+            {yourStat.pickCount === 1 ? (
+              <>pick <span className="opacity-60">(you!)</span></>
+            ) : (
+              "picks"
+            )}
+          </span>
         </div>
       )}
     </>
