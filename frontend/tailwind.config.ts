@@ -32,7 +32,6 @@ const config: Config = {
         gold: "#ffc63a",
         red: "#ff5e5e",
         cyan: "#00e5ff",
-        violet: "#a45ee5",
         magenta: "#ff2cdf",
       },
       fontFamily: {

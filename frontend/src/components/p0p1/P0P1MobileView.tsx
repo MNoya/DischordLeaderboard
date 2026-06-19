@@ -277,7 +277,7 @@ function MobileChip({
     ? "text-cyan"
     : classification?.state === "rogue"
     ? "text-magenta"
-    : "text-violet";
+    : "text-white";
 
   return (
     <button

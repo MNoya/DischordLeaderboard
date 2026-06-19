@@ -38,7 +38,7 @@ export function participantCount(stats: P0P1PickStat[]): number {
 
 export type PickClassification = {
   state: "most" | "minority" | "rogue";
-  qualifier: string;
+  qualifier?: string;
 };
 
 export function classifyYourPick(
@@ -49,12 +49,12 @@ export function classifyYourPick(
   const inMost = most.some((s) => s.cardName === yourStat.cardName);
   if (inMost) {
     return most.length > 1
-      ? { state: "most", qualifier: "TIED FOR MOST PICKED" }
-      : { state: "most", qualifier: "MOST PICKED" };
+      ? { state: "most", qualifier: "TIED FOR CROWD FAVORITE" }
+      : { state: "most", qualifier: "CROWD FAVORITE" };
   }
   const inLeast = least.some((s) => s.cardName === yourStat.cardName);
   if (inLeast) {
     return { state: "rogue", qualifier: "ROGUE PICK" };
   }
-  return { state: "minority", qualifier: "MINORITY PICK" };
+  return { state: "minority" };
 }

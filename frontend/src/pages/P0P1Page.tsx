@@ -248,12 +248,12 @@ function RosterTile({
     ? "text-cyan"
     : classification?.state === "rogue"
     ? "text-magenta"
-    : "text-violet";
+    : "text-white";
   const stateBg = classification?.state === "most"
     ? "bg-cyan"
     : classification?.state === "rogue"
     ? "bg-magenta"
-    : "bg-violet";
+    : "bg-white";
   const stripClass = locked
     ? "w-full shrink-0 h-1"
     : `w-full shrink-0 transition-[height] duration-150 ${active ? "h-2" : "h-1 group-hover:h-2"}`;
@@ -289,9 +289,11 @@ function RosterTile({
           <div className={`font-mono tabular-nums text-[22px] leading-none font-semibold ${stateColor}`}>
             {yourStat.pickCount}<span className="text-muted text-[14px]"> / {n}</span>
           </div>
-          <div className={`text-[9px] tracking-[0.1em] font-display mt-1 ${stateColor}`}>
-            {classification.qualifier}
-          </div>
+          {classification.qualifier && (
+            <div className={`text-[9px] tracking-[0.1em] font-display mt-1 ${stateColor}`}>
+              {classification.qualifier}
+            </div>
+          )}
           <div className="h-1 w-full bg-surface2 rounded-sm overflow-hidden mt-1.5">
             <div
               className={`h-full rounded-sm ${stateBg}`}
