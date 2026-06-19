@@ -84,7 +84,7 @@ export function P0P1Page() {
       <main className="flex-1 px-10 pb-5 pt-5">
         {(!isPastDeadline || hasParticipated) && (
           <>
-            <SectionLabel size={16} className="mb-2">YOUR PICKS</SectionLabel>
+            <SectionLabel size={16} className="mb-2 text-white">YOUR PICKS</SectionLabel>
             {dataReady ? (
               <RosterStrip
                 activeSlotKey={activeSlotKey}
