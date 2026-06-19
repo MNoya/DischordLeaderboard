@@ -22,7 +22,7 @@ export function FullBreakdownList({
 
   return (
     <div className="flex flex-col gap-2">
-      <SectionLabel size={16} className="mb-1">FULL BREAKDOWN</SectionLabel>
+      <SectionLabel size={16} className="mb-1 text-white">FULL BREAKDOWN</SectionLabel>
       <div className="flex items-center gap-1.5 flex-wrap">
         <FilterChip active={filter === "all"} onClick={() => setFilter("all")}>
           All
@@ -58,7 +58,7 @@ export function FullBreakdownList({
                 </div>
               </div>
               <span className="text-text text-[14px] font-mono tabular-nums shrink-0">
-                {stat.pickCount} / {n}
+                {stat.pickCount}
               </span>
             </div>
           );

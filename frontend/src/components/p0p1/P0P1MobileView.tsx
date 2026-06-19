@@ -165,7 +165,7 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
             )}
             {(!isPastDeadline || hasParticipated) && (
               <div className="sticky top-0 z-20 -mx-3 px-2 pt-3 pb-2 bg-bg/95 backdrop-blur border-b border-border">
-                <SectionLabel size={11} className="mb-1.5">YOUR PICKS</SectionLabel>
+                <SectionLabel size={11} className="mb-1.5 text-white">YOUR PICKS</SectionLabel>
                 <div className="grid grid-cols-4 landscape:grid-cols-8 gap-1.5">
                   {SLOTS.map((slot) => {
                     const cardName = picksBySlot.get(slot.key);
@@ -299,9 +299,9 @@ function MobileChip({
           <SlotPip slotKey={slot.key} size={20} />
         </span>
       )}
-      {yourStat && classification && n !== undefined && (
+      {yourStat && classification && (
         <div className={`absolute bottom-0 left-0 right-0 text-center font-mono tabular-nums text-[10px] py-0.5 bg-bg/75 ${stateColor}`}>
-          {yourStat.pickCount}/{n}
+          {yourStat.pickCount}
         </div>
       )}
     </button>

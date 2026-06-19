@@ -21,14 +21,14 @@ export function CommunityGrid({
   return (
     <div className="flex flex-col gap-6">
       <PickRow
-        title="MOST PICKED CARDS"
+        title="Crowd Favorites"
         tone="cyan"
         entries={SLOTS.map((slot) => ({ slotKey: slot.key, label: slot.label, stats: extremesBySlot.get(slot.key)!.most }))}
         cardsByName={cardsByName}
         n={n}
       />
       <PickRow
-        title="LEAST PICKED CARDS"
+        title="Rogue Picks"
         tone="magenta"
         entries={SLOTS.map((slot) => ({ slotKey: slot.key, label: slot.label, stats: extremesBySlot.get(slot.key)!.least }))}
         cardsByName={cardsByName}
@@ -106,7 +106,7 @@ function PickTile({
         </div>
         {hasStats && (
           <span className={`absolute top-1 right-1 text-[9px] font-mono tabular-nums px-1 rounded-sm bg-bg/85 ${toneClass}`}>
-            {stats[0].pickCount}/{n}
+            {stats[0].pickCount}
           </span>
         )}
         {tied && (
