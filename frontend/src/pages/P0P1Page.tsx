@@ -13,6 +13,7 @@ import { AutoSaveBadge } from "../components/p0p1/AutoSaveBadge";
 import { P0P1MobileSelector } from "../components/p0p1/P0P1MobileView";
 import { GoToTopButton } from "../components/GoToTopButton";
 import { PostVotingStats } from "../components/p0p1/PostVotingStats";
+import { IncompleteEntryMessage } from "../components/p0p1/IncompleteEntryMessage";
 import { useIsMobile } from "../lib/use-is-mobile";
 import { useP0P1Ballot } from "../data/useP0P1Ballot";
 import { SLOTS } from "../data/p0p1Slots";
@@ -44,6 +45,8 @@ export function P0P1Page() {
     selectAdvance,
   } = ballot;
   const isDesktop = !useIsMobile(1024);
+  const isCompleteEntrant = isPastDeadline && Boolean(user) && isComplete;
+  const isIncompleteEntrant = isPastDeadline && Boolean(user) && !isComplete;
 
   if (!isDesktop) {
     return <P0P1MobileSelector ballot={ballot} />;
@@ -82,7 +85,7 @@ export function P0P1Page() {
       <P0P1Hero cta={heroCta} belowIntro={belowIntro} isPastDeadline={isPastDeadline} />
 
       <main className="flex-1 px-10 pb-5 pt-5">
-        {(!isPastDeadline || hasParticipated) && (
+        {(!isPastDeadline || isCompleteEntrant) && (
           <>
             <SectionLabel size={16} className="mb-2 text-white">YOUR PICKS</SectionLabel>
             {dataReady ? (
@@ -98,6 +101,12 @@ export function P0P1Page() {
               <RosterStripSkeleton />
             )}
           </>
+        )}
+
+        {isIncompleteEntrant && (
+          <div className="mb-2">
+            <IncompleteEntryMessage />
+          </div>
         )}
 
         {isPastDeadline ? (

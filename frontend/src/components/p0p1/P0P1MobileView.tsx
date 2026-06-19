@@ -7,6 +7,7 @@ import { SectionLabel } from "../SectionLabel";
 import { SlotCard } from "./SlotCard";
 import { CardSelectionGrid } from "./CardSelectionGrid";
 import { PostVotingStats } from "./PostVotingStats";
+import { IncompleteEntryMessage } from "./IncompleteEntryMessage";
 import { SlotPip, SLOT_ACCENT } from "./slotVisuals";
 import { P0P1ProgressBar } from "./ProgressBar";
 import { ClearAll } from "./ClearAll";
@@ -143,6 +144,8 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
   const loginBarVisible = !authLoading && !user;
   const groupedStats = hasParticipated && pickStats ? groupBySlot(pickStats) : undefined;
   const n = hasParticipated && pickStats ? participantCount(pickStats) : 0;
+  const isCompleteEntrant = isPastDeadline && Boolean(user) && isComplete;
+  const isIncompleteEntrant = isPastDeadline && Boolean(user) && !isComplete;
 
   return (
     <div className="bg-bg text-text min-h-screen flex flex-col animate-fadeIn">
@@ -188,10 +191,16 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
               </div>
             )}
 
-            {isPastDeadline && hasParticipated && (
+            {isCompleteEntrant && (
               <div className="mb-3">
                 <SectionLabel size={18} className="mb-2 text-white">YOUR PICKS</SectionLabel>
                 <YourPicksCarousel picksBySlot={picksBySlot} cardsByName={cardsByName} groupedStats={groupedStats} n={n} />
+              </div>
+            )}
+
+            {isIncompleteEntrant && (
+              <div className="mb-3">
+                <IncompleteEntryMessage />
               </div>
             )}
 
