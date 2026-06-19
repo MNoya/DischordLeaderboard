@@ -4,11 +4,12 @@ import { cn } from "../lib/utils";
 // LLU brand mark — the user-supplied logo PNG. Bypasses Vite's asset pipeline
 // by living in /public so the public URL is deterministic across dev / prod.
 export const LLU_LOGO_SRC = `${import.meta.env.BASE_URL}llu-logo-transparent.png`;
+export const LLU_LOGO_FULL_SRC = `${import.meta.env.BASE_URL}llu-logo.png`;
 
 export function ALogo({ size = 32 }: { size?: number }) {
   return (
     <img
-      src={LLU_LOGO_SRC}
+      src={LLU_LOGO_FULL_SRC}
       alt="Limited Level-Ups"
       style={{ height: size, width: "auto" }}
       className="block"

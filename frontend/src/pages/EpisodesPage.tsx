@@ -86,7 +86,7 @@ const setNameOf = (ep: Episode) => ep.setName ?? ep.setCode ?? "";
 const setLandingPath = (code: string) => `/episodes/${code.toLowerCase()}`;
 
 export function EpisodesPage() {
-  const { data: episodes, isLoading, isError, thumbnailsPending } = useMediaFeed();
+  const { data: episodes, isLoading, isError, thumbnailsPending, setsReady } = useMediaFeed();
   const { categorySlug: slug } = useParams<{ categorySlug?: string }>();
   const navigate = useNavigate();
   const [params] = useSearchParams();
@@ -142,10 +142,10 @@ export function EpisodesPage() {
       navigate({ pathname: setLandingPath(querySet), search: next.toString() }, { replace: true });
       return;
     }
-    if (slugLower && !shortsView && !audioView && !activeCategory && !setCodesBySlug.has(slugLower)) {
+    if (setsReady && slugLower && !shortsView && !audioView && !activeCategory && !setCodesBySlug.has(slugLower)) {
       navigate({ pathname: "/episodes", search: params.toString() }, { replace: true });
     }
-  }, [params, slug, slugLower, navigate, episodes, setCodesBySlug, shortsView, audioView, activeCategory]);
+  }, [params, slug, slugLower, navigate, episodes, setCodesBySlug, shortsView, audioView, activeCategory, setsReady]);
 
   const categoryPath = shortsView
     ? "/episodes/shorts"

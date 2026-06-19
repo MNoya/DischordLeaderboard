@@ -94,6 +94,7 @@ export function useMediaFeed() {
     isLoading: db.isLoading && episodes.isLoading,
     isError: db.isError && episodes.isError,
     thumbnailsPending: videos.isLoading && !db.data,
+    setsReady: db.data !== undefined,
   };
 }
 
