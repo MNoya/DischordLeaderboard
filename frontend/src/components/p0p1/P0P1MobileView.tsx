@@ -364,19 +364,26 @@ function YourPicksCarousel({
               >
                 <SlotPip slotKey={slot.key} size={12} />
               </div>
+              {classification?.qualifier && (
+                <span className={`absolute top-1.5 right-1.5 text-[10px] font-display tracking-wide px-2 py-1 rounded-sm bg-bg/85 ${stateColor}`}>
+                  {classification.qualifier}
+                </span>
+              )}
             </div>
             <div className="px-1.5 pt-1.5 pb-2">
               <span className="text-text text-[11px] truncate block mb-1">{card?.name ?? slot.label}</span>
               {yourStat && classification && (
-                <div className="flex items-baseline justify-between gap-1">
-                  <span className={`font-mono tabular-nums text-[15px] font-semibold ${stateColor}`}>
+                <div className="flex items-baseline gap-1.5">
+                  <span className={`font-mono tabular-nums text-[15px] font-semibold`}>
                     {yourStat.pickCount}
                   </span>
-                  {classification.qualifier && (
-                    <span className={`text-[7px] tracking-[0.06em] font-display text-right ${stateColor}`}>
-                      {classification.qualifier}
-                    </span>
-                  )}
+                  <span className="text-muted text-[12px] leading-none">
+                    {yourStat.pickCount === 1 ? (
+                      <>pick <span className="opacity-60">(you!)</span></>
+                    ) : (
+                      "picks"
+                    )}
+                  </span>
                 </div>
               )}
             </div>

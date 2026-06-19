@@ -263,7 +263,7 @@ function RosterTile({
           </span>
         )}
       </div>
-      <div className="pl-4 pr-2.5 pt-2 pb-1.5 shrink-0">
+      <div className="px-2 pt-2 pb-1.5 shrink-0">
         <div className="text-subtle text-[12px] tracking-[0.12em] font-display truncate mb-1">
           {slot.label.toUpperCase()}
         </div>
@@ -281,8 +281,8 @@ function RosterTile({
         )}
       </div>
       {yourStat && classification && (
-        <div className="pl-4 pr-2.5 pt-2 pb-2.5 shrink-0 border-t border-border2 flex items-baseline gap-1.5">
-          <span className={`font-mono tabular-nums text-[22px] leading-none font-semibold ${stateColor}`}>
+        <div className="px-2 pt-2 pb-2.5 shrink-0 border-t border-border2 flex items-baseline gap-1.5">
+          <span className={`font-mono tabular-nums text-[22px] leading-none font-semibold`}>
             {yourStat.pickCount}
           </span>
           <span className="text-muted text-[12px] leading-none">
