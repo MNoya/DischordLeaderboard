@@ -1,4 +1,5 @@
 import { Mic } from "lucide-react";
+import { SiPatreon } from "react-icons/si";
 import { PageShell } from "../components/PageShell";
 import { Container } from "../components/Container";
 import { ChamferCta } from "../components/ChamferCta";
@@ -9,7 +10,7 @@ import {
   COMMUNITY_EVENTS,
   COMMUNITY_HIGHLIGHTS,
   COMMUNITY_INTRO_PARAGRAPHS,
-  COMMUNITY_SHOW_NOTE,
+  COMMUNITY_SHOW_PARAGRAPHS,
   COMMUNITY_SHOW_TOPICS,
   useCommunityStats,
 } from "../data/community";
@@ -71,28 +72,42 @@ export function CommunityPage() {
       </section>
 
       <Container className="pt-10 md:pt-12">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {COMMUNITY_EVENTS.map((event) => (
             <EventCard key={event.to} event={event} />
           ))}
-        </div>
-      </Container>
-
-      <Container className="pt-6 md:pt-8 pb-6">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <SectionPanel title="THE SHOW" icon={<Mic size={30} />}>
-            <p className="text-subtle text-[14.5px] leading-[1.7] mb-5">{COMMUNITY_SHOW_NOTE}</p>
+          <SectionPanel
+            title={
+              <span className="inline-flex items-center gap-3">
+                <Mic size={26} className="shrink-0 text-subtle" />
+                The show
+              </span>
+            }
+            className="order-first lg:order-none"
+          >
+            <div className="mb-5 flex flex-col gap-3">
+              {COMMUNITY_SHOW_PARAGRAPHS.map((paragraph) => (
+                <p key={paragraph.slice(0, 16)} className="text-subtle text-[13.5px] leading-[1.65]">
+                  {paragraph}
+                </p>
+              ))}
+            </div>
             <ShowTopics topics={COMMUNITY_SHOW_TOPICS} />
             <div className="mt-6 pt-6 border-t border-border">
-              <CommunityHeading>SUPPORT</CommunityHeading>
+              <CommunityHeading>
+                <span className="inline-flex items-center gap-2">
+                  <SiPatreon size={17} className="text-subtle" />
+                  SUPPORT
+                </span>
+              </CommunityHeading>
               <div className="mt-4">
                 <SupportCard />
               </div>
             </div>
           </SectionPanel>
-          <SectionPanel title="THE HOSTS">
+          <SectionPanel title="The hosts" bodyClassName="flex flex-1 flex-col justify-center">
             {HOSTS.map((host, i) => (
-              <div key={host.handle} className={i > 0 ? "border-t border-border pt-5 mt-5" : undefined}>
+              <div key={host.handle} className={i > 0 ? "border-t border-border pt-6 mt-6 lg:pt-10 lg:mt-10" : undefined}>
                 <HostBlock host={host} />
               </div>
             ))}

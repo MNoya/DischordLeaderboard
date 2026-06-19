@@ -1,5 +1,6 @@
 import type { IconType } from "react-icons";
-import { SiApplepodcasts, SiPatreon, SiRss, SiSpotify, SiYoutube } from "react-icons/si";
+import { SiApplepodcasts, SiPatreon, SiRss, SiSpotify } from "react-icons/si";
+import { FaYoutube } from "react-icons/fa";
 import { Container } from "./Container";
 import { LISTEN_ON, SITE_LINKS } from "../data/site";
 import { cn } from "../lib/utils";
@@ -7,7 +8,7 @@ import { cn } from "../lib/utils";
 const FOOTER_ICONS: Record<string, IconType> = {
   Apple: SiApplepodcasts,
   Spotify: SiSpotify,
-  YouTube: SiYoutube,
+  YouTube: FaYoutube,
   RSS: SiRss,
   Patreon: SiPatreon,
 };

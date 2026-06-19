@@ -28,7 +28,8 @@ export function discordEventLink(eventId: string): string {
 // Alex-approved copy — the canonical blurbs. SITE_BLURB is the brand identity
 // (YouTube + podcast + Discord); DISCORD_BLURB is the server-specific invite.
 export const SITE_BLURB =
-  "Limited Level-Ups is a YouTube channel, podcast, and Discord community for Magic: The Gathering players who want " +
+  "Limited Level-Ups is a YouTube channel, podcast, and Discord community for Magic: The Gathering players of all " +
+  "skill levels who want " +
   "to improve at Limited.\n\nWhether you're looking to get your first trophy, sharpen your fundamentals, or compete " +
   "at the highest level, Limited Level-Ups is here to help you level up your game.";
 
@@ -56,8 +57,9 @@ export const HOSTS: Host[] = [
     handle: "Chord_O_Calls",
     role: "Host & Founder",
     bio:
-      "TBD: Started Limited Level-Ups in 2020 and has hosted every week since — primers, set reviews, draft-alongs, and " +
-      "strategy deep-dives on whatever format is live. Also streams drafts on Twitch and coaches.",
+      "Alex is the force behind Limited Level-Ups. He founded the show in 2020 and has hosted it ever " +
+      "since, while also cultivating a thriving online community and building a full-time career around " +
+      "helping people become better at Limited Magic.",
     photo: xAvatar("Chord_O_Calls"),
     links: [
       { label: "Twitch", url: SITE_LINKS.twitch },
@@ -67,10 +69,11 @@ export const HOSTS: Host[] = [
   {
     name: "Marc Anderson",
     handle: "NEO_MTG",
-    role: "Set Review co-host",
+    role: "Set Review Co-Host",
     bio:
-      "TDB: Former National Champion and Face2Face Games pro-team co-founder. Joins Alex for the set-review episodes, " +
-      "grading every common and uncommon before each format goes live.",
+      "Marc brings decades of competitive experience to the table. Former Canadian National Champion and current " +
+      "Limited consultant for Cosmos Heavy Play, he teams up with Alex each set to grade every card and map out " +
+      "the format before the first packs are opened.",
     photo: xAvatar("NEO_MTG"),
     links: [{ label: "Twitter", url: "https://x.com/NEO_MTG" }],
   },

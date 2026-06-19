@@ -11,7 +11,7 @@ import {
   Mic,
   Package,
 } from "lucide-react";
-import { SiPatreon, SiTwitch, SiX, SiYoutube } from "react-icons/si";
+import { SiPatreon, SiTwitch, SiYoutube } from "react-icons/si";
 import type { IconType } from "react-icons";
 import { AAvatar } from "./Brand";
 import { ChamferCta } from "./ChamferCta";
@@ -19,13 +19,13 @@ import { CATEGORY_COLOR } from "./CategoryTag";
 import { SectionLabel } from "./SectionLabel";
 import { ArrowRight, Globe } from "./Icons";
 import { cn } from "../lib/utils";
-import { categoryHref, COMMUNITY_SUPPORT_NOTE, type CommunityLink } from "../data/community";
+import { categoryHref, COMMUNITY_SUPPORT_NOTE, COMMUNITY_SUPPORT_REWARDS, type CommunityLink } from "../data/community";
 import { EPISODE_CATEGORIES, type EpisodeCategory } from "../data/episodes";
 import { SITE_LINKS, type Host } from "../data/site";
 
 export function CommunityHeading({ children }: { children: ReactNode }) {
   return (
-    <SectionLabel size={16} letterSpacing="0.18em" className="text-subtle">
+    <SectionLabel size={22} letterSpacing="0.14em" className="text-text">
       {children}
     </SectionLabel>
   );
@@ -33,25 +33,24 @@ export function CommunityHeading({ children }: { children: ReactNode }) {
 
 export function SectionPanel({
   title,
-  icon,
+  watermark,
   children,
   className,
   bodyClassName,
 }: {
   title: ReactNode;
-  icon?: ReactNode;
+  watermark?: GlyphIcon;
   children: ReactNode;
   className?: string;
   bodyClassName?: string;
 }) {
   return (
-    <section className={cn("flex flex-col rounded-xl border border-border bg-surface p-5", className)}>
-      <div className="flex h-12 items-center gap-4">
-        {icon ? <span className="flex h-12 w-12 shrink-0 items-center justify-center text-subtle">{icon}</span> : null}
-        <span className="font-display text-text text-[19px] tracking-[0.03em]">{title}</span>
+    <PanelShell watermark={watermark} className={className}>
+      <div className="relative flex flex-1 flex-col px-6 pt-6 pb-6">
+        <PanelHeader title={title} />
+        <div className={cn("relative flex-1 pt-5", bodyClassName)}>{children}</div>
       </div>
-      <div className={cn("flex-1 pt-4", bodyClassName)}>{children}</div>
-    </section>
+    </PanelShell>
   );
 }
 
@@ -83,7 +82,7 @@ export function HostBlock({ host }: { host: Host }) {
       <HostMug host={host} />
       <div className="min-w-0">
         <div className="flex items-center gap-3">
-          <div className="font-display text-text text-[17px] tracking-[0.04em] truncate">
+          <div className="font-display text-text text-[17px] tracking-[0.04em]">
             {host.name}{" "}
             {twitter ? (
               <a
@@ -91,10 +90,9 @@ export function HostBlock({ host }: { host: Host }) {
                 target="_blank"
                 rel="noreferrer"
                 aria-label={`${host.handle} on X`}
-                className="inline-flex items-center gap-1 text-muted no-underline transition-colors hover:text-green"
+                className="text-muted no-underline transition-colors hover:text-green"
               >
                 @{host.handle}
-                <SiX size={13} />
               </a>
             ) : (
               <span className="text-muted">{host.handle}</span>
@@ -119,40 +117,132 @@ export function HostBlock({ host }: { host: Host }) {
           </div>
         </div>
         <div className="mono text-[11px] tracking-[0.12em] text-green uppercase mt-1">{host.role}</div>
-        <p className="text-muted text-[13px] leading-[1.6] mt-2">{host.bio}</p>
+        <p className="text-subtle text-[13.5px] leading-[1.6] mt-2">{host.bio}</p>
       </div>
     </div>
   );
 }
 
+const STEP_TOKEN = /(\/[a-z][\w-]*)|\[([^\]]+)\]\(([^)]+)\)/g;
+
+function renderStep(step: string) {
+  const nodes: ReactNode[] = [];
+  let cursor = 0;
+  let key = 0;
+  let match: RegExpExecArray | null;
+  STEP_TOKEN.lastIndex = 0;
+  while ((match = STEP_TOKEN.exec(step)) !== null) {
+    if (match.index > cursor) {
+      nodes.push(step.slice(cursor, match.index));
+    }
+    if (match[1]) {
+      nodes.push(
+        <code key={key++} className="mono text-text bg-surface2 border border-border2 px-1.5 py-px text-[12.5px]">
+          {match[1]}
+        </code>,
+      );
+    } else {
+      nodes.push(
+        <a
+          key={key++}
+          href={withProtocol(match[3])}
+          target="_blank"
+          rel="noreferrer"
+          className="relative z-20 font-medium text-text no-underline transition-colors hover:text-green"
+        >
+          {match[2]}
+        </a>,
+      );
+    }
+    cursor = match.index + match[0].length;
+  }
+  if (cursor < step.length) {
+    nodes.push(step.slice(cursor));
+  }
+  return nodes;
+}
+
+function withProtocol(href: string) {
+  if (/^https?:\/\//.test(href) || href.startsWith("/")) {
+    return href;
+  }
+  return `https://${href}`;
+}
+
 export function EventCard({ event, className }: { event: CommunityLink; className?: string }) {
   return (
-    <Link
-      to={event.to}
-      className={cn(
-        "group relative flex gap-5 overflow-hidden rounded-xl bg-surface border border-border p-6 no-underline transition-colors hover:border-green",
-        className,
-      )}
+    <PanelShell
+      watermark={event.Icon}
+      watermarkClassName="opacity-30 transition-[opacity,color] duration-300 group-hover:opacity-100 group-hover:text-green/[0.14]"
+      className={cn("transition-colors hover:border-green", className)}
     >
-      <event.Icon
-        size={132}
-        className="pointer-events-none absolute -right-5 -bottom-6 text-border2/50 transition-colors duration-200 group-hover:text-green/15"
-      />
-      <span className="relative flex h-16 w-16 shrink-0 items-center justify-center text-subtle transition-colors group-hover:text-green">
-        <event.Icon size={44} />
-      </span>
-      <div className="relative flex min-w-0 flex-1 flex-col">
-        <div className="font-display text-text text-[19px] tracking-[0.03em] group-hover:text-green transition-colors">
-          {event.title}
+      <Link to={event.to} aria-label={event.cta} className="absolute inset-0 z-10" />
+      <div className="relative flex flex-1 flex-col px-6 pt-6 pb-6">
+        <div className="flex items-center gap-3">
+          <event.Icon size={26} className="shrink-0 text-subtle transition-colors group-hover:text-green" />
+          <span className="font-display text-text text-[26px] leading-[0.95] tracking-[0.03em] transition-colors group-hover:text-green">
+            {event.title}
+          </span>
         </div>
-        <p className="text-muted text-[13.5px] leading-[1.65] mt-2 flex-1">{event.blurb}</p>
-        <span className="inline-flex items-center gap-1.5 font-display tracking-[0.1em] text-[12px] text-muted group-hover:text-green transition-colors mt-4">
+        <ul className="mt-4 flex flex-col gap-3">
+          {event.steps.map((step) => (
+            <li key={step} className="flex gap-3 text-subtle text-[13.5px] leading-[1.55]">
+              <span className="mt-[7px] h-[5px] w-[5px] shrink-0 rotate-45 bg-green" />
+              <span className="flex-1">{renderStep(step)}</span>
+            </li>
+          ))}
+        </ul>
+        <span className="mt-auto self-end pt-4 inline-flex items-center gap-1.5 whitespace-nowrap font-display text-[13px] tracking-[0.08em] text-green transition-colors group-hover:text-green-2">
           {event.cta}
           <ArrowRight size={13} />
         </span>
       </div>
-    </Link>
+    </PanelShell>
   );
+}
+
+type GlyphIcon = LucideIcon | IconType;
+
+function PanelShell({
+  watermark: Watermark,
+  watermarkClassName,
+  href,
+  className,
+  children,
+}: {
+  watermark?: GlyphIcon;
+  watermarkClassName?: string;
+  href?: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  const shell = "group relative flex h-full flex-col overflow-hidden rounded-xl border border-border bg-surface";
+  const content = (
+    <>
+      {Watermark ? (
+        <Watermark
+          size={120}
+          className={cn(
+            "pointer-events-none absolute right-8 top-6 text-border2/40 transition-colors duration-200",
+            watermarkClassName,
+          )}
+        />
+      ) : null}
+      {children}
+    </>
+  );
+  if (href) {
+    return (
+      <Link to={href} className={cn(shell, "no-underline transition-colors hover:border-green", className)}>
+        {content}
+      </Link>
+    );
+  }
+  return <section className={cn(shell, className)}>{content}</section>;
+}
+
+function PanelHeader({ title }: { title: ReactNode }) {
+  return <span className="font-display text-text text-[26px] leading-[0.95] tracking-[0.03em]">{title}</span>;
 }
 
 export function CommunityLinks() {
@@ -189,32 +279,63 @@ function displayUrl(url: string) {
 
 export function SupportCard() {
   return (
-    <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
-      <p className="text-muted text-[13.5px] leading-[1.6]">{COMMUNITY_SUPPORT_NOTE}</p>
-      <ChamferCta
-        label="BECOME A PATRON"
-        href={SITE_LINKS.patreon}
-        target="_blank"
-        className="shrink-0 whitespace-nowrap"
-      />
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+        <p className="text-subtle text-[13.5px] leading-[1.6]">{COMMUNITY_SUPPORT_NOTE}</p>
+        <ChamferCta
+          label="BECOME A PATRON"
+          href={SITE_LINKS.patreon}
+          target="_blank"
+          className="shrink-0 self-center whitespace-nowrap sm:self-auto"
+        />
+      </div>
+      <SupportRewards />
     </div>
   );
 }
 
-export function ShowTopics({ topics }: { topics?: readonly { category: EpisodeCategory; label: string }[] }) {
-  const items = topics ?? EPISODE_CATEGORIES.map((category) => ({ category, label: category }));
+function SupportRewards() {
   return (
-    <div className="flex flex-wrap gap-2">
-      {items.map(({ category, label }) => {
-        const Icon = CATEGORY_ICON[category];
+    <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+      {COMMUNITY_SUPPORT_REWARDS.map(({ Icon, label }) => (
+        <span
+          key={label}
+          className="flex items-center justify-center gap-2 rounded-lg bg-surface2 px-3 py-2 sm:inline-flex sm:justify-start"
+        >
+          <Icon size={18} strokeWidth={2} className="shrink-0 text-green" />
+          <span className="font-display uppercase tracking-[0.06em] text-[14.5px] text-text">{label}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+export function ShowTopics({
+  topics,
+}: {
+  topics?: readonly { category: EpisodeCategory; label: string; Icon?: GlyphIcon; iconClassName?: string }[];
+}) {
+  const items: readonly { category: EpisodeCategory; label: string; Icon?: GlyphIcon; iconClassName?: string }[] =
+    topics ?? EPISODE_CATEGORIES.map((category) => ({ category, label: category }));
+  return (
+    <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+      {items.map(({ category, label, Icon: iconOverride, iconClassName }) => {
+        const Icon = iconOverride ?? CATEGORY_ICON[category];
         return (
           <Link
             key={category}
             to={categoryHref(category)}
-            className="group inline-flex items-center gap-2 rounded-lg bg-surface2 px-3 py-2 no-underline transition-colors hover:bg-bg/40"
+            className="group/chip flex items-center justify-center gap-2 rounded-lg bg-surface2 px-3 py-2 no-underline transition-all duration-200 hover:-translate-y-0.5 hover:bg-surface hover:ring-1 hover:ring-green/80 sm:inline-flex sm:justify-start"
           >
-            <Icon size={16} strokeWidth={2} className={cn("shrink-0", CATEGORY_COLOR[category])} />
-            <span className="font-display uppercase tracking-[0.06em] text-[13px] text-text transition-colors group-hover:text-green">
+            <Icon
+              size={iconOverride ? 21 : 18}
+              strokeWidth={iconOverride ? undefined : 2}
+              className={cn(
+                "shrink-0 transition-transform duration-200 group-hover/chip:scale-110",
+                iconClassName ?? CATEGORY_COLOR[category],
+              )}
+            />
+            <span className="font-display uppercase tracking-[0.06em] text-[14.5px] text-text transition-colors group-hover/chip:text-green">
               {label}
             </span>
           </Link>

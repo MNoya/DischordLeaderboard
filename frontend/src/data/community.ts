@@ -1,6 +1,17 @@
 import { GiProgression, GiRoundTable } from "react-icons/gi";
-import { type LucideIcon, MessagesSquare, Rocket, TrendingUp, Trophy } from "lucide-react";
+import {
+  ClipboardList,
+  GraduationCap,
+  type LucideIcon,
+  MessagesSquare,
+  Rocket,
+  TrendingUp,
+  Trophy,
+  Users,
+  Wrench,
+} from "lucide-react";
 import type { IconType } from "react-icons";
+import { FaYoutube } from "react-icons/fa";
 import { categorySlug, type EpisodeCategory } from "./episodes";
 import { useDiscordStats } from "./hooks";
 import { DISCORD_BLURB, SITE_BLURB_PARAGRAPHS } from "./site";
@@ -21,31 +32,46 @@ export interface CommunityHighlight {
 }
 
 export const COMMUNITY_HIGHLIGHTS: CommunityHighlight[] = [
-  { Icon: MessagesSquare, text: "Discuss the latest Limited formats and upcoming sets" },
+  { Icon: MessagesSquare, text: "Discuss the latest formats and upcoming sets" },
   { Icon: TrendingUp, text: "Get help with deckbuilding, picks, and gameplay" },
   { Icon: Rocket, text: "Play in community organized events" },
   { Icon: Trophy, text: "Connect with dedicated Limited players" },
 ];
 
-export const COMMUNITY_SHOW_NOTE =
-  "TBD: New episodes most weeks since 2020 — set reviews on release week, plus draft-alongs, sealed prep, rankings, and " +
-  "strategy, on YouTube and every podcast app.";
+export const COMMUNITY_SHOW_PARAGRAPHS = [
+  "Every set covered from start to finish: first impressions as previews drop, a complete set review, then " +
+    "metagame updates as it develops.",
+  "Other episodes range from focused deck breakdowns to evergreen lessons on gameplay and big picture strategy " +
+    "that stay relevant from one format to the next.",
+];
 
 export const COMMUNITY_SUPPORT_NOTE =
-  "TBD: Your patronage keeps the show running by helping to pay for the costs of the show, and allows us to " +
-  "produce more content in both audio and video form.We have a bunch of rewards to help you become a better " +
-  "player when you choose to support the show!";
+  "Enjoying the show and want to support it? The Patreon rewards are all about getting you better at Limited, with " +
+  "hands-on help that goes beyond the episodes.";
 
-export const COMMUNITY_SHOW_TOPICS: Array<{ category: EpisodeCategory; label: string }> = [
+export const COMMUNITY_SUPPORT_REWARDS: Array<{ Icon: LucideIcon; label: string }> = [
+  { Icon: Wrench, label: "Deck tech help" },
+  { Icon: ClipboardList, label: "Draft log review" },
+  { Icon: Users, label: "Group classes" },
+  { Icon: GraduationCap, label: "1-on-1 coaching" },
+];
+
+export const COMMUNITY_SHOW_TOPICS: Array<{
+  category: EpisodeCategory;
+  label: string;
+  Icon?: IconType;
+  iconClassName?: string;
+}> = [
   { category: "Set Review", label: "Set reviews" },
   { category: "Metagame", label: "Format updates" },
-  { category: "Coaching", label: "Coaching" },
+  { category: "Draft", label: "Draft videos", Icon: FaYoutube, iconClassName: "text-red" },
   { category: "Evergreen", label: "Evergreen episodes" },
 ];
 
 export interface CommunityLink {
   title: string;
-  blurb: string;
+  live?: boolean;
+  steps: readonly string[];
   to: string;
   cta: string;
   Icon: IconType;
@@ -54,20 +80,25 @@ export interface CommunityLink {
 export const COMMUNITY_EVENTS: CommunityLink[] = [
   {
     title: "Community leaderboard",
-    blurb:
-      "TBD: Link your 17lands profile and your trophies and results show up under your name — a shared record of " +
-      "everyone's drafts for the set.",
+    live: true,
+    steps: [
+      "Type /join on Discord to link your 17lands profile",
+      "Share your trophies and records across sets and formats",
+      "See the drafts and decks members are winning with",
+    ],
     to: "/leaderboard",
-    cta: "See the board",
+    cta: "View the leaderboard",
     Icon: GiProgression,
   },
   {
     title: "Weekly pod drafts",
-    blurb:
-      "TBD: Eight players draft a pod together in Draftmancer, then play their matches out on MTGA. Every pick is saved " +
-      "as a replay you can revisit afterward.",
+    steps: [
+      "Sign up for the next draft in [#🚀-pod-draft-coordination](https://discord.com/channels/775371722065051658/1028072146645295125)",
+      "Draft together using [Draftmancer](draftmancer.com) and play the matches live on MTGA",
+      "All seats, logs and replays are saved on the site to revisit anytime",
+    ],
     to: "/pods",
-    cta: "See the pods",
+    cta: "Check past & upcoming events",
     Icon: GiRoundTable,
   },
 ];
