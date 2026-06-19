@@ -49,10 +49,10 @@ export function P0P1Page() {
     return <P0P1MobileSelector ballot={ballot} />;
   }
 
-  const loginCta = !authLoading && !user && !isPastDeadline && (
+  const loginCta = !authLoading && !user && (
     <button type="button" onClick={signIn} className="bg-transparent border-0 cursor-pointer p-0">
       <CtaPill size="lg" icon={<DiscordIcon size={19} />}>
-        LOG IN TO SUBMIT PICKS
+        {!isPastDeadline ? <>LOG IN TO SUBMIT PICKS</> : <>LOG IN TO VIEW YOUR PICKS</>}
       </CtaPill>
     </button>
   );

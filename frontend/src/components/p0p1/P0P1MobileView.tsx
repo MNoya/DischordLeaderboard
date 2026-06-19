@@ -98,7 +98,7 @@ export function P0P1MobileView({ ballot }: { ballot: Ballot }) {
         )}
       </main>
 
-      <MobileLoginBar show={loginBarVisible} signIn={signIn} />
+      <MobileLoginBar show={loginBarVisible} text={!isPastDeadline ? "LOG IN TO SUBMIT PICKS" : "LOG IN TO VIEW YOUR PICKS"} signIn={signIn} />
 
       {!isPastDeadline && editingSlotKey && cards && (
         <MobilePickerSheet
@@ -140,7 +140,7 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
     p0p1Sets,
   } = ballot;
 
-  const loginBarVisible = !authLoading && !user && !isPastDeadline;
+  const loginBarVisible = !authLoading && !user;
   const groupedStats = hasParticipated && pickStats ? groupBySlot(pickStats) : undefined;
   const n = hasParticipated && pickStats ? participantCount(pickStats) : 0;
 
@@ -246,7 +246,7 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
         )}
       </main>
 
-      <MobileLoginBar show={loginBarVisible} signIn={signIn} />
+      <MobileLoginBar show={loginBarVisible} signIn={signIn} text={!isPastDeadline ? "LOG IN TO SUBMIT PICKS" : "LOG IN TO VIEW YOUR PICKS"} />
 
       <GoToTopButton
         onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
@@ -394,7 +394,7 @@ function YourPicksCarousel({
   );
 }
 
-function MobileLoginBar({ show, signIn }: { show: boolean; signIn: () => void }) {
+function MobileLoginBar({ show, signIn, text }: { show: boolean; signIn: () => void; text: string }) {
   if (!show) {
     return null;
   }
@@ -402,7 +402,7 @@ function MobileLoginBar({ show, signIn }: { show: boolean; signIn: () => void })
     <div className="fixed bottom-0 left-0 right-0 z-40 bg-bg/95 backdrop-blur border-t border-border px-4 py-2.5 flex justify-center">
       <button type="button" onClick={signIn} className="bg-transparent border-0 cursor-pointer p-0">
         <CtaPill size="lg" icon={<DiscordIcon size={19} />}>
-          LOG IN TO SUBMIT PICKS
+          {text}
         </CtaPill>
       </button>
     </div>
