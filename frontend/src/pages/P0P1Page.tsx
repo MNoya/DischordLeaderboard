@@ -82,19 +82,23 @@ export function P0P1Page() {
       <P0P1Hero cta={heroCta} belowIntro={belowIntro} isPastDeadline={isPastDeadline} />
 
       <main className="flex-1 px-10 pb-5 pt-5">
-        {(!isPastDeadline || hasParticipated) &&
-          (dataReady ? (
-            <RosterStrip
-              activeSlotKey={activeSlotKey}
-              picksBySlot={picksBySlot}
-              cardsByName={cardsByName}
-              locked={isPastDeadline}
-              pickStats={hasParticipated ? pickStats : undefined}
-              onSelect={(key) => setEditingSlotKey(key)}
-            />
-          ) : (
-            <RosterStripSkeleton />
-          ))}
+        {(!isPastDeadline || hasParticipated) && (
+          <>
+            <SectionLabel size={16} className="mb-2">YOUR PICKS</SectionLabel>
+            {dataReady ? (
+              <RosterStrip
+                activeSlotKey={activeSlotKey}
+                picksBySlot={picksBySlot}
+                cardsByName={cardsByName}
+                locked={isPastDeadline}
+                pickStats={hasParticipated ? pickStats : undefined}
+                onSelect={(key) => setEditingSlotKey(key)}
+              />
+            ) : (
+              <RosterStripSkeleton />
+            )}
+          </>
+        )}
 
         {isPastDeadline ? (
           pickStats && pickStats.length > 0 && (

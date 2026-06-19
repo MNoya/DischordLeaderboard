@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { ManaCost } from "../ManaPips";
+import { SectionLabel } from "../SectionLabel";
 import { SlotPip } from "./slotVisuals";
 import { CardImagePreview } from "./CardImagePreview";
 import { globalRanked, participantCount } from "../../data/p0p1Stats";
@@ -21,6 +22,7 @@ export function FullBreakdownList({
 
   return (
     <div className="flex flex-col gap-2">
+      <SectionLabel size={16} className="mb-1">FULL BREAKDOWN</SectionLabel>
       <div className="flex items-center gap-1.5 flex-wrap">
         <FilterChip active={filter === "all"} onClick={() => setFilter("all")}>
           All

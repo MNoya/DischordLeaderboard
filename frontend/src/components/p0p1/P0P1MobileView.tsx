@@ -3,6 +3,7 @@ import { AppHeader } from "../AppHeader";
 import { CtaPill } from "../CtaPill";
 import { DiscordIcon } from "../BrandIcons";
 import { SetGlyph, setGlyphCode } from "../Brand";
+import { SectionLabel } from "../SectionLabel";
 import { SlotCard } from "./SlotCard";
 import { CardSelectionGrid } from "./CardSelectionGrid";
 import { PostVotingStats } from "./PostVotingStats";
@@ -164,6 +165,7 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
             )}
             {(!isPastDeadline || hasParticipated) && (
               <div className="sticky top-0 z-20 -mx-3 px-2 pt-3 pb-2 bg-bg/95 backdrop-blur border-b border-border">
+                <SectionLabel size={11} className="mb-1.5">YOUR PICKS</SectionLabel>
                 <div className="grid grid-cols-4 landscape:grid-cols-8 gap-1.5">
                   {SLOTS.map((slot) => {
                     const cardName = picksBySlot.get(slot.key);
