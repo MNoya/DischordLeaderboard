@@ -413,24 +413,47 @@ export const fetchPodSetCodes = (): Promise<PodSetCode[]> => wait(podSetCodesFix
 
 import { cardsMshFixture } from "./fixtures/cards-msh";
 
+const P0P1_SLOT_KEYS: SlotKey[] = [
+  "white_common", "blue_common", "black_common", "red_common",
+  "green_common", "multicolor_uncommon", "wildcard_common", "wildcard_uncommon",
+];
+
 const p0p1Picks = new Map<string, P0P1Pick>();
 
-// Seed mock picks so post-voting "picked by X%" badges show up
+// Seed mock picks with a mix of crowd-favorite, minority, and rogue picks
+// (not the top card in every slot), and never the same card twice across
+// slots - wildcard_common/wildcard_uncommon's filters are supersets of the
+// color- and type-specific slots, so naive independent picks can collide,
+// which the real ballot never allows. Slots are walked in P0P1_SLOT_KEYS
+// order (wildcards last) so their picks can see what's already claimed.
 {
-  const slotFilters: Record<string, (c: Card) => boolean> = {
-    white_common: (c) => c.rarity === "common" && c.colors.length === 1 && c.colors[0] === "W",
-    blue_common: (c) => c.rarity === "common" && c.colors.length === 1 && c.colors[0] === "U",
-    black_common: (c) => c.rarity === "common" && c.colors.length === 1 && c.colors[0] === "B",
-    red_common: (c) => c.rarity === "common" && c.colors.length === 1 && c.colors[0] === "R",
-    green_common: (c) => c.rarity === "common" && c.colors.length === 1 && c.colors[0] === "G",
-    multicolor_uncommon: (c) => c.rarity === "uncommon" && c.colors.length >= 2,
-    wildcard_common: (c) => c.rarity === "common" && !c.typeLine.startsWith("Basic Land"),
-    wildcard_uncommon: (c) => c.rarity === "uncommon",
-  };
-  for (const [slot, filter] of Object.entries(slotFilters)) {
-    const card = cardsMshFixture.find(filter);
-    if (card) p0p1Picks.set(slot, { slot: slot as SlotKey, cardName: card.name, lastUpdated: "2026-06-10T00:00:00Z" });
+  const statsBySlot = new Map<SlotKey, P0P1PickStat[]>();
+  for (const stat of generateP0P1PickStats()) {
+    const slotStats = statsBySlot.get(stat.slot);
+    if (slotStats) slotStats.push(stat);
+    else statsBySlot.set(stat.slot, [stat]);
   }
+
+  const RANK_PATTERN: Array<"top" | "middle" | "bottom"> =
+    ["top", "bottom", "middle", "top", "bottom", "middle", "top", "bottom"];
+  const claimed = new Set<string>();
+
+  P0P1_SLOT_KEYS.forEach((slot, i) => {
+    const slotStats = statsBySlot.get(slot);
+    if (!slotStats || slotStats.length === 0) return;
+    const rank = RANK_PATTERN[i % RANK_PATTERN.length];
+    const targetIndex = rank === "top" ? 0
+      : rank === "bottom" ? slotStats.length - 1
+      : Math.floor(slotStats.length / 2);
+    for (let offset = 0; offset < slotStats.length; offset++) {
+      const stat = slotStats[(targetIndex + offset) % slotStats.length];
+      if (!claimed.has(stat.cardName)) {
+        claimed.add(stat.cardName);
+        p0p1Picks.set(slot, { slot, cardName: stat.cardName, lastUpdated: "2026-06-10T00:00:00Z" });
+        break;
+      }
+    }
+  });
 }
 
 export const fetchP0P1Cards = (_setCode: string): Promise<Card[]> =>
@@ -463,12 +486,8 @@ function forceTrailingTie(counts: number[], tieCount: number, value: number) {
   counts[0] += surplus;
 }
 
-export const fetchP0P1PickStats = (_setCode: string): Promise<P0P1PickStat[]> => {
+function generateP0P1PickStats(): P0P1PickStat[] {
   const stats: P0P1PickStat[] = [];
-  const slotKeys: SlotKey[] = [
-    "white_common", "blue_common", "black_common", "red_common",
-    "green_common", "multicolor_uncommon", "wildcard_common", "wildcard_uncommon",
-  ];
   const slotFilters: Record<string, (c: Card) => boolean> = {
     white_common: (c) => c.rarity === "common" && c.colors.length === 1 && c.colors[0] === "W",
     blue_common: (c) => c.rarity === "common" && c.colors.length === 1 && c.colors[0] === "U",
@@ -483,7 +502,7 @@ export const fetchP0P1PickStats = (_setCode: string): Promise<P0P1PickStat[]> =>
   const rng = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
   const TOTAL_VOTERS = 87;
 
-  for (const slotKey of slotKeys) {
+  for (const slotKey of P0P1_SLOT_KEYS) {
     const eligible = cardsMshFixture.filter(slotFilters[slotKey]);
     const count = Math.min(eligible.length, 3 + Math.floor(rng() * 6));
     const picked = eligible.slice(0, count);
@@ -515,8 +534,10 @@ export const fetchP0P1PickStats = (_setCode: string): Promise<P0P1PickStat[]> =>
       });
     }
   }
-  return wait(stats);
-};
+  return stats;
+}
+
+export const fetchP0P1PickStats = (_setCode: string): Promise<P0P1PickStat[]> => wait(generateP0P1PickStats());
 
 export const initialAuthUser = {
   id: "mock-user-id",
