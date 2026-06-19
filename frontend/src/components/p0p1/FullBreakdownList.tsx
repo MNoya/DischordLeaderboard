@@ -1,11 +1,14 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { ManaCost } from "../ManaPips";
 import { SectionLabel } from "../SectionLabel";
-import { SlotPip } from "./slotVisuals";
+import { SlotPip, SLOT_ACCENT } from "./slotVisuals";
 import { CardImagePreview } from "./CardImagePreview";
-import { globalRanked, participantCount } from "../../data/p0p1Stats";
+import { globalRanked } from "../../data/p0p1Stats";
 import { SLOTS } from "../../data/p0p1Slots";
 import type { Card, P0P1PickStat, SlotKey } from "../../types/p0p1";
+
+const DESKTOP_COLS = "28px 36px 2fr 160px 0.5fr 50px";
+const MOBILE_COLS = "18px 28px 1fr 40px";
 
 export function FullBreakdownList({
   pickStats,
@@ -18,7 +21,7 @@ export function FullBreakdownList({
   const ranked = useMemo(() => globalRanked(pickStats), [pickStats]);
   const rows = filter === "all" ? ranked : ranked.filter((s) => s.slot === filter);
   const slotLabels = useMemo(() => new Map(SLOTS.map((s) => [s.key, s.label])), []);
-  const n = participantCount(pickStats);
+  const maxCount = rows.length > 0 ? Math.max(...rows.map((s) => s.pickCount)) : 0;
 
   return (
     <div className="flex flex-col gap-2">
@@ -33,33 +36,89 @@ export function FullBreakdownList({
           </FilterChip>
         ))}
       </div>
-      <div className="flex flex-col border border-border2 divide-y divide-border2 bg-surface">
-        {rows.map((stat) => {
+
+      <div className="hidden lg:block border border-border2 bg-surface">
+        <div
+          className="grid text-dim text-[10px] tracking-[0.08em] font-display px-3 py-1.5 border-b border-border2"
+          style={{ gridTemplateColumns: DESKTOP_COLS }}
+        >
+          <span>#</span>
+          <span />
+          <span>CARD</span>
+          <span>SLOT</span>
+          <span>SHARE</span>
+          <span className="text-right">PICKS</span>
+        </div>
+        {rows.map((stat, i) => {
           const card = cardsByName.get(stat.cardName);
           return (
-            <div key={`${stat.slot}-${stat.cardName}`} className="flex items-center gap-3 px-3 py-2">
-              {card && (
-                <CardImagePreview
-                  imageUrl={card.imageNormal}
-                  alt={card.name}
-                  className="w-10 h-10 lg:w-12 lg:h-12 rounded overflow-hidden shrink-0"
-                >
+            <div
+              key={`${stat.slot}-${stat.cardName}`}
+              className={`grid items-center px-3 py-1.5 ${i % 2 === 1 ? "bg-surface2/40" : ""}`}
+              style={{ gridTemplateColumns: DESKTOP_COLS }}
+            >
+              <span className="text-dim text-[11px] font-mono">{i + 1}</span>
+              {card ? (
+                <CardImagePreview imageUrl={card.imageNormal} alt={card.name} className="w-7 h-7 rounded overflow-hidden">
                   <img src={card.imageArtCrop} alt={card.name} className="w-full h-full object-cover" />
                 </CardImagePreview>
+              ) : (
+                <div className="w-7 h-7 rounded bg-surface2" />
               )}
-              <div className="flex-1 min-w-0 flex flex-col gap-0.5">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <span className="text-text text-[13.5px] truncate">{stat.cardName}</span>
-                  {card && <ManaCost cost={card.manaCost} size={12} />}
-                </div>
-                <div className="flex items-center gap-1 text-dim text-[11px]">
-                  <SlotPip slotKey={stat.slot} size={11} />
-                  <span className="truncate">{slotLabels.get(stat.slot)}</span>
-                </div>
+              <div className="flex items-center gap-1.5 min-w-0 pr-2">
+                <span className="text-text text-[12.5px] truncate">{stat.cardName}</span>
+                {card && <ManaCost cost={card.manaCost} size={11} />}
               </div>
-              <span className="text-text text-[14px] font-mono tabular-nums shrink-0">
-                {stat.pickCount}
-              </span>
+              <span className="text-dim text-[11px] truncate pr-2">{slotLabels.get(stat.slot)}</span>
+              <div className="h-1.5 bg-surface2 rounded-sm overflow-hidden">
+                <div
+                  className="h-full rounded-sm"
+                  style={{
+                    width: `${maxCount > 0 ? Math.round((stat.pickCount / maxCount) * 100) : 0}%`,
+                    background: SLOT_ACCENT[stat.slot],
+                  }}
+                />
+              </div>
+              <span className="text-text text-[12.5px] font-mono tabular-nums text-right">{stat.pickCount}</span>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="lg:hidden border border-border2 bg-surface">
+        <div
+          className="grid text-dim text-[9px] tracking-[0.08em] font-display px-2.5 py-1.5 border-b border-border2"
+          style={{ gridTemplateColumns: MOBILE_COLS }}
+        >
+          <span />
+          <span />
+          <span>CARD</span>
+          <span className="text-right">PICKS</span>
+        </div>
+        {rows.map((stat, i) => {
+          const card = cardsByName.get(stat.cardName);
+          return (
+            <div
+              key={`${stat.slot}-${stat.cardName}`}
+              className={`grid items-center px-2.5 py-1.5 ${i % 2 === 1 ? "bg-surface2/40" : ""}`}
+              style={{ gridTemplateColumns: MOBILE_COLS }}
+            >
+              <span className="text-dim text-[10px] font-mono">{i + 1}</span>
+              {card ? (
+                <CardImagePreview imageUrl={card.imageNormal} alt={card.name} className="w-6 h-6 rounded overflow-hidden">
+                  <img src={card.imageArtCrop} alt={card.name} className="w-full h-full object-cover" />
+                </CardImagePreview>
+              ) : (
+                <div className="w-6 h-6 rounded bg-surface2" />
+              )}
+              <div className="min-w-0 pr-1">
+                <div className="flex items-center gap-1 min-w-0">
+                  <span className="text-text text-[12px] truncate">{stat.cardName}</span>
+                  {card && <ManaCost cost={card.manaCost} size={10} />}
+                </div>
+                <div className="text-dim text-[9.5px] truncate">{slotLabels.get(stat.slot)}</div>
+              </div>
+              <span className="text-text text-[12px] font-mono tabular-nums text-right">{stat.pickCount}</span>
             </div>
           );
         })}
