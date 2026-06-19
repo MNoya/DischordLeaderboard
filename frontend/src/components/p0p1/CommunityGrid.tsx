@@ -7,8 +7,6 @@ import { groupBySlot, findExtremes, participantCount } from "../../data/p0p1Stat
 import { SLOTS } from "../../data/p0p1Slots";
 import type { Card, P0P1PickStat, SlotKey } from "../../types/p0p1";
 
-const MAX_MOSAIC = 4;
-
 export function CommunityGrid({
   pickStats,
   cardsByName,
@@ -86,12 +84,20 @@ function PickTile({
   const toneClass = tone === "cyan" ? "text-cyan" : "text-magenta";
   const hasStats = stats.length > 0;
   const tied = stats.length > 1;
-  const overflow = stats.length - MAX_MOSAIC;
+  const card = hasStats ? cardsByName.get(stats[0].cardName) : undefined;
 
   return (
     <div className="flex flex-col border border-border2 bg-surface overflow-hidden min-w-0">
       <div className="relative aspect-square bg-surface2 overflow-hidden">
-        {hasStats && <Mosaic stats={stats} cardsByName={cardsByName} />}
+        {hasStats && (
+          card ? (
+            <CardImagePreview imageUrl={card.imageNormal} alt={card.name} className="w-full h-full">
+              <img src={card.imageArtCrop} alt={card.name} className="w-full h-full object-cover" />
+            </CardImagePreview>
+          ) : (
+            <div className="w-full h-full bg-surface2" />
+          )
+        )}
         <div
           className="absolute top-1 left-1 w-5 h-5 rounded-full flex items-center justify-center bg-bg/85"
           title={label}
@@ -107,17 +113,17 @@ function PickTile({
           <button
             type="button"
             onClick={() => setModalOpen(true)}
-            className="absolute bottom-1 right-1 text-[10px] bg-bg/80 rounded-sm px-1 text-dim cursor-pointer"
-            title={`${stats.length} cards tied — view all`}
+            className="absolute bottom-1 right-1 text-[9px] font-display tracking-wide bg-bg/85 rounded-sm px-1 text-muted cursor-pointer"
+            title={`${stats.length} cards tied at this count — view all`}
           >
-            &#128269;{overflow > 0 ? ` +${overflow}` : ""}
+            {stats.length}-WAY TIE
           </button>
         )}
       </div>
       {hasStats && (
         <div className="px-1.5 py-1.5 min-w-0">
           <span className="text-subtle text-[10.5px] truncate block min-w-0">
-            {tied ? `${stats.length}-way tie` : stats[0].cardName}
+            {stats[0].cardName}
           </span>
         </div>
       )}
@@ -130,39 +136,6 @@ function PickTile({
           onClose={() => setModalOpen(false)}
         />
       )}
-    </div>
-  );
-}
-
-function Mosaic({ stats, cardsByName }: { stats: P0P1PickStat[]; cardsByName: Map<string, Card> }) {
-  const tied = stats.length > 1;
-
-  if (!tied) {
-    const card = cardsByName.get(stats[0].cardName);
-    return card ? (
-      <CardImagePreview imageUrl={card.imageNormal} alt={card.name} className="w-full h-full">
-        <img src={card.imageArtCrop} alt={card.name} className="w-full h-full object-cover" />
-      </CardImagePreview>
-    ) : (
-      <div className="w-full h-full bg-surface2" />
-    );
-  }
-
-  const shown = stats.slice(0, MAX_MOSAIC);
-  const gridCls = shown.length === 2 ? "grid-cols-2" : "grid-cols-2 grid-rows-2";
-  return (
-    <div className={`grid ${gridCls} gap-px h-full w-full bg-border2`}>
-      {shown.map((stat, i) => {
-        const card = cardsByName.get(stat.cardName);
-        const spanLast = shown.length === 3 && i === shown.length - 1 ? "col-span-2" : "";
-        return card ? (
-          <CardImagePreview key={stat.cardName} imageUrl={card.imageNormal} alt={card.name} className={`overflow-hidden ${spanLast}`}>
-            <img src={card.imageArtCrop} alt={card.name} className="w-full h-full object-cover" />
-          </CardImagePreview>
-        ) : (
-          <div key={stat.cardName} className={`bg-surface2 ${spanLast}`} />
-        );
-      })}
     </div>
   );
 }
