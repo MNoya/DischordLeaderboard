@@ -47,7 +47,7 @@ export function FullBreakdownList({
           <span>CARD</span>
           <span>SLOT</span>
           <span>SHARE</span>
-          <span className="text-right">PICKS</span>
+          <span className="text-right">PICKED</span>
         </div>
         {rows.map((stat, i) => {
           const card = cardsByName.get(stat.cardName);
@@ -93,7 +93,7 @@ export function FullBreakdownList({
           <span />
           <span />
           <span>CARD</span>
-          <span className="text-right">PICKS</span>
+          <span className="text-right">PICKED</span>
         </div>
         {rows.map((stat, i) => {
           const card = cardsByName.get(stat.cardName);
@@ -112,7 +112,7 @@ export function FullBreakdownList({
                 <div className="w-6 h-6 rounded bg-surface2" />
               )}
               <div className="min-w-0 pr-1">
-                <div className="flex items-center gap-1 min-w-0">
+                <div className="flex items-center justify-between gap-1 min-w-0">
                   <span className="text-text text-[12px] truncate">{stat.cardName}</span>
                   {card && <ManaCost cost={card.manaCost} size={10} />}
                 </div>

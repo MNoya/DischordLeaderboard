@@ -106,20 +106,20 @@ function PickTile({
         >
           <SlotPip slotKey={slotKey} size={12} />
         </div>
-        {hasStats && (
-          <span className={`absolute top-1 right-1 text-[9px] font-mono tabular-nums px-1 rounded-sm bg-bg/85`}>
-            {stats[0].pickCount} picks
-          </span>
-        )}
         {tied && (
           <button
             type="button"
             onClick={() => setModalOpen(true)}
-            className="absolute bottom-1 right-1 text-[9px] font-display tracking-wide bg-bg/85 rounded-sm px-1 text-muted cursor-pointer"
+            className="absolute top-1 right-1 text-[9px] font-display tracking-wide bg-bg/90 rounded-sm px-1 text-muted cursor-pointer"
             title={`${stats.length} cards tied at this count — view all`}
           >
             {stats.length}-WAY TIE
           </button>
+        )}
+        {hasStats && (
+          <span className={`absolute bottom-1 right-1 text-[9px] font-mono tabular-nums px-1 rounded-sm bg-bg/85`}>
+            {stats[0].pickCount} picked
+          </span>
         )}
       </div>
       {hasStats && (

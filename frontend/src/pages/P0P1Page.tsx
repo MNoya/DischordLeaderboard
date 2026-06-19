@@ -287,9 +287,9 @@ function RosterTile({
           </span>
           <span className="text-muted text-[12px] leading-none">
             {yourStat.pickCount === 1 ? (
-              <>pick <span className="opacity-60">(you!)</span></>
+              <><span className="opacity-60">(you!)</span> picked</>
             ) : (
-              "picks"
+              "picked"
             )}
           </span>
         </div>
