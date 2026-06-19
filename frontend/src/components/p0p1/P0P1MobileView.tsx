@@ -143,6 +143,7 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
 
   const loginBarVisible = !authLoading && !user;
   const groupedStats = hasParticipated && pickStats ? groupBySlot(pickStats) : undefined;
+  const entryCount = pickStats ? participantCount(pickStats) : null;
   const n = hasParticipated && pickStats ? participantCount(pickStats) : 0;
   const isCompleteEntrant = isPastDeadline && Boolean(user) && isComplete;
   const isIncompleteEntrant = isPastDeadline && Boolean(user) && !isComplete;
@@ -152,7 +153,7 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
       <AppHeader subtitle="P0 P1 Challenge" />
 
       <main className={`flex-1 flex flex-col w-full px-3 pt-3 ${loginBarVisible ? "pb-24" : "pb-4"}`}>
-        <MobileIntro sets={p0p1Sets} isPastDeadline={isPastDeadline} />
+        <MobileIntro sets={p0p1Sets} entryCount={entryCount} isPastDeadline={isPastDeadline} />
         {dataReady ? (
           <>
             {!isPastDeadline && (
@@ -418,7 +419,15 @@ function MobileLoginBar({ show, signIn, text }: { show: boolean; signIn: () => v
   );
 }
 
-function MobileIntro({ sets, isPastDeadline }: { sets: SetSummary[] | undefined; isPastDeadline: boolean }) {
+function MobileIntro({
+  sets,
+  entryCount = null,
+  isPastDeadline,
+}: {
+  sets: SetSummary[] | undefined;
+  entryCount?: number | null;
+  isPastDeadline: boolean;
+}) {
   return (
     <section className="bg-surface border border-border rounded-xl p-4 mb-3 flex flex-col gap-2.5">
       <div className="flex items-center gap-3">
@@ -461,6 +470,11 @@ function MobileIntro({ sets, isPastDeadline }: { sets: SetSummary[] | undefined;
           </>
         )}
       </p>
+      {isPastDeadline && entryCount !== null && entryCount > 0 && (
+        <p className="text-subtle text-[13.5px]">
+          {entryCount} player{entryCount !== 1 ? "s" : ""} submitted picks.
+        </p>
+      )}
     </section>
   );
 }
