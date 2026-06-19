@@ -59,7 +59,7 @@ export function TiedCardsModal({
                   <span className="text-text text-[13.5px] truncate">{stat.cardName}</span>
                   {card && <ManaCost cost={card.manaCost} size={12} />}
                 </div>
-                <span className="text-dim text-[13px] font-mono tabular-nums shrink-0">{stat.pickCount}</span>
+                <span className="text-dim text-[13px] font-mono tabular-nums shrink-0">{stat.pickCount} picked</span>
               </div>
             );
           })}
