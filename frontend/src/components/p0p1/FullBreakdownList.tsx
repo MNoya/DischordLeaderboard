@@ -3,11 +3,11 @@ import { ManaCost } from "../ManaPips";
 import { SectionLabel } from "../SectionLabel";
 import { SlotPip, SLOT_ACCENT } from "./slotVisuals";
 import { CardImagePreview } from "./CardImagePreview";
-import { globalRanked } from "../../data/p0p1Stats";
+import { globalRanked, groupBySlot, findExtremes, classifyYourPick } from "../../data/p0p1Stats";
 import { SLOTS } from "../../data/p0p1Slots";
 import type { Card, P0P1PickStat, SlotKey } from "../../types/p0p1";
 
-const DESKTOP_COLS = "28px 36px 2fr 160px 0.5fr 50px";
+const DESKTOP_COLS = "28px 36px 2fr 150px 160px 0.5fr 50px";
 const MOBILE_COLS = "18px 28px 1fr 40px";
 
 export function FullBreakdownList({
@@ -22,6 +22,10 @@ export function FullBreakdownList({
   const rows = filter === "all" ? ranked : ranked.filter((s) => s.slot === filter);
   const slotLabels = useMemo(() => new Map(SLOTS.map((s) => [s.key, s.label])), []);
   const maxCount = rows.length > 0 ? Math.max(...rows.map((s) => s.pickCount)) : 0;
+  const extremesBySlot = useMemo(() => {
+    const grouped = groupBySlot(pickStats);
+    return new Map(SLOTS.map((slot) => [slot.key, findExtremes(grouped.get(slot.key) ?? [])]));
+  }, [pickStats]);
 
   return (
     <div className="flex flex-col gap-2">
@@ -45,12 +49,20 @@ export function FullBreakdownList({
           <span>#</span>
           <span />
           <span>CARD</span>
+          <span />
           <span>SLOT</span>
           <span>SHARE</span>
           <span className="text-right">PICKED</span>
         </div>
         {rows.map((stat, i) => {
           const card = cardsByName.get(stat.cardName);
+          const extremes = extremesBySlot.get(stat.slot);
+          const classification = extremes ? classifyYourPick(stat, extremes.most, extremes.least) : undefined;
+          const badgeColor = classification?.state === "most"
+            ? "text-cyan border-cyan"
+            : classification?.state === "rogue"
+            ? "text-magenta border-magenta"
+            : "";
           return (
             <div
               key={`${stat.slot}-${stat.cardName}`}
@@ -68,6 +80,13 @@ export function FullBreakdownList({
               <div className="flex items-center gap-1.5 min-w-0 pr-2">
                 <span className="text-text text-[12.5px] truncate">{stat.cardName}</span>
                 {card && <ManaCost cost={card.manaCost} size={11} />}
+              </div>
+              <div className="pr-2">
+                {classification?.qualifier && (
+                  <span className={`text-[9px] font-display tracking-wide px-1.5 py-0.5 rounded-sm border inline-block ${badgeColor}`}>
+                    {classification.qualifier}
+                  </span>
+                )}
               </div>
               <span className="text-dim text-[11px] truncate pr-2">{slotLabels.get(stat.slot)}</span>
               <div className="h-1.5 bg-surface2 rounded-sm overflow-hidden">
