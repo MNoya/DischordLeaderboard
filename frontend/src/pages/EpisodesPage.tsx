@@ -164,6 +164,7 @@ export function EpisodesPage() {
     }
     navigate({ pathname, search: next.toString() });
     setVisible(PAGE_SIZE);
+    window.scrollTo({ top: 0 });
   };
   const setCategory = (category: EpisodeCategory | null) => {
     if (category) {
@@ -339,18 +340,20 @@ export function EpisodesPage() {
       <div className="flex min-h-full flex-1">
         <aside
           className={cn(
-            "hidden lg:block shrink-0 self-start sticky top-0 h-screen overflow-x-hidden overflow-y-auto",
+            "hidden lg:block shrink-0 self-stretch",
             "border-r border-border bg-surface",
             "transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
             railCollapsed ? "w-[57px]" : "w-[clamp(196px,18vw,244px)]",
           )}
         >
-          <CategoryRail
-            {...railProps}
-            collapsed={railCollapsed}
-            onCollapse={() => setRailCollapsed(true)}
-            onExpand={() => setRailCollapsed(false)}
-          />
+          <div className="sticky top-0 max-h-screen overflow-y-auto overflow-x-hidden">
+            <CategoryRail
+              {...railProps}
+              collapsed={railCollapsed}
+              onCollapse={() => setRailCollapsed(true)}
+              onExpand={() => setRailCollapsed(false)}
+            />
+          </div>
         </aside>
 
         <div className="min-w-0 flex-1">
