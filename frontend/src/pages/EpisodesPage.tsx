@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { SiApplepodcasts, SiRss, SiSpotify, SiYoutube } from "react-icons/si";
 import type { IconType } from "react-icons";
@@ -51,8 +51,8 @@ const renderSetValue = (option: FilterOption) => (
     <span className="hidden shrink-0 text-[11px] tracking-[0.22em] text-muted sm:inline">SET</span>
     <span className="hidden h-3.5 w-px shrink-0 bg-border2 sm:block" />
     {option.value ? (
-      <span className="flex min-w-0 items-center gap-1.5 truncate text-text">
-        <SetGlyph code={option.value} size={18} />
+      <span className="flex min-w-0 items-center gap-1.5 truncate text-green">
+        <SetGlyph code={option.value} size={18} className="text-green" />
         {option.value}
       </span>
     ) : (
@@ -100,6 +100,25 @@ export function EpisodesPage() {
   const isMobile = useIsMobile();
   const sentinelRef = useRef<HTMLDivElement>(null);
   const contentTopRef = useRef<HTMLDivElement>(null);
+  const searchWrapRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const [searchIndent, setSearchIndent] = useState(0);
+
+  useLayoutEffect(() => {
+    const measure = () => {
+      const search = searchWrapRef.current;
+      const list = listRef.current;
+      if (!search || !list || window.innerWidth < 1024) {
+        setSearchIndent(0);
+        return;
+      }
+      const contentLeft = list.getBoundingClientRect().left + parseFloat(getComputedStyle(list).paddingLeft);
+      setSearchIndent(Math.max(0, Math.round(search.getBoundingClientRect().left - contentLeft)));
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [railCollapsed]);
 
   const all = episodes ?? [];
   const setCodesBySlug = useMemo(() => {
@@ -396,7 +415,7 @@ export function EpisodesPage() {
                 <span className="shrink-0">{setFilterDropdown}</span>
               </Tooltip>
             )}
-            <div className="relative min-w-0 flex-1">
+            <div ref={searchWrapRef} className="relative min-w-0 flex-1">
               <Search
                 size={15}
                 strokeWidth={2}
@@ -440,7 +459,7 @@ export function EpisodesPage() {
             </div>
           </div>
 
-          <div className="px-4 md:px-6 pt-6 pb-4">
+          <div ref={listRef} className="px-4 md:px-6 pt-6 pb-4">
             {awaitingSetSlug || (isPending && filtered.length === 0) ? (
               <Grid>
                 {Array.from({ length: 6 }).map((_, i) => (
@@ -482,6 +501,7 @@ export function EpisodesPage() {
                 query={needle ? query.trim() : ""}
                 noun={shortsView ? "shorts" : audioView ? "audio episodes" : "episodes"}
                 context={activeSet ?? activeCategory ?? null}
+                indent={searchIndent}
                 onClear={() => {
                   setQuery("");
                   setVisible(PAGE_SIZE);
@@ -707,17 +727,22 @@ function EmptyResults({
   query,
   noun,
   context,
+  indent,
   onClear,
 }: {
   query: string;
   noun: string;
   context: string | null;
+  indent: number;
   onClear: () => void;
 }) {
   const searching = query.length > 0;
   const where = context ? ` in ${context}` : "";
   return (
-    <div className="flex animate-fadeIn flex-col items-start py-20 text-left md:py-28">
+    <div
+      className="flex animate-fadeIn flex-col items-center py-12 text-center md:py-16 lg:items-start lg:text-left"
+      style={{ marginLeft: indent }}
+    >
       <div
         className="relative mb-6 flex h-20 w-20 items-center justify-center border border-border2 bg-surface"
         style={{ clipPath: CUT_CORNER_CHAMFER }}
@@ -728,14 +753,16 @@ function EmptyResults({
       <h3 className="font-display text-[22px] leading-none tracking-[0.06em] text-text md:text-[26px]">
         {searching ? "No matches found" : `No ${noun} yet`}
       </h3>
-      <p className="mono mt-3 max-w-sm text-[12px] leading-relaxed text-muted">
+      <p className="mono mt-3 text-[12px] leading-relaxed text-muted">
         {searching ? (
           <>
             Nothing matches <span className="text-green">“{query}”</span>
-            {where}. Try a different title or set.
+            {where}.
+            <br />
+            Try a different title or set.
           </>
         ) : (
-          <>Nothing’s landed here{where} yet — check back after the next drop.</>
+          <>No {noun}{where} have been posted yet.</>
         )}
       </p>
       {searching ? (
