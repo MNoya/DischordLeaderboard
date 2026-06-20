@@ -717,7 +717,7 @@ function EmptyResults({
   const searching = query.length > 0;
   const where = context ? ` in ${context}` : "";
   return (
-    <div className="flex animate-fadeIn flex-col items-center justify-center px-4 py-20 text-center md:py-28">
+    <div className="flex animate-fadeIn flex-col items-start py-20 text-left md:py-28">
       <div
         className="relative mb-6 flex h-20 w-20 items-center justify-center border border-border2 bg-surface"
         style={{ clipPath: CUT_CORNER_CHAMFER }}
