@@ -112,7 +112,7 @@ export function P0P1Page() {
         {isPastDeadline ? (
           pickStats && pickStats.length > 0 && (
             <div className="mt-6">
-              <PostVotingStats pickStats={pickStats} cardsByName={cardsByName} />
+              <PostVotingStats pickStats={pickStats} cardsByName={cardsByName} picksBySlot={picksBySlot} />
             </div>
           )
         ) : (

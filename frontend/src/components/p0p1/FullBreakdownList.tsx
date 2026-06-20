@@ -3,16 +3,18 @@ import { ManaCost } from "../ManaPips";
 import { SectionLabel } from "../SectionLabel";
 import { SlotPip } from "./slotVisuals";
 import { CardImagePreview } from "./CardImagePreview";
-import { groupBySlot, findExtremes, classifyYourPick } from "../../data/p0p1Stats";
+import { groupBySlot } from "../../data/p0p1Stats";
 import { SLOTS } from "../../data/p0p1Slots";
 import type { Card, P0P1PickStat, SlotDefinition } from "../../types/p0p1";
 
 export function FullBreakdownList({
   pickStats,
   cardsByName,
+  picksBySlot,
 }: {
   pickStats: P0P1PickStat[];
   cardsByName: Map<string, Card>;
+  picksBySlot?: Map<string, string>;
 }) {
   const bySlot = useMemo(() => {
     const grouped = groupBySlot(pickStats);
@@ -30,13 +32,25 @@ export function FullBreakdownList({
 
       <div className="hidden lg:grid grid-cols-4 gap-3 items-start">
         {SLOTS.map((slot) => (
-          <SlotPanel key={slot.key} slot={slot} rows={bySlot.get(slot.key) ?? []} cardsByName={cardsByName} />
+          <SlotPanel
+            key={slot.key}
+            slot={slot}
+            rows={bySlot.get(slot.key) ?? []}
+            cardsByName={cardsByName}
+            yourPick={picksBySlot?.get(slot.key)}
+          />
         ))}
       </div>
 
       <div className="lg:hidden border border-border2 bg-surface divide-y divide-border2">
         {SLOTS.map((slot) => (
-          <SlotAccordionSection key={slot.key} slot={slot} rows={bySlot.get(slot.key) ?? []} cardsByName={cardsByName} />
+          <SlotAccordionSection
+            key={slot.key}
+            slot={slot}
+            rows={bySlot.get(slot.key) ?? []}
+            cardsByName={cardsByName}
+            yourPick={picksBySlot?.get(slot.key)}
+          />
         ))}
       </div>
     </div>
@@ -47,13 +61,13 @@ function SlotPanel({
   slot,
   rows,
   cardsByName,
+  yourPick,
 }: {
   slot: SlotDefinition;
   rows: P0P1PickStat[];
   cardsByName: Map<string, Card>;
+  yourPick?: string;
 }) {
-  const { most } = findExtremes(rows);
-
   return (
     <div className="border border-border2 bg-surface overflow-hidden flex flex-col">
       <div className="px-2.5 py-2 bg-surface2 border-b border-border2 flex items-center gap-2">
@@ -64,9 +78,9 @@ function SlotPanel({
       <div className="divide-y divide-border2">
         {rows.map((stat, i) => {
           const card = cardsByName.get(stat.cardName);
-          const classification = classifyYourPick(stat, most, []);
+          const isYours = stat.cardName === yourPick;
           return (
-            <div key={stat.cardName} className="flex items-center gap-2 px-2.5 py-1.5">
+            <div key={stat.cardName} className={`flex items-center gap-2 px-2.5 py-1.5 ${isYours ? "bg-green/5" : ""}`}>
               <span className="text-dim text-[10px] font-mono w-3 shrink-0">{i + 1}</span>
               {card ? (
                 <CardImagePreview imageUrl={card.imageNormal} alt={card.name} className="w-7 h-7 rounded overflow-hidden shrink-0">
@@ -77,9 +91,9 @@ function SlotPanel({
               )}
               <div className="flex-1 min-w-0 flex items-center gap-1.5">
                 <span className="text-text text-[12px] truncate">{stat.cardName}</span>
-                {classification.qualifier && (
-                  <span className="text-[8px] font-display tracking-wide text-cyan border border-cyan/50 rounded-sm px-1 shrink-0">
-                    {classification.qualifier}
+                {isYours && (
+                  <span className="text-[9px] font-display tracking-wide text-green border border-green/50 rounded-sm px-1 shrink-0">
+                    YOURS
                   </span>
                 )}
               </div>
@@ -97,13 +111,14 @@ function SlotAccordionSection({
   slot,
   rows,
   cardsByName,
+  yourPick,
 }: {
   slot: SlotDefinition;
   rows: P0P1PickStat[];
   cardsByName: Map<string, Card>;
+  yourPick?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const { most } = findExtremes(rows);
   const top = rows[0];
   const tiedAtTop = top ? rows.filter((r) => r.pickCount === top.pickCount).length : 0;
   const teaser = top
@@ -132,11 +147,11 @@ function SlotAccordionSection({
         <div className="border-t border-border2">
           {rows.map((stat, i) => {
             const card = cardsByName.get(stat.cardName);
-            const classification = classifyYourPick(stat, most, []);
+            const isYours = stat.cardName === yourPick;
             return (
               <div
                 key={stat.cardName}
-                className="flex items-center gap-2.5 px-2.5 py-2 border-b border-border2 last:border-b-0"
+                className={`flex items-center gap-2.5 px-2.5 py-2 border-b border-border2 last:border-b-0 ${isYours ? "bg-green/5" : ""}`}
               >
                 <span className="text-dim text-[10px] w-4 text-right shrink-0">{i + 1}</span>
                 {card ? (
@@ -148,9 +163,9 @@ function SlotAccordionSection({
                 )}
                 <div className="min-w-0 flex-1 flex items-center gap-1">
                   <span className="text-text text-[12.5px] truncate min-w-0">{stat.cardName}</span>
-                  {classification.qualifier && (
-                    <span className="text-[7.5px] font-display tracking-wide text-cyan border border-cyan/50 rounded-sm px-1 shrink-0">
-                      {classification.qualifier}
+                  {isYours && (
+                    <span className="text-[9px] font-display tracking-wide text-green border border-green/50 rounded-sm px-1 shrink-0">
+                      YOURS
                     </span>
                   )}
                   {card && <span className="ml-auto shrink-0"><ManaCost cost={card.manaCost} size={10} /></span>}

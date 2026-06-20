@@ -208,7 +208,7 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
             {isPastDeadline ? (
               pickStats && pickStats.length > 0 && (
                 <div className="pt-3">
-                  <PostVotingStats pickStats={pickStats} cardsByName={cardsByName} />
+                  <PostVotingStats pickStats={pickStats} cardsByName={cardsByName} picksBySlot={picksBySlot} />
                 </div>
               )
             ) : (
