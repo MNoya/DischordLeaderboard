@@ -160,63 +160,94 @@ function IdentityPanel() {
     { label: "Patreon", url: SITE_LINKS.patreon, Icon: SiPatreon },
   ];
   const offerings = ["Weekly episodes", "Set review tier lists", "Strategy discussion", "Community events"];
+  const [aboutOpen, setAboutOpen] = useState(readAboutOpen);
+
+  const toggleAbout = () => {
+    setAboutOpen((open) => {
+      const next = !open;
+      window.localStorage.setItem(ABOUT_OPEN_KEY, next ? "1" : "0");
+      return next;
+    });
+  };
   return (
     <section className="order-1 lg:order-none bg-surface border border-border rounded-xl p-4 flex flex-col gap-3 shrink-0">
-      <h2 className="font-display text-text text-[20px] tracking-[0.05em]">About the Community</h2>
-      <p className="text-subtle text-[13px] leading-[1.5] text-center">
-        Everything you need to get better at <span className="text-green">Limited Magic</span>
-      </p>
-      <ul className="grid grid-cols-[auto_auto] gap-x-6 gap-y-1.5 self-center">
-        {offerings.map((item) => (
-          <li key={item} className="flex items-center gap-2.5 text-subtle text-[13px] leading-tight">
-            <span className="w-[5px] h-[5px] shrink-0 bg-green rotate-45" />
-            {item}
-          </li>
-        ))}
-      </ul>
-      <p className="text-subtle text-[13px] leading-[1.5] text-center">
-        Join the <span className="text-green">Discord</span> to connect with other Limited players, draft with us and climb the leaderboard!
-      </p>
-      <ChamferCta
-        label="JOIN THE DISCHORD"
-        href={SITE_LINKS.discord}
-        target="_blank"
-        grow
-        className="self-center mt-0.5"
-        icon={
-          <span className="inline-flex items-center justify-center w-[22px] h-[22px] rounded-full bg-bg text-white shrink-0">
-            <DiscordIcon size={14} />
-          </span>
-        }
-      />
-      <p className="mono text-[12px] tracking-[0.04em] text-subtle text-center">
-        Hosted by {HOST.name}{" "}
-        <a
-          href={`https://x.com/${HOST.handle}`}
-          target="_blank"
-          rel="noreferrer"
-          className="text-subtle italic no-underline hover:text-green transition-colors"
+      <h2 className="font-display text-text text-[20px] tracking-[0.05em]">
+        <button
+          type="button"
+          onClick={toggleAbout}
+          aria-expanded={aboutOpen}
+          aria-label={aboutOpen ? "Collapse about the community" : "Expand about the community"}
+          className="flex w-full items-center justify-between gap-3 text-left lg:pointer-events-none"
         >
-          @{HOST.handle}
-        </a>
-      </p>
-      <div className="grid grid-cols-3 gap-2">
-        {socials.map(({ label, url, Icon }) => (
+          About the Community
+          <ChevronDown size={22} className={cn("shrink-0 text-muted transition-transform lg:hidden", !aboutOpen && "-rotate-90")} />
+        </button>
+      </h2>
+      <div className={cn("flex flex-col gap-3", !aboutOpen && "max-lg:hidden")}>
+        <p className="text-subtle text-[13px] leading-[1.5] text-center">
+          Everything you need to get better at <span className="text-green">Limited Magic</span>
+        </p>
+        <ul className="grid grid-cols-[auto_auto] gap-x-6 gap-y-1.5 self-center">
+          {offerings.map((item) => (
+            <li key={item} className="flex items-center gap-2.5 text-subtle text-[13px] leading-tight">
+              <span className="w-[5px] h-[5px] shrink-0 bg-green rotate-45" />
+              {item}
+            </li>
+          ))}
+        </ul>
+        <p className="text-subtle text-[13px] leading-[1.5] text-center">
+          Join the <span className="text-green">Discord</span> to connect with other Limited players, draft with us and climb the leaderboard!
+        </p>
+        <ChamferCta
+          label="JOIN THE DISCHORD"
+          href={SITE_LINKS.discord}
+          target="_blank"
+          grow
+          className="self-center mt-0.5"
+          icon={
+            <span className="inline-flex items-center justify-center w-[22px] h-[22px] rounded-full bg-bg text-white shrink-0">
+              <DiscordIcon size={14} />
+            </span>
+          }
+        />
+        <p className="mono text-[12px] tracking-[0.04em] text-subtle text-center">
+          Hosted by {HOST.name}{" "}
           <a
-            key={label}
-            href={url}
+            href={`https://x.com/${HOST.handle}`}
             target="_blank"
             rel="noreferrer"
-            className="mono text-[12px] tracking-[0.04em] flex items-center justify-center gap-1.5 bg-surface2 py-2 text-subtle no-underline hover:bg-border hover:text-green transition-colors"
-            style={{ clipPath: CUT_CORNER_CHAMFER }}
+            className="text-subtle italic no-underline hover:text-green transition-colors"
           >
-            <Icon className="text-[13px]" />
-            {label}
+            @{HOST.handle}
           </a>
-        ))}
+        </p>
+        <div className="grid grid-cols-3 gap-2">
+          {socials.map(({ label, url, Icon }) => (
+            <a
+              key={label}
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+              className="mono text-[12px] tracking-[0.04em] flex items-center justify-center gap-1.5 bg-surface2 py-2 text-subtle no-underline hover:bg-border hover:text-green transition-colors"
+              style={{ clipPath: CUT_CORNER_CHAMFER }}
+            >
+              <Icon className="text-[13px]" />
+              {label}
+            </a>
+          ))}
+        </div>
       </div>
     </section>
   );
+}
+
+const ABOUT_OPEN_KEY = "llu:community-about-open";
+
+function readAboutOpen(): boolean {
+  if (typeof window === "undefined") {
+    return true;
+  }
+  return window.localStorage.getItem(ABOUT_OPEN_KEY) !== "0";
 }
 
 const CARDS_PER_PAGE = 5;
