@@ -243,6 +243,10 @@ const resolveMeta = async (pathname: string): Promise<RouteMeta> => {
 
 export const onRequest: PagesFunction = async (context) => {
   const url = new URL(context.request.url);
+  // exact host only, so <branch>.dischord.pages.dev previews still serve real content
+  if (url.hostname === "dischord.pages.dev") {
+    return Response.redirect(`https://limitedlevelups.com${url.pathname}${url.search}`, 302);
+  }
   if (context.request.method !== "GET") return context.next();
 
   const lastSegment = url.pathname.split("/").pop() ?? "";

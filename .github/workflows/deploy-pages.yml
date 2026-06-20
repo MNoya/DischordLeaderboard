@@ -2,7 +2,7 @@ name: Deploy limitedlevelups.com
 
 on:
   push:
-    branches: [dev]
+    branches: [master]
 
 jobs:
   deploy:
@@ -25,4 +25,4 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy frontend/dist --project-name=limitedlevelups --branch=dev
+          command: pages deploy frontend/dist --project-name=limitedlevelups --branch=master
