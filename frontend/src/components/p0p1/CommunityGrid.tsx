@@ -15,26 +15,17 @@ export function CommunityGrid({
   cardsByName: Map<string, Card>;
 }) {
   const grouped = groupBySlot(pickStats);
-  const extremesBySlot = new Map(SLOTS.map((slot) => [slot.key, findExtremes(grouped.get(slot.key) ?? [])]));
+  const mostBySlot = new Map(SLOTS.map((slot) => [slot.key, findExtremes(grouped.get(slot.key) ?? []).most]));
   const n = participantCount(pickStats);
 
   return (
-    <div className="flex flex-col gap-6">
-      <PickRow
-        title="Crowd Favorites"
-        subtitle="Most popular picks by slot"
-        entries={SLOTS.map((slot) => ({ slotKey: slot.key, label: slot.label, stats: extremesBySlot.get(slot.key)!.most }))}
-        cardsByName={cardsByName}
-        n={n}
-      />
-      <PickRow
-        title="Rogue Picks"
-        subtitle="Least popular picks by slot"
-        entries={SLOTS.map((slot) => ({ slotKey: slot.key, label: slot.label, stats: extremesBySlot.get(slot.key)!.least }))}
-        cardsByName={cardsByName}
-        n={n}
-      />
-    </div>
+    <PickRow
+      title="Crowd Favorites"
+      subtitle="Most popular picks by slot"
+      entries={SLOTS.map((slot) => ({ slotKey: slot.key, label: slot.label, stats: mostBySlot.get(slot.key)! }))}
+      cardsByName={cardsByName}
+      n={n}
+    />
   );
 }
 

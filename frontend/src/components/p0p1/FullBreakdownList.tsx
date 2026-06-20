@@ -1,14 +1,11 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState } from "react";
 import { ManaCost } from "../ManaPips";
 import { SectionLabel } from "../SectionLabel";
-import { SlotPip, SLOT_ACCENT } from "./slotVisuals";
+import { SlotPip } from "./slotVisuals";
 import { CardImagePreview } from "./CardImagePreview";
-import { globalRanked, groupBySlot, findExtremes, classifyYourPick } from "../../data/p0p1Stats";
+import { groupBySlot, findExtremes, classifyYourPick } from "../../data/p0p1Stats";
 import { SLOTS } from "../../data/p0p1Slots";
-import type { Card, P0P1PickStat, SlotKey } from "../../types/p0p1";
-
-const DESKTOP_COLS = "28px 36px 2fr 150px 160px 0.5fr 50px";
-const MOBILE_COLS = "18px 28px 1fr 40px";
+import type { Card, P0P1PickStat, SlotDefinition } from "../../types/p0p1";
 
 export function FullBreakdownList({
   pickStats,
@@ -17,127 +14,77 @@ export function FullBreakdownList({
   pickStats: P0P1PickStat[];
   cardsByName: Map<string, Card>;
 }) {
-  const [filter, setFilter] = useState<SlotKey | "all">("all");
-  const ranked = useMemo(() => globalRanked(pickStats), [pickStats]);
-  const rows = filter === "all" ? ranked : ranked.filter((s) => s.slot === filter);
-  const slotLabels = useMemo(() => new Map(SLOTS.map((s) => [s.key, s.label])), []);
-  const maxCount = rows.length > 0 ? Math.max(...rows.map((s) => s.pickCount)) : 0;
-  const extremesBySlot = useMemo(() => {
+  const bySlot = useMemo(() => {
     const grouped = groupBySlot(pickStats);
-    return new Map(SLOTS.map((slot) => [slot.key, findExtremes(grouped.get(slot.key) ?? [])]));
+    return new Map(
+      SLOTS.map((slot) => [
+        slot.key,
+        [...(grouped.get(slot.key) ?? [])].sort((a, b) => b.pickCount - a.pickCount),
+      ]),
+    );
   }, [pickStats]);
 
   return (
     <div className="flex flex-col gap-2">
       <SectionLabel size={16} className="mb-1 text-white">FULL BREAKDOWN</SectionLabel>
-      <div className="flex items-center gap-1.5 flex-wrap">
-        <FilterChip active={filter === "all"} onClick={() => setFilter("all")}>
-          All
-        </FilterChip>
+
+      <div className="hidden lg:grid grid-cols-4 gap-3 items-start">
         {SLOTS.map((slot) => (
-          <FilterChip key={slot.key} active={filter === slot.key} onClick={() => setFilter(slot.key)}>
-            <SlotPip slotKey={slot.key} size={14} />
-          </FilterChip>
+          <SlotPanel key={slot.key} slot={slot} rows={bySlot.get(slot.key) ?? []} cardsByName={cardsByName} />
         ))}
       </div>
 
-      <div className="hidden lg:block border border-border2 bg-surface">
-        <div
-          className="grid text-dim text-[10px] tracking-[0.08em] font-display px-3 py-1.5 border-b border-border2"
-          style={{ gridTemplateColumns: DESKTOP_COLS }}
-        >
-          <span>#</span>
-          <span />
-          <span>CARD</span>
-          <span />
-          <span>SLOT</span>
-          <span>SHARE</span>
-          <span className="text-right">PICKED</span>
-        </div>
+      <div className="lg:hidden border border-border2 bg-surface divide-y divide-border2">
+        {SLOTS.map((slot) => (
+          <SlotAccordionSection key={slot.key} slot={slot} rows={bySlot.get(slot.key) ?? []} cardsByName={cardsByName} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SlotPanel({
+  slot,
+  rows,
+  cardsByName,
+}: {
+  slot: SlotDefinition;
+  rows: P0P1PickStat[];
+  cardsByName: Map<string, Card>;
+}) {
+  const { most } = findExtremes(rows);
+
+  return (
+    <div className="border border-border2 bg-surface overflow-hidden flex flex-col">
+      <div className="px-2.5 py-2 bg-surface2 border-b border-border2 flex items-center gap-2">
+        <SlotPip slotKey={slot.key} size={14} />
+        <span className="text-subtle text-[11px] tracking-[0.06em] font-display truncate">{slot.label.toUpperCase()}</span>
+        <span className="ml-auto text-dim text-[10px] font-mono shrink-0">{rows.length} cards</span>
+      </div>
+      <div className="divide-y divide-border2">
         {rows.map((stat, i) => {
           const card = cardsByName.get(stat.cardName);
-          const extremes = extremesBySlot.get(stat.slot);
-          const classification = extremes ? classifyYourPick(stat, extremes.most, extremes.least) : undefined;
-          const badgeColor = classification?.state === "most"
-            ? "text-cyan border-cyan"
-            : classification?.state === "rogue"
-            ? "text-magenta border-magenta"
-            : "";
+          const classification = classifyYourPick(stat, most, []);
           return (
-            <div
-              key={`${stat.slot}-${stat.cardName}`}
-              className={`grid items-center px-3 py-1.5 ${i % 2 === 1 ? "bg-surface2/40" : ""}`}
-              style={{ gridTemplateColumns: DESKTOP_COLS }}
-            >
-              <span className="text-dim text-[11px] font-mono">{i + 1}</span>
+            <div key={stat.cardName} className="flex items-center gap-2 px-2.5 py-1.5">
+              <span className="text-dim text-[10px] font-mono w-3 shrink-0">{i + 1}</span>
               {card ? (
-                <CardImagePreview imageUrl={card.imageNormal} alt={card.name} className="w-7 h-7 rounded overflow-hidden">
+                <CardImagePreview imageUrl={card.imageNormal} alt={card.name} className="w-7 h-7 rounded overflow-hidden shrink-0">
                   <img src={card.imageArtCrop} alt={card.name} className="w-full h-full object-cover" />
                 </CardImagePreview>
               ) : (
-                <div className="w-7 h-7 rounded bg-surface2" />
+                <div className="w-7 h-7 rounded bg-surface2 shrink-0" />
               )}
-              <div className="flex items-center gap-1.5 min-w-0 pr-2">
-                <span className="text-text text-[12.5px] truncate">{stat.cardName}</span>
-                {card && <ManaCost cost={card.manaCost} size={11} />}
-              </div>
-              <div className="pr-2">
-                {classification?.qualifier && (
-                  <span className={`text-[9px] font-display tracking-wide px-1.5 py-0.5 rounded-sm border inline-block ${badgeColor}`}>
+              <div className="flex-1 min-w-0 flex items-center gap-1.5">
+                <span className="text-text text-[12px] truncate">{stat.cardName}</span>
+                {classification.qualifier && (
+                  <span className="text-[8px] font-display tracking-wide text-cyan border border-cyan/50 rounded-sm px-1 shrink-0">
                     {classification.qualifier}
                   </span>
                 )}
               </div>
-              <span className="text-dim text-[11px] truncate pr-2">{slotLabels.get(stat.slot)}</span>
-              <div className="h-1.5 bg-surface2 rounded-sm overflow-hidden">
-                <div
-                  className="h-full rounded-sm"
-                  style={{
-                    width: `${maxCount > 0 ? Math.round((stat.pickCount / maxCount) * 100) : 0}%`,
-                    background: SLOT_ACCENT[stat.slot],
-                  }}
-                />
-              </div>
-              <span className="text-text text-[12.5px] font-mono tabular-nums text-right">{stat.pickCount}</span>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="lg:hidden border border-border2 bg-surface">
-        <div
-          className="grid text-dim text-[9px] tracking-[0.08em] font-display px-2.5 py-1.5 border-b border-border2"
-          style={{ gridTemplateColumns: MOBILE_COLS }}
-        >
-          <span />
-          <span />
-          <span>CARD</span>
-          <span className="text-right">PICKED</span>
-        </div>
-        {rows.map((stat, i) => {
-          const card = cardsByName.get(stat.cardName);
-          return (
-            <div
-              key={`${stat.slot}-${stat.cardName}`}
-              className={`grid items-center px-2.5 py-1.5 ${i % 2 === 1 ? "bg-surface2/40" : ""}`}
-              style={{ gridTemplateColumns: MOBILE_COLS }}
-            >
-              <span className="text-dim text-[10px] font-mono">{i + 1}</span>
-              {card ? (
-                <CardImagePreview imageUrl={card.imageNormal} alt={card.name} className="w-6 h-6 rounded overflow-hidden">
-                  <img src={card.imageArtCrop} alt={card.name} className="w-full h-full object-cover" />
-                </CardImagePreview>
-              ) : (
-                <div className="w-6 h-6 rounded bg-surface2" />
-              )}
-              <div className="min-w-0 pr-1">
-                <div className="flex items-center justify-between gap-1 min-w-0">
-                  <span className="text-text text-[12px] truncate">{stat.cardName}</span>
-                  {card && <ManaCost cost={card.manaCost} size={10} />}
-                </div>
-                <div className="text-dim text-[9.5px] truncate">{slotLabels.get(stat.slot)}</div>
-              </div>
-              <span className="text-text text-[12px] font-mono tabular-nums text-right">{stat.pickCount}</span>
+              {card && <ManaCost cost={card.manaCost} size={10} />}
+              <span className="text-subtle text-[11.5px] font-mono tabular-nums w-5 text-right shrink-0">{stat.pickCount}</span>
             </div>
           );
         })}
@@ -146,24 +93,74 @@ export function FullBreakdownList({
   );
 }
 
-function FilterChip({
-  active,
-  onClick,
-  children,
+function SlotAccordionSection({
+  slot,
+  rows,
+  cardsByName,
 }: {
-  active: boolean;
-  onClick: () => void;
-  children: ReactNode;
+  slot: SlotDefinition;
+  rows: P0P1PickStat[];
+  cardsByName: Map<string, Card>;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const { most } = findExtremes(rows);
+  const top = rows[0];
+  const tiedAtTop = top ? rows.filter((r) => r.pickCount === top.pickCount).length : 0;
+  const teaser = top
+    ? tiedAtTop > 1
+      ? `${tiedAtTop}-way tie at top · ${top.pickCount} each`
+      : `Top: ${top.cardName} · ${top.pickCount} picked`
+    : "No picks yet";
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`px-2.5 py-1.5 rounded-full border text-[12px] flex items-center gap-1 cursor-pointer transition-colors ${
-        active ? "border-green/60 bg-green/10 text-green" : "border-border2 bg-surface text-dim hover:text-text"
-      }`}
-    >
-      {children}
-    </button>
+    <div>
+      <button
+        type="button"
+        onClick={() => setExpanded((e) => !e)}
+        className="w-full flex items-center gap-2 px-2.5 py-2.5 text-left cursor-pointer"
+      >
+        <SlotPip slotKey={slot.key} size={16} />
+        <div className="min-w-0 flex-1">
+          <span className="font-display text-[11px] tracking-[0.06em] text-subtle">{slot.label.toUpperCase()}</span>
+          {!expanded && (
+            <div className="text-dim text-[10px] truncate mt-0.5">{teaser} · {rows.length} cards</div>
+          )}
+        </div>
+        <span className="text-dim text-[10px] shrink-0">{expanded ? "▲" : "▼"}</span>
+      </button>
+      {expanded && (
+        <div className="border-t border-border2">
+          {rows.map((stat, i) => {
+            const card = cardsByName.get(stat.cardName);
+            const classification = classifyYourPick(stat, most, []);
+            return (
+              <div
+                key={stat.cardName}
+                className="flex items-center gap-2.5 px-2.5 py-2 border-b border-border2 last:border-b-0"
+              >
+                <span className="text-dim text-[10px] w-4 text-right shrink-0">{i + 1}</span>
+                {card ? (
+                  <CardImagePreview imageUrl={card.imageNormal} alt={card.name} className="w-9 h-9 rounded-sm overflow-hidden shrink-0">
+                    <img src={card.imageArtCrop} alt={card.name} className="w-full h-full object-cover" />
+                  </CardImagePreview>
+                ) : (
+                  <div className="w-9 h-9 rounded-sm bg-surface2 shrink-0" />
+                )}
+                <div className="min-w-0 flex-1 flex items-center gap-1">
+                  <span className="text-text text-[12.5px] truncate min-w-0">{stat.cardName}</span>
+                  {classification.qualifier && (
+                    <span className="text-[7.5px] font-display tracking-wide text-cyan border border-cyan/50 rounded-sm px-1 shrink-0">
+                      {classification.qualifier}
+                    </span>
+                  )}
+                  {card && <span className="ml-auto shrink-0"><ManaCost cost={card.manaCost} size={10} /></span>}
+                </div>
+                <div className="font-mono tabular-nums text-[15px] font-semibold shrink-0 w-7 text-right">{stat.pickCount}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
