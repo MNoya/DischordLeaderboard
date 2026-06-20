@@ -12,7 +12,7 @@ from bot.commands.leaderboard import broadcast_current_set_safely
 from bot.database import SessionLocal
 from bot.services.leaderboard_visibility import set_opt_in
 from bot.services.player_stats import StatsData, process_stats, profile_url, render_embed
-from bot.sets import ACTIVE_SET_CODE, ALL_SETS
+from bot.sets import ALL_SETS, active_set_code
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +84,7 @@ class Stats(commands.Cog):
         ephemeral = interaction.guild is not None
         audit.event("stats_invoked", user_id=user_id, player=player, set=set)
 
-        set_code = ACTIVE_SET_CODE
+        set_code = active_set_code()
         if set is not None:
             seed = SET_CODES.get(set.upper())
             if seed is None:

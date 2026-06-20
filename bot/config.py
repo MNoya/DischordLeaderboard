@@ -12,8 +12,8 @@ class Settings(BaseSettings):
     Discord fields are optional so non-bot entry points (alembic CLI, the
     seed script, tests) can construct Settings without them.
 
-    The active set code lives in ``bot/sets.py``, not here — rotate it by
-    bumping ``ACTIVE_SET_CODE`` and redeploying.
+    The active set is derived from today's date in ``bot/sets.py``, not here —
+    rotation needs no config change.
     """
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

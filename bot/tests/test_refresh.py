@@ -13,7 +13,7 @@ from bot.services.refresh import (
     refresh_one_player_for_all_sets,
     refresh_player,
 )
-from bot.sets import ACTIVE_SET_CODE
+from bot.sets import active_set_code
 
 
 class FakeClient:
@@ -54,7 +54,7 @@ def _seed_set(session, code="ECL", start_date=date(2026, 1, 20)):
 
 
 def _seed_active_set(session):
-    return _seed_set(session, code=ACTIVE_SET_CODE, start_date=date(2026, 4, 21))
+    return _seed_set(session, code=active_set_code(), start_date=date(2026, 4, 21))
 
 
 def _seed_player(session, name="P", token_suffix="a", active=True, token_invalid=False):
@@ -361,7 +361,7 @@ def test_refresh_active_players_skips_inactive_and_token_invalid(session):
     _seed_player(session, name="invalid", token_suffix="c", token_invalid=True)
     session.flush()
 
-    client = FakeClient(drafts=[_draft("x", expansion=ACTIVE_SET_CODE, event_wins=7)])
+    client = FakeClient(drafts=[_draft("x", expansion=active_set_code(), event_wins=7)])
     summary = refresh_active_players(session, client)
 
     assert summary["updated"] == 1
@@ -384,7 +384,7 @@ def test_refresh_active_players_skips_pod_only_players_without_token(session):
     session.add(pod_only)
     session.flush()
 
-    client = FakeClient(drafts=[_draft("x", expansion=ACTIVE_SET_CODE, event_wins=7)])
+    client = FakeClient(drafts=[_draft("x", expansion=active_set_code(), event_wins=7)])
     summary = refresh_active_players(session, client)
 
     assert summary["invalidated"] == 0
@@ -413,7 +413,7 @@ def test_refresh_active_players_summary_counts_mixed_statuses(session):
                 raise err_404
             if token == p_5xx.seventeenlands_token:
                 raise err_500
-            return [_draft("x", expansion=ACTIVE_SET_CODE)]
+            return [_draft("x", expansion=active_set_code())]
 
     summary = refresh_active_players(session, RoutingClient())
     assert summary["updated"] == 1

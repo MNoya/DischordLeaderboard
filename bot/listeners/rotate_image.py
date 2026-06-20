@@ -12,10 +12,11 @@ import asyncio
 import io
 import logging
 import random
+from collections.abc import Callable
 
 import discord
 from discord.ext import commands
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageSequence
 
 log = logging.getLogger(__name__)
 
@@ -44,6 +45,7 @@ class RotateImageListener(commands.Cog):
         self.handled: set[int] = set()
         self.reply_to_original: dict[int, int] = {}
         self.edited_once: set[int] = set()
+        self.last_line: str | None = None
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent) -> None:
@@ -90,7 +92,7 @@ class RotateImageListener(commands.Cog):
         if rotated is None:
             self.handled.discard(message.id)
             return
-        line = random.choice(ROTATED_LINES).format(mention=message.author.mention)
+        line = self._pick_line().format(mention=message.author.mention)
         try:
             reply = await message.reply(
                 f"{line}\n{HINT_CORRECT_OR_DISMISS}",
@@ -106,6 +108,11 @@ class RotateImageListener(commands.Cog):
                 await reply.add_reaction(emoji)
             except discord.HTTPException:
                 log.info(f"could not seed {emoji} on rotated reply {reply.id}", exc_info=True)
+
+    def _pick_line(self) -> str:
+        choices = [line for line in ROTATED_LINES if line != self.last_line] or list(ROTATED_LINES)
+        self.last_line = random.choice(choices)
+        return self.last_line
 
     async def _rotate_in_place(self, payload: discord.RawReactionActionEvent, degrees: int) -> None:
         if payload.message_id in self.edited_once:
@@ -198,21 +205,27 @@ def _first_image_attachment(message: discord.Message) -> discord.Attachment | No
 
 
 def _rotate_upright(raw: bytes) -> bytes | None:
-    image = _open_image(raw)
-    if image is None:
-        return None
-    source_format = image.format or "PNG"
-    image = ImageOps.exif_transpose(image)
-    image = image.rotate(90, expand=True)
-    return _encode(image, source_format)
+    def upright(image: "Image.Image") -> "Image.Image":
+        return ImageOps.exif_transpose(image).rotate(90, expand=True)
+
+    return _rotate_image(raw, upright)
 
 
 def _rotate_fixed(raw: bytes, degrees: int) -> bytes | None:
+    def turn(image: "Image.Image") -> "Image.Image":
+        return image.rotate(degrees, expand=True)
+
+    return _rotate_image(raw, turn)
+
+
+def _rotate_image(raw: bytes, transform: "Callable[[Image.Image], Image.Image]") -> bytes | None:
     image = _open_image(raw)
     if image is None:
         return None
+    if getattr(image, "is_animated", False):
+        return _encode_animated(image, transform)
     source_format = image.format or "PNG"
-    return _encode(image.rotate(degrees, expand=True), source_format)
+    return _encode(transform(image), source_format)
 
 
 def _open_image(raw: bytes) -> "Image.Image | None":
@@ -228,6 +241,21 @@ def _open_image(raw: bytes) -> "Image.Image | None":
 def _encode(image: "Image.Image", source_format: str) -> bytes:
     buffer = io.BytesIO()
     image.save(buffer, format=source_format)
+    return buffer.getvalue()
+
+
+def _encode_animated(image: "Image.Image", transform: "Callable[[Image.Image], Image.Image]") -> bytes:
+    frames = [transform(frame.copy()) for frame in ImageSequence.Iterator(image)]
+    buffer = io.BytesIO()
+    frames[0].save(
+        buffer,
+        format="GIF",
+        save_all=True,
+        append_images=frames[1:],
+        loop=image.info.get("loop", 0),
+        duration=image.info.get("duration", 100),
+        disposal=2,
+    )
     return buffer.getvalue()
 
 

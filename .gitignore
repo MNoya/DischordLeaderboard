@@ -156,3 +156,6 @@ design/var-B-epc.png
 design/var-C-strip.png
 
 design/var-D-bento.png
+
+# Database dumps (contain secrets — never commit)
+backups/

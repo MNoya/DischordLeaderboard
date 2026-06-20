@@ -50,7 +50,7 @@ from bot.listeners.auto_link_listener import setup as setup_auto_link_listener
 from bot.listeners.pod_screenshots import setup as setup_pod_screenshots
 from bot.listeners.rotate_image import setup as setup_rotate_image
 from bot.listeners.sesh_listener import reschedule_pending_events, setup as setup_sesh_listener
-from bot.models import LeaderboardMessage, MagicSet, Player, PodDraftEvent
+from bot.models import LeaderboardMessage, Player, PodDraftEvent
 from bot.services.bot_log import BotLog
 from bot.services.lobby_embed import LobbyReadyButtonView
 from bot.services.pod_draft_manager import rehydrate_active_lobbies
@@ -60,9 +60,10 @@ from bot.services.pod_tournament import (
     rehydrate_active_tournaments,
 )
 from bot.services.media_sync import sync_media, SyncResult
+from bot.services.active_set import resolve_active_set
 from bot.services.refresh import refresh_active_players
 from bot.services.seventeenlands import MinIntervalLimiter, SeventeenLandsClient
-from bot.sets import ACTIVE_SET_CODE
+from bot.sets import active_set_code
 from bot.tasks.pod_draft_reminder import init_reminder
 from bot.tasks.format_schedule_post import init_format_schedule
 from bot.tasks.pod_schedule_post import init_schedule_post
@@ -332,9 +333,7 @@ def build_bot(guild_id: int) -> commands.Bot:
 
         edit_summary = {"edited": 0, "pruned": 0}
         with SessionLocal() as session:
-            ms = session.execute(
-                select(MagicSet).where(MagicSet.code == ACTIVE_SET_CODE)
-            ).scalar_one_or_none()
+            ms = resolve_active_set(session)
             if ms is not None:
                 edit_summary = await edit_tracked_messages_for_set(bot, ms)
 
@@ -525,9 +524,7 @@ def _deploy_announcement() -> str:
 def _log_startup_summary() -> None:
     now = datetime.now(timezone.utc)
     with SessionLocal() as session:
-        active_set = session.execute(
-            select(MagicSet).where(MagicSet.code == ACTIVE_SET_CODE)
-        ).scalar_one_or_none()
+        active_set = resolve_active_set(session)
         player_count = session.execute(select(func.count()).select_from(Player)).scalar()
         lb_count = session.execute(select(func.count()).select_from(LeaderboardMessage)).scalar()
         upcoming = session.execute(
@@ -536,7 +533,7 @@ def _log_startup_summary() -> None:
             .order_by(PodDraftEvent.event_time)
         ).scalars().all()
 
-    set_code = active_set.code if active_set else ACTIVE_SET_CODE
+    set_code = active_set.code if active_set else active_set_code()
     header = f"{set_code} | {player_count} Players"
     lb_line = f"{lb_count} Leaderboard Messages"
     if upcoming:

@@ -44,7 +44,7 @@ from bot.services.pod_drafts import (
 from bot.services.player_stats import SeededAttendee, rank_ordered_names, seed_attendees, seated_ring_order
 from bot.services.pod_seating_select import SEATING_ORDER_MARKER, seating_change_message
 from bot.services.pod_seating_image import drop_unrenderable, render_octagon_png
-from bot.sets import ACTIVE_SET_CODE
+from bot.sets import active_set_code
 from bot.tasks.pod_draft_reminder import fetch_sesh_rsvps, fire_reminder
 from bot.services.pod_settings_view import PodSettingsView
 from bot.services.pod_tournament import (
@@ -77,8 +77,9 @@ SEEDING_CUT_OVER_CAP = "Past the cut"
 
 def seeding_phase_projected() -> str:
     """Pre-lobby seeding header — built at call time so the llu emoji resolves from the live registry."""
-    url = f"{settings.leaderboard_url}/{ACTIVE_SET_CODE}"
-    return f"{emojis.prefix('llu')}Players ranked by **[{ACTIVE_SET_CODE} Leaderboard]({url})**"
+    active = active_set_code()
+    url = f"{settings.leaderboard_url}/{active}"
+    return f"{emojis.prefix('llu')}Players ranked by **[{active} Leaderboard]({url})**"
 
 MSG_SEEDING_WAITING = "Waiting for players to confirm attendance."
 MSG_SEEDING_NOT_POD_THREAD = "Run this inside a pod-draft thread."
@@ -555,6 +556,7 @@ def _seeding_block(
 
     header_line = line(lead_label, header_cells)
     lines = [f"`{header_line}`"]
+    active = active_set_code()
     for i, a in enumerate(attendees):
         if cut_after is not None and i == cut_after:
             lines.append(f"`{'─' * display_width(header_line)}`")
@@ -562,7 +564,7 @@ def _seeding_block(
                 lines.append(f"**{cut_label}**")
         inner = line(leads[i] if numbered else "", row_cells[i])
         if a.slug:
-            lines.append(f"[`{inner}`](<{player_url(a.slug, ACTIVE_SET_CODE)}>)")
+            lines.append(f"[`{inner}`](<{player_url(a.slug, active)}>)")
         else:
             lines.append(f"`{inner}`")
     return "\n".join(lines)

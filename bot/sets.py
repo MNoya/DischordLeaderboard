@@ -1,17 +1,32 @@
 """Source of truth for Magic set metadata and which set is currently active.
 
-Changes here ship as part of the codebase — bumping ``ACTIVE_SET_CODE`` and
-pushing to master is what rotates the leaderboard onto a new set on Railway.
-No env var indirection.
+The active leaderboard set is derived from today's date by ``active_set_code`` —
+no constant to flip and no redeploy to rotate. Adding a set to ``ALL_SETS`` with
+its Arena dates and pushing to master is all a rotation takes; the board flips on
+the new set's ``start_date`` on its own. This mirrors the ``public_sets`` view the
+frontend reads, so bot and site agree on the boundary.
 
-Dates are MTG Arena release dates (not tabletop). The active set's ``end_date``
+Dates are MTG Arena release dates (not tabletop). The newest set's ``end_date``
 holds the anticipated rotation date based on the next set's announced launch;
-a real ``end_date`` is filled in when a successor set is added.
+a real ``end_date`` is filled in when a successor set is added. Keep an anticipated
+``end_date`` on the newest set so it always falls inside an active window.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+# Arena drops a set around noon Eastern on its release day; the leaderboard rotates at that
+# instant rather than at UTC midnight (which is the evening before in the Americas). ET, not a
+# fixed UTC offset, so the boundary tracks daylight saving. The public_sets view encodes the
+# same instant in SQL — keep them in lockstep.
+RELEASE_TZ = ZoneInfo("America/New_York")
+RELEASE_TIME = time(12, 0)
+
+
+def release_instant(d: date) -> datetime:
+    return datetime.combine(d, RELEASE_TIME, tzinfo=RELEASE_TZ).astimezone(timezone.utc)
 
 
 @dataclass(frozen=True)
@@ -66,16 +81,42 @@ ALL_SETS: tuple[SetSeed, ...] = (
     SetSeed("MSH", "Marvel Super Heroes", date(2026, 6, 23), date(2026, 8, 10)),
 )
 
-ACTIVE_SET_CODE = "SOS"
+
+def active_set_code(when: datetime | None = None) -> str:
+    """Leaderboard set code at an instant, mirroring the ``public_sets`` view: a set with an
+    ``end_date`` whose window holds the instant, where the window runs from noon ET on
+    ``start_date`` to noon ET the day after ``end_date`` (i.e. until the successor's release).
+    Overlapping historical ranges (alchemy/masters sets nested inside a main set) resolve to the
+    latest-started match; if no window holds the instant, the newest set already released wins so
+    callers always get a real code."""
+    now = when or datetime.now(timezone.utc)
+
+    in_window: SetSeed | None = None
+    for seed in ALL_SETS:
+        if seed.end_date is None:
+            continue
+        if now < release_instant(seed.start_date) or now >= release_instant(seed.end_date + timedelta(days=1)):
+            continue
+        if in_window is None or seed.start_date > in_window.start_date:
+            in_window = seed
+    if in_window is not None:
+        return in_window.code
+
+    released: SetSeed | None = None
+    for seed in ALL_SETS:
+        if release_instant(seed.start_date) <= now and (released is None or seed.start_date > released.start_date):
+            released = seed
+    return (released or ALL_SETS[-1]).code
 
 
-def upcoming_sets() -> tuple[SetSeed, ...]:
+def upcoming_sets(when: datetime | None = None) -> tuple[SetSeed, ...]:
     """Registered sets that rotate in after the active one — not yet the leaderboard set, but
     draftable for pod/mock previews. Empty once the active set is the newest entry."""
+    active = active_set_code(when)
     codes = [s.code for s in ALL_SETS]
-    if ACTIVE_SET_CODE not in codes:
+    if active not in codes:
         return ()
-    return ALL_SETS[codes.index(ACTIVE_SET_CODE) + 1:]
+    return ALL_SETS[codes.index(active) + 1:]
 
 
 def is_known_set(code: str) -> bool:

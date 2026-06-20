@@ -7,14 +7,37 @@ invocation cancel any in-progress flow for the same user (newest wins).
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Awaitable
 
 import discord
 from discord.ext import commands
 
+logger = logging.getLogger(__name__)
+
 IN_FLIGHT_DM_FLOWS: set[str] = set()
 ACTIVE_FLOW_TASKS: dict[str, asyncio.Task] = {}
+
+INSTRUCTIONS_IMAGE = Path(__file__).resolve().parents[2] / "bot" / "assets" / "signup_event_history.png"
+
+
+async def send_token_instructions(send, content: str) -> None:
+    """Send walkthrough `content` via `send`, attaching the 17lands event-history screenshot when present.
+
+    Falls back to text-only when the image is missing or the upload is rejected; re-raises Forbidden so
+    the caller can surface the DMs-blocked path.
+    """
+    if INSTRUCTIONS_IMAGE.exists():
+        try:
+            await send(content=content, file=discord.File(INSTRUCTIONS_IMAGE))
+            return
+        except discord.Forbidden:
+            raise
+        except discord.HTTPException as exc:
+            logger.warning(f"token instructions attachment failed ({exc}); text-only")
+    await send(content)
 
 
 @contextmanager

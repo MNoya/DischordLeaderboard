@@ -29,7 +29,7 @@ from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_deck_color import SubmitDeckView
 from bot.services.pod_draft_manager import PodDraftManager, start_manager
 from bot.services.pod_drafts import seed_event_participants
-from bot.sets import ACTIVE_SET_CODE
+from bot.sets import active_set_code
 from bot.services.pod_format import format_display
 from bot.services.pod_pairing_select import pairing_label
 from bot.services.pod_seating_select import seating_mode_label
@@ -105,7 +105,7 @@ def _seed_live_test_event_sync(
             id=event_id,
             event_date=now.date(),
             event_time=now,
-            set_code=ACTIVE_SET_CODE,
+            set_code=active_set_code(),
             name="Testlobby Live Pod",
             draftmancer_session=session_id,
             discord_thread_id=str(channel_id),
@@ -159,7 +159,7 @@ def _build_live_test_manager(
 ) -> PodDraftManager:
     """A socket-less manager wired to drive the real tournament code. Never calls connect()."""
     manager = PodDraftManager(
-        bot, event_id, session_id, channel_id, ACTIVE_SET_CODE, len(roster),
+        bot, event_id, session_id, channel_id, active_set_code(), len(roster),
         event_name="Testlobby Live Pod",
         draftmancer_url=f"{settings.draftmancer_web_url}/?session={session_id}",
     )
@@ -206,7 +206,7 @@ async def _purge_and_reset_test(ctx) -> None:
 def _top_ranked_names_sync(n: int) -> list[str]:
     with SessionLocal() as session:
         set_id = session.execute(
-            select(MagicSet.id).where(MagicSet.code == ACTIVE_SET_CODE)
+            select(MagicSet.id).where(MagicSet.code == active_set_code())
         ).scalar_one_or_none()
         if not set_id:
             return []
@@ -259,7 +259,7 @@ async def _start_live_test_lobby(ctx) -> None:
     url = f"{settings.draftmancer_web_url}/?session={session_id}"
     log.info(f"[testlobby] live lobby connecting event={event_id} session={session_id}")
     manager = await start_manager(
-        ctx.bot, event_id, session_id, channel_id, ACTIVE_SET_CODE, len(_LIVE_TEST_ROSTER),
+        ctx.bot, event_id, session_id, channel_id, active_set_code(), len(_LIVE_TEST_ROSTER),
         event_name="Testlobby Live Pod", draftmancer_url=url,
     )
     if manager is None:
@@ -378,11 +378,12 @@ async def _reset_podbracket(channel, bot_user) -> None:
 
 _PROGRESS_STATES = ("ready", "notready", "cancelled", "superseded", "drafting", "complete")
 
-_PREVIEW_SETTINGS_LABELS = dict(
-    format_label=format_display(ACTIVE_SET_CODE),
-    pairing_label=pairing_label("swiss"),
-    seating_label=seating_mode_label("random"),
-)
+def _preview_settings_labels() -> dict:
+    return dict(
+        format_label=format_display(active_set_code()),
+        pairing_label=pairing_label("swiss"),
+        seating_label=seating_mode_label("random"),
+    )
 
 
 def _build(state: str) -> tuple[discord.Embed, discord.ui.View | None]:
@@ -410,8 +411,7 @@ def _build(state: str) -> tuple[discord.Embed, discord.ui.View | None]:
         state=render_state, draftmancer_url=_DRAFTMANCER_URL,
         decliner_name=decliner_name, cancel_reason=cancel_reason, initiated_by=initiated_by,
         spectators=_SPECTATORS,
-        format_label=format_display(ACTIVE_SET_CODE), pairing_label=pairing_label("swiss"),
-        seating_label=seating_mode_label("random"),
+        **_preview_settings_labels(),
     )
     has_unrecognized = any(dn is None for _, dn in in_session)
     view: discord.ui.View | None = (
@@ -436,7 +436,7 @@ def _build_ready_progress(state: str) -> list[tuple[discord.Embed, discord.ui.Vi
         embed = render_ready_check_progress(
             _THREAD_NAME, in_session, state="ready",
             draftmancer_url=_DRAFTMANCER_URL, ready_arena_names={arena for arena, _ in _LINKED_EIGHT[:3]},
-            initiated_by=_LINKED_EIGHT[0][1], **_PREVIEW_SETTINGS_LABELS,
+            initiated_by=_LINKED_EIGHT[0][1], **_preview_settings_labels(),
         )
         return [(embed, active_view)]
     if state in ("notready", "cancelled"):
@@ -445,24 +445,24 @@ def _build_ready_progress(state: str) -> list[tuple[discord.Embed, discord.ui.Vi
         embed = render_ready_check_progress(
             _THREAD_NAME, in_session, state="notready", draftmancer_url=_DRAFTMANCER_URL,
             decliner_name=decliner, cancel_reason=cancel_reason, ready_count=3, total_count=8,
-            **_PREVIEW_SETTINGS_LABELS,
+            **_preview_settings_labels(),
         )
         return [(embed, None)]
     if state == "superseded":
         collapsed = render_ready_check_progress(
             _THREAD_NAME, in_session, state="notready", draftmancer_url=_DRAFTMANCER_URL,
             decliner_name=_LINKED_EIGHT[3][0], superseded=True, ready_count=3, total_count=8,
-            **_PREVIEW_SETTINGS_LABELS,
+            **_preview_settings_labels(),
         )
         active = render_ready_check_progress(
             _THREAD_NAME, in_session, state="ready",
             draftmancer_url=_DRAFTMANCER_URL, ready_arena_names=set(),
-            initiated_by=_LINKED_EIGHT[0][1], **_PREVIEW_SETTINGS_LABELS,
+            initiated_by=_LINKED_EIGHT[0][1], **_preview_settings_labels(),
         )
         return [(collapsed, None), (active, active_view)]
     embed = render_ready_check_progress(
         _THREAD_NAME, in_session, state=state, draftmancer_url=_DRAFTMANCER_URL,
-        **_PREVIEW_SETTINGS_LABELS,
+        **_preview_settings_labels(),
     )
     return [(embed, None)]
 

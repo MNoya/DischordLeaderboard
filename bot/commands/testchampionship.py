@@ -25,7 +25,7 @@ from bot.database import SessionLocal
 from bot.models import MagicSet
 from bot.services.player_stats import rank_players_for_set
 from bot.services.pod_registration_embed import build_registered_embed
-from bot.sets import ACTIVE_SET_CODE
+from bot.sets import active_set_code
 
 PREVIEW_ROSTER_SIZE = 10
 MSG_NO_PLAYERS = "No ranked players on the active set yet — seed some locally to preview the seeding cut."
@@ -38,7 +38,7 @@ async def setup(bot: commands.Bot) -> None:
         """Owner-only. Preview the crown registration embed and both seeding phases."""
         names = await asyncio.to_thread(_top_player_names_sync, PREVIEW_ROSTER_SIZE)
         await ctx.send(embed=build_registered_embed(
-            ACTIVE_SET_CODE, "swiss", "leaderboard", championship=True))
+            active_set_code(), "swiss", "leaderboard", championship=True))
         if not names:
             await ctx.send(MSG_NO_PLAYERS)
             return
@@ -62,7 +62,7 @@ async def _send(ctx: commands.Context, file, embed) -> None:
 def _top_player_names_sync(limit: int) -> list[str]:
     with SessionLocal() as session:
         set_id = session.execute(
-            select(MagicSet.id).where(MagicSet.code == ACTIVE_SET_CODE)
+            select(MagicSet.id).where(MagicSet.code == active_set_code())
         ).scalar_one_or_none()
         if set_id is None:
             return []

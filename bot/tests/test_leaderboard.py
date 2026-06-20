@@ -23,6 +23,7 @@ from bot.commands.leaderboard import (
 )
 from bot.services.player_stats import StatsData, process_stats, render_embed as render_stats_embed
 from bot.models import DraftEvent, MagicSet, Player, PlayerStats, PodDraftEvent, PodDraftParticipant
+from bot.sets import active_set_code
 
 
 def _seed_set(session, code="SOS"):
@@ -62,9 +63,20 @@ def _seed_stats(session, p, s, trophies=0, events=1, fmt="PremierDraft", expansi
     ))
 
 
-def test_leaderboard_returns_none_when_no_current_set(session):
-    _seed_set(session, code="ECL")
+def test_leaderboard_returns_none_when_no_set_seeded(session):
     assert process_leaderboard(session, viewer_discord_id=None) is None
+
+
+def test_leaderboard_falls_back_to_latest_seeded_set_when_active_missing(session):
+    ecl = _seed_set(session, code="ECL")
+    alice = _seed_player(session, "Alice", "1", "a")
+    _seed_stats(session, alice, ecl, trophies=3, events=5)
+    session.commit()
+
+    data = process_leaderboard(session, viewer_discord_id=None)
+
+    assert data is not None
+    assert data.set_code == "ECL"
 
 
 def test_leaderboard_orders_by_score_desc(session):
@@ -314,15 +326,18 @@ def test_drafter_count_excludes_inactive_players(session):
 
 
 def test_process_leaderboard_renders_non_active_set_via_override(session):
-    # No active (SOS) set seeded — only the historical one
+    active = _seed_set(session, code=active_set_code())
     stx = _seed_set(session, code="STX")
-    a = _seed_player(session, "Alice", "1", "a")
-    _seed_stats(session, a, stx, trophies=3, events=5)
+    alice = _seed_player(session, "Alice", "1", "a")
+    _seed_stats(session, alice, stx, trophies=3, events=5)
+    bob = _seed_player(session, "Bob", "2", "b")
+    _seed_stats(session, bob, active, trophies=2, events=4)
     session.commit()
 
-    assert process_leaderboard(session, viewer_discord_id=None) is None
+    default = process_leaderboard(session, viewer_discord_id=None)
+    assert default.set_code == active_set_code()
+
     data = process_leaderboard(session, viewer_discord_id=None, magic_set=stx)
-    assert data is not None
     assert data.set_code == "STX"
     assert [e.display_name for e in data.top] == ["Alice"]
 

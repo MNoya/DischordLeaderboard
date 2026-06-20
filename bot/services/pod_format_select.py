@@ -17,7 +17,7 @@ from bot.services.pod_format import (
     custom_formats,
     format_applied_message,
 )
-from bot.sets import ACTIVE_SET_CODE, upcoming_sets
+from bot.sets import active_set_code, upcoming_sets
 
 
 ApplyFormatCallback = Callable[[discord.Interaction, str], Awaitable[str | None]]
@@ -29,11 +29,12 @@ def format_options(current_code: str | None) -> list[discord.SelectOption]:
     matching the Pairings and Seats dropdowns and the lobby footer. Upcoming sets (e.g. MSH before it
     rotates in) let a pod preview-draft a set the bot serves via setRestriction."""
     cur = (current_code or "").upper()
+    active = active_set_code()
     on_other = cur in CUSTOM_FORMATS or cur in {s.code for s in upcoming_sets()}
     options = [discord.SelectOption(
-        label=f"Format: {ACTIVE_SET_CODE}",
-        value=ACTIVE_SET_CODE,
-        description=f"Draft the latest set ({ACTIVE_SET_CODE})",
+        label=f"Format: {active}",
+        value=active,
+        description=f"Draft the latest set ({active})",
         default=not on_other,
     )]
     for seed in upcoming_sets():

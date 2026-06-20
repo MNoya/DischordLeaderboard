@@ -37,7 +37,7 @@ from bot.services.pod_schedule import (
     monday_kind,
     slots_for_week,
 )
-from bot.sets import ACTIVE_SET_CODE
+from bot.sets import active_set_code
 
 
 MONDAY_DM_HOUR_ET = 9
@@ -111,7 +111,7 @@ async def build_monday_package(monday: date) -> tuple[str, "PodMondayView", str 
     The paste-ready message and its buttons come first; the Sesh /create blocks are a separate
     aide unrelated to the post, returned as a standalone follow-up (None on boundary weeks).
     """
-    message = compose_monday_message(monday, ACTIVE_SET_CODE)
+    message = compose_monday_message(monday, active_set_code())
     body = f"{MSG_MONDAY_DRAFT_INTRO}\n```\n{message}\n```"
     create_blocks = None
     if monday_kind(monday)[0] == MONDAY_KIND_NORMAL:
@@ -172,7 +172,7 @@ async def _post_default_if_needed(monday: date | None = None) -> bool:
         return False
 
     monday = monday or upcoming_monday()
-    body = compose_monday_message(monday, ACTIVE_SET_CODE)
+    body = compose_monday_message(monday, active_set_code())
     message = await channel.send(body)
     kind, _ = monday_kind(monday)
     if kind == MONDAY_KIND_RELEASE_WEEK:
@@ -200,7 +200,7 @@ async def _create_command_blocks(monday) -> list[str]:
     event_count = await asyncio.to_thread(_count_set_events)
     blocks = []
     for i, slot in enumerate(slots_for_week(monday)):
-        command = build_create_command(ACTIVE_SET_CODE, event_count + 1 + i, slot)
+        command = build_create_command(active_set_code(), event_count + 1 + i, slot)
         blocks.append(f"```\n{command}\n```")
     return blocks
 
@@ -230,7 +230,7 @@ async def _fetch_owner() -> discord.User | None:
 def _count_set_events() -> int:
     with SessionLocal() as session:
         count = session.execute(
-            select(func.count()).select_from(PodDraftEvent).where(PodDraftEvent.set_code == ACTIVE_SET_CODE)
+            select(func.count()).select_from(PodDraftEvent).where(PodDraftEvent.set_code == active_set_code())
         ).scalar()
         return count or 0
 

@@ -30,8 +30,9 @@ from bot.models import (
     Player,
     PlayerStats,
 )
+from bot.services.active_set import resolve_active_set
 from bot.services.seventeenlands import SUPPORTED_FORMATS, extract_event_row
-from bot.sets import ACTIVE_SET_CODE
+from bot.sets import active_set_code
 
 PERIODIC_WINDOW_DAYS = 7
 
@@ -159,7 +160,8 @@ def refresh_player(
     upsert = bulk_upsert_draft_events(session, player.id, drafts, sets)
     touched_set_ids = {set_id for (_pid, set_id) in upsert["touched_pairs"]}
 
-    active = next((s for s in sets if s.code == ACTIVE_SET_CODE), None)
+    active_code = active_set_code()
+    active = next((s for s in sets if s.code == active_code), None)
     if active is not None:
         touched_set_ids.add(active.id)
 
@@ -265,7 +267,7 @@ def refresh_active_players(session: Session, client: _DraftClient) -> dict:
     """Periodic refresh. Window: ``max(today - PERIODIC_WINDOW_DAYS, ACTIVE_SET.start_date)`` so a fresh
     rotation doesn't widen the fetch. Flashback drafts in that window route to their own set's rows.
     """
-    active = session.execute(select(MagicSet).where(MagicSet.code == ACTIVE_SET_CODE)).scalar_one_or_none()
+    active = resolve_active_set(session)
     if active is None:
         return {
             "updated": 0, "invalidated": 0, "errors": 0,

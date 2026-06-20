@@ -29,7 +29,7 @@ from bot.services import pod_format
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_drafts import draftmancer_url_for, record_mock_event
 from bot.services.pod_draft_manager import start_manager
-from bot.sets import ACTIVE_SET_CODE, ALL_SETS, is_known_set
+from bot.sets import ALL_SETS, active_set_code, is_known_set
 
 
 log = logging.getLogger(__name__)
@@ -37,9 +37,10 @@ log = logging.getLogger(__name__)
 
 def _format_choices() -> list[tuple[str, str]]:
     """(label, code) the set option offers: the active set, every other supported set, then custom cubes."""
-    choices = [(f"{ACTIVE_SET_CODE} (current)", ACTIVE_SET_CODE)]
+    active = active_set_code()
+    choices = [(f"{active} (current)", active)]
     for seed in reversed(ALL_SETS):
-        if seed.code != ACTIVE_SET_CODE:
+        if seed.code != active:
             choices.append((f"{seed.code} — {seed.name}", seed.code))
     for fmt in pod_format.custom_formats():
         choices.append((fmt.label, fmt.code))
@@ -48,7 +49,7 @@ def _format_choices() -> list[tuple[str, str]]:
 
 def _resolve_code(value: str | None) -> str | None:
     """Normalize a set option to a stored code, or None when it isn't a registered set/cube."""
-    code = (value or ACTIVE_SET_CODE).strip().upper()
+    code = (value or active_set_code()).strip().upper()
     if is_known_set(code) or pod_format.is_custom(code):
         return code
     return None
