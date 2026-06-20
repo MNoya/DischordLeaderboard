@@ -23,7 +23,7 @@ Final week of {set_name}. The leaderboard decides who plays for the championship
 • RSVP on the championship event in {channel} if you can make it. Seats go to the highest standings among those who show, the rest are alternates for no-shows.
 • Best of 3, Swiss, three rounds, one Champion.
 
-📊 Standings: <https://dischord.pages.dev/leaderboard/{set_code}>
+📊 Standings: <https://limitedlevelups.com/leaderboard/{set_code}>
 📺 Streamed live: <https://twitch.tv/GatoDelFuego>
 
 Regular pods are paused this week. **{next_name}** arrives <t:{unix}:R>.

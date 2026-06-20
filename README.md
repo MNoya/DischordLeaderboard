@@ -2,7 +2,7 @@
 
 A community leaderboard for an MTG Arena Discord server (**LLU** — Limited Level-Ups). Players link their [17lands](https://17lands.com) profile through a Discord bot; their drafts are pulled, scored with a custom formula, and ranked on a public site.
 
-- **Site**: https://dischord.pages.dev/ (`limitedlevelups.com` at launch)
+- **Site**: https://limitedlevelups.com/ (`dischord.pages.dev` redirects here; branch previews live at `<branch>.dischord.pages.dev`)
 - **Bot**: invite-only to the LLU server; commands work in-server and in DM
 - **Stack**: Python `discord.py` bot · React + Vite frontend · Supabase Postgres · Railway + Cloudflare Pages
 
