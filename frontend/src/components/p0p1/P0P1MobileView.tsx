@@ -144,7 +144,6 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
   const loginBarVisible = !authLoading && !user;
   const groupedStats = hasParticipated && pickStats ? groupBySlot(pickStats) : undefined;
   const entryCount = pickStats ? participantCount(pickStats) : null;
-  const n = hasParticipated && pickStats ? participantCount(pickStats) : 0;
   const isCompleteEntrant = isPastDeadline && Boolean(user) && isComplete;
   const isIncompleteEntrant = isPastDeadline && Boolean(user) && !isComplete;
 
@@ -183,7 +182,6 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
                         active={activeSlotKey === slot.key}
                         yourStat={yourStat}
                         slotStats={slotStats}
-                        n={n}
                         onClick={() => setEditingSlotKey(slot.key)}
                       />
                     );
@@ -195,7 +193,7 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
             {isCompleteEntrant && (
               <div className="mb-3">
                 <SectionLabel size={18} className="mb-2 text-white">YOUR PICKS</SectionLabel>
-                <YourPicksCarousel picksBySlot={picksBySlot} cardsByName={cardsByName} groupedStats={groupedStats} n={n} />
+                <YourPicksCarousel picksBySlot={picksBySlot} cardsByName={cardsByName} groupedStats={groupedStats} />
               </div>
             )}
 
@@ -273,7 +271,6 @@ function MobileChip({
   active,
   yourStat,
   slotStats,
-  n,
   onClick,
 }: {
   slot: SlotDefinition;
@@ -281,7 +278,6 @@ function MobileChip({
   active: boolean;
   yourStat?: P0P1PickStat;
   slotStats?: P0P1PickStat[];
-  n?: number;
   onClick: () => void;
 }) {
   const accent = SLOT_ACCENT[slot.key];
@@ -329,12 +325,10 @@ function YourPicksCarousel({
   picksBySlot,
   cardsByName,
   groupedStats,
-  n,
 }: {
   picksBySlot: Map<string, string>;
   cardsByName: Map<string, Card>;
   groupedStats: Map<SlotKey, P0P1PickStat[]> | undefined;
-  n: number;
 }) {
   return (
     <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1" style={{ scrollSnapType: "x mandatory" }}>

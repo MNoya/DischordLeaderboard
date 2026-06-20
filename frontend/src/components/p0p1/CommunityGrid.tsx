@@ -3,7 +3,7 @@ import { SlotPip } from "./slotVisuals";
 import { CardImagePreview } from "./CardImagePreview";
 import { TiedCardsModal } from "./TiedCardsModal";
 import { SectionLabel } from "../SectionLabel";
-import { groupBySlot, findExtremes, participantCount } from "../../data/p0p1Stats";
+import { groupBySlot, findExtremes } from "../../data/p0p1Stats";
 import { SLOTS } from "../../data/p0p1Slots";
 import type { Card, P0P1PickStat, SlotKey } from "../../types/p0p1";
 
@@ -16,7 +16,6 @@ export function CommunityGrid({
 }) {
   const grouped = groupBySlot(pickStats);
   const mostBySlot = new Map(SLOTS.map((slot) => [slot.key, findExtremes(grouped.get(slot.key) ?? []).most]));
-  const n = participantCount(pickStats);
 
   return (
     <PickRow
@@ -24,7 +23,6 @@ export function CommunityGrid({
       subtitle="Most popular picks by slot"
       entries={SLOTS.map((slot) => ({ slotKey: slot.key, label: slot.label, stats: mostBySlot.get(slot.key)! }))}
       cardsByName={cardsByName}
-      n={n}
     />
   );
 }
@@ -34,13 +32,11 @@ function PickRow({
   subtitle,
   entries,
   cardsByName,
-  n,
 }: {
   title: string;
   subtitle: string;
   entries: { slotKey: SlotKey; label: string; stats: P0P1PickStat[] }[];
   cardsByName: Map<string, Card>;
-  n: number;
 }) {
   return (
     <div>
@@ -54,7 +50,7 @@ function PickRow({
       </div>
       <div className="grid grid-cols-4 lg:grid-cols-8 gap-2">
         {entries.map(({ slotKey, label, stats }) => (
-          <PickTile key={slotKey} slotKey={slotKey} label={label} stats={stats} cardsByName={cardsByName} n={n} />
+          <PickTile key={slotKey} slotKey={slotKey} label={label} stats={stats} cardsByName={cardsByName} />
         ))}
       </div>
     </div>
@@ -66,13 +62,11 @@ function PickTile({
   label,
   stats,
   cardsByName,
-  n,
 }: {
   slotKey: SlotKey;
   label: string;
   stats: P0P1PickStat[];
   cardsByName: Map<string, Card>;
-  n: number;
 }) {
   const [modalOpen, setModalOpen] = useState(false);
   const hasStats = stats.length > 0;
@@ -125,7 +119,6 @@ function PickTile({
           label={label}
           stats={stats}
           cardsByName={cardsByName}
-          n={n}
           onClose={() => setModalOpen(false)}
         />
       )}

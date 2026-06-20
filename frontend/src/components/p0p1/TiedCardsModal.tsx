@@ -8,13 +8,11 @@ export function TiedCardsModal({
   label,
   stats,
   cardsByName,
-  n,
   onClose,
 }: {
   label: string;
   stats: P0P1PickStat[];
   cardsByName: Map<string, Card>;
-  n: number;
   onClose: () => void;
 }) {
   useEffect(() => {
