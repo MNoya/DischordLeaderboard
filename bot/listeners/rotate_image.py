@@ -1,11 +1,10 @@
 """React ♻️ on an image post → reply with the same image rotated upright.
 
-Fixes prerelease-deck screenshots posted sideways. Fires when two members react ♻️, or
-one reactor holds Manage Messages. EXIF auto-orient handles phone photos whose rotation
-lives in metadata Discord ignores; anything without a rotating orientation tag falls back
-to a 90° counterclockwise nudge. The original message is left in place — the rotated copy
-is a reply, seeded with ⤴️ (rotate 90°), 🔄 (flip 180°), and ❌ (delete it). One manual
-correction is allowed; after it the rotate reactions are stripped and only ❌ stays.
+Fixes prerelease-deck screenshots posted sideways. Fires when any member reacts ♻️.
+The image is normalized to its displayed orientation, then rotated 90° counterclockwise.
+The original message stays put. The rotated copy is posted as a reply, seeded with ⤴️
+(rotate another 90°), 🔄 (flip 180°), and ❌ (delete it). One manual correction is allowed,
+after which the rotate reactions are stripped and only ❌ remains.
 """
 from __future__ import annotations
 
@@ -25,7 +24,6 @@ RECYCLE_EMOJI = "♻️"
 ROTATE_EMOJI = "⤴️"
 FLIP_EMOJI = "🔄"
 DISMISS_EMOJI = "❌"
-ROTATING_ORIENTATIONS = frozenset({3, 5, 6, 7, 8})
 ROTATED_LINES = (
     "{mention} here is your image, I rotated it to save everyone the neck pain ♻️",
     "{mention} your image was a bit twisted, so I rotated it ♻️",
@@ -72,21 +70,11 @@ class RotateImageListener(commands.Cog):
         attachment = _first_image_attachment(message)
         if attachment is None:
             return
-        if not self._threshold_met(message, payload.member):
-            return
         if payload.message_id in self.handled:
             return
 
         self.handled.add(payload.message_id)
         await self._reply_rotated(message, attachment)
-
-    def _threshold_met(self, message: discord.Message, reactor: discord.Member | None) -> bool:
-        if reactor is not None and reactor.guild_permissions.manage_messages:
-            return True
-        for reaction in message.reactions:
-            if _is_recycle(reaction.emoji):
-                return reaction.count >= 2
-        return False
 
     async def _fetch_message(self, channel_id: int, message_id: int) -> discord.Message | None:
         channel = self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
@@ -214,10 +202,8 @@ def _rotate_upright(raw: bytes) -> bytes | None:
     if image is None:
         return None
     source_format = image.format or "PNG"
-    orientation = image.getexif().get(0x0112)
     image = ImageOps.exif_transpose(image)
-    if orientation not in ROTATING_ORIENTATIONS:
-        image = image.rotate(90, expand=True)
+    image = image.rotate(90, expand=True)
     return _encode(image, source_format)
 
 
