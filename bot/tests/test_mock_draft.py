@@ -12,7 +12,7 @@ from bot.services.pod_drafts import (
     record_mock_event,
 )
 from bot.services.pod_format_select import format_options
-from bot.sets import ACTIVE_SET_CODE, is_known_set, upcoming_sets
+from bot.sets import active_set_code, is_known_set, upcoming_sets
 
 
 def _seed_player(session, discord_id="901", username="cap", display_name="Cap"):
@@ -30,9 +30,10 @@ def _seed_player(session, discord_id="901", username="cap", display_name="Cap"):
 
 
 def test_upcoming_sets_and_known_set():
-    upcoming_codes = [s.code for s in upcoming_sets()]
+    before_msh_rotates = datetime(2026, 6, 20, 12, 0, tzinfo=timezone.utc)
+    upcoming_codes = [s.code for s in upcoming_sets(before_msh_rotates)]
 
-    assert ACTIVE_SET_CODE not in upcoming_codes
+    assert active_set_code(before_msh_rotates) not in upcoming_codes
     assert "MSH" in upcoming_codes
     assert is_known_set("msh") and not is_known_set("zzz")
 
@@ -40,7 +41,7 @@ def test_upcoming_sets_and_known_set():
 def test_format_options_offers_active_and_upcoming_sets():
     values = [opt.value for opt in format_options(None)]
 
-    assert values[0] == ACTIVE_SET_CODE
+    assert values[0] == active_set_code()
     assert "MSH" in values
 
 

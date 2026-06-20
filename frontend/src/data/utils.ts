@@ -23,12 +23,20 @@ export function eventDate(e: { finishedAt: string | null; startedAt: string | nu
   return e.finishedAt ?? e.startedAt ?? "";
 }
 
+// The new set goes live the evening of its start date, so the changeover day still carries the old
+// set's drafts. Treat events as flashback only once a full day past the end date has elapsed.
 export function isFlashbackEvent(
   finishedAt: string | null | undefined,
   setEndDate: string | null | undefined,
 ): boolean {
   if (!finishedAt || !setEndDate) return false;
-  return finishedAt.slice(0, 10) > setEndDate;
+  return finishedAt.slice(0, 10) > dayAfter(setEndDate);
+}
+
+function dayAfter(isoDate: string): string {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
 }
 
 // Win percentage as a fixed-precision string, safe against zero-game players.
@@ -137,6 +145,30 @@ export function relativeTime(iso: string, now: Date = new Date()): string {
   if (months < 12) return `${months}mo`;
   const years = Math.floor(days / 365);
   return `${years}y`;
+}
+
+const AGE_UNITS: Array<{ unit: string; seconds: number }> = [
+  { unit: "year", seconds: 31_536_000 },
+  { unit: "month", seconds: 2_592_000 },
+  { unit: "week", seconds: 604_800 },
+  { unit: "day", seconds: 86_400 },
+  { unit: "hour", seconds: 3_600 },
+  { unit: "minute", seconds: 60 },
+];
+
+export function relativeAge(iso: string, now: Date = new Date()): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) {
+    return "";
+  }
+  const seconds = Math.floor((now.getTime() - then) / 1000);
+  for (const { unit, seconds: unitSeconds } of AGE_UNITS) {
+    const value = Math.floor(seconds / unitSeconds);
+    if (value >= 1) {
+      return `${value} ${unit}${value === 1 ? "" : "s"} ago`;
+    }
+  }
+  return "just now";
 }
 
 // Maps any raw 17lands format string OR a backend `format_label` group

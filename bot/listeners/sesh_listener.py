@@ -23,7 +23,7 @@ from bot.services.pod_registration_embed import RegisteredSettingsView, build_re
 from bot.services.pod_draft_manager import notify_seeding_change
 from bot.services.pod_drafts import ParsedSeshEvent, is_championship, record_event, update_event_time_if_changed
 from bot.services.sesh_parser import ParsedSeshFields, parse_sesh_embed
-from bot.sets import ACTIVE_SET_CODE
+from bot.sets import active_set_code
 from bot.tasks.pod_draft_reminder import REMINDER_LEAD_MIN, fire_reminder
 from bot.tasks.pod_underfill import refresh_underfill_nudge, schedule_underfill_checks
 
@@ -124,7 +124,7 @@ class SeshListener(commands.Cog):
         parsed_event = ParsedSeshEvent(
             event_date=fields.event_date,
             event_time=fields.event_time,
-            set_code=fields.set_code or ACTIVE_SET_CODE,
+            set_code=fields.set_code or active_set_code(),
             event_number=fields.event_number,
             name=fields.name,
             attendees=fields.attendees,

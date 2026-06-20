@@ -1,17 +1,32 @@
 """Source of truth for Magic set metadata and which set is currently active.
 
-Changes here ship as part of the codebase — bumping ``ACTIVE_SET_CODE`` and
-pushing to master is what rotates the leaderboard onto a new set on Railway.
-No env var indirection.
+The active leaderboard set is derived from today's date by ``active_set_code`` —
+no constant to flip and no redeploy to rotate. Adding a set to ``ALL_SETS`` with
+its Arena dates and pushing to master is all a rotation takes; the board flips on
+the new set's ``start_date`` on its own. This mirrors the ``public_sets`` view the
+frontend reads, so bot and site agree on the boundary.
 
-Dates are MTG Arena release dates (not tabletop). The active set's ``end_date``
+Dates are MTG Arena release dates (not tabletop). The newest set's ``end_date``
 holds the anticipated rotation date based on the next set's announced launch;
-a real ``end_date`` is filled in when a successor set is added.
+a real ``end_date`` is filled in when a successor set is added. Keep an anticipated
+``end_date`` on the newest set so it always falls inside an active window.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+# Arena drops a set around noon Eastern on its release day; the leaderboard rotates at that
+# instant rather than at UTC midnight (which is the evening before in the Americas). ET, not a
+# fixed UTC offset, so the boundary tracks daylight saving. The public_sets view encodes the
+# same instant in SQL — keep them in lockstep.
+RELEASE_TZ = ZoneInfo("America/New_York")
+RELEASE_TIME = time(12, 0)
+
+
+def release_instant(d: date) -> datetime:
+    return datetime.combine(d, RELEASE_TIME, tzinfo=RELEASE_TZ).astimezone(timezone.utc)
 
 
 @dataclass(frozen=True)
@@ -24,19 +39,40 @@ class SetSeed:
 
 
 ALL_SETS: tuple[SetSeed, ...] = (
+    SetSeed("DOM", "Dominaria", date(2018, 4, 26), date(2019, 4, 24)),
+    SetSeed("WAR", "War of the Spark", date(2019, 4, 25), date(2019, 9, 25)),
+    SetSeed("ELD", "Throne of Eldraine", date(2019, 9, 26), date(2020, 1, 15)),
+    SetSeed("THB", "Theros Beyond Death", date(2020, 1, 16), date(2020, 4, 15)),
+    SetSeed("IKO", "Ikoria: Lair of Behemoths", date(2020, 4, 16), date(2021, 1, 27)),
     SetSeed("KHM", "Kaldheim", date(2021, 1, 28), date(2021, 4, 14)),
     SetSeed("STX", "Strixhaven: School of Mages", date(2021, 4, 15), date(2021, 7, 7)),
+    SetSeed("AFR", "Adventures in the Forgotten Realms", date(2021, 7, 8), date(2021, 9, 15)),
+    SetSeed("MID", "Innistrad: Midnight Hunt", date(2021, 9, 16), date(2021, 11, 10)),
+    SetSeed("VOW", "Innistrad: Crimson Vow", date(2021, 11, 11), date(2022, 2, 9)),
+    SetSeed("NEO", "Kamigawa: Neon Dynasty", date(2022, 2, 10), date(2022, 4, 27)),
+    SetSeed("SNC", "Streets of New Capenna", date(2022, 4, 28), date(2022, 7, 6)),
+    SetSeed("HBG", "Alchemy Horizons: Baldur's Gate", date(2022, 7, 7), date(2022, 8, 31)),
+    SetSeed("DMU", "Dominaria United", date(2022, 9, 1), date(2022, 11, 14)),
+    SetSeed("BRO", "The Brothers' War", date(2022, 11, 15), date(2023, 2, 6)),
+    SetSeed("ONE", "Phyrexia: All Will Be One", date(2023, 2, 7), date(2023, 3, 20)),
+    SetSeed("SIR", "Shadows over Innistrad Remastered", date(2023, 3, 21), date(2023, 4, 17)),
+    SetSeed("MOM", "March of the Machine", date(2023, 4, 18), date(2023, 6, 19), expansion_match="MAT"),
+    SetSeed("LTR", "The Lord of the Rings: Tales of Middle-earth", date(2023, 6, 20), date(2023, 9, 4)),
     SetSeed("WOE", "Wilds of Eldraine", date(2023, 9, 5), date(2023, 11, 13)),
     SetSeed("LCI", "The Lost Caverns of Ixalan", date(2023, 11, 14), date(2024, 2, 5)),
+    SetSeed("KTK", "Khans of Tarkir", date(2023, 12, 12), date(2024, 2, 5)),
     SetSeed("MKM", "Murders at Karlov Manor", date(2024, 2, 6), date(2024, 4, 15)),
     SetSeed("OTJ", "Outlaws of Thunder Junction", date(2024, 4, 16), date(2024, 7, 29)),
+    SetSeed("MH3", "Modern Horizons 3", date(2024, 6, 11), date(2024, 7, 29)),
     SetSeed("BLB", "Bloomburrow", date(2024, 7, 30), date(2024, 9, 23)),
     SetSeed("DSK", "Duskmourn: House of Horror", date(2024, 9, 24), date(2024, 11, 11)),
     SetSeed("FDN", "Foundations", date(2024, 11, 12), date(2025, 2, 10)),
+    SetSeed("PIO", "Pioneer Masters", date(2024, 12, 10), date(2025, 2, 10)),
     SetSeed("DFT", "Aetherdrift", date(2025, 2, 11), date(2025, 4, 7)),
     SetSeed("TDM", "Tarkir: Dragonstorm", date(2025, 4, 8), date(2025, 6, 8)),
     SetSeed("FIN", "Final Fantasy", date(2025, 6, 9), date(2025, 7, 28)),
     SetSeed("EOE", "Edge of Eternities", date(2025, 7, 29), date(2025, 9, 23)),
+    SetSeed("SPM", "Marvel's Spider-Man", date(2025, 9, 23), date(2025, 11, 15), expansion_match="OM1"),
     SetSeed("CUBE", "Arena Powered Cube", date(2025, 10, 28), None, expansion_match="Cube - Powered"),
     SetSeed("TLA", "Avatar: The Last Airbender", date(2025, 11, 16), date(2026, 1, 19)),
     SetSeed("ECL", "Lorwyn Eclipsed", date(2026, 1, 20), date(2026, 3, 2)),
@@ -45,16 +81,42 @@ ALL_SETS: tuple[SetSeed, ...] = (
     SetSeed("MSH", "Marvel Super Heroes", date(2026, 6, 23), date(2026, 8, 10)),
 )
 
-ACTIVE_SET_CODE = "SOS"
+
+def active_set_code(when: datetime | None = None) -> str:
+    """Leaderboard set code at an instant, mirroring the ``public_sets`` view: a set with an
+    ``end_date`` whose window holds the instant, where the window runs from noon ET on
+    ``start_date`` to noon ET the day after ``end_date`` (i.e. until the successor's release).
+    Overlapping historical ranges (alchemy/masters sets nested inside a main set) resolve to the
+    latest-started match; if no window holds the instant, the newest set already released wins so
+    callers always get a real code."""
+    now = when or datetime.now(timezone.utc)
+
+    in_window: SetSeed | None = None
+    for seed in ALL_SETS:
+        if seed.end_date is None:
+            continue
+        if now < release_instant(seed.start_date) or now >= release_instant(seed.end_date + timedelta(days=1)):
+            continue
+        if in_window is None or seed.start_date > in_window.start_date:
+            in_window = seed
+    if in_window is not None:
+        return in_window.code
+
+    released: SetSeed | None = None
+    for seed in ALL_SETS:
+        if release_instant(seed.start_date) <= now and (released is None or seed.start_date > released.start_date):
+            released = seed
+    return (released or ALL_SETS[-1]).code
 
 
-def upcoming_sets() -> tuple[SetSeed, ...]:
+def upcoming_sets(when: datetime | None = None) -> tuple[SetSeed, ...]:
     """Registered sets that rotate in after the active one — not yet the leaderboard set, but
     draftable for pod/mock previews. Empty once the active set is the newest entry."""
+    active = active_set_code(when)
     codes = [s.code for s in ALL_SETS]
-    if ACTIVE_SET_CODE not in codes:
+    if active not in codes:
         return ()
-    return ALL_SETS[codes.index(ACTIVE_SET_CODE) + 1:]
+    return ALL_SETS[codes.index(active) + 1:]
 
 
 def is_known_set(code: str) -> bool:

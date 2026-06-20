@@ -3,7 +3,7 @@ import React, { Fragment, useEffect, useMemo, useState } from "react";
 
 import { AppHeader } from "../components/AppHeader";
 import { useIsMobile } from "../lib/use-is-mobile";
-import { SetGlyph, Trophy } from "../components/Brand";
+import { SetGlyph, setGlyphCode, Trophy } from "../components/Brand";
 import {
   ArrowRight,
   BsAsterisk,
@@ -12,10 +12,11 @@ import {
 } from "../components/Icons";
 import { Footer } from "../components/Footer";
 import { Pip, Pips } from "../components/ManaPips";
-import { SetSwitcherDesktop, SetSwitcherMobile } from "../components/SetSwitcher";
+import { SetSwitcherDesktop } from "../components/SetSwitcher";
 import { FilterDropdown } from "../components/FilterDropdown";
+import { SetFilterDropdown, type SetFilterOption } from "../components/SetFilterDropdown";
 import { ColorsSwitcher } from "../components/ColorsSwitcher";
-import { LeaderboardSidebar } from "../components/LeaderboardSidebar";
+import { LeaderboardSidebar, LeaderboardInsightsStrip } from "../components/LeaderboardSidebar";
 import { boardModeFor, DEFAULT_SORT, DEFAULT_SORT_NOSCORE, defaultSortFor, LeaderboardColumnHeader, LeaderboardTable, sortRows } from "../components/LeaderboardTable";
 import type { SortDir, SortKey, SortState } from "../components/LeaderboardTable";
 import { SectionLabel } from "../components/SectionLabel";
@@ -552,9 +553,8 @@ function FilterRow({
   formatOptions,
 }: FilterRowProps) {
   return (
-    <div className="px-10 py-3.5 border-b border-border flex items-center gap-4 flex-wrap">
+    <div className="px-10 py-3 border-b border-border flex items-center gap-4 flex-wrap">
       <FilterDropdown
-        label="FORMAT"
         value={format}
         options={formatOptions}
         onChange={setFormat}
@@ -599,9 +599,10 @@ function Mobile({
   onSort: (key: SortKey) => void;
 }) {
   const navigate = useNavigate();
-  const { prefetchSet, prefetchPlayer } = usePrefetchers();
+  const { prefetchPlayer } = usePrefetchers();
   const profileSet = baseSetCode(activeSet);
   const isCube = profileSet === CUBE_BASE;
+  const setOptions = useMemo<SetFilterOption[]>(() => (sets ? setFilterOptionsFrom(sets) : []), [sets]);
   return (
     <div className="bg-bg text-text min-h-screen flex flex-col overflow-x-hidden animate-fadeIn">
       <div className="sticky top-0 z-10 bg-bg">
@@ -610,7 +611,6 @@ function Mobile({
         <div className="px-3 py-2 border-b border-border bg-surface flex items-stretch gap-2">
           <div className="basis-[60%] min-w-0 flex">
             <FilterDropdown
-              label="FORMAT"
               value={filters.format}
               options={filters.formatOptions}
               onChange={filters.setFormat}
@@ -620,12 +620,14 @@ function Mobile({
             />
           </div>
           {sets && (
-            <div className="basis-[40%] min-w-0">
-              <SetSwitcherMobile
-                sets={sets}
-                activeCode={profileSet}
+            <div className="basis-[40%] min-w-0 flex">
+              <SetFilterDropdown
+                value={profileSet}
+                options={setOptions}
                 onChange={(code) => goToSet(navigate, code, sets, searchParams, latestCubeSeason)}
-                onPrefetch={prefetchSet}
+                variant="mobile"
+                align="right"
+                searchable
               />
             </div>
           )}
@@ -649,6 +651,15 @@ function Mobile({
             variant="mobile"
           />
         </div>
+        <LeaderboardInsightsStrip
+          setCode={activeSet}
+          playerSetCode={profileSet}
+          colors={filters.colors}
+          format={filters.format}
+          otherCombos={otherCombos}
+          onColorsSelect={filters.setColors}
+          searchParams={searchParams}
+        />
         {/* Column header is part of the sticky chrome so it stays pinned with the
             rest of the page chrome as rows scroll under it. */}
         <LeaderboardColumnHeader variant="mobile" mode={boardModeFor(filters.format)} sort={sort} onSort={onSort} />
@@ -1161,6 +1172,22 @@ function MobileExpandedRow({
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
+
+function setFilterOptionsFrom(sets: SetSummary[]): SetFilterOption[] {
+  const ordered = [...sets].sort((a, b) => setReleaseRank(b).localeCompare(setReleaseRank(a)));
+  return ordered.map((s) => ({
+    value: s.code,
+    label: s.name,
+    glyphCode: setGlyphCode(s),
+    meta: s.isActive ? (
+      <span className="mono text-[10px] tracking-[0.18em] text-green shrink-0">LIVE</span>
+    ) : undefined,
+  }));
+}
+
+function setReleaseRank(s: SetSummary): string {
+  return s.startDate || (s.custom ? "" : "9999-99-99");
+}
 
 function goToSet(
   navigate: ReturnType<typeof useNavigate>,

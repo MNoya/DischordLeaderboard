@@ -11,8 +11,9 @@ from sqlalchemy.orm import Session
 from bot.models import DraftEvent, MagicSet, Player, PlayerStats
 from bot.discord_helpers import player_url
 from bot.scoring import boxes_for_event, compute_score, compute_score_breakdown, pod_points
+from bot.services.active_set import resolve_active_set
 from bot.services.pod_drafts import PodSetSummary, players_for_names, pod_scoring_counts, pod_summary_by_set_for_player
-from bot.sets import ACTIVE_SET_CODE
+from bot.sets import active_set_code
 
 
 @dataclass
@@ -46,12 +47,13 @@ def process_stats(
     session: Session,
     player_name: str | None,
     viewer_discord_id: str,
-    set_code: str = ACTIVE_SET_CODE,
+    set_code: str | None = None,
 ) -> StatsData | None:
     player = resolve_player(session, player_name, viewer_discord_id)
     if player is None:
         return None
 
+    set_code = set_code or active_set_code()
     magic_set = session.execute(
         select(MagicSet).where(MagicSet.code == set_code)
     ).scalar_one_or_none()
@@ -309,9 +311,8 @@ def seed_attendees(session: Session, names: Sequence[str]) -> list[SeededAttende
     sort by leaderboard rank, everyone else falls to the bottom by display name. The raw sesh name
     is shown when no Player matches.
     """
-    set_id = session.execute(
-        select(MagicSet.id).where(MagicSet.code == ACTIVE_SET_CODE)
-    ).scalar_one_or_none()
+    active = resolve_active_set(session)
+    set_id = active.id if active else None
     ranked = {r.player_id: r for r in rank_players_for_set(session, set_id)} if set_id else {}
 
     seeded: list[SeededAttendee] = []
@@ -354,9 +355,8 @@ def rank_ordered_names(session: Session, names: Sequence[str]) -> list[str]:
     Unranked players (unlinked, opted out, no score, or an unresolvable handle) fall to the end —
     same treatment as `/pod-seeding`. Returns the original names, just reordered.
     """
-    set_id = session.execute(
-        select(MagicSet.id).where(MagicSet.code == ACTIVE_SET_CODE)
-    ).scalar_one_or_none()
+    active = resolve_active_set(session)
+    set_id = active.id if active else None
     ranks = {r.player_id: r.rank for r in rank_players_for_set(session, set_id)} if set_id else {}
     resolved = players_for_names(session, names)
 

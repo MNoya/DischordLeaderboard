@@ -15,7 +15,7 @@ from bot.database import SessionLocal
 from bot.discord_helpers import extract_avatar_hash
 from bot.models import Player
 from bot.services import bot_log
-from bot.services.dm_flows import run_latest_flow, wait_for_token_reply
+from bot.services.dm_flows import run_latest_flow, send_token_instructions, wait_for_token_reply
 from bot.services.refresh import refresh_one_player_for_all_sets
 from bot.services.seventeenlands import SeventeenLandsClient
 from bot.services.token_link import link_token, outcome_log_suffix
@@ -25,33 +25,51 @@ logger = logging.getLogger(__name__)
 DM_TIMEOUT_S = 10 * 60
 PROMPT_TIMEOUT_S = 10 * 60
 
+LEADERBOARD_URL = "https://dischord.pages.dev/leaderboard"
+
 INSTRUCTIONS = (
-    "Reply with your **17lands profile URL or token**, for example:\n"
-    "`https://www.17lands.com/user_history/10c0f8918a2b4fa7b230448caee0b2ca`\n"
+    "**Link your 17lands profile** to track your games.\n"
+    + tmsg.WALKTHROUGH_STEPS + "\n"
     "\n"
-    "*Your token is stored securely and only used to fetch your game data.*"
+    + tmsg.TOKEN_PRIVACY_NOTE
 )
 
 MSG_DM_SENT = "📬 Check your DMs to finish linking 17lands."
 MSG_TIMEOUT = "⏱️ Timed out. Run `/link-17lands` whenever you're ready to try again."
-MSG_LINKED_PROMPT = "✅ 17lands linked! Do you also want to join the [live leaderboard](https://dischord.pages.dev/leaderboard)?"
-MSG_STAYED_OFF = "👍 You're off the leaderboard. Your games are still tracked for pods, and you can `/join` anytime"
-MSG_UPDATED = "Updated. Your latest stats are on the [leaderboard](https://dischord.pages.dev/leaderboard)"
-MSG_UPDATED_HIDDEN = "Updated. Your rank stays hidden. Run `/join` to appear on the [leaderboard](https://dischord.pages.dev/leaderboard)"
+MSG_LINK_OFF_BOARD = f"17lands linked! Want to join the [live leaderboard](<{LEADERBOARD_URL}>)?"
+MSG_LINK_ON_BOARD = f"17lands updated! You're on the [leaderboard](<{LEADERBOARD_URL}>)."
+MSG_LEFT = "👋 You've left the leaderboard. Your games still count for pods — run `/join` anytime to return."
+MSG_STAYED_OFF = "👍 You're off the leaderboard. Your games are still tracked for pods, and you can `/join` anytime."
+MSG_STAYED_ON = "👍 You're still on the leaderboard."
 
 
-def updated_message(opted_in: bool) -> str:
+def link_prompt(currently_in: bool) -> str:
     icon = emojis.get("17lands") or "✅"
-    return f"{icon} {MSG_UPDATED if opted_in else MSG_UPDATED_HIDDEN}"
+    return f"{icon} {MSG_LINK_ON_BOARD if currently_in else MSG_LINK_OFF_BOARD}"
 
 
-class JoinLeaderboardPrompt(discord.ui.View):
-    def __init__(self, bot: commands.Bot, user_id: str, player_id: str) -> None:
+class LeaderboardChoicePrompt(discord.ui.View):
+    """Post-link choice that lets a player join or leave the leaderboard from whichever state they're in."""
+
+    def __init__(self, bot: commands.Bot, user_id: str, player_id: str, *, currently_in: bool) -> None:
         super().__init__(timeout=PROMPT_TIMEOUT_S)
         self.bot = bot
         self.user_id = user_id
         self.player_id = player_id
+        self.currently_in = currently_in
         self.message: discord.Message | None = None
+
+        if currently_in:
+            self._add_button("Leave the leaderboard", discord.ButtonStyle.danger, self._leave)
+            self._add_button("Stay on", discord.ButtonStyle.secondary, self._keep)
+        else:
+            self._add_button("Join the leaderboard", discord.ButtonStyle.success, self._join)
+            self._add_button("Stay off", discord.ButtonStyle.secondary, self._keep)
+
+    def _add_button(self, label: str, style: discord.ButtonStyle, callback) -> None:
+        button = discord.ui.Button(label=label, style=style)
+        button.callback = callback
+        self.add_item(button)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return str(interaction.user.id) == self.user_id
@@ -65,30 +83,43 @@ class JoinLeaderboardPrompt(discord.ui.View):
             except discord.HTTPException:
                 pass
 
-    @discord.ui.button(label="Join the leaderboard", style=discord.ButtonStyle.success)
-    async def yes(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        with SessionLocal() as session:
-            player = session.get(Player, self.player_id)
-            display_name = player.display_name if player else None
-            if player is not None:
-                player.leaderboard_opt_in = True
-                session.commit()
+    async def _join(self, interaction: discord.Interaction) -> None:
+        display_name = self._set_membership(active=True, opt_in=True)
         audit.event("link_17lands_join", user_id=self.user_id, player_id=self.player_id)
-        for child in self.children:
-            child.disabled = True
-        await interaction.response.edit_message(content=MSG_JOINED_LEADERBOARD, view=self)
-        self.stop()
+        await self._finish(interaction, MSG_JOINED_LEADERBOARD)
         await broadcast_current_set_safely(self.bot)
         if display_name:
             await bot_log.get(self.bot).post_plain(f"🆕 **{display_name}** joined the leaderboard")
 
-    @discord.ui.button(label="No thanks", style=discord.ButtonStyle.secondary)
-    async def no(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        audit.event("link_17lands_decline", user_id=self.user_id, player_id=self.player_id)
+    async def _leave(self, interaction: discord.Interaction) -> None:
+        display_name = self._set_membership(opt_in=False)
+        audit.event("link_17lands_leave", user_id=self.user_id, player_id=self.player_id)
+        await self._finish(interaction, MSG_LEFT)
+        await broadcast_current_set_safely(self.bot)
+        if display_name:
+            await bot_log.get(self.bot).post_plain(f"👋 **{display_name}** left the leaderboard")
+
+    async def _keep(self, interaction: discord.Interaction) -> None:
+        audit.event("link_17lands_no_change", user_id=self.user_id, player_id=self.player_id)
+        await self._finish(interaction, MSG_STAYED_ON if self.currently_in else MSG_STAYED_OFF)
+
+    async def _finish(self, interaction: discord.Interaction, content: str) -> None:
         for child in self.children:
             child.disabled = True
-        await interaction.response.edit_message(content=MSG_STAYED_OFF, view=self)
+        await interaction.response.edit_message(content=content, view=self)
         self.stop()
+
+    def _set_membership(self, *, opt_in: bool, active: bool | None = None) -> str | None:
+        with SessionLocal() as session:
+            player = session.get(Player, self.player_id)
+            if player is None:
+                return None
+            player.leaderboard_opt_in = opt_in
+            if active is not None:
+                player.active = active
+            display_name = player.display_name
+            session.commit()
+        return display_name
 
 
 class Link17Lands(commands.Cog):
@@ -109,17 +140,18 @@ class Link17Lands(commands.Cog):
 
     async def _run_link_flow(self, interaction: discord.Interaction, user_id: str, username: str) -> None:
         in_guild = interaction.guild is not None
+        await interaction.response.defer(ephemeral=in_guild, thinking=True)
         try:
             dm = await interaction.user.create_dm()
             if in_guild:
-                await dm.send(INSTRUCTIONS)
-                await interaction.response.send_message(MSG_DM_SENT, ephemeral=True)
+                await send_token_instructions(dm.send, INSTRUCTIONS)
+                await interaction.followup.send(MSG_DM_SENT, ephemeral=True)
             else:
-                await interaction.response.send_message(INSTRUCTIONS)
+                await send_token_instructions(interaction.followup.send, INSTRUCTIONS)
         except discord.Forbidden:
             audit.event("link_17lands_dms_disabled", user_id=user_id)
             logger.warning(f"link-17lands: {username} DMs blocked")
-            await interaction.response.send_message(tmsg.DMS_DISABLED, ephemeral=in_guild)
+            await interaction.followup.send(tmsg.DMS_DISABLED, ephemeral=in_guild)
             return
 
         audit.event("link_17lands_dm_sent", user_id=user_id)
@@ -157,15 +189,15 @@ class Link17Lands(commands.Cog):
             refresh_one_player_for_all_sets(session, self.client, result.player_id)
             session.commit()
 
-        if result.relinked:
-            with SessionLocal() as session:
-                player = session.get(Player, result.player_id)
-                opted_in = bool(player and player.leaderboard_opt_in)
-            await dm.send(updated_message(opted_in))
-            return
+        with SessionLocal() as session:
+            player = session.get(Player, result.player_id)
+            currently_in = bool(player and player.active and player.leaderboard_opt_in)
 
-        view = JoinLeaderboardPrompt(self.bot, user_id, result.player_id)
-        view.message = await dm.send(MSG_LINKED_PROMPT, view=view)
+        if currently_in:
+            await broadcast_current_set_safely(self.bot)
+
+        view = LeaderboardChoicePrompt(self.bot, user_id, result.player_id, currently_in=currently_in)
+        view.message = await dm.send(link_prompt(currently_in), view=view)
 
 
 async def setup(bot: commands.Bot) -> None:

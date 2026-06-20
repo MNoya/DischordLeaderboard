@@ -12,6 +12,7 @@ const impl = useSupabase ? real : mock;
 
 export const fetchSets = impl.fetchSets;
 export const fetchCubeSeasons = impl.fetchCubeSeasons;
+export const fetchDbEpisodes = impl.fetchDbEpisodes;
 export const fetchLeaderboard = impl.fetchLeaderboard;
 export const fetchFormatLeaderboard = impl.fetchFormatLeaderboard;
 export const fetchColorsLeaderboard = impl.fetchColorsLeaderboard;

@@ -9,6 +9,7 @@ Requires ``inkscape`` (rasterizer) and ``pngquant`` (optional optimization) on P
 """
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import sys
@@ -21,6 +22,9 @@ from bot.sets import ALL_SETS
 KEYRUNE_SVG_URL = "https://cdn.jsdelivr.net/gh/andrewgioia/keyrune@latest/svg/{code}.svg"
 OUTPUT_DIR = Path(__file__).resolve().parents[2] / "frontend" / "public" / "set-symbols"
 SYMBOL_PX = 256
+
+# Arena-only sets keyrune has no glyph for borrow their source set's symbol.
+KEYRUNE_ALIAS = {"SIR": "soi"}
 
 
 def generate(codes: list[str]) -> tuple[list[str], list[str]]:
@@ -41,7 +45,8 @@ def generate(codes: list[str]) -> tuple[list[str], list[str]]:
 
 
 def _fetch_white_svg(code: str) -> str | None:
-    url = KEYRUNE_SVG_URL.format(code=code.lower())
+    glyph = KEYRUNE_ALIAS.get(code.upper(), code.lower())
+    url = KEYRUNE_SVG_URL.format(code=glyph)
     try:
         with urllib.request.urlopen(url, timeout=20) as resp:
             raw = resp.read().decode("utf-8")
@@ -49,7 +54,31 @@ def _fetch_white_svg(code: str) -> str | None:
         if e.code == 404:
             return None
         raise
-    return raw.replace("#444", "#ffffff")
+    return _squarify(raw.replace("#444", "#ffffff"))
+
+
+def _squarify(svg: str) -> str:
+    """Keyrune glyphs share a height but vary in width; without this the 256x256 export stretches
+    a non-square glyph to fill the square. Centering it in a square viewBox keeps its proportions."""
+    m = re.search(r'viewBox="(-?[\d.]+) (-?[\d.]+) ([\d.]+) ([\d.]+)"', svg)
+    if not m:
+        return svg
+    width, height = float(m.group(3)), float(m.group(4))
+    side = max(width, height)
+    min_x = float(m.group(1)) - (side - width) / 2
+    min_y = float(m.group(2)) - (side - height) / 2
+
+    def fmt(value: float) -> str:
+        return f"{value:g}"
+
+    svg = re.sub(r'(<svg[^>]*?)\swidth="[\d.]+"', rf'\1 width="{fmt(side)}"', svg, count=1)
+    svg = re.sub(r'(<svg[^>]*?)\sheight="[\d.]+"', rf'\1 height="{fmt(side)}"', svg, count=1)
+    return re.sub(
+        r'viewBox="[^"]*"',
+        f'viewBox="{fmt(min_x)} {fmt(min_y)} {fmt(side)} {fmt(side)}"',
+        svg,
+        count=1,
+    )
 
 
 def _rasterize(code: str, svg: str) -> None:

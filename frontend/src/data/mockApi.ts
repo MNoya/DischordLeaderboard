@@ -31,6 +31,7 @@ import type {
   SetSummary,
 } from "../types/leaderboard";
 import type { Card, P0P1Pick, P0P1PickStat, SlotKey } from "../types/p0p1";
+import type { Episode } from "./episodes";
 import {
   podDraftArtifactFixture,
   podEventsFixture,
@@ -92,6 +93,8 @@ const wait = <T,>(value: T): Promise<T> =>
 export const fetchSets = (): Promise<SetSummary[]> => wait(setsFixture);
 
 export const fetchCubeSeasons = (): Promise<CubeSeason[]> => wait([]);
+
+export const fetchDbEpisodes = (): Promise<Episode[]> => wait([]);
 
 export const fetchAvailableFormats = (_setCode: string): Promise<string[]> =>
   wait(["Premier", "Trad", "Sealed", "Quick", "LCQ Draft 1", "LCQ Draft 2"]);

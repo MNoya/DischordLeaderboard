@@ -4,6 +4,7 @@ import { ChevronDown, ChevronUp } from "lucide-react";
 import { AAvatar, Trophy, fmtPts } from "./Brand";
 import { Record } from "./Record";
 import { ErrorState } from "./ErrorState";
+import { ScoringInfoButton } from "./ScoringInfoButton";
 import { winPct } from "../data/utils";
 import { cn } from "../lib/utils";
 
@@ -226,7 +227,7 @@ export function LeaderboardColumnHeader({
         {mode === "lcq" && <SortHeader label="$" sortKey="earnings" sort={sort} onSort={onSort} />}
         <SortHeader label="TR" sortKey="trophies" sort={sort} onSort={onSort} />
         {(mode === "points" || mode === "lcq") && (
-          <SortHeader label="PTS" sortKey="score" sort={sort} onSort={onSort} />
+          <ScoringSortHeader label="PTS" sort={sort} onSort={onSort} />
         )}
         {mode === "pod" && (
           <>
@@ -256,7 +257,7 @@ export function LeaderboardColumnHeader({
       <SortHeader label="RECORD" sortKey="record" sort={sort} onSort={onSort} />
       <SortHeader label="WIN %" sortKey="winPct" sort={sort} onSort={onSort} />
       {(mode === "points" || mode === "lcq") && (
-        <SortHeader label="POINTS" sortKey="score" sort={sort} onSort={onSort} />
+        <ScoringSortHeader label="POINTS" sort={sort} onSort={onSort} />
       )}
       {mode === "direct" && <SortHeader label="BOXES" sortKey="boxes" sort={sort} onSort={onSort} />}
     </div>
@@ -268,11 +269,13 @@ function SortHeader({
   sortKey,
   sort,
   onSort,
+  inline = false,
 }: {
   label: string;
   sortKey: SortKey;
   sort?: SortState;
   onSort?: (key: SortKey) => void;
+  inline?: boolean;
 }) {
   if (!onSort) {
     return <span className="text-right">{label}</span>;
@@ -286,7 +289,8 @@ function SortHeader({
       aria-label={`Sort by ${label}`}
       aria-sort={active ? (sort?.dir === "asc" ? "ascending" : "descending") : "none"}
       className={cn(
-        "relative block w-full text-right cursor-pointer transition-colors tracking-[inherit] text-[inherit] font-[inherit]",
+        "relative cursor-pointer transition-colors tracking-[inherit] text-[inherit] font-[inherit]",
+        inline ? "inline-flex items-center" : "block w-full text-right",
         active ? "text-text" : "hover:text-text",
       )}
     >
@@ -301,6 +305,25 @@ function SortHeader({
         aria-hidden="true"
       />
     </button>
+  );
+}
+
+// The POINTS / PTS header with the scoring "(?)" affordance to the left of the
+// sortable label, kept together at the column's right edge.
+function ScoringSortHeader({
+  label,
+  sort,
+  onSort,
+}: {
+  label: string;
+  sort?: SortState;
+  onSort?: (key: SortKey) => void;
+}) {
+  return (
+    <div className="flex items-center justify-end gap-1.5">
+      <ScoringInfoButton />
+      <SortHeader label={label} sortKey="score" sort={sort} onSort={onSort} inline />
+    </div>
   );
 }
 

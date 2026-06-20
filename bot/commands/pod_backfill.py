@@ -55,7 +55,7 @@ from bot.services.pod_thread_backfill import (
 from bot.services.pod_tournament import TOTAL_ROUNDS, post_championship_for_event, set_organizer_deck_override
 from bot.services.sesh_parser import parse_sesh_embed, unescape_markdown
 from bot.services.seventeenlands import SeventeenLandsClient
-from bot.sets import ACTIVE_SET_CODE
+from bot.sets import active_set_code
 from bot.tasks.pod_draft_reminder import fetch_sesh_message, fetch_sesh_rsvps
 
 
@@ -233,7 +233,7 @@ async def reconstruct_event_from_thread(bot: commands.Bot, thread_id: str) -> st
     parsed = ParsedSeshEvent(
         event_date=fields.event_date,
         event_time=fields.event_time,
-        set_code=fields.set_code or ACTIVE_SET_CODE,
+        set_code=fields.set_code or active_set_code(),
         event_number=fields.event_number,
         name=fields.name,
         attendees=fields.attendees,

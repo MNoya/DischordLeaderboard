@@ -26,8 +26,9 @@ from bot.scoring import (
 )
 from bot.services.pod_deck_color import PAIR_EMOJI_NAME
 from bot.services.pod_drafts import pod_summary_by_set_for_player
+from bot.services.active_set import resolve_active_set
 from bot.services.pod_format import PEASANT_CODE, PEASANT_LABEL
-from bot.sets import ACTIVE_SET_CODE, ALL_SETS
+from bot.sets import ALL_SETS, active_set_code
 
 
 # Color archetype label → PlayerArchetypeScore.archetype key
@@ -1055,7 +1056,7 @@ class _FilterButton(discord.ui.Button):
                     ephemeral=True,
                 )
                 return
-            set_code = ACTIVE_SET_CODE
+            set_code = active_set_code()
             if tracked.set_id is not None:
                 ms = session.get(MagicSet, tracked.set_id)
                 if ms is not None:
@@ -1098,7 +1099,7 @@ def board_site_url(set_code: str | None, filter_type: str | None, filter_value: 
     if set_code == PEASANT_CODE:
         return _peasant_board_url()
     base = settings.leaderboard_url
-    set_base = base if set_code is None or set_code == ACTIVE_SET_CODE else f"{base}/{set_code}"
+    set_base = base if set_code is None or set_code == active_set_code() else f"{base}/{set_code}"
     return set_base + _site_query(filter_type, filter_value)
 
 
@@ -1635,9 +1636,7 @@ async def broadcast_current_set_update(bot: commands.Bot) -> dict:
     latest data everywhere' without resolving the set themselves.
     """
     with SessionLocal() as session:
-        ms = session.execute(
-            select(MagicSet).where(MagicSet.code == ACTIVE_SET_CODE)
-        ).scalar_one_or_none()
+        ms = resolve_active_set(session)
         if ms is None:
             return {"edited": 0, "pruned": 0}
         return await edit_tracked_messages_for_set(bot, ms)
@@ -1842,7 +1841,7 @@ class Leaderboard(commands.Cog):
                 msg = (
                     f"No leaderboard for `{set}` — it isn't a registered set."
                     if set is not None else
-                    "No active set is configured. `bot/sets.py::ACTIVE_SET_CODE` doesn't match any registered set."
+                    "No active set is configured. The date-derived active set isn't seeded in the database yet."
                 )
                 await interaction.followup.send(msg, ephemeral=ephemeral)
                 return
@@ -1869,7 +1868,7 @@ class Leaderboard(commands.Cog):
         # A specific past set is a post-and-forget snapshot: send it once, no
         # tracking row (so !refresh skips it) and no cycle button (cycling needs
         # the tracking row). The active set keeps the tracked, refreshable path.
-        if magic_set.code != ACTIVE_SET_CODE:
+        if magic_set.code != active_set_code():
             await interaction.followup.send(
                 embed=embed,
                 view=render_view(
@@ -1988,9 +1987,7 @@ async def setup(bot: commands.Bot) -> None:
 
 
 def _current_set(session: Session) -> MagicSet | None:
-    return session.execute(
-        select(MagicSet).where(MagicSet.code == ACTIVE_SET_CODE)
-    ).scalar_one_or_none()
+    return resolve_active_set(session)
 
 
 _WUBRG = "WUBRG"

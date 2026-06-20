@@ -18,7 +18,7 @@ from bot.database import SessionLocal
 from bot.models import Player
 from bot.scoring import DEFAULT_QUEUE_GROUPS
 from bot.services.seventeenlands import SeventeenLandsClient, event_is_trophy
-from bot.sets import ACTIVE_SET_CODE, ALL_SETS, SetSeed
+from bot.sets import ALL_SETS, SetSeed, active_set_code
 
 _TOKEN_RE = re.compile(r"^[a-f0-9]{32}$")
 
@@ -59,12 +59,13 @@ def _resolve_token(identifier: str) -> tuple[str, str]:
 
 
 def main() -> None:
+    active = active_set_code()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("identifier", help="Discord username substring or raw 32-hex 17lands token")
     parser.add_argument(
         "--set",
-        default=ACTIVE_SET_CODE,
-        help=f"3-4 letter set code (default: {ACTIVE_SET_CODE}). Pass ALL for full history.",
+        default=active,
+        help=f"3-4 letter set code (default: {active}). Pass ALL for full history.",
     )
     args = parser.parse_args()
 

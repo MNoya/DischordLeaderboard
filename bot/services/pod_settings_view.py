@@ -29,7 +29,7 @@ from bot.services.pod_seating_select import (
     seating_mode_options,
 )
 from bot.services.pod_tournament import actor_label
-from bot.sets import ACTIVE_SET_CODE
+from bot.sets import active_set_code
 
 
 Apply = Callable[[discord.Interaction, str], Awaitable[str | None]]
@@ -108,7 +108,7 @@ class PodSettingsView(ui.View):
         await update_registered_embed(
             interaction.channel,
             client_user=interaction.client.user,
-            set_code=self.current_code or ACTIVE_SET_CODE,
+            set_code=self.current_code or active_set_code(),
             pairing_mode=self.current_mode,
             seating_mode=self.current_seating,
             championship=is_championship(self.event_name),

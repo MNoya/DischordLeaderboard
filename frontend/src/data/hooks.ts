@@ -33,12 +33,71 @@ import {
   fetchPodSetCodes,
   fetchRecentTrophies,
   fetchSets,
+  fetchDbEpisodes,
   upsertP0P1Pick,
   deleteAllP0P1Picks,
 } from "./api";
+import { fetchEpisodes } from "./episodes";
+import { fetchDiscordStats } from "./discord";
+import { fetchYouTubeVideos, mergeMedia, overlayLiveMedia } from "./youtube";
 import type { P0P1Pick, SlotKey } from "../types/p0p1";
 import { MULTI, OTHER } from "./filters";
 const FIVE_MINUTES = 5 * 60 * 1000;
+const ONE_HOUR = 60 * 60 * 1000;
+
+export function useEpisodes() {
+  return useQuery({
+    queryKey: ["episodes"],
+    queryFn: fetchEpisodes,
+    staleTime: ONE_HOUR,
+  });
+}
+
+export function useYouTubeVideos() {
+  return useQuery({
+    queryKey: ["youtube"],
+    queryFn: fetchYouTubeVideos,
+    staleTime: ONE_HOUR,
+  });
+}
+
+export function useDiscordStats() {
+  return useQuery({
+    queryKey: ["discord-stats"],
+    queryFn: fetchDiscordStats,
+    staleTime: ONE_HOUR,
+  });
+}
+
+export function useDbEpisodes() {
+  return useQuery({
+    queryKey: ["db-episodes"],
+    queryFn: fetchDbEpisodes,
+    staleTime: ONE_HOUR,
+  });
+}
+
+// DB rows are the authoritative, categorized base; the live RSS/YouTube feeds overlay any
+// freshly published item the next bot sync hasn't picked up yet, so new drops appear at once.
+export function useMediaFeed() {
+  const db = useDbEpisodes();
+  const episodes = useEpisodes();
+  const videos = useYouTubeVideos();
+  const data = useMemo(() => {
+    const live = episodes.data ? mergeMedia(episodes.data, videos.data ?? []) : undefined;
+    if (db.data && live) {
+      return overlayLiveMedia(db.data, live);
+    }
+    return db.data ?? live;
+  }, [db.data, episodes.data, videos.data]);
+  return {
+    data,
+    isLoading: db.isLoading && episodes.isLoading,
+    isError: db.isError && episodes.isError,
+    thumbnailsPending: videos.isLoading && !db.data,
+    setsReady: db.data !== undefined,
+  };
+}
 
 export function useSets() {
   return useQuery({
@@ -176,6 +235,7 @@ export function useRecentTrophies(setCode: string | undefined, limit = 8) {
     queryFn: () => fetchRecentTrophies(setCode!, limit),
     enabled: !!setCode,
     staleTime: FIVE_MINUTES,
+    placeholderData: keepPreviousData,
   });
 }
 

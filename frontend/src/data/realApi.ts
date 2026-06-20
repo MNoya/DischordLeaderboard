@@ -12,6 +12,7 @@ import {
   adaptLeaderboardRow,
   adaptSet,
 } from "./adapter";
+import { adaptDbEpisode, type DbEpisodeRow, type Episode } from "./episodes";
 import {
   aggregate,
   boxesForEvent,
@@ -59,6 +60,15 @@ const LCQ_DRAFT_2_FORMATS = formatsForBucket("LCQ Draft 2");
 // and trophy boards work off set_code alone.
 const eventsViewFor = (setCode: string): string =>
   isCubeSeasonCode(setCode) ? "public_cube_season_events" : "public_player_draft_events";
+
+export async function fetchDbEpisodes(): Promise<Episode[]> {
+  const { data, error } = await client()
+    .from("public_episodes")
+    .select("*")
+    .order("published_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((r) => adaptDbEpisode(r as unknown as DbEpisodeRow));
+}
 
 export async function fetchCubeSeasons(): Promise<CubeSeason[]> {
   const { data, error } = await client()

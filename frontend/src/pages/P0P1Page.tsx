@@ -1,5 +1,5 @@
-import { useEffect, useState, type ReactNode } from "react";
 import { AppHeader } from "../components/AppHeader";
+import { Crossfade } from "../components/Crossfade";
 import { CtaPill } from "../components/CtaPill";
 import { DiscordIcon } from "../components/BrandIcons";
 import { SectionLabel } from "../components/SectionLabel";
@@ -118,7 +118,7 @@ export function P0P1Page() {
         ) : (
           <div className="mt-4">
             {dataReady && cards ? (
-              <SlotTransition slotKey={activeSlot.key}>
+              <Crossfade transitionKey={activeSlot.key}>
                 <CardSelectionGrid
                   key={activeSlot.key}
                   animateMount={false}
@@ -138,7 +138,7 @@ export function P0P1Page() {
                     />
                   }
                 />
-              </SlotTransition>
+              </Crossfade>
             ) : (
               <CardGridSkeleton />
             )}
@@ -147,39 +147,6 @@ export function P0P1Page() {
       </main>
 
       <GoToTopButton onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} />
-    </div>
-  );
-}
-
-const SLOT_CROSSFADE_MS = 220;
-
-type SlotLayer = { key: string; content: ReactNode };
-
-function SlotTransition({ slotKey, children }: { slotKey: string; children: ReactNode }) {
-  const [current, setCurrent] = useState<SlotLayer>({ key: slotKey, content: children });
-  const [outgoing, setOutgoing] = useState<SlotLayer | null>(null);
-
-  useEffect(() => {
-    if (slotKey === current.key) {
-      setCurrent({ key: slotKey, content: children });
-      return;
-    }
-    setOutgoing(current);
-    setCurrent({ key: slotKey, content: children });
-    const timer = setTimeout(() => setOutgoing(null), SLOT_CROSSFADE_MS);
-    return () => clearTimeout(timer);
-  }, [slotKey, children, current.key]);
-
-  return (
-    <div className="relative">
-      <div key={current.key} className="animate-fadeIn">
-        {current.content}
-      </div>
-      {outgoing ? (
-        <div key={outgoing.key} className="animate-fadeOut absolute inset-x-0 top-0 pointer-events-none">
-          {outgoing.content}
-        </div>
-      ) : null}
     </div>
   );
 }

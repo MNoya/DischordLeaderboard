@@ -26,8 +26,13 @@ export const PUBLIC_SUPABASE_URL = "https://yrecdosksgigpceholjl.supabase.co";
 export const PUBLIC_SUPABASE_PUBLISHABLE_KEY =
   "sb_publishable_x-W4800MtS_hbFAnLmAk6Q_68P4Nxsf";
 
-// Fixed dev defaults for bot.scripts.local_supabase_proxy, so VITE_DATA_MODE=local
-// needs no credentials. Never used by production builds.
-export const LOCAL_SUPABASE_URL = "http://localhost:3001";
+// Dev defaults for bot.scripts.local_supabase_proxy, so VITE_DATA_MODE=local needs no
+// credentials. Never used by production builds. The proxy host tracks whatever host serves
+// the page (localhost on this machine, the LAN IP from a phone), so local mode works from a
+// phone with no config as long as the proxy is bound to 0.0.0.0. VITE_LOCAL_SUPABASE_URL still
+// overrides for an off-box proxy.
+const localProxyHost = typeof window !== "undefined" ? window.location.hostname : "localhost";
+export const LOCAL_SUPABASE_URL =
+  import.meta.env?.VITE_LOCAL_SUPABASE_URL ?? `http://${localProxyHost}:3001`;
 
 export const LOCAL_SUPABASE_PUBLISHABLE_KEY = "dev-anon-key";

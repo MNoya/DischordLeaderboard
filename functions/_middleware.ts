@@ -18,6 +18,18 @@ import {
 } from "../frontend/src/data/public-supabase-config";
 import { SITE_NAME as SITE, TITLE_SEPARATOR, TIER_LIST_PREVIEW_SETS } from "../frontend/src/data/constants";
 import { P0P1_SET_CODE } from "../frontend/src/data/p0p1Slots";
+import { categoryFromSlug } from "../frontend/src/data/episodes";
+
+const EPISODE_CATEGORY_DESCRIPTIONS: Record<string, string> = {
+  "Set Review": "Card-by-card set reviews and first impressions for MTG limited.",
+  Draft: "Draft playthroughs, archetype guides, and deckbuilding for MTG limited.",
+  Sealed: "Sealed and prerelease deckbuilding and gameplay.",
+  Rankings: "Tier lists, top-10s, and best-of-year rankings.",
+  Metagame: "Format state, metagame updates, and tournament reports.",
+  Coaching: "Coaching sessions and gameplay reviews.",
+  Guest: "Interviews and conversations with limited players.",
+  Evergreen: "Timeless limited skills, fundamentals, and strategy.",
+};
 
 const LEADERBOARD_DESCRIPTION =
   "Check ranks and trophies from the community. /join on Discord to share your drafts and climb the leaderboard";
@@ -86,6 +98,21 @@ const fetchSetName = async (code: string): Promise<string> => {
     // fall through
   }
   return TIER_LIST_PREVIEW_SETS[code]?.name ?? code;
+};
+
+// Episodes span sets that never reached the leaderboard, so resolve their display name
+// from public_episodes instead of public_sets. Null means no episode carries that code.
+const fetchEpisodeSetName = async (code: string): Promise<string | null> => {
+  try {
+    const resp = await restGet(`public_episodes?set_code=eq.${encodeURIComponent(code)}&select=set_name&limit=1`);
+    if (resp.ok) {
+      const rows = (await resp.json()) as Array<{ set_name: string | null }>;
+      if (rows.length > 0) return rows[0].set_name ?? code;
+    }
+  } catch {
+    // fall through
+  }
+  return null;
 };
 
 type PlayerCard = { name: string; avatarUrl: string | null };
@@ -179,6 +206,29 @@ const resolveMeta = async (pathname: string): Promise<RouteMeta> => {
     );
   }
   if (section === "episodes") {
+    const slug = rest[0];
+    if (!slug) {
+      return page("Episodes", "Check out the latest episodes, or search the archive.");
+    }
+    if (slug === "shorts") {
+      return page("Shorts", "Quick limited tips and highlights in under two minutes.");
+    }
+    if (slug === "audio") {
+      return page("Audio", "Listen to the podcast archive.");
+    }
+    const category = categoryFromSlug(slug);
+    if (category) {
+      return page(`${category} Episodes`, EPISODE_CATEGORY_DESCRIPTIONS[category]);
+    }
+    const setCode = slug.toUpperCase();
+    const setName = await fetchEpisodeSetName(setCode);
+    if (setName) {
+      return page(
+        `${setCode} Episodes`,
+        `Episodes, set reviews, and draft guides for ${setName}.`,
+        { kind: "setSymbol", code: setCode },
+      );
+    }
     return page("Episodes", "Check out the latest episodes, or search the archive.");
   }
   if (section === "community") {
@@ -210,6 +260,9 @@ export const onRequest: PagesFunction = async (context) => {
   const setContent = (value: string): HTMLRewriterElementContentHandlers => ({
     element: (el) => el.setAttribute("content", value),
   });
+  const setHref = (value: string): HTMLRewriterElementContentHandlers => ({
+    element: (el) => el.setAttribute("href", value),
+  });
   const remove: HTMLRewriterElementContentHandlers = { element: (el) => el.remove() };
 
   const descriptionHandler = meta.description === null ? remove : setContent(meta.description);
@@ -222,6 +275,7 @@ export const onRequest: PagesFunction = async (context) => {
 
   let rewriter = new HTMLRewriter()
     .on("title", { element: (el) => el.setInnerContent(meta.tabTitle) })
+    .on('link[rel="canonical"]', setHref(ogUrl))
     .on('meta[property="og:site_name"]', siteNameHandler)
     .on('meta[property="og:title"]', setContent(meta.ogTitle))
     .on('meta[name="twitter:title"]', setContent(meta.ogTitle))

@@ -8,6 +8,7 @@ export interface SetSummary {
   startDate: string; // ISO date
   endDate: string;
   isActive: boolean;
+  early?: boolean; // shown before release_date when early-access data already exists
   custom?: boolean; // synthesized for pod-only cube formats with no row in `sets`
 }
 

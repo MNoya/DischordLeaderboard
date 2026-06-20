@@ -1,9 +1,8 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Link } from "react-router-dom";
 import { X } from "lucide-react";
 
-import { ArrowRight } from "./Icons";
+import { ScoringInfoButton } from "./ScoringInfoButton";
 import { Trophy } from "./Brand";
 import { Record } from "./Record";
 import { FMT_COLORS, FMT_DEFAULT_COLOR } from "../data/format-display";
@@ -254,14 +253,7 @@ export function PointsBreakdown({ open, onClose, breakdown, anchorRef }: Props) 
       )}
 
       <footer className="px-4 py-2.5 border-t border-border flex items-center justify-between gap-3">
-        <Link
-          to="/about"
-          onClick={onClose}
-          className="inline-flex items-center gap-2 text-green font-display tracking-[0.10em] text-[12px] leading-none hover:text-green-2 transition-colors whitespace-nowrap no-underline"
-        >
-          ABOUT SCORING
-          <ArrowRight size={12} />
-        </Link>
+        <ScoringInfoButton size={14} label="ABOUT POINTS" />
         <span className="font-display text-green text-[22px] leading-none tabular-nums shrink-0">
           {rounded}
         </span>

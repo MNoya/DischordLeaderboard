@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Literal
 
 import discord
@@ -27,7 +26,7 @@ from bot.database import SessionLocal
 from bot.discord_helpers import extract_avatar_hash
 from bot.models import Player
 from bot.services import bot_log
-from bot.services.dm_flows import run_latest_flow, wait_for_token_reply
+from bot.services.dm_flows import run_latest_flow, send_token_instructions, wait_for_token_reply
 from bot.services.refresh import refresh_one_player_for_all_sets
 from bot.services.seventeenlands import SeventeenLandsClient
 from bot.services.token_link import link_token, outcome_log_suffix
@@ -36,21 +35,12 @@ logger = logging.getLogger(__name__)
 
 DM_TIMEOUT_S = 10 * 60
 
-# Optional walkthrough image attached to the signup DM. Drop a screenshot at
-# this path (highlighting the 'event history' link on 17lands.com/history/events)
-# and the bot will include it; if the file is missing the DM is text-only.
-INSTRUCTIONS_IMAGE = Path(__file__).resolve().parents[2] / "bot" / "assets" / "signup_event_history.png"
-
 INSTRUCTIONS = (
     "{hello}**Welcome to the LLU Community Leaderboard!**\n"
     "Join by sharing your **17lands profile link**.\n"
-    "1. Go to [17lands.com/history/events](https://www.17lands.com/history/events)\n"
-    "2. Click the *event history* link.\n"
-    "3. Copy the URL from your browser's address bar. It looks like:\n"
-    "`https://www.17lands.com/user_history/abc123...` (any `?...` extras at the end are fine)\n"
-    "4. Reply to this message with the full URL or just the token.\n"
+    + tmsg.WALKTHROUGH_STEPS + "\n"
     "\n"
-    "*Your token is stored securely and only used to fetch your game stats for the leaderboard.*"
+    + tmsg.TOKEN_PRIVACY_NOTE
 )
 
 MSG_DM_SENT = "📬 Check your DMs to join!"
@@ -274,17 +264,8 @@ async def setup(bot: commands.Bot) -> None:
 
 
 async def _send_signup_instructions(send) -> None:
-    """Send the walkthrough via `send`, attaching the image if present, text-only if the upload fails."""
     content = INSTRUCTIONS.format(hello=emojis.prefix("chordoHello"))
-    if INSTRUCTIONS_IMAGE.exists():
-        try:
-            await send(content=content, file=discord.File(INSTRUCTIONS_IMAGE))
-            return
-        except discord.Forbidden:
-            raise
-        except discord.HTTPException as exc:
-            logger.warning(f"join: instructions attachment failed ({exc}); text-only")
-    await send(content)
+    await send_token_instructions(send, content)
 
 
 async def _build_join_preview(bot: commands.Bot, user_id: str):

@@ -1,6 +1,15 @@
 import React from "react";
-import { Root, Trigger, Portal, Content, Arrow } from "@radix-ui/react-tooltip";
+import { Root, Trigger, Portal, Content } from "@radix-ui/react-tooltip";
 import { cn } from "../lib/utils";
+
+type Side = "top" | "right" | "bottom" | "left";
+
+const ARROW_BY_SIDE: Record<Side, string> = {
+  top: "bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2 border-b border-r",
+  bottom: "top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 border-t border-l",
+  left: "right-0 top-1/2 -translate-y-1/2 translate-x-1/2 border-r border-t",
+  right: "left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 border-l border-b",
+};
 
 export function Tooltip({
   label,
@@ -8,33 +17,39 @@ export function Tooltip({
   align,
   children,
   className,
+  open,
+  onOpenChange,
   delayDuration,
 }: {
   label: string;
-  side?: "top" | "right" | "bottom" | "left";
+  side?: Side;
   align?: "start" | "center" | "end";
   children: React.ReactNode;
   className?: string;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   delayDuration?: number;
 }) {
   return (
-    <Root delayDuration={delayDuration}>
+    <Root open={open} onOpenChange={onOpenChange} delayDuration={delayDuration}>
       <Trigger asChild>{children}</Trigger>
       <Portal>
         <Content
           side={side}
           align={align}
-          sideOffset={6}
+          sideOffset={7}
           collisionPadding={8}
           className={cn(
-            "z-50 pointer-events-none select-none rounded-md px-2.5 py-1.5",
-            "bg-zinc-900 text-zinc-100 text-[12px] leading-tight",
-            "shadow-md shadow-black/40",
+            "relative z-50 pointer-events-none select-none rounded-md px-2.5 py-1.5",
+            "border border-border2 bg-black text-text text-[12px] leading-tight",
+            "shadow-lg shadow-black/60",
             className,
           )}
         >
           {label}
-          <Arrow className="fill-zinc-900" width={10} height={5} />
+          <span
+            className={cn("absolute h-2.5 w-2.5 rotate-45 bg-black border-border2", ARROW_BY_SIDE[side ?? "top"])}
+          />
         </Content>
       </Portal>
     </Root>

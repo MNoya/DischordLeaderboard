@@ -16,10 +16,9 @@ import discord
 from discord.ext import commands
 from sqlalchemy import select
 
-from bot import audit
+from bot import audit, emojis
 from bot.commands import token_messages as tmsg
 from bot.commands.leaderboard import broadcast_current_set_update
-from bot.commands.link_17lands import updated_message
 from bot.commands.messages import MSG_JOINED_LEADERBOARD
 from bot.commands.signup import (
     MSG_WELCOME_BACK,
@@ -38,6 +37,13 @@ from bot.services.token_link import link_token
 log = logging.getLogger(__name__)
 
 MSG_ALREADY_LINKED = "That token is already linked to your account — use `/leaderboard` to see your stats."
+MSG_UPDATED = "Updated. Your latest stats are on the [leaderboard](https://dischord.pages.dev/leaderboard)"
+MSG_UPDATED_HIDDEN = "Updated. Your rank stays hidden. Run `/join` to appear on the [leaderboard](https://dischord.pages.dev/leaderboard)"
+
+
+def updated_message(opted_in: bool) -> str:
+    icon = emojis.get("17lands") or "✅"
+    return f"{icon} {MSG_UPDATED if opted_in else MSG_UPDATED_HIDDEN}"
 
 
 class AutoLinkListener(commands.Cog):
