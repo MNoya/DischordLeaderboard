@@ -126,13 +126,6 @@ function SlotAccordionSection({
   yourPick?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const top = rows[0];
-  const tiedAtTop = top ? rows.filter((r) => r.pickCount === top.pickCount).length : 0;
-  const teaser = top
-    ? tiedAtTop > 1
-      ? `${tiedAtTop}-way tie at top · ${top.pickCount} each`
-      : `Top: ${top.cardName} · ${top.pickCount} picked`
-    : "No picks yet";
 
   return (
     <div>
@@ -142,13 +135,11 @@ function SlotAccordionSection({
         className="w-full flex items-center gap-2 px-2.5 py-2.5 text-left cursor-pointer"
       >
         <SlotPip slotKey={slot.key} size={16} />
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 flex items-center justify-between">
           <span className="font-display text-[11px] tracking-[0.06em] text-subtle">{slot.label.toUpperCase()}</span>
-          {!expanded && (
-            <div className="text-dim text-[10px] truncate mt-0.5">{teaser} · {rows.length} cards</div>
-          )}
+          <span className="text-subtle text-[10px] truncate">{rows.length} cards</span>
         </div>
-        <span className="text-dim text-[10px] shrink-0">{expanded ? "▲" : "▼"}</span>
+        <span className="text-dim text-[8px] shrink-0">{expanded ? "▲" : "▼"}</span>
       </button>
       {expanded && (
         <>
