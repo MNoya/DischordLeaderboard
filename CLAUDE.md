@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A Discord bot + public website for an MTGA community leaderboard called **LLU**. Players link their 17lands profile through Discord; the bot pulls draft data, computes a custom score, and ranks them within the current Magic set. Multi-server-capable (single shared leaderboard across all guilds the bot is invited to). Fully automated — no manual score submission.
 
 - **Bot** (`bot/`): Python, `discord.py`, SQLAlchemy 2.0 + Alembic, deployed on Railway from `master`
-- **Frontend** (`frontend/`): React 18 + Vite + TanStack Query + Tailwind, deployed on Cloudflare Pages from the domain root (`https://dischord.pages.dev/` today, `limitedlevelups.com` at launch)
+- **Frontend** (`frontend/`): React 18 + Vite + TanStack Query + Tailwind, deployed on Cloudflare Pages at `https://limitedlevelups.com/` (production fed by `master`; `dischord.pages.dev` redirects here, branch previews at `<branch>.dischord.pages.dev`)
 - **Database**: Postgres — local Docker for dev, Supabase (project `yrecdosksgigpceholjl`) for prod
 
 Spec documents live under `spec/` (original project spec, frontend contract, pod-draft design).

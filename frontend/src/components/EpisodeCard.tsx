@@ -14,7 +14,7 @@ export function EpisodeCard({
   const meta = [episode.publishedLabel.toUpperCase(), episode.number ? `EP ${episode.number}` : null]
     .filter(Boolean)
     .join(" · ");
-  const titleHref = audioMode || episode.kind === "episode" ? episode.link : episode.videoUrl ?? episode.link;
+  const titleHref = !audioMode && episode.videoUrl ? episode.videoUrl : episode.link;
 
   return (
     <div className="group flex flex-col">

@@ -22,18 +22,18 @@ import { categoryFromSlug } from "../frontend/src/data/episodes";
 
 const EPISODE_CATEGORY_DESCRIPTIONS: Record<string, string> = {
   "Set Review": "Card-by-card set reviews and first impressions for MTG limited.",
-  Draft: "Draft playthroughs, archetype guides, and deckbuilding for MTG limited.",
+  Draft: "Draft playthroughs, archetype guides and deckbuilding for MTG limited.",
   Sealed: "Sealed and prerelease deckbuilding and gameplay.",
-  Rankings: "Tier lists, top-10s, and best-of-year rankings.",
-  Metagame: "Format state, metagame updates, and tournament reports.",
+  Rankings: "Tier lists, top-10s and best-of-year rankings.",
+  Metagame: "Format state, metagame updates and tournament reports.",
   Coaching: "Coaching sessions and gameplay reviews.",
   Guest: "Interviews and conversations with limited players.",
-  Evergreen: "Timeless limited skills, fundamentals, and strategy.",
+  Evergreen: "Timeless limited skills, fundamentals and strategy.",
 };
 
 const LEADERBOARD_DESCRIPTION =
   "Check ranks and trophies from the community. /join on Discord to share your drafts and climb the leaderboard";
-const HOME_DESCRIPTION = "Weekly episodes, set reviews, strategy, and community events. Join the Discord and climb the leaderboard.";
+const HOME_DESCRIPTION = "Weekly episodes, set reviews, strategy and community events. Join the Discord and climb the leaderboard.";
 
 type ImageIntent = { kind: "url"; url: string } | { kind: "setSymbol"; code: string } | null;
 
@@ -225,14 +225,14 @@ const resolveMeta = async (pathname: string): Promise<RouteMeta> => {
     if (setName) {
       return page(
         `${setCode} Episodes`,
-        `Episodes, set reviews, and draft guides for ${setName}.`,
+        `Episodes, set reviews and draft guides for ${setName}.`,
         { kind: "setSymbol", code: setCode },
       );
     }
     return page("Episodes", "Check out the latest episodes, or search the archive.");
   }
   if (section === "community") {
-    return page("Community", "Check out the Discord and start drafting.");
+    return page("Community", "Learn about us, the show and the community behind it.");
   }
   if (section === "about") {
     return page("About", "Learn how the community leaderboard works.");
@@ -243,6 +243,10 @@ const resolveMeta = async (pathname: string): Promise<RouteMeta> => {
 
 export const onRequest: PagesFunction = async (context) => {
   const url = new URL(context.request.url);
+  // exact host only, so <branch>.dischord.pages.dev previews still serve real content
+  if (url.hostname === "dischord.pages.dev") {
+    return Response.redirect(`https://limitedlevelups.com${url.pathname}${url.search}`, 302);
+  }
   if (context.request.method !== "GET") return context.next();
 
   const lastSegment = url.pathname.split("/").pop() ?? "";

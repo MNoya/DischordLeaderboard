@@ -39,8 +39,9 @@ import { ACTIVE_SET_CODE } from "../data/constants";
 import { FMT_COLORS, shortFormat } from "../data/format-display";
 import { FORMAT_OPTIONS } from "../data/filters";
 import { discordEventLink, HOST, SITE_LINKS } from "../data/site";
-import { cleanPodEventName, leaderboardPath, playerPath, relativeAge } from "../data/utils";
+import { cleanPodEventName, leaderboardPath, playerPath, relativeAge, relativeAgeShort } from "../data/utils";
 import type { Episode } from "../data/episodes";
+import { formatDurationShort } from "../data/episodes";
 import type { LeaderboardRow, PodEventSummary, SetSummary } from "../types/leaderboard";
 import { cn } from "../lib/utils";
 
@@ -141,12 +142,12 @@ function Panel({
         <Link
           to={to}
           className={cn(
-            "relative z-0 -mx-4 -mb-4 shrink-0 flex w-[calc(100%+2rem)] items-center justify-end gap-1.5 rounded-b-xl px-4 py-2.5 font-display tracking-[0.08em] text-[13px] text-green no-underline transition-colors hover:bg-green/5 hover:text-green-2",
+            "relative z-0 -mx-4 -mb-4 shrink-0 flex w-[calc(100%+2rem)] items-center justify-end gap-1.5 rounded-b-xl px-4 py-2.5 font-display tracking-[0.08em] text-[15px] text-green no-underline transition-colors hover:bg-green/5 hover:text-green-2",
             linkBody && "peer-hover/cta:bg-green/5 peer-hover/cta:text-green-2",
             actionBorder && "border-t border-border",
           )}
         >
-          {action} <ArrowRight size={13} />
+          {action} <ArrowRight size={15} />
         </Link>
       ) : null}
     </section>
@@ -491,7 +492,19 @@ function EpisodesHero({
   thumbnailsPending: boolean;
 }) {
   return (
-    <Panel title="LATEST CONTENT" to="/episodes" corner="podcast & youtube" action="View All Episodes" className="order-2 lg:order-none lg:h-full">
+    <Panel
+      title="LATEST CONTENT"
+      to="/episodes"
+      corner={
+        <Link
+          to="/episodes"
+          className="shrink-0 flex items-center gap-1.5 font-display tracking-[0.08em] text-[15px] text-green no-underline transition-colors hover:text-green-2"
+        >
+          View All Episodes <ArrowRight size={15} />
+        </Link>
+      }
+      className="order-2 lg:order-none lg:h-full"
+    >
       {loading ? (
         <>
           <div className="lg:hidden flex flex-col gap-4">
@@ -538,6 +551,8 @@ function EpisodesHero({
     </Panel>
   );
 }
+
+const episodeShortTitle = (title: string) => title.split("|")[0].trim();
 
 function HeroEpisodeCard({
   episode,
@@ -602,12 +617,22 @@ function HeroEpisodeCard({
           </a>
         )}
       </div>
-      <div className="p-3 shrink-0 flex items-start justify-between gap-2">
-        <h3 className="flex-1 min-w-0 font-body text-text text-[16px] font-medium leading-snug truncate transition-colors group-hover/ep:text-green">
-          {episode.title}
-        </h3>
-        <EpisodeTag episode={episode} className="mt-0.5" />
-      </div>
+      {compact ? (
+        <div className="shrink-0 flex items-center justify-between gap-1.5 pl-2">
+          <span className="flex-1 min-w-0 text-[10px] font-medium text-white truncate">
+            {relativeAgeShort(episode.pubDate)}
+            {episode.durationSeconds ? ` · ${formatDurationShort(episode.durationSeconds)}` : ""}
+          </span>
+          <EpisodeTag episode={episode} glyphSize={14} className="gap-1" />
+        </div>
+      ) : (
+        <div className="p-3 shrink-0 flex items-start justify-between gap-2">
+          <h3 className="flex-1 min-w-0 font-body text-text text-[16px] font-medium leading-snug line-clamp-2 transition-colors group-hover/ep:text-green">
+            {episodeShortTitle(episode.title)}
+          </h3>
+          <EpisodeTag episode={episode} className="mt-0.5" />
+        </div>
+      )}
     </div>
   );
 }

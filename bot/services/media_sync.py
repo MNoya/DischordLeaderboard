@@ -312,6 +312,7 @@ def _category_from_playlists(playlists: list[str]) -> str | None:
 _TITLE_OVERRIDES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("Set Review", re.compile(r"first impressions?", re.I)),
     ("Metagame", re.compile(r"draft primer|draft guide|limited guide|win ?rate|tips for success", re.I)),
+    ("Sealed", re.compile(r"pre-?release", re.I)),
 )
 
 _TITLE_CATEGORY_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (

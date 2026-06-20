@@ -24,6 +24,7 @@ from bot.commands.leaderboard import (
 from bot.services.player_stats import StatsData, process_stats, render_embed as render_stats_embed
 from bot.models import DraftEvent, MagicSet, Player, PlayerStats, PodDraftEvent, PodDraftParticipant
 from bot.sets import active_set_code
+from bot.config import settings
 
 
 def _seed_set(session, code="SOS"):
@@ -346,8 +347,9 @@ def test_embed_link_strips_path_and_points_at_set_for_historical():
     entry = LeaderboardEntry(rank=1, player_id="p", slug="alice-1", display_name="Alice", score=42.0, trophies=3)
     data = LeaderboardData(set_code="STX", set_name="STX", top=[entry], viewer=None)
     embed = render_public_embed(data)
-    assert "[dischord.pages.dev]" in embed.description
-    assert "[dischord.pages.dev/leaderboard]" not in embed.description
+    host = settings.public_site_url.split("://", 1)[-1].rstrip("/")
+    assert f"[{host}]" in embed.description
+    assert f"[{host}/leaderboard]" not in embed.description
     assert embed.url.endswith("/STX")
 
 

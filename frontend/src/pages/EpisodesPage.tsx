@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { SiApplepodcasts, SiRss, SiSpotify, SiYoutube } from "react-icons/si";
 import type { IconType } from "react-icons";
@@ -18,7 +18,9 @@ import {
   Mic,
   Package,
   Search,
+  SearchX,
   SlidersHorizontal,
+  X,
   Zap,
   type LucideIcon,
 } from "lucide-react";
@@ -49,8 +51,8 @@ const renderSetValue = (option: FilterOption) => (
     <span className="hidden shrink-0 text-[11px] tracking-[0.22em] text-muted sm:inline">SET</span>
     <span className="hidden h-3.5 w-px shrink-0 bg-border2 sm:block" />
     {option.value ? (
-      <span className="flex min-w-0 items-center gap-1.5 truncate text-text">
-        <SetGlyph code={option.value} size={18} />
+      <span className="flex min-w-0 items-center gap-1.5 truncate text-green">
+        <SetGlyph code={option.value} size={18} className="text-green" />
         {option.value}
       </span>
     ) : (
@@ -86,7 +88,7 @@ const setNameOf = (ep: Episode) => ep.setName ?? ep.setCode ?? "";
 const setLandingPath = (code: string) => `/episodes/${code.toLowerCase()}`;
 
 export function EpisodesPage() {
-  const { data: episodes, isLoading, isError, thumbnailsPending, setsReady } = useMediaFeed();
+  const { data: episodes, isPending, isError, thumbnailsPending, setsReady } = useMediaFeed();
   const { categorySlug: slug } = useParams<{ categorySlug?: string }>();
   const navigate = useNavigate();
   const [params] = useSearchParams();
@@ -97,6 +99,26 @@ export function EpisodesPage() {
   const [railCollapsed, setRailCollapsed] = useState(false);
   const isMobile = useIsMobile();
   const sentinelRef = useRef<HTMLDivElement>(null);
+  const contentTopRef = useRef<HTMLDivElement>(null);
+  const searchWrapRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const [searchIndent, setSearchIndent] = useState(0);
+
+  useLayoutEffect(() => {
+    const measure = () => {
+      const search = searchWrapRef.current;
+      const list = listRef.current;
+      if (!search || !list || window.innerWidth < 1024) {
+        setSearchIndent(0);
+        return;
+      }
+      const contentLeft = list.getBoundingClientRect().left + parseFloat(getComputedStyle(list).paddingLeft);
+      setSearchIndent(Math.max(0, Math.round(search.getBoundingClientRect().left - contentLeft)));
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [railCollapsed]);
 
   const all = episodes ?? [];
   const setCodesBySlug = useMemo(() => {
@@ -156,6 +178,11 @@ export function EpisodesPage() {
         ? `/episodes/${categorySlug(activeCategory)}`
         : null;
 
+  const contentTopOffset = () => {
+    const root = contentTopRef.current;
+    return root ? root.getBoundingClientRect().top + window.scrollY : 0;
+  };
+
   const navTo = (pathname: string, querySet: string | null) => {
     const next = new URLSearchParams(params);
     next.delete("set");
@@ -164,6 +191,10 @@ export function EpisodesPage() {
     }
     navigate({ pathname, search: next.toString() });
     setVisible(PAGE_SIZE);
+    const contentTop = contentTopOffset();
+    if (window.scrollY > contentTop) {
+      window.scrollTo({ top: contentTop });
+    }
   };
   const setCategory = (category: EpisodeCategory | null) => {
     if (category) {
@@ -335,22 +366,24 @@ export function EpisodesPage() {
   };
 
   return (
-    <PageShell subtitle="EPISODES">
-      <div className="flex min-h-full flex-1">
+    <PageShell subtitle="EPISODES" flushFooter>
+      <div ref={contentTopRef} className="flex min-h-full flex-1">
         <aside
           className={cn(
-            "hidden lg:block shrink-0 self-start sticky top-0 h-screen overflow-x-hidden overflow-y-auto",
+            "hidden lg:block shrink-0 self-stretch",
             "border-r border-border bg-surface",
             "transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
             railCollapsed ? "w-[57px]" : "w-[clamp(196px,18vw,244px)]",
           )}
         >
-          <CategoryRail
-            {...railProps}
-            collapsed={railCollapsed}
-            onCollapse={() => setRailCollapsed(true)}
-            onExpand={() => setRailCollapsed(false)}
-          />
+          <div className="sticky top-0 max-h-screen overflow-y-auto overflow-x-hidden">
+            <CategoryRail
+              {...railProps}
+              collapsed={railCollapsed}
+              onCollapse={() => setRailCollapsed(true)}
+              onExpand={() => setRailCollapsed(false)}
+            />
+          </div>
         </aside>
 
         <div className="min-w-0 flex-1">
@@ -382,7 +415,7 @@ export function EpisodesPage() {
                 <span className="shrink-0">{setFilterDropdown}</span>
               </Tooltip>
             )}
-            <div className="relative min-w-0 flex-1">
+            <div ref={searchWrapRef} className="relative min-w-0 flex-1">
               <Search
                 size={15}
                 strokeWidth={2}
@@ -426,8 +459,8 @@ export function EpisodesPage() {
             </div>
           </div>
 
-          <div className="px-4 md:px-6 pt-6 pb-4">
-            {isLoading || awaitingSetSlug ? (
+          <div ref={listRef} className="px-4 md:px-6 pt-6 pb-4">
+            {awaitingSetSlug || (isPending && filtered.length === 0) ? (
               <Grid>
                 {Array.from({ length: 6 }).map((_, i) => (
                   <div key={i} className="aspect-video bg-surface border border-border animate-pulse" />
@@ -464,9 +497,17 @@ export function EpisodesPage() {
                 ) : null}
               </>
             ) : (
-              <p className="text-muted text-[14px] py-8">
-                No {shortsView ? "shorts" : audioView ? "audio episodes" : "episodes"} match that search.
-              </p>
+              <EmptyResults
+                query={needle ? query.trim() : ""}
+                noun={shortsView ? "shorts" : audioView ? "audio episodes" : "episodes"}
+                category={activeCategory}
+                set={activeSet}
+                indent={searchIndent}
+                onClear={() => {
+                  setQuery("");
+                  setVisible(PAGE_SIZE);
+                }}
+              />
             )}
           </div>
         </div>
@@ -476,7 +517,7 @@ export function EpisodesPage() {
         <CategoryRail {...railProps} />
       </SwipeableDrawer>
 
-      <GoToTopButton onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} />
+      <GoToTopButton onClick={() => window.scrollTo({ top: contentTopOffset(), behavior: "smooth" })} />
     </PageShell>
   );
 }
@@ -681,6 +722,67 @@ function RailRow({
     );
   }
   return button;
+}
+
+function EmptyResults({
+  query,
+  noun,
+  category,
+  set,
+  indent,
+  onClear,
+}: {
+  query: string;
+  noun: string;
+  category: string | null;
+  set: string | null;
+  indent: number;
+  onClear: () => void;
+}) {
+  const searching = query.length > 0;
+  const forSet = set ? ` for ${set}` : "";
+  const nounPhrase = category ? `${category} ${noun}` : noun;
+  return (
+    <div
+      className="flex animate-fadeIn flex-col items-center py-12 text-center md:py-16 lg:flex-row lg:items-center lg:gap-6 lg:text-left"
+      style={{ marginLeft: indent }}
+    >
+      <div
+        className="relative mb-6 flex h-20 w-20 shrink-0 items-center justify-center border border-border2 bg-surface lg:mb-0"
+        style={{ clipPath: CUT_CORNER_CHAMFER }}
+      >
+        <SearchX size={32} strokeWidth={1.5} className="text-dim" />
+        <span className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(46,232,92,0.10),transparent_70%)]" />
+      </div>
+      <div className="flex flex-col">
+        <h3 className="font-display text-[22px] leading-none tracking-[0.06em] text-text md:text-[26px]">
+          {searching ? "No matches found" : `No ${nounPhrase} yet`}
+        </h3>
+        <p className="mono mt-3 text-[12px] leading-relaxed text-muted">
+          {searching ? (
+            <>
+              Nothing matches <span className="text-green">“{query}”</span>
+              {forSet}.
+              <br />
+              Try a different title or set.
+            </>
+          ) : (
+            <>No {nounPhrase}{forSet} have been posted yet.</>
+          )}
+        </p>
+      </div>
+      {searching ? (
+        <button
+          type="button"
+          onClick={onClear}
+          className="mt-7 inline-flex h-10 items-center gap-2 border border-border2 px-4 font-display text-[13px] tracking-[0.12em] text-text transition-colors hover:border-green hover:text-green lg:mt-0 lg:ml-2"
+        >
+          <X size={14} strokeWidth={2} className="shrink-0" />
+          CLEAR SEARCH
+        </button>
+      ) : null}
+    </div>
+  );
 }
 
 function Grid({ children }: { children: ReactNode }) {

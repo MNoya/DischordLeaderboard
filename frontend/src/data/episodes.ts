@@ -181,6 +181,18 @@ export function formatDuration(seconds: number): string {
   return hours ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
+export function formatDurationShort(seconds: number): string {
+  if (!seconds) {
+    return "";
+  }
+  const totalMinutes = Math.round(seconds / 60);
+  if (totalMinutes < 60) {
+    return `${totalMinutes}m`;
+  }
+  const halfHours = Math.round(totalMinutes / 30) / 2;
+  return `${halfHours}h`;
+}
+
 export function formatPublished(pubDate: string): string {
   const date = new Date(pubDate);
   if (Number.isNaN(date.getTime())) {

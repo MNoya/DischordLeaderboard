@@ -3,7 +3,7 @@ import { useState } from "react";
 import type { Episode } from "../data/episodes";
 import { EpisodeThumbnail } from "./EpisodeThumbnail";
 import { PodcastAudioPlayer } from "./PodcastAudioPlayer";
-import { Music, Play } from "./Icons";
+import { Headphones, Music, Play } from "./Icons";
 import { PlayBadge } from "./PlayBadge";
 import { cn } from "../lib/utils";
 
@@ -110,6 +110,7 @@ function ThumbnailInner({
   audio: boolean;
   portrait: boolean;
 }) {
+  const audioOnly = !episode.youtubeId && Boolean(episode.audioUrl);
   return (
     <>
       <EpisodeThumbnail
@@ -118,9 +119,10 @@ function ThumbnailInner({
         portrait={portrait}
         className="transition-transform duration-300 group-hover:scale-[1.07]"
       />
-      {episode.durationLabel ? (
-        <span className="absolute bottom-2 right-2 mono text-[11px] text-text bg-bg/85 px-1.5 py-0.5">
-          {episode.durationLabel}
+      {audioOnly || episode.durationLabel ? (
+        <span className="absolute bottom-2 right-2 flex items-center gap-1.5 mono text-[11px] text-text bg-bg/85 px-1.5 py-0.5">
+          {audioOnly ? <Headphones size={12} /> : null}
+          {episode.durationLabel ? episode.durationLabel : null}
         </span>
       ) : null}
       <span className="absolute inset-0 flex items-center justify-center bg-bg/30 opacity-0 transition-opacity group-hover:opacity-100">

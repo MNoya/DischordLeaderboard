@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 export const CROSSFADE_MS = 220;
 
@@ -7,17 +7,20 @@ type Layer = { key: string; content: ReactNode };
 export function Crossfade({ transitionKey, children }: { transitionKey: string; children: ReactNode }) {
   const [current, setCurrent] = useState<Layer>({ key: transitionKey, content: children });
   const [outgoing, setOutgoing] = useState<Layer | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
     if (transitionKey === current.key) {
       setCurrent({ key: transitionKey, content: children });
       return;
     }
+    clearTimeout(timer.current);
     setOutgoing(current);
     setCurrent({ key: transitionKey, content: children });
-    const timer = setTimeout(() => setOutgoing(null), CROSSFADE_MS);
-    return () => clearTimeout(timer);
+    timer.current = setTimeout(() => setOutgoing(null), CROSSFADE_MS);
   }, [transitionKey, children, current.key]);
+
+  useEffect(() => () => clearTimeout(timer.current), []);
 
   return (
     <div className="relative">

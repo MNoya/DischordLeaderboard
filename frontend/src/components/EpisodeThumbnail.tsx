@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LLU_LOGO_SRC } from "./Brand";
 import { cn } from "../lib/utils";
 
@@ -16,9 +16,12 @@ export function EpisodeThumbnail({
   const [loaded, setLoaded] = useState(false);
   const [revealed, setRevealed] = useState(false);
   const [failed, setFailed] = useState(false);
+  const imgRef = useRef<HTMLImageElement>(null);
 
   useEffect(() => {
-    setLoaded(false);
+    const img = imgRef.current;
+    const alreadyComplete = img?.complete && img.naturalWidth > 0;
+    setLoaded(!!alreadyComplete);
     setRevealed(false);
     setFailed(false);
   }, [src]);
@@ -52,6 +55,7 @@ export function EpisodeThumbnail({
       ) : null}
       {ready ? (
         <img
+          ref={imgRef}
           src={src}
           alt=""
           loading="lazy"

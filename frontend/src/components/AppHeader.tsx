@@ -21,6 +21,8 @@ const NAV: Array<{ label: string; badge?: (props: { active: boolean }) => JSX.El
   { label: "COMMUNITY", to: "/community", match: (p) => p.startsWith("/community") },
 ];
 
+const HOME_ITEM: (typeof NAV)[number] = { label: "HOME", to: "/", match: (p) => p === "/" };
+
 const NAV_ITEM_CLASS = "h-12 px-5 inline-flex items-center no-underline border transition-colors whitespace-nowrap";
 
 export function AppHeader({ subtitle = "LEADERBOARD", fill = false }: { subtitle?: string; fill?: boolean }) {
@@ -191,7 +193,7 @@ export function AppHeader({ subtitle = "LEADERBOARD", fill = false }: { subtitle
 
       {hasMenu && menuOpen && (
         <MobileMenu
-          items={isMobile ? NAV : NAV.slice(visibleCount)}
+          items={isMobile ? [HOME_ITEM, ...NAV] : NAV.slice(visibleCount)}
           includeAuth={isMobile}
           pathname={loc.pathname}
           onClose={() => setMenuOpen(false)}

@@ -13,10 +13,12 @@ import { cn } from "../lib/utils";
 export function PageShell({
   subtitle,
   fill = false,
+  flushFooter = false,
   children,
 }: {
   subtitle?: string;
   fill?: boolean;
+  flushFooter?: boolean;
   children: ReactNode;
 }) {
   useEffect(() => {
@@ -47,7 +49,7 @@ export function PageShell({
     >
       <AppHeader subtitle={subtitle} fill={fill} />
       <main className={cn("flex-1", fill ? "lg:min-h-0 lg:overflow-hidden" : "flex flex-col")}>{children}</main>
-      <SiteFooter flush={fill} />
+      <SiteFooter flush={fill || flushFooter} />
     </div>
   );
 }
