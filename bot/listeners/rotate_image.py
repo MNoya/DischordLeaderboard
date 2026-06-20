@@ -4,7 +4,9 @@ Fixes prerelease-deck screenshots posted sideways. Fires when any member reacts 
 The image is normalized to its displayed orientation, then rotated 90° counterclockwise.
 The original message stays put. The rotated copy is posted as a reply, seeded with ⤴️
 (rotate another 90°), 🔄 (flip 180°), and ❌ (delete it). One manual correction is allowed,
-after which the rotate reactions are stripped and only ❌ remains.
+after which the rotate reactions are stripped and only ❌ remains. After a short window the
+reply auto-cleans: the bot's control reactions and the hint line are removed, leaving just
+the message and image to keep the channel tidy.
 """
 from __future__ import annotations
 
@@ -37,6 +39,7 @@ ROTATED_LINES = (
 )
 HINT_CORRECT_OR_DISMISS = "-# react ⤴️ to rotate it 90°, 🔄 to flip it 180°, or ❌ to dismiss this message"
 HINT_DISMISS = "-# react ❌ to dismiss this message"
+CLEANUP_DELAY_S = 60
 
 
 class RotateImageListener(commands.Cog):
@@ -108,6 +111,7 @@ class RotateImageListener(commands.Cog):
                 await reply.add_reaction(emoji)
             except discord.HTTPException:
                 log.info(f"could not seed {emoji} on rotated reply {reply.id}", exc_info=True)
+        asyncio.create_task(self._cleanup_after_delay(reply.channel.id, reply.id))
 
     def _pick_line(self) -> str:
         choices = [line for line in ROTATED_LINES if line != self.last_line] or list(ROTATED_LINES)
@@ -168,6 +172,25 @@ class RotateImageListener(commands.Cog):
         self.edited_once.discard(message_id)
         if original_id is not None:
             self.handled.discard(original_id)
+
+    async def _cleanup_after_delay(self, channel_id: int, message_id: int) -> None:
+        await asyncio.sleep(CLEANUP_DELAY_S)
+        if message_id not in self.reply_to_original:
+            return
+        message = await self._fetch_message(channel_id, message_id)
+        if message is None:
+            return
+        first_line = message.content.split("\n", 1)[0]
+        try:
+            await message.edit(content=first_line)
+        except discord.HTTPException:
+            log.info(f"could not strip hint from rotated reply {message_id}", exc_info=True)
+        if self.bot.user is not None:
+            for emoji in (ROTATE_EMOJI, FLIP_EMOJI, DISMISS_EMOJI):
+                try:
+                    await message.remove_reaction(emoji, self.bot.user)
+                except discord.HTTPException:
+                    pass
 
     async def _rotate_attachment(self, attachment: discord.Attachment, degrees: int | None = None) -> bytes | None:
         raw = await attachment.read()
