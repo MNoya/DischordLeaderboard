@@ -157,6 +157,11 @@ export function EpisodesPage() {
         ? `/episodes/${categorySlug(activeCategory)}`
         : null;
 
+  const contentTopOffset = () => {
+    const root = contentTopRef.current;
+    return root ? root.getBoundingClientRect().top + window.scrollY : 0;
+  };
+
   const navTo = (pathname: string, querySet: string | null) => {
     const next = new URLSearchParams(params);
     next.delete("set");
@@ -165,8 +170,7 @@ export function EpisodesPage() {
     }
     navigate({ pathname, search: next.toString() });
     setVisible(PAGE_SIZE);
-    const root = contentTopRef.current;
-    const contentTop = root ? root.getBoundingClientRect().top + window.scrollY : 0;
+    const contentTop = contentTopOffset();
     if (window.scrollY > contentTop) {
       window.scrollTo({ top: contentTop });
     }
@@ -341,7 +345,7 @@ export function EpisodesPage() {
   };
 
   return (
-    <PageShell subtitle="EPISODES">
+    <PageShell subtitle="EPISODES" flushFooter>
       <div ref={contentTopRef} className="flex min-h-full flex-1">
         <aside
           className={cn(
@@ -484,7 +488,7 @@ export function EpisodesPage() {
         <CategoryRail {...railProps} />
       </SwipeableDrawer>
 
-      <GoToTopButton onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} />
+      <GoToTopButton onClick={() => window.scrollTo({ top: contentTopOffset(), behavior: "smooth" })} />
     </PageShell>
   );
 }
