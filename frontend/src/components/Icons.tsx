@@ -8,6 +8,7 @@ import {
   Clock as LR_Clock,
   ExternalLink as LR_ExternalLink,
   Globe as LR_Globe,
+  Headphones as LR_Headphones,
   Image as LR_Image,
   Info as LR_Info,
   Music as LR_Music,
@@ -50,6 +51,7 @@ export const ChevronRight = withShrink(LR_ChevronRight);
 export const Clock = withShrink(LR_Clock);
 export const ExternalLink = withShrink(LR_ExternalLink);
 export const Globe = withShrink(LR_Globe);
+export const Headphones = withShrink(LR_Headphones);
 export const ImageIcon = withShrink(LR_Image);
 export const Info = withShrink(LR_Info);
 export const Music = withShrink(LR_Music);
