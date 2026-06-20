@@ -97,6 +97,7 @@ export function EpisodesPage() {
   const [railCollapsed, setRailCollapsed] = useState(false);
   const isMobile = useIsMobile();
   const sentinelRef = useRef<HTMLDivElement>(null);
+  const contentTopRef = useRef<HTMLDivElement>(null);
 
   const all = episodes ?? [];
   const setCodesBySlug = useMemo(() => {
@@ -164,7 +165,11 @@ export function EpisodesPage() {
     }
     navigate({ pathname, search: next.toString() });
     setVisible(PAGE_SIZE);
-    window.scrollTo({ top: 0 });
+    const root = contentTopRef.current;
+    const contentTop = root ? root.getBoundingClientRect().top + window.scrollY : 0;
+    if (window.scrollY > contentTop) {
+      window.scrollTo({ top: contentTop });
+    }
   };
   const setCategory = (category: EpisodeCategory | null) => {
     if (category) {
@@ -337,7 +342,7 @@ export function EpisodesPage() {
 
   return (
     <PageShell subtitle="EPISODES">
-      <div className="flex min-h-full flex-1">
+      <div ref={contentTopRef} className="flex min-h-full flex-1">
         <aside
           className={cn(
             "hidden lg:block shrink-0 self-stretch",
