@@ -500,7 +500,8 @@ export function EpisodesPage() {
               <EmptyResults
                 query={needle ? query.trim() : ""}
                 noun={shortsView ? "shorts" : audioView ? "audio episodes" : "episodes"}
-                context={activeSet ?? activeCategory ?? null}
+                category={activeCategory}
+                set={activeSet}
                 indent={searchIndent}
                 onClear={() => {
                   setQuery("");
@@ -726,18 +727,21 @@ function RailRow({
 function EmptyResults({
   query,
   noun,
-  context,
+  category,
+  set,
   indent,
   onClear,
 }: {
   query: string;
   noun: string;
-  context: string | null;
+  category: string | null;
+  set: string | null;
   indent: number;
   onClear: () => void;
 }) {
   const searching = query.length > 0;
-  const where = context ? ` in ${context}` : "";
+  const forSet = set ? ` for ${set}` : "";
+  const nounPhrase = category ? `${category} ${noun}` : noun;
   return (
     <div
       className="flex animate-fadeIn flex-col items-center py-12 text-center md:py-16 lg:flex-row lg:items-center lg:gap-6 lg:text-left"
@@ -752,18 +756,18 @@ function EmptyResults({
       </div>
       <div className="flex flex-col">
         <h3 className="font-display text-[22px] leading-none tracking-[0.06em] text-text md:text-[26px]">
-          {searching ? "No matches found" : `No ${noun} yet`}
+          {searching ? "No matches found" : `No ${nounPhrase} yet`}
         </h3>
         <p className="mono mt-3 text-[12px] leading-relaxed text-muted">
           {searching ? (
             <>
               Nothing matches <span className="text-green">“{query}”</span>
-              {where}.
+              {forSet}.
               <br />
               Try a different title or set.
             </>
           ) : (
-            <>No {noun}{where} have been posted yet.</>
+            <>No {nounPhrase}{forSet} have been posted yet.</>
           )}
         </p>
       </div>
