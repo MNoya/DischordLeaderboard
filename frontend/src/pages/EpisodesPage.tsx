@@ -740,36 +740,38 @@ function EmptyResults({
   const where = context ? ` in ${context}` : "";
   return (
     <div
-      className="flex animate-fadeIn flex-col items-center py-12 text-center md:py-16 lg:items-start lg:text-left"
+      className="flex animate-fadeIn flex-col items-center py-12 text-center md:py-16 lg:flex-row lg:items-center lg:gap-6 lg:text-left"
       style={{ marginLeft: indent }}
     >
       <div
-        className="relative mb-6 flex h-20 w-20 items-center justify-center border border-border2 bg-surface"
+        className="relative mb-6 flex h-20 w-20 shrink-0 items-center justify-center border border-border2 bg-surface lg:mb-0"
         style={{ clipPath: CUT_CORNER_CHAMFER }}
       >
         <SearchX size={32} strokeWidth={1.5} className="text-dim" />
         <span className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(46,232,92,0.10),transparent_70%)]" />
       </div>
-      <h3 className="font-display text-[22px] leading-none tracking-[0.06em] text-text md:text-[26px]">
-        {searching ? "No matches found" : `No ${noun} yet`}
-      </h3>
-      <p className="mono mt-3 text-[12px] leading-relaxed text-muted">
-        {searching ? (
-          <>
-            Nothing matches <span className="text-green">“{query}”</span>
-            {where}.
-            <br />
-            Try a different title or set.
-          </>
-        ) : (
-          <>No {noun}{where} have been posted yet.</>
-        )}
-      </p>
+      <div className="flex flex-col">
+        <h3 className="font-display text-[22px] leading-none tracking-[0.06em] text-text md:text-[26px]">
+          {searching ? "No matches found" : `No ${noun} yet`}
+        </h3>
+        <p className="mono mt-3 text-[12px] leading-relaxed text-muted">
+          {searching ? (
+            <>
+              Nothing matches <span className="text-green">“{query}”</span>
+              {where}.
+              <br />
+              Try a different title or set.
+            </>
+          ) : (
+            <>No {noun}{where} have been posted yet.</>
+          )}
+        </p>
+      </div>
       {searching ? (
         <button
           type="button"
           onClick={onClear}
-          className="mt-7 inline-flex h-10 items-center gap-2 border border-border2 px-4 font-display text-[13px] tracking-[0.12em] text-text transition-colors hover:border-green hover:text-green"
+          className="mt-7 inline-flex h-10 items-center gap-2 border border-border2 px-4 font-display text-[13px] tracking-[0.12em] text-text transition-colors hover:border-green hover:text-green lg:mt-0 lg:ml-2"
         >
           <X size={14} strokeWidth={2} className="shrink-0" />
           CLEAR SEARCH
