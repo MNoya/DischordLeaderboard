@@ -115,6 +115,7 @@ export function EpisodesPage() {
   const activeCategory = slug ? categoryFromSlug(slug) : null;
   const pathSet = slugLower && !shortsView && !audioView && !activeCategory ? setCodesBySlug.get(slugLower) ?? null : null;
   const activeSet = pathSet ?? params.get("set");
+  const awaitingSetSlug = !!slugLower && !shortsView && !audioView && !activeCategory && !setsReady;
 
   useEffect(() => {
     const legacyCategory = params.get("category");
@@ -426,7 +427,7 @@ export function EpisodesPage() {
           </div>
 
           <div className="px-4 md:px-6 pt-6 pb-4">
-            {isLoading ? (
+            {isLoading || awaitingSetSlug ? (
               <Grid>
                 {Array.from({ length: 6 }).map((_, i) => (
                   <div key={i} className="aspect-video bg-surface border border-border animate-pulse" />
