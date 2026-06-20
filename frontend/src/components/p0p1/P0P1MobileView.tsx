@@ -472,7 +472,7 @@ function MobileIntro({
       </p>
       {isPastDeadline && entryCount !== null && entryCount > 0 && (
         <p className="text-subtle text-[13.5px]">
-          {entryCount} player{entryCount !== 1 ? "s" : ""} submitted picks.
+          {entryCount} player{entryCount !== 1 ? "s" : ""} submitted entries.
         </p>
       )}
     </section>

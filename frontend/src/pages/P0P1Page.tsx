@@ -67,7 +67,7 @@ export function P0P1Page() {
   const belowIntro = isPastDeadline ? (
     entryCount !== null && entryCount > 0 ? (
       <div className="text-subtle text-[14px]">
-        {entryCount} player{entryCount !== 1 ? "s" : ""} submitted picks.
+        {entryCount} player{entryCount !== 1 ? "s" : ""} submitted entries.
       </div>
     ) : null
   ) : (

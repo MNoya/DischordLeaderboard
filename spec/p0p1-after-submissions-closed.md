@@ -12,7 +12,7 @@ This spec covers **only the post-submission display**. Scoring mechanics, the re
 
 - The countdown switches from "Closes in X days" to "Results in X days" targeting the scoring date. Show hours when it's less than 2 days remaining.
 - Intro text updates to something like: "Picks are locked. Scoring begins when 17Lands data is finalized."
-- The progress bar (`belowIntro` slot) is replaced with a total voter count: "87 players submitted picks."
+- The progress bar (`belowIntro` slot) is replaced with a total voter count: "87 players submitted entries."
 - Logged-out users still see aggregate stats but no personal pick comparison.
 
 ### 2. User's locked roster (already implemented)
