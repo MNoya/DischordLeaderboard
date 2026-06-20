@@ -234,6 +234,7 @@ export function useRecentTrophies(setCode: string | undefined, limit = 8) {
     queryFn: () => fetchRecentTrophies(setCode!, limit),
     enabled: !!setCode,
     staleTime: FIVE_MINUTES,
+    placeholderData: keepPreviousData,
   });
 }
 

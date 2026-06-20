@@ -16,7 +16,7 @@ import { SetSwitcherDesktop } from "../components/SetSwitcher";
 import { FilterDropdown } from "../components/FilterDropdown";
 import { SetFilterDropdown, type SetFilterOption } from "../components/SetFilterDropdown";
 import { ColorsSwitcher } from "../components/ColorsSwitcher";
-import { LeaderboardSidebar } from "../components/LeaderboardSidebar";
+import { LeaderboardSidebar, LeaderboardInsightsStrip } from "../components/LeaderboardSidebar";
 import { boardModeFor, DEFAULT_SORT, DEFAULT_SORT_NOSCORE, defaultSortFor, LeaderboardColumnHeader, LeaderboardTable, sortRows } from "../components/LeaderboardTable";
 import type { SortDir, SortKey, SortState } from "../components/LeaderboardTable";
 import { SectionLabel } from "../components/SectionLabel";
@@ -651,6 +651,15 @@ function Mobile({
             variant="mobile"
           />
         </div>
+        <LeaderboardInsightsStrip
+          setCode={activeSet}
+          playerSetCode={profileSet}
+          colors={filters.colors}
+          format={filters.format}
+          otherCombos={otherCombos}
+          onColorsSelect={filters.setColors}
+          searchParams={searchParams}
+        />
         {/* Column header is part of the sticky chrome so it stays pinned with the
             rest of the page chrome as rows scroll under it. */}
         <LeaderboardColumnHeader variant="mobile" mode={boardModeFor(filters.format)} sort={sort} onSort={onSort} />
