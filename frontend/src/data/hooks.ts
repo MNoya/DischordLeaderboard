@@ -92,6 +92,7 @@ export function useMediaFeed() {
   return {
     data,
     isLoading: db.isLoading && episodes.isLoading,
+    isPending: db.isLoading || episodes.isLoading,
     isError: db.isError && episodes.isError,
     thumbnailsPending: videos.isLoading && !db.data,
     setsReady: db.data !== undefined,

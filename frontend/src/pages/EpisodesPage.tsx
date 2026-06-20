@@ -18,7 +18,9 @@ import {
   Mic,
   Package,
   Search,
+  SearchX,
   SlidersHorizontal,
+  X,
   Zap,
   type LucideIcon,
 } from "lucide-react";
@@ -86,7 +88,7 @@ const setNameOf = (ep: Episode) => ep.setName ?? ep.setCode ?? "";
 const setLandingPath = (code: string) => `/episodes/${code.toLowerCase()}`;
 
 export function EpisodesPage() {
-  const { data: episodes, isLoading, isError, thumbnailsPending, setsReady } = useMediaFeed();
+  const { data: episodes, isPending, isError, thumbnailsPending, setsReady } = useMediaFeed();
   const { categorySlug: slug } = useParams<{ categorySlug?: string }>();
   const navigate = useNavigate();
   const [params] = useSearchParams();
@@ -439,7 +441,7 @@ export function EpisodesPage() {
           </div>
 
           <div className="px-4 md:px-6 pt-6 pb-4">
-            {isLoading || awaitingSetSlug ? (
+            {awaitingSetSlug || (isPending && filtered.length === 0) ? (
               <Grid>
                 {Array.from({ length: 6 }).map((_, i) => (
                   <div key={i} className="aspect-video bg-surface border border-border animate-pulse" />
@@ -476,9 +478,15 @@ export function EpisodesPage() {
                 ) : null}
               </>
             ) : (
-              <p className="text-muted text-[14px] py-8">
-                No {shortsView ? "shorts" : audioView ? "audio episodes" : "episodes"} match that search.
-              </p>
+              <EmptyResults
+                query={needle ? query.trim() : ""}
+                noun={shortsView ? "shorts" : audioView ? "audio episodes" : "episodes"}
+                context={activeSet ?? activeCategory ?? null}
+                onClear={() => {
+                  setQuery("");
+                  setVisible(PAGE_SIZE);
+                }}
+              />
             )}
           </div>
         </div>
@@ -693,6 +701,55 @@ function RailRow({
     );
   }
   return button;
+}
+
+function EmptyResults({
+  query,
+  noun,
+  context,
+  onClear,
+}: {
+  query: string;
+  noun: string;
+  context: string | null;
+  onClear: () => void;
+}) {
+  const searching = query.length > 0;
+  const where = context ? ` in ${context}` : "";
+  return (
+    <div className="flex animate-fadeIn flex-col items-center justify-center px-4 py-20 text-center md:py-28">
+      <div
+        className="relative mb-6 flex h-20 w-20 items-center justify-center border border-border2 bg-surface"
+        style={{ clipPath: CUT_CORNER_CHAMFER }}
+      >
+        <SearchX size={32} strokeWidth={1.5} className="text-dim" />
+        <span className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(46,232,92,0.10),transparent_70%)]" />
+      </div>
+      <h3 className="font-display text-[22px] leading-none tracking-[0.06em] text-text md:text-[26px]">
+        {searching ? "No matches found" : `No ${noun} yet`}
+      </h3>
+      <p className="mono mt-3 max-w-sm text-[12px] leading-relaxed text-muted">
+        {searching ? (
+          <>
+            Nothing matches <span className="text-green">“{query}”</span>
+            {where}. Try a different title or set.
+          </>
+        ) : (
+          <>Nothing’s landed here{where} yet — check back after the next drop.</>
+        )}
+      </p>
+      {searching ? (
+        <button
+          type="button"
+          onClick={onClear}
+          className="mt-7 inline-flex h-10 items-center gap-2 border border-border2 px-4 font-display text-[13px] tracking-[0.12em] text-text transition-colors hover:border-green hover:text-green"
+        >
+          <X size={14} strokeWidth={2} className="shrink-0" />
+          CLEAR SEARCH
+        </button>
+      ) : null}
+    </div>
+  );
 }
 
 function Grid({ children }: { children: ReactNode }) {
