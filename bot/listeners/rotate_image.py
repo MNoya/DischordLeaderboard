@@ -1,0 +1,249 @@
+"""React ♻️ on an image post → reply with the same image rotated upright.
+
+Fixes prerelease-deck screenshots posted sideways. Fires when two members react ♻️, or
+one reactor holds Manage Messages. EXIF auto-orient handles phone photos whose rotation
+lives in metadata Discord ignores; anything without a rotating orientation tag falls back
+to a 90° counterclockwise nudge. The original message is left in place — the rotated copy
+is a reply, seeded with ⤴️ (rotate 90°), 🔄 (flip 180°), and ❌ (delete it). One manual
+correction is allowed; after it the rotate reactions are stripped and only ❌ stays.
+"""
+from __future__ import annotations
+
+import asyncio
+import io
+import logging
+import random
+
+import discord
+from discord.ext import commands
+from PIL import Image, ImageOps
+
+log = logging.getLogger(__name__)
+
+VARIATION_SELECTOR = "️"
+RECYCLE_EMOJI = "♻️"
+ROTATE_EMOJI = "⤴️"
+FLIP_EMOJI = "🔄"
+DISMISS_EMOJI = "❌"
+ROTATING_ORIENTATIONS = frozenset({3, 5, 6, 7, 8})
+ROTATED_LINES = (
+    "{mention} here is your image, I rotated it to save everyone the neck pain ♻️",
+    "{mention} your image was a bit twisted, so I rotated it ♻️",
+    "{mention} by order of the ♻️, your image has been rotated",
+    "{mention} your image was sideways, so I rotated it to comply with ♻️ standards",
+    "{mention} phones have had a rotate button since 2007, but here you go ♻️",
+    "{mention} the technology to rotate this exists on your end too, just saying ♻️",
+    "{mention} image rotation has been a solved problem for decades, but here we are ♻️",
+    "{mention} every device made this century can do this, but I got you ♻️",
+)
+HINT_CORRECT_OR_DISMISS = "-# react ⤴️ to rotate it 90°, 🔄 to flip it 180°, or ❌ to dismiss this message"
+HINT_DISMISS = "-# react ❌ to dismiss this message"
+
+
+class RotateImageListener(commands.Cog):
+    def __init__(self, bot: commands.Bot) -> None:
+        self.bot = bot
+        self.handled: set[int] = set()
+        self.reply_to_original: dict[int, int] = {}
+        self.edited_once: set[int] = set()
+
+    @commands.Cog.listener()
+    async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent) -> None:
+        if payload.guild_id is None:
+            return
+        if self.bot.user is not None and payload.user_id == self.bot.user.id:
+            return
+
+        if payload.message_id in self.reply_to_original:
+            if _is_dismiss(payload.emoji):
+                await self._dismiss(payload.channel_id, payload.message_id)
+            elif payload.message_id not in self.edited_once:
+                if _is_rotate(payload.emoji):
+                    await self._rotate_in_place(payload, 90)
+                elif _is_flip(payload.emoji):
+                    await self._rotate_in_place(payload, 180)
+            return
+
+        if not _is_recycle(payload.emoji) or payload.message_id in self.handled:
+            return
+        message = await self._fetch_message(payload.channel_id, payload.message_id)
+        if message is None or message.author.bot:
+            return
+        attachment = _first_image_attachment(message)
+        if attachment is None:
+            return
+        if not self._threshold_met(message, payload.member):
+            return
+        if payload.message_id in self.handled:
+            return
+
+        self.handled.add(payload.message_id)
+        await self._reply_rotated(message, attachment)
+
+    def _threshold_met(self, message: discord.Message, reactor: discord.Member | None) -> bool:
+        if reactor is not None and reactor.guild_permissions.manage_messages:
+            return True
+        for reaction in message.reactions:
+            if _is_recycle(reaction.emoji):
+                return reaction.count >= 2
+        return False
+
+    async def _fetch_message(self, channel_id: int, message_id: int) -> discord.Message | None:
+        channel = self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
+        try:
+            return await channel.fetch_message(message_id)
+        except discord.HTTPException:
+            log.info(f"could not fetch message {message_id} for ♻️ rotate", exc_info=True)
+            return None
+
+    async def _reply_rotated(self, message: discord.Message, attachment: discord.Attachment) -> None:
+        log.info(f"[ROTATE] rotating image msg={message.id} author={message.author.id}")
+        rotated = await self._rotate_attachment(attachment)
+        if rotated is None:
+            self.handled.discard(message.id)
+            return
+        line = random.choice(ROTATED_LINES).format(mention=message.author.mention)
+        try:
+            reply = await message.reply(
+                f"{line}\n{HINT_CORRECT_OR_DISMISS}",
+                file=discord.File(io.BytesIO(rotated), filename=attachment.filename),
+            )
+        except discord.HTTPException:
+            log.warning(f"could not reply with rotated image for msg={message.id}", exc_info=True)
+            self.handled.discard(message.id)
+            return
+        self.reply_to_original[reply.id] = message.id
+        for emoji in (ROTATE_EMOJI, FLIP_EMOJI, DISMISS_EMOJI):
+            try:
+                await reply.add_reaction(emoji)
+            except discord.HTTPException:
+                log.info(f"could not seed {emoji} on rotated reply {reply.id}", exc_info=True)
+
+    async def _rotate_in_place(self, payload: discord.RawReactionActionEvent, degrees: int) -> None:
+        if payload.message_id in self.edited_once:
+            return
+        self.edited_once.add(payload.message_id)
+
+        message = await self._fetch_message(payload.channel_id, payload.message_id)
+        attachment = _first_image_attachment(message) if message else None
+        if message is None or attachment is None:
+            self.edited_once.discard(payload.message_id)
+            return
+        rotated = await self._rotate_attachment(attachment, degrees)
+        if rotated is None:
+            self.edited_once.discard(payload.message_id)
+            return
+
+        first_line = message.content.split("\n", 1)[0]
+        content = f"{first_line}\n{HINT_DISMISS}"
+        try:
+            await message.edit(
+                content=content,
+                attachments=[discord.File(io.BytesIO(rotated), filename=attachment.filename)],
+            )
+        except discord.HTTPException:
+            log.warning(f"could not edit rotated reply {message.id} in place", exc_info=True)
+            self.edited_once.discard(payload.message_id)
+            return
+        await self._strip_rotate_reactions(message, payload)
+
+    async def _strip_rotate_reactions(self, message: discord.Message, payload: discord.RawReactionActionEvent) -> None:
+        if self.bot.user is not None:
+            for emoji in (ROTATE_EMOJI, FLIP_EMOJI):
+                try:
+                    await message.remove_reaction(emoji, self.bot.user)
+                except discord.HTTPException:
+                    pass
+        if payload.member is not None:
+            try:
+                await message.remove_reaction(payload.emoji, payload.member)
+            except discord.HTTPException:
+                pass
+
+    async def _dismiss(self, channel_id: int, message_id: int) -> None:
+        message = await self._fetch_message(channel_id, message_id)
+        if message is None:
+            return
+        try:
+            await message.delete()
+        except discord.HTTPException:
+            log.warning(f"could not dismiss rotated reply {message_id}", exc_info=True)
+            return
+        original_id = self.reply_to_original.pop(message_id, None)
+        self.edited_once.discard(message_id)
+        if original_id is not None:
+            self.handled.discard(original_id)
+
+    async def _rotate_attachment(self, attachment: discord.Attachment, degrees: int | None = None) -> bytes | None:
+        raw = await attachment.read()
+        if degrees is None:
+            return await asyncio.to_thread(_rotate_upright, raw)
+        return await asyncio.to_thread(_rotate_fixed, raw, degrees)
+
+
+def _is_recycle(emoji: "discord.PartialEmoji | discord.Emoji | str") -> bool:
+    return _emoji_matches(emoji, RECYCLE_EMOJI)
+
+
+def _is_rotate(emoji: "discord.PartialEmoji | discord.Emoji | str") -> bool:
+    return _emoji_matches(emoji, ROTATE_EMOJI)
+
+
+def _is_flip(emoji: "discord.PartialEmoji | discord.Emoji | str") -> bool:
+    return _emoji_matches(emoji, FLIP_EMOJI)
+
+
+def _is_dismiss(emoji: "discord.PartialEmoji | discord.Emoji | str") -> bool:
+    return _emoji_matches(emoji, DISMISS_EMOJI)
+
+
+def _emoji_matches(emoji: "discord.PartialEmoji | discord.Emoji | str", target: str) -> bool:
+    name = emoji if isinstance(emoji, str) else getattr(emoji, "name", "") or ""
+    return name.replace(VARIATION_SELECTOR, "") == target.replace(VARIATION_SELECTOR, "")
+
+
+def _first_image_attachment(message: discord.Message) -> discord.Attachment | None:
+    for attachment in message.attachments:
+        if (attachment.content_type or "").lower().startswith("image/"):
+            return attachment
+    return None
+
+
+def _rotate_upright(raw: bytes) -> bytes | None:
+    image = _open_image(raw)
+    if image is None:
+        return None
+    source_format = image.format or "PNG"
+    orientation = image.getexif().get(0x0112)
+    image = ImageOps.exif_transpose(image)
+    if orientation not in ROTATING_ORIENTATIONS:
+        image = image.rotate(90, expand=True)
+    return _encode(image, source_format)
+
+
+def _rotate_fixed(raw: bytes, degrees: int) -> bytes | None:
+    image = _open_image(raw)
+    if image is None:
+        return None
+    source_format = image.format or "PNG"
+    return _encode(image.rotate(degrees, expand=True), source_format)
+
+
+def _open_image(raw: bytes) -> "Image.Image | None":
+    try:
+        image = Image.open(io.BytesIO(raw))
+        image.load()
+        return image
+    except OSError:
+        log.info("could not decode image for ♻️ rotate", exc_info=True)
+        return None
+
+
+def _encode(image: "Image.Image", source_format: str) -> bytes:
+    buffer = io.BytesIO()
+    image.save(buffer, format=source_format)
+    return buffer.getvalue()
+
+
+async def setup(bot: commands.Bot) -> None:
+    await bot.add_cog(RotateImageListener(bot))

@@ -48,6 +48,7 @@ from bot.commands.testformatschedule import setup as setup_testformatschedule
 from bot.commands.testscribe import setup as setup_testscribe
 from bot.listeners.auto_link_listener import setup as setup_auto_link_listener
 from bot.listeners.pod_screenshots import setup as setup_pod_screenshots
+from bot.listeners.rotate_image import setup as setup_rotate_image
 from bot.listeners.sesh_listener import reschedule_pending_events, setup as setup_sesh_listener
 from bot.models import LeaderboardMessage, MagicSet, Player, PodDraftEvent
 from bot.services.bot_log import BotLog
@@ -175,6 +176,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_preview_season_awards(bot)
         await setup_sesh_listener(bot)
         await setup_pod_screenshots(bot)
+        await setup_rotate_image(bot)
         await setup_auto_link_listener(bot)
         await setup_test_group(bot)
         await setup_testlobby(bot)
