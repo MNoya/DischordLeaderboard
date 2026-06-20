@@ -192,9 +192,9 @@ export function EventCard({ event, className }: { event: CommunityLink; classNam
             </li>
           ))}
         </ul>
-        <span className="mt-auto self-end pt-4 inline-flex items-center gap-1.5 whitespace-nowrap font-display text-[13px] tracking-[0.08em] text-green transition-colors group-hover:text-green-2">
+        <span className="mt-auto self-end pt-4 inline-flex items-center gap-1.5 whitespace-nowrap font-display text-[15px] tracking-[0.08em] text-green transition-colors group-hover:text-green-2">
           {event.cta}
-          <ArrowRight size={13} />
+          <ArrowRight size={15} />
         </span>
       </div>
     </PanelShell>

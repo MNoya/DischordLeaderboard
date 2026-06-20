@@ -147,13 +147,13 @@ export function relativeTime(iso: string, now: Date = new Date()): string {
   return `${years}y`;
 }
 
-const AGE_UNITS: Array<{ unit: string; seconds: number }> = [
-  { unit: "year", seconds: 31_536_000 },
-  { unit: "month", seconds: 2_592_000 },
-  { unit: "week", seconds: 604_800 },
-  { unit: "day", seconds: 86_400 },
-  { unit: "hour", seconds: 3_600 },
-  { unit: "minute", seconds: 60 },
+const AGE_UNITS: Array<{ unit: string; short: string; seconds: number }> = [
+  { unit: "year", short: "y", seconds: 31_536_000 },
+  { unit: "month", short: "mo", seconds: 2_592_000 },
+  { unit: "week", short: "w", seconds: 604_800 },
+  { unit: "day", short: "d", seconds: 86_400 },
+  { unit: "hour", short: "h", seconds: 3_600 },
+  { unit: "minute", short: "m", seconds: 60 },
 ];
 
 export function relativeAge(iso: string, now: Date = new Date()): string {
@@ -166,6 +166,21 @@ export function relativeAge(iso: string, now: Date = new Date()): string {
     const value = Math.floor(seconds / unitSeconds);
     if (value >= 1) {
       return `${value} ${unit}${value === 1 ? "" : "s"} ago`;
+    }
+  }
+  return "just now";
+}
+
+export function relativeAgeShort(iso: string, now: Date = new Date()): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) {
+    return "";
+  }
+  const seconds = Math.floor((now.getTime() - then) / 1000);
+  for (const { short, seconds: unitSeconds } of AGE_UNITS) {
+    const value = Math.floor(seconds / unitSeconds);
+    if (value >= 1) {
+      return `${value}${short} ago`;
     }
   }
   return "just now";
