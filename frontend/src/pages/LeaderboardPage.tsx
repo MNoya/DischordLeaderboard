@@ -563,6 +563,13 @@ function FilterRow({
       />
       <SectionLabel size={11}>COLORS</SectionLabel>
       <ColorsSwitcher activeCode={colors} onChange={setColors} chips={colorChips} loading={colorChipsLoading} />
+      <Link
+        to="/leaderboard/about"
+        className="ml-auto inline-flex items-center gap-1.5 font-display text-[15px] leading-none tracking-[0.08em] text-green hover:text-green-2 transition-colors no-underline whitespace-nowrap"
+      >
+        ABOUT THE LEADERBOARD
+        <ArrowRight size={15} />
+      </Link>
     </div>
   );
 }
