@@ -99,7 +99,8 @@ image_normal, image_art_crop`.
      via the search endpoint (`set:<code>`, rarity common/uncommon/rare, no mythics), paginating
      `has_more`/`next_page`; model HTTP style on `bot/scripts/backfill_pod_draft_log.py`. Iterates
      the set codes in `P0P1_CONTESTS`. Assume Scryfall code == app set_code; verify MSH resolves.
-     Map DFC/split cards via front face.
+     Map DFC/split cards via front face. **Exclude mythic rares** (filter `rarity != mythic` in the
+     Scryfall query or post-fetch) — consistent with the contest rules and the existing MSH fixture.
    - Document both under CLAUDE.md "Common commands".
 
 ### Frontend (leave uncommitted for user review)
@@ -116,7 +117,11 @@ Contest metadata and card pool come from the DB. **Slot rules / predicate logic 
        ordered by `collector_number::int`; snake→camel inline. (Currently ignores setCode and returns
        the MSH fixture.)
    - `mockApi.ts`: return a static MSH contest object for `fetchP0P1Contest` / `fetchP0P1Contests`;
-     `fetchP0P1Cards` unchanged (keeps the fixture — mock is fixture-backed by design).
+     replace `fetchP0P1Cards` with a `generateP0P1Cards(setCode)` function that synthesizes 3–5
+     fake cards per slot covering each slot's eligibility filter (right rarity/colors/typeLine for
+     all 8 slots, no mythics, placeholder image strings). Follows the same pattern as the existing
+     `generateP0P1PickStats()` — no fixture file, zero growth per future set. The `cards-msh.ts`
+     fixture loses all consumers and can be deleted.
    - `api.ts`: wire the three new exports.
    - `hooks.ts`: add `useP0P1Contest()` and `useP0P1Contests()`.
 6. **Thread through, drop the constants**
