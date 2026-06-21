@@ -17,9 +17,16 @@ something to prevent. It isn't:
 So the read gate is dropped entirely — `public_p0p1_pick_stats` becomes unconditionally public, same
 as `public_p0p1_contests` and `public_cards`. The frontend keeps withholding the community grid /
 `PostVotingStats` until the deadline, but that's now a **UX reveal moment**, not a security boundary;
-the data underneath is public the whole time. The voting deadline (lock + reveal) becomes entirely
-client-enforced — acceptable because reads are public by design and the write path
-(`upsertP0P1Pick`) was already unguarded server-side.
+the data underneath is public the whole time. The reveal becomes entirely client-enforced — there's
+nothing left to protect on the read side.
+
+The **write** side is a different story and is a real boundary worth keeping: nothing today stops a
+user from scripting around the disabled UI and upserting or deleting `p0p1_entries` rows past the
+deadline via a direct PostgREST call (`upsertP0P1Pick` / `deleteAllP0P1Picks` have no server-side
+check). Since this spec already adds `p0p1_contests` as the source of truth for each set's deadline,
+it's the natural place to enforce it — the `p0p1_entries` RLS policies gain a `voting_deadline`
+check (see below), closing the gap flagged in `spec/p0p1-voting-mvp.md:111` instead of leaving it for
+later.
 
 What still needs fixing, independent of the gate: the deadline and set are a **single global
 timestamp/constant** duplicated in the view literal **and** `frontend/src/data/p0p1Slots.ts:6`
@@ -41,7 +48,7 @@ migration, no code change, and no per-contest editing of two synced literals.
 | ----------------- | ----------- | ---------------------------------------------------------------- |
 | `set_code`        | text        | **PK**                                                           |
 | `set_name`        | text        | not null — display name, e.g. "Marvel Super Heroes"              |
-| `voting_deadline` | timestamptz | not null — write lock + frontend reveal moment                    |
+| `voting_deadline` | timestamptz | not null — write lock + frontend reveal moment                   |
 | `scoring_date`    | timestamptz | not null — when results are scored (today = deadline + 28d)      |
 | `is_active`       | boolean     | not null default true — the featured/default contest (see below) |
 
@@ -52,6 +59,50 @@ migration, no code change, and no per-contest editing of two synced literals.
   If no row is active the frontend falls back to the most-recent `voting_deadline`. Voting is enabled
   only when the selected contest is `is_active` **and** pre-deadline; every other contest is
   results-only read-only.
+
+### `p0p1_entries` RLS — write gate (new)
+
+`p0p1_entries`'s INSERT/UPDATE policies (`alembic/versions/b2c3d4e5f6g7_p0p1_entries_table.py:64-73`)
+currently only check `auth.uid() = user_id`. Add a deadline check sourced from `p0p1_contests`:
+
+```sql
+DROP POLICY IF EXISTS "p0p1_entries_insert" ON p0p1_entries;
+CREATE POLICY "p0p1_entries_insert"
+    ON p0p1_entries FOR INSERT
+    WITH CHECK (
+        auth.uid() = user_id
+        AND now() <= (SELECT voting_deadline FROM p0p1_contests WHERE set_code = p0p1_entries.set_code)
+    );
+
+DROP POLICY IF EXISTS "p0p1_entries_update" ON p0p1_entries;
+CREATE POLICY "p0p1_entries_update"
+    ON p0p1_entries FOR UPDATE
+    USING (auth.uid() = user_id)
+    WITH CHECK (
+        auth.uid() = user_id
+        AND now() <= (SELECT voting_deadline FROM p0p1_contests WHERE set_code = p0p1_entries.set_code)
+    );
+
+DROP POLICY IF EXISTS "p0p1_entries_delete" ON p0p1_entries;
+CREATE POLICY "p0p1_entries_delete"
+    ON p0p1_entries FOR DELETE
+    USING (
+        auth.uid() = user_id
+        AND now() <= (SELECT voting_deadline FROM p0p1_contests WHERE set_code = p0p1_entries.set_code)
+    );
+```
+
+- SELECT is untouched — `auth.uid() = user_id` already scopes reads to your own ballot; the deadline
+  is irrelevant there.
+- DELETE gets the same check as INSERT/UPDATE for consistency — once the deadline passes, a ballot is
+  locked, not just frozen from edits but also from being cleared.
+- **Fail-closed by construction**: if a `set_code` has no `p0p1_contests` row, the subquery returns
+  `NULL` and `now() <= NULL` evaluates to `NULL` (falsy in `WITH CHECK`/`USING`), so writes are
+  blocked until a contest row exists for that set.
+- This makes `p0p1_entries`'s RLS depend on `p0p1_contests`, so the migration must create
+  `p0p1_contests` (and the bot must seed the MSH row) **before** altering these policies in the same
+  migration — order matters within the single revision.
+- Downgrade restores the original deadline-free policies.
 
 ### Views
 
@@ -91,13 +142,16 @@ image_normal, image_art_crop`.
 3. **Migration** — new revision, `down_revision = d5e6f7g8h9i0`:
    - `CREATE TABLE IF NOT EXISTS p0p1_contests (...)`.
    - `CREATE TABLE IF NOT EXISTS cards (...)`.
+   - Re-create the `p0p1_entries_insert` / `_update` / `_delete` RLS policies with the
+     `voting_deadline` check (above) — after `p0p1_contests` exists, before the seed step runs.
    - `CREATE OR REPLACE VIEW public_p0p1_pick_stats` dropping the global-literal `WHERE` gate
      (ungated, per above).
    - `CREATE OR REPLACE VIEW public_p0p1_contests`.
    - `CREATE OR REPLACE VIEW public_cards`.
    - GRANTs via the `pg_roles` guard block for all three views.
-   - `downgrade()`: drop the three views, drop `cards`, drop `p0p1_contests`, restore the old
-     global-literal WHERE on `public_p0p1_pick_stats`.
+   - `downgrade()`: restore the original deadline-free `p0p1_entries` policies, drop the three views,
+     drop `cards`, drop `p0p1_contests`, restore the old global-literal WHERE on
+     `public_p0p1_pick_stats`.
 4. **Seed scripts** — both separate from `seed_sets` (which runs heavyweight leaderboard work):
    - `bot/scripts/seed_p0p1_contests.py`: idempotent upsert from `bot.sets.P0P1_CONTESTS`,
      mirroring `seed_sets.py:upsert_set`.
@@ -192,6 +246,10 @@ UPDATE p0p1_contests SET voting_deadline = '2000-01-01T00:00:00Z' WHERE set_code
   return rows via the Supabase SQL editor.
 - Manual DB check: `public_p0p1_pick_stats` returns aggregates for complete entrants for any
   `set_code` regardless of deadline — no gate to verify, just confirm the view recreated cleanly.
+- Manual RLS check: as an authenticated test user, upsert a `p0p1_entries` row for a `set_code`
+  whose `voting_deadline` is in the past (use the dev `UPDATE` above) and confirm PostgREST returns
+  a 403; restore the deadline to the future and confirm the same write succeeds. Also confirm a
+  write against a `set_code` with no `p0p1_contests` row is rejected (fail-closed).
 - Frontend: page skeleton renders until `useP0P1Contest` resolves; countdown, set name, and lock
   all derive from the DB row; the community grid / `PostVotingStats` stay hidden until
   `isPastDeadline` (UX reveal, confirmed by toggling the deadline per above); mock mode still works
@@ -199,9 +257,6 @@ UPDATE p0p1_contests SET voting_deadline = '2000-01-01T00:00:00Z' WHERE set_code
 
 ## Out of scope
 
-- Server-side deadline enforcement, for either read or write. With the read gate gone, the voting
-  deadline is now **entirely client-enforced** for both the reveal moment and the write/edit window
-  (`upsertP0P1Pick` / `deleteAllP0P1Picks` stay unguarded). Acceptable because reads are public by
-  design and there's nothing left to protect. If write-side abuse becomes a real concern, the
-  optional RLS timestamp check already noted in `spec/p0p1-voting-mvp.md:111`
-  (`current_timestamp < voting_deadline`) is the fast follow — flag only, not built here.
+- **Read-side** deadline enforcement. With the read gate dropped, `public_p0p1_pick_stats` is
+  unconditionally public — there's nothing to protect, so no server-side check applies to reads.
+  The pre-deadline hide on the community grid / `PostVotingStats` is purely a frontend UX choice.
