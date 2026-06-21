@@ -72,6 +72,9 @@ class RotateImageListener(commands.Cog):
         message = await self._fetch_message(payload.channel_id, payload.message_id)
         if message is None or message.author.bot:
             return
+        if _bot_marked_recycle(message):
+            self.handled.add(payload.message_id)
+            return
         attachment = _first_image_attachment(message)
         if attachment is None:
             return
@@ -106,6 +109,10 @@ class RotateImageListener(commands.Cog):
             self.handled.discard(message.id)
             return
         self.reply_to_original[reply.id] = message.id
+        try:
+            await message.add_reaction(RECYCLE_EMOJI)
+        except discord.HTTPException:
+            log.info(f"could not mark original {message.id} as handled", exc_info=True)
         for emoji in (ROTATE_EMOJI, FLIP_EMOJI, DISMISS_EMOJI):
             try:
                 await reply.add_reaction(emoji)
@@ -172,6 +179,19 @@ class RotateImageListener(commands.Cog):
         self.edited_once.discard(message_id)
         if original_id is not None:
             self.handled.discard(original_id)
+            await self._clear_recycle_marker(channel_id, original_id)
+
+    async def _clear_recycle_marker(self, channel_id: int, message_id: int) -> None:
+        """Remove the bot's ♻️ from a dismissed post's original, so a fresh ♻️ can re-process it."""
+        if self.bot.user is None:
+            return
+        original = await self._fetch_message(channel_id, message_id)
+        if original is None:
+            return
+        try:
+            await original.remove_reaction(RECYCLE_EMOJI, self.bot.user)
+        except discord.HTTPException:
+            log.info(f"could not clear ♻️ marker on original {message_id}", exc_info=True)
 
     async def _cleanup_after_delay(self, channel_id: int, message_id: int) -> None:
         await asyncio.sleep(CLEANUP_DELAY_S)
@@ -218,6 +238,14 @@ def _is_dismiss(emoji: "discord.PartialEmoji | discord.Emoji | str") -> bool:
 def _emoji_matches(emoji: "discord.PartialEmoji | discord.Emoji | str", target: str) -> bool:
     name = emoji if isinstance(emoji, str) else getattr(emoji, "name", "") or ""
     return name.replace(VARIATION_SELECTOR, "") == target.replace(VARIATION_SELECTOR, "")
+
+
+def _bot_marked_recycle(message: discord.Message) -> bool:
+    """The bot reacts ♻️ on an original once it has replied, so a restart can't re-trigger a repost."""
+    for reaction in message.reactions:
+        if _is_recycle(reaction.emoji) and reaction.me:
+            return True
+    return False
 
 
 def _first_image_attachment(message: discord.Message) -> discord.Attachment | None:
