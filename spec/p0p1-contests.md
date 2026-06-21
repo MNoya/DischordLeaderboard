@@ -2,30 +2,36 @@
 
 ## Context / motivation
 
-P0P1's reveal gate is the line `WHERE now() > '2026-06-23T15:00:00Z'` in the
-`public_p0p1_pick_stats` view (`alembic/versions/d5e6f7g8h9i0_public_p0p1_pick_stats_view.py`).
-That view runs as owner and bypasses RLS, so it is the **only** real boundary keeping everyone's
-picks secret until the deadline — the frontend `isPastDeadline` checks and the `enabled` query gate
-are UX-only (anyone with the anon key can query the view directly).
+`public_p0p1_pick_stats` (`alembic/versions/d5e6f7g8h9i0_public_p0p1_pick_stats_view.py`) currently
+gates on `WHERE now() > '2026-06-23T15:00:00Z'`, treating early visibility of aggregate picks as
+something to prevent. It isn't:
 
-The gate is a **single global timestamp** sitting over **per-set** data (`set_code` is in the
-`p0p1_entries` PK and the view's GROUP BY). Consequences:
+- **Scoring is fully external.** Ballots are ranked by 17lands GIH win rate of the picked cards,
+  measured over the following 6 weeks (`spec/p0p1-voting-mvp.md:11`). That data doesn't exist at
+  voting time, so seeing what others picked gives no edge — there's nothing to copy that improves
+  your score.
+- **The view is anonymous aggregate, never per-ballot.** It groups by
+  `(set_code, slot, card_name)` over complete entrants only; no individual's picks are ever exposed,
+  gated or not.
 
-- The instant `2026-06-23` passes, the view reveals aggregates for **every** `set_code` at once.
-  A second contest on a later set would leak picks from its first vote — no secrecy window.
-- A single constant cannot express two contests with different deadlines.
-- The same timestamp is duplicated in the view **and** `frontend/src/data/p0p1Slots.ts:6`
-  (`P0P1_VOTING_DEADLINE`), kept in sync by hand. The contest set is likewise hardcoded
-  (`p0p1Slots.ts:4`, with a `// TODO: get this data from the database`).
+So the read gate is dropped entirely — `public_p0p1_pick_stats` becomes unconditionally public, same
+as `public_p0p1_contests` and `public_cards`. The frontend keeps withholding the community grid /
+`PostVotingStats` until the deadline, but that's now a **UX reveal moment**, not a security boundary;
+the data underneath is public the whole time. The voting deadline (lock + reveal) becomes entirely
+client-enforced — acceptable because reads are public by design and the write path
+(`upsertP0P1Pick`) was already unguarded server-side.
 
-This matches what the original spec already anticipated (`spec/p0p1-voting-mvp.md:113`: "A `contests`
-table … would let deadlines be managed without code changes").
+What still needs fixing, independent of the gate: the deadline and set are a **single global
+timestamp/constant** duplicated in the view literal **and** `frontend/src/data/p0p1Slots.ts:6`
+(`P0P1_VOTING_DEADLINE`) / `p0p1Slots.ts:4` (`// TODO: get this data from the database`), kept in
+sync by hand, and incapable of expressing a second contest with a different deadline. This matches
+what the original spec already anticipated (`spec/p0p1-voting-mvp.md:113`: "A `contests` table …
+would let deadlines be managed without code changes").
 
-**Outcome:** a `p0p1_contests` table owns each contest's deadline **and** active-contest metadata.
-The reveal view gates per-set via a JOIN. The frontend reads contest config from a public view instead
-of hardcoded constants. Launching a new contest becomes "insert a row" — no migration, no code change,
-and no per-contest editing of two synced literals. The gate stays server-side (it is a security
-boundary and must not move to the client).
+**Outcome:** a `p0p1_contests` table owns each contest's deadline and active-contest metadata as
+data-driven config — not as an access-control mechanism. The frontend reads contest config from a
+public view instead of hardcoded constants. Launching a new contest becomes "insert a row" — no
+migration, no code change, and no per-contest editing of two synced literals.
 
 ## Data model
 
@@ -35,7 +41,7 @@ boundary and must not move to the client).
 | ----------------- | ----------- | ---------------------------------------------------------------- |
 | `set_code`        | text        | **PK**                                                           |
 | `set_name`        | text        | not null — display name, e.g. "Marvel Super Heroes"              |
-| `voting_deadline` | timestamptz | not null — per-set reveal gate                                   |
+| `voting_deadline` | timestamptz | not null — write lock + frontend reveal moment                    |
 | `scoring_date`    | timestamptz | not null — when results are scored (today = deadline + 28d)      |
 | `is_active`       | boolean     | not null default true — the featured/default contest (see below) |
 
@@ -50,12 +56,11 @@ boundary and must not move to the client).
 ### Views
 
 - **`public_p0p1_pick_stats`** (recreated): unchanged CTEs (`slot_counts`, `complete_entrants`),
-  but JOIN `p0p1_contests` and gate per-set:
+  but the `WHERE now() > '2026-06-23T15:00:00Z'` gate is dropped — the view always returns
+  aggregates for complete entrants, no `p0p1_contests` JOIN needed:
   ```sql
   FROM p0p1_entries e
   JOIN complete_entrants c USING (user_id, set_code)
-  JOIN p0p1_contests ct ON ct.set_code = e.set_code
-  WHERE now() > ct.voting_deadline           -- per-set, replaces the global literal
   GROUP BY e.set_code, e.slot, e.card_name;
   ```
 - **`public_p0p1_contests`** (new): `SELECT set_code, set_name, voting_deadline, scoring_date,
@@ -86,7 +91,8 @@ image_normal, image_art_crop`.
 3. **Migration** — new revision, `down_revision = d5e6f7g8h9i0`:
    - `CREATE TABLE IF NOT EXISTS p0p1_contests (...)`.
    - `CREATE TABLE IF NOT EXISTS cards (...)`.
-   - `CREATE OR REPLACE VIEW public_p0p1_pick_stats` with the per-set JOIN/gate above.
+   - `CREATE OR REPLACE VIEW public_p0p1_pick_stats` dropping the global-literal `WHERE` gate
+     (ungated, per above).
    - `CREATE OR REPLACE VIEW public_p0p1_contests`.
    - `CREATE OR REPLACE VIEW public_cards`.
    - GRANTs via the `pg_roles` guard block for all three views.
@@ -128,6 +134,10 @@ Contest metadata and card pool come from the DB. **Slot rules / predicate logic 
    - `useP0P1Ballot.ts`: consume `useP0P1Contest()`; derive `setCode` + `isPastDeadline =
 contest && new Date() > contest.votingDeadline`. While loading (undefined), render a page
      skeleton — do not treat undefined as past-deadline, no hardcoded fallback.
+     `isPastDeadline` is now purely a **UX flag** (no server gate backs it): it both locks voting
+     and decides when the community grid / `PostVotingStats` become visible. The aggregate data
+     itself (`public_p0p1_pick_stats`) is public throughout — the frontend chooses to withhold it
+     pre-deadline as a reveal moment, not because it's protecting anything.
    - Replace constant imports in `AppHeader.tsx`, `P0P1Hero.tsx`, `P0P1MobileView.tsx`,
      `slotVisuals.tsx` with hook values. `slotVisuals.tsx:37` uses `P0P1_SET_CODE` at module scope
      for the keyrune class — pass `setCode` in as an arg.
@@ -163,38 +173,35 @@ The backend paths (`fetchP0P1PickStats(setCode)`, `fetchP0P1Cards(setCode)`, and
 
 ## Local / dev testing
 
-To flip between phases against a real DB, update the `p0p1_contests` row:
+`public_p0p1_pick_stats` has no read gate, so there's no DB-side phase to flip and no risk of
+leaking real picks — the aggregate is public by design, gated or not. The reveal/lock is a pure
+frontend concern: to preview either phase, adjust the contest's `voting_deadline` in
+`p0p1_contests` (config, not a security boundary) or just mock the client clock.
 
 ```sql
--- Reveal results (open the gate)
+-- Move the deadline for local testing
 UPDATE p0p1_contests SET voting_deadline = '2000-01-01T00:00:00Z' WHERE set_code = 'MSH';
-
--- Re-hide / voting phase (close the gate)
-UPDATE p0p1_contests SET voting_deadline = '2099-01-01T00:00:00Z' WHERE set_code = 'MSH';
 
 -- Restore: re-run seed_p0p1_contests or UPDATE back to the bot/sets.py value.
 ```
-
-> **Caution**: this flips the gate on whatever DB the row lives in. Running it against **prod
-> Supabase reveals every user's picks live.** For a non-destructive real-data preview, run the view's
-> aggregate SELECT without the `WHERE now() > …` clause directly in the Supabase SQL editor instead
-> of mutating the deadline row.
-
-The frontend clock check (`isPastDeadline`) can be tested independently against any deadline without
-touching the DB — the DB view gate is the real security boundary.
 
 ## Verification
 
 - `alembic upgrade head && alembic check` (model/migration drift) → `pytest bot/tests/`.
 - Run `seed_p0p1_contests` + `seed_cards MSH`; confirm `public_p0p1_contests` and `public_cards`
   return rows via the Supabase SQL editor.
-- Manual DB check: before a contest's deadline the stats view returns 0 rows for that `set_code`;
-  after (or after the dev UPDATE above), rows appear. Seed a 2nd contest with a future deadline and
-  confirm MSH reveals while the 2nd stays hidden — proving the per-set gate.
+- Manual DB check: `public_p0p1_pick_stats` returns aggregates for complete entrants for any
+  `set_code` regardless of deadline — no gate to verify, just confirm the view recreated cleanly.
 - Frontend: page skeleton renders until `useP0P1Contest` resolves; countdown, set name, and lock
-  all derive from the DB row; mock mode still works offline; card picker contents match the fixture.
+  all derive from the DB row; the community grid / `PostVotingStats` stay hidden until
+  `isPastDeadline` (UX reveal, confirmed by toggling the deadline per above); mock mode still works
+  offline; card picker contents match the fixture.
 
 ## Out of scope
 
-- Server-side **write**-path deadline enforcement (`upsertP0P1Pick` / `deleteAllP0P1Picks` stay
-  unguarded on the frontend — separate concern; flag only).
+- Server-side deadline enforcement, for either read or write. With the read gate gone, the voting
+  deadline is now **entirely client-enforced** for both the reveal moment and the write/edit window
+  (`upsertP0P1Pick` / `deleteAllP0P1Picks` stay unguarded). Acceptable because reads are public by
+  design and there's nothing left to protect. If write-side abuse becomes a real concern, the
+  optional RLS timestamp check already noted in `spec/p0p1-voting-mvp.md:111`
+  (`current_timestamp < voting_deadline`) is the fast follow — flag only, not built here.
