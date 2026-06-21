@@ -31,6 +31,7 @@ from bot.commands.mock_draft import setup as setup_mock_draft
 from bot.commands.pod_draft import setup as setup_pod_draft
 from bot.commands.pod_schedule import setup as setup_pod_schedule
 from bot.commands.preview_season_awards import setup as setup_preview_season_awards
+from bot.commands.set_awards import setup as setup_set_awards
 from bot.commands.signout import setup as setup_signout
 from bot.commands.signup import setup as setup_signup
 from bot.commands.stats import setup as setup_stats
@@ -175,6 +176,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_pod_backfill(bot)
         await setup_pod_schedule(bot)
         await setup_preview_season_awards(bot)
+        await setup_set_awards(bot)
         await setup_sesh_listener(bot)
         await setup_pod_screenshots(bot)
         await setup_rotate_image(bot)
