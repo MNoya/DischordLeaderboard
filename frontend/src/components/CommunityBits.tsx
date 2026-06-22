@@ -318,14 +318,14 @@ export function ShowTopics({
   const items: readonly { category: EpisodeCategory; label: string; Icon?: GlyphIcon; iconClassName?: string }[] =
     topics ?? EPISODE_CATEGORIES.map((category) => ({ category, label: category }));
   return (
-    <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+    <div className="flex flex-wrap gap-2">
       {items.map(({ category, label, Icon: iconOverride, iconClassName }) => {
         const Icon = iconOverride ?? CATEGORY_ICON[category];
         return (
           <Link
             key={category}
             to={categoryHref(category)}
-            className="group/chip flex items-center justify-center gap-2 rounded-lg bg-surface2 px-3 py-2 no-underline transition-all duration-200 hover:-translate-y-0.5 hover:bg-surface hover:ring-1 hover:ring-green/80 sm:inline-flex sm:justify-start"
+            className="group/chip inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-surface2 px-3 py-2 no-underline transition-all duration-200 hover:-translate-y-0.5 hover:bg-surface hover:ring-1 hover:ring-green/80 sm:flex-none sm:justify-start"
           >
             <Icon
               size={iconOverride ? 21 : 18}
@@ -335,7 +335,7 @@ export function ShowTopics({
                 iconClassName ?? CATEGORY_COLOR[category],
               )}
             />
-            <span className="font-display uppercase tracking-[0.06em] text-[14.5px] text-text transition-colors group-hover/chip:text-green">
+            <span className="whitespace-nowrap font-display uppercase tracking-[0.06em] text-[14.5px] text-text transition-colors group-hover/chip:text-green">
               {label}
             </span>
           </Link>

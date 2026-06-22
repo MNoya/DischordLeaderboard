@@ -25,7 +25,7 @@ const HOME_ITEM: (typeof NAV)[number] = { label: "HOME", to: "/", match: (p) => 
 
 const NAV_ITEM_CLASS = "h-12 px-5 inline-flex items-center no-underline border transition-colors whitespace-nowrap";
 
-export function AppHeader({ subtitle = "LEADERBOARD", fill = false }: { subtitle?: string; fill?: boolean }) {
+export function AppHeader({ subtitle = "LEADERBOARD", subtitleShort, fill = false }: { subtitle?: string; subtitleShort?: string; fill?: boolean }) {
   const loc = useLocation();
   const isMobile = useIsMobile();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -127,7 +127,7 @@ export function AppHeader({ subtitle = "LEADERBOARD", fill = false }: { subtitle
         >
           <ALogo size={isMobile ? 42 : 55} />
         </div>
-        <AWordmark size={isMobile ? "sm" : "lg"} subtitle={subtitle} />
+        <AWordmark size={isMobile ? "sm" : "lg"} subtitle={subtitle} subtitleShort={subtitleShort} />
       </Link>
 
       <div

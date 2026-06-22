@@ -102,6 +102,8 @@ export function TierFilterBar({
     </FilterGroup>
   );
 
+  const compact = stacked && options.sets.length >= 3;
+
   const manaValueGroup = (
     <FilterGroup label="MANA VALUE" stacked={stacked} joined className={stacked ? undefined : "max-[1150px]:hidden"}>
       {MANA_VALUE_BUCKETS.map((mv) => (
@@ -111,8 +113,11 @@ export function TierFilterBar({
           onClick={() => toggle("manaValues", mv)}
           label={`Mana value ${mv}`}
           narrow
+          compact={compact}
         >
-          <span className="font-display text-[18px] font-bold leading-none">{mv}</span>
+          <span className={cn("font-display font-bold leading-none", compact ? "text-[15px]" : "text-[18px]")}>
+            {mv}
+          </span>
         </IconToggle>
       ))}
     </FilterGroup>
@@ -127,8 +132,9 @@ export function TierFilterBar({
             active={filters.sets.includes(s.value)}
             onClick={() => toggle("sets", s.value)}
             label={`${s.label} (${s.count})`}
+            compact={compact}
           >
-            <i className={`ss ss-${keyruneClass(s.value)}`} style={{ fontSize: 19 }} />
+            <i className={`ss ss-${keyruneClass(s.value)}`} style={{ fontSize: compact ? 16 : 19 }} />
           </IconToggle>
         ))}
       </FilterGroup>
@@ -250,6 +256,7 @@ function IconToggle({
   children,
   roomy = false,
   narrow = false,
+  compact = false,
   mutedActive = false,
   tooltipOpen,
   onTooltipOpenChange,
@@ -260,6 +267,7 @@ function IconToggle({
   children: ReactNode;
   roomy?: boolean;
   narrow?: boolean;
+  compact?: boolean;
   mutedActive?: boolean;
   tooltipOpen?: boolean;
   onTooltipOpenChange?: (open: boolean) => void;
@@ -274,7 +282,15 @@ function IconToggle({
         onClick={onClick}
         className={cn(
           "relative flex h-10 items-center justify-center rounded border transition-colors",
-          roomy ? "min-w-[40px] px-2.5" : narrow ? "min-w-[34px] px-1.5" : "min-w-[40px] px-2",
+          roomy
+            ? "min-w-[40px] px-2.5"
+            : narrow
+              ? compact
+                ? "min-w-[28px] px-1"
+                : "min-w-[34px] px-1.5"
+              : compact
+                ? "min-w-[32px] px-1.5"
+                : "min-w-[40px] px-2",
           active
             ? activeClass
             : "border-border2 bg-transparent text-muted hover:bg-surface2 hover:text-text",

@@ -91,6 +91,7 @@ export interface TierCard {
   card_id: number;
   name: string;
   url: string;
+  url_back?: string | null;
   rarity: string;
   color: string;
   tier: string;
@@ -217,7 +218,12 @@ export const RARITY_NAMES: Record<string, string> = {
   M: "Mythic",
 };
 
-const INCLUSION_ORDER = ["Main Set", "Bonus Sheet", "Special Guests"];
+export const INCLUSION_ORDER = ["Main Set", "Bonus Sheet", "Special Guests", "Source Material"];
+
+export function inclusionRank(type: string): number {
+  const i = INCLUSION_ORDER.indexOf(type);
+  return i === -1 ? INCLUSION_ORDER.length : i;
+}
 
 export interface TierFilterOptions {
   sets: Array<{ value: string; label: string; count: number }>;

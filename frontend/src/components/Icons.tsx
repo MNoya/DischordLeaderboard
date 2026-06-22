@@ -12,6 +12,7 @@ import {
   Image as LR_Image,
   Info as LR_Info,
   Music as LR_Music,
+  RefreshCw as LR_RefreshCw,
   Trophy as LR_Trophy,
 } from "lucide-react";
 import { MdPause as R_MdPause } from "react-icons/md";
@@ -55,6 +56,7 @@ export const Headphones = withShrink(LR_Headphones);
 export const ImageIcon = withShrink(LR_Image);
 export const Info = withShrink(LR_Info);
 export const Music = withShrink(LR_Music);
+export const RefreshCw = withShrink(LR_RefreshCw);
 export const Trophy = withShrink(LR_Trophy);
 export const Pause = withShrink(R_MdPause);
 export function Play({ size = 24, className, ...rest }: { size?: number } & React.SVGProps<SVGSVGElement>) {

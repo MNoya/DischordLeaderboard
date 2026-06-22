@@ -22,9 +22,11 @@ export function ALogo({ size = 32 }: { size?: number }) {
 export function AWordmark({
   size = "md",
   subtitle = "LEADERBOARD",
+  subtitleShort,
 }: {
   size?: "sm" | "md" | "lg";
   subtitle?: string;
+  subtitleShort?: string;
 }) {
   if (size === "sm") {
     return (
@@ -34,7 +36,7 @@ export function AWordmark({
         </span>
         <span className="bg-border2 shrink-0" style={{ width: 1, height: 16 }} />
         <span className="text-green leading-none" style={{ fontSize: 15, letterSpacing: "0.14em" }}>
-          {subtitle}
+          {subtitleShort ?? subtitle}
         </span>
       </div>
     );
