@@ -117,7 +117,7 @@ def bulk_upsert_draft_events(
             touched_pairs.add((player_id, set_id))
 
         fmt = row["format"]
-        if fmt not in SUPPORTED_FORMATS:
+        if fmt not in SUPPORTED_FORMATS and not fmt.startswith("MidWeek"):
             unknown_formats[fmt] = unknown_formats.get(fmt, 0) + 1
 
     account_ids = _resolve_account_ids(session, player_id, {r["account"] for r in rows if r["account"]})

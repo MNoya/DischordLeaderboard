@@ -170,6 +170,20 @@ def test_bulk_upsert_keeps_unknown_formats_and_tallies_them(session):
     assert result["unknown_formats"] == {"MysteryCubeDraft": 1}
 
 
+def test_bulk_upsert_treats_midweek_as_known_not_unknown(session):
+    """MidWeek* are casual events: persisted but never reported as unknown formats."""
+    sos = _seed_set(session, code="SOS")
+    p = _seed_player(session)
+    result = bulk_upsert_draft_events(
+        session, p.id, [_draft("a", format="MidWeekSealed"), _draft("b", format="MidWeekQuickDraft")], [sos]
+    )
+    session.flush()
+
+    stored = {r.format for r in session.execute(select(DraftEvent).where(DraftEvent.player_id == p.id)).scalars()}
+    assert stored == {"MidWeekSealed", "MidWeekQuickDraft"}
+    assert result["unknown_formats"] == {}
+
+
 def test_bulk_upsert_is_idempotent(session):
     """Re-running with the same drafts must not duplicate rows."""
     sos = _seed_set(session, code="SOS")
