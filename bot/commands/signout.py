@@ -57,6 +57,8 @@ class Signout(commands.Cog):
     async def signout(self, interaction: discord.Interaction) -> None:
         user_id = str(interaction.user.id)
         username = str(interaction.user)
+        ephemeral = interaction.guild is not None
+        await interaction.response.defer(ephemeral=ephemeral, thinking=True)
         audit.event("signout_invoked", user_id=user_id, username=username)
 
         with SessionLocal() as session:
@@ -69,11 +71,11 @@ class Signout(commands.Cog):
             await bot_log.get(self.bot).post_plain(
                 f"🧎‍♂️ **{interaction.user.display_name}** retired from the leaderboard"
             )
-            await interaction.response.send_message(MSG_SIGNED_OUT, ephemeral=(interaction.guild is not None))
+            await interaction.followup.send(MSG_SIGNED_OUT, ephemeral=ephemeral)
         elif result.kind == "already_inactive":
-            await interaction.response.send_message(MSG_ALREADY_INACTIVE, ephemeral=(interaction.guild is not None))
+            await interaction.followup.send(MSG_ALREADY_INACTIVE, ephemeral=ephemeral)
         else:
-            await interaction.response.send_message(MSG_NOT_ON_BOARD, ephemeral=(interaction.guild is not None))
+            await interaction.followup.send(MSG_NOT_ON_BOARD, ephemeral=ephemeral)
 
 
 async def setup(bot: commands.Bot) -> None:

@@ -57,6 +57,8 @@ DEFAULT_QUEUE_GROUPS: tuple[QueueGroup, ...] = tuple(
 POD_TROPHY_POINTS = int(_BUCKETS.get("pod", {}).get("trophy_points", 5))
 POD_WIN_2_1_POINTS = int(_BUCKETS.get("pod", {}).get("win_2_1_points", 2))
 
+NON_SCORING_FORMATS: tuple[str, ...] = tuple(_BUCKETS.get("non_scoring_formats", []))
+
 ARENA_DIRECT_SEALED_FORMAT = "ArenaDirect_Sealed"
 
 
@@ -70,7 +72,8 @@ def pod_points(trophies_3_0: int, wins_2_1: int) -> int:
 
 
 def supported_formats(groups: Iterable[QueueGroup] = DEFAULT_QUEUE_GROUPS) -> tuple[str, ...]:
-    return tuple(fmt for g in groups for fmt in g.formats)
+    grouped = tuple(fmt for g in groups for fmt in g.formats)
+    return grouped + NON_SCORING_FORMATS
 
 
 def confidence_factor(total_trophies: int) -> float:

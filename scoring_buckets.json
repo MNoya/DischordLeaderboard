@@ -4,6 +4,9 @@
     "trophy_points": 5,
     "win_2_1_points": 2
   },
+  "non_scoring_formats": [
+    "MidWeekSealed"
+  ],
   "groups": [
     {
       "label": "Premier",
