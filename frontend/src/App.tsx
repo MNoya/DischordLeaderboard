@@ -13,7 +13,6 @@ import { AboutPage } from "./pages/AboutPage";
 import { TierListPage } from "./pages/TierListPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { P0P1Page } from "./pages/P0P1Page";
-import { P0P1V1Page } from "./pages/P0P1V1Page";
 import { BannerLab } from "./pages/BannerLab";
 import { preloadGuildLogos } from "./data/guild-art";
 
@@ -58,7 +57,6 @@ export function App() {
       <Route path="/tier-list/:setCode" element={<TierListPage />} />
 
       <Route path="/p0p1" element={<P0P1Page />} />
-      <Route path="/p0p1-v1" element={<P0P1V1Page />} />
 
       <Route path="/banner" element={<BannerLab />} />
 
