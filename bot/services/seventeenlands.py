@@ -310,8 +310,8 @@ def extract_event_row(draft: dict) -> dict | None:
 
     Returns ``None`` if the draft lacks an event id (defensive — 17lands has
     always provided one in observed responses). Otherwise returns every field
-    the model needs except ``player_id`` and ``set_id``; the caller resolves
-    those.
+    the model needs except ``player_id`` and ``set_id``, plus the raw ``account``
+    string; the caller resolves those into ids.
 
     Format/set/expansion are kept raw (other than ``normalize_expansion``) so
     unrecognized values still persist — the leaderboard score layer decides
@@ -333,6 +333,7 @@ def extract_event_row(draft: dict) -> dict | None:
         "losses": int(draft.get("losses") or 0),
         "is_trophy": event_is_trophy(draft),
         "colors": draft.get("colors") or None,
+        "account": draft.get("account") or None,
         "start_rank": draft.get("start_rank") or None,
         "end_rank": draft.get("end_rank") or None,
         "started_at": _parse_17lands_ts(draft.get("first_event_server_time")),

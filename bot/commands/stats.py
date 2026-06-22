@@ -8,7 +8,6 @@ from discord.ext import commands
 
 from bot import audit, emojis
 from bot.commands import descriptions as desc
-from bot.commands.leaderboard import broadcast_current_set_safely
 from bot.database import SessionLocal
 from bot.services.leaderboard_visibility import set_opt_in
 from bot.services.player_stats import StatsData, process_stats, profile_url, render_embed
@@ -62,7 +61,6 @@ class LeaderboardVisibilityView(discord.ui.View):
             await interaction.response.edit_message(embed=render_embed(data), view=self)
         else:
             await interaction.response.edit_message(view=self)
-        await broadcast_current_set_safely(self.bot)
 
 
 class Stats(commands.Cog):
@@ -82,15 +80,14 @@ class Stats(commands.Cog):
         user_id = str(interaction.user.id)
         username = str(interaction.user)
         ephemeral = interaction.guild is not None
+        await interaction.response.defer(ephemeral=ephemeral, thinking=True)
         audit.event("stats_invoked", user_id=user_id, player=player, set=set)
 
         set_code = active_set_code()
         if set is not None:
             seed = SET_CODES.get(set.upper())
             if seed is None:
-                await interaction.response.send_message(
-                    f"Unknown set `{set}`.", ephemeral=ephemeral
-                )
+                await interaction.followup.send(f"Unknown set `{set}`.", ephemeral=ephemeral)
                 return
             set_code = seed.code
 
@@ -106,7 +103,7 @@ class Stats(commands.Cog):
                 msg = f"No active player found with display name `{player}`."
             else:
                 msg = "You're not on the leaderboard. Run `/join` to get started."
-            await interaction.response.send_message(msg, ephemeral=ephemeral)
+            await interaction.followup.send(msg, ephemeral=ephemeral)
             return
 
         logger.info(f"stats: {data.player_name} rank={data.rank} score={data.total_score:.1f}")
@@ -117,7 +114,7 @@ class Stats(commands.Cog):
             view = discord.ui.View(timeout=600)
             view.add_item(_profile_button(data, own=player is None))
             kwargs["view"] = view
-        await interaction.response.send_message(**kwargs)
+        await interaction.followup.send(**kwargs)
 
     @stats.autocomplete("set")
     async def _set_autocomplete(

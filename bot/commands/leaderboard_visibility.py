@@ -8,11 +8,11 @@ from sqlalchemy import select
 
 from bot import audit
 from bot.commands import descriptions as desc
-from bot.commands.leaderboard import broadcast_current_set_safely
 from bot.commands.messages import MSG_ALREADY_HIDDEN, MSG_NOT_REGISTERED, MSG_NOW_HIDDEN
 from bot.database import SessionLocal
 from bot.discord_helpers import player_url
 from bot.models import Player
+from bot.services import bot_log
 
 
 class LeaderboardVisibility(commands.Cog):
@@ -25,6 +25,7 @@ class LeaderboardVisibility(commands.Cog):
     async def opt_out(self, interaction: discord.Interaction) -> None:
         user_id = str(interaction.user.id)
         ephemeral = interaction.guild is not None
+        await interaction.response.defer(ephemeral=ephemeral, thinking=True)
         with SessionLocal() as session:
             player = session.execute(
                 select(Player).where(Player.discord_id == user_id)
@@ -32,19 +33,21 @@ class LeaderboardVisibility(commands.Cog):
             ranked = player is not None and player.active and player.seventeenlands_token is not None
             if not ranked:
                 audit.event("leaderboard_opt_out", user_id=user_id, registered=False)
-                await interaction.response.send_message(MSG_NOT_REGISTERED, ephemeral=ephemeral)
+                await interaction.followup.send(MSG_NOT_REGISTERED, ephemeral=ephemeral)
                 return
             if not player.leaderboard_opt_in:
                 audit.event("leaderboard_opt_out", user_id=user_id, registered=True, already_hidden=True)
-                await interaction.response.send_message(MSG_ALREADY_HIDDEN, ephemeral=ephemeral)
+                await interaction.followup.send(MSG_ALREADY_HIDDEN, ephemeral=ephemeral)
                 return
             player.leaderboard_opt_in = False
             slug = player.slug
             session.commit()
         audit.event("leaderboard_opt_out", user_id=user_id, registered=True)
+        await bot_log.get(self.bot).post_plain(
+            f"🕵️ **{interaction.user.display_name}** opted out from the leaderboard"
+        )
         message = MSG_NOW_HIDDEN.format(profile_url=player_url(slug))
-        await interaction.response.send_message(message, ephemeral=ephemeral)
-        await broadcast_current_set_safely(self.bot)
+        await interaction.followup.send(message, ephemeral=ephemeral)
 
 
 async def setup(bot: commands.Bot) -> None:

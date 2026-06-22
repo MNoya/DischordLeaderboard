@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Callable
 
 import discord
@@ -881,50 +881,29 @@ def _archetype_emoji(code: str) -> discord.Emoji | None:
     return emojis.get_emoji(name) if name else None
 
 
-async def _apply_tracked_filter(
-    interaction: discord.Interaction, message_id: str, set_code: str,
-    format_value: str | None, color_value: str | None,
-) -> str | None:
-    """Re-render the shared tracked leaderboard message in place for a new set/filter.
+def _render_ephemeral_board(
+    session: Session, set_code: str, format_value: str | None, color_value: str | None,
+    viewer_discord_id: str | None,
+) -> discord.Embed | None:
+    """Render the leaderboard embed for a personal, ephemeral filter view.
 
-    Updates the tracking row so !refresh keeps rendering the chosen view, then edits
-    the public message via REST. Returns the resolved set code, or None on failure.
+    Powers the 🔎 Filter button's per-user explorer: nothing shared is touched, so
+    one viewer's filtering never mutates the posted snapshot for everyone else.
     """
+    magic_set = session.execute(
+        select(MagicSet).where(func.upper(MagicSet.code) == set_code.upper())
+    ).scalar_one_or_none()
     filter_type, filter_value = encode_filter(format_value, color_value)
-    with SessionLocal() as session:
-        magic_set = session.execute(
-            select(MagicSet).where(func.upper(MagicSet.code) == set_code.upper())
-        ).scalar_one_or_none()
-        if magic_set is None:
-            return None
-        data, suffix = render_filtered_data(
-            session, filter_type=filter_type, filter_value=filter_value, viewer_discord_id=None, magic_set=magic_set,
-        )
-        if data is None:
-            return None
-        tracked = session.execute(
-            select(LeaderboardMessage).where(LeaderboardMessage.message_id == message_id)
-        ).scalar_one_or_none()
-        if tracked is not None:
-            tracked.set_id = magic_set.id
-            tracked.filter_type = filter_type
-            tracked.filter_value = filter_value
-            tracked.last_rendered_at = datetime.now(timezone.utc)
-            session.commit()
-        set_code = magic_set.code
-
+    data, suffix = render_filtered_data(
+        session, filter_type=filter_type, filter_value=filter_value,
+        viewer_discord_id=viewer_discord_id, magic_set=magic_set,
+    )
+    if data is None:
+        return None
     embed = render_public_embed(data)
     if suffix:
         embed.title = f"{embed.title} · {suffix}"
-    try:
-        msg = await interaction.channel.fetch_message(int(message_id))
-        await msg.edit(content=None, embed=embed, view=render_view(
-            filter_type=filter_type, filter_value=filter_value, set_code=set_code,
-        ))
-    except discord.HTTPException:
-        logger.warning(f"could not edit tracked leaderboard message {message_id}", exc_info=True)
-        return None
-    return set_code
+    return embed
 
 
 class _SetSelect(discord.ui.Select):
@@ -978,19 +957,18 @@ class _ColorSelect(discord.ui.Select):
 
 
 class _FilterPanel(discord.ui.View):
-    """Ephemeral control panel that re-renders the shared leaderboard message.
+    """Per-user ephemeral control panel + leaderboard, private to the clicker.
 
     Set picks which board; format and color combine (Pod/Direct stay standalone, so
-    selecting one clears the color). Each pick edits the public message in place and
-    rebuilds the panel to reflect the new selection.
+    selecting one clears the color). Each pick re-renders the ephemeral message —
+    the posted snapshot everyone sees is never touched.
     """
 
     def __init__(
-        self, message_id: str, set_code: str, format_value: str | None, color_value: str | None,
+        self, set_code: str, format_value: str | None, color_value: str | None,
         with_emoji: bool = True,
     ) -> None:
         super().__init__(timeout=180)
-        self.message_id = message_id
         self.set_code = set_code
         self.format_value = format_value
         self.color_value = color_value
@@ -1009,17 +987,18 @@ class _FilterPanel(discord.ui.View):
             new_color = None
 
         await interaction.response.defer()
-        resolved = await _apply_tracked_filter(interaction, self.message_id, new_set, new_fmt, new_color)
-        if resolved is None:
-            await interaction.followup.send("Could not update that leaderboard.", ephemeral=True)
+        with SessionLocal() as session:
+            embed = _render_ephemeral_board(session, new_set, new_fmt, new_color, str(interaction.user.id))
+        if embed is None:
+            await interaction.followup.send("Could not render that leaderboard.", ephemeral=True)
             return
         try:
             await interaction.edit_original_response(
-                view=_FilterPanel(self.message_id, resolved, new_fmt, new_color, self.with_emoji),
+                embed=embed, view=_FilterPanel(new_set, new_fmt, new_color, self.with_emoji),
             )
         except discord.HTTPException:
             await interaction.edit_original_response(
-                view=_FilterPanel(self.message_id, resolved, new_fmt, new_color, with_emoji=False),
+                embed=embed, view=_FilterPanel(new_set, new_fmt, new_color, with_emoji=False),
             )
 
 
@@ -1045,39 +1024,41 @@ class _FilterButton(discord.ui.Button):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        user_id = str(interaction.user.id)
         msg_id = str(interaction.message.id)
+        set_code = active_set_code()
+        format_value: str | None = None
+        color_value: str | None = None
         with SessionLocal() as session:
             tracked = session.execute(
                 select(LeaderboardMessage).where(LeaderboardMessage.message_id == msg_id)
             ).scalar_one_or_none()
-            if tracked is None:
-                await interaction.response.send_message(
-                    "Post a fresh leaderboard with /leaderboard to enable filtering.",
-                    ephemeral=True,
-                )
-                return
-            set_code = active_set_code()
-            if tracked.set_id is not None:
-                ms = session.get(MagicSet, tracked.set_id)
-                if ms is not None:
-                    set_code = ms.code
-            format_value, color_value = decode_filter(tracked.filter_type, tracked.filter_value)
+            if tracked is not None:
+                if tracked.set_id is not None:
+                    ms = session.get(MagicSet, tracked.set_id)
+                    if ms is not None:
+                        set_code = ms.code
+                format_value, color_value = decode_filter(tracked.filter_type, tracked.filter_value)
+            embed = _render_ephemeral_board(session, set_code, format_value, color_value, user_id)
 
+        if embed is None:
+            await interaction.response.send_message(
+                "Could not render that leaderboard.", ephemeral=True,
+            )
+            return
+
+        await _clear_prev_ephemeral(user_id)
         try:
             await interaction.response.send_message(
-                "Filter the leaderboard:",
-                view=_FilterPanel(msg_id, set_code, format_value, color_value),
-                ephemeral=True,
+                embed=embed, view=_FilterPanel(set_code, format_value, color_value), ephemeral=True,
             )
         except discord.HTTPException:
             await interaction.response.send_message(
-                "Filter the leaderboard:",
-                view=_FilterPanel(msg_id, set_code, format_value, color_value, with_emoji=False),
+                embed=embed, view=_FilterPanel(set_code, format_value, color_value, with_emoji=False),
                 ephemeral=True,
             )
-        await _clear_prev_ephemeral(interaction.user.id)
         try:
-            _LAST_EPHEMERAL[interaction.user.id] = await interaction.original_response()
+            _LAST_EPHEMERAL[user_id] = await interaction.original_response()
         except discord.HTTPException:
             pass
 
@@ -1627,101 +1608,6 @@ async def _replace_tracked_message(
                 if stale is not None:
                     session.delete(stale)
                     session.commit()
-
-
-async def broadcast_current_set_update(bot: commands.Bot) -> dict:
-    """Re-render every tracked leaderboard message for the currently active set.
-
-    Wrapper used by callers (signup flow, !refresh) that just want 'reflect the
-    latest data everywhere' without resolving the set themselves.
-    """
-    with SessionLocal() as session:
-        ms = resolve_active_set(session)
-        if ms is None:
-            return {"edited": 0, "pruned": 0}
-        return await edit_tracked_messages_for_set(bot, ms)
-
-
-async def broadcast_current_set_safely(bot: commands.Bot) -> None:
-    """``broadcast_current_set_update`` wrapped so a Discord hiccup can't sink the calling flow."""
-    try:
-        await broadcast_current_set_update(bot)
-    except Exception:
-        logger.warning("leaderboard broadcast failed", exc_info=True)
-
-
-async def edit_tracked_messages_for_set(bot: commands.Bot, magic_set: MagicSet) -> dict:
-    """Refresh the rendered embed of every tracked leaderboard message for ``magic_set``.
-
-    Used by ``!refresh`` (and any future periodic job) to keep posted leaderboards
-    live without requiring users to re-invoke ``/leaderboard``. Stale tracking
-    rows (message deleted in Discord) get pruned automatically.
-    """
-    summary = {"edited": 0, "pruned": 0}
-    with SessionLocal() as session:
-        rows = session.execute(
-            select(LeaderboardMessage).where(LeaderboardMessage.set_id == magic_set.id)
-        ).scalars().all()
-        targets = [
-            (r.id, r.channel_id, r.message_id, r.filter_type, r.filter_value)
-            for r in rows
-        ]
-
-    if not targets:
-        return summary
-
-    rendered_cache: dict[tuple[str | None, str | None], discord.Embed | None] = {}
-
-    def _render_for(filter_type: str | None, filter_value: str | None) -> discord.Embed | None:
-        key = (filter_type, filter_value)
-        if key in rendered_cache:
-            return rendered_cache[key]
-        with SessionLocal() as session:
-            data, suffix = render_filtered_data(
-                session, filter_type=filter_type, filter_value=filter_value, viewer_discord_id=None,
-            )
-        if data is None:
-            rendered_cache[key] = None
-            return None
-        embed = render_public_embed(data)
-        if suffix:
-            embed.title = f"{embed.title} · {suffix}"
-        rendered_cache[key] = embed
-        return embed
-
-    for row_id, channel_id, message_id, filter_type, filter_value in targets:
-        embed = _render_for(filter_type, filter_value)
-        if embed is None:
-            continue
-        try:
-            channel = bot.get_channel(int(channel_id)) or await bot.fetch_channel(int(channel_id))
-            msg = await channel.fetch_message(int(message_id))
-            # Pass content=None to strip any prior message-content variant (transient format)
-            await msg.edit(content=None, embed=embed, view=render_view(
-                filter_type=filter_type, filter_value=filter_value, set_code=magic_set.code,
-            ))
-            with SessionLocal() as session:
-                tracked = session.get(LeaderboardMessage, row_id)
-                if tracked is not None:
-                    tracked.last_rendered_at = datetime.now(timezone.utc)
-                    session.commit()
-            summary["edited"] += 1
-        except discord.NotFound:
-            with SessionLocal() as session:
-                tracked = session.get(LeaderboardMessage, row_id)
-                if tracked is not None:
-                    session.delete(tracked)
-                    session.commit()
-            summary["pruned"] += 1
-        except discord.HTTPException as e:
-            logger.warning(f"pruning leaderboard message {message_id} in channel {channel_id} after edit failure: {e}")
-            with SessionLocal() as session:
-                tracked = session.get(LeaderboardMessage, row_id)
-                if tracked is not None:
-                    session.delete(tracked)
-                    session.commit()
-            summary["pruned"] += 1
-    return summary
 
 
 class Leaderboard(commands.Cog):

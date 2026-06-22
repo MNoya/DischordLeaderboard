@@ -74,7 +74,8 @@ def process_stats(
     pod = pod_summary_by_set_for_player(session, player.id).get(magic_set.code)
     pod_pts = pod_points(pod.trophies, pod.wins_2_1) if pod else 0
     total_score = compute_score(stat_dicts) + pod_pts
-    total_trophies = sum(int(r.trophies or 0) for r in stats_rows)
+    draft_trophies = sum(int(r.trophies or 0) for r in stats_rows)
+    total_trophies = draft_trophies + (pod.trophies if pod else 0)
     last_updated = max((r.last_fetched_at for r in stats_rows if r.last_fetched_at), default=None)
 
     rank: int | None = None
@@ -185,11 +186,12 @@ def rank_players_for_set(session: Session, set_id: str) -> list[RankedPlayer]:
     standings: list[RankedPlayer] = []
     for pid, (slug, name, did) in identities.items():
         rows = stats_by_player.get(pid, [])
+        pod_trophies, pod_wins_2_1 = pod_counts.get(pid, (0, 0))
         standings.append(RankedPlayer(
             rank=0,
             player_id=pid, slug=slug, display_name=name, discord_id=did,
-            score=compute_score(rows) + pod_points(*pod_counts.get(pid, (0, 0))),
-            trophies=sum(r["trophies"] for r in rows),
+            score=compute_score(rows) + pod_points(pod_trophies, pod_wins_2_1),
+            trophies=sum(r["trophies"] for r in rows) + pod_trophies,
         ))
 
     standings.sort(key=lambda p: (-p.score, p.display_name.lower()))

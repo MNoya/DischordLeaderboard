@@ -159,6 +159,7 @@ class DraftEvent(Base):
     colors     = Column(String, nullable=True)
     start_rank = Column(String, nullable=True)
     end_rank   = Column(String, nullable=True)
+    account_id = Column(Integer, ForeignKey("player_accounts.id", ondelete="SET NULL"), nullable=True)
 
     started_at  = Column(DateTime(timezone=True), nullable=True)
     finished_at = Column(DateTime(timezone=True), nullable=True)
@@ -168,6 +169,24 @@ class DraftEvent(Base):
     __table_args__ = (
         UniqueConstraint("player_id", "seventeenlands_event_id",
                          name="uq_draft_event_per_player"),
+    )
+
+
+class PlayerAccount(Base):
+    """One MTGA account seen under a player's 17lands token.
+
+    A single token can hold several accounts, so ``DraftEvent.account_id`` points here to keep
+    per-account stats (the climb award) from stitching a low rank on one account to Mythic on
+    another. Integer PK rather than the usual UUID so the per-row foreign key stays compact.
+    """
+    __tablename__ = "player_accounts"
+
+    id        = Column(Integer, primary_key=True, autoincrement=True)
+    player_id = Column(String, ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    name      = Column(String, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("player_id", "name", name="uq_player_account"),
     )
 
 

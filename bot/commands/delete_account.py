@@ -104,6 +104,8 @@ class DeleteAccount(commands.Cog):
     async def delete_account(self, interaction: discord.Interaction) -> None:
         user_id = str(interaction.user.id)
         username = str(interaction.user)
+        ephemeral = interaction.guild is not None
+        await interaction.response.defer(ephemeral=ephemeral, thinking=True)
         audit.event("delete_account_invoked", user_id=user_id, username=username)
         logger.info(f"exile: {username} invoked")
 
@@ -114,11 +116,11 @@ class DeleteAccount(commands.Cog):
         if existing is None:
             audit.event("delete_account_short_circuit", user_id=user_id, reason="not_registered")
             logger.info(f"exile: {username} not registered")
-            await interaction.response.send_message(MSG_NOT_ON_BOARD, ephemeral=(interaction.guild is not None))
+            await interaction.followup.send(MSG_NOT_ON_BOARD, ephemeral=ephemeral)
             return
 
-        await interaction.response.send_message(
-            MSG_CONFIRM, view=ConfirmExileView(self.bot, user_id), ephemeral=(interaction.guild is not None),
+        await interaction.followup.send(
+            MSG_CONFIRM, view=ConfirmExileView(self.bot, user_id), ephemeral=ephemeral,
         )
 
 

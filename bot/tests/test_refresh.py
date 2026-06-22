@@ -4,7 +4,10 @@ import requests
 from sqlalchemy import select
 
 from bot.models import DraftEvent, MagicSet, Player, PlayerStats
+from bot.services import refresh as refresh_mod
 from bot.services.refresh import (
+    RATE_LIMIT_COOLDOWN_S,
+    RATE_LIMIT_MAX_RETRIES,
     bulk_upsert_draft_events,
     claim_orphan_drafts,
     rebuild_player_stats,
@@ -44,6 +47,25 @@ def _make_500():
     resp = requests.Response()
     resp.status_code = 500
     return requests.HTTPError(response=resp)
+
+
+def _make_403():
+    resp = requests.Response()
+    resp.status_code = 403
+    return requests.HTTPError(response=resp)
+
+
+class RateLimitedThenOkClient:
+    def __init__(self, fail_times, drafts=None):
+        self.fail_times = fail_times
+        self.drafts = drafts or []
+        self.calls = 0
+
+    def fetch_drafts(self, token, start_date=None, end_date=None):
+        self.calls += 1
+        if self.calls <= self.fail_times:
+            raise _make_403()
+        return list(self.drafts)
 
 
 def _seed_set(session, code="ECL", start_date=date(2026, 1, 20)):
@@ -138,14 +160,28 @@ def test_bulk_upsert_keeps_unknown_formats_and_tallies_them(session):
     sos = _seed_set(session, code="SOS")
     p = _seed_player(session)
     result = bulk_upsert_draft_events(
-        session, p.id, [_draft("a", format="MidWeekSealed")], [sos]
+        session, p.id, [_draft("a", format="MysteryCubeDraft")], [sos]
     )
     session.flush()
 
     [row] = session.execute(select(DraftEvent).where(DraftEvent.player_id == p.id)).scalars().all()
-    assert row.format == "MidWeekSealed"
+    assert row.format == "MysteryCubeDraft"
     assert row.set_id == sos.id
-    assert result["unknown_formats"] == {"MidWeekSealed": 1}
+    assert result["unknown_formats"] == {"MysteryCubeDraft": 1}
+
+
+def test_bulk_upsert_treats_midweek_as_known_not_unknown(session):
+    """MidWeek* are casual events: persisted but never reported as unknown formats."""
+    sos = _seed_set(session, code="SOS")
+    p = _seed_player(session)
+    result = bulk_upsert_draft_events(
+        session, p.id, [_draft("a", format="MidWeekSealed"), _draft("b", format="MidWeekQuickDraft")], [sos]
+    )
+    session.flush()
+
+    stored = {r.format for r in session.execute(select(DraftEvent).where(DraftEvent.player_id == p.id)).scalars()}
+    assert stored == {"MidWeekSealed", "MidWeekQuickDraft"}
+    assert result["unknown_formats"] == {}
 
 
 def test_bulk_upsert_is_idempotent(session):
@@ -347,6 +383,48 @@ def test_refresh_player_network_error_does_not_invalidate(session):
     result = refresh_player(session, FakeClient(raise_=requests.ConnectTimeout("timeout")), p)
     assert result["status"] == "error"
     assert p.token_invalid is False
+
+
+def test_refresh_player_403_returns_rate_limited(session):
+    _seed_set(session, code="ECL")
+    p = _seed_player(session)
+
+    result = refresh_player(session, FakeClient(raise_=_make_403()), p)
+
+    assert result["status"] == "rate_limited"
+    assert p.token_invalid is False
+
+
+def test_rate_limit_pause_retries_then_succeeds(session, monkeypatch):
+    _seed_active_set(session)
+    p = _seed_player(session)
+    sleeps = []
+    monkeypatch.setattr(refresh_mod._time, "sleep", lambda s: sleeps.append(s))
+    client = RateLimitedThenOkClient(fail_times=1)
+
+    result = refresh_mod._refresh_player_pausing_on_rate_limit(
+        session, client, p, date(2026, 4, 21), idx=1, n_total=1
+    )
+
+    assert result["status"] == "updated"
+    assert sleeps == [RATE_LIMIT_COOLDOWN_S]
+    assert client.calls == 2
+
+
+def test_rate_limit_pause_gives_up_after_max_retries(session, monkeypatch):
+    _seed_active_set(session)
+    p = _seed_player(session)
+    sleeps = []
+    monkeypatch.setattr(refresh_mod._time, "sleep", lambda s: sleeps.append(s))
+    client = RateLimitedThenOkClient(fail_times=99)
+
+    result = refresh_mod._refresh_player_pausing_on_rate_limit(
+        session, client, p, date(2026, 4, 21), idx=5, n_total=10
+    )
+
+    assert result["status"] == "error"
+    assert len(sleeps) == RATE_LIMIT_MAX_RETRIES
+    assert client.calls == RATE_LIMIT_MAX_RETRIES + 1
 
 
 # ---------------------------------------------------------------------------
