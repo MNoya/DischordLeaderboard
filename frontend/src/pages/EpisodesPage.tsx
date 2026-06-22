@@ -38,7 +38,7 @@ import { useMediaFeed } from "../data/hooks";
 import { EPISODE_CATEGORIES, categoryFromSlug, categorySlug, type Episode, type EpisodeCategory } from "../data/episodes";
 import { LISTEN_ON } from "../data/site";
 import { cn } from "../lib/utils";
-import { useIsMobile } from "../lib/use-is-mobile";
+import { useEpisodeGridColumns, useIsMobile } from "../lib/use-is-mobile";
 import { TOGGLE_ACTIVE, TOGGLE_INACTIVE } from "../lib/toggle-styles";
 
 const SORT_OPTIONS: { value: SortKey; label: string; icon: LucideIcon }[] = [
@@ -97,7 +97,9 @@ export function EpisodesPage() {
   const [visible, setVisible] = useState(PAGE_SIZE);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [railCollapsed, setRailCollapsed] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const isMobile = useIsMobile();
+  const gridColumns = useEpisodeGridColumns();
   const sentinelRef = useRef<HTMLDivElement>(null);
   const contentTopRef = useRef<HTMLDivElement>(null);
   const searchWrapRef = useRef<HTMLDivElement>(null);
@@ -305,6 +307,10 @@ export function EpisodesPage() {
   }, [shortsView, audioView, scopedShorts, scopedAudio, scopedLongform, activeCategory, sort]);
 
   useEffect(() => {
+    setExpandedId(null);
+  }, [slug, activeSet, audioView, shortsView, sort, query]);
+
+  useEffect(() => {
     if (visible >= filtered.length) {
       return;
     }
@@ -479,14 +485,25 @@ export function EpisodesPage() {
                     </ShortGrid>
                   ) : (
                     <Grid>
-                      {filtered.slice(0, visible).map((ep) => (
-                        <EpisodeCard
-                          key={ep.id}
-                          episode={ep}
-                          thumbnailPending={thumbnailsPending}
-                          audioMode={audioView}
-                        />
-                      ))}
+                      {filtered.slice(0, visible).map((ep, index) => {
+                        const isExpanded = expandedId === ep.id;
+                        const column = index % gridColumns;
+                        const colStart = column === gridColumns - 1 ? gridColumns - 1 : column + 1;
+                        const rowStart = Math.floor(index / gridColumns) + 1;
+                        const placed = isExpanded && gridColumns > 1;
+                        return (
+                          <EpisodeCard
+                            key={ep.id}
+                            episode={ep}
+                            thumbnailPending={thumbnailsPending}
+                            audioMode={audioView}
+                            expanded={isExpanded}
+                            colStart={placed ? colStart : undefined}
+                            rowStart={placed ? rowStart : undefined}
+                            onPlayingChange={(playing) => setExpandedId(playing ? ep.id : null)}
+                          />
+                        );
+                      })}
                     </Grid>
                   )}
                 </Crossfade>
@@ -787,7 +804,7 @@ function EmptyResults({
 
 function Grid({ children }: { children: ReactNode }) {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-x-4 gap-y-7">
+    <div className="grid grid-flow-row-dense grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-x-4 gap-y-7">
       {children}
     </div>
   );

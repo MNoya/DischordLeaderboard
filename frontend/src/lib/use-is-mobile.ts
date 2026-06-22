@@ -62,3 +62,31 @@ export function useSetVisibleCap(total: number, extraHide = 0): number {
   }, []);
   return Math.max(VISIBLE_FLOOR, Math.min(total, cap - extraHide));
 }
+
+const EPISODE_GRID_BREAKPOINTS: Array<[number, number]> = [
+  [1536, 4],
+  [1280, 3],
+  [640, 2],
+];
+
+function computeEpisodeColumns(): number {
+  if (typeof window === "undefined") return 4;
+  for (const [w, cols] of EPISODE_GRID_BREAKPOINTS) {
+    if (window.matchMedia(`(min-width: ${w}px)`).matches) return cols;
+  }
+  return 1;
+}
+
+export function useEpisodeGridColumns(): number {
+  const [columns, setColumns] = React.useState<number>(computeEpisodeColumns);
+  React.useEffect(() => {
+    const mqls = EPISODE_GRID_BREAKPOINTS.map(([w]) =>
+      window.matchMedia(`(min-width: ${w}px)`),
+    );
+    const update = () => setColumns(computeEpisodeColumns());
+    mqls.forEach((m) => m.addEventListener("change", update));
+    update();
+    return () => mqls.forEach((m) => m.removeEventListener("change", update));
+  }, []);
+  return columns;
+}

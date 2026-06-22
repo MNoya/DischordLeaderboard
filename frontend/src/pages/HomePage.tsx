@@ -14,6 +14,7 @@ import { GiRoundTable } from "react-icons/gi";
 import { SiPatreon, SiTwitch, SiYoutube } from "react-icons/si";
 import type { IconType } from "react-icons";
 import { Tooltip } from "../components/Tooltip";
+import { EpisodeLinkTooltip, episodeTitleHref } from "../components/EpisodeLink";
 import { AAvatar, fmtPts, SetGlyph, setGlyphCode } from "../components/Brand";
 import { TierSetDropdown } from "../components/TierSetDropdown";
 import { boardModeFor, type BoardMode } from "../components/LeaderboardTable";
@@ -569,6 +570,7 @@ function HeroEpisodeCard({
   const [playing, setPlaying] = useState(false);
   const { canPlayAudio, playable } = episodePlayability(episode);
   const play = () => setPlaying(true);
+  const titleHref = episodeTitleHref(episode);
 
   const thumbnail = (
     <>
@@ -627,14 +629,19 @@ function HeroEpisodeCard({
           <EpisodeTag episode={episode} glyphSize={14} className="gap-1" />
         </div>
       ) : (
-        <div className="p-3 shrink-0 flex items-start justify-between gap-2">
-          <h3 className="flex-1 min-w-0 font-body text-text text-[16px] font-medium leading-snug line-clamp-2 transition-colors group-hover/ep:text-green">
-            <a href={episode.link} target="_blank" rel="noreferrer" className="no-underline text-inherit hover:text-green">
+        <EpisodeLinkTooltip episode={episode}>
+          <a
+            href={titleHref}
+            target="_blank"
+            rel="noreferrer"
+            className="p-3 shrink-0 flex items-start justify-between gap-2 no-underline group-hover/ep:text-green"
+          >
+            <h3 className="flex-1 min-w-0 font-body text-text text-[16px] font-medium leading-snug line-clamp-2 transition-colors group-hover/ep:text-green">
               {episodeShortTitle(episode.title)}
-            </a>
-          </h3>
-          <EpisodeTag episode={episode} className="mt-0.5" />
-        </div>
+            </h3>
+            <EpisodeTag episode={episode} className="mt-0.5" />
+          </a>
+        </EpisodeLinkTooltip>
       )}
     </div>
   );
