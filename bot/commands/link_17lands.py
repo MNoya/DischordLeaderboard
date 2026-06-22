@@ -9,7 +9,6 @@ from discord.ext import commands
 from bot import audit, emojis
 from bot.commands import descriptions as desc
 from bot.commands import token_messages as tmsg
-from bot.commands.leaderboard import broadcast_current_set_safely
 from bot.commands.messages import MSG_JOINED_LEADERBOARD
 from bot.database import SessionLocal
 from bot.discord_helpers import extract_avatar_hash
@@ -87,7 +86,6 @@ class LeaderboardChoicePrompt(discord.ui.View):
         display_name = self._set_membership(active=True, opt_in=True)
         audit.event("link_17lands_join", user_id=self.user_id, player_id=self.player_id)
         await self._finish(interaction, MSG_JOINED_LEADERBOARD)
-        await broadcast_current_set_safely(self.bot)
         if display_name:
             await bot_log.get(self.bot).post_plain(f"🆕 **{display_name}** joined the leaderboard")
 
@@ -95,7 +93,6 @@ class LeaderboardChoicePrompt(discord.ui.View):
         display_name = self._set_membership(opt_in=False)
         audit.event("link_17lands_leave", user_id=self.user_id, player_id=self.player_id)
         await self._finish(interaction, MSG_LEFT)
-        await broadcast_current_set_safely(self.bot)
         if display_name:
             await bot_log.get(self.bot).post_plain(f"👋 **{display_name}** left the leaderboard")
 
@@ -193,9 +190,6 @@ class Link17Lands(commands.Cog):
         with SessionLocal() as session:
             player = session.get(Player, result.player_id)
             currently_in = bool(player and player.active and player.leaderboard_opt_in)
-
-        if currently_in:
-            await broadcast_current_set_safely(self.bot)
 
         view = LeaderboardChoicePrompt(self.bot, user_id, result.player_id, currently_in=currently_in)
         view.message = await dm.send(link_prompt(currently_in), view=view)

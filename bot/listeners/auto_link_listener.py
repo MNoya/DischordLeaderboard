@@ -18,7 +18,6 @@ from sqlalchemy import select
 
 from bot import audit, emojis
 from bot.commands import token_messages as tmsg
-from bot.commands.leaderboard import broadcast_current_set_update
 from bot.commands.messages import MSG_JOINED_LEADERBOARD
 from bot.commands.signup import (
     MSG_WELCOME_BACK,
@@ -130,7 +129,6 @@ class AutoLinkListener(commands.Cog):
             with SessionLocal() as session:
                 refresh_one_player_for_all_sets(session, self.client, result.player_id)
                 session.commit()
-            await _safe_broadcast(self.bot)
             await bot_log.get(self.bot).post_plain(
                 f"🆕 **{message.author.display_name}** joined the leaderboard"
             )
@@ -163,7 +161,6 @@ class AutoLinkListener(commands.Cog):
                 refresh_one_player_for_all_sets(session, self.client, result.player_id)
                 session.commit()
             if was_inactive:
-                await _safe_broadcast(self.bot)
                 await bot_log.get(self.bot).post_plain(
                     f"🔁 **{message.author.display_name}** rejoined the leaderboard"
                 )
@@ -177,13 +174,6 @@ class AutoLinkListener(commands.Cog):
             await _safe_dm(message.author, tmsg.TOKEN_IN_USE)
         elif result.kind == "rejected_by_17lands":
             await _safe_dm(message.author, tmsg.REJECTED)
-
-
-async def _safe_broadcast(bot: commands.Bot) -> None:
-    try:
-        await broadcast_current_set_update(bot)
-    except Exception:
-        log.warning("auto-link broadcast failed", exc_info=True)
 
 
 async def _safe_dm(user: discord.abc.User, content: str) -> None:

@@ -14,7 +14,6 @@ from bot import audit, emojis
 from bot.commands import descriptions as desc
 from bot.commands import token_messages as tmsg
 from bot.commands.leaderboard import (
-    broadcast_current_set_safely,
     process_leaderboard,
     render_embed as render_lb,
     render_view as render_lb_view,
@@ -46,6 +45,7 @@ INSTRUCTIONS = (
 MSG_DM_SENT = "📬 Check your DMs to join!"
 MSG_ALREADY_SIGNED_UP = "You're already in! 🎉 Run `/help` to see everything you can do."
 MSG_WELCOME_BACK = "👋 Welcome back! You're on the leaderboard again."
+MSG_SYNCING = "⏳ Catching up on your latest 17lands drafts…"
 MSG_TIMEOUT = "⏱️ Timed out. Run `/join` again whenever you're ready."
 
 
@@ -156,30 +156,21 @@ class Signup(commands.Cog):
             reactivated = check.kind == "reactivated"
             audit.event(f"signup_{check.kind}", user_id=user_id, player_id=check.player_id)
             logger.info(f"join: {username} {check.kind}")
-            # Defer because the refresh may take a second or two on a cold rate limiter
-            await interaction.response.defer(ephemeral=(interaction.guild is not None), thinking=True)
-            # Only reactivated players need a catch-up pull, opted-in players stayed in the periodic refresh
+            in_guild = interaction.guild is not None
+            await interaction.response.defer(ephemeral=in_guild, thinking=True)
+            # Only reactivated players need a catch-up pull; opted-in players stayed in the periodic refresh
+            progress = None
             if reactivated:
+                progress = await interaction.followup.send(MSG_SYNCING, ephemeral=in_guild, wait=True)
                 with SessionLocal() as session:
                     refresh_one_player_for_all_sets(session, self.client, check.player_id)
                     session.commit()
-            await broadcast_current_set_safely(self.bot)
             await bot_log.get(self.bot).post_plain(
                 f"🔁 **{interaction.user.display_name}** rejoined the leaderboard"
             )
-            await interaction.followup.send(
-                MSG_WELCOME_BACK if reactivated else MSG_RANKED_AGAIN,
-                ephemeral=(interaction.guild is not None),
-            )
-            try:
-                dm = await interaction.user.create_dm()
-                lb_embed, lb_view, stats_embed, stats_view = await _build_join_preview(self.bot, user_id)
-                if lb_embed is not None:
-                    await dm.send(embed=lb_embed, view=lb_view)
-                if stats_embed is not None:
-                    await dm.send(embed=stats_embed, view=stats_view)
-            except Exception:
-                logger.warning("post-join preview failed", exc_info=True)
+            back_msg = MSG_WELCOME_BACK if reactivated else MSG_RANKED_AGAIN
+            stats_embed, stats_view = await _build_join_stats(self.bot, user_id)
+            await _deliver_rejoin_reply(interaction, progress, back_msg, stats_embed, stats_view, in_guild)
             return
         if check.kind == "already_signed_up":
             audit.event("signup_short_circuit", user_id=user_id, reason="already_signed_up")
@@ -244,7 +235,6 @@ class Signup(commands.Cog):
         with SessionLocal() as session:
             refresh_one_player_for_all_sets(session, self.client, result.player_id)
             session.commit()
-        await broadcast_current_set_safely(self.bot)
         await bot_log.get(self.bot).post_plain(
             f"🆕 **{interaction.user.display_name}** joined the leaderboard"
         )
@@ -271,22 +261,45 @@ async def _send_signup_instructions(send) -> None:
     await send_token_instructions(send, content)
 
 
-async def _build_join_preview(bot: commands.Bot, user_id: str):
-    """Fetch the leaderboard + stats data for a freshly-joined or reactivated user.
+async def _build_join_stats(bot: commands.Bot, user_id: str):
+    """Personal stats embed + Hide/Show-rank view for a joined or reactivated user.
 
-    Returns (leaderboard_embed, leaderboard_view, stats_embed, stats_view). Any
-    element may be None if there's nothing to show (no current set, no stats yet).
-    The stats view carries the Hide/Show-rank toggle when the player has a token.
+    Either element is None when there's nothing to show yet (no stats this set, or
+    no token to gate the visibility toggle on).
+    """
+    with SessionLocal() as session:
+        stats_data = process_stats(session, player_name=None, viewer_discord_id=user_id)
+    if stats_data is None:
+        return None, None
+    stats_view = LeaderboardVisibilityView(bot, user_id, stats_data) if stats_data.has_token else None
+    return render_stats_embed(stats_data), stats_view
+
+
+async def _build_join_preview(bot: commands.Bot, user_id: str):
+    """Leaderboard + personal stats for a freshly-linked user's welcome DM.
+
+    Returns (leaderboard_embed, leaderboard_view, stats_embed, stats_view); any
+    element may be None when there's nothing to show.
     """
     with SessionLocal() as session:
         lb_data = process_leaderboard(session, viewer_discord_id=user_id)
     lb_embed = render_lb(lb_data) if lb_data is not None else None
-
-    with SessionLocal() as session:
-        stats_data = process_stats(session, player_name=None, viewer_discord_id=user_id)
-    stats_embed = render_stats_embed(stats_data) if stats_data is not None else None
-    stats_view = None
-    if stats_data is not None and stats_data.has_token:
-        stats_view = LeaderboardVisibilityView(bot, user_id, stats_data)
-
+    stats_embed, stats_view = await _build_join_stats(bot, user_id)
     return lb_embed, render_lb_view(), stats_embed, stats_view
+
+
+async def _deliver_rejoin_reply(interaction, progress, content, stats_embed, stats_view, ephemeral):
+    """Send the rejoin confirmation plus personal stats in the invoked channel.
+
+    Edits the in-progress sync message in place when one was posted, otherwise sends
+    a fresh followup. Pod-only players with no stats this set just get the text.
+    """
+    kwargs = {"content": content}
+    if stats_embed is not None:
+        kwargs["embed"] = stats_embed
+    if stats_view is not None:
+        kwargs["view"] = stats_view
+    if progress is not None:
+        await progress.edit(**kwargs)
+    else:
+        await interaction.followup.send(ephemeral=ephemeral, **kwargs)

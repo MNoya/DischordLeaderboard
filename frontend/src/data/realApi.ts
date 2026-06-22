@@ -213,12 +213,14 @@ export async function fetchLeaderboard(setCode: string): Promise<LeaderboardRow[
   for (const raw of pod.data ?? []) {
     const r = raw as Record<string, unknown>;
     if (r.leaderboard_opt_in === false) continue;
-    const bonus = podPoints((r.trophies as number) ?? 0, (r.wins_2_1 as number) ?? 0);
+    const podTrophies = (r.trophies as number) ?? 0;
+    const bonus = podPoints(podTrophies, (r.wins_2_1 as number) ?? 0);
     if (bonus === 0) continue;
     const slug = r.slug as string;
     const existing = bySlug.get(slug);
     if (existing) {
       existing.score = Math.round((existing.score + bonus) * 100) / 100;
+      existing.trophies += podTrophies;
     } else {
       bySlug.set(slug, {
         setCode,
@@ -227,7 +229,7 @@ export async function fetchLeaderboard(setCode: string): Promise<LeaderboardRow[
         avatarUrl: (r.avatar_url ?? null) as string | null,
         rank: 0,
         score: bonus,
-        trophies: 0,
+        trophies: podTrophies,
         events: 0,
         wins: 0,
         losses: 0,
@@ -835,11 +837,12 @@ export async function fetchPlayerProfile(
     b.scoreContribution = Math.round((agg.contributionByLabel.get(b.formatLabel) ?? 0) * 100) / 100;
   }
   // Pods score flat (no weight/rate/confidence) — append as its own breakdown row
+  let podTrophies = 0;
   if (podResp.data) {
     const p = podResp.data as Record<string, unknown>;
-    const trophies = (p.trophies as number) ?? 0;
+    podTrophies = (p.trophies as number) ?? 0;
     const wins21 = (p.wins_2_1 as number) ?? 0;
-    const pts = podPoints(trophies, wins21);
+    const pts = podPoints(podTrophies, wins21);
     if (pts > 0) {
       breakdown.push({
         setCode,
@@ -848,7 +851,7 @@ export async function fetchPlayerProfile(
         events: (p.events as number) ?? 0,
         wins: (p.wins as number) ?? 0,
         losses: (p.losses as number) ?? 0,
-        trophies,
+        trophies: podTrophies,
         wins21,
         scoreContribution: pts,
       });
@@ -863,7 +866,7 @@ export async function fetchPlayerProfile(
     setCode: headline.setCode,
     rank: inBoard?.rank ?? 0,
     score: inBoard?.score ?? 0,
-    trophies: headline.trophies,
+    trophies: headline.trophies + podTrophies,
     events: headline.events,
     wins: headline.wins,
     losses: headline.losses,

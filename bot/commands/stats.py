@@ -8,7 +8,6 @@ from discord.ext import commands
 
 from bot import audit, emojis
 from bot.commands import descriptions as desc
-from bot.commands.leaderboard import broadcast_current_set_safely
 from bot.database import SessionLocal
 from bot.services.leaderboard_visibility import set_opt_in
 from bot.services.player_stats import StatsData, process_stats, profile_url, render_embed
@@ -62,7 +61,6 @@ class LeaderboardVisibilityView(discord.ui.View):
             await interaction.response.edit_message(embed=render_embed(data), view=self)
         else:
             await interaction.response.edit_message(view=self)
-        await broadcast_current_set_safely(self.bot)
 
 
 class Stats(commands.Cog):

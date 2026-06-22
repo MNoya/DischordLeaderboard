@@ -23,7 +23,6 @@ from bot.commands.link_17lands import setup as setup_link_17lands
 from bot.commands.leaderboard_visibility import setup as setup_leaderboard_visibility
 from bot.commands.leaderboard import (
     LeaderboardView,
-    edit_tracked_messages_for_set,
     setup as setup_leaderboard,
 )
 from bot.commands.pod_backfill import setup as setup_pod_backfill
@@ -333,16 +332,9 @@ def build_bot(guild_id: int) -> commands.Bot:
         except Exception:
             log.warning("profile refresh sweep failed", exc_info=True)
 
-        edit_summary = {"edited": 0, "pruned": 0}
-        with SessionLocal() as session:
-            ms = resolve_active_set(session)
-            if ms is not None:
-                edit_summary = await edit_tracked_messages_for_set(bot, ms)
-
         result = {
             "summary": summary,
             "avatar_summary": avatar_summary,
-            "edit_summary": edit_summary,
             "trigger": trigger,
         }
 
@@ -361,7 +353,6 @@ def build_bot(guild_id: int) -> commands.Bot:
         rows: list[str] = [
             f"{trigger} Refresh | {elapsed} | {n_players} Players{avg}",
             f"Updated {summary['updated']} | Invalidated {summary['invalidated']} | Errors {summary['errors']}",
-            f"Messages: {result['edit_summary']['edited']} edited | {result['edit_summary']['pruned']} pruned",
         ]
         unknown = summary.get("unknown_formats") or {}
         if unknown:
@@ -383,11 +374,6 @@ def build_bot(guild_id: int) -> commands.Bot:
                 f"Invalidated: {summary['invalidated']} · "
                 f"Errors: {summary['errors']}"
             )
-        edits = result["edit_summary"]
-        msg_line = f"Live messages: {edits['edited']} edited"
-        if edits["pruned"]:
-            msg_line += f" · {edits['pruned']} pruned"
-        body += f"\n{msg_line}"
         if unknown:
             tally = ", ".join(f"`{fmt}` ×{n}" for fmt, n in sorted(unknown.items(), key=lambda kv: (-kv[1], kv[0])))
             body += f"\n⚠️ New format(s) observed (stored, not scoring): {tally}"
