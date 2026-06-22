@@ -247,6 +247,9 @@ export const fetchPlayerProfile = (
   });
 };
 
+export const fetchPlayerSlugByDiscordId = (_discordId: string): Promise<string | null> =>
+  wait(leaderboardSosFixture[0]?.slug ?? null);
+
 // ─── public_player (identity, set-independent) ───────────────────────────────
 export const fetchPlayerIdentity = (slug: string): Promise<PlayerIdentity | null> => {
   const row = leaderboardSosFixture.find((r) => r.slug === slug);

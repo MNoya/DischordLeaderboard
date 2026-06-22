@@ -208,9 +208,11 @@ export async function fetchLeaderboard(setCode: string): Promise<LeaderboardRow[
     });
   }
 
-  // Pod points: add to existing rows, or admit pod-only players as entrants (always public)
+  // Pod points: add to existing rows, or admit pod-only players as entrants. Opted-out
+  // players stay in the pod standings but never rejoin the overall board on pod points.
   for (const raw of pod.data ?? []) {
     const r = raw as Record<string, unknown>;
+    if (r.leaderboard_opt_in === false) continue;
     const bonus = podPoints((r.trophies as number) ?? 0, (r.wins_2_1 as number) ?? 0);
     if (bonus === 0) continue;
     const slug = r.slug as string;
@@ -870,6 +872,20 @@ export async function fetchPlayerProfile(
 }
 
 // ─── public_player (identity, set-independent) ─────────────────────────────
+
+// The logged-in user carries only their Discord id; the player slug lives in the DB.
+// discord_id is already embedded in the public avatar_url, so match on it to recover
+// the slug. Players on a default Discord avatar have a null avatar_url and won't resolve.
+export async function fetchPlayerSlugByDiscordId(discordId: string): Promise<string | null> {
+  const { data, error } = await client()
+    .from("public_player")
+    .select("slug")
+    .ilike("avatar_url", `%/avatars/${discordId}/%`)
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as { slug?: string } | null)?.slug ?? null;
+}
 
 export async function fetchPlayerIdentity(slug: string): Promise<PlayerIdentity | null> {
   const { data, error } = await client()

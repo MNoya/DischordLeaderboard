@@ -6,7 +6,7 @@ import { ALogo, AWordmark } from "./Brand";
 import { cn } from "../lib/utils";
 import { useIsMobile } from "../lib/use-is-mobile";
 import { useAuth } from "../auth/useAuth";
-import { useP0P1Picks } from "../data/hooks";
+import { useP0P1Picks, usePlayerSlugByDiscordId } from "../data/hooks";
 import { P0P1_SET_CODE, P0P1_VOTING_DEADLINE, SLOTS } from "../data/p0p1Slots";
 
 // Top-of-page chrome shared across the whole community site. The brand mark is
@@ -205,6 +205,7 @@ export function AppHeader({ subtitle = "LEADERBOARD", subtitleShort, fill = fals
 
 function DesktopAuth() {
   const { user, loading, signIn, signOut } = useAuth();
+  const { data: profileSlug } = usePlayerSlugByDiscordId(user?.discordId);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -260,10 +261,21 @@ function DesktopAuth() {
       </button>
       {open && (
         <div className="absolute right-0 top-full mt-2 w-60 bg-surface border border-border2 rounded-lg shadow-xl shadow-black/40 overflow-hidden z-50 animate-fadeUpIn">
-          <div className="flex items-center gap-2.5 px-3 py-3 border-b border-border">
-            {avatar("w-8 h-8", "text-sm")}
-            <span className="text-text text-sm font-medium truncate">{user.username}</span>
-          </div>
+          {profileSlug ? (
+            <Link
+              to={`/leaderboard/player/${profileSlug}`}
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-2.5 px-3 py-3 border-b border-border no-underline hover:bg-surface2 transition-colors"
+            >
+              {avatar("w-8 h-8", "text-sm")}
+              <span className="text-text text-sm font-medium truncate">{user.username}</span>
+            </Link>
+          ) : (
+            <div className="flex items-center gap-2.5 px-3 py-3 border-b border-border">
+              {avatar("w-8 h-8", "text-sm")}
+              <span className="text-text text-sm font-medium truncate">{user.username}</span>
+            </div>
+          )}
           <button
             type="button"
             onClick={() => { signOut(); setOpen(false); }}
@@ -290,6 +302,18 @@ function MobileMenu({
   onClose: () => void;
 }) {
   const { user, loading, signIn, signOut } = useAuth();
+  const { data: profileSlug } = usePlayerSlugByDiscordId(user?.discordId);
+
+  const userRow = user && (
+    <>
+      {user.avatarUrl ? (
+        <img src={user.avatarUrl} alt="" className="w-6 h-6 rounded-full" />
+      ) : (
+        <div className="w-6 h-6 rounded-full bg-surface" />
+      )}
+      <span className="text-text text-sm truncate">{user.username}</span>
+    </>
+  );
 
   return (
     <>
@@ -303,14 +327,18 @@ function MobileMenu({
         role="menu"
       >
         {includeAuth && !loading && user && (
-          <div className="flex items-center gap-3 px-5 min-h-[54px] border-b border-border">
-            {user.avatarUrl ? (
-              <img src={user.avatarUrl} alt="" className="w-6 h-6 rounded-full" />
-            ) : (
-              <div className="w-6 h-6 rounded-full bg-surface" />
-            )}
-            <span className="text-text text-sm truncate">{user.username}</span>
-          </div>
+          profileSlug ? (
+            <Link
+              to={`/leaderboard/player/${profileSlug}`}
+              onClick={onClose}
+              role="menuitem"
+              className="flex items-center gap-3 px-5 min-h-[54px] border-b border-border no-underline hover:bg-surface transition-colors"
+            >
+              {userRow}
+            </Link>
+          ) : (
+            <div className="flex items-center gap-3 px-5 min-h-[54px] border-b border-border">{userRow}</div>
+          )
         )}
         {items.map((n) => {
           const active = n.match(pathname);

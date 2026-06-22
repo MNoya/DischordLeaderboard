@@ -158,9 +158,11 @@ class Signup(commands.Cog):
             logger.info(f"join: {username} {check.kind}")
             # Defer because the refresh may take a second or two on a cold rate limiter
             await interaction.response.defer(ephemeral=(interaction.guild is not None), thinking=True)
-            with SessionLocal() as session:
-                refresh_one_player_for_all_sets(session, self.client, check.player_id)
-                session.commit()
+            # Only reactivated players need a catch-up pull, opted-in players stayed in the periodic refresh
+            if reactivated:
+                with SessionLocal() as session:
+                    refresh_one_player_for_all_sets(session, self.client, check.player_id)
+                    session.commit()
             await broadcast_current_set_safely(self.bot)
             await bot_log.get(self.bot).post_plain(
                 f"🔁 **{interaction.user.display_name}** rejoined the leaderboard"
@@ -238,6 +240,7 @@ class Signup(commands.Cog):
             return
 
         # linked — pull fresh stats so they show up immediately
+        await dm.send(tmsg.FETCHING_EVENTS)
         with SessionLocal() as session:
             refresh_one_player_for_all_sets(session, self.client, result.player_id)
             session.commit()

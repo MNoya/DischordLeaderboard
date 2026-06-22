@@ -174,7 +174,11 @@ def rank_players_for_set(session: Session, set_id: str) -> list[RankedPlayer]:
         p.id: (p.slug, p.display_name, p.discord_id)
         for p in session.execute(
             select(Player.id, Player.slug, Player.display_name, Player.discord_id)
-            .where(Player.id.in_(set(stats_by_player) | set(pod_counts)))
+            .where(
+                Player.id.in_(set(stats_by_player) | set(pod_counts)),
+                Player.active.is_(True),
+                Player.leaderboard_opt_in.is_(True),
+            )
         ).all()
     }
 

@@ -73,13 +73,13 @@ function CardsLayout({ rows, confidence = 0 }: { rows: BreakdownRow[]; confidenc
                       {r.count}
                       <Trophy size={11} color="#ffc63a" />
                     </span>
-                    <span className="text-dim">×</span>
+                    <span className="text-green text-[14px] leading-none align-middle">×</span>
                     <span className="mono">5 pts</span>
                     {r.wins21 > 0 && (
                       <>
-                        <span className="text-dim">+</span>
-                        <span className="mono">{r.wins21} × 2-1</span>
-                        <span className="text-dim">×</span>
+                        <span className="text-green text-[16px] font-bold leading-none align-middle">+</span>
+                        <span className="mono">{r.wins21} two-ones</span>
+                        <span className="text-green text-[14px] leading-none align-middle">×</span>
                         <span className="mono">2 pts</span>
                       </>
                     )}
@@ -92,11 +92,11 @@ function CardsLayout({ rows, confidence = 0 }: { rows: BreakdownRow[]; confidenc
                     </span>
                     {earned && (
                       <>
-                        <span className="text-dim">×</span>
+                        <span className="text-green text-[14px] leading-none align-middle">×</span>
                         <span className="mono">{pct(r.rate)} win rate</span>
                       </>
                     )}
-                    <span className="text-dim">×</span>
+                    <span className="text-green text-[14px] leading-none align-middle">×</span>
                     <span className="mono">{r.points} pts</span>
                   </>
                 ) : (
@@ -105,17 +105,17 @@ function CardsLayout({ rows, confidence = 0 }: { rows: BreakdownRow[]; confidenc
                       {r.count}
                       <Trophy size={11} color="#ffc63a" />
                     </span>
-                    <span className="text-dim">×</span>
+                    <span className="text-green text-[14px] leading-none align-middle">×</span>
                     <span className="mono">{r.points} pts</span>
                     {earned && (
                       <>
-                        <span className="text-dim">×</span>
+                        <span className="text-green text-[14px] leading-none align-middle">×</span>
                         <span className="mono">{pct(r.rate)} trophy rate</span>
                       </>
                     )}
                     {earned && confidence > 0 && (
                       <>
-                        <span className="text-dim">×</span>
+                        <span className="text-green text-[14px] leading-none align-middle">×</span>
                         <span className="mono">{pct(confidence)} confidence</span>
                       </>
                     )}
@@ -124,7 +124,7 @@ function CardsLayout({ rows, confidence = 0 }: { rows: BreakdownRow[]; confidenc
               </div>
             </div>
             <span className="font-display text-text tabular-nums shrink-0 self-center leading-none text-[20px]">
-              {earned ? r.score.toFixed(2) : <span className="text-dim">—</span>}
+              {earned ? (r.isPod ? r.score.toFixed(0) : r.score.toFixed(2)) : <span className="text-dim">—</span>}
             </span>
           </div>
         );

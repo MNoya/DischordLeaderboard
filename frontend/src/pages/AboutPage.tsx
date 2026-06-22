@@ -29,11 +29,12 @@ function Intro() {
         THE <span className="text-green">LEADERBOARD</span>
       </SectionHeading>
       <p className="text-[13px] md:text-[14px] text-muted leading-[1.6]">
-        Ranks Discord members who opt in via{" "}
-        <code className="mono text-text bg-surface2 border border-border2 px-1.5 py-px text-[13px]">
-          /join
-        </code>
-        , using their <ExternalLink href={SEVENTEEN_LANDS_URL}>17Lands</ExternalLink> data.
+        Ranks Discord members who opt in via <Cmd>/join</Cmd>, using their{" "}
+        <ExternalLink href={SEVENTEEN_LANDS_URL}>17Lands</ExternalLink> data.
+      </p>
+      <p className="text-[13px] md:text-[14px] text-muted leading-[1.6] mt-2">
+        Use <Cmd>/opt-out</Cmd> to hide your rank, keeping your profile and stats. Use <Cmd>/retire</Cmd>{" "}
+        to hide everything until you come back.
       </p>
     </section>
   );
@@ -68,6 +69,14 @@ function Rule() {
       <span className="flex-1 h-px bg-border block" />
       <span className="w-1 h-1 bg-dim rotate-45 inline-block" />
     </div>
+  );
+}
+
+function Cmd({ children }: { children: ReactNode }) {
+  return (
+    <code className="mono text-text bg-surface2 border border-border2 px-1.5 py-px text-[13px] whitespace-nowrap">
+      {children}
+    </code>
   );
 }
 

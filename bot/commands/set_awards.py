@@ -99,7 +99,7 @@ AWARD_SPECS: tuple[AwardSpec, ...] = (
     AwardSpec("first_striker", "⚔️", "First Striker", "First trophy of the set",
               connector="", you_verb="trophied",
               miss="No trophy this set"),
-    AwardSpec("seize_the_day", "☀️", "Seize the Day", "Most trophies in any 24 hours",
+    AwardSpec("seize_the_day", "☀️", "Seize the Day", "Most trophies in 24 hours",
               connector="claimed", you_verb="claimed",
               miss="No multi-trophy day this set"),
     AwardSpec("climber", "🧗", "The Climber", "Fastest ladder grind in a single month",

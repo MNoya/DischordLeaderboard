@@ -185,6 +185,7 @@ class Link17Lands(commands.Cog):
             await dm.send(tmsg.TOKEN_IN_USE)
             return
 
+        await dm.send(tmsg.FETCHING_EVENTS)
         with SessionLocal() as session:
             refresh_one_player_for_all_sets(session, self.client, result.player_id)
             session.commit()

@@ -21,6 +21,7 @@ import {
   fetchOtherColorsLeaderboard,
   fetchPlayerDraftEvents,
   fetchPlayerIdentity,
+  fetchPlayerSlugByDiscordId,
   fetchPlayerProfile,
   fetchPodDraftArtifact,
   fetchPodEventBySlug,
@@ -205,6 +206,15 @@ export function usePlayerIdentity(slug: string | undefined, enabled: boolean) {
     queryKey: ["player-identity", slug],
     queryFn: () => fetchPlayerIdentity(slug!),
     enabled: !!slug && enabled,
+    staleTime: FIVE_MINUTES,
+  });
+}
+
+export function usePlayerSlugByDiscordId(discordId: string | undefined) {
+  return useQuery({
+    queryKey: ["player-slug-by-discord", discordId],
+    queryFn: () => fetchPlayerSlugByDiscordId(discordId!),
+    enabled: !!discordId,
     staleTime: FIVE_MINUTES,
   });
 }
