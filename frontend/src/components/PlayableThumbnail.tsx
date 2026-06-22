@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { X } from "lucide-react";
 
 import type { Episode } from "../data/episodes";
 import { EpisodeThumbnail } from "./EpisodeThumbnail";
@@ -13,14 +14,27 @@ export function PlayableThumbnail({
   aspect,
   audioMode = false,
   portrait = false,
+  playing: controlledPlaying,
+  onPlayingChange,
 }: {
   episode: Episode;
   thumbnailPending?: boolean;
   aspect: string;
   audioMode?: boolean;
   portrait?: boolean;
+  playing?: boolean;
+  onPlayingChange?: (playing: boolean) => void;
 }) {
-  const [playing, setPlaying] = useState(false);
+  const controlled = onPlayingChange !== undefined;
+  const [internalPlaying, setInternalPlaying] = useState(false);
+  const playing = controlled ? Boolean(controlledPlaying) : internalPlaying;
+  const setPlaying = (next: boolean) => {
+    if (controlled) {
+      onPlayingChange(next);
+    } else {
+      setInternalPlaying(next);
+    }
+  };
   const { canPlayAudio, playable } = episodePlayability(episode, audioMode);
 
   return (
@@ -31,7 +45,19 @@ export function PlayableThumbnail({
       )}
     >
       {playing ? (
-        <EpisodeEmbed episode={episode} thumbnailPending={thumbnailPending} audioMode={audioMode} />
+        <>
+          <EpisodeEmbed episode={episode} thumbnailPending={thumbnailPending} audioMode={audioMode} />
+          {controlled ? (
+            <button
+              type="button"
+              onClick={() => setPlaying(false)}
+              aria-label="Close player"
+              className="absolute top-2 right-2 z-20 flex h-8 w-8 items-center justify-center rounded-full bg-bg/80 text-text transition-colors hover:bg-bg hover:text-green"
+            >
+              <X size={16} strokeWidth={2.5} />
+            </button>
+          ) : null}
+        </>
       ) : playable ? (
         <button
           type="button"

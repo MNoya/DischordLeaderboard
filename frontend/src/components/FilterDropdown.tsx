@@ -147,8 +147,15 @@ export function FilterDropdown({
                 autoFocus
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && filtered.length > 0) {
+                    e.preventDefault();
+                    onChange(filtered[0].value);
+                    setOpen(false);
+                  }
+                }}
                 placeholder={searchPlaceholder}
-                className="w-full bg-bg border border-border px-2.5 py-1.5 font-body text-[14px] text-text placeholder:text-dim outline-none focus:border-green"
+                className="w-full bg-bg border border-border px-2.5 py-1.5 font-body text-[14px] tracking-normal text-text placeholder:text-dim outline-none focus:border-green"
               />
             </div>
           )}

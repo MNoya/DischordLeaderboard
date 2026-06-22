@@ -382,7 +382,7 @@ function NoSetData({
         )}
       </section>
       <div className="p-20 text-center text-muted font-display tracking-[0.2em]">
-        NO {setCode} DATA FOR THIS PLAYER
+        NO {setCode} EVENTS RECORDED
       </div>
     </div>
   );

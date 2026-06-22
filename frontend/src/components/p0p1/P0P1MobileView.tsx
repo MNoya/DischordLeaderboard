@@ -69,7 +69,7 @@ export function P0P1MobileView({ ballot }: { ballot: Ballot }) {
 
   return (
     <div className="bg-bg text-text min-h-screen flex flex-col animate-fadeIn">
-      <AppHeader subtitle="P0 P1 Challenge" />
+      <AppHeader subtitle="P0 P1 Challenge" subtitleShort="P0 P1" />
 
       <main className={`flex-1 flex flex-col w-full px-4 pt-4 ${loginBarVisible ? "pb-20" : "pb-4"}`}>
         <MobileIntro sets={p0p1Sets} isPastDeadline={isPastDeadline} />
@@ -149,7 +149,7 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
 
   return (
     <div className="bg-bg text-text min-h-screen flex flex-col animate-fadeIn">
-      <AppHeader subtitle="P0 P1 Challenge" />
+      <AppHeader subtitle="P0 P1 Challenge" subtitleShort="P0 P1" />
 
       <main className={`flex-1 flex flex-col w-full px-3 pt-3 ${loginBarVisible ? "pb-24" : "pb-4"}`}>
         <MobileIntro sets={p0p1Sets} entryCount={entryCount} isPastDeadline={isPastDeadline} />

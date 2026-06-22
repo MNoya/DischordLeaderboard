@@ -10,6 +10,7 @@ WALKTHROUGH_STEPS = (
 TOKEN_PRIVACY_NOTE = "*Your token is stored securely and only used to fetch your game stats.*"
 
 CHECKING = "⏳ Checking your 17lands link…"
+FETCHING_EVENTS = "🔄 Link verified! Pulling your 17lands drafts now..."
 INVALID_FORMAT = "That doesn't look like a valid 17lands token. Please check and try again."
 REJECTED = "That token couldn't be verified with 17lands. Please check and try again."
 TOKEN_IN_USE = "That 17lands token is already linked to another Discord account."

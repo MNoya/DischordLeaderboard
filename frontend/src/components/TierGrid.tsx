@@ -1,9 +1,11 @@
 import { createContext, Fragment, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { RefreshCw } from "./Icons";
 import { cn } from "../lib/utils";
 import { useIsMobile } from "../lib/use-is-mobile";
 import {
   hasActiveFilters,
+  inclusionRank,
   isCardFilteredOut,
   TIER_ORDER,
   TREND_COLOR,
@@ -106,6 +108,9 @@ export function TierGrid({
   }
   for (const bucket of byKey.values()) {
     bucket.sort((a, b) => {
+      const ra = inclusionRank(a.inclusion_type);
+      const rb = inclusionRank(b.inclusion_type);
+      if (ra !== rb) return ra - rb;
       const sa = a.sort_key ?? Number.MAX_SAFE_INTEGER;
       const sb = b.sort_key ?? Number.MAX_SAFE_INTEGER;
       return sa - sb || a.name.localeCompare(b.name);
@@ -398,10 +403,14 @@ function MobileTiers({
 
 const COLUMN_INDEX: Record<string, number> = Object.fromEntries(COLUMN_CODES.map((code, i) => [code, i]));
 
-// Pager walks by color column (W→U→B→R→G→multi→colorless), then keeps each
-// expansion's block contiguous, then printed number. Expansion matters because a
-// merged list reuses collector numbers across sets. Alt-art "PROMO-12" sorts last.
+// Pager walks the whole main set first, then bonus/source-material reprints, each
+// block by color column (W→U→B→R→G→multi→colorless), then keeps each expansion's
+// block contiguous, then printed number. Expansion matters because a merged list
+// reuses collector numbers across sets. Alt-art "PROMO-12" sorts last.
 export function comparePagerOrder(a: TierCard, b: TierCard): number {
+  const ia = inclusionRank(a.inclusion_type);
+  const ib = inclusionRank(b.inclusion_type);
+  if (ia !== ib) return ia - ib;
   const da = COLUMN_INDEX[columnOf(a.color)] ?? COLUMN_CODES.length;
   const db = COLUMN_INDEX[columnOf(b.color)] ?? COLUMN_CODES.length;
   if (da !== db) return da - db;
@@ -757,6 +766,13 @@ export function CardModal({
   onNext?: () => void;
   position?: string;
 }) {
+  const [flipped, setFlipped] = useState(false);
+  const flippable = Boolean(card.url_back);
+
+  useEffect(() => {
+    setFlipped(false);
+  }, [card.card_id]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "ArrowLeft") onPrev?.();
@@ -775,32 +791,87 @@ export function CardModal({
         onClose();
       }}
     >
-      <div
-        className="w-full max-w-[320px] rounded-xl border border-white/60 p-[6px] shadow-2xl"
-        style={{ backgroundColor: PREVIEW_MAT }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <GradesPanel card={card} />
-        <img src={card.url} alt={card.name} className="w-full rounded-[10px]" />
+      <div className="flex w-full max-w-[320px] flex-col items-center">
         <div
-          className={cn(
-            "flex items-center justify-between px-3 py-3.5",
-            !card.comment && "-mb-[6px]",
-          )}
+          className="w-full rounded-xl border border-white/60 p-[6px] shadow-2xl"
+          style={{ backgroundColor: PREVIEW_MAT }}
+          onClick={(e) => e.stopPropagation()}
         >
-          <ModalNavButton label="Previous card" dir="prev" onClick={onPrev} />
-          {position && (
-            <span className="mono text-[12px] tracking-[0.1em] text-white/70">
-              {position}
-            </span>
+          <GradesPanel card={card} />
+          {flippable ? (
+            <FlipCardImage front={card.url} back={card.url_back!} name={card.name} flipped={flipped} />
+          ) : (
+            <img src={card.url} alt={card.name} className="w-full rounded-[10px]" />
           )}
-          <ModalNavButton label="Next card" dir="next" onClick={onNext} />
+          <div
+            className={cn(
+              "flex items-center justify-between px-3 py-3.5",
+              !card.comment && "-mb-[6px]",
+            )}
+          >
+            <ModalNavButton label="Previous card" dir="prev" onClick={onPrev} />
+            {position && (
+              <span className="mono text-[12px] tracking-[0.1em] text-white/70">
+                {position}
+              </span>
+            )}
+            <ModalNavButton label="Next card" dir="next" onClick={onNext} />
+          </div>
+          {card.comment && (
+            <p className="-mx-[6px] -mb-[6px] whitespace-pre-line border-t border-white/60 px-3 py-3.5 text-center text-[14px] leading-snug text-text">
+              {card.comment}
+            </p>
+          )}
         </div>
-        {card.comment && (
-          <p className="-mx-[6px] -mb-[6px] whitespace-pre-line border-t border-white/60 px-3 py-3.5 text-center text-[14px] leading-snug text-text">
-            {card.comment}
-          </p>
+        {flippable && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setFlipped((prev) => !prev);
+            }}
+            className="mt-4 flex items-center gap-2 rounded-lg border border-white/40 px-4 py-2 text-[13px] font-medium text-text shadow-lg transition-colors hover:bg-white/10"
+            style={{ backgroundColor: PREVIEW_MAT }}
+          >
+            <RefreshCw size={15} />
+            Turn Over
+          </button>
         )}
+      </div>
+    </div>
+  );
+}
+
+function FlipCardImage({
+  front,
+  back,
+  name,
+  flipped,
+}: {
+  front: string;
+  back: string;
+  name: string;
+  flipped: boolean;
+}) {
+  return (
+    <div className="w-full [perspective:1200px]">
+      <div
+        className="relative w-full transition-transform duration-700 [transform-style:preserve-3d] [-webkit-transform-style:preserve-3d]"
+        style={{
+          aspectRatio: "28 / 39",
+          transform: flipped ? "rotateY(180deg)" : undefined,
+        }}
+      >
+        <img
+          src={front}
+          alt={name}
+          className="absolute inset-0 h-full w-full rounded-[10px] [backface-visibility:hidden] [-webkit-backface-visibility:hidden]"
+        />
+        <img
+          src={back}
+          alt=""
+          className="absolute inset-0 h-full w-full rounded-[10px] [backface-visibility:hidden] [-webkit-backface-visibility:hidden] [transform:rotateY(180deg)]"
+        />
       </div>
     </div>
   );

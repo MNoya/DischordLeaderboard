@@ -9,6 +9,21 @@ type Color = (typeof WILDCARD_COLORS)[number];
 
 const NO_PICKS: Set<string> = new Set();
 
+const COLOR_RANK: Record<string, number> = { W: 0, U: 1, B: 2, R: 3, G: 4 };
+
+function colorGroupRank(colors: string[]): number {
+  if (colors.length === 0) return 6;
+  if (colors.length > 1) return 5;
+  return COLOR_RANK[colors[0]] ?? 6;
+}
+
+function byColorThenManaThenName(a: Card, b: Card): number {
+  const groupDiff = colorGroupRank(a.colors) - colorGroupRank(b.colors);
+  if (groupDiff !== 0) return groupDiff;
+  if (a.cmc !== b.cmc) return a.cmc - b.cmc;
+  return a.name.localeCompare(b.name);
+}
+
 interface Props {
   slot: SlotDefinition;
   cards: Card[];
@@ -51,7 +66,7 @@ export function CardSelectionGrid({
   const toggleColor = (c: Color) => setColor((prev) => (prev === c ? null : c));
 
   const eligible = useMemo(
-    () => cards.filter((c) => slot.filter(c, NO_PICKS)),
+    () => cards.filter((c) => slot.filter(c, NO_PICKS)).sort(byColorThenManaThenName),
     [cards, slot],
   );
 

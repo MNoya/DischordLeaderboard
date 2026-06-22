@@ -14,8 +14,10 @@ import { GiRoundTable } from "react-icons/gi";
 import { SiPatreon, SiTwitch, SiYoutube } from "react-icons/si";
 import type { IconType } from "react-icons";
 import { Tooltip } from "../components/Tooltip";
+import { EpisodeLinkTooltip, episodeTitleHref } from "../components/EpisodeLink";
 import { AAvatar, fmtPts, SetGlyph, setGlyphCode } from "../components/Brand";
 import { TierSetDropdown } from "../components/TierSetDropdown";
+import { boardModeFor, type BoardMode } from "../components/LeaderboardTable";
 import {
   CardModal,
   CardPreview,
@@ -568,6 +570,7 @@ function HeroEpisodeCard({
   const [playing, setPlaying] = useState(false);
   const { canPlayAudio, playable } = episodePlayability(episode);
   const play = () => setPlaying(true);
+  const titleHref = episodeTitleHref(episode);
 
   const thumbnail = (
     <>
@@ -626,12 +629,19 @@ function HeroEpisodeCard({
           <EpisodeTag episode={episode} glyphSize={14} className="gap-1" />
         </div>
       ) : (
-        <div className="p-3 shrink-0 flex items-start justify-between gap-2">
-          <h3 className="flex-1 min-w-0 font-body text-text text-[16px] font-medium leading-snug line-clamp-2 transition-colors group-hover/ep:text-green">
-            {episodeShortTitle(episode.title)}
-          </h3>
-          <EpisodeTag episode={episode} className="mt-0.5" />
-        </div>
+        <EpisodeLinkTooltip episode={episode}>
+          <a
+            href={titleHref}
+            target="_blank"
+            rel="noreferrer"
+            className="p-3 shrink-0 flex items-start justify-between gap-2 no-underline group-hover/ep:text-green"
+          >
+            <h3 className="flex-1 min-w-0 font-body text-text text-[16px] font-medium leading-snug line-clamp-2 transition-colors group-hover/ep:text-green">
+              {episodeShortTitle(episode.title)}
+            </h3>
+            <EpisodeTag episode={episode} className="mt-0.5" />
+          </a>
+        </EpisodeLinkTooltip>
       )}
     </div>
   );
@@ -640,7 +650,7 @@ function HeroEpisodeCard({
 const LB_ROW_HEIGHT = 28;
 const LB_CYCLE_MS = 5000;
 
-type BoardSnapshot = { key: string; setCode: string; rows: LeaderboardRow[] };
+type BoardSnapshot = { key: string; setCode: string; mode: BoardMode; rows: LeaderboardRow[] };
 
 function LeaderboardPanel({ setCode }: { setCode: string }) {
   const { data: sets } = useSets();
@@ -701,10 +711,11 @@ function LeaderboardPanel({ setCode }: { setCode: string }) {
 
   const liveKey = `${set}-${current}`;
   const liveRows = data?.slice(0, maxRows) ?? [];
+  const mode = boardModeFor(current);
   const to = isAll ? leaderboardPath(set) : `${leaderboardPath(set)}?format=${encodeURIComponent(current)}`;
 
   const [layers, setLayers] = useState<{ front: BoardSnapshot; back: BoardSnapshot | null }>(() => ({
-    front: { key: liveKey, setCode: set, rows: liveRows },
+    front: { key: liveKey, setCode: set, mode, rows: liveRows },
     back: null,
   }));
   const shownKeyRef = useRef(liveKey);
@@ -712,7 +723,7 @@ function LeaderboardPanel({ setCode }: { setCode: string }) {
     if (liveRows.length === 0) {
       return;
     }
-    const snapshot: BoardSnapshot = { key: liveKey, setCode: set, rows: liveRows };
+    const snapshot: BoardSnapshot = { key: liveKey, setCode: set, mode, rows: liveRows };
     const changed = shownKeyRef.current !== liveKey;
     shownKeyRef.current = liveKey;
     setLayers((prev) => ({ front: snapshot, back: changed ? prev.front : prev.back }));
@@ -765,7 +776,7 @@ function LeaderboardPanel({ setCode }: { setCode: string }) {
             {layers.back ? (
               <div key={layers.back.key} className="absolute inset-0 flex h-full flex-col animate-fadeOut">
                 {layers.back.rows.map((row) => (
-                  <LeaderboardMiniRow key={row.slug} row={row} setCode={layers.back!.setCode} />
+                  <LeaderboardMiniRow key={row.slug} row={row} setCode={layers.back!.setCode} mode={layers.back!.mode} />
                 ))}
                 {emptyRowKeys(maxRows - layers.back.rows.length).map((key) => (
                   <LeaderboardEmptyRow key={key} />
@@ -774,7 +785,7 @@ function LeaderboardPanel({ setCode }: { setCode: string }) {
             ) : null}
             <div key={layers.front.key} className="absolute inset-0 flex h-full flex-col animate-fadeIn">
               {layers.front.rows.map((row) => (
-                <LeaderboardMiniRow key={row.slug} row={row} setCode={layers.front.setCode} />
+                <LeaderboardMiniRow key={row.slug} row={row} setCode={layers.front.setCode} mode={layers.front.mode} />
               ))}
               {emptyRowKeys(maxRows - layers.front.rows.length).map((key) => (
                 <LeaderboardEmptyRow key={key} />
@@ -869,7 +880,7 @@ function FormatDropdown({
   );
 }
 
-function LeaderboardMiniRow({ row, setCode }: { row: LeaderboardRow; setCode: string }) {
+function LeaderboardMiniRow({ row, setCode, mode }: { row: LeaderboardRow; setCode: string; mode: BoardMode }) {
   return (
     <Link
       to={playerPath(row.slug, setCode)}
@@ -881,10 +892,33 @@ function LeaderboardMiniRow({ row, setCode }: { row: LeaderboardRow; setCode: st
       <span className="truncate font-display text-[15px] leading-none tracking-[0.04em] transition-colors group-hover/row:text-green">
         {row.displayName.toUpperCase()}
       </span>
-      <span className="ml-auto font-display text-[15px] leading-none tracking-[0.02em] tabular-nums text-green">
-        {Number.isFinite(row.score) ? fmtPts(row.score) : "—"}
-      </span>
+      <MiniRowMetric row={row} mode={mode} />
     </Link>
+  );
+}
+
+function MiniRowMetric({ row, mode }: { row: LeaderboardRow; mode: BoardMode }) {
+  if (mode === "direct") {
+    const boxes = row.boxes ?? 0;
+    return (
+      <span className="ml-auto flex items-center gap-1 font-display text-[15px] leading-none tracking-[0.02em] tabular-nums">
+        <span className="text-[11px]" aria-hidden="true">📦</span>
+        <span className={boxes === 0 ? "text-dim" : "text-text"}>{boxes}</span>
+      </span>
+    );
+  }
+  if (mode === "lcq") {
+    const earnings = row.earnings ?? 0;
+    return (
+      <span className="ml-auto font-display text-[15px] leading-none tracking-[0.02em] tabular-nums text-green">
+        {earnings > 0 ? `$${earnings / 1000}K` : "—"}
+      </span>
+    );
+  }
+  return (
+    <span className="ml-auto font-display text-[15px] leading-none tracking-[0.02em] tabular-nums text-green">
+      {Number.isFinite(row.score) ? fmtPts(row.score) : "—"}
+    </span>
   );
 }
 

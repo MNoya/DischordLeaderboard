@@ -122,6 +122,22 @@ def test_leaderboard_excludes_opted_out_players(session):
     assert [e.display_name for e in data.top] == ["Alice"]
 
 
+def test_leaderboard_excludes_opted_out_players_with_pod_points(session):
+    s = _seed_set(session)
+    a = _seed_player(session, "Alice", "1", "a")
+    opted_out = _seed_player(session, "Bob", "2", "b", leaderboard_opt_in=False)
+    pod_only = _seed_player(session, "Cara", "3", "c")
+    _seed_stats(session, a, s, trophies=2, events=4)
+    pod = _seed_pod_event(session, s.code, "SOS Pod 1")
+    session.add(PodDraftParticipant(event_id=pod.id, player_id=opted_out.id, display_name="Bob", placement=1))
+    session.add(PodDraftParticipant(event_id=pod.id, player_id=pod_only.id, display_name="Cara", placement=1))
+    session.commit()
+
+    data = process_leaderboard(session, viewer_discord_id=None, top_n=3)
+
+    assert [e.display_name for e in data.top] == ["Alice", "Cara"]
+
+
 def test_leaderboard_excludes_players_with_no_stats(session):
     s = _seed_set(session)
     a = _seed_player(session, "Alice", "1", "a")

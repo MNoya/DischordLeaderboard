@@ -11,6 +11,7 @@ from bot.commands import descriptions as desc
 from bot.commands.leaderboard import broadcast_current_set_safely
 from bot.commands.messages import MSG_ALREADY_HIDDEN, MSG_NOT_REGISTERED, MSG_NOW_HIDDEN
 from bot.database import SessionLocal
+from bot.discord_helpers import player_url
 from bot.models import Player
 
 
@@ -38,9 +39,11 @@ class LeaderboardVisibility(commands.Cog):
                 await interaction.response.send_message(MSG_ALREADY_HIDDEN, ephemeral=ephemeral)
                 return
             player.leaderboard_opt_in = False
+            slug = player.slug
             session.commit()
         audit.event("leaderboard_opt_out", user_id=user_id, registered=True)
-        await interaction.response.send_message(MSG_NOW_HIDDEN, ephemeral=ephemeral)
+        message = MSG_NOW_HIDDEN.format(profile_url=player_url(slug))
+        await interaction.response.send_message(message, ephemeral=ephemeral)
         await broadcast_current_set_safely(self.bot)
 
 
