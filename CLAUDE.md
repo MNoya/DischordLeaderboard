@@ -64,7 +64,7 @@ docker exec dischord-pg psql -U postgres -d dischord -c 'DROP SCHEMA public CASC
 ### Owner-only prefix commands (DM the bot)
 
 - `!sync` — push slash-command schema changes to Discord. Run after editing any command's name/description/options. Body-only changes don't need it.
-- `!refresh` — re-pull 17lands for active players against the active set's window, recompute scores, edit tracked leaderboard messages in place. Same code path as the periodic tick. For full-history reconciliation (formula change, retroactive set add, drift recovery) run `python -m bot.scripts.refresh_stats` from a console instead.
+- `!refresh` — re-pull 17lands for active players against the active set's window and recompute scores. Same code path as the periodic tick. Posted leaderboards are frozen snapshots, so this edits no messages; fresh standings surface on the next `/leaderboard` or on the website. For full-history reconciliation (formula change, retroactive set add, drift recovery) run `python -m bot.scripts.refresh_stats` from a console instead.
 
 ## Architecture
 
@@ -122,7 +122,7 @@ The formula may diverge per set in the future — `DEFAULT_QUEUE_GROUPS` is glob
 - `players.seventeenlands_token` is nullable so `/pod-link-arena` can create lightweight pod-draft-only players without a 17lands profile.
 - `player_stats` is unique per `(player, set, format, expansion)` and **fully derived** from `draft_events` — rebuilt via `DELETE + INSERT … SELECT GROUP BY` per touched (player, set) on every refresh. Alchemy variants like `Y26ECL` get their own row but bucket under `ECL` for scoring. `last_fetched_at` is set on every rebuild (not just on data change); the "Last updated" footer is the max `last_fetched_at` across a player's rows.
 - `draft_events` is the additive event log — one row per individual 17lands draft, keyed on `(player_id, seventeenlands_event_id)`. `set_id` is nullable so drafts in not-yet-registered expansions still persist; `/add-set` claims orphans by matching `expansion` to the new set's `code`. 17lands' case-encoded color string (`WBg` = WB main + green splash) is preserved verbatim in `colors`.
-- `leaderboard_messages` tracks the bot's posted leaderboard per `(channel, set)` so `/leaderboard` delete-and-reposts (instead of duplicating) and `!refresh` edits in place. Stale rows get pruned on next edit attempt.
+- `leaderboard_messages` tracks the bot's posted leaderboard per `(channel, set, filter)` so `/leaderboard` delete-and-reposts instead of duplicating. Posted boards are **frozen snapshots** — never auto-edited after posting (the broadcast/live-edit subsystem was removed); the 🔎 Filter button opens a per-user **ephemeral** board rather than mutating the shared message. Fresh standings come from re-running `/leaderboard` or the website.
 
 ### Slash commands — `bot/commands/`
 
@@ -130,7 +130,7 @@ All commands work in server channels and DMs.
 
 | Command | Purpose |
 |---|---|
-| `/leaderboard` | Current set leaderboard + persistent Join/Stats button view (registered via `bot.add_view()` at startup so buttons survive restarts) |
+| `/leaderboard` | Current set leaderboard, posted as a frozen snapshot; persistent Join/Stats view (registered via `bot.add_view()` at startup so buttons survive restarts) plus a 🔎 Filter button that opens a per-user ephemeral board |
 | `/stats [player]` | Per-player formula breakdown by queue group |
 | `/join` | Sign-up DM walkthrough with 17lands token; per-user lock prevents duplicate flows |
 | `/retire` | Pause participation (replies via DM) |
@@ -170,5 +170,5 @@ On push/PR to `master`: spin up Postgres service container → `alembic upgrade 
 - Supabase prod pooler URL (with encoded password) lives in gitignored `.env.supabase`.
 - 17lands cache: per-token JSONs at `cache/17lands/<token>__YYYY-MM-DD.json`. Use `refresh_stats --cache` for free re-aggregation, omit `--cache` for live fetch.
 - Bot logs: `logs/bot.log` (gitignored). Audit log: append-only JSONL at `logs/events.jsonl`.
-- Production guild: LLU community server, guild ID `775371722065051658`. Bot is `DisChord Bot#1519`, app ID `1466076574372724819`. Per-channel permission overrides can block `msg.edit` even when posting works via interaction-token auth — grant explicit channel access if `!refresh` fails on a tracked message.
+- Production guild: LLU community server, guild ID `775371722065051658`. Bot is `DisChord Bot#1519`, app ID `1466076574372724819`.
 - Discord fields in `bot/config.py` are optional so non-bot entry points (alembic CLI, seed scripts, tests) can construct `Settings` without them.
