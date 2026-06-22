@@ -362,8 +362,9 @@ function MobileMenu({
             type="button"
             onClick={() => { signIn(); onClose(); }}
             role="menuitem"
-            className="flex items-center min-h-[54px] px-5 font-display text-[17px] tracking-[0.14em] border-b border-border transition-colors text-text bg-transparent hover:bg-surface cursor-pointer border-x-0 border-t-0"
+            className="flex items-center gap-3 min-h-[54px] px-5 font-display text-[17px] tracking-[0.14em] border-b border-border transition-colors text-text bg-transparent hover:bg-surface cursor-pointer border-x-0 border-t-0"
           >
+            <DiscordIcon size={18} />
             LOG IN
           </button>
         )}
@@ -372,8 +373,9 @@ function MobileMenu({
             type="button"
             onClick={() => { signOut(); onClose(); }}
             role="menuitem"
-            className="flex items-center min-h-[54px] px-5 text-sm text-muted bg-transparent hover:bg-surface cursor-pointer border-x-0 border-t-0 border-b border-border"
+            className="flex items-center gap-3 min-h-[54px] px-5 font-display text-[17px] tracking-[0.14em] border-b border-border transition-colors text-text bg-transparent hover:bg-surface cursor-pointer border-x-0 border-t-0"
           >
+            <LogOut size={18} />
             LOG OUT
           </button>
         )}
