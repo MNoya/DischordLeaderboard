@@ -495,7 +495,7 @@ MY_AWARDS_BUTTON_ID = "set_awards:my"
 class MyAwardsButton(discord.ui.Button):
     def __init__(self) -> None:
         super().__init__(
-            label="How did I do?", style=discord.ButtonStyle.success,
+            label="My Awards", style=discord.ButtonStyle.success,
             emoji="🏆", custom_id=MY_AWARDS_BUTTON_ID,
         )
 
@@ -523,19 +523,16 @@ def persistent_my_awards_view() -> ui.LayoutView:
 async def _respond_my_awards(interaction: discord.Interaction, code: str, seed) -> None:
     await interaction.response.defer(ephemeral=True)
     discord_id = str(interaction.user.id)
-    payload = awards_svc.cached_payload(seed)
-    if payload is None:
-        with SessionLocal() as session:
-            mset = session.execute(select(MagicSet).where(MagicSet.code == code)).scalar_one_or_none()
-            if mset is None:
-                await interaction.followup.send(f"Set {code} is not in the database.", ephemeral=True)
-                return
-            payload = awards_svc.build_payload(session, mset, seed)
-    ranked, by_discord, fun_values = payload
-    mine = by_discord.get(discord_id)
-    if mine is None:
+    with SessionLocal() as session:
+        mset = session.execute(select(MagicSet).where(MagicSet.code == code)).scalar_one_or_none()
+        if mset is None:
+            await interaction.followup.send(f"Set {code} is not in the database.", ephemeral=True)
+            return
+        result = awards_svc.personal_payload(session, mset, seed, discord_id)
+    if result is None:
         await _send_no_standing(interaction, code, discord_id)
         return
+    ranked, mine, fun_values = result
     extras = awards_svc.personal_extras(mine)
     for key in awards_svc.FUN_RANKED_STATS:
         extras[f"{key}_rank"] = awards_svc.rank_in(fun_values[key], extras[key])

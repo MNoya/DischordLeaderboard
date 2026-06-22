@@ -28,6 +28,7 @@ from bot.models import (
     DraftEvent,
     MagicSet,
     Player,
+    PlayerAccount,
     PlayerStats,
 )
 from bot.services.active_set import resolve_active_set
@@ -53,6 +54,23 @@ def _resolve_set_id(expansion: str, codes: list[str], sets_by_code: dict[str, Ma
         if code in expansion:
             return sets_by_code[code].id
     return None
+
+
+def _resolve_account_ids(session: Session, player_id: str, names: set[str]) -> dict[str, int]:
+    """Map each 17lands account name to a ``player_accounts`` id, registering any new ones."""
+    if not names:
+        return {}
+    session.execute(
+        pg_insert(PlayerAccount)
+        .values([{"player_id": player_id, "name": name} for name in names])
+        .on_conflict_do_nothing(index_elements=["player_id", "name"])
+    )
+    pairs = session.execute(
+        select(PlayerAccount.name, PlayerAccount.id).where(
+            PlayerAccount.player_id == player_id, PlayerAccount.name.in_(names)
+        )
+    ).all()
+    return {name: account_id for name, account_id in pairs}
 
 
 def bulk_upsert_draft_events(
@@ -102,6 +120,10 @@ def bulk_upsert_draft_events(
         if fmt not in SUPPORTED_FORMATS:
             unknown_formats[fmt] = unknown_formats.get(fmt, 0) + 1
 
+    account_ids = _resolve_account_ids(session, player_id, {r["account"] for r in rows if r["account"]})
+    for row in rows:
+        row["account_id"] = account_ids.get(row.pop("account"))
+
     if rows:
         stmt = pg_insert(DraftEvent).values(rows)
         stmt = stmt.on_conflict_do_update(
@@ -114,6 +136,7 @@ def bulk_upsert_draft_events(
                 "losses": stmt.excluded.losses,
                 "is_trophy": stmt.excluded.is_trophy,
                 "colors": stmt.excluded.colors,
+                "account_id": stmt.excluded.account_id,
                 "start_rank": stmt.excluded.start_rank,
                 "end_rank": stmt.excluded.end_rank,
                 "started_at": stmt.excluded.started_at,

@@ -28,8 +28,7 @@ from bot.sets import SetSeed, release_instant
 ET = ZoneInfo("America/New_York")
 RANK_TIERS = ("Bronze", "Silver", "Gold", "Platinum", "Diamond", "Mythic")
 MYTHIC_INDEX = RANK_TIERS.index("Mythic")
-MAX_CLIMBER_START_INDEX = RANK_TIERS.index("Gold")
-CLIMB_TIER_WEIGHT = 2
+CLIMB_TIER_WEIGHT = 100
 BO1_FORMATS = frozenset({"PremierDraft", "QuickDraft"})
 
 MIN_ARCHETYPE_GAMES = 20
@@ -109,7 +108,7 @@ def rank_db_awards(ctxs: list[PlayerCtx], seed: SetSeed, code: str) -> dict[str,
 
 PAYLOAD_TTL_SECONDS = 24 * 60 * 60
 FUN_RANKED_STATS = ("trophy_streak", "merchant_streak", "heartbreakers", "cold_run")
-_payload_cache: dict[str, tuple[float, dict, dict, dict]] = {}
+_payload_cache: dict[str, tuple[float, dict, dict, dict, list]] = {}
 
 
 def cached_payload(seed: SetSeed) -> tuple[dict, dict, dict] | None:
@@ -129,8 +128,35 @@ def build_payload(session: Session, mset: MagicSet, seed: SetSeed) -> tuple[dict
     ranked = rank_db_awards(ctxs, seed, mset.code)
     by_discord = {c.player.discord_id: c for c in ctxs if c.player.discord_id}
     fun_values = {key: [_fun_value(c, key) for c in ctxs] for key in FUN_RANKED_STATS}
-    _payload_cache[seed.code] = (time.monotonic() + PAYLOAD_TTL_SECONDS, ranked, by_discord, fun_values)
+    _payload_cache[seed.code] = (time.monotonic() + PAYLOAD_TTL_SECONDS, ranked, by_discord, fun_values, ctxs)
     return ranked, by_discord, fun_values
+
+
+def personal_payload(
+    session: Session, mset: MagicSet, seed: SetSeed, discord_id: str,
+) -> tuple[dict, "PlayerCtx", dict] | None:
+    """Award standings, the caller's own context, and field-wide fun-stat values for one player.
+
+    Players captured in the cached ceremony snapshot are served from it. A player who joined after
+    the snapshot is scored live against the cached field, minus the MVP award whose #trophy-hype
+    channel scan is too expensive to run per click.
+    """
+    if cached_payload(seed) is None:
+        build_payload(session, mset, seed)
+    cached = _payload_cache.get(seed.code)
+    if cached is None:
+        return None
+    _, ranked, by_discord, fun_values, ctxs = cached
+    mine = by_discord.get(discord_id)
+    if mine is not None:
+        return ranked, mine, fun_values
+    mine = load_one_context(session, mset, seed.start_date, discord_id)
+    if mine is None:
+        return None
+    field = ctxs + [mine]
+    live_ranked = rank_db_awards(field, seed, mset.code)
+    live_fun = {key: [_fun_value(c, key) for c in field] for key in FUN_RANKED_STATS}
+    return live_ranked, mine, live_fun
 
 
 def rank_in(values: list[int], value: int) -> int:
@@ -274,6 +300,37 @@ def load_contexts(session: Session, mset: MagicSet, release_date: date) -> list[
     return [c for c in by_id.values() if c.events]
 
 
+def load_one_context(
+    session: Session, mset: MagicSet, release_date: date, discord_id: str,
+) -> PlayerCtx | None:
+    player = session.execute(
+        select(Player).where(
+            Player.discord_id == discord_id,
+            Player.active.is_(True),
+            Player.leaderboard_opt_in.is_(True),
+        )
+    ).scalar_one_or_none()
+    if player is None:
+        return None
+    ctx = PlayerCtx(player=player)
+    events = session.execute(
+        select(DraftEvent).where(DraftEvent.set_id == mset.id, DraftEvent.player_id == player.id)
+    ).scalars()
+    for event in events:
+        if event.started_at is not None and event.started_at.astimezone(ET).date() < release_date:
+            continue
+        ctx.events.append(event)
+    stats = session.execute(
+        select(PlayerStats).where(PlayerStats.set_id == mset.id, PlayerStats.player_id == player.id)
+    ).scalars()
+    for stat in stats:
+        ctx.stats_rows.append({
+            "format": stat.format, "wins": stat.wins, "losses": stat.losses,
+            "trophies": stat.trophies, "events": stat.events,
+        })
+    return ctx if ctx.events else None
+
+
 SPECIALIST_FIELD_SEP = ", vs field of"
 
 
@@ -377,8 +434,9 @@ def seize_the_day(ctxs: list[PlayerCtx]) -> list[AwardCandidate]:
 
 
 def _climb_score(floor_index: int, days: int) -> int:
-    """Reward distance and speed together: a full Bronze→Mythic grind outranks a fast high-start hop,
-    but among similar distances the faster climb wins. Tune via CLIMB_TIER_WEIGHT (points per tier)."""
+    """A lower starting tier always outranks a higher one: CLIMB_TIER_WEIGHT exceeds any in-month day
+    span, so a Bronze/Silver/Gold grind beats a Platinum or Diamond sprint and days only break ties
+    within a tier."""
     return CLIMB_TIER_WEIGHT * (MYTHIC_INDEX - floor_index) - days
 
 
@@ -475,10 +533,10 @@ def _max_within_24h(times: list[datetime]) -> tuple[int, datetime | None]:
 
 
 def _best_mythic_climb(c: PlayerCtx) -> tuple[int, int, str] | None:
-    by_month: dict[tuple[int, int], list[DraftEvent]] = defaultdict(list)
+    by_month: dict[tuple[int | None, int, int], list[DraftEvent]] = defaultdict(list)
     for e in c.events:
         if e.started_at is not None and e.start_rank and e.end_rank:
-            by_month[(e.started_at.year, e.started_at.month)].append(e)
+            by_month[(e.account_id, e.started_at.year, e.started_at.month)].append(e)
 
     best: tuple[int, int, str] | None = None
     best_key: tuple[int, int, int] | None = None
@@ -497,7 +555,7 @@ def _best_mythic_climb(c: PlayerCtx) -> tuple[int, int, str] | None:
             if tier is not None and RANK_TIERS.index(tier) < floor_index:
                 floor_index = RANK_TIERS.index(tier)
                 floor_event = e
-        if floor_event is None or floor_index > MAX_CLIMBER_START_INDEX:
+        if floor_event is None or floor_index >= MYTHIC_INDEX:
             continue
         end_at = first_mythic.finished_at or first_mythic.started_at
         days = (end_at.date() - floor_event.started_at.date()).days
