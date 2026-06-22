@@ -328,7 +328,7 @@ def mvp_ceremony_detail(count: int) -> str:
 
 
 def mvp_runner_detail(count: int) -> str:
-    return f"**{count}** posted"
+    return f"**{count}** trophies"
 
 
 def first_striker(ctxs: list[PlayerCtx], seed: SetSeed) -> list[AwardCandidate]:

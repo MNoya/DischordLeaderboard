@@ -105,7 +105,7 @@ AWARD_SPECS: tuple[AwardSpec, ...] = (
     AwardSpec("climber", "🧗", "The Climber", "Fastest ladder grind in a single month",
               connector="-", you_verb="climbed from",
               miss="You didn't grind to Mythic this set"),
-    AwardSpec("specialist", "🎯", "The Specialist", "Overperformed the field on one archetype",
+    AwardSpec("specialist", "🎯", "The Specialist", "Overperformed on one archetype",
               connector="-", you_verb="posted",
               miss="Not enough games on any one archetype"),
     AwardSpec("revel_in_riches", "📦", "Revel in Riches", "Most Arena Direct boxes won",
