@@ -1,6 +1,7 @@
 import { createContext, Fragment, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { RefreshCw } from "./Icons";
+import { ModalNavButton } from "./ModalNavButton";
 import { cn } from "../lib/utils";
 import { useIsMobile } from "../lib/use-is-mobile";
 import {
@@ -611,7 +612,7 @@ function trendGlyphStack(card: TierCard): string[] {
 
 function GradesPanel({ card }: { card: TierCard }) {
   const comparison = useContext(ComparisonContext);
-  const graders = card.graders ?? [];
+  const graders = (card.graders ?? []).filter((grade) => grade.tier !== "TBD");
   if (comparison && graders.length > 0) {
     return (
       <div className="flex items-stretch px-3 py-2.5">
@@ -793,7 +794,7 @@ export function CardModal({
     >
       <div className="flex w-full max-w-[320px] flex-col items-center">
         <div
-          className="w-full rounded-xl border border-white/60 p-[6px] shadow-2xl"
+          className="w-full rounded-xl border border-white/15 p-[6px] shadow-2xl sm:border-white/60"
           style={{ backgroundColor: PREVIEW_MAT }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -809,16 +810,16 @@ export function CardModal({
               !card.comment && "-mb-[6px]",
             )}
           >
-            <ModalNavButton label="Previous card" dir="prev" onClick={onPrev} />
+            <ModalNavButton dir="prev" srLabel="Previous card" onClick={onPrev} />
             {position && (
               <span className="mono text-[12px] tracking-[0.1em] text-white/70">
                 {position}
               </span>
             )}
-            <ModalNavButton label="Next card" dir="next" onClick={onNext} />
+            <ModalNavButton dir="next" srLabel="Next card" onClick={onNext} />
           </div>
           {card.comment && (
-            <p className="-mx-[6px] -mb-[6px] whitespace-pre-line border-t border-white/60 px-3 py-3.5 text-center text-[14px] leading-snug text-text">
+            <p className="-mx-[6px] -mb-[6px] whitespace-pre-line border-t border-white/15 px-3 py-3.5 text-center text-[14px] leading-snug text-text sm:border-white/60">
               {card.comment}
             </p>
           )}
@@ -877,38 +878,3 @@ function FlipCardImage({
   );
 }
 
-function ModalNavButton({
-  label,
-  dir,
-  onClick,
-}: {
-  label: string;
-  dir: "prev" | "next";
-  onClick?: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={!onClick}
-      aria-label={label}
-      className={cn(
-        "flex h-9 w-9 items-center justify-center rounded border border-white/40 text-text transition-colors",
-        onClick ? "hover:bg-white/10" : "opacity-30",
-      )}
-    >
-      <svg
-        width="15"
-        height="15"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d={dir === "prev" ? "M15 18l-6-6 6-6" : "M9 6l6 6 -6 6"} />
-      </svg>
-    </button>
-  );
-}

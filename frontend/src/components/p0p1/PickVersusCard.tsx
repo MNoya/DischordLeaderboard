@@ -1,5 +1,6 @@
 import { useEffect, useState, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
+import { ModalNavButton } from "../ModalNavButton";
 import { SlotPip } from "./slotVisuals";
 import { pickPctLabel } from "../../data/p0p1Stats";
 import type { PickVersus, PickVersusSide } from "../../types/p0p1";
@@ -73,7 +74,7 @@ export function PickVersusCard({
     return (
       <div
         onClick={stop}
-        className="flex max-h-[92vh] w-full max-w-[420px] flex-col overflow-hidden rounded-xl border border-green/70 p-[6px] shadow-2xl"
+        className="flex max-h-[92vh] w-full max-w-[420px] flex-col overflow-hidden rounded-xl border border-white/15 p-[6px] shadow-2xl sm:border-white/60"
         style={{ backgroundColor: MAT }}
       >
         <div className="px-4 pt-2">
@@ -93,7 +94,7 @@ export function PickVersusCard({
   return (
     <div
       onClick={stop}
-      className="flex max-h-[92vh] w-full max-w-[820px] flex-col overflow-hidden rounded-xl border border-white/60 p-[6px] shadow-2xl"
+      className="flex max-h-[92vh] w-full max-w-[820px] flex-col overflow-hidden rounded-xl border border-white/15 p-[6px] shadow-2xl sm:border-white/60"
       style={{ backgroundColor: MAT }}
     >
       <div className="px-2 pt-2 lg:px-4">
@@ -134,11 +135,9 @@ function VersusSide({
     ? "flex items-baseline justify-between gap-3"
     : "flex flex-col gap-1.5 lg:flex-row lg:items-baseline lg:justify-between lg:gap-3";
   const numberGroupClass = solo ? "flex items-baseline gap-1.5" : "order-2 flex items-baseline gap-1.5 lg:order-none";
-  const pctClass = solo
-    ? "font-mono tabular-nums text-[26px] font-semibold leading-none lg:text-[30px]"
-    : "font-mono tabular-nums text-[20px] font-semibold leading-none lg:text-[30px]";
+  const pctClass = "font-mono tabular-nums text-[20px] font-semibold leading-none lg:text-[30px]";
   const labelClass = solo
-    ? "shrink-0 whitespace-nowrap font-display text-[16px] leading-none tracking-[0.14em]"
+    ? "shrink-0 whitespace-nowrap font-display text-[13px] leading-none tracking-[0.14em] lg:text-[16px]"
     : "order-1 truncate font-display text-[13px] leading-none tracking-[0.14em] lg:order-none lg:shrink-0 lg:whitespace-nowrap lg:text-[16px]";
   return (
     <div className="flex min-w-0 flex-col gap-2.5 lg:gap-3">
@@ -179,33 +178,12 @@ function PagerNav({
   if (!paged) return null;
   return (
     <div className="flex items-center justify-between px-3 py-3.5">
-      <NavButton dir="prev" label="Prev Pick" onClick={onPrev} />
-      <NavButton dir="next" label="Next Pick" onClick={onNext} />
+      <ModalNavButton dir="prev" label="Prev Pick" onClick={onPrev} />
+      <ModalNavButton dir="next" label="Next Pick" onClick={onNext} />
     </div>
   );
 }
 
-function NavButton({ dir, label, onClick }: { dir: "prev" | "next"; label: string; onClick?: () => void }) {
-  const chevron = (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d={dir === "prev" ? "M15 18l-6-6 6-6" : "M9 6l6 6 -6 6"} />
-    </svg>
-  );
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={!onClick}
-      className={`flex h-9 items-center gap-2 rounded border border-white/40 px-3 font-display text-[14px] tracking-[0.14em] text-text transition-colors ${
-        onClick ? "hover:bg-white/10" : "opacity-30"
-      }`}
-    >
-      {dir === "prev" && chevron}
-      {label.toUpperCase()}
-      {dir === "next" && chevron}
-    </button>
-  );
-}
 
 function CategoryHeader({ versus }: { versus: PickVersus }) {
   return (
