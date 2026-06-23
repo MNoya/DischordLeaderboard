@@ -5,7 +5,9 @@ import type { SlotKey } from "../../types/p0p1";
 
 type Color = "W" | "U" | "B" | "R" | "G";
 
-const UNCOMMON_SILVER_GRADIENT = "linear-gradient(90deg, #8a94a3 0%, #e6e9ef 50%, #8a94a3 100%)";
+const UNCOMMON_SILVER_GRADIENT =
+  "repeating-linear-gradient(135deg, #8a94a3 0px, #c9cfd8 2px, #e6e9ef 4px, #c9cfd8 6px, #8a94a3 8px)";
+const UNCOMMON_GLYPH_GRADIENT = "linear-gradient(to bottom, #d6dbe3 0%, #ffffff 48%, #ffffff 56%, #cdd3dc 100%)";
 
 export const SLOT_ACCENT: Record<SlotKey, string> = {
   white_common: "#e8e4cf",
@@ -38,5 +40,17 @@ export function SlotPip({ slotKey, size = 15 }: { slotKey: SlotKey; size?: numbe
   if (slotKey === "wildcard_common") {
     return <i className={setSymbol} style={{ fontSize: size, color: "#fff", lineHeight: 1 }} />;
   }
-  return <i className={`${setSymbol} ss-uncommon ss-grad`} style={{ fontSize: size, lineHeight: 1 }} />;
+  return (
+    <i
+      className={`${setSymbol} ss-uncommon ss-grad`}
+      style={{
+        fontSize: size,
+        lineHeight: 1,
+        background: UNCOMMON_GLYPH_GRADIENT,
+        WebkitBackgroundClip: "text",
+        backgroundClip: "text",
+        WebkitTextFillColor: "transparent",
+      }}
+    />
+  );
 }

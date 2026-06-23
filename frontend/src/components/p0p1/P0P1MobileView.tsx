@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { AppHeader } from "../AppHeader";
 import { CtaPill } from "../CtaPill";
 import { DiscordIcon } from "../BrandIcons";
@@ -7,24 +7,28 @@ import { SectionLabel } from "../SectionLabel";
 import { SlotCard } from "./SlotCard";
 import { CardSelectionGrid } from "./CardSelectionGrid";
 import { PostVotingStats } from "./PostVotingStats";
-import { IncompleteEntryMessage } from "./IncompleteEntryMessage";
+import { PickGrid } from "./CommunityGrid";
+import { P0P1IntroText } from "./P0P1IntroText";
 import { SlotPip, SLOT_ACCENT } from "./slotVisuals";
 import { P0P1ProgressBar } from "./ProgressBar";
+import { P0P1CountdownBar } from "./CountdownBar";
+import { pluralizeUnit } from "./Countdown";
 import { ClearAll } from "./ClearAll";
 import { GoToTopButton } from "../GoToTopButton";
+import { SiteFooter } from "../SiteFooter";
+import { ChevronDown } from "../Icons";
 import type { useP0P1Ballot } from "../../data/useP0P1Ballot";
 import {
   P0P1_SET_CODE as SET_CODE,
-  P0P1_SET_NAME,
   P0P1_VOTING_DEADLINE as VOTING_DEADLINE,
   P0P1_SCORING_DATE as SCORING_DATE,
   SLOTS,
 } from "../../data/p0p1Slots";
-import { groupBySlot, findExtremes, classifyYourPick, participantCount } from "../../data/p0p1Stats";
+import { groupBySlot, findExtremes, classifyYourPick, pickPctLabel } from "../../data/p0p1Stats";
+import { SITE_LINKS } from "../../data/site";
+import { p0p1Now } from "../../data/p0p1DevState";
 import type { Card, P0P1PickStat, SlotDefinition, SlotKey } from "../../types/p0p1";
 import type { SetSummary } from "../../types/leaderboard";
-
-const SEVENTEEN_LANDS_URL = "https://www.17lands.com/card_data";
 
 type Ballot = ReturnType<typeof useP0P1Ballot>;
 
@@ -143,16 +147,15 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
 
   const loginBarVisible = !authLoading && !user;
   const groupedStats = hasParticipated && pickStats ? groupBySlot(pickStats) : undefined;
-  const entryCount = pickStats ? participantCount(pickStats) : null;
   const isCompleteEntrant = isPastDeadline && Boolean(user) && isComplete;
-  const isIncompleteEntrant = isPastDeadline && Boolean(user) && !isComplete;
+  const didNotVote = isPastDeadline && Boolean(user) && !isComplete;
 
   return (
     <div className="bg-bg text-text min-h-screen flex flex-col animate-fadeIn">
       <AppHeader subtitle="P0 P1 Challenge" subtitleShort="P0 P1" />
 
       <main className={`flex-1 flex flex-col w-full px-3 pt-3 ${loginBarVisible ? "pb-24" : "pb-4"}`}>
-        <MobileIntro sets={p0p1Sets} entryCount={entryCount} isPastDeadline={isPastDeadline} />
+        <MobileIntro sets={p0p1Sets} isPastDeadline={isPastDeadline} />
         {dataReady ? (
           <>
             {!isPastDeadline && (
@@ -168,7 +171,6 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
             )}
             {!isPastDeadline && (
               <div className="sticky top-0 z-20 -mx-3 px-2 pt-3 pb-2 bg-bg/95 backdrop-blur border-b border-border">
-                <SectionLabel size={11} className="mb-1.5 text-white">YOUR PICKS</SectionLabel>
                 <div className="grid grid-cols-4 landscape:grid-cols-8 gap-1.5">
                   {SLOTS.map((slot) => {
                     const cardName = picksBySlot.get(slot.key);
@@ -190,24 +192,43 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
               </div>
             )}
 
-            {isCompleteEntrant && (
-              <div className="mb-3">
-                <SectionLabel size={18} className="mb-2 text-white">YOUR PICKS</SectionLabel>
-                <YourPicksCarousel picksBySlot={picksBySlot} cardsByName={cardsByName} groupedStats={groupedStats} />
-              </div>
-            )}
-
-            {isIncompleteEntrant && (
-              <div className="mb-3">
-                <IncompleteEntryMessage />
-              </div>
-            )}
-
             {isPastDeadline ? (
               pickStats && pickStats.length > 0 && (
-                <div className="pt-3">
-                  <PostVotingStats pickStats={pickStats} cardsByName={cardsByName} picksBySlot={picksBySlot} />
-                </div>
+                <>
+                  {didNotVote && <MobileDidNotVoteLine />}
+                  <PostVotingStats
+                    pickStats={pickStats}
+                    cardsByName={cardsByName}
+                    picksBySlot={picksBySlot}
+                    yourPicks={
+                      isCompleteEntrant ? (
+                        <div>
+                          <div className="flex items-baseline justify-center gap-2 mb-1.5">
+                            <SectionLabel size={22} className="text-white">YOUR PICKS</SectionLabel>
+                          </div>
+                          <PickGrid
+                            entries={SLOTS.map((slot) => {
+                              const cardName = picksBySlot.get(slot.key);
+                              const slotStats = groupedStats?.get(slot.key) ?? [];
+                              const yourStat = cardName ? slotStats.find((s) => s.cardName === cardName) : undefined;
+                              const extremes = findExtremes(slotStats);
+                              const cls = yourStat ? classifyYourPick(yourStat, extremes.most, extremes.least) : undefined;
+                              return {
+                                slotKey: slot.key,
+                                label: slot.label,
+                                stats: yourStat ? [yourStat] : [],
+                                slotStats,
+                                badge: cls?.state === "rogue" ? cls.qualifier : undefined,
+                              };
+                            })}
+                            cardsByName={cardsByName}
+                            picksBySlot={picksBySlot}
+                          />
+                        </div>
+                      ) : null
+                    }
+                  />
+                </>
               )
             ) : (
               cards && (
@@ -253,6 +274,8 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
           </>
         )}
       </main>
+
+      <SiteFooter flush />
 
       <MobileLoginBar show={loginBarVisible} signIn={signIn} text={!isPastDeadline ? "LOG IN TO SUBMIT PICKS" : "LOG IN TO VIEW YOUR PICKS"} />
 
@@ -314,87 +337,29 @@ function MobileChip({
       )}
       {yourStat && classification && (
         <div className={`absolute bottom-0 left-0 right-0 text-center font-mono tabular-nums text-[10px] py-0.5 bg-bg/75 ${stateColor}`}>
-          {yourStat.pickCount}
+          {pickPctLabel(yourStat.pickPct)}
         </div>
       )}
     </button>
   );
 }
 
-function YourPicksCarousel({
-  picksBySlot,
-  cardsByName,
-  groupedStats,
-}: {
-  picksBySlot: Map<string, string>;
-  cardsByName: Map<string, Card>;
-  groupedStats: Map<SlotKey, P0P1PickStat[]> | undefined;
-}) {
+function MobileDidNotVoteLine() {
   return (
-    <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1" style={{ scrollSnapType: "x mandatory" }}>
-      {SLOTS.map((slot) => {
-        const cardName = picksBySlot.get(slot.key);
-        const card = cardName ? cardsByName.get(cardName) : undefined;
-        const slotStats = groupedStats?.get(slot.key);
-        const yourStat = cardName && slotStats ? slotStats.find((s) => s.cardName === cardName) : undefined;
-        let classification: ReturnType<typeof classifyYourPick> | undefined;
-        if (yourStat && slotStats) {
-          const { most, least } = findExtremes(slotStats);
-          classification = classifyYourPick(yourStat, most, least);
-        }
-        const stateColor = classification?.state === "most"
-          ? "text-cyan"
-          : classification?.state === "rogue"
-          ? "text-magenta"
-          : "text-white";
-
-        return (
-          <div
-            key={slot.key}
-            className="shrink-0 w-[122px] border border-border2 bg-surface overflow-hidden rounded-lg"
-            style={{ scrollSnapAlign: "start" }}
-          >
-            <div className="relative bg-surface2 overflow-hidden" style={{ aspectRatio: "3 / 4" }}>
-              {card ? (
-                <img src={card.imageArtCrop} alt="" className="w-full h-full object-cover" />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center">
-                  <SlotPip slotKey={slot.key} size={24} />
-                </div>
-              )}
-              <div
-                className="absolute top-1 left-1 w-5 h-5 rounded-full flex items-center justify-center bg-bg/85"
-                title={slot.label}
-              >
-                <SlotPip slotKey={slot.key} size={12} />
-              </div>
-              {classification?.qualifier && (
-                <span className={`absolute top-1.5 right-1.5 text-[10px] font-display tracking-wide px-2 py-1 rounded-sm bg-bg/85 ${stateColor}`}>
-                  {classification.qualifier}
-                </span>
-              )}
-            </div>
-            <div className="px-1.5 pt-1.5 pb-2">
-              <span className="text-text text-[11px] truncate block mb-1">{card?.name ?? slot.label}</span>
-              {yourStat && classification && (
-                <div className="flex items-baseline gap-1.5">
-                  <span className={`font-mono tabular-nums text-[15px] font-semibold`}>
-                    {yourStat.pickCount}
-                  </span>
-                  <span className="text-muted text-[12px] leading-none">
-                    {yourStat.pickCount === 1 ? (
-                      <><span className="opacity-60">(you!)</span> picked</>
-                    ) : (
-                      "picked"
-                    )}
-                  </span>
-                </div>
-              )}
-            </div>
-          </div>
-        );
-      })}
-    </div>
+    <a
+      href={SITE_LINKS.discord}
+      target="_blank"
+      rel="noreferrer"
+      className="h-7 mb-3 rounded-full bg-surface2 border border-border flex items-center justify-between gap-2 px-5 no-underline animate-fadeIn"
+    >
+      <span className="font-display text-subtle text-[13px] tracking-[0.08em] leading-none whitespace-nowrap">
+        YOU DIDN'T VOTE ON THIS ONE
+      </span>
+      <span className="flex items-center gap-1.5 text-green leading-none whitespace-nowrap">
+        <DiscordIcon size={14} />
+        <span className="font-body text-[12px]">Catch the next</span>
+      </span>
+    </a>
   );
 }
 
@@ -415,58 +380,46 @@ function MobileLoginBar({ show, signIn, text }: { show: boolean; signIn: () => v
 
 function MobileIntro({
   sets,
-  entryCount = null,
   isPastDeadline,
 }: {
   sets: SetSummary[] | undefined;
-  entryCount?: number | null;
   isPastDeadline: boolean;
 }) {
+  const [open, setOpen] = useState(true);
+
   return (
     <section className="bg-surface border border-border rounded-xl p-4 mb-3 flex flex-col gap-2.5">
-      <div className="flex items-center gap-3">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-label={open ? "Hide details" : "Show details"}
+        className="flex w-full items-center gap-3 text-left bg-transparent border-0 p-0 cursor-pointer"
+      >
         <div className="flex items-center gap-1 shrink-0">
           <SetGlyph code={setGlyphCode(sets?.find((s) => s.code === SET_CODE) ?? { code: SET_CODE })} size={34} />
           <span className="font-display text-text tracking-[0.04em]" style={{ fontSize: 22, lineHeight: 1 }}>
             {SET_CODE}
           </span>
         </div>
-        <span className="flex-1 text-center font-display text-[16px] text-text tracking-[0.1em]">PACK 0, PICK 1</span>
-        <CountdownStacked deadline={VOTING_DEADLINE} scoringDate={SCORING_DATE} />
-      </div>
-      <p className="text-subtle text-[13.5px] leading-[1.5]">
-        {isPastDeadline ? (
-          <>
-            Entries are locked. Results will be displayed when{" "}
-            <a
-              href={SEVENTEEN_LANDS_URL}
-              target="_blank"
-              rel="noreferrer"
-              className="text-green hover:underline underline-offset-2"
-            >
-              17Lands
-            </a>
-            {" "}data is finalized.
-          </>
-        ) : (
-          <>
-            Put together a team of eight cards from <span className="font-semibold text-text">{P0P1_SET_NAME}</span>. Six weeks
-            after release, teams are ranked by their total{" "}
-            <a
-              href={SEVENTEEN_LANDS_URL}
-              target="_blank"
-              rel="noreferrer"
-              className="text-green hover:underline underline-offset-2"
-            >
-              17Lands GIH win rate
-            </a>
-            .
-          </>
-        )}
-      </p>
-      {isPastDeadline && entryCount !== null && entryCount > 0 && (
-        <p className="text-subtle text-[13.5px]">
-          {entryCount} player{entryCount !== 1 ? "s" : ""} submitted entries.
+        <span className="flex-1 min-w-0 text-center font-display text-[16px] text-text tracking-[0.1em] truncate pointer-events-none">
+          PACK 0, PICK 1
+        </span>
+        <div className="flex flex-col items-end gap-1 shrink-0">
+          <div className="flex items-center gap-2">
+            <CountdownStacked deadline={VOTING_DEADLINE} scoringDate={SCORING_DATE} pastDeadline={isPastDeadline} />
+            <ChevronDown size={22} className={`shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`} />
+          </div>
+          {isPastDeadline && (
+            <div className="w-full">
+              <P0P1CountdownBar from={VOTING_DEADLINE} to={SCORING_DATE} />
+            </div>
+          )}
+        </div>
+      </button>
+      {open && (
+        <p className="text-subtle text-[13.5px] leading-[1.5]">
+          <P0P1IntroText isPastDeadline={isPastDeadline} />
         </p>
       )}
     </section>
@@ -553,18 +506,26 @@ export function SlotsListSkeleton() {
   );
 }
 
-function CountdownStacked({ deadline, scoringDate }: { deadline: Date; scoringDate?: Date }) {
-  const now = Date.now();
+function CountdownStacked({
+  deadline,
+  scoringDate,
+  pastDeadline = false,
+}: {
+  deadline: Date;
+  scoringDate?: Date;
+  pastDeadline?: boolean;
+}) {
+  const now = p0p1Now();
   const deadlineDiff = deadline.getTime() - now;
 
-  if (deadlineDiff > 0) {
+  if (!pastDeadline && deadlineDiff > 0) {
     const days = Math.floor(deadlineDiff / (1000 * 60 * 60 * 24));
     const hours = Math.floor((deadlineDiff / (1000 * 60 * 60)) % 24);
     return (
       <div className="flex flex-col items-end leading-tight whitespace-nowrap shrink-0">
         <span className="text-muted text-[11px] tracking-[0.04em]">Closes in</span>
         <span className="text-green text-[13px]">
-          {days} days, {hours} hours
+          {pluralizeUnit(days, "day")}, {pluralizeUnit(hours, "hour")}
         </span>
       </div>
     );
@@ -580,7 +541,9 @@ function CountdownStacked({ deadline, scoringDate }: { deadline: Date; scoringDa
         <div className="flex flex-col items-end leading-tight whitespace-nowrap shrink-0">
           <span className="text-muted text-[11px] tracking-[0.04em]">Results in</span>
           <span className="text-green text-[13px]">
-            {showHours ? `${days * 24 + hours} hours` : `${days} days, ${hours} hours`}
+            {showHours
+              ? pluralizeUnit(days * 24 + hours, "hour")
+              : `${pluralizeUnit(days, "day")}, ${pluralizeUnit(hours, "hour")}`}
           </span>
         </div>
       );

@@ -10,13 +10,17 @@ import {
 } from "./hooks";
 import { P0P1_SET_CODE as SET_CODE, P0P1_VOTING_DEADLINE as VOTING_DEADLINE, SLOTS } from "./p0p1Slots";
 import { useLocalP0P1Picks, setLocalPick, clearLocalPicks, getLocalPicks } from "./localPicks";
-import type { Card, SlotKey } from "../types/p0p1";
+import { p0p1DevEnabled, useP0P1DevPreset, type P0P1DevPreset } from "./p0p1DevState";
+import type { AuthUser } from "../auth/AuthContext";
+import type { Card, P0P1PickStat, SlotKey } from "../types/p0p1";
 
 const ADVANCE_BEAT_MS = 260;
 
 export function useP0P1Ballot() {
-  const { user, loading: authLoading, signIn } = useAuth();
-  const useServerPicks = Boolean(user);
+  const { user: authUser, loading: authLoading, signIn } = useAuth();
+  const devPreset = useP0P1DevPreset();
+  const devActive = p0p1DevEnabled && devPreset !== "live";
+  const useServerPicks = Boolean(authUser);
   const { data: cards } = useP0P1Cards(SET_CODE);
   const { data: serverPicks } = useP0P1Picks(useServerPicks ? SET_CODE : undefined);
   const localPicks = useLocalP0P1Picks(SET_CODE);
@@ -36,7 +40,7 @@ export function useP0P1Ballot() {
       upsertPick.mutate({ slot: p.slot, cardName: p.cardName });
     }
     clearLocalPicks(SET_CODE);
-  }, [user, serverPicks, upsertPick]);
+  }, [authUser, serverPicks, upsertPick]);
 
   const activePicks = authLoading ? undefined : useServerPicks ? serverPicks : localPicks;
   const dataReady = Boolean(cards) && activePicks !== undefined;
@@ -92,11 +96,16 @@ export function useP0P1Ballot() {
     [pickedCards, picksBySlot],
   );
 
-  const scoringFilled = SLOTS.filter((s) => picksBySlot.has(s.key)).length;
-  const isComplete = scoringFilled === SLOTS.length;
-  const isPastDeadline = new Date() > VOTING_DEADLINE;
-  const hasParticipated = isPastDeadline && Boolean(user) && scoringFilled > 0;
+  const isPastDeadline = devActive ? true : new Date() > VOTING_DEADLINE;
   const { data: pickStats } = useP0P1PickStats(SET_CODE, isPastDeadline);
+
+  const devViewPreset = devActive ? devPreset : "live";
+  const user = applyDevUser(authUser, devViewPreset);
+  const effectivePicksBySlot = applyDevPicks(picksBySlot, pickStats, devViewPreset);
+
+  const scoringFilled = SLOTS.filter((s) => effectivePicksBySlot.has(s.key)).length;
+  const isComplete = scoringFilled === SLOTS.length;
+  const hasParticipated = isPastDeadline && Boolean(user) && scoringFilled > 0;
 
   const defaultSlotKey = useMemo(
     () => SLOTS.find((s) => !picksBySlot.has(s.key))?.key ?? SLOTS[0].key,
@@ -148,7 +157,7 @@ export function useP0P1Ballot() {
     user,
     authLoading,
     signIn,
-    picksBySlot,
+    picksBySlot: effectivePicksBySlot,
     pickedExcept,
     pickedSlotLabels,
     scoringFilled,
@@ -167,4 +176,39 @@ export function useP0P1Ballot() {
     selectAndClose,
     p0p1Sets,
   };
+}
+
+const FAKE_DEV_USER: AuthUser = {
+  id: "dev-preview-user",
+  discordId: "0",
+  username: "DevPreview",
+  avatarUrl: null,
+};
+
+function applyDevUser(authUser: AuthUser | null, preset: P0P1DevPreset): AuthUser | null {
+  if (preset === "closedLoggedOut") return null;
+  if (preset === "closedComplete" || preset === "closedDidNotVote") return authUser ?? FAKE_DEV_USER;
+  return authUser;
+}
+
+function applyDevPicks(
+  picksBySlot: Map<string, string>,
+  pickStats: P0P1PickStat[] | undefined,
+  preset: P0P1DevPreset,
+): Map<string, string> {
+  if (preset === "closedLoggedOut" || preset === "closedDidNotVote") return new Map();
+  if (preset !== "closedComplete") return picksBySlot;
+
+  return picksBySlot.size > 0 ? picksBySlot : topPickPerSlot(pickStats);
+}
+
+function topPickPerSlot(pickStats: P0P1PickStat[] | undefined): Map<string, string> {
+  const topBySlot = new Map<string, P0P1PickStat>();
+  for (const stat of pickStats ?? []) {
+    const current = topBySlot.get(stat.slot);
+    if (!current || stat.pickCount > current.pickCount) topBySlot.set(stat.slot, stat);
+  }
+  const picks = new Map<string, string>();
+  for (const [slot, stat] of topBySlot) picks.set(slot, stat.cardName);
+  return picks;
 }

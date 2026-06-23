@@ -1,58 +1,109 @@
 import { useState } from "react";
-import { SlotPip } from "./slotVisuals";
+import { SlotPip, SLOT_ACCENT } from "./slotVisuals";
 import { CardImagePreview } from "./CardImagePreview";
 import { TiedCardsModal } from "./TiedCardsModal";
+import { PickVersusModal, usePickVersusPager } from "./PickVersusCard";
 import { SectionLabel } from "../SectionLabel";
-import { groupBySlot, findExtremes } from "../../data/p0p1Stats";
+import { ManaCost } from "../ManaPips";
+import { groupBySlot, findExtremes, buildPickVersus, pickPctLabel } from "../../data/p0p1Stats";
 import { SLOTS } from "../../data/p0p1Slots";
-import type { Card, P0P1PickStat, SlotKey } from "../../types/p0p1";
+import type { Card, P0P1PickStat, PickVersus, SlotKey } from "../../types/p0p1";
 
 export function CommunityGrid({
   pickStats,
   cardsByName,
+  picksBySlot,
 }: {
   pickStats: P0P1PickStat[];
   cardsByName: Map<string, Card>;
+  picksBySlot?: Map<string, string>;
 }) {
   const grouped = groupBySlot(pickStats);
-  const mostBySlot = new Map(SLOTS.map((slot) => [slot.key, findExtremes(grouped.get(slot.key) ?? []).most]));
 
   return (
     <PickRow
       title="Crowd Favorites"
-      subtitle="Most popular picks by slot"
-      entries={SLOTS.map((slot) => ({ slotKey: slot.key, label: slot.label, stats: mostBySlot.get(slot.key)! }))}
+      entries={SLOTS.map((slot) => {
+        const slotStats = grouped.get(slot.key) ?? [];
+        return { slotKey: slot.key, label: slot.label, stats: findExtremes(slotStats).most, slotStats };
+      })}
       cardsByName={cardsByName}
+      picksBySlot={picksBySlot}
     />
   );
 }
 
+export type PickEntry = {
+  slotKey: SlotKey;
+  label: string;
+  stats: P0P1PickStat[];
+  slotStats?: P0P1PickStat[];
+  badge?: string;
+};
+
 function PickRow({
   title,
-  subtitle,
   entries,
   cardsByName,
+  picksBySlot,
 }: {
   title: string;
-  subtitle: string;
-  entries: { slotKey: SlotKey; label: string; stats: P0P1PickStat[] }[];
+  entries: PickEntry[];
   cardsByName: Map<string, Card>;
+  picksBySlot?: Map<string, string>;
 }) {
   return (
     <div>
-      <div className="flex flex-col mb-2">
-        <SectionLabel size={16} color={'white'}>
+      <div className="flex justify-center mb-1.5 lg:mb-2">
+        <SectionLabel size={22} color={'white'}>
           {title}
         </SectionLabel>
-        <p className="text-dim text-[12px]">
-          {subtitle}
-        </p>
       </div>
-      <div className="grid grid-cols-4 lg:grid-cols-8 gap-2">
-        {entries.map(({ slotKey, label, stats }) => (
-          <PickTile key={slotKey} slotKey={slotKey} label={label} stats={stats} cardsByName={cardsByName} />
-        ))}
-      </div>
+      <PickGrid entries={entries} cardsByName={cardsByName} picksBySlot={picksBySlot} />
+    </div>
+  );
+}
+
+export function PickGrid({
+  entries,
+  cardsByName,
+  picksBySlot,
+}: {
+  entries: PickEntry[];
+  cardsByName: Map<string, Card>;
+  picksBySlot?: Map<string, string>;
+}) {
+  const versusList: PickVersus[] = [];
+  const pagerIndexBySlot = new Map<SlotKey, number>();
+  for (const entry of entries) {
+    const yourPick = picksBySlot?.get(entry.slotKey);
+    const versus = entry.slotStats && yourPick
+      ? buildPickVersus(entry.slotStats, yourPick, cardsByName, entry.slotKey, entry.label)
+      : null;
+    if (versus) {
+      pagerIndexBySlot.set(entry.slotKey, versusList.length);
+      versusList.push(versus);
+    }
+  }
+  const pager = usePickVersusPager(versusList);
+
+  return (
+    <div className="grid grid-cols-4 lg:grid-cols-8 gap-2">
+      {entries.map(({ slotKey, label, stats, badge }) => {
+        const pagerIndex = pagerIndexBySlot.get(slotKey);
+        return (
+          <PickTile
+            key={slotKey}
+            slotKey={slotKey}
+            label={label}
+            stats={stats}
+            badge={badge}
+            cardsByName={cardsByName}
+            onOpenVersus={pagerIndex === undefined ? undefined : () => pager.open(pagerIndex)}
+          />
+        );
+      })}
+      <PickVersusModal pager={pager} />
     </div>
   );
 }
@@ -62,58 +113,74 @@ function PickTile({
   label,
   stats,
   cardsByName,
+  onOpenVersus,
+  badge,
 }: {
   slotKey: SlotKey;
   label: string;
   stats: P0P1PickStat[];
   cardsByName: Map<string, Card>;
+  onOpenVersus?: () => void;
+  badge?: string;
 }) {
   const [modalOpen, setModalOpen] = useState(false);
   const hasStats = stats.length > 0;
   const tied = stats.length > 1;
   const card = hasStats ? cardsByName.get(stats[0].cardName) : undefined;
+  const accent = SLOT_ACCENT[slotKey];
+
+  let art;
+  if (!card) {
+    art = <SlotPip slotKey={slotKey} size={48} />;
+  } else if (onOpenVersus) {
+    art = (
+      <button type="button" onClick={onOpenVersus} className="w-full h-full cursor-pointer p-0 border-0 bg-transparent">
+        <img src={card.imageArtCrop} alt={card.name} className="w-full h-full object-cover" />
+      </button>
+    );
+  } else {
+    art = (
+      <CardImagePreview imageUrl={card.imageNormal} alt={card.name} className="w-full h-full">
+        <img src={card.imageArtCrop} alt={card.name} className="w-full h-full object-cover" />
+      </CardImagePreview>
+    );
+  }
 
   return (
-    <div className="flex flex-col border border-border2 bg-surface overflow-hidden min-w-0">
-      <div className="relative aspect-square bg-surface2 overflow-hidden">
-        {hasStats && (
-          card ? (
-            <CardImagePreview imageUrl={card.imageNormal} alt={card.name} className="w-full h-full">
-              <img src={card.imageArtCrop} alt={card.name} className="w-full h-full object-cover" />
-            </CardImagePreview>
-          ) : (
-            <div className="w-full h-full bg-surface2" />
-          )
-        )}
-        <div
-          className="absolute top-1 left-1 w-5 h-5 rounded-full flex items-center justify-center bg-bg/85"
-          title={label}
-        >
-          <SlotPip slotKey={slotKey} size={12} />
+    <div className="group relative min-w-0 transition-transform duration-150 hover:z-10 hover:scale-[1.04]">
+      <div className="flex flex-col border border-t-0 border-border2 bg-surface overflow-hidden">
+        <div className="relative z-10 h-1 w-full shrink-0 origin-top transition-transform duration-150 group-hover:scale-y-[2]" style={{ background: accent }} />
+        <div className="relative aspect-square bg-surface2 flex items-center justify-center overflow-hidden">
+          {art}
+          {badge && (
+            <span className="absolute bottom-1 left-1 text-[11px] lg:text-[13px] font-display tracking-wide uppercase bg-black/85 text-purple rounded-sm px-1.5 py-0.5">
+              {badge}
+            </span>
+          )}
+          {tied && (
+            <button
+              type="button"
+              onClick={() => setModalOpen(true)}
+              className="absolute top-1 right-1 text-[9px] lg:text-[10px] font-display tracking-wide bg-bg/90 rounded-sm px-1 text-muted cursor-pointer"
+              title={`${stats.length} cards tied at this count — view all`}
+            >
+              {stats.length}-WAY TIE
+            </button>
+          )}
+          {hasStats && (
+            <span className="absolute bottom-1 right-1 text-[11px] lg:text-[13px] font-mono tabular-nums font-semibold px-1 rounded-sm bg-bg/85">
+              {pickPctLabel(stats[0].pickPct)}
+            </span>
+          )}
         </div>
-        {tied && (
-          <button
-            type="button"
-            onClick={() => setModalOpen(true)}
-            className="absolute top-1 right-1 text-[9px] font-display tracking-wide bg-bg/90 rounded-sm px-1 text-muted cursor-pointer"
-            title={`${stats.length} cards tied at this count — view all`}
-          >
-            {stats.length}-WAY TIE
-          </button>
-        )}
         {hasStats && (
-          <span className={`absolute bottom-1 right-1 text-[9px] font-mono tabular-nums px-1 rounded-sm bg-bg/85`}>
-            {stats[0].pickCount} picked
-          </span>
+          <div className="px-1.5 py-1.5 min-w-0 flex items-center gap-1.5">
+            <span className="text-subtle text-[11px] lg:text-[13px] truncate min-w-0">{stats[0].cardName}</span>
+            {card && <span className="ml-auto shrink-0 hidden lg:flex"><ManaCost cost={card.manaCost} size={12} /></span>}
+          </div>
         )}
       </div>
-      {hasStats && (
-        <div className="px-1.5 py-1.5 min-w-0">
-          <span className="text-subtle text-[10.5px] truncate block min-w-0">
-            {stats[0].cardName}
-          </span>
-        </div>
-      )}
+
       {modalOpen && (
         <TiedCardsModal
           label={label}

@@ -20,8 +20,9 @@ export function Tooltip({
   open,
   onOpenChange,
   delayDuration,
+  hideArrow,
 }: {
-  label: string;
+  label: React.ReactNode;
   side?: Side;
   align?: "start" | "center" | "end";
   children: React.ReactNode;
@@ -29,6 +30,7 @@ export function Tooltip({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   delayDuration?: number;
+  hideArrow?: boolean;
 }) {
   return (
     <Root open={open} onOpenChange={onOpenChange} delayDuration={delayDuration}>
@@ -47,9 +49,11 @@ export function Tooltip({
           )}
         >
           {label}
-          <span
-            className={cn("absolute h-2.5 w-2.5 rotate-45 bg-black border-border2", ARROW_BY_SIDE[side ?? "top"])}
-          />
+          {!hideArrow && (
+            <span
+              className={cn("absolute h-2.5 w-2.5 rotate-45 bg-black border-border2", ARROW_BY_SIDE[side ?? "top"])}
+            />
+          )}
         </Content>
       </Portal>
     </Root>

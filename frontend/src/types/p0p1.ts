@@ -40,3 +40,21 @@ export interface P0P1PickStat {
   pickCount: number;
   pickPct: number;
 }
+
+export type PickVersusState = "matched" | "minority" | "rogue";
+
+export interface PickVersusSide {
+  name: string;
+  imageUrl: string;
+  pickPct: number;
+}
+
+export interface PickVersus {
+  slotKey: SlotKey;
+  slotLabel: string;
+  state: PickVersusState;
+  agreed: boolean;
+  tiedCount: number;
+  crowd: PickVersusSide;
+  yours: PickVersusSide;
+}

@@ -426,42 +426,6 @@ const P0P1_SLOT_KEYS: SlotKey[] = [
 
 const p0p1Picks = new Map<string, P0P1Pick>();
 
-// Seed mock picks with a mix of crowd-favorite, minority, and rogue picks
-// (not the top card in every slot), and never the same card twice across
-// slots - wildcard_common/wildcard_uncommon's filters are supersets of the
-// color- and type-specific slots, so naive independent picks can collide,
-// which the real ballot never allows. Slots are walked in P0P1_SLOT_KEYS
-// order (wildcards last) so their picks can see what's already claimed.
-{
-  const statsBySlot = new Map<SlotKey, P0P1PickStat[]>();
-  for (const stat of generateP0P1PickStats()) {
-    const slotStats = statsBySlot.get(stat.slot);
-    if (slotStats) slotStats.push(stat);
-    else statsBySlot.set(stat.slot, [stat]);
-  }
-
-  const RANK_PATTERN: Array<"top" | "middle" | "bottom"> =
-    ["top", "bottom", "middle", "top", "bottom", "middle", "top", "bottom"];
-  const claimed = new Set<string>();
-
-  P0P1_SLOT_KEYS.forEach((slot, i) => {
-    const slotStats = statsBySlot.get(slot);
-    if (!slotStats || slotStats.length === 0) return;
-    const rank = RANK_PATTERN[i % RANK_PATTERN.length];
-    const targetIndex = rank === "top" ? 0
-      : rank === "bottom" ? slotStats.length - 1
-      : Math.floor(slotStats.length / 2);
-    for (let offset = 0; offset < slotStats.length; offset++) {
-      const stat = slotStats[(targetIndex + offset) % slotStats.length];
-      if (!claimed.has(stat.cardName)) {
-        claimed.add(stat.cardName);
-        p0p1Picks.set(slot, { slot, cardName: stat.cardName, lastUpdated: "2026-06-10T00:00:00Z" });
-        break;
-      }
-    }
-  });
-}
-
 export const fetchP0P1Cards = (_setCode: string): Promise<Card[]> =>
   wait(cardsMshFixture);
 
@@ -483,67 +447,111 @@ export const deleteAllP0P1Picks = async (
   p0p1Picks.clear();
 };
 
-function forceTrailingTie(counts: number[], tieCount: number, value: number) {
-  let surplus = 0;
-  for (let i = counts.length - tieCount; i < counts.length; i++) {
-    surplus += counts[i] - value;
-    counts[i] = value;
+export const fetchP0P1PickStats = (_setCode: string): Promise<P0P1PickStat[]> =>
+  wait(syntheticPickStats);
+
+const P0P1_COMPLETE_ENTRANTS = 91;
+
+const P0P1_SLOT_FILTERS: Record<SlotKey, (c: Card) => boolean> = {
+  white_common: (c) => c.rarity === "common" && c.colors.length === 1 && c.colors[0] === "W",
+  blue_common: (c) => c.rarity === "common" && c.colors.length === 1 && c.colors[0] === "U",
+  black_common: (c) => c.rarity === "common" && c.colors.length === 1 && c.colors[0] === "B",
+  red_common: (c) => c.rarity === "common" && c.colors.length === 1 && c.colors[0] === "R",
+  green_common: (c) => c.rarity === "common" && c.colors.length === 1 && c.colors[0] === "G",
+  multicolor_uncommon: (c) => c.rarity === "uncommon" && c.colors.length >= 2,
+  wildcard_common: (c) => c.rarity === "common" && !c.typeLine.startsWith("Basic Land"),
+  wildcard_uncommon: (c) => c.rarity === "uncommon",
+};
+
+function shuffleInPlace<T>(items: T[], rng: () => number): T[] {
+  for (let i = items.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [items[i], items[j]] = [items[j], items[i]];
   }
-  counts[0] += surplus;
+  return items;
 }
 
-function generateP0P1PickStats(): P0P1PickStat[] {
-  const stats: P0P1PickStat[] = [];
-  const slotFilters: Record<string, (c: Card) => boolean> = {
-    white_common: (c) => c.rarity === "common" && c.colors.length === 1 && c.colors[0] === "W",
-    blue_common: (c) => c.rarity === "common" && c.colors.length === 1 && c.colors[0] === "U",
-    black_common: (c) => c.rarity === "common" && c.colors.length === 1 && c.colors[0] === "B",
-    red_common: (c) => c.rarity === "common" && c.colors.length === 1 && c.colors[0] === "R",
-    green_common: (c) => c.rarity === "common" && c.colors.length === 1 && c.colors[0] === "G",
-    multicolor_uncommon: (c) => c.rarity === "uncommon" && c.colors.length >= 2,
-    wildcard_common: (c) => c.rarity === "common" && !c.typeLine.startsWith("Basic Land"),
-    wildcard_uncommon: (c) => c.rarity === "uncommon",
-  };
+function allocateVotes(weights: number[], total: number): number[] {
+  const totalWeight = weights.reduce((sum, w) => sum + w, 0);
+  const exact = weights.map((w) => (w / totalWeight) * total);
+  const counts = exact.map(Math.floor);
+  const byRemainder = exact
+    .map((value, i) => ({ i, frac: value - Math.floor(value) }))
+    .sort((a, b) => b.frac - a.frac);
+  let allocated = counts.reduce((sum, c) => sum + c, 0);
+  let k = 0;
+  while (allocated < total) {
+    counts[byRemainder[k % byRemainder.length].i] += 1;
+    allocated += 1;
+    k += 1;
+  }
+  return counts;
+}
+
+function generateSyntheticPickStats(): P0P1PickStat[] {
   let seed = 42;
   const rng = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
-  const TOTAL_VOTERS = 87;
+  const N = P0P1_COMPLETE_ENTRANTS;
 
+  const stats: P0P1PickStat[] = [];
   for (const slotKey of P0P1_SLOT_KEYS) {
-    const eligible = cardsMshFixture.filter(slotFilters[slotKey]);
-    const count = Math.min(eligible.length, 3 + Math.floor(rng() * 6));
-    const picked = eligible.slice(0, count);
-    let remaining = TOTAL_VOTERS;
-    const counts: number[] = [];
-    for (let i = 0; i < picked.length; i++) {
-      if (i === picked.length - 1) {
-        counts.push(remaining);
-      } else {
-        const share = Math.max(1, Math.floor(remaining * (0.15 + rng() * 0.45)));
-        counts.push(share);
-        remaining -= share;
-      }
-    }
-    counts.sort((a, b) => b - a);
-    if (slotKey === "black_common" && counts.length >= 3) {
-      forceTrailingTie(counts, 3, 4);
-    }
-    if (slotKey === "wildcard_common" && counts.length >= 4) {
-      forceTrailingTie(counts, 4, 5);
-    }
-    for (let i = 0; i < picked.length; i++) {
-      stats.push({
+    const eligible = shuffleInPlace(cardsMshFixture.filter(P0P1_SLOT_FILTERS[slotKey]), rng);
+    if (eligible.length === 0) continue;
+    const skew = 1.1 + rng() * 0.8;
+    const weights = eligible.map((_, rank) => 1 / Math.pow(rank + 1, skew));
+    const counts = allocateVotes(weights, N);
+    const slotStats = eligible
+      .map((card, i) => ({
         setCode: "MSH",
         slot: slotKey,
-        cardName: picked[i].name,
+        cardName: card.name,
         pickCount: counts[i],
-        pickPct: Math.round(counts[i] * 1000 / TOTAL_VOTERS) / 10,
-      });
-    }
+        pickPct: Math.round(counts[i] * 1000 / N) / 10,
+      }))
+      .filter((stat) => stat.pickCount > 0)
+      .sort((a, b) => b.pickCount - a.pickCount);
+    stats.push(...slotStats);
   }
   return stats;
 }
 
-export const fetchP0P1PickStats = (_setCode: string): Promise<P0P1PickStat[]> => wait(generateP0P1PickStats());
+function buildSyntheticPicks(stats: P0P1PickStat[]): P0P1Pick[] {
+  const statsBySlot = new Map<SlotKey, P0P1PickStat[]>();
+  for (const stat of stats) {
+    const slotStats = statsBySlot.get(stat.slot);
+    if (slotStats) slotStats.push(stat);
+    else statsBySlot.set(stat.slot, [stat]);
+  }
+
+  const RANK_PATTERN: Array<"top" | "middle" | "bottom"> =
+    ["top", "bottom", "middle", "top", "bottom", "middle", "top", "bottom"];
+  const claimed = new Set<string>();
+  const picks: P0P1Pick[] = [];
+
+  P0P1_SLOT_KEYS.forEach((slot, i) => {
+    const slotStats = statsBySlot.get(slot);
+    if (!slotStats || slotStats.length === 0) return;
+    const rank = RANK_PATTERN[i % RANK_PATTERN.length];
+    const targetIndex = rank === "top" ? 0
+      : rank === "bottom" ? slotStats.length - 1
+      : Math.floor(slotStats.length / 2);
+    for (let offset = 0; offset < slotStats.length; offset++) {
+      const stat = slotStats[(targetIndex + offset) % slotStats.length];
+      if (!claimed.has(stat.cardName)) {
+        claimed.add(stat.cardName);
+        picks.push({ slot, cardName: stat.cardName, lastUpdated: "2026-06-10T00:00:00Z" });
+        break;
+      }
+    }
+  });
+  return picks;
+}
+
+const syntheticPickStats = generateSyntheticPickStats();
+const syntheticPicks = buildSyntheticPicks(syntheticPickStats);
+for (const pick of syntheticPicks) {
+  p0p1Picks.set(pick.slot, pick);
+}
 
 export const initialAuthUser = {
   id: "mock-user-id",

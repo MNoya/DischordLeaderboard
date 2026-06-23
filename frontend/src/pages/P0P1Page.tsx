@@ -13,12 +13,15 @@ import { AutoSaveBadge } from "../components/p0p1/AutoSaveBadge";
 import { P0P1MobileSelector } from "../components/p0p1/P0P1MobileView";
 import { GoToTopButton } from "../components/GoToTopButton";
 import { PostVotingStats } from "../components/p0p1/PostVotingStats";
-import { IncompleteEntryMessage } from "../components/p0p1/IncompleteEntryMessage";
+import { P0P1DevPanel } from "../components/p0p1/P0P1DevPanel";
+import { P0P1BallotScorecard, CHAMFER } from "../components/p0p1/P0P1BallotScorecard";
+import { PickGrid } from "../components/p0p1/CommunityGrid";
 import { useIsMobile } from "../lib/use-is-mobile";
 import { useP0P1Ballot } from "../data/useP0P1Ballot";
 import { SLOTS } from "../data/p0p1Slots";
-import { groupBySlot, findExtremes, classifyYourPick, participantCount } from "../data/p0p1Stats";
-import type { Card, P0P1PickStat, SlotDefinition, SlotKey } from "../types/p0p1";
+import { groupBySlot, findExtremes, classifyYourPick } from "../data/p0p1Stats";
+import type { Card, SlotDefinition, SlotKey } from "../types/p0p1";
+import { SITE_LINKS } from "../data/site";
 
 export function P0P1Page() {
   const ballot = useP0P1Ballot();
@@ -46,10 +49,16 @@ export function P0P1Page() {
   } = ballot;
   const isDesktop = !useIsMobile(1024);
   const isCompleteEntrant = isPastDeadline && Boolean(user) && isComplete;
-  const isIncompleteEntrant = isPastDeadline && Boolean(user) && !isComplete;
+  const didNotVote = isPastDeadline && Boolean(user) && !isComplete;
+  const groupedStats = hasParticipated && pickStats ? groupBySlot(pickStats) : undefined;
 
   if (!isDesktop) {
-    return <P0P1MobileSelector ballot={ballot} />;
+    return (
+      <>
+        <P0P1MobileSelector ballot={ballot} />
+        <P0P1DevPanel />
+      </>
+    );
   }
 
   const loginCta = !authLoading && !user && (
@@ -60,17 +69,18 @@ export function P0P1Page() {
     </button>
   );
 
-  const heroCta = loginCta || (user && !isPastDeadline ? <AutoSaveBadge complete={isComplete} /> : null);
+  const ballotScorecard =
+    user && isPastDeadline && isComplete && pickStats && pickStats.length > 0 ? (
+      <P0P1BallotScorecard pickStats={pickStats} picksBySlot={picksBySlot} />
+    ) : null;
+  const didNotVoteCard = didNotVote ? <DidNotVoteCard /> : null;
+  const heroCta =
+    loginCta ||
+    (user && !isPastDeadline ? <AutoSaveBadge complete={isComplete} /> : null) ||
+    ballotScorecard ||
+    didNotVoteCard;
 
-  const entryCount = pickStats ? participantCount(pickStats) : null;
-
-  const belowIntro = isPastDeadline ? (
-    entryCount !== null && entryCount > 0 ? (
-      <div className="text-subtle text-[14px]">
-        {entryCount} player{entryCount !== 1 ? "s" : ""} submitted entries.
-      </div>
-    ) : null
-  ) : (
+  const belowIntro = isPastDeadline ? null : (
     <div className="flex items-center gap-3 w-full max-w-[420px]">
       <SectionLabel size={13}>PICKS</SectionLabel>
       <div className="flex-1">
@@ -85,35 +95,52 @@ export function P0P1Page() {
       <P0P1Hero cta={heroCta} belowIntro={belowIntro} isPastDeadline={isPastDeadline} />
 
       <main className="flex-1 px-10 pb-5 pt-5">
-        {(!isPastDeadline || isCompleteEntrant) && (
-          <>
-            <SectionLabel size={16} className="mb-2 text-white">YOUR PICKS</SectionLabel>
-            {dataReady ? (
-              <RosterStrip
-                activeSlotKey={activeSlotKey}
-                picksBySlot={picksBySlot}
-                cardsByName={cardsByName}
-                locked={isPastDeadline}
-                pickStats={hasParticipated ? pickStats : undefined}
-                onSelect={(key) => setEditingSlotKey(key)}
-              />
-            ) : (
-              <RosterStripSkeleton />
-            )}
-          </>
-        )}
-
-        {isIncompleteEntrant && (
-          <div className="mb-2">
-            <IncompleteEntryMessage />
-          </div>
-        )}
+        {!isPastDeadline &&
+          (dataReady ? (
+            <RosterStrip
+              activeSlotKey={activeSlotKey}
+              picksBySlot={picksBySlot}
+              cardsByName={cardsByName}
+              onSelect={(key) => setEditingSlotKey(key)}
+            />
+          ) : (
+            <RosterStripSkeleton />
+          ))}
 
         {isPastDeadline ? (
           pickStats && pickStats.length > 0 && (
-            <div className="mt-6">
-              <PostVotingStats pickStats={pickStats} cardsByName={cardsByName} picksBySlot={picksBySlot} />
-            </div>
+            <PostVotingStats
+              pickStats={pickStats}
+              cardsByName={cardsByName}
+              picksBySlot={picksBySlot}
+              yourPicks={
+                isCompleteEntrant ? (
+                  <div>
+                    <div className="relative flex items-baseline justify-center gap-2 mb-2">
+                      <SectionLabel size={22} className="text-white">YOUR PICKS</SectionLabel>
+                    </div>
+                    <PickGrid
+                      cardsByName={cardsByName}
+                      picksBySlot={picksBySlot}
+                      entries={SLOTS.map((slot) => {
+                        const cardName = picksBySlot.get(slot.key);
+                        const slotStats = groupedStats?.get(slot.key) ?? [];
+                        const yourStat = cardName ? slotStats.find((s) => s.cardName === cardName) : undefined;
+                        const extremes = findExtremes(slotStats);
+                        const cls = yourStat ? classifyYourPick(yourStat, extremes.most, extremes.least) : undefined;
+                        return {
+                          slotKey: slot.key,
+                          label: slot.label,
+                          stats: yourStat ? [yourStat] : [],
+                          slotStats,
+                          badge: cls?.state === "rogue" ? cls.qualifier : undefined,
+                        };
+                      })}
+                    />
+                  </div>
+                ) : null
+              }
+            />
           )
         ) : (
           <div className="mt-4">
@@ -147,6 +174,30 @@ export function P0P1Page() {
       </main>
 
       <GoToTopButton onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} />
+      <P0P1DevPanel />
+    </div>
+  );
+}
+
+function DidNotVoteCard() {
+  return (
+    <div className="inline-block animate-fadeUpIn" style={{ clipPath: CHAMFER, background: "#3b4458", padding: 1 }}>
+      <div className="bg-surface2 w-[clamp(280px,22vw,340px)] px-5 py-3 flex flex-col gap-1.5" style={{ clipPath: CHAMFER }}>
+        <span className="font-display text-text leading-none tracking-[0.04em]" style={{ fontSize: 22 }}>
+          YOU DIDN'T VOTE ON THIS ONE
+        </span>
+        <p className="font-body text-subtle text-[12px] leading-snug">
+          <a
+            href={SITE_LINKS.discord}
+            target="_blank"
+            rel="noreferrer"
+            className="text-green hover:text-green-2 underline underline-offset-2"
+          >
+            Check the Dischord
+          </a>{" "}
+          to catch the next challenge
+        </p>
+      </div>
     </div>
   );
 }
@@ -155,36 +206,23 @@ function RosterStrip({
   activeSlotKey,
   picksBySlot,
   cardsByName,
-  locked,
-  pickStats,
   onSelect,
 }: {
   activeSlotKey: SlotKey;
   picksBySlot: Map<string, string>;
   cardsByName: Map<string, Card>;
-  locked: boolean;
-  pickStats?: P0P1PickStat[];
   onSelect: (key: SlotKey) => void;
 }) {
-  const groupedStats = pickStats ? groupBySlot(pickStats) : undefined;
-
   return (
     <div className="grid grid-cols-8 gap-2">
       {SLOTS.map((slot) => {
         const cardName = picksBySlot.get(slot.key);
-        const stat = cardName && groupedStats
-          ? groupedStats.get(slot.key)?.find((s) => s.cardName === cardName)
-          : undefined;
-        const slotStats = groupedStats?.get(slot.key);
         return (
           <RosterTile
             key={slot.key}
             slot={slot}
             card={cardName ? cardsByName.get(cardName) : undefined}
-            active={!locked && activeSlotKey === slot.key}
-            locked={locked}
-            yourStat={stat}
-            slotStats={slotStats}
+            active={activeSlotKey === slot.key}
             onClick={() => onSelect(slot.key)}
           />
         );
@@ -197,46 +235,31 @@ function RosterTile({
   slot,
   card,
   active,
-  locked,
-  yourStat,
-  slotStats,
   onClick,
 }: {
   slot: SlotDefinition;
   card: Card | undefined;
   active: boolean;
-  locked: boolean;
-  yourStat?: P0P1PickStat;
-  slotStats?: P0P1PickStat[];
   onClick: () => void;
 }) {
   const accent = SLOT_ACCENT[slot.key];
-  let classification: ReturnType<typeof classifyYourPick> | undefined;
-  if (yourStat && slotStats) {
-    const { most, least } = findExtremes(slotStats);
-    classification = classifyYourPick(yourStat, most, least);
-  }
-  const stateColor = classification?.state === "most"
-    ? "text-cyan"
-    : classification?.state === "rogue"
-    ? "text-magenta"
-    : "text-white";
-  const stripClass = locked
-    ? "w-full shrink-0 h-1"
-    : `w-full shrink-0 transition-[height] duration-150 ${active ? "h-2" : "h-1 group-hover:h-2"}`;
-  const body = (
-    <>
-      <div className={stripClass} style={{ background: accent }} />
-      <div className="relative aspect-square shrink-0 bg-surface2 flex items-center justify-center overflow-hidden">
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`group relative flex flex-col aspect-square border border-t-0 overflow-hidden text-left min-w-0 transition-all duration-150 cursor-pointer hover:z-10 hover:scale-[1.04] ${
+        active ? "border-green/60 bg-green/5 z-10 scale-[1.04]" : "border-border2 bg-surface hover:border-border"
+      }`}
+    >
+      <div
+        className={`w-full shrink-0 transition-[height] duration-150 ${active ? "h-2" : "h-1 group-hover:h-2"}`}
+        style={{ background: accent }}
+      />
+      <div className="relative flex-1 min-h-0 bg-surface2 flex items-center justify-center overflow-hidden">
         {card ? (
           <img src={card.imageArtCrop} alt={card.name} className="w-full h-full object-cover" />
         ) : (
           <SlotPip slotKey={slot.key} size={48} />
-        )}
-        {classification?.qualifier && (
-          <span className={`absolute top-1.5 right-1.5 text-[10px] font-display tracking-wide px-2 py-1 rounded-sm bg-bg/85 ${stateColor}`}>
-            {classification.qualifier}
-          </span>
         )}
       </div>
       <div className="px-2 pt-2 pb-1.5 shrink-0">
@@ -251,41 +274,9 @@ function RosterTile({
             </span>
           </div>
         ) : (
-          <span className={locked ? "text-dim text-[14px]" : "italic text-dim text-[13px]"}>
-            {locked ? "—" : "Select a card"}
-          </span>
+          <span className="italic text-dim text-[13px]">Select a card</span>
         )}
       </div>
-      {yourStat && classification && (
-        <div className="px-2 pt-2 pb-2.5 shrink-0 border-t border-border2 flex items-baseline gap-1.5">
-          <span className={`font-mono tabular-nums text-[22px] leading-none font-semibold`}>
-            {yourStat.pickCount}
-          </span>
-          <span className="text-muted text-[12px] leading-none">
-            {yourStat.pickCount === 1 ? (
-              <><span className="opacity-60">(you!)</span> picked</>
-            ) : (
-              "picked"
-            )}
-          </span>
-        </div>
-      )}
-    </>
-  );
-
-  const base = "group relative flex flex-col border border-t-0 overflow-hidden text-left min-w-0";
-  if (locked) {
-    return <div className={`${base} bg-surface border-border2`}>{body}</div>;
-  }
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`${base} transition-colors cursor-pointer ${
-        active ? "border-green/60 bg-green/5" : "border-border2 bg-surface hover:border-green/60"
-      }`}
-    >
-      {body}
     </button>
   );
 }
@@ -294,9 +285,9 @@ function RosterStripSkeleton() {
   return (
     <div className="grid grid-cols-8 gap-2">
       {Array.from({ length: SLOTS.length }, (_, i) => (
-        <div key={i} className="flex flex-col border-t-0 bg-surface border border-border2">
+        <div key={i} className="flex flex-col aspect-square border-t-0 bg-surface border border-border2">
           <div className="h-1 w-full bg-surface2" />
-          <div className="aspect-square shrink-0 bg-surface2 animate-pulse" />
+          <div className="flex-1 min-h-0 bg-surface2 animate-pulse" />
           <div className="px-2.5 py-1.5 shrink-0 flex flex-col gap-1">
             <div className="h-2 w-12 bg-surface2 animate-pulse" />
             <div className="h-2.5 w-16 bg-surface2 animate-pulse" />
