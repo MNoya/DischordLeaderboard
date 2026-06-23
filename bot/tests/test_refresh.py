@@ -6,8 +6,8 @@ from sqlalchemy import select
 from bot.models import DraftEvent, MagicSet, Player, PlayerStats
 from bot.services import refresh as refresh_mod
 from bot.services.refresh import (
-    RATE_LIMIT_COOLDOWN_S,
-    RATE_LIMIT_MAX_RETRIES,
+    TRANSIENT_COOLDOWN_S,
+    TRANSIENT_MAX_RETRIES,
     bulk_upsert_draft_events,
     claim_orphan_drafts,
     rebuild_player_stats,
@@ -55,7 +55,7 @@ def _make_403():
     return requests.HTTPError(response=resp)
 
 
-class RateLimitedThenOkClient:
+class TransientThenOkClient:
     def __init__(self, fail_times, drafts=None):
         self.fail_times = fail_times
         self.drafts = drafts or []
@@ -385,46 +385,57 @@ def test_refresh_player_network_error_does_not_invalidate(session):
     assert p.token_invalid is False
 
 
-def test_refresh_player_403_returns_rate_limited(session):
+def test_refresh_player_403_returns_transient(session):
     _seed_set(session, code="ECL")
     p = _seed_player(session)
 
     result = refresh_player(session, FakeClient(raise_=_make_403()), p)
 
-    assert result["status"] == "rate_limited"
+    assert result["status"] == "transient"
     assert p.token_invalid is False
 
 
-def test_rate_limit_pause_retries_then_succeeds(session, monkeypatch):
+def test_refresh_player_connection_drop_returns_transient(session):
+    _seed_set(session, code="ECL")
+    p = _seed_player(session)
+
+    dropped = requests.ConnectionError("('Connection aborted.', RemoteDisconnected())")
+    result = refresh_player(session, FakeClient(raise_=dropped), p)
+
+    assert result["status"] == "transient"
+    assert p.token_invalid is False
+
+
+def test_transient_retry_pauses_then_succeeds(session, monkeypatch):
     _seed_active_set(session)
     p = _seed_player(session)
     sleeps = []
     monkeypatch.setattr(refresh_mod._time, "sleep", lambda s: sleeps.append(s))
-    client = RateLimitedThenOkClient(fail_times=1)
+    client = TransientThenOkClient(fail_times=1)
 
-    result = refresh_mod._refresh_player_pausing_on_rate_limit(
+    result = refresh_mod._refresh_player_retrying_transient(
         session, client, p, date(2026, 4, 21), idx=1, n_total=1
     )
 
     assert result["status"] == "updated"
-    assert sleeps == [RATE_LIMIT_COOLDOWN_S]
+    assert sleeps == [TRANSIENT_COOLDOWN_S]
     assert client.calls == 2
 
 
-def test_rate_limit_pause_gives_up_after_max_retries(session, monkeypatch):
+def test_transient_retry_gives_up_after_max_retries(session, monkeypatch):
     _seed_active_set(session)
     p = _seed_player(session)
     sleeps = []
     monkeypatch.setattr(refresh_mod._time, "sleep", lambda s: sleeps.append(s))
-    client = RateLimitedThenOkClient(fail_times=99)
+    client = TransientThenOkClient(fail_times=99)
 
-    result = refresh_mod._refresh_player_pausing_on_rate_limit(
+    result = refresh_mod._refresh_player_retrying_transient(
         session, client, p, date(2026, 4, 21), idx=5, n_total=10
     )
 
     assert result["status"] == "error"
-    assert len(sleeps) == RATE_LIMIT_MAX_RETRIES
-    assert client.calls == RATE_LIMIT_MAX_RETRIES + 1
+    assert len(sleeps) == TRANSIENT_MAX_RETRIES
+    assert client.calls == TRANSIENT_MAX_RETRIES + 1
 
 
 # ---------------------------------------------------------------------------

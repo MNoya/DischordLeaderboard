@@ -37,8 +37,8 @@ from bot.sets import active_set_code
 
 PERIODIC_WINDOW_DAYS = 7
 
-RATE_LIMIT_COOLDOWN_S = 60.0
-RATE_LIMIT_MAX_RETRIES = 2
+TRANSIENT_COOLDOWN_S = 60.0
+TRANSIENT_MAX_RETRIES = 2
 
 
 logger = logging.getLogger(__name__)
@@ -174,13 +174,19 @@ def refresh_player(
                 return {"status": "invalidated"}
             if status_code == 403:
                 logger.warning(f"refresh: rate limited (403) for player {player.id}")
-                return {"status": "rate_limited", "error": str(e)}
+                return {"status": "transient", "error": str(e)}
             logger.warning(f"refresh: HTTP error for player {player.id}: {e}")
             return {"status": "error", "error": str(e)}
         except ValueError as e:
             # Signup verifies tokens, so a malformed 200 is a 17lands-side issue, not a bad token
             logger.warning(f"refresh: malformed response for player {player.id}: {e}")
             return {"status": "error", "error": str(e)}
+        except requests.Timeout as e:
+            logger.warning(f"refresh: timeout for player {player.id}: {e}")
+            return {"status": "error", "error": str(e)}
+        except requests.ConnectionError as e:
+            logger.warning(f"refresh: connection dropped for player {player.id}: {e}")
+            return {"status": "transient", "error": str(e)}
         except requests.RequestException as e:
             logger.warning(f"refresh: network error for player {player.id}: {e}")
             return {"status": "error", "error": str(e)}
@@ -324,26 +330,27 @@ def refresh_active_players_all_sets(session: Session, client: _DraftClient) -> d
     return _refresh_active_with_window(session, client, sets[0].start_date)
 
 
-def _refresh_player_pausing_on_rate_limit(
+def _refresh_player_retrying_transient(
     session: Session, client: _DraftClient, player: Player, fetch_start: date, idx: int, n_total: int
 ) -> dict:
-    """Refresh one player, treating a 403 as a run-wide cooldown signal.
+    """Refresh one player, treating 403s and dropped connections as a run-wide cooldown signal.
 
-    17lands rate-limits the connection after a sustained run, not a single token, so a 403 means
-    pause the whole sequential run and retry rather than skip the player. Exhausted retries fall
-    through as an error so the player can recover on the next tick.
+    17lands sheds load after a sustained run by throttling the connection — a 403 or an abruptly
+    closed socket — not by rejecting a single token, so either means pause the whole sequential run
+    and retry rather than skip the player. Exhausted retries fall through as an error so the player
+    can recover on the next tick.
     """
-    for attempt in range(RATE_LIMIT_MAX_RETRIES + 1):
+    for attempt in range(TRANSIENT_MAX_RETRIES + 1):
         result = refresh_player(session, client, player, fetch_start=fetch_start)
-        if result.get("status") != "rate_limited":
+        if result.get("status") != "transient":
             return result
-        if attempt == RATE_LIMIT_MAX_RETRIES:
-            logger.warning(f"refresh: [{idx}/{n_total}] still rate limited after {attempt} retries, skipping")
-            return {"status": "error", "error": result.get("error", "rate limited")}
+        if attempt == TRANSIENT_MAX_RETRIES:
+            logger.warning(f"refresh: [{idx}/{n_total}] still failing after {attempt} retries, skipping")
+            return {"status": "error", "error": result.get("error", "transient failure")}
         logger.warning(
-            f"refresh: rate limited at [{idx}/{n_total}], pausing {RATE_LIMIT_COOLDOWN_S:.0f}s before retry"
+            f"refresh: transient failure at [{idx}/{n_total}], pausing {TRANSIENT_COOLDOWN_S:.0f}s before retry"
         )
-        _time.sleep(RATE_LIMIT_COOLDOWN_S)
+        _time.sleep(TRANSIENT_COOLDOWN_S)
     return result
 
 
@@ -371,7 +378,7 @@ def _refresh_active_with_window(session: Session, client: _DraftClient, fetch_st
     t_total = _time.monotonic()
     for idx, player in enumerate(players, start=1):
         t0 = _time.monotonic()
-        result = _refresh_player_pausing_on_rate_limit(session, client, player, fetch_start, idx, n_total)
+        result = _refresh_player_retrying_transient(session, client, player, fetch_start, idx, n_total)
         # Commit per-player so a mid-run crash keeps fetched data and the token_invalid flag persists
         session.commit()
         elapsed = _time.monotonic() - t0
