@@ -5,8 +5,8 @@ import type { SlotKey } from "../../types/p0p1";
 
 type Color = "W" | "U" | "B" | "R" | "G";
 
-const UNCOMMON_SILVER_GRADIENT =
-  "repeating-linear-gradient(135deg, #8a94a3 0px, #c9cfd8 2px, #e6e9ef 4px, #c9cfd8 6px, #8a94a3 8px)";
+const UNCOMMON_SILVER_GRADIENT = "linear-gradient(90deg, #8a94a3 0%, #e6e9ef 50%, #8a94a3 100%)";
+const UNCOMMON_SILVER_BAR = "linear-gradient(90deg, #5c6675 0%, #b9c1cc 40%, #ffffff 50%, #b9c1cc 60%, #5c6675 100%)";
 const UNCOMMON_GLYPH_GRADIENT = "linear-gradient(to bottom, #d6dbe3 0%, #ffffff 48%, #ffffff 56%, #cdd3dc 100%)";
 
 export const SLOT_ACCENT: Record<SlotKey, string> = {
@@ -19,6 +19,10 @@ export const SLOT_ACCENT: Record<SlotKey, string> = {
   wildcard_common: "#ffffff",
   wildcard_uncommon: UNCOMMON_SILVER_GRADIENT,
 };
+
+export function breakdownStripAccent(slotKey: SlotKey): string {
+  return slotKey === "wildcard_uncommon" ? UNCOMMON_SILVER_BAR : SLOT_ACCENT[slotKey];
+}
 
 const MONO: Partial<Record<SlotKey, Color>> = {
   white_common: "W",

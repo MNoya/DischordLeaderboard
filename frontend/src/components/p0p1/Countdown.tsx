@@ -5,7 +5,7 @@ export function pluralizeUnit(value: number, unit: string) {
   return `${value} ${unit}${value === 1 ? "" : "s"}`;
 }
 
-function formatRemaining(diff: number): string {
+export function formatRemaining(diff: number): string {
   const days = Math.floor(diff / (1000 * 60 * 60 * 24));
   const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
   const minutes = Math.floor((diff / (1000 * 60)) % 60);
@@ -18,7 +18,7 @@ function formatRemaining(diff: number): string {
   return pluralizeUnit(minutes, "minute");
 }
 
-function useTick(intervalMs: number) {
+export function useTick(intervalMs: number) {
   const [, setTick] = useState(0);
   useEffect(() => {
     const id = setInterval(() => setTick((t) => t + 1), intervalMs);

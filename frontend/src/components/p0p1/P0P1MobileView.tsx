@@ -12,7 +12,7 @@ import { P0P1IntroText } from "./P0P1IntroText";
 import { SlotPip, SLOT_ACCENT } from "./slotVisuals";
 import { P0P1ProgressBar } from "./ProgressBar";
 import { P0P1CountdownBar } from "./CountdownBar";
-import { pluralizeUnit } from "./Countdown";
+import { pluralizeUnit, formatRemaining, useTick } from "./Countdown";
 import { ClearAll } from "./ClearAll";
 import { GoToTopButton } from "../GoToTopButton";
 import { SiteFooter } from "../SiteFooter";
@@ -515,18 +515,15 @@ function CountdownStacked({
   scoringDate?: Date;
   pastDeadline?: boolean;
 }) {
+  useTick(30_000);
   const now = p0p1Now();
   const deadlineDiff = deadline.getTime() - now;
 
   if (!pastDeadline && deadlineDiff > 0) {
-    const days = Math.floor(deadlineDiff / (1000 * 60 * 60 * 24));
-    const hours = Math.floor((deadlineDiff / (1000 * 60 * 60)) % 24);
     return (
       <div className="flex flex-col items-end leading-tight whitespace-nowrap shrink-0">
         <span className="text-muted text-[11px] tracking-[0.04em]">Closes in</span>
-        <span className="text-green text-[13px]">
-          {pluralizeUnit(days, "day")}, {pluralizeUnit(hours, "hour")}
-        </span>
+        <span className="text-green text-[13px]">{formatRemaining(deadlineDiff)}</span>
       </div>
     );
   }

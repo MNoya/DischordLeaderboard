@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { ManaCost } from "../ManaPips";
 import { SectionLabel } from "../SectionLabel";
-import { SlotPip, SLOT_ACCENT } from "./slotVisuals";
+import { SlotPip, breakdownStripAccent } from "./slotVisuals";
 import { CardImagePreview } from "./CardImagePreview";
 import { groupBySlot, participantCount } from "../../data/p0p1Stats";
 import { SLOTS } from "../../data/p0p1Slots";
@@ -32,7 +32,7 @@ export function FullBreakdownList({
     <div className="flex flex-col gap-1.5 lg:gap-3">
       <div className="relative flex items-center justify-center">
         <SectionLabel size={22} className="text-white">FULL BREAKDOWN</SectionLabel>
-        <span className="absolute right-0 text-subtle text-[14px]">{entryCount} player{entryCount !== 1 ? "s" : ""}</span>
+        <span className="absolute right-3 text-subtle text-[14px]">{entryCount} player{entryCount !== 1 ? "s" : ""}</span>
       </div>
 
       <div className="hidden lg:grid grid-cols-2 xl:grid-cols-3 gap-3 items-start">
@@ -77,12 +77,13 @@ function SlotBreakdownPanel({
   collapsible?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const accent = SLOT_ACCENT[slot.key];
+  const accent = breakdownStripAccent(slot.key);
   const topPct = rows.length ? rows[0].pickPct : 0;
   const showRows = !collapsible || expanded;
+  const wide = slot.key === "wildcard_uncommon";
 
   const header = (
-    <div className="flex-1 flex items-center gap-2 px-3 py-2.5 min-w-0">
+    <div className={`flex-1 flex items-center gap-2 ${wide ? "pl-4 pr-3" : "px-3"} py-2.5 min-w-0`}>
       <SlotPip slotKey={slot.key} size={20} />
       <span className="font-display text-[15px] tracking-[0.1em] text-white truncate">
         {slot.label.toUpperCase()}
@@ -101,7 +102,7 @@ function SlotBreakdownPanel({
 
   return (
     <div className="relative border-y border-r border-border2 bg-surface overflow-hidden flex flex-col">
-      <div className="absolute inset-y-0 left-0 z-10 w-1 pointer-events-none" style={{ background: accent }} />
+      <div className={`absolute inset-y-0 left-0 z-10 ${wide ? "w-2" : "w-1"} pointer-events-none`} style={{ background: accent }} />
       {collapsible ? (
         <button
           type="button"
@@ -124,6 +125,7 @@ function SlotBreakdownPanel({
               topPct={topPct}
               card={cardsByName.get(stat.cardName)}
               isYours={stat.cardName === yourPick}
+              wide={wide}
             />
           ))}
         </div>
@@ -138,12 +140,14 @@ function SlotRow({
   topPct,
   card,
   isYours,
+  wide,
 }: {
   rank: number;
   stat: P0P1PickStat;
   topPct: number;
   card?: Card;
   isYours: boolean;
+  wide: boolean;
 }) {
   const fillPct = topPct > 0 ? Math.max((stat.pickPct / topPct) * 100, 3) : 0;
   const isLeader = rank === 1;
@@ -152,7 +156,7 @@ function SlotRow({
     <div className="relative overflow-hidden border-b border-border2 last:border-b-0">
       <div className="absolute inset-y-0 left-0 bg-subtle/[0.08]" style={{ width: `${fillPct}%` }} />
 
-      <div className={`relative flex items-center gap-2.5 pl-1.5 pr-3 py-1.5 ${isYours ? "bg-green/[0.07]" : ""}`}>
+      <div className={`relative flex items-center gap-2.5 ${wide ? "pl-4" : "pl-1.5"} pr-3 py-1.5 ${isYours ? "bg-green/[0.07]" : ""}`}>
         <span className={`w-4 shrink-0 text-right font-mono tabular-nums text-[13px] ${isLeader ? "text-text font-bold" : "text-muted"}`}>
           {rank}
         </span>

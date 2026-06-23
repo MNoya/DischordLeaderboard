@@ -252,7 +252,7 @@ function RosterTile({
       }`}
     >
       <div
-        className={`w-full shrink-0 transition-[height] duration-150 ${active ? "h-2" : "h-1 group-hover:h-2"}`}
+        className={`w-full shrink-0 transition-[height] duration-150 ${active ? "h-2" : "h-[4px] group-hover:h-2"}`}
         style={{ background: accent }}
       />
       <div className="relative flex-1 min-h-0 bg-surface2 flex items-center justify-center overflow-hidden">

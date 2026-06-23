@@ -59,10 +59,10 @@ export function P0P1BallotScorecard({
         </div>
 
         {boldest && (
-          <p className="flex items-center gap-1 font-body text-subtle text-[12px] leading-none min-w-0 -ml-[10px]">
-            <span className="shrink-0">🌶️</span>
-            <span className="shrink-0">{rarityPrefix(boldest.pickCount)}</span>
-            <span className="text-text truncate min-w-0">{boldest.cardName}</span>
+          <p className="font-body text-subtle text-[12px] leading-snug -ml-[10px]">
+            <span className="mr-1">🌶️</span>
+            {rarityPrefix(boldest.pickCount)}{" "}
+            <span className="text-text">{boldest.cardName}</span>
           </p>
         )}
       </div>

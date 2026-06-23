@@ -7,7 +7,7 @@ import { cn } from "../lib/utils";
 import { useIsMobile } from "../lib/use-is-mobile";
 import { useAuth } from "../auth/useAuth";
 import { useP0P1Picks, usePlayerSlugByDiscordId } from "../data/hooks";
-import { P0P1_SCORING_DATE, P0P1_SET_CODE, P0P1_VOTING_DEADLINE, SLOTS } from "../data/p0p1Slots";
+import { P0P1_SET_CODE, P0P1_VOTING_DEADLINE, SLOTS } from "../data/p0p1Slots";
 
 // Top-of-page chrome shared across the whole community site. The brand mark is
 // the Home link; each section is a nav tab.
@@ -395,42 +395,27 @@ function useP0P1BadgeState() {
 function P0P1Badge({ active }: { active: boolean }) {
   const { user, isPastDeadline, filled, total } = useP0P1BadgeState();
 
-  if (isPastDeadline) return null;
-
   const pill = cn(
     "absolute -top-1.5 -right-1.5 z-10 rounded-full border border-green px-1.5 py-0.5 text-[9px] leading-none font-sans font-bold tracking-wide",
     active ? "bg-bg text-green" : "bg-green text-bg",
   );
 
+  if (isPastDeadline) return <span className={pill}>REVIEW</span>;
   if (!user || filled === 0) return <span className={pill}>OPEN</span>;
-  if (filled === total) return <span className={pill}>REVIEW</span>;
+  if (filled === total) return <span className={pill}>VOTED!</span>;
   return <span className={pill}>{filled}/{total}</span>;
 }
 
 function MobileBadgeSlot({ active }: { active: boolean }) {
   const { user, isPastDeadline, filled, total } = useP0P1BadgeState();
 
-  if (isPastDeadline) return null;
-
   const wrap = cn(
     "ml-3 inline-flex items-center gap-2 text-[14px] font-semibold font-sans tracking-[0.08em]",
     active ? "text-bg" : "text-green",
   );
 
+  if (isPastDeadline) return <span className={wrap}>REVIEW</span>;
   if (!user || filled === 0) return <span className={wrap}>OPEN</span>;
-  if (filled === total) {
-    const days = daysUntil(P0P1_SCORING_DATE);
-    const results = days <= 0 ? "Results soon" : `Results in ${days} day${days === 1 ? "" : "s"}`;
-    return (
-      <span className={cn("flex-1 text-center text-[14px] font-normal font-sans tracking-normal", active ? "text-bg" : "text-muted")}>
-        Predictions are in! {results}
-      </span>
-    );
-  }
+  if (filled === total) return <span className={wrap}>VOTED!</span>;
   return <span className={wrap}>{filled}/{total}</span>;
-}
-
-function daysUntil(date: Date) {
-  const msPerDay = 24 * 60 * 60 * 1000;
-  return Math.ceil((date.getTime() - new Date().getTime()) / msPerDay);
 }

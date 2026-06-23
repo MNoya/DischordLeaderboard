@@ -149,7 +149,7 @@ function PickTile({
   return (
     <div className="group relative min-w-0 transition-transform duration-150 hover:z-10 hover:scale-[1.04]">
       <div className="flex flex-col border border-t-0 border-border2 bg-surface overflow-hidden">
-        <div className="relative z-10 h-1 w-full shrink-0 origin-top transition-transform duration-150 group-hover:scale-y-[2]" style={{ background: accent }} />
+        <div className="relative z-10 h-[4px] w-full shrink-0 origin-top transition-transform duration-150 group-hover:scale-y-[2]" style={{ background: accent }} />
         <div className="relative aspect-square bg-surface2 flex items-center justify-center overflow-hidden">
           {art}
           {badge && (
