@@ -13,6 +13,7 @@ import {
   fetchColorsSummary,
   fetchCubeSeasons,
   fetchP0P1Cards,
+  fetchP0P1PickStats,
   fetchP0P1Picks,
   fetchFormatColorsLeaderboard,
   fetchFormatLeaderboard,
@@ -450,6 +451,15 @@ export function useUpsertP0P1Pick(setCode: string) {
       if (ctx?.prev) qc.setQueryData(queryKey, ctx.prev);
     },
     onSettled: () => qc.invalidateQueries({ queryKey }),
+  });
+}
+
+export function useP0P1PickStats(setCode: string | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: ["p0p1-pick-stats", setCode],
+    queryFn: () => fetchP0P1PickStats(setCode!),
+    enabled: !!setCode && enabled,
+    staleTime: FIVE_MINUTES,
   });
 }
 

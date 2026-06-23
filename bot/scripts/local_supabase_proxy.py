@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime
+import decimal
 import json
 import logging
 import os
@@ -20,6 +21,7 @@ _ALLOWED_VIEWS = {
     "public_cube_season_events",
     "public_episodes",
     "public_leaderboard",
+    "public_p0p1_pick_stats",
     "public_player",
     "public_player_draft_events",
     "public_player_format_breakdown",
@@ -40,6 +42,8 @@ _OP_PATTERN = re.compile(r"^(eq|neq|lt|lte|gt|gte|like|ilike|in)\.(.+)$", re.DOT
 def _json_default(value: Any) -> Any:
     if isinstance(value, (datetime.datetime, datetime.date)):
         return value.isoformat()
+    if isinstance(value, decimal.Decimal):
+        return float(value)
     raise TypeError(f"cannot serialize {type(value).__name__}")
 
 

@@ -32,3 +32,29 @@ export interface SlotDefinition {
   label: string;
   filter: (card: Card, pickedCards: Set<string>) => boolean;
 }
+
+export interface P0P1PickStat {
+  setCode: string;
+  slot: SlotKey;
+  cardName: string;
+  pickCount: number;
+  pickPct: number;
+}
+
+export type PickVersusState = "matched" | "minority" | "rogue";
+
+export interface PickVersusSide {
+  name: string;
+  imageUrl: string;
+  pickPct: number;
+}
+
+export interface PickVersus {
+  slotKey: SlotKey;
+  slotLabel: string;
+  state: PickVersusState;
+  agreed: boolean;
+  tiedCount: number;
+  crowd: PickVersusSide;
+  yours: PickVersusSide;
+}

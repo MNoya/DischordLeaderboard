@@ -30,7 +30,7 @@ import type {
   RecentTrophy,
   SetSummary,
 } from "../types/leaderboard";
-import type { Card, P0P1Pick, SlotKey } from "../types/p0p1";
+import type { Card, P0P1Pick, P0P1PickStat, SlotKey } from "../types/p0p1";
 import type { Episode } from "./episodes";
 import {
   podDraftArtifactFixture,
@@ -419,6 +419,11 @@ export const fetchPodSetCodes = (): Promise<PodSetCode[]> => wait(podSetCodesFix
 
 import { cardsMshFixture } from "./fixtures/cards-msh";
 
+const P0P1_SLOT_KEYS: SlotKey[] = [
+  "white_common", "blue_common", "black_common", "red_common",
+  "green_common", "multicolor_uncommon", "wildcard_common", "wildcard_uncommon",
+];
+
 const p0p1Picks = new Map<string, P0P1Pick>();
 
 export const fetchP0P1Cards = (_setCode: string): Promise<Card[]> =>
@@ -441,6 +446,112 @@ export const deleteAllP0P1Picks = async (
 ): Promise<void> => {
   p0p1Picks.clear();
 };
+
+export const fetchP0P1PickStats = (_setCode: string): Promise<P0P1PickStat[]> =>
+  wait(syntheticPickStats);
+
+const P0P1_COMPLETE_ENTRANTS = 91;
+
+const P0P1_SLOT_FILTERS: Record<SlotKey, (c: Card) => boolean> = {
+  white_common: (c) => c.rarity === "common" && c.colors.length === 1 && c.colors[0] === "W",
+  blue_common: (c) => c.rarity === "common" && c.colors.length === 1 && c.colors[0] === "U",
+  black_common: (c) => c.rarity === "common" && c.colors.length === 1 && c.colors[0] === "B",
+  red_common: (c) => c.rarity === "common" && c.colors.length === 1 && c.colors[0] === "R",
+  green_common: (c) => c.rarity === "common" && c.colors.length === 1 && c.colors[0] === "G",
+  multicolor_uncommon: (c) => c.rarity === "uncommon" && c.colors.length >= 2,
+  wildcard_common: (c) => c.rarity === "common" && !c.typeLine.startsWith("Basic Land"),
+  wildcard_uncommon: (c) => c.rarity === "uncommon",
+};
+
+function shuffleInPlace<T>(items: T[], rng: () => number): T[] {
+  for (let i = items.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [items[i], items[j]] = [items[j], items[i]];
+  }
+  return items;
+}
+
+function allocateVotes(weights: number[], total: number): number[] {
+  const totalWeight = weights.reduce((sum, w) => sum + w, 0);
+  const exact = weights.map((w) => (w / totalWeight) * total);
+  const counts = exact.map(Math.floor);
+  const byRemainder = exact
+    .map((value, i) => ({ i, frac: value - Math.floor(value) }))
+    .sort((a, b) => b.frac - a.frac);
+  let allocated = counts.reduce((sum, c) => sum + c, 0);
+  let k = 0;
+  while (allocated < total) {
+    counts[byRemainder[k % byRemainder.length].i] += 1;
+    allocated += 1;
+    k += 1;
+  }
+  return counts;
+}
+
+function generateSyntheticPickStats(): P0P1PickStat[] {
+  let seed = 42;
+  const rng = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  const N = P0P1_COMPLETE_ENTRANTS;
+
+  const stats: P0P1PickStat[] = [];
+  for (const slotKey of P0P1_SLOT_KEYS) {
+    const eligible = shuffleInPlace(cardsMshFixture.filter(P0P1_SLOT_FILTERS[slotKey]), rng);
+    if (eligible.length === 0) continue;
+    const skew = 1.1 + rng() * 0.8;
+    const weights = eligible.map((_, rank) => 1 / Math.pow(rank + 1, skew));
+    const counts = allocateVotes(weights, N);
+    const slotStats = eligible
+      .map((card, i) => ({
+        setCode: "MSH",
+        slot: slotKey,
+        cardName: card.name,
+        pickCount: counts[i],
+        pickPct: Math.round(counts[i] * 1000 / N) / 10,
+      }))
+      .filter((stat) => stat.pickCount > 0)
+      .sort((a, b) => b.pickCount - a.pickCount);
+    stats.push(...slotStats);
+  }
+  return stats;
+}
+
+function buildSyntheticPicks(stats: P0P1PickStat[]): P0P1Pick[] {
+  const statsBySlot = new Map<SlotKey, P0P1PickStat[]>();
+  for (const stat of stats) {
+    const slotStats = statsBySlot.get(stat.slot);
+    if (slotStats) slotStats.push(stat);
+    else statsBySlot.set(stat.slot, [stat]);
+  }
+
+  const RANK_PATTERN: Array<"top" | "middle" | "bottom"> =
+    ["top", "bottom", "middle", "top", "bottom", "middle", "top", "bottom"];
+  const claimed = new Set<string>();
+  const picks: P0P1Pick[] = [];
+
+  P0P1_SLOT_KEYS.forEach((slot, i) => {
+    const slotStats = statsBySlot.get(slot);
+    if (!slotStats || slotStats.length === 0) return;
+    const rank = RANK_PATTERN[i % RANK_PATTERN.length];
+    const targetIndex = rank === "top" ? 0
+      : rank === "bottom" ? slotStats.length - 1
+      : Math.floor(slotStats.length / 2);
+    for (let offset = 0; offset < slotStats.length; offset++) {
+      const stat = slotStats[(targetIndex + offset) % slotStats.length];
+      if (!claimed.has(stat.cardName)) {
+        claimed.add(stat.cardName);
+        picks.push({ slot, cardName: stat.cardName, lastUpdated: "2026-06-10T00:00:00Z" });
+        break;
+      }
+    }
+  });
+  return picks;
+}
+
+const syntheticPickStats = generateSyntheticPickStats();
+const syntheticPicks = buildSyntheticPicks(syntheticPickStats);
+for (const pick of syntheticPicks) {
+  p0p1Picks.set(pick.slot, pick);
+}
 
 export const initialAuthUser = {
   id: "mock-user-id",

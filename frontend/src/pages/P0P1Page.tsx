@@ -12,10 +12,16 @@ import { P0P1Hero } from "../components/p0p1/P0P1Hero";
 import { AutoSaveBadge } from "../components/p0p1/AutoSaveBadge";
 import { P0P1MobileSelector } from "../components/p0p1/P0P1MobileView";
 import { GoToTopButton } from "../components/GoToTopButton";
+import { PostVotingStats } from "../components/p0p1/PostVotingStats";
+import { P0P1DevPanel } from "../components/p0p1/P0P1DevPanel";
+import { P0P1BallotScorecard, CHAMFER } from "../components/p0p1/P0P1BallotScorecard";
+import { PickGrid } from "../components/p0p1/CommunityGrid";
 import { useIsMobile } from "../lib/use-is-mobile";
 import { useP0P1Ballot } from "../data/useP0P1Ballot";
 import { SLOTS } from "../data/p0p1Slots";
+import { groupBySlot, findExtremes, classifyYourPick } from "../data/p0p1Stats";
 import type { Card, SlotDefinition, SlotKey } from "../types/p0p1";
+import { SITE_LINKS } from "../data/site";
 
 export function P0P1Page() {
   const ballot = useP0P1Ballot();
@@ -32,6 +38,8 @@ export function P0P1Page() {
     scoringFilled,
     isComplete,
     isPastDeadline,
+    hasParticipated,
+    pickStats,
     handleClearAll,
     clearPending,
     setEditingSlotKey,
@@ -40,22 +48,39 @@ export function P0P1Page() {
     selectAdvance,
   } = ballot;
   const isDesktop = !useIsMobile(1024);
+  const isCompleteEntrant = isPastDeadline && Boolean(user) && isComplete;
+  const didNotVote = isPastDeadline && Boolean(user) && !isComplete;
+  const groupedStats = hasParticipated && pickStats ? groupBySlot(pickStats) : undefined;
 
   if (!isDesktop) {
-    return <P0P1MobileSelector ballot={ballot} />;
+    return (
+      <>
+        <P0P1MobileSelector ballot={ballot} />
+        <P0P1DevPanel />
+      </>
+    );
   }
 
-  const loginCta = !authLoading && !user && !isPastDeadline && (
+  const loginCta = !authLoading && !user && (
     <button type="button" onClick={signIn} className="bg-transparent border-0 cursor-pointer p-0">
       <CtaPill size="lg" icon={<DiscordIcon size={19} />}>
-        LOG IN TO SUBMIT PICKS
+        {!isPastDeadline ? <>LOG IN TO SUBMIT PICKS</> : <>LOG IN TO VIEW YOUR PICKS</>}
       </CtaPill>
     </button>
   );
 
-  const heroCta = loginCta || (user && !isPastDeadline ? <AutoSaveBadge complete={isComplete} /> : null);
+  const ballotScorecard =
+    user && isPastDeadline && isComplete && pickStats && pickStats.length > 0 ? (
+      <P0P1BallotScorecard pickStats={pickStats} picksBySlot={picksBySlot} />
+    ) : null;
+  const didNotVoteCard = didNotVote ? <DidNotVoteCard /> : null;
+  const heroCta =
+    loginCta ||
+    (user && !isPastDeadline ? <AutoSaveBadge complete={isComplete} /> : null) ||
+    ballotScorecard ||
+    didNotVoteCard;
 
-  const teamProgress = !isPastDeadline && (
+  const belowIntro = isPastDeadline ? null : (
     <div className="flex items-center gap-3 w-full max-w-[420px]">
       <SectionLabel size={13}>PICKS</SectionLabel>
       <div className="flex-1">
@@ -67,22 +92,57 @@ export function P0P1Page() {
   return (
     <div className="bg-bg text-text min-h-screen flex flex-col animate-fadeIn">
       <AppHeader subtitle="P0 P1 Challenge" subtitleShort="P0 P1" />
-      <P0P1Hero cta={heroCta} belowIntro={teamProgress} />
+      <P0P1Hero cta={heroCta} belowIntro={belowIntro} isPastDeadline={isPastDeadline} />
 
       <main className="flex-1 px-10 pb-5 pt-5">
-        {dataReady ? (
-          <RosterStrip
-            activeSlotKey={activeSlotKey}
-            picksBySlot={picksBySlot}
-            cardsByName={cardsByName}
-            locked={isPastDeadline}
-            onSelect={(key) => setEditingSlotKey(key)}
-          />
-        ) : (
-          <RosterStripSkeleton />
-        )}
+        {!isPastDeadline &&
+          (dataReady ? (
+            <RosterStrip
+              activeSlotKey={activeSlotKey}
+              picksBySlot={picksBySlot}
+              cardsByName={cardsByName}
+              onSelect={(key) => setEditingSlotKey(key)}
+            />
+          ) : (
+            <RosterStripSkeleton />
+          ))}
 
-        {!isPastDeadline && (
+        {isPastDeadline ? (
+          pickStats && pickStats.length > 0 && (
+            <PostVotingStats
+              pickStats={pickStats}
+              cardsByName={cardsByName}
+              picksBySlot={picksBySlot}
+              yourPicks={
+                isCompleteEntrant ? (
+                  <div>
+                    <div className="relative flex items-baseline justify-center gap-2 mb-2">
+                      <SectionLabel size={22} className="text-white">YOUR PICKS</SectionLabel>
+                    </div>
+                    <PickGrid
+                      cardsByName={cardsByName}
+                      picksBySlot={picksBySlot}
+                      entries={SLOTS.map((slot) => {
+                        const cardName = picksBySlot.get(slot.key);
+                        const slotStats = groupedStats?.get(slot.key) ?? [];
+                        const yourStat = cardName ? slotStats.find((s) => s.cardName === cardName) : undefined;
+                        const extremes = findExtremes(slotStats);
+                        const cls = yourStat ? classifyYourPick(yourStat, extremes.most, extremes.least) : undefined;
+                        return {
+                          slotKey: slot.key,
+                          label: slot.label,
+                          stats: yourStat ? [yourStat] : [],
+                          slotStats,
+                          badge: cls?.state === "rogue" ? cls.qualifier : undefined,
+                        };
+                      })}
+                    />
+                  </div>
+                ) : null
+              }
+            />
+          )
+        ) : (
           <div className="mt-4">
             {dataReady && cards ? (
               <Crossfade transitionKey={activeSlot.key}>
@@ -114,6 +174,30 @@ export function P0P1Page() {
       </main>
 
       <GoToTopButton onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} />
+      <P0P1DevPanel />
+    </div>
+  );
+}
+
+function DidNotVoteCard() {
+  return (
+    <div className="inline-block animate-fadeUpIn" style={{ clipPath: CHAMFER, background: "#3b4458", padding: 1 }}>
+      <div className="bg-surface2 w-[clamp(280px,22vw,340px)] px-5 py-3 flex flex-col gap-1.5" style={{ clipPath: CHAMFER }}>
+        <span className="font-display text-text leading-none tracking-[0.04em]" style={{ fontSize: 22 }}>
+          YOU DIDN'T VOTE ON THIS ONE
+        </span>
+        <p className="font-body text-subtle text-[12px] leading-snug">
+          <a
+            href={SITE_LINKS.discord}
+            target="_blank"
+            rel="noreferrer"
+            className="text-green hover:text-green-2 underline underline-offset-2"
+          >
+            Check the Dischord
+          </a>{" "}
+          to catch the next challenge
+        </p>
+      </div>
     </div>
   );
 }
@@ -122,13 +206,11 @@ function RosterStrip({
   activeSlotKey,
   picksBySlot,
   cardsByName,
-  locked,
   onSelect,
 }: {
   activeSlotKey: SlotKey;
   picksBySlot: Map<string, string>;
   cardsByName: Map<string, Card>;
-  locked: boolean;
   onSelect: (key: SlotKey) => void;
 }) {
   return (
@@ -140,8 +222,7 @@ function RosterStrip({
             key={slot.key}
             slot={slot}
             card={cardName ? cardsByName.get(cardName) : undefined}
-            active={!locked && activeSlotKey === slot.key}
-            locked={locked}
+            active={activeSlotKey === slot.key}
             onClick={() => onSelect(slot.key)}
           />
         );
@@ -154,28 +235,34 @@ function RosterTile({
   slot,
   card,
   active,
-  locked,
   onClick,
 }: {
   slot: SlotDefinition;
   card: Card | undefined;
   active: boolean;
-  locked: boolean;
   onClick: () => void;
 }) {
   const accent = SLOT_ACCENT[slot.key];
-  const stripClass = `w-full shrink-0 transition-[height] duration-150 ${active ? "h-2" : "h-1 group-hover:h-2"}`;
-  const body = (
-    <>
-      <div className={stripClass} style={{ background: accent }} />
-      <div className="flex-1 min-h-0 bg-surface2 flex items-center justify-center overflow-hidden">
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`group relative flex flex-col aspect-square border border-t-0 overflow-hidden text-left min-w-0 transition-all duration-150 cursor-pointer hover:z-10 hover:scale-[1.04] ${
+        active ? "border-green/60 bg-green/5 z-10 scale-[1.04]" : "border-border2 bg-surface hover:border-border"
+      }`}
+    >
+      <div
+        className={`w-full shrink-0 transition-[height] duration-150 ${active ? "h-2" : "h-1 group-hover:h-2"}`}
+        style={{ background: accent }}
+      />
+      <div className="relative flex-1 min-h-0 bg-surface2 flex items-center justify-center overflow-hidden">
         {card ? (
           <img src={card.imageArtCrop} alt={card.name} className="w-full h-full object-cover" />
         ) : (
           <SlotPip slotKey={slot.key} size={48} />
         )}
       </div>
-      <div className={`pl-4 pr-2.5 shrink-0 transition-[padding] duration-150 ${active ? "py-2.5" : "py-1.5 group-hover:py-2.5"}`}>
+      <div className="px-2 pt-2 pb-1.5 shrink-0">
         <div className="text-subtle text-[12px] tracking-[0.12em] font-display truncate mb-1">
           {slot.label.toUpperCase()}
         </div>
@@ -187,27 +274,9 @@ function RosterTile({
             </span>
           </div>
         ) : (
-          <span className={locked ? "text-dim text-[14px]" : "italic text-dim text-[13px]"}>
-            {locked ? "—" : "Select a card"}
-          </span>
+          <span className="italic text-dim text-[13px]">Select a card</span>
         )}
       </div>
-    </>
-  );
-
-  const base = "group relative flex flex-col aspect-square border border-t-0 overflow-hidden text-left min-w-0";
-  if (locked) {
-    return <div className={`${base} bg-surface border-border2`}>{body}</div>;
-  }
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`${base} transition-colors cursor-pointer ${
-        active ? "border-green/60 bg-green/5" : "border-border2 bg-surface hover:border-green/60"
-      }`}
-    >
-      {body}
     </button>
   );
 }

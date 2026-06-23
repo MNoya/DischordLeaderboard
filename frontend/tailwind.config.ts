@@ -31,6 +31,8 @@ const config: Config = {
         teal: "#22d4c0",
         gold: "#ffc63a",
         red: "#ff5e5e",
+        cyan: "#00e5ff",
+        magenta: "#ff2cdf",
         blue: "#4aa8ff",
         purple: "#a98eff",
         orange: "#ff9d42",
