@@ -142,7 +142,7 @@ export interface PodEventSummary {
   championRecord: string | null;
   participantCount: number;
   isFinalized: boolean;
-  discordEventId: string | null;
+  seshMessageId: string | null;
 }
 
 export interface MainboardCard {

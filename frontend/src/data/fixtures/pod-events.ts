@@ -45,7 +45,7 @@ function summaryFromFixture(): PodEventSummary {
     championRecord: champion?.record ?? null,
     participantCount: podSos3Fixture.participants.length,
     isFinalized: podSos3Fixture.participants.every((p) => p.placement != null),
-    discordEventId: null,
+    seshMessageId: null,
   };
 }
 
@@ -67,7 +67,7 @@ const extraSummaries: PodEventSummary[] = [
     championRecord: null,
     participantCount: 8,
     isFinalized: true,
-    discordEventId: null,
+    seshMessageId: null,
   },
   {
     eventId: "mock-sos-4",
@@ -86,7 +86,7 @@ const extraSummaries: PodEventSummary[] = [
     championRecord: null,
     participantCount: 0,
     isFinalized: false,
-    discordEventId: "1505785425049030818",
+    seshMessageId: "1505785425049030818",
   },
   {
     eventId: "mock-sos-2",
@@ -105,7 +105,7 @@ const extraSummaries: PodEventSummary[] = [
     championRecord: "3-0",
     participantCount: 8,
     isFinalized: true,
-    discordEventId: null,
+    seshMessageId: null,
   },
   {
     eventId: "mock-sos-1",
@@ -124,7 +124,7 @@ const extraSummaries: PodEventSummary[] = [
     championRecord: "3-0",
     participantCount: 8,
     isFinalized: true,
-    discordEventId: null,
+    seshMessageId: null,
   },
 ];
 
@@ -161,7 +161,7 @@ const peasantSummaries: PodEventSummary[] = [
     championRecord: null,
     participantCount: 0,
     isFinalized: false,
-    discordEventId: null,
+    seshMessageId: null,
   },
 ];
 

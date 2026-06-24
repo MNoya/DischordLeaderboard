@@ -48,6 +48,7 @@ from bot.services.pod_seating_select import seating_mode_label
 from bot.services.pod_drafts import (
     normalize_player_name,
     classify_lobby_names,
+    delete_event_sync,
     draftmancer_url_for,
     finalize_mock_event,
     load_event_pairing_mode_sync,
@@ -106,6 +107,21 @@ def notify_seeding_repost(bot, event_id: str) -> None:
     link goes up so the live table sits by the action instead of only at the scrolled-up pinned anchor."""
     if _SEEDING_REPOST_HOOK is not None:
         asyncio.create_task(_SEEDING_REPOST_HOOK(bot, event_id))
+
+
+async def cancel_pod_event(event_id: str, *, actor: str) -> str | None:
+    """Tear down a pod draft entirely: cancel pending tournament tasks, disconnect the manager, and
+    delete the event row — the cascade drops participants, matches, replays, and DM trackers, which
+    also removes the leaderboard pod page."""
+    log.warning(f"pod-cancel: {actor} deleting event {event_id}")
+    manager = ACTIVE_POD_MANAGERS.get(event_id)
+    if manager is not None:
+        for task in (manager.grace_task, manager.championship_task):
+            if task is not None and not task.done():
+                task.cancel()
+        await manager.disconnect_safely()
+    await asyncio.to_thread(delete_event_sync, event_id)
+    return None
 
 
 class PodDraftManager:

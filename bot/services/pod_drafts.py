@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import NamedTuple, Sequence
 
-from sqlalchemy import any_, func, select
+from sqlalchemy import any_, delete, func, select
 from sqlalchemy.orm import Session
 
 from bot.config import settings
@@ -30,6 +30,8 @@ DM_KIND_ROUND = "round_pairing"
 DM_KIND_SUBMIT_DECK = "submit_deck"
 DM_KIND_SUBMIT_DECK_FINAL = "submit_deck_final"
 
+FINALIZED_STATUSES = ("draft_done", "complete")
+
 
 @dataclass(frozen=True)
 class ParticipantDmInfo:
@@ -51,7 +53,6 @@ class ParsedSeshEvent:
     attendees: Sequence[str]
     sesh_message_id: str
     discord_thread_id: str
-    discord_event_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -261,7 +262,6 @@ def record_event(session: Session, parsed: ParsedSeshEvent) -> PodDraftEvent:
         discord_thread_id=parsed.discord_thread_id,
         sesh_message_id=parsed.sesh_message_id,
         socket_status="pending",
-        discord_event_id=parsed.discord_event_id,
     )
     if is_championship(parsed.name):
         event.seating_mode = "leaderboard"
@@ -295,7 +295,7 @@ def update_event_time_if_changed(
     event = session.execute(
         select(PodDraftEvent).where(PodDraftEvent.sesh_message_id == sesh_message_id)
     ).scalar_one_or_none()
-    if event is None or event.socket_status in ("draft_done", "complete"):
+    if event is None or event.socket_status in FINALIZED_STATUSES:
         return None
     was_active = event.socket_status != "pending"
     time_changed = event.event_time != new_event_time or event.event_date != new_event_date
@@ -312,7 +312,7 @@ def update_event_time_if_changed(
 def update_event_format(session: Session, event_id: str, code: str) -> bool:
     """Repoint a pre-draft pod event's set_code, set_id and format label; False if missing or already finalized."""
     event = session.get(PodDraftEvent, event_id)
-    if event is None or event.socket_status in ("draft_done", "complete"):
+    if event is None or event.socket_status in FINALIZED_STATUSES:
         return False
     event.set_code = code
     event.set_id = _lookup_set_id(session, code)
@@ -357,6 +357,23 @@ def load_event_sesh_message_id_sync(event_id: str) -> str | None:
         return session.execute(
             select(PodDraftEvent.sesh_message_id).where(PodDraftEvent.id == event_id)
         ).scalar_one_or_none()
+
+
+def event_for_sesh_message_sync(sesh_message_id: str) -> tuple[str, str] | None:
+    """(event_id, socket_status) for the event tracking this sesh message, or None when none does."""
+    with SessionLocal() as session:
+        row = session.execute(
+            select(PodDraftEvent.id, PodDraftEvent.socket_status)
+            .where(PodDraftEvent.sesh_message_id == sesh_message_id)
+        ).first()
+    return (row[0], row[1]) if row else None
+
+
+def delete_event_sync(event_id: str) -> None:
+    """Delete a pod event row; the cascade drops participants, matches, replays, and DM trackers."""
+    with SessionLocal() as session:
+        session.execute(delete(PodDraftEvent).where(PodDraftEvent.id == event_id))
+        session.commit()
 
 
 def load_event_id_by_thread_sync(thread_id: str) -> str | None:

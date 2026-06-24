@@ -31,6 +31,9 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         ("/link-17lands", desc.LINK_17LANDS),
         ("/link-arena", desc.LINK_ARENA),
     ]),
+    ("🚀 Pod Drafts", [
+        ("/pod-guide", desc.POD_GUIDE),
+    ]),
 ]
 
 POD_HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [

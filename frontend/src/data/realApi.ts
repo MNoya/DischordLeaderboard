@@ -1295,7 +1295,7 @@ function adaptPodEvent(row: Record<string, unknown>): PodEventSummary {
     championRecord: (row.champion_record ?? null) as string | null,
     participantCount: (row.participant_count ?? 0) as number,
     isFinalized: (row.is_finalized ?? false) as boolean,
-    discordEventId: (row.discord_event_id ?? null) as string | null,
+    seshMessageId: (row.sesh_message_id ?? null) as string | null,
   };
 }
 

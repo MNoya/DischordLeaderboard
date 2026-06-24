@@ -9,7 +9,7 @@ import re
 import discord
 from discord import app_commands
 from discord.ext import commands
-from sqlalchemy import any_, delete, select
+from sqlalchemy import any_, select
 
 from bot import audit, emojis
 from bot.commands import descriptions as desc
@@ -17,9 +17,10 @@ from bot.commands.messages import MSG_ADMIN_ONLY
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.discord_helpers import display_width, extract_avatar_hash, player_url
-from bot.models import Player, PodDraftEvent
+from bot.models import Player
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_draft_manager import (
+    cancel_pod_event,
     set_event_format,
     set_event_pairing_mode,
     set_event_seating,
@@ -731,27 +732,6 @@ async def build_pod_settings_view(bot, event_id: str, *, is_owner: bool) -> PodS
         kick_targets_provider=kick_targets_provider, on_kick=on_kick,
         on_cancel=on_cancel, event_name=event_name,
     )
-
-
-async def cancel_pod_event(event_id: str, *, actor: str) -> str | None:
-    """Tear down a pod draft entirely: cancel pending tournament tasks, disconnect the manager, and
-    delete the event row — the cascade drops participants, matches, replays, and DM trackers, which
-    also removes the leaderboard pod page."""
-    log.warning(f"pod-cancel: {actor} deleting event {event_id}")
-    manager = ACTIVE_POD_MANAGERS.get(event_id)
-    if manager is not None:
-        for task in (manager.grace_task, manager.championship_task):
-            if task is not None and not task.done():
-                task.cancel()
-        await manager.disconnect_safely()
-    await asyncio.to_thread(_delete_event_sync, event_id)
-    return None
-
-
-def _delete_event_sync(event_id: str) -> None:
-    with SessionLocal() as session:
-        session.execute(delete(PodDraftEvent).where(PodDraftEvent.id == event_id))
-        session.commit()
 
 
 async def seating_message_for_event(bot, event_id: str) -> tuple[discord.File | None, discord.Embed | None]:

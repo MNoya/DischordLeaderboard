@@ -28,7 +28,8 @@ import {
 import { useIsMobile } from "../lib/use-is-mobile";
 import { cn } from "../lib/utils";
 import { cleanPodEventName, fmtRange, playerPath, podDiscordName, stripDiscriminator, weekOfSet } from "../data/utils";
-import { ACTIVE_SET_CODE, DISCORD_GUILD_ID } from "../data/constants";
+import { ACTIVE_SET_CODE } from "../data/constants";
+import { podDraftMessageLink } from "../data/site";
 import {
   useLeaderboard,
   usePodDraftArtifact,
@@ -445,7 +446,8 @@ function EventRow({
 }) {
   const isUpcoming = !event.championDisplayName && new Date(event.eventTime).getTime() > nowMs;
   const expandable = !isUpcoming;
-  const isJoinable = isUpcoming && !!event.discordEventId;
+  const joinHref = event.seshMessageId ? podDraftMessageLink(event.seshMessageId) : null;
+  const isJoinable = isUpcoming && joinHref !== null;
   const [open, setOpen] = useState(defaultOpen && expandable);
   const headerClass = cn(
     "group w-full min-h-[68px] flex items-stretch text-left bg-transparent border-0 no-underline transition-colors",
@@ -480,7 +482,7 @@ function EventRow({
     >
       {isJoinable ? (
         <a
-          href={`https://discord.com/events/${DISCORD_GUILD_ID}/${event.discordEventId}`}
+          href={joinHref ?? undefined}
           target="_blank"
           rel="noreferrer"
           className={headerClass}

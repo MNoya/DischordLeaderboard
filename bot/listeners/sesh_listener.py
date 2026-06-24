@@ -20,8 +20,15 @@ from bot.database import SessionLocal
 from bot.models import PodDraftEvent
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_registration_embed import RegisteredSettingsView, build_registered_embed
-from bot.services.pod_draft_manager import notify_seeding_change
-from bot.services.pod_drafts import ParsedSeshEvent, is_championship, record_event, update_event_time_if_changed
+from bot.services.pod_draft_manager import cancel_pod_event, notify_seeding_change
+from bot.services.pod_drafts import (
+    FINALIZED_STATUSES,
+    ParsedSeshEvent,
+    event_for_sesh_message_sync,
+    is_championship,
+    record_event,
+    update_event_time_if_changed,
+)
 from bot.services.sesh_parser import ParsedSeshFields, parse_sesh_embed
 from bot.sets import active_set_code
 from bot.tasks.pod_draft_reminder import REMINDER_LEAD_MIN, fire_reminder
@@ -32,8 +39,6 @@ log = logging.getLogger(__name__)
 
 THREAD_POLL_INTERVAL_S = 5
 THREAD_POLL_TIMEOUT_S = 120
-
-SCHEDULED_EVENT_MATCH_WINDOW_S = 120
 
 
 class SeshListener(commands.Cog):
@@ -88,6 +93,28 @@ class SeshListener(commands.Cog):
         except Exception:
             log.exception(f"underfill nudge refresh failed for message {message.id}")
 
+    @commands.Cog.listener()
+    async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent) -> None:
+        """Sesh deletes its RSVP message when an event is cancelled — tear down the matching pod draft.
+        Finalized pods are kept: deleting an old sesh message must never wipe played-pod history."""
+        if payload.channel_id != settings.pod_draft_channel_id:
+            return
+        found = await asyncio.to_thread(event_for_sesh_message_sync, str(payload.message_id))
+        if found is None:
+            return
+        event_id, socket_status = found
+        if socket_status in FINALIZED_STATUSES:
+            log.info(
+                f"sesh message {payload.message_id} deleted but pod {event_id} is {socket_status}; "
+                "keeping finalized event"
+            )
+            return
+        log.warning(f"sesh message {payload.message_id} deleted; cancelling pod draft {event_id}")
+        try:
+            await cancel_pod_event(event_id, actor="sesh cancellation")
+        except Exception:
+            log.exception(f"sesh-cancel teardown failed for event {event_id}")
+
     def _is_target_message(self, message: discord.Message) -> bool:
         if message.author.id != settings.sesh_bot_id:
             return False
@@ -119,8 +146,6 @@ class SeshListener(commands.Cog):
             )
             return
 
-        discord_event_id = await _resolve_discord_event_id(message.guild, fields.event_time)
-
         parsed_event = ParsedSeshEvent(
             event_date=fields.event_date,
             event_time=fields.event_time,
@@ -130,7 +155,6 @@ class SeshListener(commands.Cog):
             attendees=fields.attendees,
             sesh_message_id=str(message.id),
             discord_thread_id=str(thread.id),
-            discord_event_id=discord_event_id,
         )
         event_row = await asyncio.to_thread(_persist_event, parsed_event)
 
@@ -268,34 +292,6 @@ class SeshListener(commands.Cog):
 async def _fire_after_delay(event_id: str, delay_s: float) -> None:
     await asyncio.sleep(delay_s)
     await fire_reminder(event_id)
-
-
-async def _resolve_discord_event_id(
-    guild: discord.Guild | None,
-    event_time: datetime,
-) -> str | None:
-    """Match a guild scheduled event whose start_time is within 2 minutes of the sesh event time."""
-    if guild is None:
-        return None
-    try:
-        scheduled = await guild.fetch_scheduled_events()
-    except discord.HTTPException as e:
-        log.warning(f"fetch_scheduled_events failed for guild {guild.id}: {e}")
-        return None
-    best: tuple[float, discord.ScheduledEvent] | None = None
-    for ev in scheduled:
-        if ev.start_time is None:
-            continue
-        delta = abs((ev.start_time - event_time).total_seconds())
-        if delta > SCHEDULED_EVENT_MATCH_WINDOW_S:
-            continue
-        if best is None or delta < best[0]:
-            best = (delta, ev)
-    if best is None:
-        log.info(f"no scheduled event within {SCHEDULED_EVENT_MATCH_WINDOW_S}s of {event_time.isoformat()}")
-        return None
-    log.info(f"matched scheduled event {best[1].id} (Δ={best[0]:.0f}s) for pod-draft at {event_time.isoformat()}")
-    return str(best[1].id)
 
 
 def _persist_event(parsed_event: ParsedSeshEvent) -> PodDraftEvent:

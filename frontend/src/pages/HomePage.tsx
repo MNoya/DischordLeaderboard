@@ -40,7 +40,7 @@ import { buildTierListSets, resolveTierList, TIER_ORDER, useTierList, type TierC
 import { ACTIVE_SET_CODE } from "../data/constants";
 import { FMT_COLORS, shortFormat } from "../data/format-display";
 import { FORMAT_OPTIONS } from "../data/filters";
-import { discordEventLink, HOST, SITE_LINKS } from "../data/site";
+import { HOST, podDraftMessageLink, SITE_LINKS } from "../data/site";
 import { cleanPodEventName, leaderboardPath, playerPath, relativeAge, relativeAgeShort } from "../data/utils";
 import type { Episode } from "../data/episodes";
 import { formatDurationShort } from "../data/episodes";
@@ -1038,7 +1038,7 @@ function PodRow({ entry }: { entry: PodEntry }) {
   );
 
   if (upcoming) {
-    const href = event.discordEventId ? discordEventLink(event.discordEventId) : SITE_LINKS.discord;
+    const href = event.seshMessageId ? podDraftMessageLink(event.seshMessageId) : SITE_LINKS.discord;
     return (
       <Tooltip label="View event on Discord" side="left">
         <a href={href} target="_blank" rel="noreferrer" className={rowClassName}>
