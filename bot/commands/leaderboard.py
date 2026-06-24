@@ -906,14 +906,24 @@ def _render_ephemeral_board(
     return embed
 
 
+MAX_SELECT_OPTIONS = 25
+
+
 class _SetSelect(discord.ui.Select):
     def __init__(self, current_code: str) -> None:
+        newest_first = list(reversed(ALL_SETS))
+        shown = newest_first[:MAX_SELECT_OPTIONS]
+        if all(s.code != current_code for s in shown):
+            for s in newest_first:
+                if s.code == current_code:
+                    shown = [s, *shown[: MAX_SELECT_OPTIONS - 1]]
+                    break
         options = [
             discord.SelectOption(
                 label=s.code, description=s.name[:100], value=s.code,
                 default=(s.code == current_code),
             )
-            for s in reversed(ALL_SETS)
+            for s in shown
         ]
         super().__init__(placeholder="Set", min_values=1, max_values=1, options=options, row=0)
 
@@ -1293,27 +1303,21 @@ def render_personal_embed(data: PersonalStandingsData) -> discord.Embed:
 
 
 async def _send_personal_followup(
-    interaction: discord.Interaction, viewer_discord_id: str, viewer_registered: bool,
+    interaction: discord.Interaction, viewer_discord_id: str,
 ) -> None:
-    """Ephemeral follow-up to the invoker — rich stats breakdown if signed up,
-    /join prompt otherwise. Re-uses the /stats embed so the two commands stay
-    visually consistent."""
-    if not viewer_registered:
-        msg = await interaction.followup.send(
-            content=MSG_NOT_REGISTERED,
-            ephemeral=(interaction.guild is not None),
-        )
-        await _clear_prev_ephemeral(interaction.user.id)
-        _LAST_EPHEMERAL[interaction.user.id] = msg
-        return
+    """Ephemeral follow-up to the invoker — rich stats breakdown for any registered
+    player, including one who's opted out of the rankings; /join prompt otherwise.
+    Re-uses the /stats embed so the two commands stay visually consistent. Keys off
+    process_stats rather than the ranked standings, which exclude opted-out players."""
     with SessionLocal() as session:
         stats_data = process_stats(session, player_name=None, viewer_discord_id=viewer_discord_id)
-    if stats_data is not None:
-        msg = await interaction.followup.send(
-            embed=render_stats_embed(stats_data), ephemeral=(interaction.guild is not None),
-        )
-        await _clear_prev_ephemeral(interaction.user.id)
-        _LAST_EPHEMERAL[interaction.user.id] = msg
+    ephemeral = interaction.guild is not None
+    if stats_data is None:
+        msg = await interaction.followup.send(content=MSG_NOT_REGISTERED, ephemeral=ephemeral)
+    else:
+        msg = await interaction.followup.send(embed=render_stats_embed(stats_data), ephemeral=ephemeral)
+    await _clear_prev_ephemeral(interaction.user.id)
+    _LAST_EPHEMERAL[interaction.user.id] = msg
 
 
 class LeaderboardView(discord.ui.View):
@@ -1779,11 +1783,7 @@ class Leaderboard(commands.Cog):
                 filter_value=filter_value,
             )
             if filter_type is None:
-                await _send_personal_followup(
-                    interaction,
-                    viewer_discord_id=user_id,
-                    viewer_registered=data.viewer is not None,
-                )
+                await _send_personal_followup(interaction, viewer_discord_id=user_id)
         else:
             # In DM: send the (already filter-aware) embed as a followup,
             # then the stats embed (or /join prompt) via dm.send so it doesn't visually
@@ -1800,11 +1800,10 @@ class Leaderboard(commands.Cog):
                 return
             try:
                 dm = interaction.channel  # already a DM channel here
-                if data.viewer is not None:
-                    with SessionLocal() as session:
-                        stats_data = process_stats(session, player_name=None, viewer_discord_id=user_id)
-                    if stats_data is not None:
-                        await dm.send(embed=render_stats_embed(stats_data))
+                with SessionLocal() as session:
+                    stats_data = process_stats(session, player_name=None, viewer_discord_id=user_id)
+                if stats_data is not None:
+                    await dm.send(embed=render_stats_embed(stats_data))
                 else:
                     await dm.send(MSG_NOT_REGISTERED)
             except Exception:
@@ -1836,36 +1835,6 @@ class Leaderboard(commands.Cog):
             if s.code != CUBE_CODE and (cur in s.code.upper() or cur in s.name.upper())
         ]
         return matches[:25]
-
-    @commands.command(name="lifetime")
-    @commands.is_owner()
-    async def lifetime_cmd(self, ctx: commands.Context, *, args: str | None = None) -> None:
-        """Owner-only. Print a player's Lifetime Sets embed — any player, for testing.
-
-        `!lifetime` → your own, `!lifetime <name>` → that player's. A trailing format
-        token scopes it, e.g. `!lifetime Elfandor Direct` or `!lifetime Premier`.
-        """
-        try:
-            await ctx.message.delete()
-        except discord.HTTPException:
-            pass
-        name: str | None = None
-        fmt: str | None = None
-        if args:
-            valid = {g.label.lower(): g.label for g in DEFAULT_QUEUE_GROUPS}
-            valid["traditional"] = "Trad"
-            valid[DIRECT_FILTER.lower()] = DIRECT_FILTER
-            valid[LCQ_FILTER.lower()] = LCQ_FILTER
-            tokens = args.split()
-            if tokens[-1].lower() in valid:
-                fmt = valid[tokens.pop().lower()]
-            name = " ".join(tokens) or None
-        with SessionLocal() as session:
-            data = process_personal_standings(session, str(ctx.author.id), player_name=name, format_label=fmt)
-        if data is None:
-            await ctx.send(f"No player named `{name}`." if name else MSG_NOT_REGISTERED)
-            return
-        await ctx.send(embed=render_personal_embed(data))
 
 
 async def setup(bot: commands.Bot) -> None:

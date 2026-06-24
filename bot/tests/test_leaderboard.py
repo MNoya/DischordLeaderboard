@@ -370,10 +370,11 @@ def test_embed_link_strips_path_and_points_at_set_for_historical():
 
 
 def test_embed_link_active_set_has_no_set_path():
+    active = active_set_code()
     entry = LeaderboardEntry(rank=1, player_id="p", slug="alice-1", display_name="Alice", score=42.0, trophies=3)
-    data = LeaderboardData(set_code="SOS", set_name="SOS", top=[entry], viewer=None)
+    data = LeaderboardData(set_code=active, set_name=active, top=[entry], viewer=None)
     embed = render_public_embed(data)
-    assert not embed.url.rstrip("/").endswith("/SOS")
+    assert not embed.url.rstrip("/").endswith(f"/{active}")
 
 
 # ---------------------------------------------------------------------------
