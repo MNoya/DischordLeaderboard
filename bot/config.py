@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     youtube_channel_handle: str = "limitedlevel-ups"
     libsyn_feed_url: str = "https://feeds.libsyn.com/limitedlevelups/rss"
     media_sync_enabled: bool = True
+    profile_sync_enabled: bool = True
 
 
 settings = Settings()

@@ -49,10 +49,12 @@ async def refresh_player_profiles(
     session: "Session",
     players: "Iterable[Player]",
 ) -> dict:
-    """Re-fetch each linked player and sync their avatar, display name, and username if changed.
+    """Reconcile each linked player's avatar, display name, and username, gateway cache first.
 
-    Players without a `discord_id` are skipped; players we can't resolve
-    (deleted account, banned) keep their last-known values.
+    The reactive listeners in profile_sync_listener keep these fresh in real time; this sweep is
+    the weekly backstop for changes made while the bot was offline. It prefers `get_user` so a
+    full pass costs almost no REST calls. Players without a `discord_id` are skipped; players we
+    can't resolve (deleted account, banned) keep their last-known values.
     """
     summary = {"checked": 0, "updated": 0, "skipped": 0, "errors": 0}
     for player in players:
@@ -61,7 +63,7 @@ async def refresh_player_profiles(
             continue
         summary["checked"] += 1
         try:
-            user = await bot.fetch_user(int(player.discord_id))
+            user = bot.get_user(int(player.discord_id)) or await bot.fetch_user(int(player.discord_id))
         except Exception:  # noqa: BLE001 - Discord can throw a wide variety
             logger.warning(f"profile refresh: could not fetch user {player.discord_id}", exc_info=True)
             summary["errors"] += 1

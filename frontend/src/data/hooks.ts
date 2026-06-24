@@ -43,7 +43,7 @@ import { fetchDiscordStats } from "./discord";
 import { fetchYouTubeVideos, mergeMedia, overlayLiveMedia } from "./youtube";
 import type { P0P1Pick, SlotKey } from "../types/p0p1";
 import { MULTI, OTHER } from "./filters";
-const FIVE_MINUTES = 5 * 60 * 1000;
+const THIRTY_MINUTES = 30 * 60 * 1000;
 const ONE_HOUR = 60 * 60 * 1000;
 
 export function useEpisodes() {
@@ -105,7 +105,7 @@ export function useSets() {
   return useQuery({
     queryKey: ["sets"],
     queryFn: fetchSets,
-    staleTime: FIVE_MINUTES,
+    staleTime: THIRTY_MINUTES,
   });
 }
 
@@ -113,7 +113,7 @@ export function useCubeSeasons() {
   return useQuery({
     queryKey: ["cube-seasons"],
     queryFn: fetchCubeSeasons,
-    staleTime: FIVE_MINUTES,
+    staleTime: THIRTY_MINUTES,
   });
 }
 
@@ -122,7 +122,7 @@ export function useAvailableFormats(setCode: string | undefined) {
     queryKey: ["available-formats", setCode],
     queryFn: () => fetchAvailableFormats(setCode!),
     enabled: !!setCode,
-    staleTime: FIVE_MINUTES,
+    staleTime: THIRTY_MINUTES,
   });
 }
 
@@ -131,7 +131,7 @@ export function useLeaderboard(setCode: string | undefined) {
     queryKey: ["leaderboard", setCode],
     queryFn: () => fetchLeaderboard(setCode!),
     enabled: !!setCode,
-    staleTime: FIVE_MINUTES,
+    staleTime: THIRTY_MINUTES,
   });
 }
 
@@ -146,7 +146,7 @@ export function useFormatLeaderboard(
     queryKey: ["format-leaderboard", setCode, format],
     queryFn: () => fetchFormatLeaderboard(setCode!, format!),
     enabled: !!setCode && !!format,
-    staleTime: FIVE_MINUTES,
+    staleTime: THIRTY_MINUTES,
   });
 }
 
@@ -158,7 +158,7 @@ export function useColorsLeaderboard(
     queryKey: ["colors-leaderboard", setCode, colors],
     queryFn: () => fetchColorsLeaderboard(setCode!, colors!),
     enabled: !!setCode && !!colors,
-    staleTime: FIVE_MINUTES,
+    staleTime: THIRTY_MINUTES,
   });
 }
 
@@ -174,7 +174,7 @@ export function useFormatColorsLeaderboard(
     queryKey: ["format-colors-leaderboard", setCode, format, key],
     queryFn: () => fetchFormatColorsLeaderboard(setCode!, format!, archetypes!),
     enabled,
-    staleTime: FIVE_MINUTES,
+    staleTime: THIRTY_MINUTES,
   });
 }
 
@@ -188,7 +188,7 @@ export function useOtherColorsLeaderboard(
     queryKey: ["other-colors-leaderboard", setCode, key, formatFilter ?? null],
     queryFn: () => fetchOtherColorsLeaderboard(setCode!, otherCombos!, formatFilter),
     enabled: !!setCode && !!otherCombos && otherCombos.length > 0,
-    staleTime: FIVE_MINUTES,
+    staleTime: THIRTY_MINUTES,
   });
 }
 
@@ -197,7 +197,7 @@ export function usePlayerProfile(slug: string | undefined, setCode: string) {
     queryKey: ["player-profile", slug, setCode],
     queryFn: () => fetchPlayerProfile(slug!, setCode),
     enabled: !!slug,
-    staleTime: FIVE_MINUTES,
+    staleTime: THIRTY_MINUTES,
     placeholderData: keepPreviousData,
   });
 }
@@ -207,7 +207,7 @@ export function usePlayerIdentity(slug: string | undefined, enabled: boolean) {
     queryKey: ["player-identity", slug],
     queryFn: () => fetchPlayerIdentity(slug!),
     enabled: !!slug && enabled,
-    staleTime: FIVE_MINUTES,
+    staleTime: THIRTY_MINUTES,
   });
 }
 
@@ -216,7 +216,7 @@ export function usePlayerSlugByDiscordId(discordId: string | undefined) {
     queryKey: ["player-slug-by-discord", discordId],
     queryFn: () => fetchPlayerSlugByDiscordId(discordId!),
     enabled: !!discordId,
-    staleTime: FIVE_MINUTES,
+    staleTime: THIRTY_MINUTES,
   });
 }
 
@@ -225,7 +225,7 @@ export function useDraftEvents(slug: string | undefined, setCode: string) {
     queryKey: ["draft-events", slug, setCode],
     queryFn: () => fetchPlayerDraftEvents(slug!, setCode),
     enabled: !!slug,
-    staleTime: FIVE_MINUTES,
+    staleTime: THIRTY_MINUTES,
     placeholderData: keepPreviousData,
   });
 }
@@ -235,7 +235,7 @@ export function useColorsSummary(setCode: string | undefined) {
     queryKey: ["colors-summary", setCode],
     queryFn: () => fetchColorsSummary(setCode!),
     enabled: !!setCode,
-    staleTime: FIVE_MINUTES,
+    staleTime: THIRTY_MINUTES,
   });
 }
 
@@ -245,7 +245,7 @@ export function useRecentTrophies(setCode: string | undefined, limit = 8) {
     queryKey: ["recent-trophies", setCode, limit],
     queryFn: () => fetchRecentTrophies(setCode!, limit),
     enabled: !!setCode,
-    staleTime: FIVE_MINUTES,
+    staleTime: THIRTY_MINUTES,
     placeholderData: keepPreviousData,
   });
 }
@@ -260,7 +260,7 @@ export function useFormatScopedTrophies(
     queryKey: ["format-trophies", setCode, format],
     queryFn: () => fetchFormatRecentTrophies(setCode!, format!),
     enabled: !!setCode && !!format,
-    staleTime: FIVE_MINUTES,
+    staleTime: THIRTY_MINUTES,
   });
 }
 
@@ -275,7 +275,7 @@ export function usePrefetchers() {
       qc.prefetchQuery({
         queryKey: ["leaderboard", code],
         queryFn: () => fetchLeaderboard(code),
-        staleTime: FIVE_MINUTES,
+        staleTime: THIRTY_MINUTES,
       });
     },
     [qc],
@@ -286,12 +286,12 @@ export function usePrefetchers() {
       qc.prefetchQuery({
         queryKey: ["player-profile", slug, setCode],
         queryFn: () => fetchPlayerProfile(slug, setCode),
-        staleTime: FIVE_MINUTES,
+        staleTime: THIRTY_MINUTES,
       });
       qc.prefetchQuery({
         queryKey: ["draft-events", slug, setCode],
         queryFn: () => fetchPlayerDraftEvents(slug, setCode),
-        staleTime: FIVE_MINUTES,
+        staleTime: THIRTY_MINUTES,
       });
     },
     [qc],
@@ -344,7 +344,7 @@ export function usePodEvents(setCode: string | undefined) {
     queryKey: ["pod-events", setCode],
     queryFn: () => fetchPodEvents(setCode!),
     enabled: !!setCode,
-    staleTime: FIVE_MINUTES,
+    staleTime: THIRTY_MINUTES,
   });
 }
 
@@ -353,7 +353,7 @@ export function usePodEventParticipants(eventId: string | undefined) {
     queryKey: ["pod-event-participants", eventId],
     queryFn: () => fetchPodEventParticipants(eventId!),
     enabled: !!eventId,
-    staleTime: FIVE_MINUTES,
+    staleTime: THIRTY_MINUTES,
   });
 }
 
@@ -362,7 +362,7 @@ export function usePodDraftArtifact(eventId: string | undefined) {
     queryKey: ["pod-draft-artifact", eventId],
     queryFn: () => fetchPodDraftArtifact(eventId!),
     enabled: !!eventId,
-    staleTime: FIVE_MINUTES,
+    staleTime: THIRTY_MINUTES,
   });
 }
 
@@ -371,7 +371,7 @@ export function usePodEventBySlug(slug: string | undefined) {
     queryKey: ["pod-event-by-slug", slug],
     queryFn: () => fetchPodEventBySlug(slug!),
     enabled: !!slug,
-    staleTime: FIVE_MINUTES,
+    staleTime: THIRTY_MINUTES,
   });
 }
 
@@ -380,7 +380,7 @@ export function usePodEventMatches(eventId: string | undefined) {
     queryKey: ["pod-event-matches", eventId],
     queryFn: () => fetchPodEventMatches(eventId!),
     enabled: !!eventId,
-    staleTime: FIVE_MINUTES,
+    staleTime: THIRTY_MINUTES,
   });
 }
 
@@ -389,7 +389,7 @@ export function usePodEventReplays(eventId: string | undefined) {
     queryKey: ["pod-event-replays", eventId],
     queryFn: () => fetchPodEventReplays(eventId!),
     enabled: !!eventId,
-    staleTime: FIVE_MINUTES,
+    staleTime: THIRTY_MINUTES,
   });
 }
 
@@ -398,7 +398,7 @@ export function usePodLeaderboard(setCode: string | undefined) {
     queryKey: ["pod-leaderboard", setCode],
     queryFn: () => fetchPodLeaderboard(setCode!),
     enabled: !!setCode,
-    staleTime: FIVE_MINUTES,
+    staleTime: THIRTY_MINUTES,
   });
 }
 
@@ -406,7 +406,7 @@ export function usePodSetCodes() {
   return useQuery({
     queryKey: ["pod-set-codes"],
     queryFn: fetchPodSetCodes,
-    staleTime: FIVE_MINUTES,
+    staleTime: THIRTY_MINUTES,
   });
 }
 
@@ -417,7 +417,7 @@ export function useP0P1Cards(setCode: string | undefined) {
     queryKey: ["p0p1-cards", setCode],
     queryFn: () => fetchP0P1Cards(setCode!),
     enabled: !!setCode,
-    staleTime: FIVE_MINUTES,
+    staleTime: THIRTY_MINUTES,
   });
 }
 
@@ -426,7 +426,7 @@ export function useP0P1Picks(setCode: string | undefined) {
     queryKey: ["p0p1-picks", setCode],
     queryFn: () => fetchP0P1Picks(setCode!),
     enabled: !!setCode,
-    staleTime: FIVE_MINUTES,
+    staleTime: THIRTY_MINUTES,
   });
 }
 
@@ -459,7 +459,7 @@ export function useP0P1PickStats(setCode: string | undefined, enabled: boolean) 
     queryKey: ["p0p1-pick-stats", setCode],
     queryFn: () => fetchP0P1PickStats(setCode!),
     enabled: !!setCode && enabled,
-    staleTime: FIVE_MINUTES,
+    staleTime: THIRTY_MINUTES,
   });
 }
 

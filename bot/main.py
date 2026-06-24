@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import calendar
 import logging
 import logging.handlers
 import os
@@ -47,6 +48,7 @@ from bot.commands.testschedule import setup as setup_testschedule
 from bot.commands.testformatschedule import setup as setup_testformatschedule
 from bot.commands.testscribe import setup as setup_testscribe
 from bot.listeners.auto_link_listener import setup as setup_auto_link_listener
+from bot.listeners.profile_sync_listener import setup as setup_profile_sync_listener
 from bot.listeners.pod_screenshots import setup as setup_pod_screenshots
 from bot.listeners.rotate_image import setup as setup_rotate_image
 from bot.listeners.sesh_listener import reschedule_pending_events, setup as setup_sesh_listener
@@ -84,6 +86,8 @@ AUTO_REFRESH_TIMES = [
 AUTO_REFRESH_17L_INTERVAL_S = 3.0
 
 MEDIA_SYNC_TIME = dtime(hour=3, minute=30, tzinfo=AUTO_REFRESH_TZ)
+PROFILE_SYNC_TIME = dtime(hour=4, minute=0, tzinfo=AUTO_REFRESH_TZ)
+PROFILE_SYNC_WEEKDAY = calendar.MONDAY
 
 MSG_GENERIC_ERROR = "⚠️ Something went wrong handling that command. The bot owner has been notified."
 
@@ -180,6 +184,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_pod_screenshots(bot)
         await setup_rotate_image(bot)
         await setup_auto_link_listener(bot)
+        await setup_profile_sync_listener(bot)
         await setup_test_group(bot)
         await setup_testlobby(bot)
         await setup_testcomponent(bot)
@@ -320,21 +325,8 @@ def build_bot(guild_id: int) -> commands.Bot:
             except discord.HTTPException as e:
                 log.warning(f"could not DM player {player.id}: {e}")
 
-        avatar_summary = {"checked": 0, "updated": 0, "skipped": 0, "errors": 0}
-        try:
-            with SessionLocal() as session:
-                active_players = list(
-                    session.execute(
-                        select(Player).where(Player.active.is_(True))
-                    ).scalars().all()
-                )
-                avatar_summary = await refresh_player_profiles(bot, session, active_players)
-        except Exception:
-            log.warning("profile refresh sweep failed", exc_info=True)
-
         result = {
             "summary": summary,
-            "avatar_summary": avatar_summary,
             "trigger": trigger,
         }
 
@@ -435,6 +427,44 @@ def build_bot(guild_id: int) -> commands.Bot:
     async def _before_media_sync() -> None:
         await bot.wait_until_ready()
 
+    async def run_profile_reconcile() -> dict:
+        with SessionLocal() as session:
+            active_players = list(
+                session.execute(select(Player).where(Player.active.is_(True))).scalars().all()
+            )
+            return await refresh_player_profiles(bot, session, active_players)
+
+    @bot.command(name="sync-profiles")
+    @commands.is_owner()
+    async def sync_profiles_cmd(ctx: commands.Context) -> None:
+        """Owner-only. Reconcile every active player's Discord avatar, nickname, and username now."""
+        await _reply_quietly(ctx, "⏳ Syncing Discord profiles…")
+        summary = await run_profile_reconcile()
+        await _reply_quietly(
+            ctx,
+            f"✅ Profiles checked {summary['checked']} · updated {summary['updated']} · "
+            f"skipped {summary['skipped']} · errors {summary['errors']}.",
+        )
+
+    @tasks.loop(time=PROFILE_SYNC_TIME)
+    async def profile_sync_tick() -> None:
+        if datetime.now(AUTO_REFRESH_TZ).weekday() != PROFILE_SYNC_WEEKDAY:
+            return
+        try:
+            log.info("profile-sync: weekly reconcile firing")
+            summary = await run_profile_reconcile()
+            log.info(
+                f"profile-sync: checked {summary['checked']} | updated {summary['updated']} | "
+                f"skipped {summary['skipped']} | errors {summary['errors']}"
+            )
+        except Exception:
+            log.exception("profile-sync tick failed")
+            await _notify_owner(bot, "⚠️ profile-sync tick crashed:", traceback.format_exc())
+
+    @profile_sync_tick.before_loop
+    async def _before_profile_sync() -> None:
+        await bot.wait_until_ready()
+
     bot.startup_announced = False
 
     @bot.event
@@ -457,6 +487,8 @@ def build_bot(guild_id: int) -> commands.Bot:
             auto_refresh_tick.start()
         if settings.media_sync_enabled and not media_sync_tick.is_running():
             media_sync_tick.start()
+        if settings.profile_sync_enabled and not profile_sync_tick.is_running():
+            profile_sync_tick.start()
 
     return bot
 

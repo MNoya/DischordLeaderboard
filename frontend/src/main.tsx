@@ -13,6 +13,7 @@ const queryClient = new QueryClient({
       // Spec §6 — view-backed reads are cheap; refetch on window focus is noise.
       refetchOnWindowFocus: false,
       retry: 1,
+      gcTime: 60 * 60 * 1000,
     },
   },
 });
