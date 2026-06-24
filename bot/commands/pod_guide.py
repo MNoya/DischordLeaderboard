@@ -36,9 +36,9 @@ class PodGuide(commands.Cog):
         audit.event("pod_guide_invoked", user_id=str(interaction.user.id), pinned=is_owner)
         no_pings = discord.AllowedMentions.none()
         if is_owner:
+            await interaction.response.defer()
             await self._remove_existing_pins(interaction.channel)
-            await interaction.response.send_message(body, allowed_mentions=no_pings)
-            message = await interaction.original_response()
+            message = await interaction.followup.send(body, allowed_mentions=no_pings, wait=True)
             await self._pin(message)
             await self._react_love(message)
         else:
