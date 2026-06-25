@@ -38,7 +38,7 @@ function CardsLayout({ rows, confidence = 0 }: { rows: BreakdownRow[]; confidenc
       {rows.map((r) => {
         const color = FMT_COLORS[r.label] ?? FMT_DEFAULT_COLOR;
         const isLcqD2 = r.isLcq;
-        const earned = r.count > 0;
+        const earned = r.isPod ? r.score > 0 : r.count > 0;
         return (
           <div
             key={r.label}

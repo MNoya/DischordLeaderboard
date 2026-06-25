@@ -159,7 +159,7 @@ function ShieldActions({
   onShowDeck: (p: PodSeat) => void;
   scale: number;
 }) {
-  const hasDeck = !!participant.deckScreenshotUrl;
+  const hasDeck = !!participant.deckScreenshotUrl || !!participant.hasDeckList;
   const hasDraftLog = !!participant.draftLogUrl;
   if (!hasDeck && !hasDraftLog) return null;
 

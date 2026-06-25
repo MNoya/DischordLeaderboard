@@ -216,6 +216,7 @@ export interface PodEventMatchRow {
 export interface PodSeat extends PodEventParticipantRow {
   seatIndex: number;
   discordName: string;
+  hasDeckList?: boolean;
 }
 
 export interface PodEventReplayRow {

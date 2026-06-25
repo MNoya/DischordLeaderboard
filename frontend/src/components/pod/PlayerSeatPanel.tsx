@@ -124,7 +124,7 @@ function SeatHeader({
   const hasRecord = participant.record != null;
   const wins = Number((participant.record ?? "").split("-")[0] || 0);
   const losses = Number((participant.record ?? "").split("-")[1] || 0);
-  const hasDeck = participant.deckScreenshotUrl !== null;
+  const hasDeck = participant.deckScreenshotUrl !== null || !!participant.hasDeckList;
 
   const nameLink = profileHref ? (
     <Link
@@ -397,8 +397,9 @@ function RoundRow({
     </span>
   );
 
+  const opponentHasDeck = !!opponent?.deckScreenshotUrl || !!opponent?.hasDeckList;
   const deckButton = opponent ? (
-    opponent.deckScreenshotUrl ? (
+    opponentHasDeck ? (
       <button
         type="button"
         onClick={(e) => {

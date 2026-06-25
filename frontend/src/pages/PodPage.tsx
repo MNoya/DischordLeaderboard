@@ -157,10 +157,15 @@ export function PodPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [prevTo, nextTo, navigate, deckTarget]);
 
-  const seats = useMemo<PodSeat[]>(
-    () => (participantRows ? assignSeats(participantRows) : []),
-    [participantRows],
-  );
+  const seats = useMemo<PodSeat[]>(() => {
+    if (!participantRows) return [];
+    const base = assignSeats(participantRows);
+    if (!draftArtifact) return base;
+    return base.map((s) => ({
+      ...s,
+      hasDeckList: resolveDeck(draftArtifact, s.seatIndex) !== null,
+    }));
+  }, [participantRows, draftArtifact]);
 
   const participantsBySeatName = useMemo(() => {
     const m = new Map<string, PodSeat>();
