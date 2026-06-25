@@ -1,6 +1,6 @@
 """Admin-only `/pod-schedule` — preview the weekly package on demand and act on it early.
 
-Renders the exact body and buttons the Monday DM sends, ephemerally in the invoking channel.
+Renders the exact body and buttons the Monday DM sends, in the invoking channel or a DM with the bot.
 `week` composes for any week so boundary variants and blurb cycling can be checked ahead of time;
 the buttons (Post it for me / I've got it / Skip this week) carry that week, so skipping a future
 week here suppresses its fallback post.
@@ -27,11 +27,12 @@ class PodSchedule(commands.Cog):
 
     @app_commands.command(name="pod-schedule", description=desc.POD_SCHEDULE)
     @app_commands.describe(week="Any date in the target week (YYYY-MM-DD); defaults to the upcoming week")
-    @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
-    @app_commands.allowed_installs(guilds=True, users=False)
+    @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+    @app_commands.allowed_installs(guilds=True, users=True)
     async def pod_schedule(self, interaction: discord.Interaction, week: str | None = None) -> None:
+        ephemeral = interaction.guild is not None
         if not await self.bot.is_owner(interaction.user):
-            await interaction.response.send_message(MSG_ADMIN_ONLY, ephemeral=True)
+            await interaction.response.send_message(MSG_ADMIN_ONLY, ephemeral=ephemeral)
             return
 
         monday = upcoming_monday()
@@ -39,14 +40,14 @@ class PodSchedule(commands.Cog):
             try:
                 parsed = date.fromisoformat(week)
             except ValueError:
-                await interaction.response.send_message(MSG_BAD_WEEK, ephemeral=True)
+                await interaction.response.send_message(MSG_BAD_WEEK, ephemeral=ephemeral)
                 return
             monday = parsed - timedelta(days=parsed.weekday())
 
         body, view, create_blocks = await build_monday_package(monday)
-        await interaction.response.send_message(body, view=view, ephemeral=True)
+        await interaction.response.send_message(body, view=view, ephemeral=ephemeral)
         if create_blocks is not None:
-            await interaction.followup.send(create_blocks, ephemeral=True)
+            await interaction.followup.send(create_blocks, ephemeral=ephemeral)
 
 
 async def setup(bot: commands.Bot) -> None:

@@ -16,12 +16,13 @@ PAIRING_MODES = (
     ("bracket", "Fast Bracket", "Pairs players the moment two reach the same record. 8p only"),
     ("random", "Random", "Round 1 randomized ignoring seats. Later rounds by record."),
 )
+DEFAULT_PAIRING_MODE = "bracket"
 SELECT_PLACEHOLDER = "Choose pairing mode"
 
 
 def pairing_label(mode: str | None) -> str:
-    """Display label for a pairing mode; defaults to Swiss."""
-    cur = (mode or "swiss").lower()
+    """Display label for a pairing mode; defaults to Fast Bracket."""
+    cur = (mode or DEFAULT_PAIRING_MODE).lower()
     return next((lbl for code, lbl, _ in PAIRING_MODES if code == cur), cur)
 
 
@@ -36,7 +37,7 @@ def pairing_options(current_mode: str | None) -> list[discord.SelectOption]:
     """The pairing-mode dropdown options, with the current mode defaulted. Labels are prefixed with
     'Pairings:' so the collapsed dropdown reads e.g. 'Pairings: Swiss Tournament', matching the Set and
     Seats dropdowns and disambiguating its Random option from the Seats one."""
-    cur = (current_mode or "swiss").lower()
+    cur = (current_mode or DEFAULT_PAIRING_MODE).lower()
     return [
         discord.SelectOption(label=f"Pairings: {label}", value=code, description=desc, default=(cur == code))
         for code, label, desc in PAIRING_MODES

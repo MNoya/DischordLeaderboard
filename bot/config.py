@@ -34,6 +34,7 @@ class Settings(BaseSettings):
 
     pod_draft_channel_id: int = 1028072146645295125
     pod_draft_target_players: int = 8
+    pod_draft_voice_channel_name: str = "Pod General"
     pod_schedule_enabled: bool = True
     pod_draft_session_prefix: str = "LLU"
     pod_draft_max_players: int = 10

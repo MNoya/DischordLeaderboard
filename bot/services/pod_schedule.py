@@ -5,14 +5,16 @@ bot/tasks/pod_schedule_post.py and bot/tasks/pod_underfill.py.
 
 Monday blurbs are curated offline (generated with an LLM, hand-picked per set) — see
 spec/pod-draft-scheduler.md for the prompt guidance. A set with a missing or empty pool
-falls back to GENERIC_MONDAY_BLURBS.
+falls back to GENERIC_MONDAY_BLURBS; with both empty the post carries no blurb line.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
+from bot.services.sesh_parser import NUM_RE
 from bot.sets import ALL_SETS
 from bot.text import link_with_emoji
 
@@ -71,19 +73,18 @@ POD_DRAFTERS_ROLE_NAME = "Pod Drafters"
 
 CREATE_CHANNEL_REF = "#🚀-pod-draft-coordination"
 CREATE_MENTIONS = f"@{POD_DRAFTERS_ROLE_NAME}"
+CREATE_DESCRIPTION = "Please RSVP"
+CREATE_DESCRIPTION_EU = ":flag_eu: friendly time.\nPlease RSVP"
 CREATE_COMMAND_TEMPLATE = (
     "/create title:{set_code} Pod Draft #{event_number} - {day} "
-    "datetime:{day} {clock} ET "
+    "datetime:{day} {clock} {zone} "
+    "duration:2 hours "
+    "description:{description} "
     "channel:{channel} "
     "on_create_mentions:{mentions}"
 )
 
-GENERIC_MONDAY_BLURBS: tuple[str, ...] = (
-    "📜 **Weekly Draft Bulletin**\nThe packs are sealed. The seats are open. The lanes remain, for now, unclaimed.",
-    "📜 **Notice from the Pairings Office**\nTwo pods are scheduled this week. History shows the best seats go to "
-    "those who react early.",
-    "📜 **Weekly Records Update**\nArchivists note that every memorable draft began the same way: somebody RSVP'd.",
-)
+GENERIC_MONDAY_BLURBS: tuple[str, ...] = ()
 
 MONDAY_BLURBS: dict[str, tuple[str, ...]] = {
     "MSH": (),
@@ -94,11 +95,12 @@ MONDAY_BLURBS: dict[str, tuple[str, ...]] = {
 class WeeklySlot:
     weekday: int
     start: time
+    description: str
 
 
 WEEKLY_SLOTS: tuple[WeeklySlot, ...] = (
-    WeeklySlot(weekday=WEDNESDAY, start=time(20, 0)),
-    WeeklySlot(weekday=THURSDAY, start=time(14, 0)),
+    WeeklySlot(weekday=WEDNESDAY, start=time(20, 0), description=CREATE_DESCRIPTION),
+    WeeklySlot(weekday=THURSDAY, start=time(14, 0), description=CREATE_DESCRIPTION_EU),
 )
 
 
@@ -161,6 +163,8 @@ def week_index_for(set_code: str, monday: date) -> int:
 
 def monday_blurb(set_code: str, week_index: int) -> str:
     pool = MONDAY_BLURBS.get(set_code) or GENERIC_MONDAY_BLURBS
+    if not pool:
+        return ""
     return pool[week_index % len(pool)]
 
 
@@ -184,7 +188,8 @@ def compose_monday_message(monday: date, set_code: str) -> str:
     for slot in slots_for_week(monday):
         unix = int(slot.timestamp())
         slot_lines.append(f"• <t:{unix}:F> (<t:{unix}:R>)")
-    return blurb + "\n\n" + header + "\n" + "\n".join(slot_lines)
+    body = header + "\n" + "\n".join(slot_lines)
+    return f"{blurb}\n\n{body}" if blurb else body
 
 
 def release_unix(release: UpcomingRelease) -> int:
@@ -199,15 +204,27 @@ def _noon_unix(day: date) -> int:
     return int(datetime.combine(day, time(12, 0), tzinfo=SCHEDULE_TZ).timestamp())
 
 
-def build_create_command(set_code: str, event_number: int, slot_start: datetime) -> str:
+def build_create_command(set_code: str, event_number: int, slot_start: datetime, description: str) -> str:
     return CREATE_COMMAND_TEMPLATE.format(
         set_code=set_code,
         event_number=event_number,
         day=f"{slot_start:%B} {slot_start.day}",
         clock=format_clock(slot_start),
+        zone=slot_start.strftime("%Z"),
+        description=description,
         channel=CREATE_CHANNEL_REF,
         mentions=CREATE_MENTIONS,
     )
+
+
+def highest_event_number(event_names: Iterable[str]) -> int:
+    """Largest '#N' across recorded pod names; the weekly forecast numbers up from here."""
+    highest = 0
+    for name in event_names:
+        match = NUM_RE.search(name or "")
+        if match is not None:
+            highest = max(highest, int(match.group(1)))
+    return highest
 
 
 def build_underfill_message(

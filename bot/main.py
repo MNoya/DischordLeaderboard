@@ -203,7 +203,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         # Register the persistent leaderboard view so Join buttons on previously-posted
         # messages keep dispatching after a bot restart
         bot.add_view(LeaderboardView())
-        bot.add_view(LobbyReadyButtonView())
+        bot.add_view(LobbyReadyButtonView(show_force_start=True))
 
         log.info("setup_hook: cogs loaded; run `!sync` to publish slash commands to Discord")
 

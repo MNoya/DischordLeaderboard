@@ -74,6 +74,7 @@ LOBBY_REHYDRATE_WINDOW = timedelta(hours=12)
 _READY_TIMEOUT_S = 90
 _READY_DEBOUNCE_S = 2.0
 _LOBBY_FULL_THRESHOLD = 8
+_LOBBY_HALF_THRESHOLD = _LOBBY_FULL_THRESHOLD // 2
 _LOBBY_FULL_PROMPT_DELAY_S = 10
 _AI_BOT_NAME_RE = re.compile(r"^Bot #\d+$")
 
@@ -164,6 +165,7 @@ class PodDraftManager:
         self._lobby_full_prompt_task: asyncio.Task | None = None
         self._lobby_full_prompt_message: "discord.Message | None" = None
         self._lobby_full_prompted = False
+        self._voice_link_posted = False
         self._ready_check_started_at = 0.0
         self.lobby_status_message: object | None = None
         self.ready_check_progress_message: object | None = None
@@ -567,7 +569,7 @@ class PodDraftManager:
             self.ready_check_progress_message = await thread.send(
                 embed=progress_embed,
                 view=LobbyReadyButtonView(
-                    draftmancer_url=self.draftmancer_url, ready_disabled=True,
+                    draftmancer_url=self.draftmancer_url, ready_disabled=True, show_force_start=True,
                 ),
             )
         except Exception:
@@ -750,11 +752,36 @@ class PodDraftManager:
                 progress_view = LobbyReadyButtonView(
                     draftmancer_url=self.draftmancer_url,
                     ready_disabled=(state == "ready" or has_unrecognized),
+                    show_force_start=(state == "ready"),
                 )
             try:
                 await self.ready_check_progress_message.edit(embed=progress_embed, view=progress_view)
             except Exception:
                 log.warning("could not edit ready-check progress card", exc_info=True)
+
+        await self._maybe_post_voice_link(classified, thread)
+
+    async def _maybe_post_voice_link(self, classified: list[tuple[str, str | None]], thread) -> None:
+        """Once half the table has gathered in the Draftmancer lobby, drop a one-time link to the pod
+        voice channel so players hop in to chat while the rest fill in. Resolved by name from the guild's
+        cached channels, so it costs no extra Discord request."""
+        if self._voice_link_posted or self.kind == "mock" or self.drafting or self.draft_complete:
+            return
+        if len(classified) < _LOBBY_HALF_THRESHOLD:
+            return
+        channel = discord.utils.get(thread.guild.voice_channels, name=settings.pod_draft_voice_channel_name)
+        self._voice_link_posted = True
+        if channel is None:
+            log.info(
+                f"[LOBBY] voice_link_skip — no '{settings.pod_draft_voice_channel_name}' voice channel "
+                f"event={self.event_id}"
+            )
+            return
+        try:
+            await thread.send(channel.jump_url)
+        except discord.HTTPException:
+            self._voice_link_posted = False
+            log.warning(f"[LOBBY] voice_link_send_failed event={self.event_id}", exc_info=True)
 
     def _compute_state(self, classified: list[tuple[str, str | None]]) -> str:
         if self.draft_complete:

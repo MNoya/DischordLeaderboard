@@ -23,18 +23,27 @@ log = logging.getLogger("bot.lobby_embed")
 
 READY_CHECK_CUSTOM_ID = "pod-draft:ready-check"
 SETTINGS_CUSTOM_ID = "pod-draft:settings"
+FORCE_START_CUSTOM_ID = "pod-draft:force-start"
 
 _NO_ACTIVE_POD_MSG = "No active pod-draft session in this thread."
+
+
+def _active_manager_for_channel(channel_id: int | None):
+    from bot.services.pod_active import ACTIVE_POD_MANAGERS
+    return next((m for m in ACTIVE_POD_MANAGERS.values() if m.thread_id == channel_id), None)
 
 
 class LobbyReadyButtonView(discord.ui.View):
     def __init__(
         self, draftmancer_url: str | None = None, ready_disabled: bool = False,
+        show_force_start: bool = False,
     ) -> None:
         super().__init__(timeout=None)
         if ready_disabled:
             self.ready_check.disabled = True
         self.add_item(SettingsButton())
+        if show_force_start:
+            self.add_item(ForceStartButton())
         if draftmancer_url:
             self.add_item(discord.ui.Button(
                 label="Join Draftmancer",
@@ -50,14 +59,10 @@ class LobbyReadyButtonView(discord.ui.View):
     async def ready_check(
         self, interaction: discord.Interaction, button: discord.ui.Button,
     ) -> None:
-        from bot.services.pod_active import ACTIVE_POD_MANAGERS
         channel = interaction.channel
         channel_id = channel.id if channel else None
         actor = actor_label(interaction)
-        manager = next(
-            (m for m in ACTIVE_POD_MANAGERS.values() if m.thread_id == channel_id),
-            None,
-        )
+        manager = _active_manager_for_channel(channel_id)
         if manager is None:
             log.info(f"{actor} clicked Ready Check in channel={channel_id} (no active pod)")
             await interaction.response.send_message(_NO_ACTIVE_POD_MSG, ephemeral=True)
@@ -79,6 +84,76 @@ class SettingsButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         await open_settings_panel(interaction)
+
+
+class ForceStartButton(discord.ui.Button):
+    """On the active ready-check card: an understated escape hatch to skip the remaining ready checks
+    and start the draft, behind a confirmation so a stray click can't launch the pod with players away."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            label="Force Start", style=discord.ButtonStyle.secondary,
+            custom_id=FORCE_START_CUSTOM_ID, emoji="⏭️",
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        actor = actor_label(interaction)
+        manager = _active_manager_for_channel(interaction.channel_id)
+        if manager is None:
+            if _force_start_preview_factory is not None:
+                ready, total, pending = _force_start_preview_factory()
+                await interaction.response.send_message(
+                    force_start_confirm_text(ready, total, pending),
+                    view=ForceStartConfirmView(None), ephemeral=True,
+                )
+                return
+            log.info(f"{actor} clicked Force Start in channel={interaction.channel_id} (no active pod)")
+            await interaction.response.send_message(_NO_ACTIVE_POD_MSG, ephemeral=True)
+            return
+        non_bot = manager.player_session_users()
+        total = len(non_bot)
+        pending = [u.get("userName") for u in non_bot
+                   if u.get("userID") not in manager.ready_users and u.get("userName")]
+        ready = total - len(pending)
+        log.info(f"[{manager.event_name}] {actor} opened Force Start confirm ({ready}/{total} ready)")
+        await interaction.response.send_message(
+            force_start_confirm_text(ready, total, pending),
+            view=ForceStartConfirmView(manager),
+            ephemeral=True,
+        )
+
+
+def force_start_confirm_text(ready: int, total: int, pending: list[str]) -> str:
+    """Confirmation prompt for skipping the ready check, naming who'd be left behind. Shared by the live
+    Force Start button and the `!test forcestart` preview so the copy never drifts."""
+    if pending:
+        return (
+            f"⏭️ {ready}/{total} ready — still waiting on {', '.join(pending)}.\n"
+            "Start the draft now without them?"
+        )
+    return f"⏭️ {ready}/{total} ready. Start the draft now?"
+
+
+class ForceStartConfirmView(discord.ui.View):
+    def __init__(self, manager) -> None:
+        super().__init__(timeout=60)
+        self.manager = manager
+
+    @discord.ui.button(label="Start now", style=discord.ButtonStyle.success)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if self.manager is None:
+            await interaction.response.edit_message(content="Preview only — no live pod to start.", view=None)
+            return
+        actor = actor_label(interaction)
+        log.info(f"[{self.manager.event_name}] {actor} confirmed Force Start")
+        await interaction.response.defer()
+        err = await self.manager.force_start()
+        message = f"⚠️ {err}" if err else "Force-starting the draft, watch the thread."
+        await interaction.edit_original_response(content=message, view=None)
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.grey)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await interaction.response.edit_message(content="Force start cancelled.", view=None)
 
 
 async def open_settings_panel(interaction: discord.Interaction) -> None:
@@ -372,3 +447,13 @@ def register_settings_preview(factory) -> None:
     """Let the testlobby sandbox preview the Settings panel even though it has no live pod manager."""
     global _settings_preview_factory
     _settings_preview_factory = factory
+
+
+# testlobby injects a (ready, total, pending) factory so the Force Start confirm is previewable
+_force_start_preview_factory = None
+
+
+def register_force_start_preview(factory) -> None:
+    """Let the testlobby sandbox preview the Force Start confirm dialog without a live pod manager."""
+    global _force_start_preview_factory
+    _force_start_preview_factory = factory

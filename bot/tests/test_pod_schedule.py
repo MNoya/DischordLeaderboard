@@ -3,7 +3,7 @@ from datetime import date, datetime, timezone
 import pytest
 
 from bot.services.pod_schedule import (
-    GENERIC_MONDAY_BLURBS,
+    CREATE_DESCRIPTION,
     MONDAY_KIND_CHAMPIONSHIP_WEEK,
     MONDAY_KIND_NORMAL,
     MONDAY_KIND_RELEASE_WEEK,
@@ -14,6 +14,7 @@ from bot.services.pod_schedule import (
     build_underfill_message,
     compose_monday_message,
     format_clock,
+    highest_event_number,
     monday_blurb,
     monday_kind,
     next_release_after,
@@ -71,19 +72,17 @@ def test_week_index_for_unknown_set_falls_back_to_iso_week():
     assert week_index_for("ZZZ", date(2026, 6, 8)) == date(2026, 6, 8).isocalendar().week
 
 
-def test_monday_blurbs_fall_back_to_generic_and_wrap():
-    assert monday_blurb("ZZZ", 0) == GENERIC_MONDAY_BLURBS[0]
-    assert monday_blurb("ZZZ", len(GENERIC_MONDAY_BLURBS)) == GENERIC_MONDAY_BLURBS[0]
-    assert monday_blurb("MSH", 1) == GENERIC_MONDAY_BLURBS[1]
+def test_monday_blurb_is_empty_when_no_pool_is_curated():
+    assert monday_blurb("ZZZ", 0) == ""
+    assert monday_blurb("MSH", 3) == ""
 
 
-def test_compose_monday_message_normal_week_opens_with_the_blurb_and_lists_both_slots():
+def test_compose_monday_message_normal_week_lists_both_slots_without_a_blurb():
     monday = date(2026, 6, 1)
 
     message = compose_monday_message(monday, "SOS")
 
-    expected_blurb = monday_blurb("SOS", week_index_for("SOS", monday))
-    assert message.split("\n\n")[0] == expected_blurb
+    assert not message.startswith("\n")
     assert "SOS" in message
     for slot in slots_for_week(monday):
         assert f"<t:{int(slot.timestamp())}:F>" in message
@@ -120,13 +119,24 @@ def test_compose_monday_message_season_over_counts_down_to_the_next_drop():
 def test_build_create_command_interpolates_event_data():
     slot = datetime(2026, 6, 24, 20, 0, tzinfo=SCHEDULE_TZ)
 
-    command = build_create_command("MSH", 5, slot)
+    command = build_create_command("MSH", 5, slot, CREATE_DESCRIPTION)
 
     assert command.startswith("/create ")
     assert "MSH" in command
     assert "#5" in command
     assert "June 24" in command
     assert "8pm" in command
+
+
+def test_highest_event_number_takes_the_max_and_ignores_unnumbered_names():
+    names = ["SOS Pod Draft #3 - May 15", "SOS Pod Draft #5 - May 22", "SOS Pod Draft - aborted"]
+
+    assert highest_event_number(names) == 5
+
+
+def test_highest_event_number_defaults_to_zero_with_no_numbers():
+    assert highest_event_number([]) == 0
+    assert highest_event_number(["Pod Draft - no number"]) == 0
 
 
 @pytest.mark.parametrize(

@@ -22,20 +22,24 @@ from bot.sets import active_set_code, upcoming_sets
 
 ApplyFormatCallback = Callable[[discord.Interaction, str], Awaitable[str | None]]
 
+WRITE_IN_VALUE = "__format_write_in__"
+
 
 def format_options(current_code: str | None) -> list[discord.SelectOption]:
-    """The format dropdown options (active set + upcoming sets + custom cubes), with the current one
-    defaulted. Labels are prefixed with 'Format:' so the collapsed dropdown reads e.g. 'Format: SOS',
-    matching the Pairings and Seats dropdowns and the lobby footer. Upcoming sets (e.g. MSH before it
-    rotates in) let a pod preview-draft a set the bot serves via setRestriction."""
+    """The format dropdown options (active set + upcoming sets + custom cubes + a write-in launcher),
+    with the current one defaulted. Labels are prefixed with 'Format:' so the collapsed dropdown reads
+    e.g. 'Format: SOS', matching the Pairings and Seats dropdowns and the lobby footer. Upcoming sets
+    (e.g. MSH before it rotates in) let a pod preview-draft a set the bot serves via setRestriction; the
+    write-in option drafts any other set code the user types."""
     cur = (current_code or "").upper()
     active = active_set_code()
-    on_other = cur in CUSTOM_FORMATS or cur in {s.code for s in upcoming_sets()}
+    upcoming_codes = {s.code for s in upcoming_sets()}
+    known = {active} | upcoming_codes | set(CUSTOM_FORMATS)
     options = [discord.SelectOption(
         label=f"Format: {active}",
         value=active,
         description=f"Draft the latest set ({active})",
-        default=not on_other,
+        default=cur in ("", active),
     )]
     for seed in upcoming_sets():
         options.append(discord.SelectOption(
@@ -51,6 +55,15 @@ def format_options(current_code: str | None) -> list[discord.SelectOption]:
             description=f"CubeCobra: {fmt.cube_id}",
             default=(cur == fmt.code.upper()),
         ))
+    if cur and cur not in known:
+        options.append(discord.SelectOption(
+            label=f"Format: {cur}", value=cur, description="Written-in set code", default=True,
+        ))
+    options.append(discord.SelectOption(
+        label="Format: Write in…",
+        value=WRITE_IN_VALUE,
+        description="Type any set code the bot will try to draft",
+    ))
     return options
 
 
@@ -70,7 +83,17 @@ class FormatSelect(ui.Select):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         code = self.values[0]
+        if code == WRITE_IN_VALUE:
+            await interaction.response.send_modal(FormatWriteInModal(self._apply_write_in))
+            return
         await interaction.response.defer()
+        await self._apply_and_refresh(interaction, code)
+
+    async def _apply_write_in(self, interaction: discord.Interaction, code: str) -> None:
+        await interaction.response.defer()
+        await self._apply_and_refresh(interaction, code)
+
+    async def _apply_and_refresh(self, interaction: discord.Interaction, code: str) -> None:
         err = await self._on_apply(interaction, code)
         if err:
             await interaction.edit_original_response(content=f"⚠️ {err}", view=None)
@@ -79,3 +102,27 @@ class FormatSelect(ui.Select):
             content=format_applied_message(code),
             view=FormatSelectView(self._on_apply, current_code=code),
         )
+
+
+class FormatWriteInModal(ui.Modal, title="Write in a set code"):
+    code = ui.TextInput(
+        label="Set code",
+        placeholder="e.g. MH3, FIN, DSK",
+        min_length=2,
+        max_length=5,
+        required=True,
+    )
+
+    def __init__(self, on_code: Callable[[discord.Interaction, str], Awaitable[None]]) -> None:
+        super().__init__()
+        self._on_code = on_code
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        typed = self.code.value.strip().upper()
+        if not typed.isalnum():
+            await interaction.response.send_message(
+                f"⚠️ `{self.code.value}` isn't a valid set code — use letters and numbers only.",
+                ephemeral=True,
+            )
+            return
+        await self._on_code(interaction, typed)

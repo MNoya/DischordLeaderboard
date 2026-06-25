@@ -16,7 +16,8 @@ from bot.services.pod_notices import send_settings_notice
 from bot.services.pod_drafts import is_championship
 from bot.services.pod_registration_embed import update_registered_embed
 from bot.services.pod_format_select import SELECT_PLACEHOLDER as FORMAT_PLACEHOLDER
-from bot.services.pod_format_select import format_options
+from bot.services.pod_format_select import WRITE_IN_VALUE as FORMAT_WRITE_IN_VALUE
+from bot.services.pod_format_select import FormatWriteInModal, format_options
 from bot.services.pod_pairing_select import SELECT_PLACEHOLDER as PAIRING_PLACEHOLDER
 from bot.services.pod_pairing_select import pairing_change_message, pairing_options
 from bot.services.pod_seating_select import (
@@ -114,6 +115,11 @@ class PodSettingsView(ui.View):
             championship=is_championship(self.event_name),
         )
 
+    async def _apply_format_code(self, interaction: discord.Interaction, code: str) -> None:
+        await self.apply(interaction, on_apply=self.on_format, value=code, attr="current_code",
+                         notice=format_change_message(actor_label(interaction), code),
+                         marker=settings_notice_marker("Format"))
+
 
 class _FormatSetting(ui.Select):
     def __init__(self, current_code: str | None) -> None:
@@ -123,9 +129,10 @@ class _FormatSetting(ui.Select):
     async def callback(self, interaction: discord.Interaction) -> None:
         view: PodSettingsView = self.view
         code = self.values[0]
-        await view.apply(interaction, on_apply=view.on_format, value=code, attr="current_code",
-                         notice=format_change_message(actor_label(interaction), code),
-                         marker=settings_notice_marker("Format"))
+        if code == FORMAT_WRITE_IN_VALUE:
+            await interaction.response.send_modal(FormatWriteInModal(view._apply_format_code))
+            return
+        await view._apply_format_code(interaction, code)
 
 
 class _PairingSetting(ui.Select):

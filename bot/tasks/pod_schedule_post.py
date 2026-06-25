@@ -14,7 +14,7 @@ from datetime import date, datetime, time, timedelta
 
 import discord
 from discord.ext import commands
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from bot.config import settings
 from bot.database import SessionLocal
@@ -32,8 +32,10 @@ from bot.services.pod_schedule import (
     MSG_CREATE_BLOCKS_HEADER,
     MSG_MONDAY_DRAFT_INTRO,
     SCHEDULE_TZ,
+    WEEKLY_SLOTS,
     build_create_command,
     compose_monday_message,
+    highest_event_number,
     monday_kind,
     slots_for_week,
 )
@@ -197,10 +199,10 @@ async def _schedule_already_posted(channel: discord.abc.Messageable) -> bool:
 
 
 async def _create_command_blocks(monday) -> list[str]:
-    event_count = await asyncio.to_thread(_count_set_events)
+    last_number = await asyncio.to_thread(_latest_event_number)
     blocks = []
-    for i, slot in enumerate(slots_for_week(monday)):
-        command = build_create_command(active_set_code(), event_count + 1 + i, slot)
+    for i, (slot, start) in enumerate(zip(WEEKLY_SLOTS, slots_for_week(monday))):
+        command = build_create_command(active_set_code(), last_number + 1 + i, start, slot.description)
         blocks.append(f"```\n{command}\n```")
     return blocks
 
@@ -227,12 +229,12 @@ async def _fetch_owner() -> discord.User | None:
         return None
 
 
-def _count_set_events() -> int:
+def _latest_event_number() -> int:
     with SessionLocal() as session:
-        count = session.execute(
-            select(func.count()).select_from(PodDraftEvent).where(PodDraftEvent.set_code == active_set_code())
-        ).scalar()
-        return count or 0
+        names = session.execute(
+            select(PodDraftEvent.name).where(PodDraftEvent.set_code == active_set_code())
+        ).scalars()
+        return highest_event_number(names)
 
 
 def upcoming_monday() -> date:

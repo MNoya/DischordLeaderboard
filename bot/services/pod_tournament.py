@@ -38,6 +38,7 @@ from bot.services.pod_deck_color import (
     SubmitDeckView,
 )
 from bot.services.player_stats import leaderboard_seat_order
+from bot.services.pod_pairing_select import DEFAULT_PAIRING_MODE
 from bot.services.pod_replays import capture_event_replays
 from bot.services.seventeenlands import SeventeenLandsClient
 from bot.services.pod_drafts import (
@@ -843,7 +844,7 @@ async def start_tournament(manager: "PodDraftManager") -> None:
         return
 
     manager.tournament_players = [Player(id=name, name=name) for name in roster]
-    effective_mode = manager.pairing_mode or "swiss"
+    effective_mode = manager.pairing_mode or DEFAULT_PAIRING_MODE
     if effective_mode == "bracket" and not pod_bracket.supports(len(roster)):
         effective_mode = "swiss"
     manager.pairing_mode = effective_mode
@@ -1371,6 +1372,8 @@ def _load_round_states(event_id: str, round_num: int) -> list[dict]:
             "b_name": r.player_b_name,
             "a_display": a_info.get("display_name") or r.player_a_name,
             "b_display": b_info.get("display_name") or r.player_b_name,
+            "a_arena": a_info.get("arena"),
+            "b_arena": b_info.get("arena"),
             "a_record": f"{a_s.wins}-{a_s.losses}" if a_s else "0-0",
             "b_record": f"{b_s.wins}-{b_s.losses}" if b_s else "0-0",
             "winner_name": r.winner_name,
@@ -1623,12 +1626,13 @@ def _load_participant_slugs(event_id: str) -> dict[str, str]:
 
 
 def _load_participant_displays(event_id: str) -> dict[str, dict]:
-    """Map normalized name → {'display_name', 'slug'}.
+    """Map normalized name → {'display_name', 'slug', 'arena'}.
 
     Indexed by both draftmancer_name and the participant's display_name so pre-draft and post-draft
     participants both resolve. The display_name we *expose* prefers Player.display_name (the Discord
     display) over the participant row's display_name, which can carry stale Arena-style handles when
-    the participant was created from a test/debug roster.
+    the participant was created from a test/debug roster. `arena` is the linked Arena handle when known,
+    surfaced in the Round 1 pairings so players can find each other in-client.
     """
     with SessionLocal() as session:
         rows = session.execute(
@@ -1637,13 +1641,14 @@ def _load_participant_displays(event_id: str) -> dict[str, dict]:
                 PodDraftParticipant.display_name,
                 DbPlayer.display_name,
                 DbPlayer.slug,
+                DbPlayer.arena_name,
             )
             .outerjoin(DbPlayer, DbPlayer.id == PodDraftParticipant.player_id)
             .where(PodDraftParticipant.event_id == event_id)
         ).all()
     out: dict[str, dict] = {}
-    for dm, participant_dn, player_dn, slug in rows:
-        info = {"display_name": player_dn or participant_dn, "slug": slug}
+    for dm, participant_dn, player_dn, slug, arena in rows:
+        info = {"display_name": player_dn or participant_dn, "slug": slug, "arena": arena}
         if dm:
             out[normalize_player_name(dm)] = info
         if participant_dn:
@@ -2979,6 +2984,8 @@ def _state_for_pending(match_id: str, a_name: str, b_name: str, standings_by_id,
         "b_name": b_name,
         "a_display": a_info.get("display_name") or a_name,
         "b_display": b_info.get("display_name") or b_name,
+        "a_arena": a_info.get("arena"),
+        "b_arena": b_info.get("arena"),
         "a_record": f"{a_s.wins}-{a_s.losses}" if a_s else "0-0",
         "b_record": f"{b_s.wins}-{b_s.losses}" if b_s else "0-0",
         "winner_name": None,
@@ -2996,9 +3003,31 @@ def _parse_wl(record: str | None) -> tuple[int, int]:
     return (0, 0)
 
 
-def _match_line(m: dict, *, seat_label: str | None = None) -> str:
+def _arena_matches_display(arena: str, display: str | None) -> bool:
+    """Whether the Arena handle and Discord display name are the same identity — equal base, or one a
+    prefix of the other (e.g. 'Marlo' ~ 'Marlo#08011', 'driftwood' ~ 'driftwood60'). Drives whether
+    a pairing needs to show both names or can lead with the Arena handle alone."""
+    base = arena.split("#", 1)[0].strip().lower()
+    name = (display or "").strip().lower()
+    if not name or not base:
+        return True
+    return base == name or base.startswith(name) or name.startswith(base)
+
+
+def _name_with_arena(display: str, arena: str | None) -> str:
+    """Pairing label: lead with the Draftmancer Arena handle so opponents can find each other in-client,
+    appending the Discord name only when it diverges from the handle (e.g. '`driftwood#49190` (Marlo)')."""
+    if not arena:
+        return display
+    if _arena_matches_display(arena, display):
+        return f"`{arena}`"
+    return f"`{arena}` ({display})"
+
+
+def _match_line(m: dict, *, seat_label: str | None = None, show_arena: bool = False) -> str:
     """One pairing line: result once reported, otherwise the matchup. Pending cross-record matches
-    show inline records with the higher record first; same-record matches lean on the group header."""
+    show inline records with the higher record first; same-record matches lean on the group header.
+    `show_arena` leads each unreported matchup with the players' Arena handles."""
     a_disp = m.get("a_display") or m["a_name"]
     b_disp = m.get("b_display") or m["b_name"]
     winner = m["winner_name"]
@@ -3010,6 +3039,9 @@ def _match_line(m: dict, *, seat_label: str | None = None) -> str:
         else:
             winner_disp, loser_disp = b_disp, a_disp
         return f"▫️{NBSP}{NBSP}{winner_disp} wins {m['score']} vs {loser_disp}"
+    if show_arena:
+        a_disp = _name_with_arena(a_disp, m.get("a_arena"))
+        b_disp = _name_with_arena(b_disp, m.get("b_arena"))
     if seat_label:
         return f"⚔️{NBSP}{NBSP}{a_disp} vs {b_disp} {seat_label}"
     a_wl, b_wl = _parse_wl(m["a_record"]), _parse_wl(m["b_record"])
@@ -3027,7 +3059,7 @@ def _round1_lines(match_states: list[dict], seated: bool) -> list[str]:
         if seated:
             lo, hi = sorted((m["a_seat"], m["b_seat"]))
             label = f"({lo}v{hi})"
-        lines.append(_match_line(m, seat_label=label))
+        lines.append(_match_line(m, seat_label=label, show_arena=True))
     lines.append("")
     lines.append(f"🎯{NBSP}{NBSP}Opponent DM'd. Report your match result using the dropdowns below")
     lines.append(f"🚨{NBSP}{NBSP}Change your MTGA deck image before you play, or it leaks your P1P1")
@@ -3098,7 +3130,7 @@ def _grouped_lines(round_num: int, match_states: list[dict]) -> list[str]:
                 label = m.get("label") or ""
                 lines.append(f"⏳{NBSP}{NBSP}{label}" if label else "⏳")
             else:
-                lines.append(_match_line(m))
+                lines.append(_match_line(m, show_arena=True))
     return lines
 
 
