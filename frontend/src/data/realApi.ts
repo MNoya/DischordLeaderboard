@@ -816,9 +816,11 @@ export async function fetchPlayerProfile(
   if (headlineResp.error) throw headlineResp.error;
   if (breakdownResp.error) throw breakdownResp.error;
   if (podResp.error) throw podResp.error;
-  if (!headlineResp.data) return null;
+  if (!headlineResp.data && !podResp.data) return null;
 
-  const headline = adaptLeaderboardRow(headlineResp.data as Record<string, unknown>);
+  const headline = headlineResp.data
+    ? adaptLeaderboardRow(headlineResp.data as Record<string, unknown>)
+    : podOnlyHeadline(slug, setCode, podResp.data as Record<string, unknown>);
   const breakdown = (breakdownResp.data ?? []).map((r) =>
     adaptFormatBreakdown(r as Record<string, unknown>),
   );
@@ -871,6 +873,22 @@ export async function fetchPlayerProfile(
     wins: headline.wins,
     losses: headline.losses,
     formatBreakdown: breakdown,
+  };
+}
+
+function podOnlyHeadline(slug: string, setCode: string, pod: Record<string, unknown>): LeaderboardRow {
+  return {
+    setCode,
+    slug,
+    displayName: (pod.display_name as string | null) ?? slug,
+    avatarUrl: (pod.avatar_url as string | null) ?? null,
+    rank: 0,
+    score: 0,
+    trophies: 0,
+    events: (pod.events as number) ?? 0,
+    wins: (pod.wins as number) ?? 0,
+    losses: (pod.losses as number) ?? 0,
+    lastCalculatedAt: "",
   };
 }
 
