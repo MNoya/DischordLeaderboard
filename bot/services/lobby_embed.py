@@ -201,15 +201,15 @@ def render(
     names by RSVP type; `in_session` is Draftmancer sessionUsers as (arena_name,
     linked_display_name_or_None). `draftmancer_url` appears under the header.
 
-    Buckets: In Draftmancer (linked + in session), Unrecognized name (in session, no Player row),
-    Waiting on (Yes RSVP not in session), Maybe (Maybe RSVP not in session). Waiting + Maybe are
-    hidden once ready check fires; the live Ready/Pending split lives on the separate ready-check
-    progress card, not here. `spectators` lists Draftmancer sessionSpectators comma-separated below
-    Maybe whenever any are present, regardless of state."""
+    Buckets: In Draftmancer (counts every session user; lists the linked ones), Unrecognized (in
+    session, no Player row), Waiting on (Yes RSVP not in session), Maybe (Maybe RSVP not in session).
+    Waiting + Maybe are hidden once ready check fires; the live Ready/Pending split lives on the
+    separate ready-check progress card, not here. `spectators` lists Draftmancer sessionSpectators
+    comma-separated below Maybe whenever any are present, regardless of state."""
     in_draftmancer = [(arena, dn) for arena, dn in in_session if dn is not None]
     unrecognized = [arena for arena, dn in in_session if dn is None]
     mention_map = display_name_by_mention_id or {}
-    in_session_keys = {dn.lower() for _, dn in in_draftmancer if dn}
+    in_session_keys = {dn.lower() for _, dn in in_session if dn}
     in_session_keys |= {arena.lower() for arena, _ in in_session}
     waiting_yes = [
         name for name in rsvps_yes
@@ -223,7 +223,7 @@ def render(
 
     banner_state = state
     if state not in ("ready", "notready", "drafting", "complete") and unrecognized:
-        banner_state = "onhold"
+        banner_state = "has_unlinked"
     status_lines, color = ready_status_banner(
         banner_state, decliner_name=decliner_name, cancel_reason=cancel_reason,
         initiated_by=initiated_by,
@@ -238,11 +238,11 @@ def render(
     embed = discord.Embed(title=title, description=description, color=color)
     _set_settings_footer(embed, format_label, pairing_label, seating_label)
 
-    if in_draftmancer:
+    if in_session:
         trailing = "\n​" if show_pending else ""
         in_drft_label = "Players" if state == "complete" else "In Draftmancer"
         _player_columns(
-            embed, f"✅ {in_drft_label} ({len(in_draftmancer)})", in_draftmancer,
+            embed, f"✅ {in_drft_label} ({len(in_session)})", in_draftmancer,
             trailing=trailing, spacer=show_pending,
         )
 
@@ -340,7 +340,7 @@ def render_ready_check_progress(
     `❌ <name> is Not Ready` + `✅ ready_count/total_count Ready` — with no link, buttons, or roster,
     since the retry controls live on the main lobby card.
     """
-    in_draftmancer = [(arena, dn) for arena, dn in in_session if dn is not None]
+    roster = _seat_rows(in_session)
 
     declined = state == "notready"
     status_lines, color = ready_status_banner(
@@ -360,14 +360,14 @@ def render_ready_check_progress(
         return embed
 
     if state in ("drafting", "complete"):
-        ready_players = in_draftmancer
+        ready_players = roster
         pending_players = []
     elif ready_arena_names is not None:
-        ready_players = [(a, dn) for a, dn in in_draftmancer if a in ready_arena_names]
-        pending_players = [(a, dn) for a, dn in in_draftmancer if a not in ready_arena_names]
+        ready_players = [(a, dn) for a, dn in roster if a in ready_arena_names]
+        pending_players = [(a, dn) for a, dn in roster if a not in ready_arena_names]
     else:
         ready_players = []
-        pending_players = in_draftmancer
+        pending_players = roster
 
     ready_label = "Players" if state == "complete" else "Ready"
     two_groups = bool(pending_players) or state == "ready"
@@ -401,8 +401,8 @@ def ready_status_banner(
         retry = "! Click Ready Check to retry" if retry_hint else ""
         reason = f"`{decliner_name}` is Not Ready" if decliner_name else (cancel_reason or "Ready Check cancelled")
         return [f"### ❌ {reason}{retry}"], discord.Color.red()
-    if state == "onhold":
-        return ["### ⏳ Ready Check on hold until everyone is linked"], discord.Color.orange()
+    if state == "has_unlinked":
+        return ["### ⚠️ Some players aren't recognized yet"], discord.Color.orange()
     return [], discord.Color.blurple()
 
 
@@ -411,6 +411,21 @@ def _quote_block(lines: list[str], *, trailing: str = "") -> str:
     if not lines:
         return "​"
     return "\n".join(f"> {line}" for line in lines) + trailing
+
+
+_ARENA_SUFFIX_RE = re.compile(r"#[0-9?]+$")
+
+
+def _seat_rows(in_session: list[tuple[str, str | None]]) -> list[tuple[str, str]]:
+    """(arena_handle, display_label) for every Draftmancer seat. An unlinked seat keeps its place in
+    the roster with a ⚠️ marker rather than being dropped, so the lobby never hides who is present."""
+    rows: list[tuple[str, str]] = []
+    for arena, dn in in_session:
+        if dn is not None:
+            rows.append((arena, dn))
+        else:
+            rows.append((arena, f"{_ARENA_SUFFIX_RE.sub('', arena) or arena} ⚠️"))
+    return rows
 
 
 def _player_columns(

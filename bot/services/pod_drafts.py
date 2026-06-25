@@ -21,6 +21,7 @@ from bot.models import (
     PodDraftParticipant,
 )
 from bot.services import pod_format
+from bot.slug import disambiguate_slug, slugify
 
 
 log = logging.getLogger(__name__)
@@ -128,6 +129,33 @@ def name_token_match(norm: str, field: str) -> bool:
     return len(norm) >= 3 and norm in _NAME_TOKEN_RE.split(field.lower())
 
 
+_FUZZY_MIN_LEN = 5
+
+
+def within_one_edit(a: str, b: str) -> bool:
+    """True when `a` and `b` are within a single insertion, deletion, or substitution
+    (Levenshtein distance ≤ 1). Catches the off-by-one Arena handle typo `jineteroj0` vs `jineterojo`."""
+    if a == b:
+        return True
+    if abs(len(a) - len(b)) > 1:
+        return False
+    if len(a) == len(b):
+        return sum(1 for x, y in zip(a, b) if x != y) == 1
+    shorter, longer = (a, b) if len(a) < len(b) else (b, a)
+    i = j = 0
+    edited = False
+    while i < len(shorter) and j < len(longer):
+        if shorter[i] == longer[j]:
+            i += 1
+            j += 1
+        elif edited:
+            return False
+        else:
+            edited = True
+            j += 1
+    return True
+
+
 def _normalized_column(col):
     """SQL expression: lowercase a column and strip the trailing MTG Arena suffix."""
     return func.regexp_replace(func.lower(col), _ARENA_ID_SQL, "")
@@ -199,7 +227,70 @@ def player_for_name(session: Session, name: str) -> Player | None:
             if name_token_match(norm, field):
                 return p
 
+    if len(norm) >= _FUZZY_MIN_LEN:
+        near: list[Player] = []
+        for p in candidates:
+            for alias in (p.arena_aliases or []):
+                if len(alias) >= _FUZZY_MIN_LEN and within_one_edit(norm, alias):
+                    near.append(p)
+                    break
+        if len(near) == 1:
+            return near[0]
+
     return None
+
+
+def attach_arena_alias(
+    session: Session,
+    *,
+    discord_id: str,
+    discord_username: str,
+    display_name: str,
+    avatar_hash: str | None,
+    arena_name: str,
+) -> tuple[str | None, str | None]:
+    """Find-or-create the active player for `discord_id` and bind `arena_name` as a normalized alias.
+
+    Returns (player_id, collision_player_id). On a clean link collision_player_id is None; when the
+    alias already belongs to a different active player, player_id is None and collision_player_id
+    names the owner. Shared by /link-arena and the lobby claim-seat button so the two never drift.
+    """
+    normalized = normalize_player_name(arena_name)
+
+    collision = session.execute(
+        select(Player).where(
+            Player.active.is_(True),
+            Player.discord_id != discord_id,
+            normalized == any_(Player.arena_aliases),
+        ).limit(1)
+    ).scalar_one_or_none()
+    if collision is not None:
+        return None, collision.id
+
+    player = session.execute(
+        select(Player).where(Player.discord_id == discord_id)
+    ).scalar_one_or_none()
+    if player is None:
+        taken_slugs = set(session.execute(select(Player.slug)).scalars().all())
+        player = Player(
+            slug=disambiguate_slug(slugify(display_name), taken_slugs),
+            discord_id=discord_id,
+            discord_username=discord_username,
+            display_name=display_name,
+            avatar_hash=avatar_hash,
+            arena_name=arena_name,
+            arena_aliases=[normalized],
+            active=True,
+            leaderboard_opt_in=False,
+        )
+        session.add(player)
+    else:
+        if not (player.arena_name or "").strip():
+            player.arena_name = arena_name
+        if normalized not in player.arena_aliases:
+            player.arena_aliases = [*player.arena_aliases, normalized]
+    session.flush()
+    return player.id, None
 
 
 def build_mock_session(session: Session, set_code: str) -> tuple[str, int]:

@@ -4,9 +4,12 @@ from __future__ import annotations
 import re
 from types import SimpleNamespace
 
+from sqlalchemy import select
+
 from bot.models import Player
 from bot.services.pod_draft_manager import _find_guild_member_for_arena
 from bot.services.pod_drafts import (
+    attach_arena_alias,
     normalize_player_name,
     player_for_name,
     classify_lobby_names,
@@ -124,6 +127,82 @@ def test_display_name_wins_over_discord_username_when_both_match(session):
     # display_name leg fires before discord_username leg; p_display should win
     assert found is not None
     assert found.discord_id == "8"
+
+
+def test_fuzzy_resolves_off_by_one_alias_typo(session):
+    _seed_player(session, discord_id="20", username="vortex", display_name="Vortex", arena_name="Vortexia0#48954")
+
+    found = player_for_name(session, "Vortexia#48954")
+    assert found is not None
+    assert found.discord_id == "20"
+
+
+def test_fuzzy_skips_when_two_players_are_equally_close(session):
+    _seed_player(session, discord_id="21", username="a", display_name="A", arena_name="questor#1")
+    _seed_player(session, discord_id="22", username="b", display_name="B", arena_name="questar#2")
+
+    assert player_for_name(session, "questir#9") is None
+
+
+def test_fuzzy_ignores_short_aliases(session):
+    _seed_player(session, discord_id="23", username="newt", display_name="Newt", arena_name="newt#1")
+
+    assert player_for_name(session, "bolt#2") is None
+
+
+# --- attach_arena_alias ---
+
+def test_attach_creates_player_for_new_discord_id(session):
+    player_id, collision_id = attach_arena_alias(
+        session, discord_id="30", discord_username="newbie", display_name="Newbie",
+        avatar_hash=None, arena_name="Vortexia#48954",
+    )
+
+    created = session.execute(select(Player).where(Player.discord_id == "30")).scalar_one()
+    assert collision_id is None
+    assert created.id == player_id
+    assert "vortexia" in created.arena_aliases
+
+
+def test_attach_relinking_own_handle_is_not_a_collision(session):
+    _seed_player(session, discord_id="31", username="owner", display_name="Owner", arena_name="Vortexia#1")
+
+    player_id, collision_id = attach_arena_alias(
+        session, discord_id="31", discord_username="owner", display_name="Owner",
+        avatar_hash=None, arena_name="Vortexia#999",
+    )
+
+    assert collision_id is None
+    assert player_id is not None
+
+
+def test_attach_collision_with_another_player_returns_owner(session):
+    owner = _seed_player(session, discord_id="32", username="owner", display_name="Owner", arena_name="Vortexia#1")
+
+    player_id, collision_id = attach_arena_alias(
+        session, discord_id="33", discord_username="thief", display_name="Thief",
+        avatar_hash=None, arena_name="Vortexia#999",
+    )
+
+    assert player_id is None
+    assert collision_id == owner.id
+    assert session.execute(select(Player).where(Player.discord_id == "33")).scalar_one_or_none() is None
+
+
+def test_attach_dedupes_alias_and_keeps_existing_arena_name(session):
+    _seed_player(
+        session, discord_id="34", username="dev", display_name="Dev",
+        arena_name="Primary#1", arena_aliases=["primary"],
+    )
+
+    attach_arena_alias(
+        session, discord_id="34", discord_username="dev", display_name="Dev",
+        avatar_hash=None, arena_name="Primary#2",
+    )
+
+    player = session.execute(select(Player).where(Player.discord_id == "34")).scalar_one()
+    assert player.arena_aliases == ["primary"]
+    assert player.arena_name == "Primary#1"
 
 
 # --- classify_lobby_names ---

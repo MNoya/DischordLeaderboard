@@ -25,6 +25,26 @@ def test_in_session_arena_handle_deduped_from_maybe():
     assert maybe.name.endswith("(0)")
 
 
+def test_unlinked_seat_counted_in_draftmancer_but_listed_separately():
+    """An in-session player with no linked Player row counts toward the In Draftmancer total but is
+    listed in its own Unrecognized bucket, not among the linked players."""
+    embed = render(
+        title="Pod Draft",
+        rsvps_yes=[],
+        rsvps_maybe=[],
+        in_session=[("Player1#0001", "Player One"), ("Stranger#12345", None)],
+        state="unlinked",
+    )
+
+    roster = _field(embed, "✅ In Draftmancer")
+    unrecognized = _field(embed, "⚠️ Unrecognized")
+
+    assert roster.name.endswith("(2)")
+    assert unrecognized is not None
+    assert unrecognized.name.endswith("(1)")
+    assert "Stranger#12345" in unrecognized.value
+
+
 def test_spectators_listed_comma_separated_when_present():
     embed = render(
         title="Pod Draft", rsvps_yes=[], rsvps_maybe=[], in_session=[],

@@ -10,7 +10,6 @@ from bot.services.pod_schedule import (
     MONDAY_KIND_SEASON_OVER,
     SCHEDULE_TZ,
     build_create_command,
-    build_underfill_filled_message,
     build_underfill_message,
     compose_monday_message,
     format_clock,
@@ -18,6 +17,7 @@ from bot.services.pod_schedule import (
     monday_blurb,
     monday_kind,
     next_release_after,
+    short_event_name,
     release_unix,
     slots_for_week,
     week_index_for,
@@ -151,31 +151,37 @@ def test_format_clock(slot, expected):
     assert format_clock(slot) == expected
 
 
-def test_underfill_message_interpolates_thread_count_time_and_links():
+def test_underfill_message_interpolates_name_count_time_and_signup_link():
     event_time = datetime(2026, 6, 24, 0, 0, tzinfo=timezone.utc)
-    thread_url = "https://discord.com/channels/1/9"
     jump_url = "https://discord.com/channels/1/2/3"
 
-    body = build_underfill_message("FIN Pod Draft #1", thread_url, 5, 8, event_time, jump_url)
+    body = build_underfill_message("FIN Pod Draft #1 - Jun 24", 5, 8, event_time, jump_url)
 
-    assert "[FIN Pod Draft #1](https://discord.com/channels/1/9)" in body
-    assert "3 more players needed" in body
+    assert "FIN Pod Draft #1" in body
+    assert "Jun 24" not in body
+    assert "3 more players" in body
     assert f"<t:{int(event_time.timestamp())}:R>" in body
     assert ":F>" not in body
-    assert f"[Sign Up Link]({jump_url})" in body
+    assert f"]({jump_url})" in body
 
 
 def test_underfill_message_never_pings_a_role():
     event_time = datetime(2026, 6, 24, 0, 0, tzinfo=timezone.utc)
 
-    body = build_underfill_message("Pod", "thread_url", 7, 8, event_time, "url")
+    body = build_underfill_message("Pod", 7, 8, event_time, "url")
 
     assert "<@&" not in body
-    assert "1 more player needed" in body
+    assert "1 more player" in body
 
 
-def test_underfill_filled_message_links_the_thread():
-    body = build_underfill_filled_message("FIN Pod Draft #1", "https://discord.com/channels/1/9")
-
-    assert "[FIN Pod Draft #1](https://discord.com/channels/1/9)" in body
-    assert "Pod is full" in body
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("MSH Pod Draft #2 - Jun 25", "MSH Pod Draft #2"),
+        ("SOS Pod Draft #3 - May 5", "SOS Pod Draft #3"),
+        ("MSH Pod Draft #2", "MSH Pod Draft #2"),
+        ("Throwback Cube Night", "Throwback Cube Night"),
+    ],
+)
+def test_short_event_name_strips_trailing_date(name, expected):
+    assert short_event_name(name) == expected

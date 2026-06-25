@@ -9,14 +9,15 @@ falls back to GENERIC_MONDAY_BLURBS; with both empty the post carries no blurb l
 """
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
+from bot import emojis
 from bot.services.sesh_parser import NUM_RE
 from bot.sets import ALL_SETS
-from bot.text import link_with_emoji
 
 
 SCHEDULE_TZ = ZoneInfo("America/New_York")
@@ -61,11 +62,9 @@ MSG_SEASON_OVER = (
 )
 
 MSG_UNDERFILL = (
-    "{thread_link}: {needed} more player{plural} needed in <t:{unix}:R> "
-    "- [Sign Up Link]({jump_url})"
+    "{hello}**{name}** looking for **{needed} more player{plural}** <t:{unix}:R> "
+    "- [**Sign up here**]({jump_url}) {manat}"
 )
-
-MSG_UNDERFILL_FILLED = "{thread_link}: Pod is full ✅"
 
 MSG_CREATE_BLOCKS_HEADER = "Sesh commands for this week's pods:"
 
@@ -227,26 +226,32 @@ def highest_event_number(event_names: Iterable[str]) -> int:
     return highest
 
 
+_DATE_SUFFIX_RE = re.compile(r"\s+-\s+[A-Z][a-z]+\s+\d{1,2}$")
+
+
+def short_event_name(name: str) -> str:
+    """Pod name without the trailing ' - Month Day' suffix the scheduler appends, for tight inline copy."""
+    return _DATE_SUFFIX_RE.sub("", name)
+
+
 def build_underfill_message(
     thread_name: str,
-    thread_url: str,
     yes_count: int,
     target: int,
     event_time: datetime,
     jump_url: str,
 ) -> str:
     needed = target - yes_count
-    return MSG_UNDERFILL.format(
-        thread_link=link_with_emoji(thread_name, thread_url),
+    body = MSG_UNDERFILL.format(
+        hello=emojis.prefix("chordoHello"),
+        name=short_event_name(thread_name),
         needed=needed,
         plural="s" if needed != 1 else "",
         unix=int(event_time.timestamp()),
         jump_url=jump_url,
+        manat=emojis.get("manat"),
     )
-
-
-def build_underfill_filled_message(thread_name: str, thread_url: str) -> str:
-    return MSG_UNDERFILL_FILLED.format(thread_link=link_with_emoji(thread_name, thread_url))
+    return body.rstrip()
 
 
 def format_clock(slot_start: datetime) -> str:

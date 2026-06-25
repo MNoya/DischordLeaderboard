@@ -9,7 +9,6 @@ import re
 import discord
 from discord import app_commands
 from discord.ext import commands
-from sqlalchemy import any_, select
 
 from bot import audit, emojis
 from bot.commands import descriptions as desc
@@ -17,7 +16,6 @@ from bot.commands.messages import MSG_ADMIN_ONLY
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.discord_helpers import display_width, extract_avatar_hash, player_url
-from bot.models import Player
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_draft_manager import (
     cancel_pod_event,
@@ -39,7 +37,7 @@ from bot.services.pod_drafts import (
     load_event_sesh_message_id_sync,
     load_event_set_code_sync,
     load_event_thread_id_sync,
-    normalize_player_name,
+    attach_arena_alias,
     search_event_names_sync,
 )
 from bot.services.player_stats import SeededAttendee, rank_ordered_names, seed_attendees, seated_ring_order
@@ -57,7 +55,6 @@ from bot.services.pod_tournament import (
     build_thread_link_button,
     post_trophy_hype_for_event,
 )
-from bot.slug import disambiguate_slug, slugify
 
 
 log = logging.getLogger(__name__)
@@ -189,53 +186,24 @@ class PodDraft(commands.Cog):
             )
             return
 
-        normalized = normalize_player_name(arena_name)
-
         with SessionLocal() as session:
-            collision = session.execute(
-                select(Player)
-                .where(
-                    Player.active.is_(True),
-                    Player.discord_id != user_id,
-                    normalized == any_(Player.arena_aliases),
-                )
-                .limit(1)
-            ).scalar_one_or_none()
-            if collision is not None:
+            player_id, collision_id = attach_arena_alias(
+                session,
+                discord_id=user_id,
+                discord_username=interaction.user.name,
+                display_name=interaction.user.display_name,
+                avatar_hash=extract_avatar_hash(interaction.user),
+                arena_name=arena_name,
+            )
+            if collision_id is not None:
                 audit.event("pod_link_arena_collision", user_id=user_id, arena_name=arena_name,
-                            collides_with=collision.id)
+                            collides_with=collision_id)
                 await interaction.response.send_message(
                     f"❌ `{arena_name}` is already linked to another player. "
                     "If this is your account, ask an admin for help.",
                     ephemeral=True,
                 )
                 return
-
-            player = session.execute(
-                select(Player).where(Player.discord_id == user_id)
-            ).scalar_one_or_none()
-            if player is None:
-                taken_slugs = set(session.execute(select(Player.slug)).scalars().all())
-                slug = disambiguate_slug(slugify(interaction.user.display_name), taken_slugs)
-                player = Player(
-                    slug=slug,
-                    discord_id=user_id,
-                    discord_username=interaction.user.name,
-                    display_name=interaction.user.display_name,
-                    avatar_hash=extract_avatar_hash(interaction.user),
-                    arena_name=arena_name,
-                    arena_aliases=[normalized],
-                    active=True,
-                    leaderboard_opt_in=False,
-                )
-                session.add(player)
-            else:
-                if not (player.arena_name or "").strip():
-                    player.arena_name = arena_name
-                if normalized not in player.arena_aliases:
-                    player.arena_aliases = [*player.arena_aliases, normalized]
-            session.flush()
-            player_id = player.id
             session.commit()
 
         audit.event("pod_link_arena_success", user_id=user_id, player_id=player_id)
@@ -683,7 +651,8 @@ async def delete_stale_seeding_messages(
 
 async def build_pod_settings_view(bot, event_id: str, *, is_owner: bool) -> PodSettingsView:
     """Settings panel wired for `event_id`. Shared by /pod-settings and the lobby Settings button.
-    Kick Player appears when a Draftmancer session is live; Cancel Draft only for the bot owner."""
+    Kick Player and Link Players appear when a Draftmancer session is live; Cancel Draft only for the
+    bot owner."""
     current_code = await asyncio.to_thread(load_event_set_code_sync, event_id)
     current_mode = await asyncio.to_thread(load_event_pairing_mode_sync, event_id)
     current_seating = await asyncio.to_thread(load_event_seating_mode_sync, event_id)
@@ -709,14 +678,20 @@ async def build_pod_settings_view(bot, event_id: str, *, is_owner: bool) -> PodS
     seat_order_provider = None
     kick_targets_provider = None
     on_kick = None
+    link_targets_provider = None
+    on_link = None
     if manager is not None:
         async def on_seating(inter: discord.Interaction, ordered_user_names: list[str]) -> str | None:
             return await set_event_seating(event_id, ordered_user_names)
         seat_order_provider = manager.seating_lobby_order
         kick_targets_provider = manager.kick_targets
+        link_targets_provider = manager.unrecognized_lobby_names
 
         async def on_kick(inter: discord.Interaction, user_id: str) -> str | None:
             return await manager.kick_player(user_id)
+
+        async def on_link(inter: discord.Interaction, arena_name: str, member: discord.abc.User) -> str | None:
+            return await manager.link_seat(member, arena_name)
 
     on_cancel = None
     if is_owner:
@@ -730,6 +705,7 @@ async def build_pod_settings_view(bot, event_id: str, *, is_owner: bool) -> PodS
         on_seating=on_seating, seat_order_provider=seat_order_provider,
         on_seating_table=on_seating_table, on_seated=on_seated,
         kick_targets_provider=kick_targets_provider, on_kick=on_kick,
+        link_targets_provider=link_targets_provider, on_link=on_link,
         on_cancel=on_cancel, event_name=event_name,
     )
 

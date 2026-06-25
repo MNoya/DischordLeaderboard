@@ -21,13 +21,9 @@ async def setup(bot: commands.Bot) -> None:
     @commands.is_owner()
     async def test_underfill(ctx: commands.Context, yes_count: int = 5) -> None:
         """Owner-only. Post a sample underfill nudge in this channel — no DB or sesh lookup."""
+        name = ctx.channel.name if isinstance(ctx.channel, discord.Thread) else "Sample Pod Draft - Jun 25"
         body = build_underfill_message(
-            ctx.channel.name if isinstance(ctx.channel, discord.Thread) else "Sample Pod Draft",
-            ctx.channel.jump_url,
-            yes_count,
-            settings.pod_draft_target_players,
-            _next_slot(),
-            ctx.message.jump_url,
+            name, yes_count, settings.pod_draft_target_players, _next_slot(), ctx.message.jump_url,
         )
         await ctx.send(body, allowed_mentions=discord.AllowedMentions.none())
 

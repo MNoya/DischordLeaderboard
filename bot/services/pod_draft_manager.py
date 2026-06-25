@@ -46,6 +46,7 @@ from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_pairing_select import pairing_label
 from bot.services.pod_seating_select import seating_mode_label
 from bot.services.pod_drafts import (
+    attach_arena_alias,
     normalize_player_name,
     classify_lobby_names,
     delete_event_sync,
@@ -693,13 +694,13 @@ class PodDraftManager:
                 spectators=self.spectator_names,
                 **self._settings_labels(),
             )
-            has_unrecognized = any(dn is None for _, dn in classified)
             self._maybe_schedule_lobby_full_prompt(classified)
             view = (
                 None if state in ("drafting", "complete")
                 else LobbyReadyButtonView(
                     draftmancer_url=self.draftmancer_url,
-                    ready_disabled=(state == "ready" or has_unrecognized),
+                    ready_disabled=(state == "ready"),
+                    show_force_start=(state == "unlinked"),
                 )
             )
             suppress_empty_reconnect = self.reconnect and not classified
@@ -751,7 +752,7 @@ class PodDraftManager:
             else:
                 progress_view = LobbyReadyButtonView(
                     draftmancer_url=self.draftmancer_url,
-                    ready_disabled=(state == "ready" or has_unrecognized),
+                    ready_disabled=(state == "ready"),
                     show_force_start=(state == "ready"),
                 )
             try:
@@ -1218,6 +1219,37 @@ class PodDraftManager:
         log.info(f"[KICK] removed event={self.event_id} user_id={user_id}")
         return None
 
+    async def unrecognized_lobby_names(self) -> list[str]:
+        """Draftmancer seat names in the live lobby with no linked player — the targets the Settings
+        'Link Players' action offers an organizer to bind by hand."""
+        names = self.non_bot_session_names()
+        classified = await self._classify_users(names) if names else []
+        return [arena for arena, dn in classified if dn is None]
+
+    async def link_seat(self, member: discord.abc.User, arena_name: str) -> str | None:
+        """Bind `member`'s Discord identity to the exact Draftmancer seat `arena_name`, then refresh
+        the lobby so the seat resolves. Returns an error string on failure, None on success."""
+        def _link() -> tuple[str | None, str | None]:
+            with SessionLocal() as session:
+                player_id, collision_id = attach_arena_alias(
+                    session,
+                    discord_id=str(member.id),
+                    discord_username=member.name,
+                    display_name=member.display_name,
+                    avatar_hash=extract_avatar_hash(member),
+                    arena_name=arena_name,
+                )
+                if collision_id is None:
+                    session.commit()
+                return player_id, collision_id
+
+        _, collision_id = await asyncio.to_thread(_link)
+        if collision_id is not None:
+            return f"`{arena_name}` is already linked to another player."
+        log.info(f"[LINK] seat_linked event={self.event_id} member={member} arena={arena_name!r}")
+        await self.refresh_lobby_now()
+        return None
+
     def _sync_leaderboard_seeding(self) -> None:
         """Re-apply leaderboard seating and refresh the posted seeding table after the player pool or a
         name changes. No-op unless the pod is leaderboard-seated. Fires from both the sessionUsers and
@@ -1363,10 +1395,19 @@ class PodDraftManager:
             return None
 
     async def share_draft_log(self) -> bool:
-        """Owner-only emit that flips the session's delayed/personal logs to fully public."""
+        """Owner-only emit that flips the session's delayed/personal logs to fully public.
+
+        Reconnects first when the socket dropped mid-event: this emit is the only way to unlock the
+        logs, the session is recoverable by sessionID, and ownership persists for the same userID.
+        """
         if not self.sio.connected:
-            log.warning(f"[DRAFT] share_log.skipped event={self.event_id} reason=socket_not_connected")
-            return False
+            log.info(f"[DRAFT] share_log.reconnecting event={self.event_id}")
+            self._closed = False
+            try:
+                await self.sio.connect(self._connect_url, transports=["websocket"], wait_timeout=10)
+            except (socketio.exceptions.ConnectionError, OSError) as e:
+                log.warning(f"[DRAFT] share_log.skipped event={self.event_id} reason=reconnect_failed err={e!s}")
+                return False
         if not self.draft_logs:
             log.warning(f"[DRAFT] share_log.skipped event={self.event_id} reason=no_payload")
             return False

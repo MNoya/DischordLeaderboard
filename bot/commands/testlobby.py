@@ -503,12 +503,12 @@ def _build(state: str) -> tuple[discord.Embed, discord.ui.View | None]:
         spectators=_SPECTATORS,
         **_preview_settings_labels(),
     )
-    has_unrecognized = any(dn is None for _, dn in in_session)
     view: discord.ui.View | None = (
         None if state in ("drafting", "complete")
         else LobbyReadyButtonView(
             draftmancer_url=_DRAFTMANCER_URL,
-            ready_disabled=(render_state == "ready" or has_unrecognized),
+            ready_disabled=(render_state == "ready"),
+            show_force_start=(render_state == "unlinked"),
         )
     )
     return embed, view
@@ -605,15 +605,27 @@ async def _settings_preview_on_seated(interaction: discord.Interaction, labels: 
     await post_manual_seating_table(interaction.client, interaction.channel, labels, actor_label(interaction))
 
 
+async def _settings_preview_link_targets() -> list[str]:
+    return ["Stranger#12345"]
+
+
+async def _settings_preview_on_link(
+    interaction: discord.Interaction, arena_name: str, member: discord.abc.User,
+) -> str | None:
+    return None
+
+
 def _settings_preview_view() -> PodSettingsView:
-    """No-op Settings panel so `!test` can preview the format + pairing + seats dropdowns with no pod.
-    Defaults to Seats: Random (like a fresh pod); pick Manual in the dropdown to reveal the Seat Order button."""
+    """No-op Settings panel so `!test` can preview the format + pairing + seats dropdowns plus the Link
+    Players flow with no pod. Defaults to Seats: Random (like a fresh pod); pick Manual in the dropdown
+    to reveal the Seat Order button."""
     return PodSettingsView(
         on_format=_settings_preview_noop, on_pairing=_settings_preview_noop,
         current_code=None, current_mode=DEFAULT_PAIRING_MODE,
         on_seating_mode=_settings_preview_noop, current_seating="random",
         on_seating=_settings_preview_seating_noop, seat_order_provider=_settings_preview_seat_order,
         on_seated=_settings_preview_on_seated,
+        link_targets_provider=_settings_preview_link_targets, on_link=_settings_preview_on_link,
     )
 
 
