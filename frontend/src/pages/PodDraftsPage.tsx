@@ -291,10 +291,16 @@ export function PodDraftsPage({ setCode }: { setCode?: string } = {}) {
                     )}
                   </>
                 )}
-                {mock.length > 0 && <MockDraftsBlock events={mock} />}
+                {!isMobile && mock.length > 0 && <MockDraftsBlock events={mock} />}
               </>
             )}
           </section>
+
+          {isMobile && mock.length > 0 && (
+            <section className="order-3">
+              <MockDraftsBlock events={mock} />
+            </section>
+          )}
         </div>
       </main>
 
