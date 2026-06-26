@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import datetime
 from typing import NamedTuple, Sequence
 
 import discord
-from sqlalchemy import Date, case, cast, func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from bot.models import DraftEvent, MagicSet, Player, PlayerStats
@@ -199,70 +199,48 @@ def rank_players_for_set(session: Session, set_id: str) -> list[RankedPlayer]:
 
 
 CUBE_CODE = "CUBE"
+CUBE_BURST_GAP_DAYS = 7
 
 
-def latest_cube_season(session: Session) -> tuple[str, str, date, date | None] | None:
-    """The most recent CUBE season: (cube_set_id, season label, window_start, window_end_exclusive).
+def latest_cube_season(session: Session) -> str | None:
+    """Season label of the latest cube burst — the set live when the most recent cube run *began*.
 
-    A season is the cube drafts played while a regular set was live — the window is
-    [set.start, next regular set's start), matching the public_cube_season_* views. The latest
-    season is the one that contains the most recent cube draft. None if no cube drafts exist.
+    A burst is community cube activity with no gap longer than ``CUBE_BURST_GAP_DAYS``; its whole
+    run inherits the season of the set window holding its first event, so a tail spilling past a set
+    rotation stays with the season it started in rather than minting a phantom next-set season. None
+    if no cube drafts exist. Mirrors the burst-anchored public_cube_seasons view.
     """
-    cube_id = session.execute(select(MagicSet.id).where(MagicSet.code == CUBE_CODE)).scalar_one_or_none()
-    if cube_id is None:
-        return None
-    latest = session.execute(
-        select(func.max(DraftEvent.started_at))
-        .where(DraftEvent.set_id == cube_id, DraftEvent.started_at.isnot(None))
-    ).scalar()
-    if latest is None:
-        return None
-    latest_date = latest.date()
-
-    sets = session.execute(
-        select(MagicSet.code, MagicSet.start_date)
-        .where(MagicSet.code != CUBE_CODE)
-        .order_by(MagicSet.start_date)
-    ).all()
-    for i, s in enumerate(sets):
-        next_start = sets[i + 1].start_date if i + 1 < len(sets) else None
-        if s.start_date <= latest_date and (next_start is None or latest_date < next_start):
-            return cube_id, s.code, s.start_date, next_start
-    return None
+    row = session.execute(
+        text(f"{_CUBE_SEASON_BINNING_SQL} SELECT season FROM binned ORDER BY started_at DESC LIMIT 1")
+    ).first()
+    return row.season if row is not None else None
 
 
 def rank_cube_season(session: Session) -> tuple[list[RankedPlayer], str] | None:
     """Rank active, opted-in players for the latest cube season; returns (standings, season label).
 
-    Scored from draft_events windowed to the season (cube only — no pod points), so the standings
-    match the site's CUBE-<set> board. None if there is no cube data.
+    Scored from the burst-anchored cube binning (cube only — no pod points) so the standings match
+    the site's CUBE-<set> board. None if there is no cube data.
     """
-    info = latest_cube_season(session)
-    if info is None:
+    label = latest_cube_season(session)
+    if label is None:
         return None
-    cube_id, label, window_start, window_end = info
-
-    conds = [
-        DraftEvent.set_id == cube_id,
-        DraftEvent.started_at.isnot(None),
-        cast(DraftEvent.started_at, Date) >= window_start,
-        Player.active.is_(True),
-        Player.leaderboard_opt_in.is_(True),
-    ]
-    if window_end is not None:
-        conds.append(cast(DraftEvent.started_at, Date) < window_end)
 
     rows = session.execute(
-        select(
-            DraftEvent.player_id, DraftEvent.format,
-            func.count().label("events"),
-            func.sum(DraftEvent.wins).label("wins"),
-            func.sum(DraftEvent.losses).label("losses"),
-            func.sum(case((DraftEvent.is_trophy, 1), else_=0)).label("trophies"),
-        )
-        .join(Player, Player.id == DraftEvent.player_id)
-        .where(*conds)
-        .group_by(DraftEvent.player_id, DraftEvent.format)
+        text(f"""
+            {_CUBE_SEASON_BINNING_SQL}
+            SELECT
+                player_id,
+                format,
+                COUNT(*) AS events,
+                SUM(wins) AS wins,
+                SUM(losses) AS losses,
+                SUM(CASE WHEN is_trophy THEN 1 ELSE 0 END) AS trophies
+            FROM binned
+            WHERE season = :label AND leaderboard_opt_in = true
+            GROUP BY player_id, format
+        """),
+        {"label": label},
     ).all()
 
     by_player: dict[str, list[dict]] = {}
@@ -292,6 +270,64 @@ def rank_cube_season(session: Session) -> tuple[list[RankedPlayer], str] | None:
         ))
     standings.sort(key=lambda p: (-p.score, p.display_name.lower()))
     return [p._replace(rank=rank) for rank, p in enumerate(standings, start=1)], label
+
+
+_CUBE_SEASON_BINNING_SQL = f"""
+WITH seasons AS (
+    SELECT
+        code,
+        start_date,
+        LEAD(start_date) OVER (ORDER BY start_date) AS next_start
+    FROM sets
+    WHERE code <> '{CUBE_CODE}'
+),
+cube_events AS (
+    SELECT
+        de.player_id,
+        de.format,
+        de.started_at,
+        de.wins,
+        de.losses,
+        de.is_trophy,
+        p.leaderboard_opt_in
+    FROM draft_events de
+    JOIN sets s ON s.id = de.set_id
+    JOIN players p ON p.id = de.player_id
+    WHERE s.code = '{CUBE_CODE}' AND p.active = true AND de.started_at IS NOT NULL
+),
+marked AS (
+    SELECT
+        ce.*,
+        CASE
+            WHEN LAG(started_at) OVER w IS NULL
+              OR started_at - LAG(started_at) OVER w > INTERVAL '{CUBE_BURST_GAP_DAYS} days'
+            THEN 1 ELSE 0
+        END AS new_burst
+    FROM cube_events ce
+    WINDOW w AS (ORDER BY started_at)
+),
+bursts AS (
+    SELECT
+        m.*,
+        SUM(new_burst) OVER (ORDER BY started_at ROWS UNBOUNDED PRECEDING) AS burst_id
+    FROM marked m
+),
+anchored AS (
+    SELECT
+        br.*,
+        MIN(started_at) OVER (PARTITION BY burst_id) AS burst_start
+    FROM bursts br
+),
+binned AS (
+    SELECT
+        a.*,
+        seasons.code AS season
+    FROM anchored a
+    JOIN seasons
+        ON a.burst_start::date >= seasons.start_date
+       AND (seasons.next_start IS NULL OR a.burst_start::date < seasons.next_start)
+)
+"""
 
 
 @dataclass
