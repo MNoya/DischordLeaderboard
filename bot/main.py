@@ -21,6 +21,7 @@ from bot.commands.delete_account import setup as setup_delete_account
 from bot.commands.event_scribe import setup as setup_event_scribe
 from bot.commands.help import setup as setup_help
 from bot.commands.link_17lands import setup as setup_link_17lands
+from bot.commands.messages import MSG_TOKEN_INVALIDATED
 from bot.commands.leaderboard_visibility import setup as setup_leaderboard_visibility
 from bot.commands.leaderboard import (
     LeaderboardView,
@@ -65,6 +66,7 @@ from bot.services.pod_tournament import (
 from bot.services.media_sync import sync_media, sync_recent, SyncResult
 from bot.services.active_set import resolve_active_set
 from bot.services.refresh import refresh_active_players
+from bot.services.refresh_report import build_refresh_report, format_elapsed
 from bot.services.seventeenlands import MinIntervalLimiter, SeventeenLandsClient
 from bot.sets import active_set_code
 from bot.tasks.pod_draft_reminder import init_reminder
@@ -80,11 +82,13 @@ LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
 AUTO_REFRESH_TZ = ZoneInfo("America/Montevideo")
 AUTO_REFRESH_TIMES = [
     dtime(hour=2, minute=0, tzinfo=AUTO_REFRESH_TZ),
-    dtime(hour=8, minute=0, tzinfo=AUTO_REFRESH_TZ),
+    dtime(hour=6, minute=0, tzinfo=AUTO_REFRESH_TZ),
+    dtime(hour=10, minute=0, tzinfo=AUTO_REFRESH_TZ),
     dtime(hour=14, minute=0, tzinfo=AUTO_REFRESH_TZ),
-    dtime(hour=20, minute=0, tzinfo=AUTO_REFRESH_TZ),
+    dtime(hour=18, minute=0, tzinfo=AUTO_REFRESH_TZ),
+    dtime(hour=22, minute=0, tzinfo=AUTO_REFRESH_TZ),
 ]
-AUTO_REFRESH_17L_INTERVAL_S = 3.0
+AUTO_REFRESH_17L_INTERVAL_S = 7.0
 
 MEDIA_SYNC_TIME = dtime(hour=3, minute=30, tzinfo=AUTO_REFRESH_TZ)
 MEDIA_FRESHNESS_TZ = ZoneInfo("America/New_York")
@@ -292,11 +296,6 @@ def build_bot(guild_id: int) -> commands.Bot:
         ``trigger`` is "manual" (``!refresh`` DM) or "auto" (periodic tick); both use the
         same active-set window. Tag is included in the channel post so the source is obvious.
         """
-        msg_invalidated_dm = (
-            "⚠️ Your 17lands token appears to be invalid (possibly regenerated). "
-            "Please use `/link-17lands` to provide your new token."
-        )
-
         def _do_db_work() -> dict:
             limiter = (
                 MinIntervalLimiter(min_interval_s=AUTO_REFRESH_17L_INTERVAL_S)
@@ -325,11 +324,17 @@ def build_bot(guild_id: int) -> commands.Bot:
         for player in invalidated_players:
             if not player.discord_id:
                 continue
+            dmed = True
             try:
                 user = await bot.fetch_user(int(player.discord_id))
-                await user.send(msg_invalidated_dm)
+                await user.send(MSG_TOKEN_INVALIDATED)
             except discord.HTTPException as e:
+                dmed = False
                 log.warning(f"could not DM player {player.id}: {e}")
+            status = "DMed" if dmed else "DM failed"
+            await bot.bot_log.post_plain(
+                f"🔑 Token invalidated — **{player.display_name}** ({status}):\n{MSG_TOKEN_INVALIDATED}"
+            )
 
         result = {
             "summary": summary,
@@ -344,7 +349,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         summary = result["summary"]
         per_player = summary.get("per_player", [])
         n_players = len(per_player)
-        elapsed = _fmt_elapsed(summary.get("elapsed_s", 0.0))
+        elapsed = format_elapsed(summary.get("elapsed_s", 0.0))
         avg = f"{summary['elapsed_s'] / n_players:.1f}s avg" if n_players else ""
         trigger = result["trigger"].title()
 
@@ -363,23 +368,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         for row in rows:
             log.info(row)
 
-        body = f"🔄 {trigger} refresh complete · {elapsed} · {n_players} players"
-        if avg:
-            body += f" · {avg}"
-        if summary["errors"]:
-            body += (
-                f"\nUpdated: {summary['updated']} · "
-                f"Invalidated: {summary['invalidated']} · "
-                f"Errors: {summary['errors']}"
-            )
-        if unknown:
-            tally = ", ".join(f"`{fmt}` ×{n}" for fmt, n in sorted(unknown.items(), key=lambda kv: (-kv[1], kv[0])))
-            body += f"\n⚠️ New format(s) observed (stored, not scoring): {tally}"
-        if unrouted:
-            tally = ", ".join(f"`{exp}` ×{n}" for exp, n in sorted(unrouted.items(), key=lambda kv: (-kv[1], kv[0])))
-            body += f"\n⚠️ Unrouted expansion(s) — events stored without a set (add to bot/sets.py): {tally}"
-
-        await bot.bot_log.post_plain(body)
+        await bot.bot_log.post_plain(build_refresh_report(summary, result["trigger"]))
 
     @bot.command(name="refresh")
     @commands.is_owner()
@@ -537,13 +526,6 @@ async def _notify_owner(bot: commands.Bot, header: str, body: str) -> None:
         await owner.send(f"{header}\n```\n{snippet}\n```")
     except discord.HTTPException:
         log.warning("could not DM owner about crash", exc_info=True)
-
-
-def _fmt_elapsed(seconds: float) -> str:
-    if seconds < 60:
-        return f"{seconds:.1f}s"
-    minutes, sec = divmod(int(round(seconds)), 60)
-    return f"{minutes}m {sec}s"
 
 
 def _fmt_eta(delta: object) -> str:
