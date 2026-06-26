@@ -35,12 +35,13 @@ import {
   fetchRecentTrophies,
   fetchSets,
   fetchDbEpisodes,
+  fetchRecentDbEpisodes,
   upsertP0P1Pick,
   deleteAllP0P1Picks,
 } from "./api";
 import { fetchEpisodes } from "./episodes";
 import { fetchDiscordStats } from "./discord";
-import { fetchYouTubeVideos, mergeMedia, overlayLiveMedia } from "./youtube";
+import { fetchYouTubeVideos, mergeMedia, overlayLiveMedia, toVideoEpisode } from "./youtube";
 import type { P0P1Pick, SlotKey } from "../types/p0p1";
 import { MULTI, OTHER } from "./filters";
 const THIRTY_MINUTES = 30 * 60 * 1000;
@@ -54,10 +55,10 @@ export function useEpisodes() {
   });
 }
 
-export function useYouTubeVideos() {
+export function useYouTubeVideos(recent = false) {
   return useQuery({
-    queryKey: ["youtube"],
-    queryFn: fetchYouTubeVideos,
+    queryKey: ["youtube", recent ? "recent" : "full"],
+    queryFn: () => fetchYouTubeVideos(recent),
     staleTime: ONE_HOUR,
   });
 }
@@ -99,6 +100,23 @@ export function useMediaFeed() {
     thumbnailsPending: videos.isLoading && !db.data,
     setsReady: db.data !== undefined,
   };
+}
+
+// DB top-N renders immediately; recent YouTube overlays new video drops in the background, podcasts ride the backend tick
+export function useRecentEpisodes(limit = 8) {
+  const db = useQuery({
+    queryKey: ["recent-episodes", limit],
+    queryFn: () => fetchRecentDbEpisodes(limit),
+    staleTime: ONE_HOUR,
+  });
+  const videos = useYouTubeVideos(true);
+  const data = useMemo(() => {
+    if (!db.data) {
+      return undefined;
+    }
+    return videos.data ? overlayLiveMedia(db.data, videos.data.map(toVideoEpisode)) : db.data;
+  }, [db.data, videos.data]);
+  return { data, isLoading: db.isLoading };
 }
 
 export function useSets() {

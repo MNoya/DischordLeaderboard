@@ -315,6 +315,7 @@ def refresh_active_players(session: Session, client: _DraftClient) -> dict:
     summary = _refresh_active_with_window(session, client, fetch_start)
     active.last_refreshed_at = func.now()
     session.commit()
+    refresh_colors_summary(session)
     return summary
 
 
@@ -336,7 +337,21 @@ def refresh_active_players_all_sets(session: Session, client: _DraftClient) -> d
         "WHERE EXISTS (SELECT 1 FROM player_stats ps WHERE ps.set_id = sets.id)"
     ))
     session.commit()
+    refresh_colors_summary(session)
     return summary
+
+
+def refresh_colors_summary(session: Session) -> None:
+    """Recompute the materialized per-color tallies the Top Colors sidebar reads on load.
+
+    CONCURRENTLY keeps the public view readable during the refresh; it needs the unique index the
+    matview migration creates. The guard lets the model-built test schema, which has no public_*
+    objects, run the refresh path as a no-op.
+    """
+    if session.execute(text("SELECT to_regclass('public.public_colors_summary')")).scalar() is None:
+        return
+    session.execute(text("REFRESH MATERIALIZED VIEW CONCURRENTLY public_colors_summary"))
+    session.commit()
 
 
 def _refresh_player_retrying_transient(

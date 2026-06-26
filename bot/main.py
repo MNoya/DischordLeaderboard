@@ -62,7 +62,7 @@ from bot.services.pod_tournament import (
     register_persistent_views as register_pod_views,
     rehydrate_active_tournaments,
 )
-from bot.services.media_sync import sync_media, SyncResult
+from bot.services.media_sync import sync_media, sync_recent, SyncResult
 from bot.services.active_set import resolve_active_set
 from bot.services.refresh import refresh_active_players
 from bot.services.seventeenlands import MinIntervalLimiter, SeventeenLandsClient
@@ -87,6 +87,10 @@ AUTO_REFRESH_TIMES = [
 AUTO_REFRESH_17L_INTERVAL_S = 3.0
 
 MEDIA_SYNC_TIME = dtime(hour=3, minute=30, tzinfo=AUTO_REFRESH_TZ)
+MEDIA_FRESHNESS_TZ = ZoneInfo("America/New_York")
+MEDIA_FRESHNESS_INTERVAL_MIN = 30
+PUBLISH_WINDOW_START_ET = 10
+PUBLISH_WINDOW_END_ET = 1
 PROFILE_SYNC_TIME = dtime(hour=4, minute=0, tzinfo=AUTO_REFRESH_TZ)
 PROFILE_SYNC_WEEKDAY = calendar.MONDAY
 
@@ -429,6 +433,30 @@ def build_bot(guild_id: int) -> commands.Bot:
     async def _before_media_sync() -> None:
         await bot.wait_until_ready()
 
+    async def run_media_freshness() -> SyncResult:
+        def _do_sync() -> SyncResult:
+            with SessionLocal() as session:
+                return sync_recent(session)
+
+        return await asyncio.to_thread(_do_sync)
+
+    @tasks.loop(minutes=MEDIA_FRESHNESS_INTERVAL_MIN)
+    async def media_freshness_tick() -> None:
+        hour = datetime.now(MEDIA_FRESHNESS_TZ).hour
+        if not (hour >= PUBLISH_WINDOW_START_ET or hour < PUBLISH_WINDOW_END_ET):
+            return
+        try:
+            result = await run_media_freshness()
+            if result.total:
+                log.info(f"media-freshness: ingested {result.total} new episode(s)")
+        except Exception:
+            log.exception("media-freshness tick failed")
+            await _notify_owner(bot, "⚠️ media-freshness tick crashed:", traceback.format_exc())
+
+    @media_freshness_tick.before_loop
+    async def _before_media_freshness() -> None:
+        await bot.wait_until_ready()
+
     async def run_profile_reconcile() -> dict:
         with SessionLocal() as session:
             active_players = list(
@@ -489,6 +517,8 @@ def build_bot(guild_id: int) -> commands.Bot:
             auto_refresh_tick.start()
         if settings.media_sync_enabled and not media_sync_tick.is_running():
             media_sync_tick.start()
+        if settings.media_sync_enabled and not media_freshness_tick.is_running():
+            media_freshness_tick.start()
         if settings.profile_sync_enabled and not profile_sync_tick.is_running():
             profile_sync_tick.start()
 

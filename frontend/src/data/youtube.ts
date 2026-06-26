@@ -21,13 +21,12 @@ export interface YouTubeVideo {
   id: string;
   title: string;
   publishedAt: string;
-  description: string;
   thumbnail: string;
   duration?: string;
 }
 
-export async function fetchYouTubeVideos(): Promise<YouTubeVideo[]> {
-  const res = await fetch(YOUTUBE_API_URL);
+export async function fetchYouTubeVideos(recent = false): Promise<YouTubeVideo[]> {
+  const res = await fetch(recent ? `${YOUTUBE_API_URL}?recent` : YOUTUBE_API_URL);
   if (!res.ok) {
     throw new Error(`YouTube proxy responded ${res.status}`);
   }
@@ -134,7 +133,7 @@ function findMatch(episode: Episode, videos: YouTubeVideo[], claimed: Set<string
   return closest;
 }
 
-function toVideoEpisode(video: YouTubeVideo): Episode {
+export function toVideoEpisode(video: YouTubeVideo): Episode {
   const durationSeconds = parseIsoDuration(video.duration);
   return {
     id: `yt:${video.id}`,
@@ -149,7 +148,6 @@ function toVideoEpisode(video: YouTubeVideo): Episode {
     durationSeconds,
     image: video.thumbnail,
     category: inferCategory(video.title),
-    summary: video.description,
     youtubeId: video.id,
     videoUrl: watchUrl(video.id),
     isShort: isShortMedia("video", durationSeconds, video.title),

@@ -32,7 +32,7 @@ import {
   useAvailableFormats,
   useFormatLeaderboard,
   useLeaderboard,
-  useMediaFeed,
+  useRecentEpisodes,
   usePodEvents,
   useSets,
 } from "../data/hooks";
@@ -50,7 +50,7 @@ import { cn } from "../lib/utils";
 export function HomePage() {
   const { data: sets } = useSets();
   const setCode = sets?.find((s) => s.isActive)?.code ?? ACTIVE_SET_CODE;
-  const { data: episodes, thumbnailsPending } = useMediaFeed();
+  const { data: episodes, isLoading: episodesLoading } = useRecentEpisodes();
 
   return (
     <PageShell subtitle="HOME" fill>
@@ -67,8 +67,8 @@ export function HomePage() {
 
         <EpisodesHero
           episodes={episodes?.filter((ep) => !ep.isShort).slice(0, 4) ?? []}
-          loading={!episodes}
-          thumbnailsPending={thumbnailsPending}
+          loading={episodesLoading}
+          thumbnailsPending={false}
         />
 
         <div className="contents lg:flex lg:flex-col lg:gap-4 lg:min-h-0 lg:h-full">
