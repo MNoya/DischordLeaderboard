@@ -31,8 +31,8 @@ import { GoToTopButton } from "../components/GoToTopButton";
 import { Tooltip } from "../components/Tooltip";
 
 import { useAvailableFormats, useColorChips, useDraftEvents, useLeaderboard, usePlayerIdentity, usePlayerProfile, useSets } from "../data/hooks";
-import { computeScore, type ScoringStatRow } from "../data/scoring";
-import { canonicalSetCode, colorsOf, eventDate, eventDisplayLabel, fmtShortDate, formatTag, isCubeCode, isFlashbackEvent, isSoup, LEADERBOARD_BASE, lcqCashPrize, leaderboardPath, mainColors, playerPath, prettyFormat, winPct } from "../data/utils";
+import { aggregate as scoreAggregate, computeScore, type ScoringStatRow } from "../data/scoring";
+import { canonicalSetCode, colorsOf, eventDate, eventDisplayLabel, fmtShortDate, formatTag, isCubeCode, isFlashbackEvent, isSoup, LEADERBOARD_BASE, lastUpdated, lcqCashPrize, leaderboardPath, mainColors, playerPath, prettyFormat, winPct } from "../data/utils";
 import { ACTIVE_SET_CODE } from "../data/constants";
 import {
   colorsDisplayName,
@@ -489,7 +489,7 @@ function DesktopSkeleton() {
         </div>
       </section>
 
-      <div className="grid" style={{ gridTemplateColumns: "440px 1fr" }}>
+      <div className="grid" style={{ gridTemplateColumns: "440px minmax(0, 1fr)" }}>
         <section className="py-6 pl-10 pr-8 border-r border-border flex flex-col gap-6">
           {[0, 1, 2].map((s) => (
             <div key={s}>
@@ -652,13 +652,37 @@ function Desktop({
   );
 
   const filtersActive = formatFilter !== "ALL" || colorsFilter !== "ALL";
-  const stats: StatStripStats = useMemo(
+  // The headline points and its breakdown popover follow the format filter only, selecting the
+  // canonical per-format contributions (already carrying the player-wide confidence, and the flat
+  // Pod row) rather than rescoring the filtered events — which would shrink confidence per-format
+  // and drop pod points. Colors narrow the event log and counts, not the points.
+  const popoverBreakdown = useMemo(() => {
+    if (formatFilter === "ALL") return profile.formatBreakdown;
+    const labels = new Set(FORMAT_LABEL_GROUPS[formatFilter] ?? [formatFilter]);
+    return profile.formatBreakdown.filter((b) => labels.has(b.formatLabel));
+  }, [profile.formatBreakdown, formatFilter]);
+  const fullConfidence = useMemo(
     () =>
-      filtersActive
-        ? statsFromEvents(filtered)
-        : { trophies: profile.trophies, events: profile.events, wins: profile.wins, losses: profile.losses, score: profile.score },
-    [filtersActive, filtered, profile.trophies, profile.events, profile.wins, profile.losses, profile.score],
+      scoreAggregate(
+        profile.formatBreakdown
+          .filter((b) => b.formatLabel !== "Pod")
+          .map((b) => ({ label: b.formatLabel, events: b.events, wins: b.wins, losses: b.losses, trophies: b.trophies })),
+      ).confidence,
+    [profile.formatBreakdown],
   );
+  const pointsTotal =
+    formatFilter === "ALL"
+      ? profile.score
+      : Math.round(popoverBreakdown.reduce((s, b) => s + b.scoreContribution, 0) * 100) / 100;
+  const lockedFormats =
+    formatFilter !== "ALL" && popoverBreakdown.length > 0 ? popoverBreakdown.map((b) => b.formatLabel) : null;
+  const stats: StatStripStats = useMemo(() => {
+    if (!filtersActive) {
+      return { trophies: profile.trophies, events: profile.events, wins: profile.wins, losses: profile.losses, score: profile.score };
+    }
+    const counts = statsFromEvents(filtered);
+    return { trophies: counts.trophies, events: counts.events, wins: counts.wins, losses: counts.losses, score: pointsTotal };
+  }, [filtersActive, filtered, pointsTotal, profile.trophies, profile.events, profile.wins, profile.losses, profile.score]);
   const wp = winPct(stats.wins, stats.losses);
   const ranked = profile.rank > 0;
   const [pointsModalOpen, setPointsModalOpen] = useState(false);
@@ -704,8 +728,8 @@ function Desktop({
         </div>
       </section>
 
-      <div className="grid" style={{ gridTemplateColumns: "440px 1fr" }}>
-        <BreakdownPanel profile={profile} events={events} showPoints={ranked} />
+      <div className="grid" style={{ gridTemplateColumns: "440px minmax(0, 1fr)" }}>
+        <BreakdownPanel breakdown={profile.formatBreakdown} totalScore={profile.score} events={events} showPoints={ranked} lockedFormats={lockedFormats} />
         <DraftLogDesktop
           events={events}
           filtered={filtered}
@@ -717,13 +741,15 @@ function Desktop({
           formatOptions={formatOptions}
           setEndDate={sets?.find((s) => s.code === profile.setCode)?.endDate ?? null}
           playerDisplayName={profile.displayName}
+          updated={profile.lastCalculatedAt ? lastUpdated(profile.lastCalculatedAt) : null}
         />
       </div>
 
       <PointsBreakdown
         open={pointsModalOpen}
         onClose={() => setPointsModalOpen(false)}
-        breakdown={profile.formatBreakdown}
+        breakdown={popoverBreakdown}
+        confidenceOverride={formatFilter !== "ALL" ? fullConfidence : undefined}
         anchorRef={pointsBtnRef}
       />
     </div>
@@ -860,17 +886,21 @@ function StatStrip({
 }
 
 function BreakdownPanel({
-  profile,
+  breakdown,
+  totalScore,
   events,
   showPoints,
+  lockedFormats,
 }: {
-  profile: PlayerProfile;
+  breakdown: PlayerFormatBreakdown[];
+  totalScore: number;
   events: PlayerDraftEvent[];
   showPoints: boolean;
+  lockedFormats?: string[] | null;
 }) {
   const formatBreakdown = useMemo(
-    () => [...profile.formatBreakdown].sort((a, b) => b.scoreContribution - a.scoreContribution),
-    [profile.formatBreakdown],
+    () => [...breakdown].sort((a, b) => b.scoreContribution - a.scoreContribution),
+    [breakdown],
   );
   const total = formatBreakdown.reduce((s, f) => s + f.scoreContribution, 0) || 1;
   const { colorCount, comboCount, comboTrophies } = aggregate(events);
@@ -879,6 +909,7 @@ function BreakdownPanel({
   const colorTotal = Object.values(colorCount).reduce((a, b) => a + b, 0) || 1;
 
   const [fmtHover, setFmtHover] = useState<string | null>(null);
+  const activeFmt = fmtHover ?? lockedFormats ?? null;
   const [deckHover, setDeckHover] = useState<string | null>(null);
   const [colorHover, setColorHover] = useState<string | null>(null);
 
@@ -905,13 +936,13 @@ function BreakdownPanel({
               radius={56}
               strokeWidth={18}
               size={148}
-              activeKey={fmtHover}
+              activeKey={activeFmt}
               onHoverEntry={setFmtHover}
             />
             <FormatLegend
               breakdown={formatBreakdown}
-              totalScore={profile.score}
-              hoveredKey={fmtHover}
+              totalScore={totalScore}
+              hoveredKey={activeFmt}
               onHover={setFmtHover}
             />
           </div>
@@ -961,7 +992,7 @@ function BreakdownPanel({
                 fixedDigits={2}
                 className="text-muted justify-self-end"
               />
-              <span className="mono text-[12px] text-muted text-right">
+              <span className="mono text-[13px] text-muted text-right">
                 ×{count}
               </span>
             </div>
@@ -1000,7 +1031,7 @@ function BreakdownPanel({
                 <span className="font-display text-[13px] tracking-[0.06em]">
                   {COLOR_NAMES[c]}
                 </span>
-                <span className="mono text-[12px] text-muted text-right">
+                <span className="mono text-[13px] text-muted text-right">
                   {pct.toFixed(0)}%
                 </span>
               </div>
@@ -1020,9 +1051,11 @@ function FormatLegend({
 }: {
   breakdown: PlayerFormatBreakdown[];
   totalScore: number;
-  hoveredKey?: string | null;
+  hoveredKey?: string | string[] | null;
   onHover?: (key: string | null) => void;
 }) {
+  const isHighlighted = (label: string) =>
+    Array.isArray(hoveredKey) ? hoveredKey.includes(label) : hoveredKey === label;
   return (
     <div className="flex-1 flex flex-col">
       {breakdown.map((f, i) => {
@@ -1034,7 +1067,7 @@ function FormatLegend({
             onMouseLeave={onHover ? () => onHover(null) : undefined}
             className={cn(
               "grid items-center py-[5px] gap-2.5 px-1.5 -mx-1.5 rounded transition-colors cursor-default",
-              hoveredKey === f.formatLabel && "bg-surface2",
+              isHighlighted(f.formatLabel) && "bg-surface2",
             )}
             style={{ gridTemplateColumns: "1fr 38px 64px 44px" }}
           >
@@ -1082,6 +1115,7 @@ function DraftLogDesktop({
   formatOptions,
   setEndDate,
   playerDisplayName,
+  updated,
 }: {
   events: PlayerDraftEvent[];
   filtered: PlayerDraftEvent[];
@@ -1093,24 +1127,35 @@ function DraftLogDesktop({
   formatOptions: FilterOption[];
   setEndDate: string | null;
   playerDisplayName: string;
+  updated: string | null;
 }) {
   const sectionRef = useRef<HTMLElement>(null);
   const scrollToTop = () =>
     sectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
 
   return (
-    <section ref={sectionRef} className="py-6 px-10">
-      <div className="flex justify-between items-center">
-        <SectionLabel size={13}>
-          EVENT LOG · {filtered.length === events.length ? "ALL" : `${filtered.length} OF ${events.length}`}
-        </SectionLabel>
-        <div className="flex gap-2">
+    <section ref={sectionRef} className="py-6 px-10 min-w-0">
+      <div className="flex justify-between items-center gap-3">
+        <div className="flex items-baseline gap-2.5 shrink-0">
+          <SectionLabel size={13}>EVENT LOG</SectionLabel>
+          <span className="font-display text-[13px] tracking-[0.14em] text-dim whitespace-nowrap">
+            {filtered.length === events.length ? `${events.length} EVENTS` : `${filtered.length} OF ${events.length}`}
+          </span>
+        </div>
+        {updated && (
+          <span className="font-display text-[13px] tracking-[0.14em] text-muted shrink-0 whitespace-nowrap">
+            UPDATED {updated}
+          </span>
+        )}
+        <div className="flex gap-2 min-w-0 shrink justify-end">
           <FilterDropdown
             value={formatFilter}
             onChange={setFormatFilter}
             options={formatOptions}
             renderValue={renderFormatOption}
             renderOption={renderFormatOption}
+            className="min-w-0 max-w-[200px]"
+            triggerClassName="min-w-0"
           />
           <FilterDropdown
             label="COLORS"
@@ -1119,6 +1164,8 @@ function DraftLogDesktop({
             options={colorOptions}
             renderValue={renderColorOption}
             renderOption={renderColorOption}
+            className="min-w-0 max-w-[200px]"
+            triggerClassName="min-w-0"
           />
         </div>
       </div>
@@ -1216,7 +1263,7 @@ function PodEventButton({ size = "md" }: { size?: "sm" | "md" }) {
           "inline-flex items-center gap-1.5 leading-none font-display text-text bg-surface2 whitespace-nowrap",
           isSm
             ? "text-[11px] tracking-[0.14em] py-[5px] pl-[8px] pr-[10px]"
-            : "text-[12px] tracking-[0.14em] py-[6px] pl-[10px] pr-[12px]",
+            : "text-[13px] tracking-[0.14em] py-[6px] pl-[10px] pr-[12px]",
         )}
         style={{ clipPath: chamfer }}
       >
@@ -1265,12 +1312,12 @@ function EventLogRow({
       <span className="grid items-center" style={{ gridTemplateColumns: "100px 60px 1fr" }}>
         <Pips colors={e.colors} size={14} flat />
         <span
-          className="text-[12px] text-muted"
+          className="text-[13px] text-muted"
           style={deckSplash ? undefined : { gridColumn: "span 2" }}
         >
           {deckName}
         </span>
-        {deckSplash && <span className="text-[12px] text-muted">{deckSplash}</span>}
+        {deckSplash && <span className="text-[13px] text-muted">{deckSplash}</span>}
       </span>
     );
     const inner = (
@@ -1278,7 +1325,7 @@ function EventLogRow({
         <span className="text-right pr-1">
           {e.isTrophy && <Trophy size={18} color="#ffc63a" />}
         </span>
-        <span className="text-[12px] text-muted text-center">{fmtShortDate(eventDate(e))}</span>
+        <span className="text-[13px] text-muted text-center">{fmtShortDate(eventDate(e))}</span>
         <span className="flex items-center gap-2 min-w-0 pr-4">
           <span className="font-display text-[16px] tracking-[0.08em] whitespace-nowrap">{formatLabel}</span>
           {e.isTrophy && isArenaChampionshipFormat(e.format) && <ArenaChampBadge size={36} box={22} />}
@@ -1290,19 +1337,19 @@ function EventLogRow({
         {isPod ? (
           <span className="grid items-center min-w-0" style={{ gridTemplateColumns: "100px 60px minmax(0, 100px) auto 1fr" }}>
             {podWithoutDeck ? (
-              <span className="text-[12px] text-muted" style={{ gridColumn: "1 / 4" }}>
+              <span className="text-[13px] text-muted" style={{ gridColumn: "1 / 4" }}>
                 Deck not submitted
               </span>
             ) : (
               <>
                 <Pips colors={e.colors} size={14} flat />
                 <span
-                  className="text-[12px] text-muted"
+                  className="text-[13px] text-muted"
                   style={deckSplash ? undefined : { gridColumn: "span 2" }}
                 >
                   {deckName}
                 </span>
-                {deckSplash && <span className="text-[12px] text-muted">{deckSplash}</span>}
+                {deckSplash && <span className="text-[13px] text-muted">{deckSplash}</span>}
               </>
             )}
             {podSlug && <PodEventButton />}
@@ -1547,13 +1594,37 @@ function Mobile({
   );
 
   const filtersActive = formatFilter !== "ALL" || colorsFilter !== "ALL";
-  const stats: StatStripStats = useMemo(
+  // The headline points and its breakdown popover follow the format filter only, selecting the
+  // canonical per-format contributions (already carrying the player-wide confidence, and the flat
+  // Pod row) rather than rescoring the filtered events — which would shrink confidence per-format
+  // and drop pod points. Colors narrow the event log and counts, not the points.
+  const popoverBreakdown = useMemo(() => {
+    if (formatFilter === "ALL") return profile.formatBreakdown;
+    const labels = new Set(FORMAT_LABEL_GROUPS[formatFilter] ?? [formatFilter]);
+    return profile.formatBreakdown.filter((b) => labels.has(b.formatLabel));
+  }, [profile.formatBreakdown, formatFilter]);
+  const fullConfidence = useMemo(
     () =>
-      filtersActive
-        ? statsFromEvents(filtered)
-        : { trophies: profile.trophies, events: profile.events, wins: profile.wins, losses: profile.losses, score: profile.score },
-    [filtersActive, filtered, profile.trophies, profile.events, profile.wins, profile.losses, profile.score],
+      scoreAggregate(
+        profile.formatBreakdown
+          .filter((b) => b.formatLabel !== "Pod")
+          .map((b) => ({ label: b.formatLabel, events: b.events, wins: b.wins, losses: b.losses, trophies: b.trophies })),
+      ).confidence,
+    [profile.formatBreakdown],
   );
+  const pointsTotal =
+    formatFilter === "ALL"
+      ? profile.score
+      : Math.round(popoverBreakdown.reduce((s, b) => s + b.scoreContribution, 0) * 100) / 100;
+  const lockedFormats =
+    formatFilter !== "ALL" && popoverBreakdown.length > 0 ? popoverBreakdown.map((b) => b.formatLabel) : null;
+  const stats: StatStripStats = useMemo(() => {
+    if (!filtersActive) {
+      return { trophies: profile.trophies, events: profile.events, wins: profile.wins, losses: profile.losses, score: profile.score };
+    }
+    const counts = statsFromEvents(filtered);
+    return { trophies: counts.trophies, events: counts.events, wins: counts.wins, losses: counts.losses, score: pointsTotal };
+  }, [filtersActive, filtered, pointsTotal, profile.trophies, profile.events, profile.wins, profile.losses, profile.score]);
   const wp = winPct(stats.wins, stats.losses);
   const ranked = profile.rank > 0;
   const [pointsModalOpen, setPointsModalOpen] = useState(false);
@@ -1625,13 +1696,19 @@ function Mobile({
         </div>
       </section>
 
-      <MobileBreakdown profile={profile} events={events} showPoints={ranked} />
+      <MobileBreakdown breakdown={profile.formatBreakdown} events={events} showPoints={ranked} lockedFormats={lockedFormats} />
 
       <section ref={eventLogRef} className="py-4 px-[18px]">
         <div className="flex items-center justify-between mb-2.5 gap-2">
-          <SectionLabel size={12}>
-            EVENT LOG · {filtered.length === events.length ? "ALL" : `${filtered.length} OF ${events.length}`}
-          </SectionLabel>
+          <div className="flex items-baseline gap-2">
+            <SectionLabel size={12}>EVENT LOG</SectionLabel>
+            <span className="font-display text-[11px] tracking-[0.12em] text-dim">
+              {filtered.length === events.length ? `${events.length} EVENTS` : `${filtered.length} OF ${events.length}`}
+            </span>
+          </div>
+          {profile.lastCalculatedAt && (
+            <span className="font-display text-[11px] tracking-[0.12em] text-muted">UPDATED {lastUpdated(profile.lastCalculatedAt)}</span>
+          )}
         </div>
         <div className="flex items-stretch gap-2 mb-3">
           <div className="flex-1 min-w-0 flex">
@@ -1674,7 +1751,7 @@ function Mobile({
           });
         })()}
         {filtered.length === 0 && (
-          <div className="p-6 text-center text-muted font-display tracking-[0.2em] text-[12px]">
+          <div className="p-6 text-center text-muted font-display tracking-[0.2em] text-[13px]">
             NO EVENTS MATCH FILTER
           </div>
         )}
@@ -1684,7 +1761,8 @@ function Mobile({
       <PointsBreakdown
         open={pointsModalOpen}
         onClose={() => setPointsModalOpen(false)}
-        breakdown={profile.formatBreakdown}
+        breakdown={popoverBreakdown}
+        confidenceOverride={formatFilter !== "ALL" ? fullConfidence : undefined}
         anchorRef={pointsBtnRef}
       />
     </div>
@@ -1702,13 +1780,15 @@ function isBreakdownTab(v: unknown): v is BreakdownTab {
 }
 
 function MobileBreakdown({
-  profile,
+  breakdown,
   events,
   showPoints,
+  lockedFormats,
 }: {
-  profile: PlayerProfile;
+  breakdown: PlayerFormatBreakdown[];
   events: PlayerDraftEvent[];
   showPoints: boolean;
+  lockedFormats?: string[] | null;
 }) {
   const [tab, setTab] = useState<BreakdownTab>(() => {
     if (typeof window === "undefined") return "deckColors";
@@ -1735,7 +1815,7 @@ function MobileBreakdown({
         </BreakdownTabButton>
       </div>
       <div className="px-[18px] py-4">
-        {activeTab === "format" && <MobileFormatTab profile={profile} />}
+        {activeTab === "format" && <MobileFormatTab breakdown={breakdown} lockedFormats={lockedFormats} />}
         {activeTab === "deckColors" && <MobileDeckColorsTab events={events} />}
         {activeTab === "manaPips" && <MobileManaPipsTab events={events} />}
       </div>
@@ -1767,13 +1847,16 @@ function BreakdownTabButton({
   );
 }
 
-function MobileFormatTab({ profile }: { profile: PlayerProfile }) {
+function MobileFormatTab({ breakdown, lockedFormats }: { breakdown: PlayerFormatBreakdown[]; lockedFormats?: string[] | null }) {
   const formatBreakdown = useMemo(
-    () => [...profile.formatBreakdown].sort((a, b) => b.scoreContribution - a.scoreContribution),
-    [profile.formatBreakdown],
+    () => [...breakdown].sort((a, b) => b.scoreContribution - a.scoreContribution),
+    [breakdown],
   );
   const total = formatBreakdown.reduce((s, f) => s + f.scoreContribution, 0) || 1;
   const [hover, setHover] = useState<string | null>(null);
+  const activeFmt = hover ?? lockedFormats ?? null;
+  const isActiveFmt = (label: string) =>
+    Array.isArray(activeFmt) ? activeFmt.includes(label) : activeFmt === label;
   return (
     <div className="flex items-center gap-3.5 min-h-[140px]">
       <DonutChart
@@ -1786,7 +1869,7 @@ function MobileFormatTab({ profile }: { profile: PlayerProfile }) {
         radius={42}
         strokeWidth={14}
         size={108}
-        activeKey={hover}
+        activeKey={activeFmt}
         onHoverEntry={setHover}
       />
       <div className="flex-1 flex flex-col">
@@ -1797,7 +1880,7 @@ function MobileFormatTab({ profile }: { profile: PlayerProfile }) {
             onMouseLeave={() => setHover(null)}
             className={cn(
               "grid items-center py-[5px] gap-2 px-1.5 -mx-1.5 rounded transition-colors cursor-default",
-              hover === f.formatLabel && "bg-surface2",
+              isActiveFmt(f.formatLabel) && "bg-surface2",
             )}
             style={{ gridTemplateColumns: "1fr 36px 56px 36px" }}
           >
@@ -1817,11 +1900,11 @@ function MobileFormatTab({ profile }: { profile: PlayerProfile }) {
               mono
               wins={f.wins}
               losses={f.losses}
-              className="mono text-[12px] text-right text-muted"
+              className="mono text-[13px] text-right text-muted"
             />
             <span
               className={cn(
-                "font-display text-[12px] text-right",
+                "font-display text-[13px] text-right",
                 f.scoreContribution > 0 ? "text-green" : "text-muted",
               )}
             >
@@ -1846,7 +1929,7 @@ function MobileDeckColorsTab({ events }: { events: PlayerDraftEvent[] }) {
     }
   }, [hover]);
   if (comboEntries.length === 0) {
-    return <div className="font-display text-[12px] text-muted py-3 min-h-[140px]">NO EVENTS YET</div>;
+    return <div className="font-display text-[13px] text-muted py-3 min-h-[140px]">NO EVENTS YET</div>;
   }
   return (
     <div className="flex items-center gap-3.5 min-h-[140px]">
@@ -1882,7 +1965,7 @@ function MobileDeckColorsTab({ events }: { events: PlayerDraftEvent[] }) {
             style={{ gridTemplateColumns: "auto 1fr 38px 36px" }}
           >
             <Pips colors={code} size={11} />
-            <span className="font-display text-[12px] tracking-[0.06em]">
+            <span className="font-display text-[13px] tracking-[0.06em]">
               {colorsDisplayName(code)}
             </span>
             <TrophyCount
@@ -1891,7 +1974,7 @@ function MobileDeckColorsTab({ events }: { events: PlayerDraftEvent[] }) {
               fixedDigits={2}
               className="text-muted justify-self-end"
             />
-            <span className="mono text-[12px] text-muted text-right">
+            <span className="mono text-[13px] text-muted text-right">
               ×{count}
             </span>
           </div>
@@ -1934,10 +2017,10 @@ function MobileManaPipsTab({ events }: { events: PlayerDraftEvent[] }) {
                 style={{ gridTemplateColumns: "auto 1fr 40px" }}
               >
                 <Pip c={c} size={11} />
-                <span className="font-display text-[12px] tracking-[0.06em]">
+                <span className="font-display text-[13px] tracking-[0.06em]">
                   {COLOR_NAMES[c]}
                 </span>
-                <span className="mono text-[12px] text-muted text-right">
+                <span className="mono text-[13px] text-muted text-right">
                   {pct.toFixed(0)}%
                 </span>
               </div>
@@ -1966,7 +2049,7 @@ function BackButton({
       onClick={onClick}
       className={cn(
         "bg-transparent border-none text-muted font-display leading-none cursor-pointer flex items-center transition-colors hover:text-text",
-        compact ? "text-[12px] tracking-[0.15em] gap-1.5" : "text-[14px] tracking-[0.18em] gap-1.5",
+        compact ? "text-[13px] tracking-[0.15em] gap-1.5" : "text-[14px] tracking-[0.18em] gap-1.5",
         !compact && !inline && "mb-3.5",
       )}
     >
@@ -1986,7 +2069,7 @@ function SiblingNavButtons({
 }) {
   const baseCls = cn(
     "bg-transparent border-none font-display tracking-[0.15em] leading-none flex items-center gap-1.5 transition-colors",
-    compact ? "text-[12px]" : "text-[14px]",
+    compact ? "text-[13px]" : "text-[14px]",
     "cursor-pointer hover:text-text no-underline text-muted",
   );
   const disabledCls = "opacity-30 cursor-default pointer-events-none text-muted";

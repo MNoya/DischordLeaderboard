@@ -106,7 +106,7 @@ export function aggregate(groups: GroupTotals[]): Aggregate {
   return { total, confidence, contributionByLabel };
 }
 
-function groupTotalsFromRows(rows: ScoringStatRow[]): GroupTotals[] {
+export function groupTotalsFromRows(rows: ScoringStatRow[]): GroupTotals[] {
   const byLabel = new Map<string, GroupTotals>();
   for (const row of rows) {
     const def = DEFAULT_QUEUE_GROUPS.find((g) => g.formats.includes(row.format));

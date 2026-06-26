@@ -105,7 +105,10 @@ function podRow(pod: PlayerFormatBreakdown): BreakdownRow {
   };
 }
 
-export function computeRows(breakdown: PlayerFormatBreakdown[]): BreakdownResult {
+export function computeRows(
+  breakdown: PlayerFormatBreakdown[],
+  confidenceOverride?: number,
+): BreakdownResult {
   const queues = breakdown.filter((b) => b.formatLabel !== "Pod");
   const agg = aggregate(
     queues.map((b) => ({
@@ -116,10 +119,16 @@ export function computeRows(breakdown: PlayerFormatBreakdown[]): BreakdownResult
       trophies: b.trophies,
     })),
   );
-  const rows = BUCKET_DEFS.map((def) => rowFor(def, queues, agg.contributionByLabel)).filter(
-    (r) => r.played,
-  );
+  const confidence = confidenceOverride ?? agg.confidence;
+  // A format-filtered subset would otherwise shrink confidence to its own trophies; rescale the
+  // confidence-weighted contributions to the player-wide factor. LCQ Draft 2 carries no confidence.
+  const scale = confidenceOverride != null && agg.confidence > 0 ? confidenceOverride / agg.confidence : 1;
+  const rows = BUCKET_DEFS.map((def) => {
+    const row = rowFor(def, queues, agg.contributionByLabel);
+    if (scale !== 1 && !row.isLcq) row.score *= scale;
+    return row;
+  }).filter((r) => r.played);
   const pod = breakdown.find((b) => b.formatLabel === "Pod");
   if (pod) rows.push(podRow(pod));
-  return { rows, confidence: agg.confidence };
+  return { rows, confidence };
 }

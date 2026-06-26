@@ -18,6 +18,9 @@ interface Props {
   open: boolean;
   onClose: () => void;
   breakdown: PlayerFormatBreakdown[];
+  // When the breakdown is a format-filtered subset, the confidence factor stays player-wide rather
+  // than recomputing from the subset's trophies. Omit for the full, unfiltered breakdown.
+  confidenceOverride?: number;
   anchorRef?: React.RefObject<HTMLElement | null>;
 }
 
@@ -133,7 +136,7 @@ function CardsLayout({ rows, confidence = 0 }: { rows: BreakdownRow[]; confidenc
   );
 }
 
-export function PointsBreakdown({ open, onClose, breakdown, anchorRef }: Props) {
+export function PointsBreakdown({ open, onClose, breakdown, confidenceOverride, anchorRef }: Props) {
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const [pos, setPos] = useState<AnchorPos | null>(null);
 
@@ -193,7 +196,7 @@ export function PointsBreakdown({ open, onClose, breakdown, anchorRef }: Props) 
 
   if (!open || !pos) return null;
 
-  const { rows: allRows, confidence } = computeRows(breakdown);
+  const { rows: allRows, confidence } = computeRows(breakdown, confidenceOverride);
   const sorted = [...allRows].sort((a, b) => b.score - a.score);
   const queueRows = sorted.filter((r) => !r.isPod);
   const podRows = sorted.filter((r) => r.isPod);

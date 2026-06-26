@@ -36,14 +36,17 @@ export function LeaderboardSidebar({
   onColorsSelect,
   searchParams,
   stats,
+  updated,
   maxColors = 5,
   maxRecent = 10,
 }: InsightsParams & {
   onColorsSelect?: (code: string) => void;
   searchParams?: URLSearchParams;
-  stats?: { players: number; events: string; updated: string };
+  stats?: { players: number; events: string };
+  updated?: string | null;
   maxColors?: number;
 }) {
+  const filterActive = format !== "ALL" || colors !== "ALL";
   const [recentLimit, setRecentLimit] = useState(maxRecent);
   const d = useInsightsData({ setCode, playerSetCode, colors, format, otherCombos, maxRecent: recentLimit }, searchParams);
   const canShowMoreRecent = Boolean(d.recentScoped && d.recentScoped.length >= recentLimit);
@@ -71,6 +74,9 @@ export function LeaderboardSidebar({
         <div className="mb-1 flex items-center gap-1.5">
           <Trophy size={16} color="#ffc63a" />
           <SectionLabel size={16} className="text-subtle">{d.recentTitle}</SectionLabel>
+          {!filterActive && updated && (
+            <span className="ml-auto mono text-[11px] text-muted whitespace-nowrap">UPDATED {updated}</span>
+          )}
           {d.namedScope && (
             <span className="ml-auto inline-flex items-center">
               <Pips colors={colors} size={12} />
@@ -99,8 +105,9 @@ export function LeaderboardSidebar({
         )}
       </SurfaceCard>
       {stats && (
-        <div className="mono text-[11px] text-muted text-right -mt-2">
-          {stats.players} PLAYERS · {stats.events} EVENTS · UPDATED {stats.updated}
+        <div className="mono text-[11px] text-muted -mt-2 flex justify-between px-12">
+          <span>{stats.players} PLAYERS</span>
+          <span>{stats.events} EVENTS</span>
         </div>
       )}
     </aside>

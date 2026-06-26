@@ -243,6 +243,7 @@ export const fetchPlayerProfile = (
     events: headline.events,
     wins: headline.wins,
     losses: headline.losses,
+    lastCalculatedAt: headline.lastCalculatedAt,
     formatBreakdown: breakdown,
   });
 };

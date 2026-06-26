@@ -350,12 +350,15 @@ export async function fetchFormatLeaderboard(
   if (format === "Direct") return fetchDirectLeaderboard(setCode);
   if (isCubeSeasonCode(setCode)) return fetchCubeSeasonFormatLeaderboard(setCode, format);
   const labels = FORMAT_LABEL_GROUPS[format] ?? [format];
+  const labelSet = new Set(labels);
+  // Fetch the whole breakdown (not just the filtered labels): a format's points must carry the
+  // player-wide confidence factor over all their trophies, matching the profile and the overall
+  // board. Scoring only the filtered groups would shrink confidence to that format alone.
   const [breakdown, leaderboard] = await Promise.all([
     client()
       .from("public_player_format_breakdown")
       .select("*")
-      .eq("set_code", setCode)
-      .in("format_label", labels),
+      .eq("set_code", setCode),
     client()
       .from("public_leaderboard")
       .select("slug, display_name, avatar_url, last_calculated_at")
@@ -378,14 +381,16 @@ export async function fetchFormatLeaderboard(
     const slug = r.slug as string;
     const events = (r.events as number) ?? 0;
     if (events <= 0 || !info.has(slug)) continue;
+    const label = r.format_label as string;
     const wins = (r.wins as number) ?? 0;
     const losses = (r.losses as number) ?? 0;
     const trophies = (r.trophies as number) ?? 0;
 
     const list = groupsBySlug.get(slug) ?? [];
-    list.push({ label: r.format_label as string, events, wins, losses, trophies });
+    list.push({ label, events, wins, losses, trophies });
     groupsBySlug.set(slug, list);
 
+    if (!labelSet.has(label)) continue;
     const t = totalsBySlug.get(slug) ?? { trophies: 0, events: 0, wins: 0, losses: 0 };
     t.trophies += trophies;
     t.events += events;
@@ -395,16 +400,20 @@ export async function fetchFormatLeaderboard(
   }
 
   const rows: LeaderboardRow[] = [];
-  for (const [slug, groups] of groupsBySlug) {
+  for (const [slug, t] of totalsBySlug) {
     const inf = info.get(slug)!;
-    const t = totalsBySlug.get(slug)!;
+    const contributions = aggregate(groupsBySlug.get(slug) ?? []).contributionByLabel;
+    let score = 0;
+    for (const label of labels) {
+      score += contributions.get(label) ?? 0;
+    }
     rows.push({
       setCode,
       slug,
       displayName: inf.display_name as string,
       avatarUrl: (inf.avatar_url ?? null) as string | null,
       rank: 0,
-      score: scoreFromGroups(groups),
+      score: Math.round(score * 100) / 100,
       trophies: t.trophies,
       events: t.events,
       wins: t.wins,
@@ -872,6 +881,7 @@ export async function fetchPlayerProfile(
     events: headline.events,
     wins: headline.wins,
     losses: headline.losses,
+    lastCalculatedAt: headline.lastCalculatedAt || undefined,
     formatBreakdown: breakdown,
   };
 }

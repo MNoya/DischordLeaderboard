@@ -184,7 +184,8 @@ export function LeaderboardPage() {
     });
   };
 
-  const filterProps: FilterRowProps = { format, setFormat, colors, setColors, colorChips, colorChipsLoading, formatOptions };
+  const updated = setMeta?.lastRefreshedAt ? lastUpdated(setMeta.lastRefreshedAt) : null;
+  const filterProps: FilterRowProps = { format, setFormat, colors, setColors, colorChips, colorChipsLoading, formatOptions, updated };
 
   return isMobile ? (
     <Mobile
@@ -248,6 +249,7 @@ interface FilterRowProps {
   colorChips: string[];
   colorChipsLoading: boolean;
   formatOptions: typeof FORMAT_OPTIONS;
+  updated: string | null;
 }
 
 // ─── Desktop ───────────────────────────────────────────────────────────────
@@ -334,15 +336,15 @@ function Desktop({
             otherCombos={otherCombos}
             onColorsSelect={filters.setColors}
             searchParams={searchParams}
+            updated={filters.updated}
             stats={{
               players: rows?.length ?? 0,
               events: sumEvents(rows),
-              updated: lastUpdated(rows),
             }}
           />
         </div>
       </div>
-      <Footer className="mt-auto px-10 pt-5 pb-3" updated={lastUpdated(rows)} />
+      <Footer className="mt-auto px-10 pt-5 pb-3" />
     </div>
   );
 }
@@ -416,9 +418,9 @@ function SetHero({
             <div className="text-right whitespace-nowrap">{seasonRange || " "}</div>
           </div>
         ) : (
-          <div className="mono text-[11px] text-muted mt-1">
-            {setMeta && fmtRange(setMeta.startDate, setMeta.endDate)}
-            {week && ` · ${week}`}
+          <div className="mono text-[11px] text-muted mt-1 flex justify-between gap-4">
+            {setMeta && <span>{fmtRange(setMeta.startDate, setMeta.endDate)}</span>}
+            {week && <span>{week}</span>}
           </div>
         )}
       </div>
@@ -608,6 +610,8 @@ function Mobile({
   const navigate = useNavigate();
   const { prefetchPlayer } = usePrefetchers();
   const profileSet = baseSetCode(activeSet);
+  const setMeta = sets?.find((s) => s.code === profileSet);
+  const updated = setMeta?.lastRefreshedAt ? lastUpdated(setMeta.lastRefreshedAt) : null;
   const isCube = profileSet === CUBE_BASE;
   const setOptions = useMemo<SetFilterOption[]>(() => (sets ? setFilterOptionsFrom(sets) : []), [sets]);
   return (
@@ -639,6 +643,11 @@ function Mobile({
             </div>
           )}
         </div>
+        {updated && (
+          <div className="px-3 py-1 border-b border-border bg-bg mono text-[10px] text-muted text-right">
+            UPDATED {updated}
+          </div>
+        )}
         {isCube && (
           <div className="px-3 py-1.5 border-b border-border bg-surface flex">
             <CubeSeasonSelector
@@ -693,7 +702,7 @@ function Mobile({
           />
         )}
       />
-      <Footer className="mt-auto px-4 py-4" updated={lastUpdated(rows)} />
+      <Footer className="mt-auto px-4 py-4" />
     </div>
   );
 }

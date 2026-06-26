@@ -10,6 +10,7 @@ export interface SetSummary {
   isActive: boolean;
   early?: boolean; // shown before release_date when early-access data already exists
   custom?: boolean; // synthesized for pod-only cube formats with no row in `sets`
+  lastRefreshedAt?: string | null; // when the full active-player refresh last completed for this set
 }
 
 export interface PodSetCode {
@@ -267,5 +268,6 @@ export interface PlayerProfile {
   events: number;
   wins: number;
   losses: number;
+  lastCalculatedAt?: string | null; // when this player's data was last pulled from 17lands
   formatBreakdown: PlayerFormatBreakdown[];
 }

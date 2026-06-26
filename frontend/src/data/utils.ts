@@ -109,15 +109,12 @@ export function weekOfSet(set: SetSummary | undefined, today: Date = new Date())
   return `WEEK ${elapsedWeeks} OF ${totalWeeks}`;
 }
 
-// Most-recent `lastCalculatedAt` across rows, rendered as a relative-time
-// string ("5M AGO", "2H AGO", "NOW") for the "UPDATED" badge.
-export function lastUpdated(rows: ReadonlyArray<{ lastCalculatedAt: string }> | undefined): string {
-  if (!rows || rows.length === 0) return "—";
-  const latest = rows.reduce(
-    (m, r) => (r.lastCalculatedAt > m ? r.lastCalculatedAt : m),
-    rows[0].lastCalculatedAt
-  );
-  const rel = relativeTime(latest);
+// Renders an ISO timestamp as a relative-time string ("5M AGO", "2H AGO", "NOW")
+// for the "UPDATED" badge. Driven by the set's full-refresh tick, not a per-player
+// max — a single join no longer makes the board read as freshly updated.
+export function lastUpdated(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const rel = relativeTime(iso);
   return rel === "now" ? "NOW" : `${rel.toUpperCase()} AGO`;
 }
 
