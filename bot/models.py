@@ -76,6 +76,7 @@ class MagicSet(Base):
     name       = Column(String, nullable=False)
     start_date = Column(Date, nullable=False)
     end_date   = Column(Date, nullable=True)
+    last_refreshed_at = Column(DateTime(timezone=True), nullable=True)
 
     stats = relationship("PlayerStats", back_populates="set")
 

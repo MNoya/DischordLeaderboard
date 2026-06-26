@@ -312,7 +312,10 @@ def refresh_active_players(session: Session, client: _DraftClient) -> dict:
             "status": "no_active_set",
         }
     fetch_start = min(date.today() - timedelta(days=PERIODIC_WINDOW_DAYS), active.start_date)
-    return _refresh_active_with_window(session, client, fetch_start)
+    summary = _refresh_active_with_window(session, client, fetch_start)
+    active.last_refreshed_at = func.now()
+    session.commit()
+    return summary
 
 
 def refresh_active_players_all_sets(session: Session, client: _DraftClient) -> dict:
@@ -327,7 +330,13 @@ def refresh_active_players_all_sets(session: Session, client: _DraftClient) -> d
             "unrouted_expansions": {}, "elapsed_s": 0.0,
             "status": "no_sets",
         }
-    return _refresh_active_with_window(session, client, sets[0].start_date)
+    summary = _refresh_active_with_window(session, client, sets[0].start_date)
+    session.execute(text(
+        "UPDATE sets SET last_refreshed_at = now() "
+        "WHERE EXISTS (SELECT 1 FROM player_stats ps WHERE ps.set_id = sets.id)"
+    ))
+    session.commit()
+    return summary
 
 
 def _refresh_player_retrying_transient(

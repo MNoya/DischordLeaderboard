@@ -145,10 +145,12 @@ def process_leaderboard(
                 )
                 break
 
-    last_updated = session.execute(
-        select(func.max(PlayerStats.last_fetched_at))
-        .where(PlayerStats.set_id == magic_set.id)
-    ).scalar()
+    last_updated = magic_set.last_refreshed_at
+    if last_updated is None:
+        last_updated = session.execute(
+            select(func.max(PlayerStats.last_fetched_at))
+            .where(PlayerStats.set_id == magic_set.id)
+        ).scalar()
 
     drafter_count = session.execute(
         select(func.count(func.distinct(PlayerStats.player_id)))
@@ -309,10 +311,12 @@ def process_leaderboard_for_format(
                 )
                 break
 
-    last_updated = session.execute(
-        select(func.max(PlayerStats.last_fetched_at))
-        .where(PlayerStats.set_id == magic_set.id)
-    ).scalar()
+    last_updated = magic_set.last_refreshed_at
+    if last_updated is None:
+        last_updated = session.execute(
+            select(func.max(PlayerStats.last_fetched_at))
+            .where(PlayerStats.set_id == magic_set.id)
+        ).scalar()
 
     return LeaderboardData(
         set_code=magic_set.code,
