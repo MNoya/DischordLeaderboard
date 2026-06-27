@@ -3,12 +3,15 @@ import { SectionLabel } from "../SectionLabel";
 import { PickGrid } from "./CommunityGrid";
 import { CtaPill } from "../CtaPill";
 import { DiscordIcon } from "../BrandIcons";
+import { MidwayBreakdownList } from "./MidwayBreakdownList";
+import { useMidwayVersusPager, MidwayVersusModal } from "./MidwayVersusCard";
 import { SLOTS } from "../../data/p0p1Slots";
 import {
   buildRatingsByName,
   scoreBallot,
   bestPossibleTeam,
   mostPopularTeam,
+  buildMidwaySlotVersus,
   GIH_SAMPLE_FLOOR,
 } from "../../data/p0p1Results";
 import type { RatingsSnapshot, TeamPick, CardRating } from "../../data/p0p1Results";
@@ -72,23 +75,25 @@ function ResultsRow({
   score,
   entries,
   cardsByName,
+  onTileOpen,
 }: {
   title: string;
   score: number;
   entries: PickEntry[];
   cardsByName: Map<string, Card>;
+  onTileOpen?: (slotKey: SlotKey) => void;
 }) {
   return (
     <div>
-      <div className="flex flex-col items-center mb-2">
+      <div className="flex items-baseline justify-center gap-3 mb-2">
         <SectionLabel size={22} color="white">
           {title}
         </SectionLabel>
-        <span className="font-mono tabular-nums text-[18px] leading-snug text-subtle mt-0.5">
+        <span className="font-mono tabular-nums text-[18px] text-subtle">
           {score.toFixed(1)}
         </span>
       </div>
-      <PickGrid entries={entries} cardsByName={cardsByName} />
+      <PickGrid entries={entries} cardsByName={cardsByName} onTileOpen={onTileOpen} />
     </div>
   );
 }
@@ -151,6 +156,41 @@ export function MidwayResults({
     [bestTeam.picks, setCode, userPicksForDot],
   );
 
+  // 3-way versus pager: one entry per slot, same order as SLOTS
+  const versusList = useMemo(
+    () =>
+      buildMidwaySlotVersus(
+        SLOTS,
+        picksBySlot,
+        crowdTeam,
+        bestTeam,
+        ratingsByName,
+        cardsByName,
+        showYourPicks,
+      ),
+    [picksBySlot, crowdTeam, bestTeam, ratingsByName, cardsByName, showYourPicks],
+  );
+  const pager = useMidwayVersusPager(versusList);
+
+  const onTileOpen = (slotKey: SlotKey) => {
+    const idx = SLOTS.findIndex((s) => s.key === slotKey);
+    if (idx !== -1) pager.open(idx);
+  };
+
+  // Maps for breakdown badges
+  const crowdCardBySlot = useMemo(
+    () => new Map(crowdTeam.picks.map((p) => [p.slot, p.cardName])) as Map<SlotKey, string>,
+    [crowdTeam.picks],
+  );
+  const bestCardBySlot = useMemo(
+    () => new Map(bestTeam.picks.map((p) => [p.slot, p.cardName])) as Map<SlotKey, string>,
+    [bestTeam.picks],
+  );
+  const yourCardBySlot = useMemo(
+    () => (showYourPicks ? (picksBySlot as Map<SlotKey, string>) : new Map<SlotKey, string>()),
+    [showYourPicks, picksBySlot],
+  );
+
   return (
     <div className="flex flex-col gap-8">
       {dateCaption && (
@@ -165,6 +205,7 @@ export function MidwayResults({
           score={yourScore!}
           entries={yourEntries}
           cardsByName={cardsByName}
+          onTileOpen={onTileOpen}
         />
       )}
 
@@ -187,6 +228,7 @@ export function MidwayResults({
         score={crowdTeam.score}
         entries={crowdEntries}
         cardsByName={cardsByName}
+        onTileOpen={onTileOpen}
       />
 
       <ResultsRow
@@ -194,6 +236,18 @@ export function MidwayResults({
         score={bestTeam.score}
         entries={bestEntries}
         cardsByName={cardsByName}
+        onTileOpen={onTileOpen}
+      />
+
+      <MidwayVersusModal pager={pager} />
+
+      <MidwayBreakdownList
+        cards={cards}
+        cardsByName={cardsByName}
+        ratingsByName={ratingsByName}
+        yourCardBySlot={yourCardBySlot}
+        crowdCardBySlot={crowdCardBySlot}
+        bestCardBySlot={bestCardBySlot}
       />
     </div>
   );

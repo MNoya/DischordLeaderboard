@@ -143,7 +143,68 @@ export function mostPopularTeam(
   return { picks, score: picks.reduce((sum, p) => sum + p.gihwr * 100, 0) };
 }
 
-// Rank all ballots by summed GIHWR (descending). Partial ballots sink naturally.
+// ── Midway versus card ──────────────────────────────────────────────────────
+
+export interface MidwayVersusSide {
+  name: string;
+  imageUrl: string;
+  // null when below the GIH floor or absent from ratings
+  gihwr: number | null;
+  gih: number;
+}
+
+export interface MidwaySlotVersus {
+  slotKey: SlotKey;
+  slotLabel: string;
+  // null when logged-out or user left this slot empty
+  yours: MidwayVersusSide | null;
+  crowd: MidwayVersusSide;
+  best: MidwayVersusSide;
+}
+
+function makeSide(
+  cardName: string,
+  ratingsByName: Map<string, CardRating>,
+  cardsByName: Map<string, Card>,
+): MidwayVersusSide {
+  const r = ratingsByName.get(cardName);
+  const gihwr = r && r.gih >= GIH_SAMPLE_FLOOR && r.gihwr !== null ? r.gihwr : null;
+  return {
+    name: cardName,
+    imageUrl: cardsByName.get(cardName)?.imageNormal ?? "",
+    gihwr,
+    gih: r?.gih ?? 0,
+  };
+}
+
+export function buildMidwaySlotVersus(
+  slots: SlotDefinition[],
+  picksBySlot: Map<string, string>,
+  crowdTeam: TeamResult,
+  bestTeam: TeamResult,
+  ratingsByName: Map<string, CardRating>,
+  cardsByName: Map<string, Card>,
+  includeYours: boolean,
+): MidwaySlotVersus[] {
+  const crowdBySlot = new Map(crowdTeam.picks.map((p) => [p.slot, p]));
+  const bestBySlot = new Map(bestTeam.picks.map((p) => [p.slot, p]));
+
+  return slots.map((slot) => {
+    const yourCardName = includeYours ? picksBySlot.get(slot.key) : undefined;
+    const crowdCardName = crowdBySlot.get(slot.key)?.cardName ?? "";
+    const bestCardName = bestBySlot.get(slot.key)?.cardName ?? "";
+
+    return {
+      slotKey: slot.key,
+      slotLabel: slot.label,
+      yours: yourCardName ? makeSide(yourCardName, ratingsByName, cardsByName) : null,
+      crowd: makeSide(crowdCardName, ratingsByName, cardsByName),
+      best: makeSide(bestCardName, ratingsByName, cardsByName),
+    };
+  });
+}
+
+// ── Rank all ballots by summed GIHWR (descending). ────────────────────────── Partial ballots sink naturally.
 // Returns the same ballots array with rank and percentile attached.
 export interface RankedBallot {
   ballotId: number;
