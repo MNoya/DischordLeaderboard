@@ -25,6 +25,7 @@ export default defineConfig(({ mode }) => {
           rewrite: (p) => p.replace(/^\/api\/tier-list/, "/data/tier_list"),
         },
       },
+      allowedHosts: [".ngrok-free.dev"]
     },
   };
 });
