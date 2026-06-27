@@ -13,7 +13,7 @@ import type { MidwaySlotVersus, MidwayVersusSide } from "../../data/p0p1Results"
 import type { SlotKey } from "../../types/p0p1";
 
 const GREEN = "#2ee85c";
-const SUBTLE = "#9aa3b5";
+const GOLD = "#ffc63a";
 const TEXT = "#e6ecf5";
 
 const BAR_MIN = 0.45;
@@ -41,21 +41,21 @@ interface Column {
 
 const ROLE_LABEL: Record<Role, string> = {
   yours: "YOUR PICK",
-  crowd: "CROWD TEAM",
-  best: "BEST POSSIBLE",
+  crowd: "CROWD PICK",
+  best: "BEST PICK",
 };
 
 // Keys are role names sorted alphabetically so the lookup is order-independent
 const MERGED_LABEL: Record<string, string> = {
-  "crowd+yours": "YOU + CROWD",
-  "best+yours": "YOU + BEST",
-  "best+crowd": "CROWD + BEST",
-  "best+crowd+yours": "ALL AGREE",
+  "crowd+yours": "CROWD/YOUR PICK",
+  "best+yours": "BEST PICK",
+  "best+crowd": "BEST PICK",
+  "best+crowd+yours": "BEST PICK",
 };
 
 function accentFor(roles: Role[]): string {
-  if (roles.includes("best")) return GREEN;
-  if (roles.includes("crowd")) return SUBTLE;
+  if (roles.includes("best")) return GOLD;
+  if (roles.includes("crowd")) return GREEN;
   return TEXT;
 }
 
