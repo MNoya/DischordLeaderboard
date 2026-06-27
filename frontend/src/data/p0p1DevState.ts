@@ -5,13 +5,17 @@ export type P0P1DevPreset =
   | "live"
   | "closedLoggedOut"
   | "closedComplete"
-  | "closedDidNotVote";
+  | "closedDidNotVote"
+  | "midwayScoring"
+  | "finalScoring";
 
 export const P0P1_DEV_PRESETS: { value: P0P1DevPreset; label: string }[] = [
   { value: "live", label: "Live" },
   { value: "closedLoggedOut", label: "Closed · logged out" },
   { value: "closedComplete", label: "Closed · complete entry" },
   { value: "closedDidNotVote", label: "Closed · logged in, didn't vote" },
+  { value: "midwayScoring", label: "Midway · complete entry" },
+  { value: "finalScoring", label: "Final · complete entry" },
 ];
 
 export const p0p1DevEnabled = import.meta.env.DEV && typeof window !== "undefined";

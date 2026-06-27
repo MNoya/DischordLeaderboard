@@ -4,6 +4,7 @@ import {
   useP0P1Cards,
   useP0P1PickStats,
   useP0P1Picks,
+  useP0P1Ratings,
   useUpsertP0P1Pick,
   useDeleteAllP0P1Picks,
   useSets,
@@ -13,6 +14,7 @@ import { useLocalP0P1Picks, setLocalPick, clearLocalPicks, getLocalPicks } from 
 import { p0p1DevEnabled, useP0P1DevPreset, type P0P1DevPreset } from "./p0p1DevState";
 import type { AuthUser } from "../auth/AuthContext";
 import type { Card, P0P1PickStat, SlotKey } from "../types/p0p1";
+import type { ResultsPhase, RatingsSnapshot } from "./p0p1Results";
 
 const ADVANCE_BEAT_MS = 260;
 
@@ -98,10 +100,12 @@ export function useP0P1Ballot() {
 
   const isPastDeadline = devActive ? true : new Date() > VOTING_DEADLINE;
   const { data: pickStats } = useP0P1PickStats(SET_CODE, isPastDeadline);
+  const { data: ratingsSnapshot } = useP0P1Ratings(SET_CODE);
 
   const devViewPreset = devActive ? devPreset : "live";
   const user = applyDevUser(authUser, devViewPreset);
   const effectivePicksBySlot = applyDevPicks(picksBySlot, pickStats, devViewPreset);
+  const resultsPhase = deriveResultsPhase(isPastDeadline, ratingsSnapshot, devViewPreset);
 
   const scoringFilled = SLOTS.filter((s) => effectivePicksBySlot.has(s.key)).length;
   const isComplete = scoringFilled === SLOTS.length;
@@ -165,6 +169,8 @@ export function useP0P1Ballot() {
     isPastDeadline,
     hasParticipated,
     pickStats,
+    ratingsSnapshot,
+    resultsPhase,
     persistPick,
     handleClearAll,
     clearPending: useServerPicks ? clearAll.isPending : false,
@@ -187,7 +193,12 @@ const FAKE_DEV_USER: AuthUser = {
 
 function applyDevUser(authUser: AuthUser | null, preset: P0P1DevPreset): AuthUser | null {
   if (preset === "closedLoggedOut") return null;
-  if (preset === "closedComplete" || preset === "closedDidNotVote") return authUser ?? FAKE_DEV_USER;
+  if (
+    preset === "closedComplete" ||
+    preset === "closedDidNotVote" ||
+    preset === "midwayScoring" ||
+    preset === "finalScoring"
+  ) return authUser ?? FAKE_DEV_USER;
   return authUser;
 }
 
@@ -197,9 +208,14 @@ function applyDevPicks(
   preset: P0P1DevPreset,
 ): Map<string, string> {
   if (preset === "closedLoggedOut" || preset === "closedDidNotVote") return new Map();
-  if (preset !== "closedComplete") return picksBySlot;
-
-  return picksBySlot.size > 0 ? picksBySlot : topPickPerSlot(pickStats);
+  if (
+    preset === "closedComplete" ||
+    preset === "midwayScoring" ||
+    preset === "finalScoring"
+  ) {
+    return picksBySlot.size > 0 ? picksBySlot : topPickPerSlot(pickStats);
+  }
+  return picksBySlot;
 }
 
 function topPickPerSlot(pickStats: P0P1PickStat[] | undefined): Map<string, string> {
@@ -211,4 +227,15 @@ function topPickPerSlot(pickStats: P0P1PickStat[] | undefined): Map<string, stri
   const picks = new Map<string, string>();
   for (const [slot, stat] of topBySlot) picks.set(slot, stat.cardName);
   return picks;
+}
+
+function deriveResultsPhase(
+  isPastDeadline: boolean,
+  snapshot: RatingsSnapshot | undefined,
+  devPreset: P0P1DevPreset,
+): ResultsPhase {
+  if (devPreset === "midwayScoring") return "midway";
+  if (devPreset === "finalScoring") return "final";
+  if (!isPastDeadline || !snapshot || snapshot.phase === null) return "none";
+  return snapshot.phase;
 }
