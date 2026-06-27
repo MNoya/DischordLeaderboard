@@ -10,7 +10,6 @@ import type { CardRating } from "../../data/p0p1Results";
 import type { Card, SlotDefinition, SlotKey } from "../../types/p0p1";
 
 const GREEN = "#2ee85c";
-const GOLD = "#f5c542";
 
 interface SlotRow {
   card: Card;
@@ -18,7 +17,6 @@ interface SlotRow {
   gih: number;
   isYours: boolean;
   isCrowd: boolean;
-  isBest: boolean;
 }
 
 export function MidwayBreakdownList({
@@ -27,14 +25,12 @@ export function MidwayBreakdownList({
   ratingsByName,
   yourCardBySlot,
   crowdCardBySlot,
-  bestCardBySlot,
 }: {
   cards: Card[];
   cardsByName: Map<string, Card>;
   ratingsByName: Map<string, CardRating>;
   yourCardBySlot: Map<SlotKey, string>;
   crowdCardBySlot: Map<SlotKey, string>;
-  bestCardBySlot: Map<SlotKey, string>;
 }) {
   const bySlot = useMemo(() => {
     const empty = new Set<string>();
@@ -50,7 +46,6 @@ export function MidwayBreakdownList({
             gih: r?.gih ?? 0,
             isYours: yourCardBySlot.get(slot.key) === c.name,
             isCrowd: crowdCardBySlot.get(slot.key) === c.name,
-            isBest: bestCardBySlot.get(slot.key) === c.name,
           };
         });
         rows.sort((a, b) => {
@@ -62,7 +57,7 @@ export function MidwayBreakdownList({
         return [slot.key, rows] as const;
       }),
     );
-  }, [cards, ratingsByName, yourCardBySlot, crowdCardBySlot, bestCardBySlot]);
+  }, [cards, ratingsByName, yourCardBySlot, crowdCardBySlot]);
 
   return (
     <div className="flex flex-col gap-1.5 lg:gap-3">
@@ -179,7 +174,7 @@ function GihwrRow({
       ? Math.max(((row.gihwr - 0.45) / (0.70 - 0.45)) * 100, 3)
       : 0;
   const isLeader = rank === 1;
-  const highlighted = row.isYours || row.isCrowd || row.isBest;
+  const highlighted = row.isYours || row.isCrowd;
 
   return (
     <div className="relative overflow-hidden border-b border-border2 last:border-b-0">
@@ -207,11 +202,6 @@ function GihwrRow({
             {row.isCrowd && !row.isYours && (
               <span className="shrink-0 inline-block font-display tracking-[0.12em] uppercase text-[11px] leading-none px-1.5 py-0.5 bg-white/8 text-subtle rounded-sm">
                 ◆ CROWD
-              </span>
-            )}
-            {row.isBest && (
-              <span className="shrink-0 inline-block font-display tracking-[0.12em] uppercase text-[11px] leading-none px-1.5 py-0.5 rounded-sm" style={{ color: GOLD, backgroundColor: "rgba(245,197,66,0.15)" }}>
-                ★ BEST
               </span>
             )}
           </div>

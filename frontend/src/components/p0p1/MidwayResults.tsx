@@ -31,11 +31,7 @@ function formatDateEnd(iso: string): string {
   });
 }
 
-function teamToEntries(
-  picks: TeamPick[],
-  setCode: string,
-  userPicksBySlot?: Map<string, string>,
-): PickEntry[] {
+function teamToEntries(picks: TeamPick[], setCode: string): PickEntry[] {
   const bySlot = new Map(picks.map((p) => [p.slot, p]));
   return SLOTS.map((slot) => {
     const pick = bySlot.get(slot.key);
@@ -45,7 +41,6 @@ function teamToEntries(
       label: slot.label,
       stats: [{ setCode, slot: slot.key as SlotKey, cardName: pick.cardName, pickCount: 0, pickPct: 0 }],
       pctLabel: pick.gihwr > 0 ? gihwrLabel(pick.gihwr) : "—",
-      matchDot: userPicksBySlot ? userPicksBySlot.get(slot.key) === pick.cardName : false,
     };
   });
 }
@@ -139,8 +134,6 @@ export function MidwayResults({
     ? formatDateEnd(ratingsSnapshot.dateRange.end)
     : null;
 
-  const userPicksForDot = showYourPicks ? picksBySlot : undefined;
-
   const { setCode } = ratingsSnapshot;
 
   const yourEntries = useMemo(
@@ -148,12 +141,12 @@ export function MidwayResults({
     [showYourPicks, picksBySlot, setCode, ratingsByName],
   );
   const crowdEntries = useMemo(
-    () => teamToEntries(crowdTeam.picks, setCode, userPicksForDot),
-    [crowdTeam.picks, setCode, userPicksForDot],
+    () => teamToEntries(crowdTeam.picks, setCode),
+    [crowdTeam.picks, setCode],
   );
   const bestEntries = useMemo(
-    () => teamToEntries(bestTeam.picks, setCode, userPicksForDot),
-    [bestTeam.picks, setCode, userPicksForDot],
+    () => teamToEntries(bestTeam.picks, setCode),
+    [bestTeam.picks, setCode],
   );
 
   // 3-way versus pager: one entry per slot, same order as SLOTS
@@ -181,10 +174,6 @@ export function MidwayResults({
   const crowdCardBySlot = useMemo(
     () => new Map(crowdTeam.picks.map((p) => [p.slot, p.cardName])) as Map<SlotKey, string>,
     [crowdTeam.picks],
-  );
-  const bestCardBySlot = useMemo(
-    () => new Map(bestTeam.picks.map((p) => [p.slot, p.cardName])) as Map<SlotKey, string>,
-    [bestTeam.picks],
   );
   const yourCardBySlot = useMemo(
     () => (showYourPicks ? (picksBySlot as Map<SlotKey, string>) : new Map<SlotKey, string>()),
@@ -247,7 +236,6 @@ export function MidwayResults({
         ratingsByName={ratingsByName}
         yourCardBySlot={yourCardBySlot}
         crowdCardBySlot={crowdCardBySlot}
-        bestCardBySlot={bestCardBySlot}
       />
     </div>
   );

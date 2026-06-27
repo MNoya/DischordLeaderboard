@@ -41,8 +41,6 @@ export type PickEntry = {
   badge?: string;
   // When set, overrides the pick% badge with this string (e.g. a GIHWR label)
   pctLabel?: string;
-  // Show a match indicator dot (used in comparison rows to highlight your picks)
-  matchDot?: boolean;
 };
 
 function PickRow({
@@ -98,7 +96,7 @@ export function PickGrid({
 
   return (
     <div className="grid grid-cols-4 lg:grid-cols-8 gap-2">
-      {entries.map(({ slotKey, label, stats, badge, pctLabel, matchDot }) => {
+      {entries.map(({ slotKey, label, stats, badge, pctLabel }) => {
         const pagerIndex = pagerIndexBySlot.get(slotKey);
         const onOpen = onTileOpen
           ? () => onTileOpen(slotKey)
@@ -111,7 +109,6 @@ export function PickGrid({
             stats={stats}
             badge={badge}
             pctLabel={pctLabel}
-            matchDot={matchDot}
             cardsByName={cardsByName}
             onOpenVersus={onOpen}
           />
@@ -130,7 +127,6 @@ function PickTile({
   onOpenVersus,
   badge,
   pctLabel,
-  matchDot,
 }: {
   slotKey: SlotKey;
   label: string;
@@ -139,7 +135,6 @@ function PickTile({
   onOpenVersus?: () => void;
   badge?: string;
   pctLabel?: string;
-  matchDot?: boolean;
 }) {
   const [modalOpen, setModalOpen] = useState(false);
   const hasStats = stats.length > 0;
@@ -172,9 +167,6 @@ function PickTile({
         <div className="relative z-10 h-[4px] w-full shrink-0 origin-top transition-transform duration-150 group-hover:scale-y-[2]" style={{ background: accent }} />
         <div className="relative aspect-square bg-surface2 flex items-center justify-center overflow-hidden">
           {art}
-          {matchDot && (
-            <span className="absolute top-1 left-1 w-2.5 h-2.5 rounded-full bg-[#2ee85c] shadow-[0_0_6px_rgba(46,232,92,0.6)]" title="Matches your pick" />
-          )}
           {badge && (
             <span className="absolute bottom-1 left-1 text-[11px] lg:text-[13px] font-display tracking-wide uppercase bg-black/85 text-purple rounded-sm px-1.5 py-0.5">
               {badge}
