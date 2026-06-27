@@ -39,4 +39,5 @@ export const fetchP0P1Picks = impl.fetchP0P1Picks;
 export const upsertP0P1Pick = impl.upsertP0P1Pick;
 export const deleteAllP0P1Picks = impl.deleteAllP0P1Picks;
 export const fetchP0P1PickStats = impl.fetchP0P1PickStats;
+export const fetchP0P1Ratings = impl.fetchP0P1Ratings;
 export const initialAuthUser = impl.initialAuthUser;

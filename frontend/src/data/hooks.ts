@@ -37,6 +37,7 @@ import {
   fetchDbEpisodes,
   upsertP0P1Pick,
   deleteAllP0P1Picks,
+  fetchP0P1Ratings,
 } from "./api";
 import { fetchEpisodes } from "./episodes";
 import { fetchDiscordStats } from "./discord";
@@ -478,5 +479,14 @@ export function useDeleteAllP0P1Picks(setCode: string) {
       if (ctx?.prev) qc.setQueryData(queryKey, ctx.prev);
     },
     onSettled: () => qc.invalidateQueries({ queryKey }),
+  });
+}
+
+// Ratings snapshot is a static import — staleTime: Infinity so it never re-fetches.
+export function useP0P1Ratings(setCode: string) {
+  return useQuery({
+    queryKey: ["p0p1-ratings", setCode] as const,
+    queryFn: (): Promise<import("./p0p1Results").RatingsSnapshot> => fetchP0P1Ratings(setCode),
+    staleTime: Infinity,
   });
 }
