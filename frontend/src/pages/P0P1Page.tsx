@@ -13,6 +13,7 @@ import { AutoSaveBadge } from "../components/p0p1/AutoSaveBadge";
 import { P0P1MobileSelector } from "../components/p0p1/P0P1MobileView";
 import { GoToTopButton } from "../components/GoToTopButton";
 import { PostVotingStats } from "../components/p0p1/PostVotingStats";
+import { MidwayResults } from "../components/p0p1/MidwayResults";
 import { P0P1DevPanel } from "../components/p0p1/P0P1DevPanel";
 import { P0P1BallotScorecard, CHAMFER } from "../components/p0p1/P0P1BallotScorecard";
 import { PickGrid } from "../components/p0p1/CommunityGrid";
@@ -46,6 +47,8 @@ export function P0P1Page() {
     activeSlotKey,
     activeSlot,
     selectAdvance,
+    resultsPhase,
+    ratingsSnapshot,
   } = ballot;
   const isDesktop = !useIsMobile(1024);
   const isCompleteEntrant = isPastDeadline && Boolean(user) && isComplete;
@@ -108,39 +111,52 @@ export function P0P1Page() {
           ))}
 
         {isPastDeadline ? (
-          pickStats && pickStats.length > 0 && (
-            <PostVotingStats
+          resultsPhase === "midway" && ratingsSnapshot && cards && pickStats ? (
+            <MidwayResults
+              ratingsSnapshot={ratingsSnapshot}
               pickStats={pickStats}
+              cards={cards}
               cardsByName={cardsByName}
               picksBySlot={picksBySlot}
-              yourPicks={
-                isCompleteEntrant ? (
-                  <div>
-                    <div className="relative flex items-baseline justify-center gap-2 mb-2">
-                      <SectionLabel size={22} className="text-white">YOUR PICKS</SectionLabel>
-                    </div>
-                    <PickGrid
-                      cardsByName={cardsByName}
-                      picksBySlot={picksBySlot}
-                      entries={SLOTS.map((slot) => {
-                        const cardName = picksBySlot.get(slot.key);
-                        const slotStats = groupedStats?.get(slot.key) ?? [];
-                        const yourStat = cardName ? slotStats.find((s) => s.cardName === cardName) : undefined;
-                        const extremes = findExtremes(slotStats);
-                        const cls = yourStat ? classifyYourPick(yourStat, extremes.most, extremes.least) : undefined;
-                        return {
-                          slotKey: slot.key,
-                          label: slot.label,
-                          stats: yourStat ? [yourStat] : [],
-                          slotStats,
-                          badge: cls?.state === "rogue" ? cls.qualifier : undefined,
-                        };
-                      })}
-                    />
-                  </div>
-                ) : null
-              }
+              user={user}
+              signIn={signIn}
+              hasParticipated={hasParticipated}
             />
+          ) : (
+            pickStats && pickStats.length > 0 && (
+              <PostVotingStats
+                pickStats={pickStats}
+                cardsByName={cardsByName}
+                picksBySlot={picksBySlot}
+                yourPicks={
+                  isCompleteEntrant ? (
+                    <div>
+                      <div className="relative flex items-baseline justify-center gap-2 mb-2">
+                        <SectionLabel size={22} className="text-white">YOUR PICKS</SectionLabel>
+                      </div>
+                      <PickGrid
+                        cardsByName={cardsByName}
+                        picksBySlot={picksBySlot}
+                        entries={SLOTS.map((slot) => {
+                          const cardName = picksBySlot.get(slot.key);
+                          const slotStats = groupedStats?.get(slot.key) ?? [];
+                          const yourStat = cardName ? slotStats.find((s) => s.cardName === cardName) : undefined;
+                          const extremes = findExtremes(slotStats);
+                          const cls = yourStat ? classifyYourPick(yourStat, extremes.most, extremes.least) : undefined;
+                          return {
+                            slotKey: slot.key,
+                            label: slot.label,
+                            stats: yourStat ? [yourStat] : [],
+                            slotStats,
+                            badge: cls?.state === "rogue" ? cls.qualifier : undefined,
+                          };
+                        })}
+                      />
+                    </div>
+                  ) : null
+                }
+              />
+            )
           )
         ) : (
           <div className="mt-4">
