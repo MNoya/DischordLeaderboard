@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { AppHeader } from "../components/AppHeader";
+import { DraftReviewMOCS, type ReviewSeatInfo } from "../components/pod/review/DraftReviewMOCS";
 import { SectionLabel } from "../components/SectionLabel";
 import { BackButton, MobilePageHeader, PrevNextNav } from "../components/PageNav";
 import { useIsMobile } from "../lib/use-is-mobile";
@@ -317,6 +318,8 @@ export function PodPage() {
           onShowDeck={setDeckTarget}
           eventLabel={eventLabel}
           setCode={event.setCode}
+          eventSlug={event.slug}
+          hasDraftLog={!!draftArtifact}
           linkableSlugs={linkableSlugs}
           formatLabel={event.formatLabel}
           isMock={event.kind === "mock"}
@@ -401,6 +404,8 @@ export function PodPage() {
                     matches={loadedMatches}
                     replays={loadedReplays}
                     setCode={event.setCode}
+                    eventSlug={event.slug}
+                    hasDraftLog={!!draftArtifact}
                     linkableSlugs={linkableSlugs}
                     onRoundHover={handleRoundHover}
                     onShowDeck={setDeckTarget}
@@ -437,6 +442,81 @@ export function PodPage() {
       )}
     </div>
   );
+}
+
+export function PodDraftLogRoute() {
+  const { slug, who } = useParams<{ slug: string; who?: string }>();
+  const navigate = useNavigate();
+  const { data: event, isLoading: eventLoading } = usePodEventBySlug(slug);
+  const eventId = event?.eventId;
+  const { data: participantRows, isLoading: participantsLoading } = usePodEventParticipants(eventId);
+  const { data: artifact, isLoading: artifactLoading } = usePodDraftArtifact(eventId);
+
+  const seats = useMemo(
+    () => (participantRows ? assignSeats(participantRows) : []),
+    [participantRows],
+  );
+
+  if (eventLoading || (event && (participantsLoading || artifactLoading))) {
+    return <div className="fixed inset-0 z-50 bg-bg" />;
+  }
+  if (!event || !artifact) {
+    return <Navigate to={`/pods/${slug ?? ""}`} replace />;
+  }
+
+  if (who == null) {
+    const champion = seats.find((s) => s.placement === 1) ?? seats[0];
+    if (!champion) {
+      return <Navigate to={`/pods/${slug}`} replace />;
+    }
+    return <Navigate to={`/pods/${slug}/log/${seatIdentifier(champion)}`} replace />;
+  }
+
+  const resolved = resolveLogSeat(seats, who);
+  const initialSeat = resolved != null && resolved < artifact.seats.length ? resolved : 0;
+  const seatInfo: ReviewSeatInfo[] = seats.map((s) => ({
+    seatIndex: s.seatIndex,
+    displayName: s.discordName,
+    participantDisplayName: s.displayName,
+    deckColors: s.deckColors,
+    deckScreenshotUrl: s.deckScreenshotUrl,
+    deckScreenshotCaption: s.deckScreenshotCaption,
+    record: s.record,
+    draftLogUrl: s.draftLogUrl,
+  }));
+
+  return (
+    <DraftReviewMOCS
+      artifact={artifact}
+      meta={{ setCode: event.setCode, name: event.name }}
+      initialSeat={initialSeat}
+      onClose={() => navigate(`/pods/${slug}`)}
+      onSeatChange={(i) => {
+        const target = seats.find((s) => s.seatIndex === i);
+        if (target) {
+          navigate(`/pods/${slug}/log/${seatIdentifier(target)}`, { replace: true });
+        }
+      }}
+      eventId={event.eventId}
+      seatInfo={seatInfo}
+    />
+  );
+}
+
+function seatIdentifier(seat: PodSeat): string {
+  return seat.playerSlug ?? String(seat.seatIndex);
+}
+
+function resolveLogSeat(seats: PodSeat[], who: string): number | null {
+  const bySlug = seats.find((s) => s.playerSlug === who);
+  if (bySlug) {
+    return bySlug.seatIndex;
+  }
+  const n = Number(who);
+  if (Number.isInteger(n) && seats.some((s) => s.seatIndex === n)) {
+    return n;
+  }
+  return null;
 }
 
 function PodPanelSkeleton() {

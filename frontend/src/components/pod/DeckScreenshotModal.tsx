@@ -34,12 +34,13 @@ type DeckTab = "screenshot" | "decklist";
 interface Props {
   participant: DeckLike;
   breakdownHref?: string;
+  hideDraftLog?: boolean;
   onClose: () => void;
   onPrev?: () => void;
   onNext?: () => void;
 }
 
-export function DeckScreenshotModal({ participant, breakdownHref, onClose, onPrev, onNext }: Props) {
+export function DeckScreenshotModal({ participant, breakdownHref, hideDraftLog = false, onClose, onPrev, onNext }: Props) {
   const isMobile = useIsMobile();
 
   const hasScreenshot = participant.deckScreenshotUrl !== null;
@@ -296,18 +297,20 @@ export function DeckScreenshotModal({ participant, breakdownHref, onClose, onPre
               <span className="lg:hidden">POOL</span>
               <span className="hidden lg:inline">CARD POOL</span>
             </PanelTab>
-            <PanelTab
-              disabled={!participant.draftLogUrl}
-              onClick={
-                participant.draftLogUrl
-                  ? () => window.open(participant.draftLogUrl!, "_blank", "noopener,noreferrer")
-                  : undefined
-              }
-              icon={<LuScrollText size={16} />}
-            >
-              <span className="lg:hidden">LOG</span>
-              <span className="hidden lg:inline">DRAFT LOG</span>
-            </PanelTab>
+            {!hideDraftLog && (
+              <PanelTab
+                disabled={!participant.draftLogUrl}
+                onClick={
+                  participant.draftLogUrl
+                    ? () => window.open(participant.draftLogUrl!, "_blank", "noopener,noreferrer")
+                    : undefined
+                }
+                icon={<LuScrollText size={16} />}
+              >
+                <span className="lg:hidden">LOG</span>
+                <span className="hidden lg:inline">DRAFT LOG</span>
+              </PanelTab>
+            )}
           </div>
           {onNext ? <PanelChevron side="right" onClick={onNext} /> : <span className="w-10 shrink-0" />}
         </div>
@@ -393,7 +396,8 @@ function PanelTab({
 
 type DeckCard = Mainboard["cards"][number];
 
-const STRIP_H = 36;
+const STRIP_H = 48;
+const BADGE_H = 28;
 const COL_MIN = 132;
 const COL_MAX = 220;
 
@@ -498,7 +502,7 @@ function CountBadge({ n }: { n: number }) {
   return (
     <span
       className="absolute right-1.5 inline-flex items-center justify-center bg-black/85 text-white font-display tabular-nums rounded px-2 leading-none"
-      style={{ fontSize: 16, height: 26, top: (STRIP_H - 26) / 2, letterSpacing: "0.04em" }}
+      style={{ fontSize: 17, height: BADGE_H, top: (STRIP_H - BADGE_H) / 2, letterSpacing: "0.04em" }}
     >
       ×{n}
     </span>

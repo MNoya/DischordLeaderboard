@@ -23,6 +23,8 @@ interface Props {
   matches: PodEventMatchRow[];
   replays: PodEventReplayRow[];
   setCode: string;
+  eventSlug: string;
+  hasDraftLog: boolean;
   linkableSlugs: Set<string>;
   onRoundHover?: (opponentSeatIndex: number | null, round: number | null, outcome: RoundOutcome | null) => void;
   onShowDeck: (p: PodSeat) => void;
@@ -35,6 +37,8 @@ export function PlayerSeatPanel({
   matches,
   replays,
   setCode,
+  eventSlug,
+  hasDraftLog,
   linkableSlugs,
   onRoundHover,
   onShowDeck,
@@ -48,11 +52,16 @@ export function PlayerSeatPanel({
   const profileHref = (slug: string | null | undefined): string | null =>
     slug && linkableSlugs.has(slug) ? playerPath(slug, setCode) : null;
 
+  const draftLogHref = hasDraftLog
+    ? `/pods/${eventSlug}/log/${participant.playerSlug ?? participant.seatIndex}`
+    : null;
+
   return (
     <div className="flex flex-col min-h-0 flex-1">
       <SeatHeader
         participant={participant}
         profileHref={profileHref(participant.playerSlug)}
+        draftLogHref={draftLogHref}
         onViewDeck={() => onShowDeck(participant)}
         isMock={isMock}
       />
@@ -111,11 +120,13 @@ export function PlayerSeatPanel({
 function SeatHeader({
   participant,
   profileHref,
+  draftLogHref,
   onViewDeck,
   isMock = false,
 }: {
   participant: PodSeat;
   profileHref: string | null;
+  draftLogHref: string | null;
   onViewDeck: () => void;
   isMock?: boolean;
 }) {
@@ -211,27 +222,11 @@ function SeatHeader({
               <TbCards size={16} aria-hidden="true" />
             </span>
           ))}
-          {participant.draftLogUrl ? (
-            <a
-              href={participant.draftLogUrl}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="inline-flex items-center justify-center gap-2 bg-bg border border-border hover:border-green/60 hover:bg-green/10 hover:text-green text-text font-display tracking-[0.14em] px-4 no-underline transition-colors flex-1"
-              style={{ fontSize: 14, height: 38 }}
-            >
-              <span>VIEW DRAFT LOG</span>
-              <LuScrollText size={15} aria-hidden="true" />
-            </a>
-          ) : (
-            <span
-              className="inline-flex items-center justify-center gap-2 bg-bg border border-border text-dim font-display tracking-[0.14em] px-4 cursor-not-allowed flex-1"
-              style={{ fontSize: 14, height: 38 }}
-              title="No draft log available"
-            >
-              <span>NO DRAFT LOG</span>
-              <LuScrollText size={15} aria-hidden="true" />
-            </span>
-          )}
+          <DraftLogButton
+            internalHref={draftLogHref}
+            externalHref={participant.draftLogUrl}
+            variant="mobile"
+          />
         </div>
       </header>
     );
@@ -265,29 +260,61 @@ function SeatHeader({
             <TbCards size={20} aria-hidden="true" />
           </span>
         ))}
-        {participant.draftLogUrl ? (
-          <a
-            href={participant.draftLogUrl}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="inline-flex items-center justify-end gap-5 bg-bg border border-border hover:border-green/60 hover:bg-green/10 hover:text-green text-text font-display tracking-[0.12em] px-5 no-underline transition-colors leading-none"
-            style={{ fontSize: 17, height: 44, paddingTop: 2 }}
-          >
-            <span>VIEW DRAFT LOG</span>
-            <LuScrollText size={20} aria-hidden="true" />
-          </a>
-        ) : (
-          <span
-            className="inline-flex items-center justify-end gap-5 bg-bg border border-border text-dim font-display tracking-[0.12em] px-5 cursor-not-allowed leading-none"
-            style={{ fontSize: 17, height: 44, paddingTop: 2 }}
-            title="No draft log available"
-          >
-            <span>NO DRAFT LOG</span>
-            <LuScrollText size={20} aria-hidden="true" />
-          </span>
-        )}
+        <DraftLogButton
+          internalHref={draftLogHref}
+          externalHref={participant.draftLogUrl}
+          variant="desktop"
+        />
       </div>
     </header>
+  );
+}
+
+function DraftLogButton({
+  internalHref,
+  externalHref,
+  variant,
+}: {
+  internalHref: string | null;
+  externalHref: string | null;
+  variant: "mobile" | "desktop";
+}) {
+  const mobile = variant === "mobile";
+  const base = mobile
+    ? "inline-flex items-center justify-center gap-2 font-display tracking-[0.14em] px-4 flex-1"
+    : "inline-flex items-center justify-end gap-5 font-display tracking-[0.12em] px-5 leading-none";
+  const enabled = "bg-bg border border-border hover:border-green/60 hover:bg-green/10 hover:text-green text-text transition-colors no-underline";
+  const style = mobile
+    ? { fontSize: 14, height: 38 }
+    : { fontSize: 17, height: 44, paddingTop: 2 };
+  const iconSize = mobile ? 15 : 20;
+  const icon = <LuScrollText size={iconSize} aria-hidden="true" />;
+
+  if (internalHref) {
+    return (
+      <Link to={internalHref} className={cn(base, enabled)} style={style}>
+        <span>VIEW DRAFT LOG</span>
+        {icon}
+      </Link>
+    );
+  }
+  if (externalHref) {
+    return (
+      <a href={externalHref} target="_blank" rel="noreferrer noopener" className={cn(base, enabled)} style={style}>
+        <span>VIEW DRAFT LOG</span>
+        {icon}
+      </a>
+    );
+  }
+  return (
+    <span
+      className={cn(base, "bg-bg border border-border text-dim cursor-not-allowed")}
+      style={style}
+      title="No draft log available"
+    >
+      <span>NO DRAFT LOG</span>
+      {icon}
+    </span>
   );
 }
 

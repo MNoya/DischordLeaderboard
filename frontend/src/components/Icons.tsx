@@ -19,6 +19,7 @@ import { MdPause as R_MdPause } from "react-icons/md";
 import { TbCards as R_TbCards } from "react-icons/tb";
 import { LuScrollText as R_LuScrollText } from "react-icons/lu";
 import { GiRoundTable as R_GiRoundTable } from "react-icons/gi";
+import { GoSidebarCollapse as R_GoSidebarCollapse } from "react-icons/go";
 import {
   BsAsterisk as R_BsAsterisk,
   BsPaletteFill as R_BsPaletteFill,
@@ -77,6 +78,7 @@ export function Play({ size = 24, className, ...rest }: { size?: number } & Reac
 export const TbCards = withShrink(R_TbCards);
 export const LuScrollText = withShrink(R_LuScrollText);
 export const GiRoundTable = withShrink(R_GiRoundTable);
+export const GoSidebarCollapse = withShrink(R_GoSidebarCollapse);
 export const BsAsterisk = withShrink(R_BsAsterisk);
 export const BsPaletteFill = withShrink(R_BsPaletteFill);
 export const SiDiscord = withShrink(R_SiDiscord);

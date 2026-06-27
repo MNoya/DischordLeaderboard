@@ -178,7 +178,9 @@ export interface ArtifactCard {
 // The canonical pod draft artifact from public_pod_draft_log. Everything references the card table
 // by index. `decks` is null for events drafted before deck capture existed.
 export interface PodDraftArtifact {
+  t?: number;
   v: number;
+  sid?: string;
   set: string | null;
   seats: string[]; // Draftmancer names; array index === participant seatIndex
   cards: ArtifactCard[];

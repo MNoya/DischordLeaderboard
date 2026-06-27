@@ -9,6 +9,7 @@ import { CommunityPage } from "./pages/CommunityPage";
 import { LeaderboardPage } from "./pages/LeaderboardPage";
 import { PlayerPage } from "./pages/PlayerPage";
 import { PodDraftsPage, PodsRoute } from "./pages/PodDraftsPage";
+import { PodDraftLogRoute } from "./pages/PodPage";
 import { AboutPage } from "./pages/AboutPage";
 import { TierListPage } from "./pages/TierListPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
@@ -52,6 +53,8 @@ export function App() {
 
       <Route path="/pods" element={<PodDraftsPage />} />
       <Route path="/pods/:slug" element={<PodsRoute />} />
+      <Route path="/pods/:slug/log" element={<PodDraftLogRoute />} />
+      <Route path="/pods/:slug/log/:who" element={<PodDraftLogRoute />} />
 
       <Route path="/tier-list" element={<TierListPage />} />
       <Route path="/tier-list/:setCode" element={<TierListPage />} />

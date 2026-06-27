@@ -17,6 +17,8 @@ interface Props {
   onShowDeck: (p: PodSeat) => void;
   eventLabel: string;
   setCode: string;
+  eventSlug: string;
+  hasDraftLog: boolean;
   linkableSlugs: Set<string>;
   formatLabel?: string | null;
   isMock?: boolean;
@@ -131,6 +133,8 @@ export function MobileSeatStack({
   onShowDeck,
   eventLabel,
   setCode,
+  eventSlug,
+  hasDraftLog,
   linkableSlugs,
   formatLabel,
   isMock = false,
@@ -167,6 +171,8 @@ export function MobileSeatStack({
                 matches={matches}
                 replays={replays}
                 setCode={setCode}
+                eventSlug={eventSlug}
+                hasDraftLog={hasDraftLog}
                 linkableSlugs={linkableSlugs}
                 onShowDeck={onShowDeck}
                 isMock={isMock}
