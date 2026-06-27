@@ -165,6 +165,7 @@ export function VsMetricSide({
           >
             {label}
           </span>
+          <span className="flex items-baseline gap-1.5">
           <span
             className="font-mono tabular-nums font-semibold leading-none"
             style={{ fontSize: 20, color: dim ? "#4a5568" : valueColor }}
@@ -172,16 +173,17 @@ export function VsMetricSide({
             {value}
           </span>
           {caption && (
-            <span className="font-body text-[9px] leading-snug" style={{ color: "#6b7585" }}>
+            <span className="font-body text-[9px] leading-none text-muted">
               {caption}
             </span>
           )}
+          </span>
         </div>
         <div className="h-2 overflow-hidden rounded-full bg-white/10">
           <div className="h-full rounded-full" style={{ width: `${fillPct}%`, background: barColor }} />
         </div>
         <VsCardImage imageUrl={imageUrl} name={name} className="w-full rounded-[5px]" />
-        <span className="truncate text-center font-body text-[9px] leading-snug" style={{ color: MUTED }}>
+        <span className="truncate text-center font-body text-[9px] leading-snug text-muted">
           {name || "—"}
         </span>
       </div>
