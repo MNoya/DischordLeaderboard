@@ -189,8 +189,9 @@ function ContributionBar({
   const fillPct = maxScore > 0 ? (ballot.score / maxScore) * 100 : 0;
 
   return (
-    // absolute inset-0: fills the full height of the relative row container
-    <div className="absolute inset-0" onClick={(e) => e.stopPropagation()}>
+    // self-stretch + negative vertical margins cancel the button's py-2.5/py-3 padding,
+    // so the bar bleeds to the full row height while hover events still reach Layer 2.
+    <div className="flex-1 self-stretch -my-2.5 lg:-my-3 relative min-w-0" onClick={(e) => e.stopPropagation()}>
       {/* Layer 1: visual segments — overflow:hidden clips art to fill width */}
       <div
         className="absolute top-0 left-0 h-full flex gap-px overflow-hidden"
@@ -328,58 +329,54 @@ function LeaderboardRow({
   );
 
   return (
-    <div className="border-b border-border2 last:border-b-0">
-      {/* relative container so ContributionBar can use absolute inset-0 */}
-      <div className={`relative ${isSelf ? "bg-white/[0.04]" : ""}`}>
+    <div className={`border-b border-border2 last:border-b-0 ${isSelf ? "bg-white/[0.04]" : ""}`}>
+      <button
+        type="button"
+        onClick={() => setExpanded((e) => !e)}
+        className="w-full flex items-center gap-2 lg:gap-3 px-3 lg:px-4 py-2.5 lg:py-3 text-left cursor-pointer bg-transparent border-0"
+      >
+        <span className="w-7 lg:w-8 shrink-0 text-right font-mono tabular-nums text-[12px] lg:text-[13px] text-muted">
+          #{ballot.rank}
+        </span>
+
+        {ballot.avatarUrl ? (
+          <img
+            src={ballot.avatarUrl}
+            alt={ballot.name}
+            className="w-6 h-6 lg:w-7 lg:h-7 rounded-full shrink-0 object-cover"
+          />
+        ) : (
+          <div className="w-6 h-6 lg:w-7 lg:h-7 rounded-full shrink-0 bg-surface flex items-center justify-center text-[10px] lg:text-[11px] text-muted font-mono">
+            ?
+          </div>
+        )}
+
+        <span
+          className={`w-[110px] lg:w-[150px] shrink-0 text-[14px] lg:text-[15px] truncate ${isSelf ? "text-white font-semibold" : "text-text"}`}
+        >
+          {ballot.name}
+          {isSelf && (
+            <span className="ml-2 text-[10px] font-normal text-subtle font-display tracking-widest">YOU</span>
+          )}
+        </span>
+
+        {/* bar lives here in the flex row — self-stretch fills full row height */}
         <ContributionBar
           ballot={ballot}
           maxScore={maxScore}
           ratingsByName={ratingsByName}
           cardsByName={cardsByName}
         />
-        {isSelf && (
-          <div className="absolute inset-y-0 left-0 w-[3px] bg-green z-20 pointer-events-none" />
-        )}
-        <button
-          type="button"
-          onClick={() => setExpanded((e) => !e)}
-          className="relative z-10 w-full flex items-center gap-2 lg:gap-3 px-3 lg:px-4 py-2.5 lg:py-3 text-left cursor-pointer bg-transparent border-0"
-        >
-          <span className="w-7 lg:w-8 shrink-0 text-right font-mono tabular-nums text-[12px] lg:text-[13px] text-muted drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
-            #{ballot.rank}
-          </span>
 
-          {ballot.avatarUrl ? (
-            <img
-              src={ballot.avatarUrl}
-              alt={ballot.name}
-              className="w-6 h-6 lg:w-7 lg:h-7 rounded-full shrink-0 object-cover ring-1 ring-black/40"
-            />
-          ) : (
-            <div className="w-6 h-6 lg:w-7 lg:h-7 rounded-full shrink-0 bg-surface/70 flex items-center justify-center text-[10px] lg:text-[11px] text-muted font-mono">
-              ?
-            </div>
-          )}
+        <span className="font-mono tabular-nums text-[13px] lg:text-[14px] text-subtle shrink-0">
+          {ballot.score.toFixed(1)}
+        </span>
 
-          <span
-            className={`flex-1 text-[14px] lg:text-[15px] min-w-0 truncate drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)] ${isSelf ? "text-white font-semibold" : "text-text"}`}
-          >
-            {ballot.name}
-            {isSelf && (
-              <span className="ml-2 text-[10px] font-normal text-subtle font-display tracking-widest">YOU</span>
-            )}
-          </span>
-
-          <span className="font-mono tabular-nums text-[13px] lg:text-[14px] text-subtle shrink-0 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
-            {ballot.score.toFixed(1)}
-          </span>
-
-          <ChevronDown
-            size={14}
-            className={`shrink-0 text-muted transition-transform duration-150 ${expanded ? "rotate-180" : ""}`}
-          />
-        </button>
-      </div>
+        <ChevronDown
+          size={14}
+          className={`shrink-0 text-muted transition-transform duration-150 ${expanded ? "rotate-180" : ""}`}
+        />
+      </button>
 
       {expanded && (
         <div className="px-3 lg:px-4 pb-4 pt-1">
