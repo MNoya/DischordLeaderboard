@@ -14,7 +14,7 @@ import { P0P1_SET_CODE as SET_CODE, P0P1_VOTING_DEADLINE as VOTING_DEADLINE, SLO
 import { useLocalP0P1Picks, setLocalPick, clearLocalPicks, getLocalPicks } from "./localPicks";
 import { p0p1DevEnabled, useP0P1DevPreset, type P0P1DevPreset } from "./p0p1DevState";
 import type { AuthUser } from "../auth/AuthContext";
-import type { Card, P0P1PickStat, SlotKey } from "../types/p0p1";
+import type { Card, P0P1BallotRow, P0P1PickStat, SlotKey } from "../types/p0p1";
 import type { ResultsPhase, RatingsSnapshot } from "./p0p1Results";
 
 const ADVANCE_BEAT_MS = 260;
@@ -110,6 +110,26 @@ export function useP0P1Ballot() {
 
   const { data: ballots } = useP0P1Ballots(SET_CODE, resultsPhase === "final");
 
+  // In dev results presets, append a ballot row for the viewer so findUserBallot
+  // always resolves regardless of which picks the viewer has selected.
+  const effectiveBallots = useMemo<P0P1BallotRow[] | undefined>(() => {
+    if (!devActive || resultsPhase !== "final" || !ballots || effectivePicksBySlot.size === 0) {
+      return ballots;
+    }
+    const youRows: P0P1BallotRow[] = [];
+    for (const [slot, cardName] of effectivePicksBySlot) {
+      youRows.push({
+        setCode: SET_CODE,
+        ballotId: 0,
+        name: user?.username ?? "You",
+        avatarUrl: user?.avatarUrl ?? null,
+        slot: slot as SlotKey,
+        cardName,
+      });
+    }
+    return [...ballots, ...youRows];
+  }, [devActive, resultsPhase, ballots, effectivePicksBySlot, user]);
+
   const scoringFilled = SLOTS.filter((s) => effectivePicksBySlot.has(s.key)).length;
   const isComplete = scoringFilled === SLOTS.length;
   const hasParticipated = isPastDeadline && Boolean(user) && scoringFilled > 0;
@@ -174,7 +194,7 @@ export function useP0P1Ballot() {
     pickStats,
     ratingsSnapshot,
     resultsPhase,
-    ballots,
+    ballots: effectiveBallots,
     persistPick,
     handleClearAll,
     clearPending: useServerPicks ? clearAll.isPending : false,

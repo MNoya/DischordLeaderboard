@@ -7,6 +7,7 @@ import { DiscordIcon } from "../BrandIcons";
 import { MidwayBreakdownList } from "./MidwayBreakdownList";
 import { useMidwayVersusPager, MidwayVersusModal } from "./MidwayVersusCard";
 import { breakdownStripAccent } from "./slotVisuals";
+import { CHAMFER } from "./P0P1BallotScorecard";
 import { SLOTS } from "../../data/p0p1Slots";
 import {
   buildRatingsByName,
@@ -191,7 +192,7 @@ function ContributionBar({
   return (
     // self-stretch + negative vertical margins cancel the button's py-2.5/py-3 padding,
     // so the bar bleeds to the full row height while hover events still reach Layer 2.
-    <div className="flex-1 self-stretch -my-2.5 lg:-my-3 relative min-w-0" onClick={(e) => e.stopPropagation()}>
+    <div className="hidden lg:block flex-1 self-stretch -my-2.5 lg:-my-3 relative min-w-0" onClick={(e) => e.stopPropagation()}>
       {/* Layer 1: visual segments — overflow:hidden clips art to fill width */}
       <div
         className="absolute top-0 left-0 h-full flex gap-px overflow-hidden"
@@ -263,43 +264,94 @@ function ContributionBar({
 
 // ── Your result ──────────────────────────────────────────────────────────────
 
+const PODIUM: Record<number, { emoji: string; label: string; color: string }> = {
+  1: { emoji: "🥇", label: "1st place", color: "#ffc63a" },
+  2: { emoji: "🥈", label: "2nd place", color: "#c0c8d6" },
+  3: { emoji: "🥉", label: "3rd place", color: "#c87941" },
+};
+
 function YourResultCard({
   ballot,
   total,
+  crowdScore,
+  bestScore,
 }: {
   ballot: RankedBallot;
   total: number;
+  crowdScore: number;
+  bestScore: number;
 }) {
-  const ordinal = (n: number) => {
-    const s = ["th", "st", "nd", "rd"];
-    const v = n % 100;
-    return n + (s[(v - 20) % 10] ?? s[v] ?? s[0]);
-  };
+  const { rank, score } = ballot;
+  const pod = PODIUM[rank] ?? null;
+  const vsCrowd = score - crowdScore;
+  const vsBest = score - bestScore;
+  const topPct = Math.max(1, Math.round((rank / total) * 100));
+
+  const scoreColor = pod?.color ?? "#ffffff";
+  const borderBg = pod ? `${pod.color}8c` : "#3b4458";
+
+  // Bar positions: track scaled 0..bestScore
+  const fillPct = bestScore > 0 ? (score / bestScore) * 100 : 0;
+  const crowdPct = bestScore > 0 ? (crowdScore / bestScore) * 100 : 0;
 
   return (
-    <div className="flex flex-col items-center gap-1 py-4 px-6 bg-surface2 border border-border2 rounded-sm">
-      <div className="font-display tracking-[0.18em] text-[13px] text-subtle uppercase">Your result</div>
-      <div className="flex items-baseline gap-4 mt-1">
-        <div className="text-center">
-          <div className="font-mono tabular-nums text-[36px] text-white leading-none">
-            {ordinal(ballot.rank)}
-          </div>
-          <div className="font-mono text-[11px] text-dim mt-0.5">of {total}</div>
+    <div
+      className="animate-fadeUpIn w-full"
+      style={{ maxWidth: 720, clipPath: CHAMFER, background: borderBg, padding: 1 }}
+    >
+      <div className="bg-surface2" style={{ clipPath: CHAMFER }}>
+
+        {/* Header: medal badge + ordinal */}
+        <div className="flex items-center gap-3 px-4 sm:px-7 pt-4 sm:pt-5 pb-1">
+          {pod && (
+            <span
+              className="font-display tracking-[0.12em] text-[12px] sm:text-[13px] inline-flex items-center gap-1.5 px-2 sm:px-2.5 py-1 rounded-sm"
+              style={{ color: pod.color, background: `${pod.color}1a`, border: `1px solid ${pod.color}52` }}
+            >
+              {pod.emoji} {pod.label.toUpperCase()}
+            </span>
+          )}
+          <span className="font-mono text-[12px] text-dim">#{rank} of {total}</span>
         </div>
-        <div className="w-px h-10 bg-border2" />
-        <div className="text-center">
-          <div className="font-mono tabular-nums text-[36px] text-white leading-none">
-            {ballot.score.toFixed(1)}
+
+        {/* Score hero */}
+        <div className="px-4 sm:px-7 py-4 sm:py-5 text-center">
+          <div
+            className="font-mono tabular-nums leading-none"
+            style={{ fontSize: "clamp(52px,14vw,80px)", color: scoreColor, textShadow: `0 0 56px ${scoreColor}60` }}
+          >
+            {score.toFixed(1)}
           </div>
-          <div className="font-mono text-[11px] text-dim mt-0.5">score</div>
-        </div>
-        <div className="w-px h-10 bg-border2" />
-        <div className="text-center">
-          <div className="font-mono tabular-nums text-[36px] text-white leading-none">
-            {ballot.percentile}
+          <div className="font-display tracking-[0.14em] sm:tracking-[0.16em] text-[10px] sm:text-[11px] text-muted mt-2">
+            SCORE · GIH WIN RATE SUM
           </div>
-          <div className="font-mono text-[11px] text-dim mt-0.5">percentile</div>
+          <div className="font-mono text-[12px] sm:text-[13px] text-subtle mt-1.5">top {topPct}%</div>
         </div>
+
+        {/* Comparison bar */}
+        <div className="px-4 sm:px-7 pb-5 sm:pb-7">
+          {/* Labels above */}
+          <div className="flex justify-between font-display tracking-[0.08em] sm:tracking-[0.1em] text-[10px] text-muted mb-1.5">
+            <span>CROWD <span className="font-mono tabular-nums text-subtle">{crowdScore.toFixed(1)}</span></span>
+            <span className="text-green">YOU <span className="font-mono tabular-nums">{score.toFixed(1)}</span></span>
+            <span>BEST <span className="font-mono tabular-nums text-subtle">{bestScore.toFixed(1)}</span></span>
+          </div>
+          {/* Track */}
+          <div className="h-1.5 bg-border rounded-sm overflow-visible relative">
+            <div className="absolute inset-0 overflow-hidden rounded-sm">
+              <div className="absolute top-0 left-0 bottom-0 bg-green" style={{ width: `${fillPct}%` }} />
+            </div>
+            <div className="absolute top-0 bottom-0 w-px bg-muted/70" style={{ left: `${crowdPct}%` }} />
+          </div>
+          {/* Deltas */}
+          <div className="flex gap-5 mt-1.5 font-mono tabular-nums text-[11px]">
+            <span className={vsCrowd >= 0 ? "text-green" : "text-red"}>
+              {vsCrowd >= 0 ? "+" : ""}{vsCrowd.toFixed(1)} vs crowd
+            </span>
+            <span className="text-red">{vsBest.toFixed(1)} vs best</span>
+          </div>
+        </div>
+
       </div>
     </div>
   );
@@ -352,7 +404,7 @@ function LeaderboardRow({
         )}
 
         <span
-          className={`w-[110px] lg:w-[150px] shrink-0 text-[14px] lg:text-[15px] truncate ${isSelf ? "text-white font-semibold" : "text-text"}`}
+          className={`flex-1 min-w-0 lg:flex-none lg:w-[150px] lg:shrink-0 text-[14px] lg:text-[15px] truncate ${isSelf ? "text-white font-semibold" : "text-text"}`}
         >
           {ballot.name}
           {isSelf && (
@@ -612,7 +664,7 @@ export function FinalResults({
       {/* Your result */}
       {showYourPicks && userBallot && (
         <div className="flex justify-center">
-          <YourResultCard ballot={userBallot} total={rankedBallots.length} />
+          <YourResultCard ballot={userBallot} total={rankedBallots.length} crowdScore={crowdTeam.score} bestScore={bestTeam.score} />
         </div>
       )}
       {showYourPicks && !userBallot && (
