@@ -1,7 +1,7 @@
 // Pure scoring and comparison functions for the P0P1 results phases.
 // All computation happens client-side from the ratings JSON + pick stats/ballots.
 
-import type { Card, P0P1PickStat, SlotKey } from "../types/p0p1";
+import type { Card, P0P1BallotRow, P0P1PickStat, SlotKey } from "../types/p0p1";
 import type { SlotDefinition } from "../types/p0p1";
 
 export type ResultsPhase = "none" | "midway" | "final";
@@ -202,6 +202,22 @@ export function buildMidwaySlotVersus(
       best: makeSide(bestCardName, ratingsByName, cardsByName),
     };
   });
+}
+
+// Fold flat ballot rows (one per slot) into the grouped shape rankBallots expects.
+export function groupBallotRows(
+  rows: P0P1BallotRow[],
+): Array<{ ballotId: number; name: string; avatarUrl: string | null; picks: Map<SlotKey, string> }> {
+  const byId = new Map<number, { ballotId: number; name: string; avatarUrl: string | null; picks: Map<SlotKey, string> }>();
+  for (const row of rows) {
+    let ballot = byId.get(row.ballotId);
+    if (!ballot) {
+      ballot = { ballotId: row.ballotId, name: row.name, avatarUrl: row.avatarUrl, picks: new Map() };
+      byId.set(row.ballotId, ballot);
+    }
+    ballot.picks.set(row.slot, row.cardName);
+  }
+  return Array.from(byId.values());
 }
 
 // ── Rank all ballots by summed GIHWR (descending). ────────────────────────── Partial ballots sink naturally.

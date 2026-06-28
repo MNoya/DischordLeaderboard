@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../auth/useAuth";
 import {
+  useP0P1Ballots,
   useP0P1Cards,
   useP0P1PickStats,
   useP0P1Picks,
@@ -107,6 +108,8 @@ export function useP0P1Ballot() {
   const effectivePicksBySlot = applyDevPicks(picksBySlot, pickStats, devViewPreset);
   const resultsPhase = deriveResultsPhase(isPastDeadline, ratingsSnapshot, devViewPreset);
 
+  const { data: ballots } = useP0P1Ballots(SET_CODE, resultsPhase === "final");
+
   const scoringFilled = SLOTS.filter((s) => effectivePicksBySlot.has(s.key)).length;
   const isComplete = scoringFilled === SLOTS.length;
   const hasParticipated = isPastDeadline && Boolean(user) && scoringFilled > 0;
@@ -171,6 +174,7 @@ export function useP0P1Ballot() {
     pickStats,
     ratingsSnapshot,
     resultsPhase,
+    ballots,
     persistPick,
     handleClearAll,
     clearPending: useServerPicks ? clearAll.isPending : false,
