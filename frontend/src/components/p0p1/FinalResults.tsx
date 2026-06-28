@@ -439,6 +439,8 @@ function LeaderboardRow({
   );
 }
 
+const COLLAPSED_COUNT = 3;
+
 function Leaderboard({
   rankedBallots,
   setCode,
@@ -452,25 +454,70 @@ function Leaderboard({
   cardsByName: Map<string, Card>;
   ratingsByName: Map<string, CardRating>;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const maxScore = rankedBallots[0]?.score ?? 1;
+  const hasMore = rankedBallots.length > COLLAPSED_COUNT;
+  const hiddenCount = rankedBallots.length - COLLAPSED_COUNT;
+
+  const visible = useMemo(() => {
+    if (expanded || !hasMore) return rankedBallots;
+    const peek = rankedBallots.slice(0, COLLAPSED_COUNT);
+    // Pin the user's own row if it falls outside the peek window
+    if (userBallotId !== null) {
+      const selfInPeek = peek.some((b) => b.ballotId === userBallotId);
+      if (!selfInPeek) {
+        const selfBallot = rankedBallots.find((b) => b.ballotId === userBallotId);
+        if (selfBallot) return [...peek, selfBallot];
+      }
+    }
+    return peek;
+  }, [expanded, hasMore, rankedBallots, userBallotId]);
 
   return (
     <div className="flex flex-col gap-3">
       <div className="flex justify-center">
         <SectionLabel size={22} className="text-white">RESULTS</SectionLabel>
       </div>
-      <div className="border-t border-border2 bg-surface2">
-        {rankedBallots.map((ballot) => (
-          <LeaderboardRow
-            key={ballot.ballotId}
-            ballot={ballot}
-            setCode={setCode}
-            isSelf={ballot.ballotId === userBallotId}
-            maxScore={maxScore}
-            cardsByName={cardsByName}
-            ratingsByName={ratingsByName}
-          />
-        ))}
+      <div>
+        <div className="relative">
+          <div className="border-t border-border2 bg-surface2">
+            {visible.map((ballot) => (
+              <LeaderboardRow
+                key={ballot.ballotId}
+                ballot={ballot}
+                setCode={setCode}
+                isSelf={ballot.ballotId === userBallotId}
+                maxScore={maxScore}
+                cardsByName={cardsByName}
+                ratingsByName={ratingsByName}
+              />
+            ))}
+          </div>
+          {/* Peek fade — only when collapsed and there are hidden rows */}
+          {!expanded && hasMore && (
+            <div className="absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-surface2 to-transparent pointer-events-none" />
+          )}
+        </div>
+        {hasMore && (
+          <button
+            type="button"
+            onClick={() => setExpanded((e) => !e)}
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-surface2 border-t-0 border border-border2 text-subtle hover:text-text transition-colors"
+          >
+            <ChevronDown
+              size={14}
+              className={`shrink-0 transition-transform duration-150 ${expanded ? "rotate-180" : ""}`}
+            />
+            <span className="font-display tracking-[0.14em] text-[13px]">
+              {expanded ? "COLLAPSE STANDINGS" : `SHOW ALL ${rankedBallots.length} STANDINGS`}
+            </span>
+            {!expanded && (
+              <span className="font-mono text-[11px] text-muted bg-border2 px-1.5 py-0.5 rounded-full">
+                +{hiddenCount}
+              </span>
+            )}
+          </button>
+        )}
       </div>
     </div>
   );
