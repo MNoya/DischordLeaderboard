@@ -18,6 +18,7 @@ import { GoToTopButton } from "../GoToTopButton";
 import { SiteFooter } from "../SiteFooter";
 import { ChevronDown } from "../Icons";
 import { MidwayResults } from "./MidwayResults";
+import { FinalResults } from "./FinalResults";
 import type { useP0P1Ballot } from "../../data/useP0P1Ballot";
 import {
   P0P1_SET_CODE as SET_CODE,
@@ -145,6 +146,7 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
     selectAdvance,
     resultsPhase,
     ratingsSnapshot,
+    ballots,
     p0p1Sets,
   } = ballot;
 
@@ -196,7 +198,19 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
             )}
 
             {isPastDeadline ? (
-              resultsPhase === "midway" && ratingsSnapshot && cards && pickStats ? (
+              resultsPhase === "final" && ratingsSnapshot && cards && pickStats && ballots ? (
+                <FinalResults
+                  ratingsSnapshot={ratingsSnapshot}
+                  pickStats={pickStats}
+                  ballots={ballots}
+                  cards={cards}
+                  cardsByName={cardsByName}
+                  picksBySlot={picksBySlot}
+                  user={user}
+                  signIn={signIn}
+                  hasParticipated={hasParticipated}
+                />
+              ) : resultsPhase === "midway" && ratingsSnapshot && cards && pickStats ? (
                 <MidwayResults
                   ratingsSnapshot={ratingsSnapshot}
                   pickStats={pickStats}

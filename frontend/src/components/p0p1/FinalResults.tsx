@@ -1,0 +1,698 @@
+import { useMemo, useState } from "react";
+import { ChevronDown } from "lucide-react";
+import { SectionLabel } from "../SectionLabel";
+import { PickGrid } from "./CommunityGrid";
+import { CtaPill } from "../CtaPill";
+import { DiscordIcon } from "../BrandIcons";
+import { MidwayBreakdownList } from "./MidwayBreakdownList";
+import { useMidwayVersusPager, MidwayVersusModal } from "./MidwayVersusCard";
+import { breakdownStripAccent } from "./slotVisuals";
+import { SLOTS } from "../../data/p0p1Slots";
+import {
+  buildRatingsByName,
+  scoreBallot,
+  bestPossibleTeam,
+  mostPopularTeam,
+  buildMidwaySlotVersus,
+  groupBallotRows,
+  rankBallots,
+  slotRankGaps,
+  GIH_SAMPLE_FLOOR,
+} from "../../data/p0p1Results";
+import type {
+  RatingsSnapshot,
+  TeamPick,
+  CardRating,
+  RankedBallot,
+  SlotRankGap,
+} from "../../data/p0p1Results";
+import type { Card, P0P1BallotRow, P0P1PickStat, SlotKey } from "../../types/p0p1";
+import type { PickEntry } from "./CommunityGrid";
+
+const HIGHLIGHTS_COUNT = 5;
+
+function gihwrLabel(gihwr: number): string {
+  return `${(gihwr * 100).toFixed(1)}%`;
+}
+
+function formatDateEnd(iso: string): string {
+  return new Date(iso + "T00:00:00Z").toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+function teamToEntries(picks: TeamPick[], setCode: string): PickEntry[] {
+  const bySlot = new Map(picks.map((p) => [p.slot, p]));
+  return SLOTS.map((slot) => {
+    const pick = bySlot.get(slot.key);
+    if (!pick?.cardName) return { slotKey: slot.key, label: slot.label, stats: [] };
+    return {
+      slotKey: slot.key,
+      label: slot.label,
+      stats: [{ setCode, slot: slot.key as SlotKey, cardName: pick.cardName, pickCount: 0, pickPct: 0 }],
+      pctLabel: pick.gihwr > 0 ? gihwrLabel(pick.gihwr) : "—",
+    };
+  });
+}
+
+function yourPicksEntries(
+  picksBySlot: Map<string, string>,
+  setCode: string,
+  ratingsByName: Map<string, CardRating>,
+): PickEntry[] {
+  return SLOTS.map((slot) => {
+    const cardName = picksBySlot.get(slot.key);
+    if (!cardName) return { slotKey: slot.key, label: slot.label, stats: [] };
+    const rating = ratingsByName.get(cardName);
+    const gihwr =
+      rating && rating.gih >= GIH_SAMPLE_FLOOR && rating.gihwr !== null ? rating.gihwr : null;
+    return {
+      slotKey: slot.key,
+      label: slot.label,
+      stats: [{ setCode, slot: slot.key as SlotKey, cardName, pickCount: 0, pickPct: 0 }],
+      pctLabel: gihwr !== null ? gihwrLabel(gihwr) : "—",
+    };
+  });
+}
+
+function ballotToEntries(ballot: RankedBallot, setCode: string, ratingsByName: Map<string, CardRating>): PickEntry[] {
+  return SLOTS.map((slot) => {
+    const cardName = ballot.picks.get(slot.key);
+    if (!cardName) return { slotKey: slot.key, label: slot.label, stats: [] };
+    const rating = ratingsByName.get(cardName);
+    const gihwr =
+      rating && rating.gih >= GIH_SAMPLE_FLOOR && rating.gihwr !== null ? rating.gihwr : null;
+    return {
+      slotKey: slot.key,
+      label: slot.label,
+      stats: [{ setCode, slot: slot.key as SlotKey, cardName, pickCount: 0, pickPct: 0 }],
+      pctLabel: gihwr !== null ? gihwrLabel(gihwr) : "—",
+    };
+  });
+}
+
+function findUserBallot(
+  rankedBallots: RankedBallot[],
+  picksBySlot: Map<string, string>,
+): RankedBallot | null {
+  if (picksBySlot.size === 0) return null;
+  for (const ballot of rankedBallots) {
+    if (ballot.picks.size !== picksBySlot.size) continue;
+    let match = true;
+    for (const [slot, cardName] of picksBySlot) {
+      if (ballot.picks.get(slot as SlotKey) !== cardName) { match = false; break; }
+    }
+    if (match) return ballot;
+  }
+  return null;
+}
+
+// ── Per-slot contribution bar ─────────────────────────────────────────────────
+
+interface SlotContrib {
+  slotKey: SlotKey;
+  label: string;
+  cardName: string | null;
+  card: Card | undefined;
+  gihwr: number | null;
+  points: number; // gihwr * 100, same units as ballot.score
+}
+
+function ballotContributions(
+  ballot: RankedBallot,
+  ratingsByName: Map<string, CardRating>,
+  cardsByName: Map<string, Card>,
+): SlotContrib[] {
+  return SLOTS.map((slot) => {
+    const cardName = ballot.picks.get(slot.key) ?? null;
+    const card = cardName ? cardsByName.get(cardName) : undefined;
+    const rating = cardName ? ratingsByName.get(cardName) : undefined;
+    const gihwr =
+      rating && rating.gih >= GIH_SAMPLE_FLOOR && rating.gihwr !== null
+        ? rating.gihwr
+        : null;
+    return {
+      slotKey: slot.key,
+      label: slot.label,
+      cardName,
+      card,
+      gihwr,
+      points: gihwr !== null ? gihwr * 100 : 0,
+    };
+  });
+}
+
+function SegTooltipContent({ seg }: { seg: SlotContrib }) {
+  return (
+    <div className="bg-surface2 border border-border2 rounded-sm shadow-xl overflow-hidden w-[160px]">
+      {seg.card ? (
+        <img src={seg.card.imageNormal} alt={seg.card.name} className="w-full block" />
+      ) : (
+        <div className="px-2 py-1.5">
+          <div className="font-display tracking-[0.1em] text-[10px] text-muted uppercase leading-none mb-0.5">
+            {seg.label}
+          </div>
+          <div className="text-[12px] text-subtle">{seg.cardName ?? "—"}</div>
+        </div>
+      )}
+      {seg.gihwr !== null && (
+        <div className="px-2 py-1 font-mono tabular-nums text-[11px] font-semibold text-white border-t border-border2">
+          {(seg.gihwr * 100).toFixed(1)}%
+          <span className="ml-1.5 font-normal text-muted text-[10px]">{seg.label}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ContributionBar({
+  ballot,
+  maxScore,
+  ratingsByName,
+  cardsByName,
+}: {
+  ballot: RankedBallot;
+  maxScore: number;
+  ratingsByName: Map<string, CardRating>;
+  cardsByName: Map<string, Card>;
+}) {
+  const [touchIdx, setTouchIdx] = useState<number | null>(null);
+
+  const contribs = useMemo(
+    () => ballotContributions(ballot, ratingsByName, cardsByName),
+    [ballot, ratingsByName, cardsByName],
+  );
+  const activeContribs = contribs.filter((c) => c.points > 0);
+  const fillPct = maxScore > 0 ? (ballot.score / maxScore) * 100 : 0;
+
+  return (
+    // absolute inset-0: fills the full height of the relative row container
+    <div className="absolute inset-0" onClick={(e) => e.stopPropagation()}>
+      {/* Layer 1: visual segments — overflow:hidden clips art to fill width */}
+      <div
+        className="absolute top-0 left-0 h-full flex gap-px overflow-hidden"
+        style={{ width: `${fillPct}%` }}
+      >
+        {activeContribs.map(({ slotKey, card, gihwr, points }) => (
+          <div
+            key={slotKey}
+            className="relative h-full overflow-hidden"
+            style={{ flexGrow: points, flexBasis: 0 }}
+          >
+            <div
+              className="absolute top-0 left-0 right-0 h-[2px] z-10 pointer-events-none"
+              style={{ background: breakdownStripAccent(slotKey) }}
+            />
+            {card && (
+              <img
+                src={card.imageArtCrop}
+                alt=""
+                aria-hidden
+                className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+              />
+            )}
+            <div className="absolute inset-0 bg-black/55 pointer-events-none" />
+            {gihwr !== null && (
+              <span className="relative z-10 flex items-center justify-center h-full text-[7px] lg:text-[8px] font-mono font-semibold text-white/40 pointer-events-none select-none">
+                {(gihwr * 100).toFixed(0)}
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Layer 2: transparent hover targets — no overflow:hidden so tooltips escape upward */}
+      <div
+        className="absolute top-0 left-0 h-full flex gap-px"
+        style={{ width: `${fillPct}%` }}
+      >
+        {activeContribs.map((seg, i) => {
+          const isActive = touchIdx === i;
+          return (
+            <div
+              key={seg.slotKey}
+              className="group/seg relative h-full cursor-pointer"
+              style={{ flexGrow: seg.points, flexBasis: 0 }}
+              onTouchStart={(e) => {
+                e.stopPropagation();
+                setTouchIdx(isActive ? null : i);
+              }}
+              onTouchEnd={(e) => e.stopPropagation()}
+            >
+              {/* desktop: CSS hover — full card image preview */}
+              <div className="absolute bottom-[calc(100%+7px)] left-1/2 -translate-x-1/2 z-50 pointer-events-none opacity-0 group-hover/seg:opacity-100 transition-opacity duration-100 hidden lg:block">
+                <SegTooltipContent seg={seg} />
+              </div>
+              {/* mobile: tap-toggled */}
+              {isActive && (
+                <div className="absolute bottom-[calc(100%+7px)] left-1/2 -translate-x-1/2 z-50 pointer-events-none lg:hidden">
+                  <SegTooltipContent seg={seg} />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Your result ──────────────────────────────────────────────────────────────
+
+function YourResultCard({
+  ballot,
+  total,
+}: {
+  ballot: RankedBallot;
+  total: number;
+}) {
+  const ordinal = (n: number) => {
+    const s = ["th", "st", "nd", "rd"];
+    const v = n % 100;
+    return n + (s[(v - 20) % 10] ?? s[v] ?? s[0]);
+  };
+
+  return (
+    <div className="flex flex-col items-center gap-1 py-4 px-6 bg-surface2 border border-border2 rounded-sm">
+      <div className="font-display tracking-[0.18em] text-[13px] text-subtle uppercase">Your result</div>
+      <div className="flex items-baseline gap-4 mt-1">
+        <div className="text-center">
+          <div className="font-mono tabular-nums text-[36px] text-white leading-none">
+            {ordinal(ballot.rank)}
+          </div>
+          <div className="font-mono text-[11px] text-dim mt-0.5">of {total}</div>
+        </div>
+        <div className="w-px h-10 bg-border2" />
+        <div className="text-center">
+          <div className="font-mono tabular-nums text-[36px] text-white leading-none">
+            {ballot.score.toFixed(1)}
+          </div>
+          <div className="font-mono text-[11px] text-dim mt-0.5">score</div>
+        </div>
+        <div className="w-px h-10 bg-border2" />
+        <div className="text-center">
+          <div className="font-mono tabular-nums text-[36px] text-white leading-none">
+            {ballot.percentile}
+          </div>
+          <div className="font-mono text-[11px] text-dim mt-0.5">percentile</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Leaderboard ───────────────────────────────────────────────────────────────
+
+function LeaderboardRow({
+  ballot,
+  setCode,
+  isSelf,
+  maxScore,
+  cardsByName,
+  ratingsByName,
+}: {
+  ballot: RankedBallot;
+  setCode: string;
+  isSelf: boolean;
+  maxScore: number;
+  cardsByName: Map<string, Card>;
+  ratingsByName: Map<string, CardRating>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const entries = useMemo(
+    () => (expanded ? ballotToEntries(ballot, setCode, ratingsByName) : []),
+    [expanded, ballot, setCode, ratingsByName],
+  );
+
+  return (
+    <div className="border-b border-border2 last:border-b-0">
+      {/* relative container so ContributionBar can use absolute inset-0 */}
+      <div className={`relative ${isSelf ? "bg-white/[0.04]" : ""}`}>
+        <ContributionBar
+          ballot={ballot}
+          maxScore={maxScore}
+          ratingsByName={ratingsByName}
+          cardsByName={cardsByName}
+        />
+        {isSelf && (
+          <div className="absolute inset-y-0 left-0 w-[3px] bg-green z-20 pointer-events-none" />
+        )}
+        <button
+          type="button"
+          onClick={() => setExpanded((e) => !e)}
+          className="relative z-10 w-full flex items-center gap-2 lg:gap-3 px-3 lg:px-4 py-2.5 lg:py-3 text-left cursor-pointer bg-transparent border-0"
+        >
+          <span className="w-7 lg:w-8 shrink-0 text-right font-mono tabular-nums text-[12px] lg:text-[13px] text-muted drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+            #{ballot.rank}
+          </span>
+
+          {ballot.avatarUrl ? (
+            <img
+              src={ballot.avatarUrl}
+              alt={ballot.name}
+              className="w-6 h-6 lg:w-7 lg:h-7 rounded-full shrink-0 object-cover ring-1 ring-black/40"
+            />
+          ) : (
+            <div className="w-6 h-6 lg:w-7 lg:h-7 rounded-full shrink-0 bg-surface/70 flex items-center justify-center text-[10px] lg:text-[11px] text-muted font-mono">
+              ?
+            </div>
+          )}
+
+          <span
+            className={`flex-1 text-[14px] lg:text-[15px] min-w-0 truncate drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)] ${isSelf ? "text-white font-semibold" : "text-text"}`}
+          >
+            {ballot.name}
+            {isSelf && (
+              <span className="ml-2 text-[10px] font-normal text-subtle font-display tracking-widest">YOU</span>
+            )}
+          </span>
+
+          <span className="font-mono tabular-nums text-[13px] lg:text-[14px] text-subtle shrink-0 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+            {ballot.score.toFixed(1)}
+          </span>
+
+          <ChevronDown
+            size={14}
+            className={`shrink-0 text-muted transition-transform duration-150 ${expanded ? "rotate-180" : ""}`}
+          />
+        </button>
+      </div>
+
+      {expanded && (
+        <div className="px-3 lg:px-4 pb-4 pt-1">
+          <PickGrid entries={entries} cardsByName={cardsByName} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Leaderboard({
+  rankedBallots,
+  setCode,
+  userBallotId,
+  cardsByName,
+  ratingsByName,
+}: {
+  rankedBallots: RankedBallot[];
+  setCode: string;
+  userBallotId: number | null;
+  cardsByName: Map<string, Card>;
+  ratingsByName: Map<string, CardRating>;
+}) {
+  const maxScore = rankedBallots[0]?.score ?? 1;
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex justify-center">
+        <SectionLabel size={22} className="text-white">RESULTS</SectionLabel>
+      </div>
+      <div className="border-t border-border2 bg-surface2">
+        {rankedBallots.map((ballot) => (
+          <LeaderboardRow
+            key={ballot.ballotId}
+            ballot={ballot}
+            setCode={setCode}
+            isSelf={ballot.ballotId === userBallotId}
+            maxScore={maxScore}
+            cardsByName={cardsByName}
+            ratingsByName={ratingsByName}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Highlights reel ───────────────────────────────────────────────────────────
+
+function HighlightTile({
+  gap,
+  cardsByName,
+}: {
+  gap: SlotRankGap;
+  cardsByName: Map<string, Card>;
+}) {
+  const card = cardsByName.get(gap.cardName);
+  const isOverrated = gap.kind === "overrated";
+  const accent = isOverrated ? "#ff6b6b" : "#2ee85c";
+  const label = isOverrated ? "OVERRATED" : "UNDERRATED";
+  const rankText = isOverrated
+    ? `#${gap.popularityRank} popular → #${gap.gihwrRank} GIH WR`
+    : `#${gap.gihwrRank} GIH WR → #${gap.popularityRank} popular`;
+
+  return (
+    <div className="flex flex-col items-center gap-1.5">
+      <div
+        className="inline-block font-display tracking-[0.14em] uppercase text-[11px] leading-none px-2 py-1 rounded-sm"
+        style={{ background: `${accent}22`, color: accent }}
+      >
+        {label}
+      </div>
+
+      {card ? (
+        <div className="relative w-[120px] h-[120px] rounded overflow-hidden">
+          <img
+            src={card.imageArtCrop}
+            alt={card.name}
+            className="w-full h-full object-cover"
+          />
+          <div className="absolute inset-x-0 bottom-0 bg-black/60 px-1.5 py-1">
+            <div className="text-white text-[11px] font-semibold leading-snug truncate">{card.name}</div>
+            <div className="text-dim text-[10px] font-mono">{gap.slotLabel}</div>
+          </div>
+        </div>
+      ) : (
+        <div className="w-[120px] h-[120px] bg-surface2 border border-border2 rounded flex items-center justify-center text-[13px] text-muted">
+          {gap.cardName}
+        </div>
+      )}
+
+      <p className="text-[11px] text-dim text-center font-mono max-w-[130px]">{rankText}</p>
+    </div>
+  );
+}
+
+function HighlightsReel({
+  highlights,
+  cardsByName,
+}: {
+  highlights: SlotRankGap[];
+  cardsByName: Map<string, Card>;
+}) {
+  if (highlights.length === 0) return null;
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex justify-center">
+        <SectionLabel size={22} className="text-white">HIGHLIGHTS</SectionLabel>
+      </div>
+      <div className="flex flex-wrap justify-center gap-6">
+        {highlights.map((gap) => (
+          <HighlightTile key={`${gap.slot}-${gap.cardName}`} gap={gap} cardsByName={cardsByName} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Orchestrator ──────────────────────────────────────────────────────────────
+
+export function FinalResults({
+  ratingsSnapshot,
+  pickStats,
+  ballots,
+  cards,
+  cardsByName,
+  picksBySlot,
+  user,
+  signIn,
+  hasParticipated,
+}: {
+  ratingsSnapshot: RatingsSnapshot;
+  pickStats: P0P1PickStat[];
+  ballots: P0P1BallotRow[];
+  cards: Card[];
+  cardsByName: Map<string, Card>;
+  picksBySlot: Map<string, string>;
+  user: object | null;
+  signIn: () => void;
+  hasParticipated: boolean;
+}) {
+  const ratingsByName = useMemo(
+    () => buildRatingsByName(ratingsSnapshot),
+    [ratingsSnapshot],
+  );
+  const crowdTeam = useMemo(
+    () => mostPopularTeam(pickStats, SLOTS, ratingsByName),
+    [pickStats, ratingsByName],
+  );
+  const bestTeam = useMemo(
+    () => bestPossibleTeam(cards, SLOTS, ratingsByName),
+    [cards, ratingsByName],
+  );
+  const rankedBallots = useMemo(() => {
+    const grouped = groupBallotRows(ballots);
+    return rankBallots(grouped, ratingsByName);
+  }, [ballots, ratingsByName]);
+  const highlights = useMemo(
+    () => slotRankGaps(pickStats, SLOTS, ratingsByName, HIGHLIGHTS_COUNT),
+    [pickStats, ratingsByName],
+  );
+
+  const showYourPicks = Boolean(user) && hasParticipated;
+  const loggedOut = !user;
+  const yourScore = showYourPicks
+    ? scoreBallot(picksBySlot as Map<SlotKey, string>, ratingsByName)
+    : null;
+  const dateCaption = ratingsSnapshot.dateRange
+    ? formatDateEnd(ratingsSnapshot.dateRange.end)
+    : null;
+
+  const { setCode } = ratingsSnapshot;
+
+  const userBallot = useMemo(
+    () => (showYourPicks ? findUserBallot(rankedBallots, picksBySlot) : null),
+    [showYourPicks, rankedBallots, picksBySlot],
+  );
+
+  const yourEntries = useMemo(
+    () => (showYourPicks ? yourPicksEntries(picksBySlot, setCode, ratingsByName) : []),
+    [showYourPicks, picksBySlot, setCode, ratingsByName],
+  );
+  const crowdEntries = useMemo(
+    () => teamToEntries(crowdTeam.picks, setCode),
+    [crowdTeam.picks, setCode],
+  );
+  const bestEntries = useMemo(
+    () => teamToEntries(bestTeam.picks, setCode),
+    [bestTeam.picks, setCode],
+  );
+
+  const versusList = useMemo(
+    () =>
+      buildMidwaySlotVersus(
+        SLOTS,
+        picksBySlot,
+        crowdTeam,
+        bestTeam,
+        ratingsByName,
+        cardsByName,
+        showYourPicks,
+      ),
+    [picksBySlot, crowdTeam, bestTeam, ratingsByName, cardsByName, showYourPicks],
+  );
+  const pager = useMidwayVersusPager(versusList);
+
+  const onTileOpen = (slotKey: SlotKey) => {
+    const idx = SLOTS.findIndex((s) => s.key === slotKey);
+    if (idx !== -1) pager.open(idx);
+  };
+
+  const crowdCardBySlot = useMemo(
+    () => new Map(crowdTeam.picks.map((p) => [p.slot, p.cardName])) as Map<SlotKey, string>,
+    [crowdTeam.picks],
+  );
+  const yourCardBySlot = useMemo(
+    () => (showYourPicks ? (picksBySlot as Map<SlotKey, string>) : new Map<SlotKey, string>()),
+    [showYourPicks, picksBySlot],
+  );
+
+  // Keep "your picks" score visible even when no ratingsSnapshot score — show raw
+  const displayScore = yourScore ?? 0;
+
+  return (
+    <div className="flex flex-col gap-8">
+      {dateCaption && (
+        <p className="text-center text-dim font-mono text-[11px] tracking-widest uppercase">
+          17lands data through {dateCaption} · final results
+        </p>
+      )}
+
+      {/* Your result */}
+      {showYourPicks && userBallot && (
+        <div className="flex justify-center">
+          <YourResultCard ballot={userBallot} total={rankedBallots.length} />
+        </div>
+      )}
+      {showYourPicks && !userBallot && (
+        <div className="flex justify-center">
+          <div className="flex flex-col items-center gap-1 py-3 px-6 bg-surface2 border border-border2 rounded-sm">
+            <div className="font-display tracking-[0.18em] text-[13px] text-subtle uppercase">Your result</div>
+            <div className="font-mono tabular-nums text-[28px] text-white mt-1">{displayScore.toFixed(1)}</div>
+          </div>
+        </div>
+      )}
+      {loggedOut && (
+        <div className="flex justify-center">
+          <button
+            type="button"
+            onClick={signIn}
+            className="bg-transparent border-0 cursor-pointer p-0"
+          >
+            <CtaPill size="lg" icon={<DiscordIcon size={19} />}>
+              LOG IN TO VIEW YOUR PICKS
+            </CtaPill>
+          </button>
+        </div>
+      )}
+
+      {/* Results leaderboard */}
+      {rankedBallots.length > 0 && (
+        <Leaderboard
+          rankedBallots={rankedBallots}
+          setCode={setCode}
+          userBallotId={userBallot?.ballotId ?? null}
+          cardsByName={cardsByName}
+          ratingsByName={ratingsByName}
+        />
+      )}
+
+      {/* Per-slot 3-way comparison — yours / crowd / best, keyed on GIHWR */}
+      <div className="flex flex-col gap-3">
+        <div className="flex items-baseline justify-center gap-3 mb-2">
+          <SectionLabel size={22} className="text-white">YOUR PICKS</SectionLabel>
+          {showYourPicks && (
+            <span className="font-mono tabular-nums text-[18px] text-subtle">
+              {displayScore.toFixed(1)}
+            </span>
+          )}
+        </div>
+        {showYourPicks && (
+          <PickGrid entries={yourEntries} cardsByName={cardsByName} onTileOpen={onTileOpen} />
+        )}
+        <div className="flex items-baseline justify-center gap-3 mb-2 mt-4">
+          <SectionLabel size={22} className="text-white">CROWD TEAM</SectionLabel>
+          <span className="font-mono tabular-nums text-[18px] text-subtle">
+            {crowdTeam.score.toFixed(1)}
+          </span>
+        </div>
+        <PickGrid entries={crowdEntries} cardsByName={cardsByName} onTileOpen={onTileOpen} />
+        <div className="flex items-baseline justify-center gap-3 mb-2 mt-4">
+          <SectionLabel size={22} className="text-white">BEST POSSIBLE</SectionLabel>
+          <span className="font-mono tabular-nums text-[18px] text-subtle">
+            {bestTeam.score.toFixed(1)}
+          </span>
+        </div>
+        <PickGrid entries={bestEntries} cardsByName={cardsByName} onTileOpen={onTileOpen} />
+      </div>
+
+      <MidwayVersusModal pager={pager} />
+
+      {/* GIHWR breakdown */}
+      <MidwayBreakdownList
+        cards={cards}
+        cardsByName={cardsByName}
+        ratingsByName={ratingsByName}
+        yourCardBySlot={yourCardBySlot}
+        crowdCardBySlot={crowdCardBySlot}
+      />
+
+      {/* Highlights reel */}
+      <HighlightsReel highlights={highlights} cardsByName={cardsByName} />
+    </div>
+  );
+}

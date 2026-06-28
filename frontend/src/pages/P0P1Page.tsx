@@ -14,6 +14,7 @@ import { P0P1MobileSelector } from "../components/p0p1/P0P1MobileView";
 import { GoToTopButton } from "../components/GoToTopButton";
 import { PostVotingStats } from "../components/p0p1/PostVotingStats";
 import { MidwayResults } from "../components/p0p1/MidwayResults";
+import { FinalResults } from "../components/p0p1/FinalResults";
 import { P0P1DevPanel } from "../components/p0p1/P0P1DevPanel";
 import { P0P1BallotScorecard, CHAMFER } from "../components/p0p1/P0P1BallotScorecard";
 import { PickGrid } from "../components/p0p1/CommunityGrid";
@@ -49,6 +50,7 @@ export function P0P1Page() {
     selectAdvance,
     resultsPhase,
     ratingsSnapshot,
+    ballots,
   } = ballot;
   const isDesktop = !useIsMobile(1024);
   const isCompleteEntrant = isPastDeadline && Boolean(user) && isComplete;
@@ -111,7 +113,19 @@ export function P0P1Page() {
           ))}
 
         {isPastDeadline ? (
-          resultsPhase === "midway" && ratingsSnapshot && cards && pickStats ? (
+          resultsPhase === "final" && ratingsSnapshot && cards && pickStats && ballots ? (
+            <FinalResults
+              ratingsSnapshot={ratingsSnapshot}
+              pickStats={pickStats}
+              ballots={ballots}
+              cards={cards}
+              cardsByName={cardsByName}
+              picksBySlot={picksBySlot}
+              user={user}
+              signIn={signIn}
+              hasParticipated={hasParticipated}
+            />
+          ) : resultsPhase === "midway" && ratingsSnapshot && cards && pickStats ? (
             <MidwayResults
               ratingsSnapshot={ratingsSnapshot}
               pickStats={pickStats}
