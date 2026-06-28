@@ -41,6 +41,15 @@ export interface P0P1PickStat {
   pickPct: number;
 }
 
+export interface P0P1BallotRow {
+  setCode: string;
+  ballotId: number;
+  name: string;
+  avatarUrl: string | null;
+  slot: SlotKey;
+  cardName: string;
+}
+
 export type PickVersusState = "matched" | "minority" | "rogue";
 
 export interface PickVersusSide {

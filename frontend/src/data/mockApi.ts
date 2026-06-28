@@ -30,7 +30,7 @@ import type {
   RecentTrophy,
   SetSummary,
 } from "../types/leaderboard";
-import type { Card, P0P1Pick, P0P1PickStat, SlotKey } from "../types/p0p1";
+import type { Card, P0P1BallotRow, P0P1Pick, P0P1PickStat, SlotKey } from "../types/p0p1";
 import type { Episode } from "./episodes";
 import {
   podDraftArtifactFixture,
@@ -577,6 +577,70 @@ const syntheticRatings = generateSyntheticRatings();
 
 export const fetchP0P1Ratings = (_setCode: string): Promise<RatingsSnapshot> =>
   wait(syntheticRatings);
+
+// Generate ~100 synthetic ballots from the pick stats distribution.
+// 90 complete + 10 partial so partial-sum ranking is exercised.
+function generateSyntheticBallots(): P0P1BallotRow[] {
+  let seed = 777;
+  const rng = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  const TOTAL = 100;
+  const PARTIAL_START = TOTAL - 10;
+
+  const statsBySlot = new Map<SlotKey, P0P1PickStat[]>();
+  for (const stat of syntheticPickStats) {
+    const arr = statsBySlot.get(stat.slot) ?? [];
+    arr.push(stat);
+    statsBySlot.set(stat.slot, arr);
+  }
+
+  const rows: P0P1BallotRow[] = [];
+
+  for (let ballotId = 1; ballotId <= TOTAL; ballotId++) {
+    const isPartial = ballotId > PARTIAL_START;
+    const usedCards = new Set<string>();
+
+    for (const slot of P0P1_SLOT_KEYS) {
+      if (isPartial && rng() < 0.4) continue;
+
+      const candidates = statsBySlot.get(slot) ?? [];
+      if (candidates.length === 0) continue;
+
+      const total = candidates.reduce((s, c) => s + c.pickCount, 0);
+      let threshold = rng() * total;
+      let picked: string | null = null;
+      for (const stat of candidates) {
+        threshold -= stat.pickCount;
+        if (threshold <= 0 && !usedCards.has(stat.cardName)) {
+          picked = stat.cardName;
+          break;
+        }
+      }
+      if (!picked) {
+        for (const stat of candidates) {
+          if (!usedCards.has(stat.cardName)) { picked = stat.cardName; break; }
+        }
+      }
+      if (picked) {
+        usedCards.add(picked);
+        rows.push({
+          setCode: "MSH",
+          ballotId,
+          name: `Player ${ballotId}`,
+          avatarUrl: null,
+          slot,
+          cardName: picked,
+        });
+      }
+    }
+  }
+
+  return rows;
+}
+
+const syntheticBallots = generateSyntheticBallots();
+
+export const fetchP0P1Ballots = (_setCode: string): Promise<P0P1BallotRow[]> =>
+  wait(syntheticBallots);
 
 export const initialAuthUser = {
   id: "mock-user-id",
