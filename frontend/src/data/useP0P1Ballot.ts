@@ -9,12 +9,12 @@ import {
   useDeleteAllP0P1Picks,
   useSets,
 } from "./hooks";
-import { P0P1_SET_CODE as SET_CODE, P0P1_VOTING_DEADLINE as VOTING_DEADLINE, SLOTS } from "./p0p1Slots";
+import { P0P1_SET_CODE as SET_CODE, P0P1_VOTING_DEADLINE as VOTING_DEADLINE, P0P1_RESULTS_PHASE, SLOTS } from "./p0p1Slots";
 import { useLocalP0P1Picks, setLocalPick, clearLocalPicks, getLocalPicks } from "./localPicks";
 import { p0p1DevEnabled, useP0P1DevPreset, type P0P1DevPreset } from "./p0p1DevState";
 import type { AuthUser } from "../auth/AuthContext";
 import type { Card, P0P1PickStat, SlotKey } from "../types/p0p1";
-import type { ResultsPhase, RatingsSnapshot } from "./p0p1Results";
+import type { P0P1Phase, RatingsSnapshot } from "./p0p1Results";
 
 const ADVANCE_BEAT_MS = 260;
 
@@ -105,7 +105,8 @@ export function useP0P1Ballot() {
   const devViewPreset = devActive ? devPreset : "live";
   const user = applyDevUser(authUser, devViewPreset);
   const effectivePicksBySlot = applyDevPicks(picksBySlot, pickStats, devViewPreset);
-  const resultsPhase = deriveResultsPhase(isPastDeadline, ratingsSnapshot, devViewPreset);
+  const dataPresent = Boolean(ratingsSnapshot && cards && pickStats);
+  const phase = deriveP0P1Phase(isPastDeadline, ratingsSnapshot, P0P1_RESULTS_PHASE, dataPresent, devViewPreset);
 
   const scoringFilled = SLOTS.filter((s) => effectivePicksBySlot.has(s.key)).length;
   const isComplete = scoringFilled === SLOTS.length;
@@ -170,7 +171,7 @@ export function useP0P1Ballot() {
     hasParticipated,
     pickStats,
     ratingsSnapshot,
-    resultsPhase,
+    phase,
     persistPick,
     handleClearAll,
     clearPending: useServerPicks ? clearAll.isPending : false,
@@ -229,13 +230,21 @@ function topPickPerSlot(pickStats: P0P1PickStat[] | undefined): Map<string, stri
   return picks;
 }
 
-function deriveResultsPhase(
+function deriveP0P1Phase(
   isPastDeadline: boolean,
   snapshot: RatingsSnapshot | undefined,
+  allowed: typeof P0P1_RESULTS_PHASE,
+  dataPresent: boolean,
   devPreset: P0P1DevPreset,
-): ResultsPhase {
+): P0P1Phase {
   if (devPreset === "midwayScoring") return "midway";
   if (devPreset === "finalScoring") return "final";
-  if (!isPastDeadline || !snapshot || snapshot.phase === null) return "none";
-  return snapshot.phase;
+  if (
+    devPreset === "closedLoggedOut" ||
+    devPreset === "closedComplete" ||
+    devPreset === "closedDidNotVote"
+  ) return "postVoting";
+  if (!isPastDeadline) return "voting";
+  if (allowed !== "none" && snapshot?.phase === allowed && dataPresent) return allowed;
+  return "postVoting";
 }
