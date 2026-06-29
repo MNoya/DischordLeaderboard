@@ -238,15 +238,17 @@ function TopColorsRows({
   onColorsSelect?: (code: string) => void;
   lcqScope: boolean;
 }) {
+  const [limit, setLimit] = useState(maxColors);
   if (!topColors) {
     return <div className="mono text-[11px] text-muted py-2">LOADING…</div>;
   }
   if (topColors.length === 0) {
     return <div className="mono text-[11px] text-muted py-2">NO TROPHIES YET</div>;
   }
+  const canShowMore = topColors.length > limit;
   return (
     <>
-      {topColors.slice(0, maxColors).map((row, i) => {
+      {topColors.slice(0, limit).map((row, i) => {
         const isActive = row.colors === colors;
         const cls =
           (lcqScope
@@ -293,6 +295,16 @@ function TopColorsRows({
           </div>
         );
       })}
+      {canShowMore && (
+        <button
+          type="button"
+          onClick={() => setLimit((n) => n + maxColors)}
+          className="-mb-3.5 mt-0.5 flex w-full items-center justify-center gap-1.5 border-t border-border bg-transparent py-2 font-display text-[12px] tracking-[0.18em] text-muted transition-colors hover:text-text"
+        >
+          SHOW MORE
+          <ChevronDown size={15} strokeWidth={2.5} />
+        </button>
+      )}
     </>
   );
 }
@@ -435,9 +447,9 @@ function useInsightsData(
   const recentTitle = scoped ? <>RECENT {scopeChip} {recentNoun}</> : "RECENT TROPHIES";
   const recentEmpty = scoped ? `NO RECENT ${scopeLabel} ${recentNoun}` : "NO TROPHIES YET";
   const topColorsTitle = formatScoped ? (
-    <>TOP COLORS · {scopeChip} {lcqScope ? "TROPHIES & CASH" : "TROPHIES"}</>
+    <>TOP COLORS {scopeChip} {lcqScope ? "TROPHIES & CASH" : "TROPHIES"}</>
   ) : (
-    "TOP COLORS · BY TROPHIES"
+    "TOP COLORS BY TROPHIES"
   );
   const namedScope = colorsScoped && colors !== MULTI && colors !== OTHER;
   const showRowPips = !namedScope;

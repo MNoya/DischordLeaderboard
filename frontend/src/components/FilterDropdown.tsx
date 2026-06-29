@@ -118,10 +118,9 @@ export function FilterDropdown({
               {label}
             </span>
           ) : null}
-          <span className="flex items-center gap-1.5 min-w-0 truncate">
+          <span className="flex flex-1 items-center gap-1.5 min-w-0 truncate">
             {renderValue ? renderValue(selected) : selected.label}
           </span>
-          <span className="flex-1" />
           <ChevronDown
             size={isMobile ? 18 : 16}
             strokeWidth={2.5}

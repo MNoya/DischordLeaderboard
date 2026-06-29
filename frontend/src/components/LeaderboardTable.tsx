@@ -111,6 +111,8 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
   onSort,
   playerHref,
   onRowPrefetch,
+  highlightSlug,
+  stickyTop = 0,
 }: {
   rows: T[] | undefined;
   variant: "desktop" | "mobile";
@@ -125,6 +127,10 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
   playerHref?: (row: T) => string | null;
   /** Fired on row hover/focus to warm that player's cache on intent. */
   onRowPrefetch?: (row: T) => void;
+  /** Slug of the signed-in viewer's own row, rendered with an accent highlight. */
+  highlightSlug?: string;
+  /** Viewport offset (px) below which the floating own-row pins — clears a sticky page header. */
+  stickyTop?: number;
 }) {
   const [openSlug, setOpenSlug] = useState<string | null>(null);
   const [renderedSlug, setRenderedSlug] = useState<string | null>(null);
@@ -139,6 +145,21 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
   }, [openSlug, renderedSlug]);
   const isMobile = variant === "mobile";
 
+  const [myRowEl, setMyRowEl] = useState<HTMLDivElement | null>(null);
+  const [myRowVisible, setMyRowVisible] = useState(true);
+  useEffect(() => {
+    if (!myRowEl) {
+      setMyRowVisible(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => setMyRowVisible(entry.intersectionRatio >= 0.999),
+      { rootMargin: `${-(stickyTop + 56)}px 0px 0px 0px`, threshold: [0, 1] },
+    );
+    observer.observe(myRowEl);
+    return () => observer.disconnect();
+  }, [myRowEl, stickyTop]);
+
   if (error) return <ErrorState error={error} compact={isMobile} />;
   if (loading) return <LoadingRows variant={variant} />;
   if (!rows || rows.length === 0) return <EmptyState>{emptyMessage}</EmptyState>;
@@ -149,13 +170,23 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
         <LeaderboardColumnHeader variant={variant} mode={mode} sort={sort} onSort={onSort} />
       )}
       <div className={cn("flex flex-col", isMobile ? "gap-0" : "gap-[1px]")}>
+        <FloatingOwnRow
+          row={highlightSlug ? rows.find((r) => r.slug === highlightSlug) : undefined}
+          mode={mode}
+          variant={variant}
+          stickyTop={stickyTop}
+          hidden={myRowVisible}
+          onScrollToRow={() => myRowEl?.scrollIntoView({ behavior: "smooth", block: "center" })}
+        />
         {rows.map((r) => {
           const open = openSlug === r.slug;
           const clickable = !!renderExpanded;
           const href = playerHref?.(r) ?? null;
+          const mine = !!highlightSlug && r.slug === highlightSlug;
           return (
             <div
               key={r.slug}
+              ref={mine ? setMyRowEl : undefined}
               onMouseEnter={onRowPrefetch ? () => onRowPrefetch(r) : undefined}
               onFocus={onRowPrefetch ? () => onRowPrefetch(r) : undefined}
               className={cn(
@@ -163,6 +194,8 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
                 isMobile && "border-b border-border",
                 open ? "bg-surface2" : isMobile ? "bg-transparent" : "bg-surface",
                 (clickable || href) && !isMobile && "hover:bg-surface2",
+                mine && !open && "bg-green/[0.07]",
+                mine && "shadow-[inset_3px_0_0_0_#2ee85c,inset_-3px_0_0_0_#2ee85c]",
               )}
             >
               {isMobile ? (
@@ -196,6 +229,46 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// The signed-in viewer's own standing, pinned to the top of the table while their
+// real row is scrolled out of view, so they never lose sight of their rank. Sticky
+// within the rows column so it inherits the table width rather than the viewport's.
+function FloatingOwnRow({
+  row,
+  mode,
+  variant,
+  stickyTop,
+  hidden,
+  onScrollToRow,
+}: {
+  row: LeaderboardTableRow | undefined;
+  mode: BoardMode;
+  variant: "desktop" | "mobile";
+  stickyTop: number;
+  hidden: boolean;
+  onScrollToRow: () => void;
+}) {
+  if (!row || hidden) {
+    return null;
+  }
+  return (
+    <div
+      className="sticky z-[5] border-b border-border bg-surface"
+      style={{ top: stickyTop }}
+    >
+      <div
+        onClick={onScrollToRow}
+        className="cursor-pointer bg-green/[0.07] shadow-[inset_3px_0_0_0_#2ee85c,inset_-3px_0_0_0_#2ee85c]"
+      >
+        {variant === "mobile" ? (
+          <MobileRow row={row} mode={mode} />
+        ) : (
+          <DesktopRow row={row} mode={mode} />
+        )}
       </div>
     </div>
   );

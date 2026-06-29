@@ -1,5 +1,5 @@
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import React, { Fragment, useEffect, useMemo, useState } from "react";
+import React, { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
 import { AppHeader } from "../components/AppHeader";
 import { useIsMobile } from "../lib/use-is-mobile";
@@ -36,10 +36,12 @@ import {
   useLeaderboard,
   useOtherColorsLeaderboard,
   usePlayerProfile,
+  usePlayerSlugByDiscordId,
   usePrefetchers,
   useSets,
   useCubeSeasons,
 } from "../data/hooks";
+import { useAuth } from "../auth/useAuth";
 import { baseSetCode, canonicalSetCode, colorsOf, CUBE_BASE, CUBE_LIFETIME, cubeSeasonLabel, eventDate, fmtRange, isCubeCode, isCubeSeasonCode, isSoup, lastUpdated, leaderboardPath, playerPath, prettyFormat, relativeTime, sumEvents, weekOfSet, winPct } from "../data/utils";
 import { CubeSeasonSelector } from "../components/CubeSeasonSelector";
 import { colorsDisplayName, FORMAT_LABEL_GROUPS, FORMAT_OPTIONS, matchesFormatFilter, MULTI, OTHER } from "../data/filters";
@@ -187,6 +189,9 @@ export function LeaderboardPage() {
   const updated = setMeta?.lastRefreshedAt ? lastUpdated(setMeta.lastRefreshedAt) : null;
   const filterProps: FilterRowProps = { format, setFormat, colors, setColors, colorChips, colorChipsLoading, formatOptions, updated };
 
+  const { user } = useAuth();
+  const { data: mySlug } = usePlayerSlugByDiscordId(user?.discordId);
+
   return isMobile ? (
     <Mobile
       activeSet={activeSet}
@@ -202,6 +207,7 @@ export function LeaderboardPage() {
       searchParams={searchParams}
       sort={sort}
       onSort={onSort}
+      mySlug={mySlug ?? undefined}
     />
   ) : (
     <Desktop
@@ -219,6 +225,7 @@ export function LeaderboardPage() {
       searchParams={searchParams}
       sort={sort}
       onSort={onSort}
+      mySlug={mySlug ?? undefined}
     />
   );
 }
@@ -269,6 +276,7 @@ function Desktop({
   searchParams,
   sort,
   onSort,
+  mySlug,
 }: {
   activeSet: string;
   sets: SetSummary[] | undefined;
@@ -284,6 +292,7 @@ function Desktop({
   searchParams: URLSearchParams;
   sort: SortState;
   onSort: (key: SortKey) => void;
+  mySlug?: string;
 }) {
   const navigate = useNavigate();
   const { prefetchSet, prefetchPlayer } = usePrefetchers();
@@ -314,6 +323,7 @@ function Desktop({
           sort={sort}
           onSort={onSort}
           onRowPrefetch={(r) => prefetchPlayer(r.slug, profileSet)}
+          highlightSlug={mySlug}
           renderExpanded={(r) => (
             <DesktopExpandedRow
               row={r}
@@ -592,6 +602,7 @@ function Mobile({
   searchParams,
   sort,
   onSort,
+  mySlug,
 }: {
   activeSet: string;
   sets: SetSummary[] | undefined;
@@ -603,6 +614,7 @@ function Mobile({
   error: Error | null;
   filters: FilterRowProps;
   colorsMode: boolean;
+  mySlug?: string;
   searchParams: URLSearchParams;
   sort: SortState;
   onSort: (key: SortKey) => void;
@@ -614,13 +626,28 @@ function Mobile({
   const updated = setMeta?.lastRefreshedAt ? lastUpdated(setMeta.lastRefreshedAt) : null;
   const isCube = profileSet === CUBE_BASE;
   const setOptions = useMemo<SetFilterOption[]>(() => (sets ? setFilterOptionsFrom(sets) : []), [sets]);
+
+  const chromeRef = useRef<HTMLDivElement>(null);
+  const [chromeHeight, setChromeHeight] = useState(0);
+  useEffect(() => {
+    const el = chromeRef.current;
+    if (!el) {
+      return;
+    }
+    const measure = () => setChromeHeight(el.getBoundingClientRect().height);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   return (
-    <div className="bg-bg text-text min-h-screen flex flex-col overflow-x-hidden animate-fadeIn">
-      <div className="sticky top-0 z-10 bg-bg">
+    <div className="bg-bg text-text min-h-screen flex flex-col overflow-x-clip animate-fadeIn">
+      <div ref={chromeRef} className="sticky top-0 z-10 bg-bg">
         <AppHeader subtitle="LEADERBOARD" />
 
         <div className="px-3 py-2 border-b border-border bg-surface flex items-stretch gap-2">
-          <div className="basis-[60%] min-w-0 flex">
+          <div className="basis-1/2 min-w-0 flex">
             <FilterDropdown
               value={filters.format}
               options={filters.formatOptions}
@@ -628,10 +655,11 @@ function Mobile({
               variant="mobile"
               renderValue={renderFormatOption}
               renderOption={renderFormatOption}
+              triggerClassName="py-2"
             />
           </div>
           {sets && (
-            <div className="basis-[40%] min-w-0 flex">
+            <div className="basis-1/2 min-w-0 flex">
               <SetFilterDropdown
                 value={profileSet}
                 options={setOptions}
@@ -639,15 +667,11 @@ function Mobile({
                 variant="mobile"
                 align="right"
                 searchable
+                subtext={updated ? `UPDATED ${updated}` : undefined}
               />
             </div>
           )}
         </div>
-        {updated && (
-          <div className="px-3 py-1 border-b border-border bg-bg mono text-[10px] text-muted text-right">
-            UPDATED {updated}
-          </div>
-        )}
         {isCube && (
           <div className="px-3 py-1.5 border-b border-border bg-surface flex">
             <CubeSeasonSelector
@@ -689,6 +713,8 @@ function Mobile({
         showHeader={false}
         mode={boardModeFor(filters.format)}
         onRowPrefetch={(r) => prefetchPlayer(r.slug, profileSet)}
+        highlightSlug={mySlug}
+        stickyTop={chromeHeight}
         renderExpanded={(r) => (
           <MobileExpandedRow
             row={r}
