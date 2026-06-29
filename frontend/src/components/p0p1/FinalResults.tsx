@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
 import { SectionLabel } from "../SectionLabel";
 import { PickGrid } from "./CommunityGrid";
@@ -447,20 +448,23 @@ function Leaderboard({
   userBallotId,
   cardsByName,
   ratingsByName,
+  mode = "full",
+  onSeeAll,
 }: {
   rankedBallots: RankedBallot[];
   setCode: string;
   userBallotId: number | null;
   cardsByName: Map<string, Card>;
   ratingsByName: Map<string, CardRating>;
+  mode?: "peek" | "full";
+  onSeeAll?: () => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
   const maxScore = rankedBallots[0]?.score ?? 1;
+  const isPeek = mode === "peek";
   const hasMore = rankedBallots.length > COLLAPSED_COUNT;
-  const hiddenCount = rankedBallots.length - COLLAPSED_COUNT;
 
   const visible = useMemo(() => {
-    if (expanded || !hasMore) return rankedBallots;
+    if (!isPeek || !hasMore) return rankedBallots;
     const peek = rankedBallots.slice(0, COLLAPSED_COUNT);
     // Pin the user's own row if it falls outside the peek window
     if (userBallotId !== null) {
@@ -471,13 +475,10 @@ function Leaderboard({
       }
     }
     return peek;
-  }, [expanded, hasMore, rankedBallots, userBallotId]);
+  }, [isPeek, hasMore, rankedBallots, userBallotId]);
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex justify-center">
-        <SectionLabel size={22} className="text-white">RESULTS</SectionLabel>
-      </div>
       <div>
         <div className="relative">
           <div className="border-t border-border2 bg-surface2">
@@ -493,29 +494,20 @@ function Leaderboard({
               />
             ))}
           </div>
-          {/* Peek fade — only when collapsed and there are hidden rows */}
-          {!expanded && hasMore && (
+          {/* Peek fade — only when in peek mode and there are hidden rows */}
+          {isPeek && hasMore && (
             <div className="absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-surface2 to-transparent pointer-events-none" />
           )}
         </div>
-        {hasMore && (
+        {isPeek && hasMore && onSeeAll && (
           <button
             type="button"
-            onClick={() => setExpanded((e) => !e)}
+            onClick={onSeeAll}
             className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-surface2 border-t-0 border border-border2 text-subtle hover:text-text transition-colors"
           >
-            <ChevronDown
-              size={14}
-              className={`shrink-0 transition-transform duration-150 ${expanded ? "rotate-180" : ""}`}
-            />
             <span className="font-display tracking-[0.14em] text-[13px]">
-              {expanded ? "COLLAPSE STANDINGS" : `SHOW ALL ${rankedBallots.length} STANDINGS`}
+              SEE ALL {rankedBallots.length} STANDINGS →
             </span>
-            {!expanded && (
-              <span className="font-mono text-[11px] text-muted bg-border2 px-1.5 py-0.5 rounded-full">
-                +{hiddenCount}
-              </span>
-            )}
           </button>
         )}
       </div>
@@ -700,95 +692,201 @@ export function FinalResults({
   // Keep "your picks" score visible even when no ratingsSnapshot score — show raw
   const displayScore = yourScore ?? 0;
 
+  const [searchParams, setSearchParams] = useSearchParams();
+  const TABS = [
+    { id: "overview", label: "OVERVIEW" },
+    { id: "results", label: "FULL RESULTS" },
+    { id: "breakdown", label: "BREAKDOWN" },
+  ] as const;
+  type TabId = typeof TABS[number]["id"];
+  const rawTab = searchParams.get("tab") as TabId | null;
+  const activeTab: TabId = TABS.some((t) => t.id === rawTab) ? rawTab! : "overview";
+
+  const goToTab = (id: TabId) =>
+    setSearchParams({ tab: id }, { replace: true });
+
+  const statsBlock = useMemo(() => {
+    if (rankedBallots.length === 0) return null;
+    const avg = rankedBallots.reduce((s, b) => s + b.score, 0) / rankedBallots.length;
+    const top = rankedBallots[0];
+    return { count: rankedBallots.length, avg, top };
+  }, [rankedBallots]);
+
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-6">
       {dateCaption && (
         <p className="text-center text-dim font-mono text-[11px] tracking-widest uppercase">
           17lands data through {dateCaption} · final results
         </p>
       )}
 
-      {/* Your result */}
-      {showYourPicks && userBallot && (
-        <div className="flex justify-center">
-          <YourResultCard ballot={userBallot} total={rankedBallots.length} crowdScore={crowdTeam.score} bestScore={bestTeam.score} />
+      {/* Sub-tab bar */}
+      <div className="flex items-center gap-4">
+        <div className="flex gap-1 bg-surface2 border border-border rounded-md p-1">
+          {TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => goToTab(tab.id)}
+              className={`font-display tracking-[0.14em] text-[13px] px-4 py-1.5 rounded transition-colors border-0 cursor-pointer ${
+                activeTab === tab.id
+                  ? "bg-green text-bg"
+                  : "bg-transparent text-muted hover:text-text"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
-      )}
-      {showYourPicks && !userBallot && (
-        <div className="flex justify-center">
-          <div className="flex flex-col items-center gap-1 py-3 px-6 bg-surface2 border border-border2 rounded-sm">
-            <div className="font-display tracking-[0.18em] text-[13px] text-subtle uppercase">Your result</div>
-            <div className="font-mono tabular-nums text-[28px] text-white mt-1">{displayScore.toFixed(1)}</div>
-          </div>
-        </div>
-      )}
-      {loggedOut && (
-        <div className="flex justify-center">
-          <button
-            type="button"
-            onClick={signIn}
-            className="bg-transparent border-0 cursor-pointer p-0"
-          >
-            <CtaPill size="lg" icon={<DiscordIcon size={19} />}>
-              LOG IN TO VIEW YOUR PICKS
-            </CtaPill>
-          </button>
-        </div>
-      )}
-
-      {/* Results leaderboard */}
-      {rankedBallots.length > 0 && (
-        <Leaderboard
-          rankedBallots={rankedBallots}
-          setCode={setCode}
-          userBallotId={userBallot?.ballotId ?? null}
-          cardsByName={cardsByName}
-          ratingsByName={ratingsByName}
-        />
-      )}
-
-      {/* Per-slot 3-way comparison — yours / crowd / best, keyed on GIHWR */}
-      <div className="flex flex-col gap-3">
-        <div className="flex items-baseline justify-center gap-3 mb-2">
-          <SectionLabel size={22} className="text-white">YOUR PICKS</SectionLabel>
-          {showYourPicks && (
-            <span className="font-mono tabular-nums text-[18px] text-subtle">
-              {displayScore.toFixed(1)}
-            </span>
-          )}
-        </div>
-        {showYourPicks && (
-          <PickGrid entries={yourEntries} cardsByName={cardsByName} onTileOpen={onTileOpen} />
+        {rankedBallots.length > 0 && (
+          <span className="font-mono text-[11px] text-dim">
+            {rankedBallots.length} participants
+          </span>
         )}
-        <div className="flex items-baseline justify-center gap-3 mb-2 mt-4">
-          <SectionLabel size={22} className="text-white">CROWD TEAM</SectionLabel>
-          <span className="font-mono tabular-nums text-[18px] text-subtle">
-            {crowdTeam.score.toFixed(1)}
-          </span>
-        </div>
-        <PickGrid entries={crowdEntries} cardsByName={cardsByName} onTileOpen={onTileOpen} />
-        <div className="flex items-baseline justify-center gap-3 mb-2 mt-4">
-          <SectionLabel size={22} className="text-white">BEST POSSIBLE</SectionLabel>
-          <span className="font-mono tabular-nums text-[18px] text-subtle">
-            {bestTeam.score.toFixed(1)}
-          </span>
-        </div>
-        <PickGrid entries={bestEntries} cardsByName={cardsByName} onTileOpen={onTileOpen} />
       </div>
 
-      <MidwayVersusModal pager={pager} />
+      {/* ── OVERVIEW ─────────────────────────────────────────────────── */}
+      {activeTab === "overview" && (
+        <div className="flex flex-col gap-8">
+          {/* Your result */}
+          {showYourPicks && userBallot && (
+            <div className="flex justify-center">
+              <YourResultCard ballot={userBallot} total={rankedBallots.length} crowdScore={crowdTeam.score} bestScore={bestTeam.score} />
+            </div>
+          )}
+          {showYourPicks && !userBallot && (
+            <div className="flex justify-center">
+              <div className="flex flex-col items-center gap-1 py-3 px-6 bg-surface2 border border-border2 rounded-sm">
+                <div className="font-display tracking-[0.18em] text-[13px] text-subtle uppercase">Your result</div>
+                <div className="font-mono tabular-nums text-[28px] text-white mt-1">{displayScore.toFixed(1)}</div>
+              </div>
+            </div>
+          )}
+          {loggedOut && (
+            <div className="flex justify-center">
+              <button
+                type="button"
+                onClick={signIn}
+                className="bg-transparent border-0 cursor-pointer p-0"
+              >
+                <CtaPill size="lg" icon={<DiscordIcon size={19} />}>
+                  LOG IN TO VIEW YOUR PICKS
+                </CtaPill>
+              </button>
+            </div>
+          )}
 
-      {/* GIHWR breakdown */}
-      <MidwayBreakdownList
-        cards={cards}
-        cardsByName={cardsByName}
-        ratingsByName={ratingsByName}
-        yourCardBySlot={yourCardBySlot}
-        crowdCardBySlot={crowdCardBySlot}
-      />
+          {/* Stat tiles */}
+          {statsBlock && (
+            <div className="grid grid-cols-3 gap-3">
+              <div className="bg-surface2 border border-border2 rounded-sm px-4 py-3">
+                <div className="font-display tracking-[0.14em] text-[11px] text-muted uppercase mb-1">Participants</div>
+                <div className="font-mono tabular-nums text-[22px] text-text font-semibold">{statsBlock.count}</div>
+              </div>
+              <div className="bg-surface2 border border-border2 rounded-sm px-4 py-3">
+                <div className="font-display tracking-[0.14em] text-[11px] text-muted uppercase mb-1">Avg score</div>
+                <div className="font-mono tabular-nums text-[22px] text-text font-semibold">{statsBlock.avg.toFixed(1)}</div>
+              </div>
+              <div className="bg-surface2 border border-border2 rounded-sm px-4 py-3">
+                <div className="font-display tracking-[0.14em] text-[11px] text-muted uppercase mb-1">Top score</div>
+                <div className="font-mono tabular-nums text-[22px] font-semibold" style={{ color: "#ffc63a" }}>
+                  {statsBlock.top.score.toFixed(1)}
+                </div>
+                <div className="text-[11px] text-muted mt-0.5 truncate">{statsBlock.top.name}</div>
+              </div>
+            </div>
+          )}
 
-      {/* Highlights reel */}
-      <HighlightsReel highlights={highlights} cardsByName={cardsByName} />
+          {/* Top-3 standings peek */}
+          {rankedBallots.length > 0 && (
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <SectionLabel size={16} className="text-white">TOP STANDINGS</SectionLabel>
+                <button
+                  type="button"
+                  onClick={() => goToTab("results")}
+                  className="font-display tracking-[0.12em] text-[11px] px-3 py-1 bg-transparent border border-border2 text-muted hover:text-text rounded transition-colors cursor-pointer"
+                >
+                  SEE ALL →
+                </button>
+              </div>
+              <Leaderboard
+                rankedBallots={rankedBallots}
+                setCode={setCode}
+                userBallotId={userBallot?.ballotId ?? null}
+                cardsByName={cardsByName}
+                ratingsByName={ratingsByName}
+                mode="peek"
+                onSeeAll={() => goToTab("results")}
+              />
+            </div>
+          )}
+
+          {/* Highlights reel */}
+          <HighlightsReel highlights={highlights} cardsByName={cardsByName} />
+        </div>
+      )}
+
+      {/* ── FULL RESULTS ─────────────────────────────────────────────── */}
+      {activeTab === "results" && (
+        <div className="flex flex-col gap-8">
+          {rankedBallots.length > 0 && (
+            <div className="flex flex-col gap-3">
+              <SectionLabel size={16} className="text-white">STANDINGS</SectionLabel>
+              <Leaderboard
+                rankedBallots={rankedBallots}
+                setCode={setCode}
+                userBallotId={userBallot?.ballotId ?? null}
+                cardsByName={cardsByName}
+                ratingsByName={ratingsByName}
+                mode="full"
+              />
+            </div>
+          )}
+
+          {/* Per-slot 3-way comparison — yours / crowd / best, keyed on GIHWR */}
+          <div className="flex flex-col gap-3">
+            <div className="flex items-baseline justify-center gap-3 mb-2">
+              <SectionLabel size={22} className="text-white">YOUR PICKS</SectionLabel>
+              {showYourPicks && (
+                <span className="font-mono tabular-nums text-[18px] text-subtle">
+                  {displayScore.toFixed(1)}
+                </span>
+              )}
+            </div>
+            {showYourPicks && (
+              <PickGrid entries={yourEntries} cardsByName={cardsByName} onTileOpen={onTileOpen} />
+            )}
+            <div className="flex items-baseline justify-center gap-3 mb-2 mt-4">
+              <SectionLabel size={22} className="text-white">CROWD TEAM</SectionLabel>
+              <span className="font-mono tabular-nums text-[18px] text-subtle">
+                {crowdTeam.score.toFixed(1)}
+              </span>
+            </div>
+            <PickGrid entries={crowdEntries} cardsByName={cardsByName} onTileOpen={onTileOpen} />
+            <div className="flex items-baseline justify-center gap-3 mb-2 mt-4">
+              <SectionLabel size={22} className="text-white">BEST POSSIBLE</SectionLabel>
+              <span className="font-mono tabular-nums text-[18px] text-subtle">
+                {bestTeam.score.toFixed(1)}
+              </span>
+            </div>
+            <PickGrid entries={bestEntries} cardsByName={cardsByName} onTileOpen={onTileOpen} />
+          </div>
+
+          <MidwayVersusModal pager={pager} />
+        </div>
+      )}
+
+      {/* ── BREAKDOWN ────────────────────────────────────────────────── */}
+      {activeTab === "breakdown" && (
+        <MidwayBreakdownList
+          cards={cards}
+          cardsByName={cardsByName}
+          ratingsByName={ratingsByName}
+          yourCardBySlot={yourCardBySlot}
+          crowdCardBySlot={crowdCardBySlot}
+        />
+      )}
     </div>
   );
 }
