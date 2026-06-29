@@ -38,6 +38,7 @@ from bot.commands.set_awards import setup as setup_set_awards
 from bot.commands.signout import setup as setup_signout
 from bot.commands.signup import setup as setup_signup
 from bot.commands.stats import setup as setup_stats
+from bot.commands.trophy import setup as setup_trophy
 from bot.config import settings
 from bot.database import SessionLocal, run_migrations
 from bot.discord_helpers import refresh_player_profiles
@@ -181,6 +182,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_delete_account(bot)
         await setup_leaderboard(bot)
         await setup_stats(bot)
+        await setup_trophy(bot)
         await setup_help(bot)
         await setup_event_scribe(bot)
         await setup_link_17lands(bot)

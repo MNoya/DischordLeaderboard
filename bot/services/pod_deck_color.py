@@ -73,7 +73,7 @@ REVIEW_NO_VALUE = "no"
 DRAFT_REVIEW_FEATURE_ENABLED = False
 
 
-def _label(code: str) -> str:
+def color_label(code: str) -> str:
     if code in GUILD_LABEL:
         return f"{GUILD_LABEL[code]} ({code})"
     return code

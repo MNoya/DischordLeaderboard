@@ -318,6 +318,41 @@ class PodDraftReplay(Base):
     )
 
 
+class SelfReportedTrophy(Base):
+    """A trophy a player posted in trophy-hype and logged to their profile via /trophy.
+
+    Unverified self-report: showcase only, never scored. The source_url links back to the
+    original public post for accountability. Unique per (player_id, source_message_id) so
+    re-running /trophy on the same post updates rather than duplicates.
+    """
+    __tablename__ = "self_reported_trophies"
+
+    id                = Column(String, primary_key=True, default=lambda: str(uuid4()))
+    player_id         = Column(String, ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    # Nullable so a trophy in a not-yet-registered set still persists, mirroring draft_events
+    set_id            = Column(String, ForeignKey("sets.id"), nullable=True)
+    set_code          = Column(String, nullable=False)
+    record            = Column(String, nullable=False)
+    # WUBRG-normalized (uppercase main, lowercase splash); null when the player left it unknown
+    colors            = Column(String, nullable=True)
+    platform          = Column(String, nullable=False)
+    # The player's original post text, kept as a memory to show alongside the deck on their profile
+    caption           = Column(Text, nullable=True)
+    # Discord CDN attachment URL (dim-stripped), refreshed browser-side via the message ref when its
+    # signed expiry lapses — same treatment as pod deck screenshots
+    screenshot_url    = Column(String, nullable=True)
+    source_channel_id = Column(String, nullable=False)
+    source_message_id = Column(String, nullable=False)
+    source_url        = Column(String, nullable=False)
+    reported_at       = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    player = relationship("Player")
+
+    __table_args__ = (
+        UniqueConstraint("player_id", "source_message_id", name="uq_self_trophy_player_message"),
+    )
+
+
 class Episode(Base):
     """One row per published piece of content — a podcast episode, a YouTube video, or both
     when a video matches its episode.

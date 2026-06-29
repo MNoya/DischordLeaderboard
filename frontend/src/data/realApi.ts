@@ -10,6 +10,7 @@ import {
   adaptDraftEvent,
   adaptFormatBreakdown,
   adaptLeaderboardRow,
+  adaptSelfReportedTrophy,
   adaptSet,
 } from "./adapter";
 import { adaptDbEpisode, type DbEpisodeRow, type Episode } from "./episodes";
@@ -792,7 +793,7 @@ export async function fetchPlayerProfile(
   setCode: string,
 ): Promise<PlayerProfile | null> {
   setCode = baseSetCode(setCode); // cube seasons share the lifetime profile
-  const [headlineResp, breakdownResp, podResp] = await Promise.all([
+  const [headlineResp, breakdownResp, podResp, trophiesResp] = await Promise.all([
     client()
       .from("public_player")
       .select("*")
@@ -810,15 +811,28 @@ export async function fetchPlayerProfile(
       .eq("set_code", setCode)
       .eq("slug", slug)
       .maybeSingle(),
+    client()
+      .from("public_self_reported_trophies")
+      .select("*")
+      .eq("set_code", setCode)
+      .eq("slug", slug)
+      .order("reported_at", { ascending: false }),
   ]);
   if (headlineResp.error) throw headlineResp.error;
   if (breakdownResp.error) throw breakdownResp.error;
   if (podResp.error) throw podResp.error;
-  if (!headlineResp.data && !podResp.data) return null;
+  if (trophiesResp.error) throw trophiesResp.error;
+  const trophyRows = (trophiesResp.data ?? []) as Record<string, unknown>[];
+  if (!headlineResp.data && !podResp.data && trophyRows.length === 0) return null;
 
-  const headline = headlineResp.data
-    ? adaptLeaderboardRow(headlineResp.data as Record<string, unknown>)
-    : podOnlyHeadline(slug, setCode, podResp.data as Record<string, unknown>);
+  let headline: LeaderboardRow;
+  if (headlineResp.data) {
+    headline = adaptLeaderboardRow(headlineResp.data as Record<string, unknown>);
+  } else if (podResp.data) {
+    headline = podOnlyHeadline(slug, setCode, podResp.data as Record<string, unknown>);
+  } else {
+    headline = trophyOnlyHeadline(slug, setCode, trophyRows[0]);
+  }
   const breakdown = (breakdownResp.data ?? []).map((r) =>
     adaptFormatBreakdown(r as Record<string, unknown>),
   );
@@ -872,6 +886,7 @@ export async function fetchPlayerProfile(
     losses: headline.losses,
     lastCalculatedAt: headline.lastCalculatedAt || undefined,
     formatBreakdown: breakdown,
+    selfReportedTrophies: trophyRows.map((r) => adaptSelfReportedTrophy(r)),
   };
 }
 
@@ -887,6 +902,24 @@ function podOnlyHeadline(slug: string, setCode: string, pod: Record<string, unkn
     events: (pod.events as number) ?? 0,
     wins: (pod.wins as number) ?? 0,
     losses: (pod.losses as number) ?? 0,
+    lastCalculatedAt: "",
+  };
+}
+
+// A player whose only footprint is self-reported trophies — no 17lands stats, no pods. Their
+// profile still renders so the trophy-case band has a home.
+function trophyOnlyHeadline(slug: string, setCode: string, trophy: Record<string, unknown>): LeaderboardRow {
+  return {
+    setCode,
+    slug,
+    displayName: (trophy.display_name as string | null) ?? slug,
+    avatarUrl: (trophy.avatar_url as string | null) ?? null,
+    rank: 0,
+    score: 0,
+    trophies: 0,
+    events: 0,
+    wins: 0,
+    losses: 0,
     lastCalculatedAt: "",
   };
 }

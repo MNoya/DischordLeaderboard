@@ -4,9 +4,11 @@ import { cn } from "../../../lib/utils";
 import { Pips } from "../../ManaPips";
 import { Tooltip } from "../../Tooltip";
 import { GoSidebarCollapse, TbCards } from "../../Icons";
-import { avatarAccent, CardImage } from "./ReviewCard";
+import { CardImage, ReviewSetProvider } from "./ReviewCard";
+import { AAvatar } from "../../Brand";
 import { DeckScreenshotModal, type DeckLike } from "../DeckScreenshotModal";
 import { poolBefore, poolByPack, reconstructDraft, resolveDeck, seatColors, seatHandle } from "../../../data/draft-artifact";
+import { cleanPodEventName, stripDiscriminator } from "../../../data/utils";
 import type { ArtifactCard, PodDraftArtifact } from "../../../types/leaderboard";
 
 type RevealMode = "revealed" | "click";
@@ -24,6 +26,7 @@ export interface ReviewSeatInfo {
   seatIndex: number;
   displayName: string;
   participantDisplayName: string;
+  avatarUrl: string | null;
   deckColors: string | null;
   deckScreenshotUrl: string | null;
   deckScreenshotCaption: string | null;
@@ -43,20 +46,24 @@ interface DraftReviewMOCSProps {
 
 export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, onClose, onSeatChange, eventId, seatInfo }: DraftReviewMOCSProps) {
   const setSymbol = `/set-symbols/${meta.setCode.toLowerCase()}.png`;
-  const eventTitle = useMemo(
-    () =>
-      meta.name
-        .replace(new RegExp(`^${meta.setCode}\\s+`, "i"), "")
-        .replace(/\s*[-–]\s*[^-–]*$/, "")
-        .trim(),
-    [meta],
-  );
+  const eventTitle = useMemo(() => cleanPodEventName(meta.name, meta.setCode), [meta]);
   const N = artifact.seats.length;
+
+  const seatInfoMap = useMemo(() => new Map((seatInfo ?? []).map((s) => [s.seatIndex, s])), [seatInfo]);
 
   const views = useMemo(() => reconstructDraft(artifact), [artifact]);
   const seats = useMemo(
-    () => artifact.seats.map((name, i) => ({ index: i, name: seatHandle(name), colors: seatColors(artifact, i) })),
-    [artifact],
+    () =>
+      artifact.seats.map((name, i) => {
+        const info = seatInfoMap.get(i);
+        return {
+          index: i,
+          name: info ? stripDiscriminator(info.displayName) : seatHandle(name),
+          colors: seatColors(artifact, i),
+          avatarUrl: info?.avatarUrl ?? null,
+        };
+      }),
+    [artifact, seatInfoMap],
   );
 
   const [seat, setSeat] = useState(initialSeat);
@@ -70,8 +77,6 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, onClose, onSe
   const [revealed, setRevealed] = useState(false);
   const [splitSideboard, setSplitSideboard] = useState(false);
   const [deckPopupSeat, setDeckPopupSeat] = useState<number | null>(null);
-
-  const seatInfoMap = useMemo(() => new Map((seatInfo ?? []).map((s) => [s.seatIndex, s])), [seatInfo]);
 
   useEffect(() => {
     const html = document.documentElement;
@@ -192,8 +197,6 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, onClose, onSe
   const left = (seat - 1 + N) % N;
   const right = (seat + 1) % N;
   const dir = PASS_DIRS[pack];
-  const fromSeat = dir === 1 ? left : right;
-  const toSeat = dir === 1 ? right : left;
 
   const leftCards = poolBefore(views, left, pack, pick).map((i) => artifact.cards[i]);
   const rightCards = poolBefore(views, right, pack, pick).map((i) => artifact.cards[i]);
@@ -201,15 +204,17 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, onClose, onSe
   const neighborsOpen = showNeighbors && neighborsHaveCards;
 
   return (
+    <ReviewSetProvider value={artifact.set}>
     <div className="fixed inset-0 z-50 flex select-none flex-col bg-bg text-text">
       <MobileTopBar
         setSymbol={setSymbol}
         eventTitle={eventTitle}
-        from={seats[fromSeat]}
+        left={seats[left]}
         active={active}
-        to={seats[toSeat]}
-        onSelectFrom={() => changeSeat(fromSeat)}
-        onSelectTo={() => changeSeat(toSeat)}
+        right={seats[right]}
+        passRight={dir === 1}
+        onSelectLeft={() => changeSeat(left)}
+        onSelectRight={() => changeSeat(right)}
         onClose={onClose}
       />
       <Header
@@ -289,7 +294,9 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, onClose, onSe
         right={seats[right]}
         passRight={dir === 1}
       />
-      {neighborsOpen && <NeighborBand left={leftCards} right={rightCards} />}
+      {neighborsOpen && (
+        <NeighborBand left={leftCards} right={rightCards} leftSeat={seats[left]} rightSeat={seats[right]} />
+      )}
       {deckPopup && (
         <DeckScreenshotModal
           participant={deckPopup}
@@ -300,6 +307,7 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, onClose, onSe
         />
       )}
     </div>
+    </ReviewSetProvider>
   );
 }
 
@@ -320,29 +328,44 @@ interface Seat {
   index: number;
   name: string;
   colors: string;
+  avatarUrl: string | null;
 }
 
-// Mobile-only slim bar: the pass flow from › active › to, names tight together. Tapping the upstream
-// or downstream player switches seats, so you can walk the table. The › points the way cards pass.
+// Renders an event title with any `#N` token in green, mirroring the placement styling on the table.
+function EventTitle({ title }: { title: string }) {
+  const parts = title.split(/(#\d+)/g);
+  return (
+    <>
+      {parts.map((part, i) => (/^#\d+$/.test(part) ? <span key={i} className="text-green">{part}</span> : part))}
+    </>
+  );
+}
+
+// Mobile-only slim bar: the left and right neighbors stay anchored to their physical sides; the arrow
+// between them points the way cards pass and flips for the right-to-left packs. Tapping a neighbor
+// switches seats so you can walk the table.
 function MobileTopBar({
   setSymbol,
   eventTitle,
-  from,
+  left,
   active,
-  to,
-  onSelectFrom,
-  onSelectTo,
+  right,
+  passRight,
+  onSelectLeft,
+  onSelectRight,
   onClose,
 }: {
   setSymbol: string;
   eventTitle: string;
-  from: Seat;
+  left: Seat;
   active: Seat;
-  to: Seat;
-  onSelectFrom: () => void;
-  onSelectTo: () => void;
+  right: Seat;
+  passRight: boolean;
+  onSelectLeft: () => void;
+  onSelectRight: () => void;
   onClose?: () => void;
 }) {
+  const arrow = passRight ? "»" : "«";
   return (
     <div className="relative flex h-10 shrink-0 items-center border-b border-border bg-surface px-2 lg:hidden">
       <button
@@ -351,28 +374,30 @@ function MobileTopBar({
         className="absolute left-2 flex items-center gap-1.5 [-webkit-tap-highlight-color:transparent] active:text-text"
       >
         <img src={setSymbol} alt="" className="h-5 w-5" />
-        <span className="max-w-[84px] truncate font-display text-[13px] tracking-[0.04em] text-subtle">{eventTitle}</span>
+        <span className="max-w-[84px] truncate font-display text-[13px] tracking-[0.04em] text-subtle">
+          <EventTitle title={eventTitle} />
+        </span>
       </button>
       <div className="grid w-full grid-cols-[1fr_auto_1fr] items-center">
         <div className="flex min-w-0 items-center justify-end gap-2">
           <button
-            onClick={onSelectFrom}
+            onClick={onSelectLeft}
             className="max-w-[110px] truncate font-display text-[13px] tracking-[0.04em] text-subtle [-webkit-tap-highlight-color:transparent] active:text-text"
           >
-            {from.name}
+            {left.name}
           </button>
-          <span className="font-mono text-[13px] text-subtle">»</span>
+          <span className="font-mono text-[13px] text-subtle">{arrow}</span>
         </div>
         <span className="max-w-[120px] truncate px-1 text-center font-display text-[16px] tracking-[0.06em] text-green">
           {active.name}
         </span>
         <div className="flex min-w-0 items-center justify-start gap-2">
-          <span className="font-mono text-[13px] text-subtle">»</span>
+          <span className="font-mono text-[13px] text-subtle">{arrow}</span>
           <button
-            onClick={onSelectTo}
+            onClick={onSelectRight}
             className="max-w-[110px] truncate font-display text-[13px] tracking-[0.04em] text-subtle [-webkit-tap-highlight-color:transparent] active:text-text"
           >
-            {to.name}
+            {right.name}
           </button>
         </div>
       </div>
@@ -450,7 +475,9 @@ function Header({
         aria-label="Back to pod"
       >
         <img src={setSymbol} alt="" className="h-7 w-7 shrink-0" />
-        <span className="truncate font-display text-[19px] tracking-[0.08em]">{eventTitle}</span>
+        <span className="truncate font-display text-[19px] tracking-[0.08em]">
+          <EventTitle title={eventTitle} />
+        </span>
       </button>
 
       <div className="flex items-center gap-5">
@@ -828,7 +855,7 @@ function MobileNavDivider({
   revealMode: RevealMode;
   onRevealMode: (m: RevealMode) => void;
 }) {
-  const arrow = "flex h-8 w-8 shrink-0 items-center justify-center rounded-md border font-mono text-[15px] transition-colors";
+  const arrow = "flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-[transform,background-color,border-color,color] duration-150 ease-out touch-manipulation [-webkit-tap-highlight-color:transparent]";
   return (
     <div className="flex h-12 shrink-0 items-center justify-between gap-1.5 border-t border-border bg-surface px-2 lg:hidden">
       <div className="flex gap-1">
@@ -852,16 +879,17 @@ function MobileNavDivider({
         <button
           onClick={onPrev}
           disabled={atStart}
-          className={cn(arrow, atStart ? "border-border text-dim opacity-40" : "border-border bg-surface2 text-subtle hover:border-white/40 hover:bg-white/10 hover:text-text")}
+          aria-label="Previous pick"
+          className={cn(arrow, atStart ? "border-border text-dim opacity-40" : "border-white/40 bg-surface2 text-text active:scale-90 active:bg-white/20 motion-reduce:active:scale-100")}
         >
-          ‹
+          <ChevronIcon dir="left" />
         </button>
         <span className="min-w-[56px] text-center font-display text-[17px] tracking-[0.06em] text-text">
           P{pack + 1}P{pick + 1}
         </span>
         {awaitingReveal ? (
           <Tooltip label="Reveal picked card" side="bottom">
-            <button onClick={onReveal} aria-label="Reveal picked card" className={cn(arrow, "border-border bg-surface2 text-subtle hover:border-white/40 hover:bg-white/10 hover:text-text")}>
+            <button onClick={onReveal} aria-label="Reveal picked card" className={cn(arrow, "border-green/55 bg-surface2 text-green active:scale-90 active:bg-green/25 motion-reduce:active:scale-100")}>
               <EyeIcon off={false} />
             </button>
           </Tooltip>
@@ -869,9 +897,10 @@ function MobileNavDivider({
           <button
             onClick={onNext}
             disabled={atEnd}
-            className={cn(arrow, atEnd ? "border-border text-dim opacity-40" : "border-border bg-surface2 text-subtle hover:border-white/40 hover:bg-white/10 hover:text-text")}
+            aria-label="Next pick"
+            className={cn(arrow, atEnd ? "border-border text-dim opacity-40" : "border-green/55 bg-surface2 text-green active:scale-90 active:bg-green/25 motion-reduce:active:scale-100")}
           >
-            ›
+            <ChevronIcon dir="right" />
           </button>
         )}
       </div>
@@ -1103,7 +1132,7 @@ function PlayerTile({
         active ? "bg-white/[0.06]" : "hover:bg-white/[0.04]",
       )}
     >
-      <Avatar name={seat.name} colors={hideColors ? "" : seat.colors} size={58} />
+      <AAvatar displayName={seat.name} avatarUrl={seat.avatarUrl} size={58} green={active} />
       <span
         className={cn(
           "max-w-full truncate font-display text-[15px] leading-none tracking-[0.04em]",
@@ -1117,16 +1146,41 @@ function PlayerTile({
   );
 }
 
-function NeighborBand({ left, right }: { left: ArtifactCard[]; right: ArtifactCard[] }) {
+function NeighborBand({
+  left,
+  right,
+  leftSeat,
+  rightSeat,
+}: {
+  left: ArtifactCard[];
+  right: ArtifactCard[];
+  leftSeat: Seat;
+  rightSeat: Seat;
+}) {
   return (
-    <div className="hidden h-[232px] shrink-0 items-stretch border-t border-border bg-bg lg:flex">
-      <div className="min-w-0 flex-1 px-6 py-3">
-        <Pool cards={left} markLast cardWidth={134} reveal={30} />
+    <div className="hidden h-[244px] shrink-0 items-stretch border-t border-border bg-bg lg:flex">
+      <div className="flex min-w-0 flex-1 flex-col px-6 pb-3 pt-2">
+        <PileLabel seat={leftSeat} align="left" />
+        <div className="min-h-0 flex-1">
+          <Pool cards={left} markLast cardWidth={134} reveal={30} />
+        </div>
       </div>
       <div className="w-px shrink-0 self-stretch bg-border" />
-      <div className="min-w-0 flex-1 px-6 py-3">
-        <Pool cards={right} markLast cardWidth={134} reveal={30} align="right" />
+      <div className="flex min-w-0 flex-1 flex-col px-6 pb-3 pt-2">
+        <PileLabel seat={rightSeat} align="right" />
+        <div className="min-h-0 flex-1">
+          <Pool cards={right} markLast cardWidth={134} reveal={30} align="right" />
+        </div>
       </div>
+    </div>
+  );
+}
+
+function PileLabel({ seat, align }: { seat: Seat; align: "left" | "right" }) {
+  return (
+    <div className={cn("mb-1.5 flex items-center gap-2", align === "right" && "flex-row-reverse")}>
+      <AAvatar displayName={seat.name} avatarUrl={seat.avatarUrl} size={22} />
+      <span className="truncate font-display text-[13px] tracking-[0.1em] text-subtle">{seat.name}</span>
     </div>
   );
 }
@@ -1191,31 +1245,25 @@ function PlayersBar({
   );
 }
 
-function Avatar({ name, colors, size }: { name: string; colors: string; size: number }) {
-  const accent = avatarAccent(colors);
-  return (
-    <div
-      className="flex shrink-0 items-center justify-center rounded-md border-2 bg-surface2"
-      style={{ width: size, height: size, borderColor: accent }}
-    >
-      <span className="font-display tracking-[0.04em]" style={{ fontSize: size * 0.42, color: accent }}>
-        {name.slice(0, 2).toUpperCase()}
-      </span>
-    </div>
-  );
-}
-
 function NavArrow({ dir, onClick, disabled }: { dir: "prev" | "next"; onClick?: () => void; disabled?: boolean }) {
+  const primary = dir === "next";
   return (
     <button
       onClick={onClick}
       disabled={disabled}
+      aria-label={primary ? "Next pick" : "Previous pick"}
       className={cn(
-        "flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface2 font-mono text-[16px] transition-colors",
-        disabled ? "text-dim opacity-40" : "text-subtle hover:border-white/40 hover:bg-white/10 hover:text-text",
+        "flex h-9 w-9 items-center justify-center rounded-md border bg-surface2",
+        "transition-[transform,background-color,border-color,color] duration-150 ease-out",
+        "touch-manipulation [-webkit-tap-highlight-color:transparent]",
+        disabled
+          ? "border-border text-dim opacity-40"
+          : primary
+            ? "border-green/55 text-green hover:border-green hover:bg-green/15 active:scale-90 active:bg-green/25 motion-reduce:active:scale-100"
+            : "border-white/40 text-text hover:border-white/60 hover:bg-white/10 active:scale-90 active:bg-white/20 motion-reduce:active:scale-100",
       )}
     >
-      {dir === "prev" ? "‹" : "›"}
+      <ChevronIcon dir={primary ? "right" : "left"} />
     </button>
   );
 }

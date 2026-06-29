@@ -478,6 +478,7 @@ export function PodDraftLogRoute() {
     seatIndex: s.seatIndex,
     displayName: s.discordName,
     participantDisplayName: s.displayName,
+    avatarUrl: s.avatarUrl,
     deckColors: s.deckColors,
     deckScreenshotUrl: s.deckScreenshotUrl,
     deckScreenshotCaption: s.deckScreenshotCaption,

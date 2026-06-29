@@ -12,6 +12,7 @@ import {
   isDiscordCdnUrl,
   isDiscordUrlFresh,
   refreshDeckUrl,
+  refreshMessageImageUrl,
 } from "../../data/refresh-deck-url";
 import type { Mainboard } from "../../types/leaderboard";
 
@@ -27,6 +28,9 @@ export interface DeckLike {
   mainboard?: Mainboard | null;
   record?: string | null;
   draftLogUrl?: string | null;
+  // Self-reported trophies refresh their Discord CDN screenshot by message ref instead of pod event
+  screenshotChannelId?: string | null;
+  screenshotMessageId?: string | null;
 }
 
 type DeckTab = "screenshot" | "decklist";
@@ -49,12 +53,17 @@ export function DeckScreenshotModal({ participant, breakdownHref, hideDraftLog =
   const [tab, setTab] = useState<DeckTab>("screenshot");
   const effectiveTab: DeckTab =
     hasScreenshot && hasDecklist ? tab : hasDecklist ? "decklist" : "screenshot";
+  const showPanelToggle = hasScreenshot && hasDecklist;
+  const showDraftLogTab = !hideDraftLog;
+  const showTabBar = showPanelToggle || showDraftLogTab || !!onPrev || !!onNext;
 
+  const canRefresh =
+    !!participant.eventId || (!!participant.screenshotChannelId && !!participant.screenshotMessageId);
   const needsRefresh = useMemo(() => {
     const url = participant.deckScreenshotUrl;
-    if (!url || !participant.eventId) return false;
+    if (!url || !canRefresh) return false;
     return isDiscordCdnUrl(url) && !isDiscordUrlFresh(url);
-  }, [participant.deckScreenshotUrl, participant.eventId]);
+  }, [participant.deckScreenshotUrl, canRefresh]);
 
   const [resolvedUrl, setResolvedUrl] = useState<string | null>(
     needsRefresh ? null : participant.deckScreenshotUrl,
@@ -83,10 +92,16 @@ export function DeckScreenshotModal({ participant, breakdownHref, hideDraftLog =
   const showSkeleton = isResolving || (resolvedUrl !== null && !imgLoaded && !imgFailed);
 
   useEffect(() => {
-    if (!needsRefresh || !participant.eventId) return;
+    if (!needsRefresh) return;
     const lookupName = participant.participantDisplayName ?? participant.displayName;
+    const fetchFresh =
+      participant.screenshotChannelId && participant.screenshotMessageId
+        ? refreshMessageImageUrl(participant.screenshotChannelId, participant.screenshotMessageId)
+        : participant.eventId
+          ? refreshDeckUrl(participant.eventId, lookupName)
+          : Promise.resolve(null);
     let cancelled = false;
-    refreshDeckUrl(participant.eventId, lookupName)
+    fetchFresh
       .then((url) => {
         if (cancelled) return;
         setResolvedUrl(url ?? participant.deckScreenshotUrl);
@@ -103,6 +118,8 @@ export function DeckScreenshotModal({ participant, breakdownHref, hideDraftLog =
     participant.displayName,
     participant.participantDisplayName,
     participant.deckScreenshotUrl,
+    participant.screenshotChannelId,
+    participant.screenshotMessageId,
   ]);
 
   useEffect(() => {
@@ -266,37 +283,40 @@ export function DeckScreenshotModal({ participant, breakdownHref, hideDraftLog =
               SIDEBOARD
             </div>
             <div className="flex gap-2 overflow-x-auto themed-scrollbar pb-1">
-              {participant.mainboard!.sideboard.map((card) => (
-                <SideboardCard key={`${card.name}-${card.cn}`} card={card} deckSet={participant.mainboard!.set} />
+              {expandDuplicates(participant.mainboard!.sideboard).map((card, i) => (
+                <SideboardCard key={`${card.name}-${card.cn}-${i}`} card={card} deckSet={participant.mainboard!.set} />
               ))}
             </div>
           </div>
         )}
       </div>
       <div className="flex-1 min-h-0 w-full max-w-[1400px] flex flex-col items-center justify-center gap-10 px-4 md:px-0">
+        {showTabBar && (
         <div
           onClick={(e) => e.stopPropagation()}
           className="shrink-0 w-full lg:w-auto flex items-center justify-between gap-2 lg:gap-4 rounded-2xl bg-surface border border-border shadow-lg px-3 py-2 lg:px-4"
         >
           {onPrev ? <PanelChevron side="left" onClick={onPrev} /> : <span className="w-10 shrink-0" />}
           <div className="flex items-center gap-1.5">
-            <PanelTab
-              active={effectiveTab === "screenshot"}
-              disabled={!hasScreenshot}
-              onClick={() => setTab("screenshot")}
-              icon={<ImageIcon size={16} />}
-            >
-              IMAGE
-            </PanelTab>
-            <PanelTab
-              active={effectiveTab === "decklist"}
-              disabled={!hasDecklist}
-              onClick={() => setTab("decklist")}
-              icon={<TbCards size={17} />}
-            >
-              <span className="lg:hidden">POOL</span>
-              <span className="hidden lg:inline">CARD POOL</span>
-            </PanelTab>
+            {showPanelToggle && (
+              <PanelTab
+                active={effectiveTab === "screenshot"}
+                onClick={() => setTab("screenshot")}
+                icon={<ImageIcon size={16} />}
+              >
+                IMAGE
+              </PanelTab>
+            )}
+            {showPanelToggle && (
+              <PanelTab
+                active={effectiveTab === "decklist"}
+                onClick={() => setTab("decklist")}
+                icon={<TbCards size={17} />}
+              >
+                <span className="lg:hidden">POOL</span>
+                <span className="hidden lg:inline">CARD POOL</span>
+              </PanelTab>
+            )}
             {!hideDraftLog && (
               <PanelTab
                 disabled={!participant.draftLogUrl}
@@ -314,6 +334,7 @@ export function DeckScreenshotModal({ participant, breakdownHref, hideDraftLog =
           </div>
           {onNext ? <PanelChevron side="right" onClick={onNext} /> : <span className="w-10 shrink-0" />}
         </div>
+        )}
         {breakdownHref && (
           <Link
             to={breakdownHref}
@@ -401,6 +422,17 @@ const BADGE_H = 28;
 const COL_MIN = 132;
 const COL_MAX = 220;
 
+// true groups copies into one card with a ×N badge (17lands style); false renders every copy as its
+// own card. Kept as a constant so both treatments are easy to compare.
+const GROUP_DUPLICATE_CARDS = false;
+
+function expandDuplicates(cards: DeckCard[]): DeckCard[] {
+  if (GROUP_DUPLICATE_CARDS) {
+    return cards;
+  }
+  return cards.flatMap((card) => Array.from({ length: card.count ?? 1 }, () => ({ ...card, count: 1 })));
+}
+
 const COLOR_RANK: Record<string, number> = { W: 0, U: 1, B: 2, R: 3, G: 4 };
 
 function isLand(type: string | null): boolean {
@@ -425,7 +457,7 @@ function DecklistView({ mainboard }: { mainboard: Mainboard }) {
   const { mvPiles, lands } = useMemo(() => {
     const landCards: DeckCard[] = [];
     const byCmc = new Map<number, DeckCard[]>();
-    for (const card of mainboard.cards) {
+    for (const card of expandDuplicates(mainboard.cards)) {
       if (isLand(card.type)) {
         landCards.push(card);
         continue;
@@ -460,7 +492,7 @@ function Pile({ cards, deckSet }: { cards: DeckCard[]; deckSet: string | null })
   return (
     <div className="flex flex-col flex-1" style={{ minWidth: COL_MIN, maxWidth: COL_MAX }}>
       {cards.map((card, i) => (
-        <StackedCard key={`${card.name}-${card.cn}`} card={card} deckSet={deckSet} reveal={i < cards.length - 1} />
+        <StackedCard key={`${card.name}-${card.cn}-${i}`} card={card} deckSet={deckSet} reveal={i < cards.length - 1} />
       ))}
     </div>
   );
@@ -493,16 +525,18 @@ function StackedCard({ card, deckSet, reveal }: { card: DeckCard; deckSet: strin
           <span className="font-body text-subtle leading-tight" style={{ fontSize: 12 }}>{card.name}</span>
         </div>
       )}
-      {count > 1 && <CountBadge n={count} />}
+      {count > 1 && <CountBadge n={count} onStrip={reveal} />}
     </div>
   );
 }
 
-function CountBadge({ n }: { n: number }) {
+// On a revealed strip the badge sits centered in the visible sliver; on the fully shown bottom card it
+// pins to the top-right corner so it reads as a count chip instead of floating over the card art.
+function CountBadge({ n, onStrip }: { n: number; onStrip: boolean }) {
   return (
     <span
       className="absolute right-1.5 inline-flex items-center justify-center bg-black/85 text-white font-display tabular-nums rounded px-2 leading-none"
-      style={{ fontSize: 17, height: BADGE_H, top: (STRIP_H - BADGE_H) / 2, letterSpacing: "0.04em" }}
+      style={{ fontSize: 17, height: BADGE_H, top: onStrip ? (STRIP_H - BADGE_H) / 2 : 6, letterSpacing: "0.04em" }}
     >
       ×{n}
     </span>
@@ -530,7 +564,7 @@ function SideboardCard({ card, deckSet }: { card: DeckCard; deckSet: string | nu
           <span className="font-body text-subtle leading-tight" style={{ fontSize: 10 }}>{card.name}</span>
         </div>
       )}
-      {count > 1 && <CountBadge n={count} />}
+      {count > 1 && <CountBadge n={count} onStrip={false} />}
     </div>
   );
 }

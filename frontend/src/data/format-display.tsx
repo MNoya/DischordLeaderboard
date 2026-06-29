@@ -13,6 +13,10 @@ export const FMT_COLORS: Record<string, string> = {
   "LCQ Draft 1": "#ff7700",
   "LCQ Draft 2": "#ff7700",
   Pod: "#a86bff",
+  // Self-reported platforms (values are the platform strings the trophy stores)
+  MTGO: "#e8503a",
+  "MTGA Mobile": "#e8503a",
+  Paper: "#a9744f",
 };
 
 export const FMT_DEFAULT_COLOR = "#5c8aff";

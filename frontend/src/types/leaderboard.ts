@@ -259,6 +259,23 @@ export interface PlayerIdentity {
   avatarUrl: string | null;
 }
 
+// Unverified trophy a player logged via /trophy from a trophy-hype post. Showcase only — never
+// scored. colors uses the 17lands convention (uppercase main, lowercase splash); '' for none.
+export interface SelfReportedTrophy {
+  setCode: string;
+  record: string;
+  colors: string;
+  platform: string;
+  // The player's original post text, kept as a keepsake shown with the deck
+  caption: string | null;
+  // Discord CDN URL; refreshed browser-side via the message ref when its signed expiry lapses
+  screenshotUrl: string | null;
+  sourceChannelId: string;
+  sourceMessageId: string;
+  sourceUrl: string;
+  reportedAt: string;
+}
+
 export interface PlayerProfile {
   slug: string;
   displayName: string;
@@ -272,4 +289,5 @@ export interface PlayerProfile {
   losses: number;
   lastCalculatedAt?: string | null; // when this player's data was last pulled from 17lands
   formatBreakdown: PlayerFormatBreakdown[];
+  selfReportedTrophies: SelfReportedTrophy[];
 }

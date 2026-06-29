@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useHref, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { AppHeader } from "../components/AppHeader";
@@ -15,6 +15,8 @@ import {
   Info,
 } from "../components/Icons";
 import { Pip, Pips } from "../components/ManaPips";
+import { ImageIcon } from "../components/Icons";
+import { DeckScreenshotModal } from "../components/pod/DeckScreenshotModal";
 import { StatChip } from "../components/StatChip";
 import { PointsBreakdown } from "../components/PointsBreakdown";
 import { FilterDropdown } from "../components/FilterDropdown";
@@ -52,6 +54,7 @@ import type {
   PlayerFormatBreakdown,
   PlayerIdentity,
   PlayerProfile,
+  SelfReportedTrophy,
   SetSummary,
 } from "../types/leaderboard";
 
@@ -624,32 +627,43 @@ function Desktop({
   }, [colorChips]);
   const { data: availableFormatLabels } = useAvailableFormats(profile.setCode);
   const formatOptions = useMemo(() => {
-    if (!availableFormatLabels) return FORMAT_OPTIONS;
-    const available = new Set(availableFormatLabels);
-    return FORMAT_OPTIONS.filter((opt) => {
-      if (opt.value === "ALL") return true;
-      const labels = FORMAT_LABEL_GROUPS[opt.value] ?? [opt.value];
-      return labels.some((l) => available.has(l));
-    });
-  }, [availableFormatLabels]);
+    const available = new Set(availableFormatLabels ?? []);
+    const base = !availableFormatLabels
+      ? FORMAT_OPTIONS
+      : FORMAT_OPTIONS.filter((opt) => {
+          if (opt.value === "ALL") return true;
+          const labels = FORMAT_LABEL_GROUPS[opt.value] ?? [opt.value];
+          return labels.some((l) => available.has(l));
+        });
+    const platforms = Array.from(new Set(profile.selfReportedTrophies.map((t) => t.platform)));
+    return [...base, ...platforms.map((p) => ({ value: p, label: p.toUpperCase() }))];
+  }, [availableFormatLabels, profile.selfReportedTrophies]);
   const otherSet = useMemo(() => new Set(otherCombos), [otherCombos]);
 
-  const filtered = useMemo(
-    () =>
-      events.filter((e) => {
-        if (formatFilter !== "ALL" && !matchesFormatFilter(e.format, formatFilter)) return false;
-        if (colorsFilter !== "ALL") {
-          if (colorsFilter === MULTI) {
-            if (!isSoup(e.colors, cube)) return false;
-          } else if (colorsFilter === OTHER) {
-            if (isSoup(e.colors, cube)) return false;
-            if (!otherSet.has(colorsOf(e.colors))) return false;
-          } else if (colorsOf(e.colors) !== colorsFilter) return false;
-        }
-        return true;
-      }),
-    [events, formatFilter, colorsFilter, otherSet, cube]
+  const matchesFilters = useCallback(
+    (colors: string, format: string) => {
+      if (formatFilter !== "ALL" && !matchesFormatFilter(format, formatFilter)) return false;
+      if (colorsFilter !== "ALL") {
+        if (colorsFilter === MULTI) {
+          if (!isSoup(colors, cube)) return false;
+        } else if (colorsFilter === OTHER) {
+          if (isSoup(colors, cube)) return false;
+          if (!otherSet.has(colorsOf(colors))) return false;
+        } else if (colorsOf(colors) !== colorsFilter) return false;
+      }
+      return true;
+    },
+    [formatFilter, colorsFilter, otherSet, cube]
   );
+
+  // filtered = real 17lands events, the basis for the scored stat strip. displayRows adds the
+  // self-reported trophies as synthetic rows for the log only, so counts/score stay untouched.
+  const filtered = useMemo(
+    () => events.filter((e) => matchesFilters(e.colors, e.format)),
+    [events, matchesFilters]
+  );
+  const displayRows = useMemo(() => mergeTrophyRows(filtered, profile, matchesFilters), [filtered, profile, matchesFilters]);
+  const [shotTrophy, setShotTrophy] = useState<SelfReportedTrophy | null>(null);
 
   const filtersActive = formatFilter !== "ALL" || colorsFilter !== "ALL";
   // The headline points and its breakdown popover follow the format filter only, selecting the
@@ -681,8 +695,9 @@ function Desktop({
       return { trophies: profile.trophies, events: profile.events, wins: profile.wins, losses: profile.losses, score: profile.score };
     }
     const counts = statsFromEvents(filtered);
-    return { trophies: counts.trophies, events: counts.events, wins: counts.wins, losses: counts.losses, score: pointsTotal };
-  }, [filtersActive, filtered, pointsTotal, profile.trophies, profile.events, profile.wins, profile.losses, profile.score]);
+    const filteredTrophyCount = displayRows.length - filtered.length;
+    return { trophies: counts.trophies + filteredTrophyCount, events: counts.events, wins: counts.wins, losses: counts.losses, score: pointsTotal };
+  }, [filtersActive, filtered, displayRows, pointsTotal, profile.trophies, profile.events, profile.wins, profile.losses, profile.score]);
   const wp = winPct(stats.wins, stats.losses);
   const ranked = profile.rank > 0;
   const [pointsModalOpen, setPointsModalOpen] = useState(false);
@@ -718,21 +733,32 @@ function Desktop({
               {ranked && <RankBadge rank={profile.rank} size="lg" />}
             </div>
           </div>
-          <StatStrip
-            stats={stats}
-            wp={wp}
-            showPoints={ranked}
-            onPointsClick={() => setPointsModalOpen((o) => !o)}
-            pointsBtnRef={pointsBtnRef}
-          />
+          <div className="ml-auto flex items-stretch gap-4 min-w-0">
+            <ManualTrophiesBlock trophies={profile.selfReportedTrophies} />
+            {profile.events > 0 && (
+              <StatStrip
+                stats={stats}
+                wp={wp}
+                showPoints={ranked}
+                onPointsClick={() => setPointsModalOpen((o) => !o)}
+                pointsBtnRef={pointsBtnRef}
+                trophiesLabel={profile.selfReportedTrophies.length > 0 ? "17L TROPHIES" : "TROPHIES"}
+              />
+            )}
+          </div>
         </div>
       </section>
 
-      <div className="grid" style={{ gridTemplateColumns: "440px minmax(0, 1fr)" }}>
-        <BreakdownPanel breakdown={profile.formatBreakdown} totalScore={profile.score} events={events} showPoints={ranked} lockedFormats={lockedFormats} />
+      <div className="grid" style={{ gridTemplateColumns: profile.events > 0 ? "440px minmax(0, 1fr)" : "minmax(0, 1fr)" }}>
+        {profile.events > 0 && (
+          <BreakdownPanel breakdown={profile.formatBreakdown} totalScore={profile.score} events={events} showPoints={ranked} lockedFormats={lockedFormats} />
+        )}
         <DraftLogDesktop
           events={events}
           filtered={filtered}
+          rows={displayRows}
+          summary={eventLogSummaryParts(events.length, profile.selfReportedTrophies, displayRows.length, filtersActive)}
+          onOpenTrophy={setShotTrophy}
           formatFilter={formatFilter}
           setFormatFilter={setFormatFilter}
           colorsFilter={colorsFilter}
@@ -752,7 +778,83 @@ function Desktop({
         confidenceOverride={formatFilter !== "ALL" ? fullConfidence : undefined}
         anchorRef={pointsBtnRef}
       />
+      {shotTrophy && <TrophyDeckModal trophy={shotTrophy} displayName={profile.displayName} onClose={() => setShotTrophy(null)} />}
     </div>
+  );
+}
+
+// A self-reported trophy rendered inline in the event log as a synthetic event. Carries the
+// trophy for the deck-screenshot modal; never counted toward the scored stat strip.
+type LogEntry = PlayerDraftEvent & { trophy?: SelfReportedTrophy };
+
+// MTGO 3-win runs read as Traditional, MTGA 7-win runs as Premier — derived from the record alone.
+function trophyFormatLabel(record: string): string {
+  const wins = Number(record.split("-")[0]) || 0;
+  return wins >= 7 ? "Premier Draft" : "Trad Draft";
+}
+
+function selfTrophyToEntry(trophy: SelfReportedTrophy, fallbackSet: string): LogEntry {
+  const [w, l] = trophy.record.split("-");
+  return {
+    slug: "",
+    setCode: trophy.setCode || fallbackSet,
+    eventId: `selftrophy-${trophy.sourceMessageId}`,
+    // The platform doubles as the format value so the format dropdown can filter to it; the row's
+    // visible label still comes from trophyFormatLabel(record).
+    format: trophy.platform,
+    expansion: trophy.setCode || fallbackSet,
+    wins: Number(w) || 0,
+    losses: Number(l) || 0,
+    isTrophy: true,
+    colors: trophy.colors,
+    startedAt: trophy.reportedAt,
+    finishedAt: trophy.reportedAt,
+    externalUrl: null,
+    eventName: null,
+    podEventSlug: null,
+    trophy,
+  };
+}
+
+// Real events plus the self-reported trophy rows that pass the active filters, newest first.
+function mergeTrophyRows(
+  filteredEvents: PlayerDraftEvent[],
+  profile: PlayerProfile,
+  matches: (colors: string, format: string) => boolean,
+): LogEntry[] {
+  const trophyRows = profile.selfReportedTrophies
+    .map((t) => selfTrophyToEntry(t, profile.setCode))
+    .filter((e) => matches(e.colors, e.format));
+  return [...filteredEvents, ...trophyRows].sort((a, b) =>
+    eventDate(a) < eventDate(b) ? 1 : eventDate(a) > eventDate(b) ? -1 : 0,
+  );
+}
+
+function TrophyDeckModal({
+  trophy,
+  displayName,
+  onClose,
+}: {
+  trophy: SelfReportedTrophy;
+  displayName: string;
+  onClose: () => void;
+}) {
+  return (
+    <DeckScreenshotModal
+      participant={{
+        displayName,
+        deckColors: trophy.colors,
+        deckScreenshotUrl: trophy.screenshotUrl,
+        deckScreenshotCaption: trophy.caption,
+        record: trophy.record,
+        screenshotChannelId: trophy.sourceChannelId,
+        screenshotMessageId: trophy.sourceMessageId,
+        mainboard: null,
+        draftLogUrl: null,
+      }}
+      hideDraftLog
+      onClose={onClose}
+    />
   );
 }
 
@@ -762,12 +864,14 @@ function StatStrip({
   showPoints = true,
   onPointsClick,
   pointsBtnRef,
+  trophiesLabel = "TROPHIES",
 }: {
   stats: StatStripStats;
   wp: string;
   showPoints?: boolean;
   onPointsClick?: () => void;
   pointsBtnRef?: React.RefObject<HTMLButtonElement>;
+  trophiesLabel?: string;
 }) {
   const valueCls = "font-display leading-none text-[clamp(26px,3vw,44px)]";
   const tiles: Array<{
@@ -778,7 +882,7 @@ function StatStrip({
     btnRef?: React.RefObject<HTMLButtonElement>;
   }> = [
     {
-      label: "TROPHIES",
+      label: trophiesLabel,
       value: (
         <span className="flex items-center gap-1.5">
           <Trophy size={26} color="#ffc63a" />
@@ -1107,6 +1211,9 @@ function FormatLegend({
 function DraftLogDesktop({
   events,
   filtered,
+  rows,
+  summary,
+  onOpenTrophy,
   formatFilter,
   setFormatFilter,
   colorsFilter,
@@ -1119,6 +1226,9 @@ function DraftLogDesktop({
 }: {
   events: PlayerDraftEvent[];
   filtered: PlayerDraftEvent[];
+  rows: LogEntry[];
+  summary: string[];
+  onOpenTrophy: (t: SelfReportedTrophy) => void;
   formatFilter: string;
   setFormatFilter: (v: string) => void;
   colorsFilter: string;
@@ -1138,9 +1248,13 @@ function DraftLogDesktop({
       <div className="flex justify-between items-center gap-3">
         <div className="flex items-baseline gap-2.5 shrink-0">
           <SectionLabel size={13}>EVENT LOG</SectionLabel>
-          <span className="font-display text-[13px] tracking-[0.14em] text-dim whitespace-nowrap">
-            {filtered.length === events.length ? `${events.length} EVENTS` : `${filtered.length} OF ${events.length}`}
-          </span>
+          {summary.length > 0 && (
+            <span className="inline-flex items-baseline gap-x-3 font-display text-[13px] tracking-[0.14em] text-dim whitespace-nowrap">
+              {summary.map((part) => (
+                <span key={part}>{part}</span>
+              ))}
+            </span>
+          )}
         </div>
         {updated && (
           <span className="font-display text-[13px] tracking-[0.14em] text-muted shrink-0 whitespace-nowrap">
@@ -1174,21 +1288,21 @@ function DraftLogDesktop({
         className="mt-3 grid gap-x-2 items-stretch"
         style={{ gridTemplateColumns: "22px 70px max-content 1fr auto" }}
       >
-        {filtered.map((e, i) => {
+        {rows.map((e, i) => {
           const isFB = isFlashbackEvent(e.finishedAt, setEndDate);
-          const prev = filtered[i - 1];
-          const next = filtered[i + 1];
+          const prev = rows[i - 1];
+          const next = rows[i + 1];
           const showBoundary = !isFB && !!prev && isFlashbackEvent(prev.finishedAt, setEndDate);
           const hideBottomBorder =
             isFB && !!next && !isFlashbackEvent(next.finishedAt, setEndDate);
           return (
             <React.Fragment key={e.eventId}>
               {showBoundary && <FlashbackDivider variant="desktop" />}
-              <EventLogRow event={e} variant="desktop" hideBottomBorder={hideBottomBorder} playerDisplayName={playerDisplayName} />
+              <EventLogRow event={e} variant="desktop" hideBottomBorder={hideBottomBorder} playerDisplayName={playerDisplayName} onOpenTrophy={onOpenTrophy} />
             </React.Fragment>
           );
         })}
-        {filtered.length === 0 && (
+        {rows.length === 0 && (
           <div className="p-6 text-center text-muted font-display tracking-[0.2em] col-span-full">
             NO EVENTS MATCH FILTER
           </div>
@@ -1275,17 +1389,116 @@ function PodEventButton({ size = "md" }: { size?: "sm" | "md" }) {
   );
 }
 
+const PLATFORM_BUCKETS = ["MTGA", "MTGO", "PAPER", "OTHER"] as const;
+
+const PLATFORM_ICONS: Record<string, string> = {
+  MTGA: `${import.meta.env.BASE_URL}platforms/mtga.png`,
+  MTGO: `${import.meta.env.BASE_URL}platforms/mtgo.png`,
+  PAPER: `${import.meta.env.BASE_URL}platforms/cardback.png`,
+};
+
+function platformBucket(platform: string): (typeof PLATFORM_BUCKETS)[number] {
+  const p = platform.toLowerCase();
+  if (p.includes("mtgo") || p.includes("online")) return "MTGO";
+  if (p.includes("mtga") || p.includes("arena")) return "MTGA";
+  if (p.includes("paper") || p.includes("pre")) return "PAPER";
+  return "OTHER";
+}
+
+function platformCounts(trophies: SelfReportedTrophy[]): Array<{ bucket: string; count: number }> {
+  const counts = new Map<string, number>();
+  for (const t of trophies) {
+    const bucket = platformBucket(t.platform);
+    counts.set(bucket, (counts.get(bucket) ?? 0) + 1);
+  }
+  return PLATFORM_BUCKETS.filter((b) => counts.has(b)).map((b) => ({ bucket: b, count: counts.get(b)! }));
+}
+
+// Event-log header summary parts, rendered space-separated: ["88 EVENTS"] when it's all 17lands,
+// ["88 17L", "1 MTGO", "1 MTGA", "1 PAPER"] when manual trophies are mixed in, the platforms alone
+// for a manual-only player, [] when empty. While filtered, the visible-of-total count.
+function eventLogSummaryParts(
+  events17L: number,
+  trophies: SelfReportedTrophy[],
+  visibleRows: number,
+  isFiltered: boolean,
+): string[] {
+  if (events17L === 0 && trophies.length === 0) return [];
+  if (isFiltered) return [`${visibleRows} OF ${events17L + trophies.length}`];
+  if (trophies.length === 0) return [`${events17L} EVENTS`];
+  const parts = events17L > 0 ? [`${events17L} 17L`] : [];
+  for (const { bucket, count } of platformCounts(trophies)) parts.push(`${count} ${bucket}`);
+  return parts;
+}
+
+// Player-logged trophies — separate from the automated 17L count, one icon + tally per source.
+// Desktop: a bordered tile beside the 17L stat. Mobile: a compact inline row under the player name
+// (no label). The platform doubles as the event-log row's format value, so the dropdown can filter it.
+function ManualTrophiesBlock({ trophies, mobile = false }: { trophies: SelfReportedTrophy[]; mobile?: boolean }) {
+  if (trophies.length === 0) return null;
+  const counts = platformCounts(trophies);
+  const iconSize = mobile ? 18 : 24;
+  const numCls = mobile ? "text-[16px]" : "text-[clamp(22px,2.4vw,32px)]";
+  const pairs = counts.map(({ bucket, count }) => (
+    <span key={bucket} className={cn("inline-flex items-center", mobile ? "gap-1" : "gap-1.5")}>
+      {PLATFORM_ICONS[bucket] ? (
+        <img src={PLATFORM_ICONS[bucket]} alt={bucket} style={{ height: iconSize }} className="w-auto shrink-0" draggable={false} />
+      ) : (
+        <span className="font-display text-muted text-[12px] tracking-[0.12em]">{bucket}</span>
+      )}
+      <span className={cn("font-display leading-none tabular-nums", numCls)}>{count}</span>
+    </span>
+  ));
+  if (mobile) {
+    return (
+      <div className="mt-0.5 flex items-center flex-wrap gap-x-2 gap-y-1">
+        <Trophy size={iconSize} color="#ffc63a" />
+        {pairs}
+      </div>
+    );
+  }
+  return (
+    <div className="border border-border2 bg-bg px-4 py-3.5 flex flex-col items-center justify-center text-center gap-2 self-stretch shrink-0 min-w-[120px]">
+      <div className="flex items-center gap-1.5">
+        <SectionLabel size={13}>MANUAL</SectionLabel>
+        <Trophy size={18} color="#ffc63a" />
+      </div>
+      <div className="flex items-center justify-center flex-wrap gap-4">{pairs}</div>
+    </div>
+  );
+}
+
+// Marks an event-log row as a player-reported result, naming where it was played.
+// Border/text take the platform's palette color (red MTGO/MTGA, brown Paper), grey for write-ins.
+function PlatformTag({ platform, label = platform }: { platform: string; label?: string }) {
+  const color = FMT_COLORS[platform];
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center px-2 py-1 bg-bg border font-display text-[13px] tracking-[0.18em] leading-none uppercase whitespace-nowrap",
+        color ? "" : "border-border text-muted",
+      )}
+      style={color ? { borderColor: color, color } : undefined}
+    >
+      {label}
+    </span>
+  );
+}
+
 function EventLogRow({
   event: e,
   variant,
   hideBottomBorder = false,
   playerDisplayName,
+  onOpenTrophy,
 }: {
-  event: PlayerDraftEvent;
+  event: LogEntry;
   variant: "desktop" | "mobile";
   hideBottomBorder?: boolean;
   playerDisplayName?: string;
+  onOpenTrophy?: (t: SelfReportedTrophy) => void;
 }) {
+  const trophy = e.trophy ?? null;
   const href = e.externalUrl ?? null;
   const isPod = e.format === "PodDraft";
   const podSlug = isPod ? e.podEventSlug ?? null : null;
@@ -1296,10 +1509,10 @@ function EventLogRow({
   const podNewTabHref = podLinkTo ? podFullHref : null;
   const rowInternal = isPod && !!podSlug;
   const rowExternal = !isPod && !!href;
-  const linkClass = (rowInternal || rowExternal) ? "group cursor-pointer transition-colors hover:bg-surface2 no-underline text-inherit" : "";
+  const linkClass = (rowInternal || rowExternal || trophy) ? "group cursor-pointer transition-colors hover:bg-surface2 no-underline text-inherit" : "";
   const podWithoutDeck = isPod && !e.colors;
-  const formatLabel = eventDisplayLabel(e).toUpperCase();
-  const tag = isPod ? null : formatTag(e.format, e.expansion);
+  const formatLabel = trophy ? trophyFormatLabel(trophy.record).toUpperCase() : eventDisplayLabel(e).toUpperCase();
+  const tag = isPod || trophy ? null : formatTag(e.format, e.expansion);
   const cashPrize = lcqCashPrize(e);
   const recordColor = cashPrize ? "#ff8c3a" : e.isTrophy ? "#2ee85c" : "#e6ecf5";
   const borderCls = hideBottomBorder ? "" : "border-b border-border";
@@ -1357,7 +1570,19 @@ function EventLogRow({
         ) : (
           deckContent
         )}
-        {isPod ? (
+        {trophy ? (
+          <span className="inline-flex items-center justify-end gap-3 text-dim group-hover:text-text transition-colors">
+            <PlatformTag platform={trophy.platform} />
+            <ImageIcon size={18} aria-hidden="true" />
+            <Record
+              mono
+              wins={e.wins}
+              losses={e.losses}
+              color={recordColor}
+              className="text-right font-display text-[22px]"
+            />
+          </span>
+        ) : isPod ? (
           podNewTabHref ? (
             <Tooltip label="Open in new tab">
               <button
@@ -1413,6 +1638,18 @@ function EventLogRow({
       linkClass,
     );
     const style = { gridTemplateColumns: "subgrid" };
+    if (trophy) {
+      return (
+        <button
+          type="button"
+          onClick={() => onOpenTrophy?.(trophy)}
+          className={cn("text-left w-full bg-transparent border-0", cls)}
+          style={style}
+        >
+          {inner}
+        </button>
+      );
+    }
     if (rowInternal && podLinkTo) {
       return (
         <Link to={podLinkTo} className={cls} style={style}>
@@ -1460,7 +1697,19 @@ function EventLogRow({
           )}
         </div>
       </div>
-      {isPod ? (
+      {trophy ? (
+        <span className="inline-flex items-center gap-1.5 text-dim group-hover:text-text transition-colors">
+          <PlatformTag platform={trophy.platform} label={platformBucket(trophy.platform)} />
+          <ImageIcon size={16} aria-hidden="true" />
+          <Record
+            mono
+            wins={e.wins}
+            losses={e.losses}
+            color={recordColor}
+            className="font-display text-[22px]"
+          />
+        </span>
+      ) : isPod ? (
         podNewTabHref ? (
           <Tooltip label="Open in new tab">
             <button
@@ -1516,6 +1765,18 @@ function EventLogRow({
     linkClass,
   );
   const style = { gridTemplateColumns: "20px 1fr auto" };
+  if (trophy) {
+    return (
+      <button
+        type="button"
+        onClick={() => onOpenTrophy?.(trophy)}
+        className={cn("text-left bg-transparent border-0 w-[calc(100%+36px)]", cls)}
+        style={style}
+      >
+        {inner}
+      </button>
+    );
+  }
   if (rowInternal && podLinkTo) {
     return (
       <Link to={podLinkTo} className={cls} style={style}>
@@ -1566,32 +1827,43 @@ function Mobile({
   }, [colorChips]);
   const { data: availableFormatLabels } = useAvailableFormats(profile.setCode);
   const formatOptions = useMemo(() => {
-    if (!availableFormatLabels) return FORMAT_OPTIONS;
-    const available = new Set(availableFormatLabels);
-    return FORMAT_OPTIONS.filter((opt) => {
-      if (opt.value === "ALL") return true;
-      const labels = FORMAT_LABEL_GROUPS[opt.value] ?? [opt.value];
-      return labels.some((l) => available.has(l));
-    });
-  }, [availableFormatLabels]);
+    const available = new Set(availableFormatLabels ?? []);
+    const base = !availableFormatLabels
+      ? FORMAT_OPTIONS
+      : FORMAT_OPTIONS.filter((opt) => {
+          if (opt.value === "ALL") return true;
+          const labels = FORMAT_LABEL_GROUPS[opt.value] ?? [opt.value];
+          return labels.some((l) => available.has(l));
+        });
+    const platforms = Array.from(new Set(profile.selfReportedTrophies.map((t) => t.platform)));
+    return [...base, ...platforms.map((p) => ({ value: p, label: p.toUpperCase() }))];
+  }, [availableFormatLabels, profile.selfReportedTrophies]);
   const otherSet = useMemo(() => new Set(otherCombos), [otherCombos]);
 
-  const filtered = useMemo(
-    () =>
-      events.filter((e) => {
-        if (formatFilter !== "ALL" && !matchesFormatFilter(e.format, formatFilter)) return false;
-        if (colorsFilter !== "ALL") {
-          if (colorsFilter === MULTI) {
-            if (!isSoup(e.colors, cube)) return false;
-          } else if (colorsFilter === OTHER) {
-            if (isSoup(e.colors, cube)) return false;
-            if (!otherSet.has(colorsOf(e.colors))) return false;
-          } else if (colorsOf(e.colors) !== colorsFilter) return false;
-        }
-        return true;
-      }),
-    [events, formatFilter, colorsFilter, otherSet, cube]
+  const matchesFilters = useCallback(
+    (colors: string, format: string) => {
+      if (formatFilter !== "ALL" && !matchesFormatFilter(format, formatFilter)) return false;
+      if (colorsFilter !== "ALL") {
+        if (colorsFilter === MULTI) {
+          if (!isSoup(colors, cube)) return false;
+        } else if (colorsFilter === OTHER) {
+          if (isSoup(colors, cube)) return false;
+          if (!otherSet.has(colorsOf(colors))) return false;
+        } else if (colorsOf(colors) !== colorsFilter) return false;
+      }
+      return true;
+    },
+    [formatFilter, colorsFilter, otherSet, cube]
   );
+
+  // filtered = real 17lands events, the basis for the scored stat strip. displayRows adds the
+  // self-reported trophies as synthetic rows for the log only, so counts/score stay untouched.
+  const filtered = useMemo(
+    () => events.filter((e) => matchesFilters(e.colors, e.format)),
+    [events, matchesFilters]
+  );
+  const displayRows = useMemo(() => mergeTrophyRows(filtered, profile, matchesFilters), [filtered, profile, matchesFilters]);
+  const [shotTrophy, setShotTrophy] = useState<SelfReportedTrophy | null>(null);
 
   const filtersActive = formatFilter !== "ALL" || colorsFilter !== "ALL";
   // The headline points and its breakdown popover follow the format filter only, selecting the
@@ -1623,8 +1895,9 @@ function Mobile({
       return { trophies: profile.trophies, events: profile.events, wins: profile.wins, losses: profile.losses, score: profile.score };
     }
     const counts = statsFromEvents(filtered);
-    return { trophies: counts.trophies, events: counts.events, wins: counts.wins, losses: counts.losses, score: pointsTotal };
-  }, [filtersActive, filtered, pointsTotal, profile.trophies, profile.events, profile.wins, profile.losses, profile.score]);
+    const filteredTrophyCount = displayRows.length - filtered.length;
+    return { trophies: counts.trophies + filteredTrophyCount, events: counts.events, wins: counts.wins, losses: counts.losses, score: pointsTotal };
+  }, [filtersActive, filtered, displayRows, pointsTotal, profile.trophies, profile.events, profile.wins, profile.losses, profile.score]);
   const wp = winPct(stats.wins, stats.losses);
   const ranked = profile.rank > 0;
   const [pointsModalOpen, setPointsModalOpen] = useState(false);
@@ -1644,18 +1917,19 @@ function Mobile({
       >
         <div className="flex items-center">
           <AAvatar displayName={profile.displayName} avatarUrl={profile.avatarUrl} size={84} green />
-          <div className="flex-1 min-w-0 overflow-hidden ml-3">
+          <div className="flex-1 min-w-0 ml-3 flex flex-col justify-end min-h-[84px]">
             <h1
-              className="font-display tracking-[0.03em] m-0 pl-[5px]"
+              className="font-display tracking-[0.03em] m-0 pl-[5px] truncate"
               style={{
                 fontSize: "clamp(20px, 7vw, 44px)",
                 lineHeight: 0.95,
-                wordBreak: "normal",
-                overflowWrap: "normal",
               }}
             >
               {profile.displayName.toUpperCase()}
             </h1>
+            <div className="pl-[5px]">
+              <ManualTrophiesBlock trophies={profile.selfReportedTrophies} mobile />
+            </div>
           </div>
           <div className="flex flex-col items-end gap-1.5 font-display tracking-[0.18em] shrink-0">
             {ranked && (
@@ -1671,9 +1945,10 @@ function Mobile({
           </div>
         </div>
 
+        {profile.events > 0 && (
         <div className={cn("mt-[18px] grid gap-[5px]", ranked ? "grid-cols-5" : "grid-cols-4")}>
           <StatChip
-            label="TROPHIES"
+            label={profile.selfReportedTrophies.length > 0 ? "17L TROPHIES" : "TROPHIES"}
             value={
               <span className="flex items-center gap-[3px]">
                 <Trophy size={12} color="#ffc63a" />
@@ -1694,16 +1969,23 @@ function Mobile({
             />
           )}
         </div>
+        )}
       </section>
 
-      <MobileBreakdown breakdown={profile.formatBreakdown} events={events} showPoints={ranked} lockedFormats={lockedFormats} />
+      {profile.events > 0 && (
+        <MobileBreakdown breakdown={profile.formatBreakdown} events={events} showPoints={ranked} lockedFormats={lockedFormats} />
+      )}
 
       <section ref={eventLogRef} className="py-4 px-[18px]">
         <div className="flex items-center justify-between mb-2.5 gap-2">
           <div className="flex items-baseline gap-2">
             <SectionLabel size={12}>EVENT LOG</SectionLabel>
-            <span className="font-display text-[11px] tracking-[0.12em] text-dim">
-              {filtered.length === events.length ? `${events.length} EVENTS` : `${filtered.length} OF ${events.length}`}
+            <span className="inline-flex items-baseline gap-x-2.5 font-display text-[11px] tracking-[0.12em] text-dim">
+              {eventLogSummaryParts(events.length, profile.selfReportedTrophies, displayRows.length, filtersActive).map(
+                (part) => (
+                  <span key={part}>{part}</span>
+                ),
+              )}
             </span>
           </div>
           {profile.lastCalculatedAt && (
@@ -1735,22 +2017,22 @@ function Mobile({
         </div>
         {(() => {
           const mobileEndDate = sets?.find((s) => s.code === profile.setCode)?.endDate ?? null;
-          return filtered.map((e, i) => {
+          return displayRows.map((e, i) => {
             const isFB = isFlashbackEvent(e.finishedAt, mobileEndDate);
-            const prev = filtered[i - 1];
-            const next = filtered[i + 1];
+            const prev = displayRows[i - 1];
+            const next = displayRows[i + 1];
             const showBoundary = !isFB && !!prev && isFlashbackEvent(prev.finishedAt, mobileEndDate);
             const hideBottomBorder =
               isFB && !!next && !isFlashbackEvent(next.finishedAt, mobileEndDate);
             return (
               <React.Fragment key={e.eventId}>
                 {showBoundary && <FlashbackDivider variant="mobile" />}
-                <EventLogRow event={e} variant="mobile" hideBottomBorder={hideBottomBorder} playerDisplayName={profile.displayName} />
+                <EventLogRow event={e} variant="mobile" hideBottomBorder={hideBottomBorder} playerDisplayName={profile.displayName} onOpenTrophy={setShotTrophy} />
               </React.Fragment>
             );
           });
         })()}
-        {filtered.length === 0 && (
+        {displayRows.length === 0 && (
           <div className="p-6 text-center text-muted font-display tracking-[0.2em] text-[13px]">
             NO EVENTS MATCH FILTER
           </div>
@@ -1765,6 +2047,7 @@ function Mobile({
         confidenceOverride={formatFilter !== "ALL" ? fullConfidence : undefined}
         anchorRef={pointsBtnRef}
       />
+      {shotTrophy && <TrophyDeckModal trophy={shotTrophy} displayName={profile.displayName} onClose={() => setShotTrophy(null)} />}
     </div>
   );
 }

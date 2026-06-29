@@ -6,6 +6,7 @@ the three entry points that touch it.
 from __future__ import annotations
 
 import logging
+import re
 import unicodedata
 from typing import TYPE_CHECKING, Iterable
 
@@ -126,6 +127,21 @@ async def resolve_display_name(bot: "commands.Bot", user: "discord.User") -> str
             if member is not None:
                 return member.display_name
     return user.display_name
+
+
+_MESSAGE_LINK_RE = re.compile(
+    r"https?://(?:ptb\.|canary\.)?discord(?:app)?\.com/channels/(\d+)/(\d+)/(\d+)"
+)
+
+
+def parse_message_link(url: str) -> tuple[int, int, int] | None:
+    """(guild_id, channel_id, message_id) from a Discord message jump URL, or None."""
+    if not url:
+        return None
+    m = _MESSAGE_LINK_RE.search(url.strip())
+    if m is None:
+        return None
+    return int(m.group(1)), int(m.group(2)), int(m.group(3))
 
 
 def first_image_url(message: "discord.Message", include_embeds: bool = False) -> str | None:

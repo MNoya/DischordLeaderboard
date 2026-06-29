@@ -38,3 +38,21 @@ export async function refreshDeckUrl(
   }
   return data?.url ?? null;
 }
+
+// Re-resolve any message's first image attachment to a fresh signed URL. Backs self-reported
+// trophy screenshots, which carry the channel + message ref instead of a pod event key.
+export async function refreshMessageImageUrl(
+  channelId: string,
+  messageId: string,
+): Promise<string | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase.functions.invoke<RefreshResponse>(
+    "refresh-deck-url",
+    { body: { channelId, messageId } },
+  );
+  if (error) {
+    console.warn("refresh-deck-url (message) failed", error);
+    return null;
+  }
+  return data?.url ?? null;
+}
