@@ -29,6 +29,8 @@ from bot.services.pod_drafts import (
     record_event,
     update_event_time_if_changed,
 )
+from bot.services.ping_roles import auto_grant_spec_for_event, build_grant_embed
+from bot.services.pod_roles import find_role, grant_role, resolve_member
 from bot.services.sesh_parser import ParsedSeshFields, parse_sesh_embed
 from bot.sets import active_set_code
 from bot.tasks.pod_draft_reminder import REMINDER_LEAD_MIN, fire_reminder
@@ -39,6 +41,7 @@ log = logging.getLogger(__name__)
 
 THREAD_POLL_INTERVAL_S = 5
 THREAD_POLL_TIMEOUT_S = 120
+
 
 
 class SeshListener(commands.Cog):
@@ -92,6 +95,12 @@ class SeshListener(commands.Cog):
             await refresh_underfill_nudge(self.bot, str(message.id), len(fields.attendees))
         except Exception:
             log.exception(f"underfill nudge refresh failed for message {message.id}")
+
+        try:
+            thread = await self._resolve_thread(message.guild, str(message.id))
+            await self._grant_subscription_roles(message.guild, thread, fields.event_time, fields.attendees)
+        except Exception:
+            log.exception(f"subscription role auto-grant failed for message {message.id}")
 
     @commands.Cog.listener()
     async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent) -> None:
@@ -165,6 +174,7 @@ class SeshListener(commands.Cog):
 
         self._schedule_reminder(event_row.id, event_row.event_time)
         self._schedule_underfill(event_row.id, event_row.event_time)
+        await self._grant_subscription_roles(message.guild, thread, event_row.event_time, fields.attendees)
 
         championship = is_championship(event_row.name)
         try:
@@ -287,6 +297,39 @@ class SeshListener(commands.Cog):
         if scheduler is None:
             return
         schedule_underfill_checks(scheduler, event_id, event_time)
+
+    async def _grant_subscription_roles(
+        self, guild: discord.Guild | None, thread: discord.Thread | None, event_time: datetime, attendees,
+    ) -> None:
+        """Sticky-grant a slot's subscription role to everyone RSVP'd Yes to a time-specific pod.
+
+        Each fresh grant is announced in the event thread (pinging the member, never the role)
+        so they know they're now subscribed and how to opt out.
+        """
+        spec = auto_grant_spec_for_event(event_time)
+        if guild is None or spec is None:
+            return
+        role = find_role(guild, spec.name)
+        if role is None:
+            log.info(f"{spec.name!r} role missing in {guild.name}; skipping auto-grant")
+            return
+        for token in attendees:
+            member = await resolve_member(guild, token)
+            if member is None:
+                continue
+            if await grant_role(member, role) and thread is not None:
+                await self._announce_grant(thread, member, role, spec.emoji)
+
+    async def _announce_grant(
+        self, thread: discord.Thread, member: discord.Member, role: discord.Role, emoji: str,
+    ) -> None:
+        try:
+            await thread.send(
+                embed=build_grant_embed(member.mention, role, emoji),
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except discord.HTTPException:
+            log.warning(f"could not announce role grant in thread {thread.id}", exc_info=True)
 
 
 async def _fire_after_delay(event_id: str, delay_s: float) -> None:

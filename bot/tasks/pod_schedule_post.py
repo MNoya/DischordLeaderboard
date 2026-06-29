@@ -9,8 +9,9 @@ schedule, so a manual post without a button press never double-posts.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 
 import discord
 from discord.ext import commands
@@ -23,18 +24,21 @@ from bot.services.pod_schedule import (
     BTN_GOT_IT,
     BTN_POST_FOR_ME,
     BTN_SKIP,
+    CREATE_LEAD_HOURS,
     MONDAY_KIND_NORMAL,
     MONDAY_KIND_RELEASE_WEEK,
     MSG_BTN_ALREADY_POSTED,
     MSG_BTN_GOT_IT,
     MSG_BTN_POSTED,
     MSG_BTN_SKIPPED,
-    MSG_CREATE_BLOCKS_HEADER,
+    MSG_CREATE_COMMAND_LEAD,
     MSG_MONDAY_DRAFT_INTRO,
+    NA_CREATE_SEND_HOUR_ET,
     SCHEDULE_TZ,
     WEEKLY_SLOTS,
     build_create_command,
     compose_monday_message,
+    create_command_send_time,
     highest_event_number,
     monday_kind,
     slots_for_week,
@@ -82,9 +86,12 @@ def init_schedule_post(bot: commands.Bot) -> None:
         id="pod-monday-fallback",
         replace_existing=True,
     )
+    arm_create_command_jobs(_current_week_monday())
+    arm_create_command_jobs(upcoming_monday())
     log.info(
         f"weekly schedule flow armed: DM Mondays {MONDAY_DM_HOUR_ET}:00, "
-        f"fallback {FALLBACK_POST_HOUR_ET}:00 {SCHEDULE_TZ.key}"
+        f"fallback {FALLBACK_POST_HOUR_ET}:00 {SCHEDULE_TZ.key}, "
+        f"/create sends: NA Mondays {NA_CREATE_SEND_HOUR_ET}:00, EU/Sat T-{CREATE_LEAD_HOURS}h"
     )
 
 
@@ -97,28 +104,28 @@ async def fire_monday_dm() -> None:
         return
 
     monday = upcoming_monday()
-    body, view, create_blocks = await build_monday_package(monday)
+    body, view, _ = await build_monday_package(monday)
     try:
         await owner.send(body, view=view)
-        if create_blocks is not None:
-            await owner.send(create_blocks)
         log.info(f"monday schedule DM sent for {monday.isoformat()}")
     except discord.HTTPException:
         log.warning("could not DM the monday schedule draft to owner", exc_info=True)
+    arm_create_command_jobs(monday)
 
 
-async def build_monday_package(monday: date) -> tuple[str, "PodMondayView", str | None]:
+async def build_monday_package(monday: date) -> tuple[str, "PodMondayView", list[str]]:
     """Render the draft the Monday DM and /pod-schedule share.
 
-    The paste-ready message and its buttons come first; the Sesh /create blocks are a separate
-    aide unrelated to the post, returned as a standalone follow-up (None on boundary weeks).
+    The paste-ready message and its buttons come first; the Sesh /create blocks are returned
+    separately as one copy-whole code block per event (empty on boundary weeks). The automated
+    Monday DM no longer batches them — each fires on its own T-47h job — but /pod-schedule still
+    previews the full set on demand.
     """
     message = compose_monday_message(monday, active_set_code())
     body = f"{MSG_MONDAY_DRAFT_INTRO}\n```\n{message}\n```"
-    create_blocks = None
+    create_blocks: list[str] = []
     if monday_kind(monday)[0] == MONDAY_KIND_NORMAL:
-        blocks = await _create_command_blocks(monday)
-        create_blocks = "\n".join([MSG_CREATE_BLOCKS_HEADER, *blocks])
+        create_blocks = await _create_command_blocks(monday)
     return body, PodMondayView(monday), create_blocks
 
 
@@ -176,6 +183,7 @@ async def _post_default_if_needed(monday: date | None = None) -> bool:
     monday = monday or upcoming_monday()
     body = compose_monday_message(monday, active_set_code())
     message = await channel.send(body)
+    await _pin_schedule(channel, message)
     kind, _ = monday_kind(monday)
     if kind == MONDAY_KIND_RELEASE_WEEK:
         try:
@@ -184,6 +192,27 @@ async def _post_default_if_needed(monday: date | None = None) -> bool:
             log.warning("could not add 👍 reaction to release-week post", exc_info=True)
     log.info(f"posted the default weekly schedule for {monday.isoformat()} ({kind})")
     return True
+
+
+async def _pin_schedule(channel: discord.abc.Messageable, message: discord.Message) -> None:
+    """Pin the freshly-posted weekly schedule, unpinning the bot/owner's prior schedule pins first."""
+    poster_ids = {_bot.owner_id, _bot.user.id if _bot.user else None}
+    try:
+        pins = await channel.pins()
+    except (discord.HTTPException, AttributeError):
+        log.warning("could not read pins while pinning the weekly schedule", exc_info=True)
+        pins = []
+    for pinned in pins:
+        if pinned.id == message.id or pinned.author.id not in poster_ids or "<t:" not in pinned.content:
+            continue
+        try:
+            await pinned.unpin()
+        except discord.HTTPException:
+            log.warning(f"could not unpin previous schedule {pinned.id}", exc_info=True)
+    try:
+        await message.pin()
+    except discord.HTTPException:
+        log.warning("could not pin the weekly schedule post", exc_info=True)
 
 
 async def _schedule_already_posted(channel: discord.abc.Messageable) -> bool:
@@ -202,9 +231,73 @@ async def _create_command_blocks(monday) -> list[str]:
     last_number = await asyncio.to_thread(_latest_event_number)
     blocks = []
     for i, (slot, start) in enumerate(zip(WEEKLY_SLOTS, slots_for_week(monday))):
-        command = build_create_command(active_set_code(), last_number + 1 + i, start, slot.description)
+        command = build_create_command(
+            active_set_code(), last_number + 1 + i, start, slot.description, slot.mentions
+        )
         blocks.append(f"```\n{command}\n```")
     return blocks
+
+
+def arm_create_command_jobs(monday: date) -> None:
+    """Schedule one DM per weekly slot at event_time − 47h carrying that slot's standalone /create command.
+
+    No-op on boundary weeks (release/championship/season) and for slots whose lead time has passed;
+    deterministic job ids keep a restart re-arm from double-firing.
+    """
+    scheduler = getattr(_bot, "pod_scheduler", None)
+    if scheduler is None:
+        return
+    if monday_kind(monday)[0] != MONDAY_KIND_NORMAL:
+        return
+    now = datetime.now(timezone.utc)
+    for slot in WEEKLY_SLOTS:
+        run_at = create_command_send_time(slot, monday)
+        job_id = f"pod-create-cmd-{monday.isoformat()}-{slot.weekday}"
+        if run_at <= now:
+            with contextlib.suppress(Exception):
+                scheduler.remove_job(job_id)
+            continue
+        scheduler.add_job(
+            fire_create_command,
+            "date",
+            run_date=run_at,
+            args=[monday.isoformat(), slot.weekday],
+            id=job_id,
+            replace_existing=True,
+        )
+        log.info(f"armed /create DM for {monday.isoformat()} weekday={slot.weekday} at {run_at.isoformat()}")
+
+
+async def fire_create_command(monday_iso: str, weekday: int) -> None:
+    if _bot is None:
+        log.error("fire_create_command: bot reference is not initialised")
+        return
+    monday = date.fromisoformat(monday_iso)
+    if monday_kind(monday)[0] != MONDAY_KIND_NORMAL:
+        return
+    slot = None
+    for candidate in WEEKLY_SLOTS:
+        if candidate.weekday == weekday:
+            slot = candidate
+            break
+    if slot is None:
+        return
+    owner = await _fetch_owner()
+    if owner is None:
+        return
+
+    slot_start = datetime.combine(monday + timedelta(days=slot.weekday), slot.start, tzinfo=SCHEDULE_TZ)
+    last_number = await asyncio.to_thread(_latest_event_number)
+    command = build_create_command(
+        active_set_code(), last_number + 1, slot_start, slot.description, slot.mentions
+    )
+    lead = MSG_CREATE_COMMAND_LEAD.format(emoji=slot.emoji, day=f"{slot_start:%A} {slot_start.day}")
+    try:
+        await owner.send(lead)
+        await owner.send(f"```\n{command}\n```")
+        log.info(f"sent /create DM for {monday_iso} weekday={weekday}")
+    except discord.HTTPException:
+        log.warning("could not DM the per-event /create command to owner", exc_info=True)
 
 
 async def _fetch_coordination_channel() -> discord.abc.Messageable | None:
@@ -240,3 +333,8 @@ def _latest_event_number() -> int:
 def upcoming_monday() -> date:
     today = datetime.now(SCHEDULE_TZ).date()
     return today + timedelta(days=(7 - today.weekday()) % 7)
+
+
+def _current_week_monday() -> date:
+    today = datetime.now(SCHEDULE_TZ).date()
+    return today - timedelta(days=today.weekday())

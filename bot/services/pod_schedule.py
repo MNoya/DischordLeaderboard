@@ -24,6 +24,10 @@ SCHEDULE_TZ = ZoneInfo("America/New_York")
 
 WEDNESDAY = 2
 THURSDAY = 3
+SATURDAY = 5
+
+CREATE_LEAD_HOURS = 47
+NA_CREATE_SEND_HOUR_ET = 12
 
 MONDAY_KIND_NORMAL = "normal"
 MONDAY_KIND_RELEASE_WEEK = "release_week"
@@ -66,20 +70,27 @@ MSG_UNDERFILL = (
     "- [**Sign up here**]({jump_url}) {manat}"
 )
 
-MSG_CREATE_BLOCKS_HEADER = "Sesh commands for this week's pods:"
+MSG_CREATE_COMMAND_LEAD = "{emoji} {day} pod — paste the next message as-is to open RSVPs:"
+
+SLOT_EMOJI_AMERICAS = "🌎"
+SLOT_EMOJI_EU = "🇪🇺"
+SLOT_EMOJI_SATURDAY = "🪐"
 
 POD_DRAFTERS_ROLE_NAME = "Pod Drafters"
+EURO_POD_DRAFTERS_ROLE_NAME = "Euro Pod Drafters"
+WEEKEND_POD_DRAFTERS_ROLE_NAME = "Weekend Pod Drafters"
 
-CREATE_CHANNEL_REF = "#🚀-pod-draft-coordination"
 CREATE_MENTIONS = f"@{POD_DRAFTERS_ROLE_NAME}"
-CREATE_DESCRIPTION = "Please RSVP"
-CREATE_DESCRIPTION_EU = ":flag_eu: friendly time.\nPlease RSVP"
+CREATE_MENTIONS_EURO = f"@{EURO_POD_DRAFTERS_ROLE_NAME}"
+CREATE_MENTIONS_WEEKEND = f"@{WEEKEND_POD_DRAFTERS_ROLE_NAME}"
+CREATE_DESCRIPTION = f"{SLOT_EMOJI_AMERICAS} Please RSVP"
+CREATE_DESCRIPTION_EU = f"{SLOT_EMOJI_EU} Early Draft! Please RSVP"
+CREATE_DESCRIPTION_SAT = f"{SLOT_EMOJI_SATURDAY} Weekend Draft! Please RSVP"
 CREATE_COMMAND_TEMPLATE = (
     "/create title:{set_code} Pod Draft #{event_number} - {day} "
-    "datetime:{day} {clock} {zone} "
+    "datetime:{day} {year} {clock} {zone} "
     "duration:2 hours "
     "description:{description} "
-    "channel:{channel} "
     "on_create_mentions:{mentions}"
 )
 
@@ -95,11 +106,17 @@ class WeeklySlot:
     weekday: int
     start: time
     description: str
+    emoji: str
+    mentions: str
+    send_monday_noon: bool = False
 
 
 WEEKLY_SLOTS: tuple[WeeklySlot, ...] = (
-    WeeklySlot(weekday=WEDNESDAY, start=time(20, 0), description=CREATE_DESCRIPTION),
-    WeeklySlot(weekday=THURSDAY, start=time(14, 0), description=CREATE_DESCRIPTION_EU),
+    WeeklySlot(
+        WEDNESDAY, time(20, 0), CREATE_DESCRIPTION, SLOT_EMOJI_AMERICAS, CREATE_MENTIONS, send_monday_noon=True
+    ),
+    WeeklySlot(THURSDAY, time(14, 0), CREATE_DESCRIPTION_EU, SLOT_EMOJI_EU, CREATE_MENTIONS_EURO),
+    WeeklySlot(SATURDAY, time(15, 0), CREATE_DESCRIPTION_SAT, SLOT_EMOJI_SATURDAY, CREATE_MENTIONS_WEEKEND),
 )
 
 
@@ -184,9 +201,9 @@ def compose_monday_message(monday: date, set_code: str) -> str:
     blurb = monday_blurb(set_code, week_index_for(set_code, monday))
     header = MSG_SCHEDULE_HEADER.format(set_code=set_code)
     slot_lines = []
-    for slot in slots_for_week(monday):
-        unix = int(slot.timestamp())
-        slot_lines.append(f"• <t:{unix}:F> (<t:{unix}:R>)")
+    for slot, start in zip(WEEKLY_SLOTS, slots_for_week(monday)):
+        unix = int(start.timestamp())
+        slot_lines.append(f"{slot.emoji} <t:{unix}:F> (<t:{unix}:R>)")
     body = header + "\n" + "\n".join(slot_lines)
     return f"{blurb}\n\n{body}" if blurb else body
 
@@ -203,17 +220,58 @@ def _noon_unix(day: date) -> int:
     return int(datetime.combine(day, time(12, 0), tzinfo=SCHEDULE_TZ).timestamp())
 
 
-def build_create_command(set_code: str, event_number: int, slot_start: datetime, description: str) -> str:
+def build_create_command(
+    set_code: str, event_number: int, slot_start: datetime, description: str, mentions: str = CREATE_MENTIONS,
+) -> str:
     return CREATE_COMMAND_TEMPLATE.format(
         set_code=set_code,
         event_number=event_number,
         day=f"{slot_start:%B} {slot_start.day}",
+        year=slot_start.year,
         clock=format_clock(slot_start),
         zone=slot_start.strftime("%Z"),
         description=description,
-        channel=CREATE_CHANNEL_REF,
-        mentions=CREATE_MENTIONS,
+        mentions=mentions,
     )
+
+
+def create_command_send_time(slot: WeeklySlot, monday: date) -> datetime:
+    """When to DM a slot's standalone /create command.
+
+    The Americas slot goes out Monday midday alongside the weekly overview; the EU-timed slots
+    fire T-47h so they don't clutter the channel days ahead of an evening-Europe pod.
+    """
+    if slot.send_monday_noon:
+        return datetime.combine(monday, time(NA_CREATE_SEND_HOUR_ET, 0), tzinfo=SCHEDULE_TZ)
+    slot_start = datetime.combine(monday + timedelta(days=slot.weekday), slot.start, tzinfo=SCHEDULE_TZ)
+    return slot_start - timedelta(hours=CREATE_LEAD_HOURS)
+
+
+def slot_for_event_time(event_time: datetime) -> WeeklySlot | None:
+    """The weekly slot whose local ET (weekday, time) matches this event, or None for an off-grid time."""
+    local = event_time.astimezone(SCHEDULE_TZ)
+    for slot in WEEKLY_SLOTS:
+        if slot.weekday == local.weekday() and slot.start == local.time():
+            return slot
+    return None
+
+
+def slot_by_weekday(weekday: int) -> WeeklySlot | None:
+    for slot in WEEKLY_SLOTS:
+        if slot.weekday == weekday:
+            return slot
+    return None
+
+
+def next_slot_datetime(slot: WeeklySlot, *, now: datetime | None = None) -> datetime:
+    """The next future occurrence of a slot in ET, for rendering a localized Discord timestamp."""
+    now = now or datetime.now(SCHEDULE_TZ)
+    candidate = datetime.combine(
+        now.date() + timedelta(days=(slot.weekday - now.weekday()) % 7), slot.start, tzinfo=SCHEDULE_TZ
+    )
+    if candidate <= now:
+        candidate += timedelta(days=7)
+    return candidate
 
 
 def highest_event_number(event_names: Iterable[str]) -> int:

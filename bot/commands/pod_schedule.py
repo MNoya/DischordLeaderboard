@@ -46,8 +46,8 @@ class PodSchedule(commands.Cog):
 
         body, view, create_blocks = await build_monday_package(monday)
         await interaction.response.send_message(body, view=view, ephemeral=ephemeral)
-        if create_blocks is not None:
-            await interaction.followup.send(create_blocks, ephemeral=ephemeral)
+        for block in create_blocks:
+            await interaction.followup.send(block, ephemeral=ephemeral)
 
 
 async def setup(bot: commands.Bot) -> None:

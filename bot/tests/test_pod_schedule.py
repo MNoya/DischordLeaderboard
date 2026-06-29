@@ -1,17 +1,20 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
 from bot.services.pod_schedule import (
     CREATE_DESCRIPTION,
+    CREATE_MENTIONS_EURO,
     MONDAY_KIND_CHAMPIONSHIP_WEEK,
     MONDAY_KIND_NORMAL,
     MONDAY_KIND_RELEASE_WEEK,
     MONDAY_KIND_SEASON_OVER,
     SCHEDULE_TZ,
+    WEEKLY_SLOTS,
     build_create_command,
     build_underfill_message,
     compose_monday_message,
+    create_command_send_time,
     format_clock,
     highest_event_number,
     monday_blurb,
@@ -19,17 +22,19 @@ from bot.services.pod_schedule import (
     next_release_after,
     short_event_name,
     release_unix,
+    slot_for_event_time,
     slots_for_week,
     week_index_for,
 )
 
 
-def test_slots_for_week_returns_wednesday_and_thursday_eastern():
+def test_slots_for_week_returns_wednesday_thursday_and_saturday_eastern():
     slots = slots_for_week(date(2026, 6, 8))
 
     assert slots == [
         datetime(2026, 6, 10, 20, 0, tzinfo=SCHEDULE_TZ),
         datetime(2026, 6, 11, 14, 0, tzinfo=SCHEDULE_TZ),
+        datetime(2026, 6, 13, 15, 0, tzinfo=SCHEDULE_TZ),
     ]
     assert all(slot.utcoffset().total_seconds() == -4 * 3600 for slot in slots)
 
@@ -126,6 +131,77 @@ def test_build_create_command_interpolates_event_data():
     assert "#5" in command
     assert "June 24" in command
     assert "8pm" in command
+
+
+def test_build_create_command_carries_the_year_in_the_datetime_not_the_title():
+    slot = datetime(2026, 6, 24, 20, 0, tzinfo=SCHEDULE_TZ)
+
+    command = build_create_command("MSH", 5, slot, CREATE_DESCRIPTION)
+
+    title, _, datetime_part = command.partition("datetime:")
+    assert "2026" in datetime_part
+    assert "2026" not in title
+
+
+def test_build_create_command_uses_supplied_mentions():
+    slot = datetime(2026, 6, 25, 14, 0, tzinfo=SCHEDULE_TZ)
+
+    command = build_create_command("MSH", 6, slot, CREATE_DESCRIPTION, CREATE_MENTIONS_EURO)
+
+    assert CREATE_MENTIONS_EURO in command
+
+
+@pytest.mark.parametrize(
+    ("event_time", "expected_weekday"),
+    [
+        (datetime(2026, 6, 10, 20, 0, tzinfo=SCHEDULE_TZ), 2),
+        (datetime(2026, 6, 11, 14, 0, tzinfo=SCHEDULE_TZ), 3),
+        (datetime(2026, 6, 13, 15, 0, tzinfo=SCHEDULE_TZ), 5),
+        (datetime(2026, 6, 13, 20, 0, tzinfo=SCHEDULE_TZ), None),
+    ],
+)
+def test_slot_for_event_time_maps_to_its_slot(event_time, expected_weekday):
+    slot = slot_for_event_time(event_time)
+
+    assert (slot.weekday if slot else None) == expected_weekday
+
+
+def test_slot_for_event_time_converts_utc_to_eastern():
+    eastern = datetime(2026, 6, 11, 14, 0, tzinfo=SCHEDULE_TZ)
+
+    slot = slot_for_event_time(eastern.astimezone(timezone.utc))
+
+    assert slot is not None and slot.weekday == 3
+
+
+def test_off_grid_time_has_no_slot():
+    assert slot_for_event_time(datetime(2026, 6, 9, 11, 0, tzinfo=SCHEDULE_TZ)) is None
+
+
+def test_americas_create_command_sends_monday_noon_eastern():
+    monday = date(2026, 7, 6)
+    slot = WEEKLY_SLOTS[0]
+
+    send_at = create_command_send_time(slot, monday)
+
+    assert send_at == datetime(2026, 7, 6, 12, 0, tzinfo=SCHEDULE_TZ)
+
+
+def test_euro_create_commands_send_47h_before_the_event():
+    monday = date(2026, 7, 6)
+
+    for slot, start in zip(WEEKLY_SLOTS[1:], slots_for_week(monday)[1:]):
+        assert create_command_send_time(slot, monday) == start - timedelta(hours=47)
+
+
+def test_compose_monday_message_marks_each_slot_with_its_emoji():
+    monday = date(2026, 6, 1)
+
+    message = compose_monday_message(monday, "SOS")
+
+    assert "• " not in message
+    for slot, start in zip(WEEKLY_SLOTS, slots_for_week(monday)):
+        assert f"{slot.emoji} <t:{int(start.timestamp())}:F>" in message
 
 
 def test_highest_event_number_takes_the_max_and_ignores_unnumbered_names():

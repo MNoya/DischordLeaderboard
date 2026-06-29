@@ -31,6 +31,7 @@ from bot.commands.pod_backfill import setup as setup_pod_backfill
 from bot.commands.mock_draft import setup as setup_mock_draft
 from bot.commands.pod_draft import setup as setup_pod_draft
 from bot.commands.pod_guide import setup as setup_pod_guide
+from bot.commands.roles import RolesView, setup as setup_roles
 from bot.commands.pod_schedule import setup as setup_pod_schedule
 from bot.commands.preview_season_awards import setup as setup_preview_season_awards
 from bot.commands.set_awards import setup as setup_set_awards
@@ -64,6 +65,7 @@ from bot.services.pod_tournament import (
     rehydrate_active_tournaments,
 )
 from bot.services.media_sync import sync_media, sync_recent, SyncResult
+from bot.services.ping_roles import reconcile_ping_roles
 from bot.services.active_set import resolve_active_set
 from bot.services.refresh import refresh_active_players
 from bot.services.refresh_report import build_refresh_report, format_elapsed
@@ -185,6 +187,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_leaderboard_visibility(bot)
         await setup_pod_draft(bot)
         await setup_pod_guide(bot)
+        await setup_roles(bot)
         await setup_mock_draft(bot)
         await setup_pod_backfill(bot)
         await setup_pod_schedule(bot)
@@ -212,6 +215,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         # messages keep dispatching after a bot restart
         bot.add_view(LeaderboardView())
         bot.add_view(LobbyReadyButtonView(show_force_start=True))
+        bot.add_view(RolesView())
 
         log.info("setup_hook: cogs loaded; run `!sync` to publish slash commands to Discord")
 
@@ -499,6 +503,10 @@ def build_bot(guild_id: int) -> commands.Bot:
             await rehydrate_active_tournaments(bot)
             await rehydrate_active_lobbies(bot)
             await reconcile_unannounced_championships(bot)
+            try:
+                await reconcile_ping_roles(bot)
+            except Exception:
+                log.exception("ping-role reconcile failed")
         if not settings.auto_refresh_enabled:
             log.info("AUTO_REFRESH_ENABLED=false; skipping the scheduled 17lands refresh tick")
             return

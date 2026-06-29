@@ -43,6 +43,7 @@ POD_HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         ("/pod-settings", desc.POD_SETTINGS),
         ("/pod-takeover", desc.POD_TAKEOVER),
         ("/pod-standings", desc.POD_STANDINGS),
+        ("/roles", desc.ROLES),
         ("/help", desc.HELP),
     ]),
     ("🔗 Integration", [
