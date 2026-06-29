@@ -52,6 +52,7 @@ class PodGuide(commands.Cog):
         else:
             await interaction.response.send_message(
                 embed=discord.Embed(description=render_pod_guide_embed_body(mention), color=discord.Color.green()),
+                allowed_mentions=discord.AllowedMentions.none(),
                 ephemeral=(interaction.guild is not None and not is_owner),
             )
 
