@@ -126,6 +126,7 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
     cards,
     cardsByName,
     dataReady,
+    resultsDataReady,
     user,
     authLoading,
     signIn,
@@ -196,20 +197,24 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
             )}
 
             {phase === "midway" ? (
-              <MidwayResults
-                ratingsSnapshot={ratingsSnapshot!}
-                pickStats={pickStats!}
-                cards={cards!}
-                cardsByName={cardsByName}
-                picksBySlot={picksBySlot}
-                user={user}
-                signIn={signIn}
-                hasParticipated={hasParticipated}
-              />
+              resultsDataReady && ratingsSnapshot && cards && pickStats ? (
+                <MidwayResults
+                  ratingsSnapshot={ratingsSnapshot}
+                  pickStats={pickStats}
+                  cards={cards}
+                  cardsByName={cardsByName}
+                  picksBySlot={picksBySlot}
+                  user={user}
+                  signIn={signIn}
+                  hasParticipated={hasParticipated}
+                />
+              ) : null
             ) : phase === "final" ? (
-              <div className="mt-10 flex items-center justify-center text-2xl font-bold text-yellow-400">
-                ⚠️ Final Results Page — TO BE IMPLEMENTED
-              </div>
+              resultsDataReady ? (
+                <div className="mt-10 flex items-center justify-center text-2xl font-bold text-yellow-400">
+                  ⚠️ Final Results Page — TO BE IMPLEMENTED
+                </div>
+              ) : null
             ) : phase === "postVoting" ? (
               pickStats && pickStats.length > 0 && (
                 <>

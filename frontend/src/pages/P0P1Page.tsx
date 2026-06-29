@@ -30,6 +30,7 @@ export function P0P1Page() {
     cards,
     cardsByName,
     dataReady,
+    resultsDataReady,
     user,
     authLoading,
     signIn,
@@ -111,20 +112,28 @@ export function P0P1Page() {
           ))}
 
         {phase === "midway" ? (
-          <MidwayResults
-            ratingsSnapshot={ratingsSnapshot!}
-            pickStats={pickStats!}
-            cards={cards!}
-            cardsByName={cardsByName}
-            picksBySlot={picksBySlot}
-            user={user}
-            signIn={signIn}
-            hasParticipated={hasParticipated}
-          />
+          resultsDataReady && ratingsSnapshot && cards && pickStats ? (
+            <MidwayResults
+              ratingsSnapshot={ratingsSnapshot}
+              pickStats={pickStats}
+              cards={cards}
+              cardsByName={cardsByName}
+              picksBySlot={picksBySlot}
+              user={user}
+              signIn={signIn}
+              hasParticipated={hasParticipated}
+            />
+          ) : (
+            <CardGridSkeleton />
+          )
         ) : phase === "final" ? (
-          <div className="mt-10 flex items-center justify-center text-2xl font-bold text-yellow-400">
-            ⚠️ Final Results Page — TO BE IMPLEMENTED
-          </div>
+          resultsDataReady ? (
+            <div className="mt-10 flex items-center justify-center text-2xl font-bold text-yellow-400">
+              ⚠️ Final Results Page — TO BE IMPLEMENTED
+            </div>
+          ) : (
+            <CardGridSkeleton />
+          )
         ) : phase === "postVoting" ? (
           pickStats && pickStats.length > 0 && (
             <PostVotingStats

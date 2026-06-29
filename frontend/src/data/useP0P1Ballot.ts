@@ -105,8 +105,8 @@ export function useP0P1Ballot() {
   const devViewPreset = devActive ? devPreset : "live";
   const user = applyDevUser(authUser, devViewPreset);
   const effectivePicksBySlot = applyDevPicks(picksBySlot, pickStats, devViewPreset);
-  const dataPresent = Boolean(ratingsSnapshot && cards && pickStats);
-  const phase = deriveP0P1Phase(isPastDeadline, ratingsSnapshot, P0P1_RESULTS_PHASE, dataPresent, devViewPreset);
+  const resultsDataReady = Boolean(ratingsSnapshot && cards && pickStats);
+  const phase = deriveP0P1Phase(isPastDeadline, ratingsSnapshot, P0P1_RESULTS_PHASE, resultsDataReady, devViewPreset);
 
   const scoringFilled = SLOTS.filter((s) => effectivePicksBySlot.has(s.key)).length;
   const isComplete = scoringFilled === SLOTS.length;
@@ -159,6 +159,7 @@ export function useP0P1Ballot() {
     cards,
     cardsByName,
     dataReady,
+    resultsDataReady,
     user,
     authLoading,
     signIn,
