@@ -29,6 +29,14 @@ def command_line(cmd: str, blurb: str) -> str:
     """One `/command` + description line, shared by /help and the lobby embed."""
     return f"`{cmd}` - {blurb}"
 
+
+def in_pod_coordination(channel: "discord.interactions.InteractionChannel | None") -> bool:
+    if channel is None:
+        return False
+    if channel.id == settings.pod_draft_channel_id:
+        return True
+    return getattr(channel, "parent_id", None) == settings.pod_draft_channel_id
+
 def extract_avatar_hash(user: "discord.abc.User | discord.User | discord.Member | None") -> str | None:
     """Return the Discord avatar hash for a user, or None if they use the default avatar.
 

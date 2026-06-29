@@ -10,6 +10,7 @@ from discord.ext import commands
 
 from bot import audit, emojis
 from bot.commands import descriptions as desc
+from bot.discord_helpers import in_pod_coordination
 from bot.services.pod_schedule import POD_DRAFTERS_ROLE_NAME
 
 log = logging.getLogger(__name__)
@@ -31,19 +32,20 @@ class PodGuide(commands.Cog):
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
     async def pod_guide(self, interaction: discord.Interaction) -> None:
-        body = render_pod_guide(self._resolve_pod_drafters_mention(interaction.guild))
         is_owner = await self.bot.is_owner(interaction.user)
-        audit.event("pod_guide_invoked", user_id=str(interaction.user.id), pinned=is_owner)
-        no_pings = discord.AllowedMentions.none()
-        if is_owner:
+        will_pin = is_owner and in_pod_coordination(interaction.channel)
+        audit.event("pod_guide_invoked", user_id=str(interaction.user.id), pinned=will_pin)
+        body = render_pod_guide(self._resolve_pod_drafters_mention(interaction.guild))
+        if will_pin:
             await interaction.response.defer()
             await self._remove_existing_pins(interaction.channel)
-            message = await interaction.followup.send(body, allowed_mentions=no_pings, wait=True)
+            message = await interaction.followup.send(body, allowed_mentions=discord.AllowedMentions.none(), wait=True)
             await self._pin(message)
             await self._react_love(message)
         else:
             await interaction.response.send_message(
-                body, allowed_mentions=no_pings, ephemeral=(interaction.guild is not None)
+                embed=discord.Embed(description=body, color=discord.Color.blurple()),
+                ephemeral=(interaction.guild is not None),
             )
 
     def _resolve_pod_drafters_mention(self, guild: discord.Guild | None) -> str:

@@ -8,8 +8,7 @@ from discord.ext import commands
 
 from bot import audit
 from bot.commands import descriptions as desc
-from bot.config import settings
-from bot.discord_helpers import command_line
+from bot.discord_helpers import command_line, in_pod_coordination
 
 logger = logging.getLogger(__name__)
 
@@ -106,17 +105,9 @@ class Help(commands.Cog):
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
     async def help(self, interaction: discord.Interaction) -> None:
-        sections = POD_HELP_SECTIONS if _in_pod_coordination(interaction.channel) else HELP_SECTIONS
+        sections = POD_HELP_SECTIONS if in_pod_coordination(interaction.channel) else HELP_SECTIONS
         audit.event("help_invoked", user_id=str(interaction.user.id))
         await interaction.response.send_message(embed=render_help_embed(sections), view=HelpView(), ephemeral=False)
-
-
-def _in_pod_coordination(channel: discord.interactions.InteractionChannel | None) -> bool:
-    if channel is None:
-        return False
-    if channel.id == settings.pod_draft_channel_id:
-        return True
-    return getattr(channel, "parent_id", None) == settings.pod_draft_channel_id
 
 
 async def setup(bot: commands.Bot) -> None:
