@@ -254,7 +254,7 @@ async def _purge_and_reset_test(ctx) -> None:
                 if task is not None and not task.done():
                     task.cancel()
             await old.disconnect_safely()
-    await _reset_podbracket(ctx.channel, ctx.bot.user)
+    await _delete_last_test_messages(ctx.channel)
 
 
 def _top_ranked_names_sync(n: int) -> list[str]:
@@ -450,20 +450,19 @@ _LAST_MESSAGE: dict[int, discord.Message] = {}
 _LAST_PROGRESS_MESSAGES: dict[int, list[discord.Message]] = {}
 
 
-async def _reset_podbracket(channel, bot_user) -> None:
-    """Wipe a prior testlobby run from this thread before starting fresh: drop the tracked preview
-    messages and delete the bot's own messages so the new bracket isn't buried under stale rounds."""
-    _LAST_MESSAGE.pop(channel.id, None)
-    _LAST_PROGRESS_MESSAGES.pop(channel.id, None)
-    try:
-        async for msg in channel.history(limit=200):
-            if msg.author.id == bot_user.id:
-                try:
-                    await msg.delete()
-                except discord.HTTPException:
-                    pass
-    except discord.HTTPException:
-        log.warning("could not sweep testlobby thread history", exc_info=True)
+async def _delete_last_test_messages(channel) -> None:
+    """Clear the previous testlobby preview before a fresh run by deleting only the tracked last
+    message(s) for this channel — never sweep the channel history, which would also take out unrelated
+    bot messages."""
+    last = _LAST_MESSAGE.pop(channel.id, None)
+    progress = _LAST_PROGRESS_MESSAGES.pop(channel.id, None) or []
+    for msg in [last, *progress]:
+        if msg is None:
+            continue
+        try:
+            await msg.delete()
+        except discord.HTTPException:
+            pass
 
 
 _PROGRESS_STATES = ("ready", "notready", "cancelled", "superseded", "drafting", "complete")
@@ -559,34 +558,6 @@ def _build_ready_progress(state: str) -> list[tuple[discord.Embed, discord.ui.Vi
     return [(embed, None)]
 
 
-async def _sync_progress_cards(
-    channel: discord.abc.Messageable,
-    cards: list[tuple[discord.Embed, discord.ui.View | None]],
-) -> None:
-    """Reconcile the tracked progress messages with `cards`: edit overlapping ones in place, post any
-    extras, delete any surplus — so a single card stays editable while `superseded` shows two."""
-    existing = _LAST_PROGRESS_MESSAGES.get(channel.id, [])
-    kept: list[discord.Message] = []
-    for i, (embed, view) in enumerate(cards):
-        if i < len(existing):
-            try:
-                await existing[i].edit(embed=embed, view=view)
-                kept.append(existing[i])
-                continue
-            except discord.HTTPException:
-                pass
-        kept.append(await channel.send(embed=embed, view=view))
-    for surplus in existing[len(cards):]:
-        try:
-            await surplus.delete()
-        except discord.HTTPException:
-            pass
-    if kept:
-        _LAST_PROGRESS_MESSAGES[channel.id] = kept
-    else:
-        _LAST_PROGRESS_MESSAGES.pop(channel.id, None)
-
-
 async def _settings_preview_noop(interaction: discord.Interaction, value: str) -> str | None:
     return None
 
@@ -643,7 +614,7 @@ async def setup(bot: commands.Bot) -> None:
         `ready` shows the active ready-check card; clicking its Force Start button previews the ephemeral
         confirm dialog (no live pod needed). `round1`/`round2`/`round3` are no-DB snapshots of each round
         embed (`round1 random` for the random-pairing header).
-        No arg → posts the beginning lobby state. A specific state → edits the last in place.
+        No arg → posts the beginning lobby state. Every invocation posts fresh messages.
         `podbracket` / `podswiss` / `podrandom` seed a real 8-player pod (seat 1 = you) and hand off to
         the prod tournament code, so the round embeds + result dropdowns drive the real round-to-round
         flow (these write to the local DB). `round1` (`round1 random` for random pairing) is a no-DB
@@ -711,17 +682,8 @@ async def setup(bot: commands.Bot) -> None:
 
         await _evict_test_managers_for_channel(ctx.channel.id)
         embed, view = _build(state)
-        progress = _build_ready_progress(state)
-        last = _LAST_MESSAGE.get(ctx.channel.id)
-        if last is not None:
-            try:
-                await last.edit(embed=embed, view=view, attachments=[])
-                await _sync_progress_cards(ctx.channel, progress)
-                return
-            except discord.HTTPException:
-                _LAST_MESSAGE.pop(ctx.channel.id, None)
-        msg = await ctx.send(embed=embed, view=view)
-        _LAST_MESSAGE[ctx.channel.id] = msg
-        await _sync_progress_cards(ctx.channel, progress)
+        _LAST_MESSAGE[ctx.channel.id] = await ctx.send(embed=embed, view=view)
+        posted = [await ctx.send(embed=e, view=v) for e, v in _build_ready_progress(state)]
+        _LAST_PROGRESS_MESSAGES[ctx.channel.id] = posted
 
     register_test_fallback(test_lobby)

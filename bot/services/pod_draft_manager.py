@@ -144,6 +144,7 @@ class PodDraftManager:
         self.expected_attendee_count = expected_attendee_count
         self.event_name = event_name
         self.draftmancer_url = draftmancer_url
+        self.spectate_url: str | None = None
         self.kind = kind
         self.reconnect = reconnect
         self._lobby_card_adopt_attempted = False
@@ -416,16 +417,11 @@ class PodDraftManager:
             error_text = _ack_error_text(result)
             log.warning(f"[LIFECYCLE] spectators.enable_failed event={self.event_id} error={error_text!r}")
             return
+        self.spectate_url = f"{self.draftmancer_url}&spectate={spectate_key}"
         if self.reconnect:
             return
-        thread = await self._fetch_thread()
-        if thread is None:
-            return
-        try:
-            await thread.send(f"👀 Spectate the Draft: <{self.draftmancer_url}&spectate={spectate_key}>")
-            log.info(f"[LIFECYCLE] spectators.enabled event={self.event_id}")
-        except Exception:
-            log.warning(f"[LIFECYCLE] spectators.thread_post_error event={self.event_id}", exc_info=True)
+        await self._refresh_lobby_status()
+        log.info(f"[LIFECYCLE] spectators.enabled event={self.event_id}")
         notify_seeding_repost(self.bot, self.event_id)
 
     async def _emit_format(self) -> str | None:
@@ -571,6 +567,7 @@ class PodDraftManager:
                 embed=progress_embed,
                 view=LobbyReadyButtonView(
                     draftmancer_url=self.draftmancer_url, ready_disabled=True, show_force_start=True,
+                    spectate_url=self.spectate_url,
                 ),
             )
         except Exception:
@@ -701,6 +698,7 @@ class PodDraftManager:
                     draftmancer_url=self.draftmancer_url,
                     ready_disabled=(state == "ready"),
                     show_force_start=(state == "unlinked"),
+                    spectate_url=self.spectate_url,
                 )
             )
             suppress_empty_reconnect = self.reconnect and not classified
@@ -754,6 +752,7 @@ class PodDraftManager:
                     draftmancer_url=self.draftmancer_url,
                     ready_disabled=(state == "ready"),
                     show_force_start=(state == "ready"),
+                    spectate_url=self.spectate_url,
                 )
             try:
                 await self.ready_check_progress_message.edit(embed=progress_embed, view=progress_view)

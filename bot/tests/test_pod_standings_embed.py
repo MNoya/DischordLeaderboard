@@ -1,5 +1,9 @@
 from bot.services.pod_swiss import Standing
-from bot.services.pod_tournament import build_champion_embed
+from bot.services.pod_tournament import (
+    ParticipantDeckData,
+    build_champion_embed,
+    normalize_player_name,
+)
 
 
 def test_medals_hidden_while_champion_undecided():
@@ -25,6 +29,39 @@ def test_medals_shown_once_standings_final():
     assert "1. 🥇 Arcyl" in embed.description
     assert "2. 🥈 Elfandor" in embed.description
     assert "3. 🥉 Bramblewick" in embed.description
+
+
+def test_draft_log_link_points_at_in_site_reviewer_keyed_on_slug():
+    key = normalize_player_name("Arcyl")
+    embed = build_champion_embed(
+        _standings(),
+        event_name="SOS Early Pod Draft 4",
+        displays={key: {"display_name": "Arcyl", "slug": "arcyl"}},
+        deck_data={key: ParticipantDeckData(
+            colors="WU", screenshot_url=None, screenshot_caption=None,
+            draft_log_url="https://magicprotools.com/draft/abc123",
+        )},
+        include_submit_cta=False,
+    )
+
+    assert "/pods/sos-early-pod-draft-4/log/arcyl" in embed.description
+    assert "magicprotools.com" not in embed.description
+
+
+def test_draft_log_link_omitted_without_slug():
+    key = normalize_player_name("Arcyl")
+    embed = build_champion_embed(
+        _standings(),
+        event_name="SOS Early Pod Draft 4",
+        displays={key: {"display_name": "Arcyl", "slug": None}},
+        deck_data={key: ParticipantDeckData(
+            colors="WU", screenshot_url=None, screenshot_caption=None,
+            draft_log_url="https://magicprotools.com/draft/abc123",
+        )},
+        include_submit_cta=False,
+    )
+
+    assert "Draft Log" not in embed.description
 
 
 def _standing(rank: int, name: str, wins: int, losses: int) -> Standing:

@@ -36,7 +36,7 @@ def _active_manager_for_channel(channel_id: int | None):
 class LobbyReadyButtonView(discord.ui.View):
     def __init__(
         self, draftmancer_url: str | None = None, ready_disabled: bool = False,
-        show_force_start: bool = False,
+        show_force_start: bool = False, spectate_url: str | None = None,
     ) -> None:
         super().__init__(timeout=None)
         if ready_disabled:
@@ -50,6 +50,13 @@ class LobbyReadyButtonView(discord.ui.View):
                 style=discord.ButtonStyle.link,
                 url=draftmancer_url,
                 emoji=emojis.get_emoji("draftmancer"),
+            ))
+        if spectate_url:
+            self.add_item(discord.ui.Button(
+                label="Spectate",
+                style=discord.ButtonStyle.link,
+                url=spectate_url,
+                emoji="👀",
             ))
 
     @discord.ui.button(

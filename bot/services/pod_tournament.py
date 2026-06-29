@@ -318,14 +318,17 @@ def _build_standings_row(
     player_colors: dict[str, str | None],
     deck_data: dict[str, ParticipantDeckData],
     leaderboard_url: str | None,
+    event_name: str | None = None,
     show_review_flag: bool = False,
     inline_caption: bool = False,
     show_medal: bool = True,
 ) -> str:
     """One standings row used by both the V2 announcement and the thread-side classic embed:
     `{rank}. {medal} {name}  {wins}-{losses}  {colors}  [Draft Log]({url}) 📜`.
-    Set show_review_flag for the in-thread variant to append 🙋 for review opt-ins. Set
-    inline_caption to splice an italicized caption between the W-L record and the color glyph."""
+    The Draft Log link points at the in-site reviewer keyed on the player's slug, so it needs both
+    event_name and a resolved slug to render. Set show_review_flag for the in-thread variant to append
+    🙋 for review opt-ins. Set inline_caption to splice an italicized caption between the W-L record and
+    the color glyph."""
     key = normalize_player_name(s.player_name)
     info = displays.get(key, {})
     name = info.get("display_name") or s.player_name
@@ -339,10 +342,11 @@ def _build_standings_row(
     )
     color_glyph = _format_deck_color_emojis(player_colors.get(key))
     color_suffix = f"  {color_glyph}" if color_glyph else ""
-    log_suffix = (
-        f"  [Draft Log]({data.draft_log_url}) 📜"
-        if data is not None and data.draft_log_url else ""
-    )
+    has_log = data is not None and data.draft_log_url
+    log_suffix = ""
+    if has_log and slug and event_name:
+        review_url = f"{settings.public_site_url.rstrip('/')}/pods/{slugify(event_name)}/log/{slug}"
+        log_suffix = f"  [Draft Log]({review_url}) 📜"
     review_suffix = (
         " 🙋" if DRAFT_REVIEW_FEATURE_ENABLED and show_review_flag
         and data is not None and data.wants_draft_review else ""
@@ -1858,7 +1862,7 @@ def build_champion_announcement_view(
         row_text = _build_standings_row(
             s, displays=displays, player_colors=player_colors,
             deck_data=deck_data, leaderboard_url=leaderboard_url,
-            inline_caption=True,
+            event_name=event_name, inline_caption=True,
         )
         key = normalize_player_name(s.player_name)
         data = deck_data.get(key)
@@ -1956,7 +1960,7 @@ def build_champion_embed(
     include_submit_cta: bool = True,
 ) -> discord.Embed:
     """Thread-side standings embed. `player_colors` adds a mana-emoji glyph after each player's record.
-    `deck_data` appends an inline Draft Log link per row when the participant has a MPT URL.
+    `deck_data` appends an inline Draft Log link per row when the participant has a captured draft log.
     `include_submit_cta` controls the trailing Submit-Deck CTA; the /pod-standings command
     sets it to False since it posts a snapshot, not a call to action."""
     displays = displays or {}
@@ -1966,7 +1970,7 @@ def build_champion_embed(
     lines = [
         _build_standings_row(
             s, displays=displays, player_colors=player_colors,
-            deck_data=deck_data, leaderboard_url=leaderboard_url,
+            deck_data=deck_data, leaderboard_url=leaderboard_url, event_name=event_name,
             show_review_flag=True, show_medal=medals_locked or (champion_locked and s.rank == 1),
         )
         for s in standings
