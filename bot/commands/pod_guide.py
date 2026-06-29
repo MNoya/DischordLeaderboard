@@ -17,11 +17,17 @@ log = logging.getLogger(__name__)
 
 GUIDE_PATH = Path(__file__).resolve().parents[1] / "pod-draft-guide.md"
 GUIDE_MARKER = "Pod Draft Guide"
+GUIDE_SIGNOFF = "Thank you for playing!"
 
 
 def render_pod_guide(pod_drafters_mention: str) -> str:
     text = GUIDE_PATH.read_text(encoding="utf-8").strip()
     return text.replace(":mtga:", emojis.get("mtga")).replace(f"@{POD_DRAFTERS_ROLE_NAME}", pod_drafters_mention)
+
+
+def render_pod_guide_embed_body(pod_drafters_mention: str) -> str:
+    guide = render_pod_guide(pod_drafters_mention).replace(GUIDE_SIGNOFF, "").rstrip()
+    return f"{guide} {emojis.get('chordo_love')}"
 
 
 class PodGuide(commands.Cog):
@@ -35,17 +41,18 @@ class PodGuide(commands.Cog):
         is_owner = await self.bot.is_owner(interaction.user)
         will_pin = is_owner and in_pod_coordination(interaction.channel)
         audit.event("pod_guide_invoked", user_id=str(interaction.user.id), pinned=will_pin)
-        body = render_pod_guide(self._resolve_pod_drafters_mention(interaction.guild))
+        mention = self._resolve_pod_drafters_mention(interaction.guild)
         if will_pin:
             await interaction.response.defer()
             await self._remove_existing_pins(interaction.channel)
+            body = render_pod_guide(mention)
             message = await interaction.followup.send(body, allowed_mentions=discord.AllowedMentions.none(), wait=True)
             await self._pin(message)
             await self._react_love(message)
         else:
             await interaction.response.send_message(
-                embed=discord.Embed(description=body, color=discord.Color.blurple()),
-                ephemeral=(interaction.guild is not None),
+                embed=discord.Embed(description=render_pod_guide_embed_body(mention), color=discord.Color.green()),
+                ephemeral=(interaction.guild is not None and not is_owner),
             )
 
     def _resolve_pod_drafters_mention(self, guild: discord.Guild | None) -> str:
