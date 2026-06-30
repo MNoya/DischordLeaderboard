@@ -15,7 +15,7 @@ import { GoToTopButton } from "../components/GoToTopButton";
 import { PostVotingStats } from "../components/p0p1/PostVotingStats";
 import { MidwayResults } from "../components/p0p1/MidwayResults";
 import { P0P1DevPanel } from "../components/p0p1/P0P1DevPanel";
-import { P0P1BallotScorecard, CHAMFER } from "../components/p0p1/P0P1BallotScorecard";
+import { P0P1BallotScorecard, MidwayBallotScorecard, CHAMFER } from "../components/p0p1/P0P1BallotScorecard";
 import { PickGrid } from "../components/p0p1/CommunityGrid";
 import { useIsMobile } from "../lib/use-is-mobile";
 import { useP0P1Ballot } from "../data/useP0P1Ballot";
@@ -75,7 +75,11 @@ export function P0P1Page() {
 
   const ballotScorecard =
     user && isPastDeadline && isComplete && pickStats && pickStats.length > 0 ? (
-      <P0P1BallotScorecard pickStats={pickStats} picksBySlot={picksBySlot} />
+      phase === "midway" && resultsDataReady && ratingsSnapshot && cards ? (
+        <MidwayBallotScorecard ratingsSnapshot={ratingsSnapshot} cards={cards} picksBySlot={picksBySlot} />
+      ) : (
+        <P0P1BallotScorecard pickStats={pickStats} picksBySlot={picksBySlot} />
+      )
     ) : null;
   const didNotVoteCard = didNotVote ? <DidNotVoteCard /> : null;
   const heroCta =
