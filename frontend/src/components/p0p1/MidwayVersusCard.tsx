@@ -60,7 +60,6 @@ function accentFor(roles: Role[]): string {
 }
 
 function buildColumns(versus: MidwaySlotVersus): Column[] {
-  // crowd and best first, yours last → YOUR PICK is always the rightmost column
   const present: Array<{ role: Role; side: MidwayVersusSide }> = [];
   present.push({ role: "crowd", side: versus.crowd });
   present.push({ role: "best", side: versus.best });
@@ -74,6 +73,15 @@ function buildColumns(versus: MidwaySlotVersus): Column[] {
       grouped.set(side.name, { roles: [], side });
     }
     grouped.get(side.name)!.roles.push(role);
+  }
+
+  // Ensure the column containing "yours" is always rightmost
+  if (versus.yours) {
+    const idx = order.indexOf(versus.yours.name);
+    if (idx !== -1) {
+      order.splice(idx, 1);
+      order.push(versus.yours.name);
+    }
   }
 
   return order.map((name) => {
