@@ -4,6 +4,7 @@ import pytest
 
 from bot.services.pod_schedule import (
     CREATE_DESCRIPTION,
+    CREATE_LEAD_HOURS,
     CREATE_MENTIONS_EURO,
     MONDAY_KIND_CHAMPIONSHIP_WEEK,
     MONDAY_KIND_NORMAL,
@@ -187,11 +188,11 @@ def test_americas_create_command_sends_monday_noon_eastern():
     assert send_at == datetime(2026, 7, 6, 12, 0, tzinfo=SCHEDULE_TZ)
 
 
-def test_euro_create_commands_send_47h_before_the_event():
+def test_euro_create_commands_send_a_fixed_lead_before_the_event():
     monday = date(2026, 7, 6)
 
     for slot, start in zip(WEEKLY_SLOTS[1:], slots_for_week(monday)[1:]):
-        assert create_command_send_time(slot, monday) == start - timedelta(hours=47)
+        assert create_command_send_time(slot, monday) == start - timedelta(hours=CREATE_LEAD_HOURS)
 
 
 def test_compose_monday_message_marks_each_slot_with_its_emoji():
