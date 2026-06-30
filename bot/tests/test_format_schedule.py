@@ -7,19 +7,32 @@ from bot.services import mtgscribe
 from bot.services.format_schedule import (
     ANNOUNCE_COMPETITIVE,
     ANNOUNCE_NONE,
+    LATEST_SET_CATEGORY,
     OPEN_TZ,
     SCHEDULE_PINS,
     already_announced,
     announcement_format,
-    channel_name_for,
+    effective_start,
+    latest_channel_in_category,
     newest_set,
     newly_opened,
     next_rotation,
     previous_window_start,
-    slugify,
 )
 from bot.sets import ALL_SETS
 from bot.tasks.format_schedule_post import announcement_for
+
+
+class _StubCategory:
+    def __init__(self, name):
+        self.name = name
+
+
+class _StubChannel:
+    def __init__(self, name, category, created_at):
+        self.name = name
+        self.category = category
+        self.created_at = created_at
 
 
 def _event(format_label, group_label, tags, now, start_off, end_off):
@@ -51,11 +64,6 @@ def _group(label, tags, formats, start, end):
     )
 
 
-def test_slugify_drops_colons_and_spaces():
-    assert slugify("Marvel Super Heroes") == "marvel-super-heroes"
-    assert slugify("Avatar: The Last Airbender") == "avatar-the-last-airbender"
-
-
 def test_newest_set_ignores_permanent_cube():
     newest = newest_set()
 
@@ -63,10 +71,28 @@ def test_newest_set_ignores_permanent_cube():
     assert all(seed.start_date <= newest.start_date for seed in ALL_SETS if seed.code != "CUBE")
 
 
-def test_set_channel_follows_newest_set():
+def test_set_pin_routes_by_latest_set_category():
     set_pin = next(pin for pin in SCHEDULE_PINS if pin.key == "set")
 
-    assert channel_name_for(set_pin) == slugify(newest_set().name)
+    assert set_pin.channel_name is None
+    assert set_pin.category == LATEST_SET_CATEGORY
+
+
+def test_latest_channel_in_category_picks_newest_created():
+    strategy = _StubCategory("MTG Strategy")
+    other = _StubCategory("General")
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    channels = [
+        _StubChannel("whats-the-build", strategy, base),
+        _StubChannel("cube-talk", strategy, base + timedelta(days=10)),
+        _StubChannel("marvel-super-heroes", strategy, base + timedelta(days=180)),
+        _StubChannel("newer-elsewhere", other, base + timedelta(days=999)),
+        _StubChannel("uncategorized", None, base + timedelta(days=500)),
+    ]
+
+    latest = latest_channel_in_category(channels, "MTG Strategy")
+
+    assert latest.name == "marvel-super-heroes"
 
 
 def test_set_pin_renders_whole_set_but_announces_competitive_only():
@@ -79,7 +105,8 @@ def test_set_pin_renders_whole_set_but_announces_competitive_only():
 def test_named_channels_use_their_fixed_substring():
     cube = next(pin for pin in SCHEDULE_PINS if pin.key == "cube")
 
-    assert channel_name_for(cube) == "cube-talk"
+    assert cube.channel_name == "cube-talk"
+    assert cube.category is None
 
 
 def test_cube_announcement_links_known_list_only():
@@ -103,7 +130,7 @@ def test_quick_and_flashback_are_separate_pins_in_one_channel():
     quick = next(pin for pin in SCHEDULE_PINS if pin.key == "quick")
     flashback = next(pin for pin in SCHEDULE_PINS if pin.key == "flashback")
 
-    assert channel_name_for(quick) == channel_name_for(flashback) == "quick-or-flashback-draft"
+    assert quick.channel_name == flashback.channel_name == "quick-or-flashback-draft"
     assert quick.scope_label == "Quick Draft"
     assert flashback.scope_label == "Flashback"
     assert quick.pin_filters == ("quick",)
@@ -128,6 +155,17 @@ def test_previous_window_wraps_to_yesterdays_last_window():
 
     assert previous.date() == date(2026, 6, 15)
     assert previous.timetz().replace(tzinfo=None) == time(14, 0)
+
+
+def test_competitive_midnight_et_start_normalizes_to_morning_open():
+    qualifier_weekend = _group("Marvel Super Heroes", ("qualifier",), ["Sealed"],
+                               datetime(2026, 7, 11, 4, 0, tzinfo=timezone.utc),
+                               datetime(2026, 7, 13, 3, 59, tzinfo=timezone.utc))
+
+    go_live = effective_start(qualifier_weekend).astimezone(OPEN_TZ)
+
+    assert go_live.date() == date(2026, 7, 11)
+    assert go_live.timetz().replace(tzinfo=None) == time(6, 0)
 
 
 def test_newly_opened_keeps_events_opened_since_the_window():

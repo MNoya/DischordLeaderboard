@@ -26,7 +26,7 @@ WEDNESDAY = 2
 THURSDAY = 3
 SATURDAY = 5
 
-CREATE_LEAD_HOURS = 47
+CREATE_LEAD_HOURS = 50
 NA_CREATE_SEND_HOUR_ET = 12
 
 MONDAY_KIND_NORMAL = "normal"
@@ -239,7 +239,7 @@ def create_command_send_time(slot: WeeklySlot, monday: date) -> datetime:
     """When to DM a slot's standalone /create command.
 
     The Americas slot goes out Monday midday alongside the weekly overview; the EU-timed slots
-    fire T-47h so they don't clutter the channel days ahead of an evening-Europe pod.
+    fire a fixed lead before slot start so they don't clutter the channel days ahead of an evening-Europe pod.
     """
     if slot.send_monday_noon:
         return datetime.combine(monday, time(NA_CREATE_SEND_HOUR_ET, 0), tzinfo=SCHEDULE_TZ)

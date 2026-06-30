@@ -17,7 +17,6 @@ from bot.services import mtgscribe
 from bot.services.format_schedule import (
     ANNOUNCE_NONE,
     SCHEDULE_PINS,
-    channel_name_for,
     newly_opened,
     previous_window_start,
 )
@@ -35,7 +34,8 @@ async def setup(bot: commands.Bot) -> None:
         emojis = {emoji.name: emoji for emoji in await ctx.bot.fetch_application_emojis()}
         since = previous_window_start(now)
         for pin in SCHEDULE_PINS:
-            await ctx.send(f"__**#{channel_name_for(pin)}**__")
+            heading = f"#{pin.channel_name}" if pin.channel_name else f"newest in “{pin.category}”"
+            await ctx.send(f"__**{heading}**__")
             if pin.maintain_pin:
                 in_progress, upcoming, scope = select_pin(events, pin)
                 await ctx.send(view=build_schedule_view(in_progress, upcoming, emojis, scope))

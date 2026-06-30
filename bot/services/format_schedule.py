@@ -5,8 +5,9 @@ bot/tasks/format_schedule_post.py; the rendering builders are reused from bot/co
 
 Each pinned schedule is one filtered /event-scribe view living in a community channel (matched by a
 name substring). A channel can host more than one: the quick-or-flashback channel carries a separate
-Quick Draft pin and Flashback pin. Limited Competitive events route to the newest set's channel,
-which moves with each rotation.
+Quick Draft pin and Flashback pin. Limited Competitive events route to the latest set's channel — the
+newest-created channel in the MTG Strategy category — which a rotation re-creates as the newest, so
+routing follows the set with no name match or config edit.
 """
 from __future__ import annotations
 
@@ -18,10 +19,12 @@ import bot.services.mtgscribe as mtgscribe
 from bot.sets import ALL_SETS
 
 OPEN_TZ = ZoneInfo("America/Los_Angeles")
+EVENT_DAY_TZ = ZoneInfo("America/New_York")
 ANNOUNCE_WINDOWS: tuple[time, ...] = (time(6, 0), time(8, 0), time(14, 0))
 DEDUP_LOOKBACK = timedelta(hours=24)
 
 PERMANENT_CUBE_CODE = "CUBE"
+LATEST_SET_CATEGORY = "MTG Strategy"
 
 
 ANNOUNCE_NONE = "none"
@@ -35,7 +38,11 @@ class SchedulePin:
     selects its formats (empty → the whole active set, the set channel) and ``scope_label`` is its title
     scope (``None`` → the active set's name). ``announce_filters`` selects which start-today events get a
     callout — independent of the pin, so the set channel shows the full set but announces competitive
-    only, and an announce-only channel (cube) keeps no pin at all."""
+    only, and an announce-only channel (cube) keeps no pin at all. Routing is by ``channel_name``
+    substring, except the set pin leaves it ``None`` and sets ``category`` to follow the newest-created
+    channel there — the latest set's channel, which a rotation re-creates without a config edit.
+    Pins are human-seeded and the bot only keeps them fresh; ``auto_pin`` would have it post and pin the
+    schedule itself when none exists, off for every pin today and reserved for when that's wanted."""
     key: str
     channel_name: str | None
     pin_filters: tuple[str, ...]
@@ -43,6 +50,8 @@ class SchedulePin:
     announce: str = ANNOUNCE_ROTATION
     announce_filters: tuple[str, ...] = ()
     maintain_pin: bool = True
+    category: str | None = None
+    auto_pin: bool = False
 
 
 SCHEDULE_PINS: tuple[SchedulePin, ...] = (
@@ -52,16 +61,23 @@ SCHEDULE_PINS: tuple[SchedulePin, ...] = (
     ),
     SchedulePin("cube", "cube-talk", (), None, ANNOUNCE_ROTATION, ("cube",), maintain_pin=False),
     SchedulePin("sealed", "sealed-discussion", ("sealed",), "Sealed", ANNOUNCE_NONE),
-    SchedulePin("set", None, (), None, ANNOUNCE_COMPETITIVE, ("competitive",)),
+    SchedulePin("set", None, (), None, ANNOUNCE_COMPETITIVE, ("competitive",), category=LATEST_SET_CATEGORY),
 )
 
 
-def channel_name_for(pin: SchedulePin) -> str:
-    """The channel-name fragment a pin routes to. The competitive pin leaves it unset and follows the
-    newest registered set, so the channel moves with each rotation without a config edit."""
-    if pin.channel_name is not None:
-        return pin.channel_name
-    return slugify(newest_set().name)
+def latest_channel_in_category(channels, category_name: str):
+    """The most recently created channel in ``category_name`` — the latest set's channel, which a
+    rotation re-creates as the newest there, so routing follows the set with no name match. ``None``
+    when the category holds no channel."""
+    in_category = [channel for channel in channels
+                   if channel.category is not None and channel.category.name == category_name]
+    if not in_category:
+        return None
+    newest = in_category[0]
+    for channel in in_category[1:]:
+        if channel.created_at > newest.created_at:
+            newest = channel
+    return newest
 
 
 def newest_set():
@@ -71,10 +87,6 @@ def newest_set():
         if seed.start_date > newest.start_date:
             newest = seed
     return newest
-
-
-def slugify(name: str) -> str:
-    return name.lower().replace(":", "").replace(" ", "-")
 
 
 def previous_window_start(now: datetime) -> datetime:
@@ -95,8 +107,26 @@ def previous_window_start(now: datetime) -> datetime:
 
 
 def newly_opened(groups: list[mtgscribe.EventGroup], since: datetime, now: datetime) -> list:
-    """Groups that opened in ``(since, now]`` — events that went live since the previous window."""
-    return [group for group in groups if since < group.start <= now]
+    """Groups whose go-live falls in ``(since, now]`` — events that opened since the previous window,
+    timed by ``effective_start`` so a midnight-ET placeholder announces at its real morning open."""
+    return [group for group in groups if since < effective_start(group) <= now]
+
+
+def effective_start(group: mtgscribe.EventGroup) -> datetime:
+    """The go-live used to time a group's announcement. Scribe stamps multi-day competitive events
+    (Qualifier Weekend, ACQ) at midnight ET — a whole-day placeholder, not a queue-open time — which
+    sits the evening before in the Americas and would fire a window early. Normalize those to the first
+    announce window that day (6 AM Pacific), the same open the Play-Ins carry. Other groups keep their
+    start verbatim."""
+    if group.competitive and _is_event_day_midnight(group.start):
+        event_day = group.start.astimezone(EVENT_DAY_TZ).date()
+        return datetime.combine(event_day, ANNOUNCE_WINDOWS[0], tzinfo=OPEN_TZ)
+    return group.start
+
+
+def _is_event_day_midnight(moment: datetime) -> bool:
+    local = moment.astimezone(EVENT_DAY_TZ)
+    return local.hour == 0 and local.minute == 0
 
 
 def next_rotation(groups: list[mtgscribe.EventGroup], current: mtgscribe.EventGroup):

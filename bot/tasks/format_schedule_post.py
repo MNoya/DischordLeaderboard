@@ -35,7 +35,7 @@ from bot.services.format_schedule import (
     SchedulePin,
     already_announced,
     announcement_format,
-    channel_name_for,
+    latest_channel_in_category,
     newest_set,
     newly_opened,
     next_rotation,
@@ -91,7 +91,7 @@ async def fire_window() -> None:
             continue
         if pin.maintain_pin:
             in_progress, upcoming, scope = select_pin(events, pin)
-            await _refresh_pin(channel, scope, in_progress, upcoming, emojis)
+            await _refresh_pin(channel, scope, in_progress, upcoming, emojis, create_if_missing=pin.auto_pin)
         if pin.announce != ANNOUNCE_NONE:
             scheduled = announce_groups(events, pin)
             fresh = newly_opened(scheduled, since, now)
@@ -116,27 +116,58 @@ def announce_groups(events: list, pin: SchedulePin) -> list:
 
 
 def _resolve_channel(guild: discord.Guild, pin: SchedulePin) -> discord.TextChannel | None:
-    target = channel_name_for(pin)
+    if pin.category is not None:
+        channel = latest_channel_in_category(guild.text_channels, pin.category)
+        if channel is None:
+            log.info(f"format-schedule: no channel in category '{pin.category}' for {pin.key}")
+        return channel
     for channel in guild.text_channels:
-        if target in channel.name:
+        if pin.channel_name in channel.name:
             return channel
-    log.info(f"format-schedule: no channel matching '{target}' for {pin.key}")
+    log.info(f"format-schedule: no channel matching '{pin.channel_name}' for {pin.key}")
     return None
 
 
 async def _refresh_pin(channel: discord.TextChannel, scope: str, in_progress: list,
-                       upcoming: list, emojis: dict) -> None:
-    """Edit the pin in place. The pin is human-seeded (the owner pins a filtered /event-scribe post);
-    the bot only keeps it fresh, matching on the title so the right pin is edited when a channel holds
-    several. A channel without a matching pin is left alone."""
+                       upcoming: list, emojis: dict, *, create_if_missing: bool = False) -> None:
+    """Edit the pin in place, matching on the title so the right pin is edited when a channel holds
+    several. Pins are human-seeded (the owner pins a filtered /event-scribe post) and a channel without
+    a matching pin is left alone. ``create_if_missing`` would post and pin the schedule itself instead;
+    no pin enables it today, reserved for when the bot should seed a channel's pin."""
+    view = build_schedule_view(in_progress, upcoming, emojis, scope)
     message = await _pinned_schedule(channel, schedule_title_marker(scope))
     if message is None:
+        if create_if_missing:
+            await _create_pinned_schedule(channel, scope, view)
         return
-    view = build_schedule_view(in_progress, upcoming, emojis, scope)
     try:
         await message.edit(view=view)
     except discord.HTTPException:
         log.warning(f"format-schedule: could not edit the '{scope}' pin in #{channel.name}", exc_info=True)
+
+
+async def _create_pinned_schedule(channel: discord.TextChannel, scope: str,
+                                  view: discord.ui.LayoutView) -> None:
+    """Post and pin a fresh schedule. ``_pinned_schedule`` only finds pinned posts, so an unpinned one
+    would be re-created every tick — if the pin fails, the post is removed so creation stays atomic."""
+    try:
+        message = await channel.send(view=view)
+    except discord.HTTPException:
+        log.warning(f"format-schedule: could not post the '{scope}' pin in #{channel.name}", exc_info=True)
+        return
+    try:
+        await message.pin()
+    except discord.HTTPException:
+        log.warning(f"format-schedule: could not pin the '{scope}' schedule in #{channel.name}; "
+                    "removing the unpinned post", exc_info=True)
+        await _delete_quietly(message)
+
+
+async def _delete_quietly(message: discord.Message) -> None:
+    try:
+        await message.delete()
+    except discord.HTTPException:
+        log.warning("format-schedule: could not remove the unpinned schedule post", exc_info=True)
 
 
 async def _pinned_schedule(channel: discord.TextChannel, marker: str) -> discord.Message | None:
