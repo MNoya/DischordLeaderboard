@@ -95,8 +95,9 @@ def sync_media(session: Session) -> SyncResult:
 
 
 def sync_recent(session: Session, limit: int = 8) -> SyncResult:
-    """Insert brand-new drops only, leaving existing rows untouched. The daily ``sync_media`` owns
-    categorization, back-catalogue features, and deletes."""
+    """Insert brand-new drops and backfill a freshly published video onto an existing podcast-only
+    row, reclassifying it from the video's playlists. Rows that already carry a video are left
+    untouched — the daily ``sync_media`` owns full reconciliation and back-catalogue pruning."""
     podcasts = sorted(
         _fetch_podcast_items(settings.libsyn_feed_url), key=lambda i: i.published_at, reverse=True
     )[:limit]
@@ -110,7 +111,7 @@ def sync_recent(session: Session, limit: int = 8) -> SyncResult:
 
     items = _merge(podcasts, videos)
     _classify_items(items)
-    return _insert_new(session, items)
+    return _ingest_fresh(session, items)
 
 
 def _classify_items(items: list[_Item]) -> None:
@@ -260,21 +261,27 @@ def _upsert(session: Session, items: list[_Item]) -> SyncResult:
     return _result(items)
 
 
-def _insert_new(session: Session, items: list[_Item]) -> SyncResult:
+def _ingest_fresh(session: Session, items: list[_Item]) -> SyncResult:
     guids = [item.guid for item in items]
-    known = (
-        set(session.execute(select(Episode.guid).where(Episode.guid.in_(guids))).scalars()) if guids else set()
+    existing = (
+        {row.guid: row for row in session.execute(select(Episode).where(Episode.guid.in_(guids))).scalars()}
+        if guids
+        else {}
     )
-    inserted: list[_Item] = []
+    applied: list[_Item] = []
     for item in items:
-        if item.guid in known:
-            continue
-        row = Episode(guid=item.guid)
+        row = existing.get(item.guid)
+        if row is None:
+            row = Episode(guid=item.guid)
+            session.add(row)
+        else:
+            video_just_landed = row.youtube_id is None and item.youtube_id is not None
+            if not video_just_landed:
+                continue
         _assign(row, item)
-        session.add(row)
-        inserted.append(item)
+        applied.append(item)
     session.commit()
-    return _result(inserted)
+    return _result(applied)
 
 
 def _assign(row: Episode, item: _Item) -> None:

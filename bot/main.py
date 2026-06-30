@@ -443,7 +443,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         try:
             result = await run_media_freshness()
             if result.total:
-                log.info(f"media-freshness: ingested {result.total} new episode(s)")
+                log.info(f"media-freshness: ingested {result.total} fresh episode(s)")
         except Exception:
             log.exception("media-freshness tick failed")
             await _notify_owner(bot, "⚠️ media-freshness tick crashed:", traceback.format_exc())
