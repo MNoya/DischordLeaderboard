@@ -7,14 +7,13 @@ import { CardImagePreview } from "./CardImagePreview";
 import { SLOTS } from "../../data/p0p1Slots";
 import { GIH_SAMPLE_FLOOR } from "../../data/p0p1Results";
 import type { CardRating } from "../../data/p0p1Results";
-import type { Card, SlotDefinition, SlotKey } from "../../types/p0p1";
+import type { Card, P0P1PickStat, SlotDefinition, SlotKey } from "../../types/p0p1";
 
 const GREEN = "#2ee85c";
 
 interface SlotRow {
   card: Card;
   gihwr: number | null;
-  gih: number;
   isYours: boolean;
   isCrowd: boolean;
 }
@@ -25,25 +24,37 @@ export function MidwayBreakdownList({
   ratingsByName,
   yourCardBySlot,
   crowdCardBySlot,
+  pickStats,
 }: {
   cards: Card[];
   cardsByName: Map<string, Card>;
   ratingsByName: Map<string, CardRating>;
   yourCardBySlot: Map<SlotKey, string>;
   crowdCardBySlot: Map<SlotKey, string>;
+  pickStats: P0P1PickStat[];
 }) {
+  const pickedBySlot = useMemo(() => {
+    const map = new Map<SlotKey, Set<string>>();
+    for (const stat of pickStats) {
+      const set = map.get(stat.slot) ?? new Set<string>();
+      set.add(stat.cardName);
+      map.set(stat.slot, set);
+    }
+    return map;
+  }, [pickStats]);
+
   const bySlot = useMemo(() => {
     const empty = new Set<string>();
     return new Map(
       SLOTS.map((slot) => {
-        const eligible = cards.filter((c) => slot.filter(c, empty));
+        const picked = pickedBySlot.get(slot.key) ?? new Set<string>();
+        const eligible = cards.filter((c) => slot.filter(c, empty) && picked.has(c.name));
         const rows: SlotRow[] = eligible.map((c) => {
           const r = ratingsByName.get(c.name);
           const gihwr = r && r.gih >= GIH_SAMPLE_FLOOR && r.gihwr !== null ? r.gihwr : null;
           return {
             card: c,
             gihwr,
-            gih: r?.gih ?? 0,
             isYours: yourCardBySlot.get(slot.key) === c.name,
             isCrowd: crowdCardBySlot.get(slot.key) === c.name,
           };
@@ -57,7 +68,7 @@ export function MidwayBreakdownList({
         return [slot.key, rows] as const;
       }),
     );
-  }, [cards, ratingsByName, yourCardBySlot, crowdCardBySlot]);
+  }, [cards, ratingsByName, yourCardBySlot, crowdCardBySlot, pickedBySlot]);
 
   return (
     <div className="flex flex-col gap-1.5 lg:gap-3">
@@ -209,13 +220,8 @@ function GihwrRow({
 
         <div className="ml-auto flex items-center gap-3 shrink-0">
           <ManaCost cost={row.card.manaCost} size={12} />
-          <div className="text-right">
-            <div className={`font-mono tabular-nums text-[13px] font-semibold ${row.gihwr !== null ? "text-text" : "text-muted"}`}>
-              {row.gihwr !== null ? `${(row.gihwr * 100).toFixed(1)}%` : "—"}
-            </div>
-            <div className="font-mono tabular-nums text-[10px] text-dim">
-              {row.gih.toLocaleString()} GIH
-            </div>
+          <div className={`font-mono tabular-nums text-[13px] font-semibold ${row.gihwr !== null ? "text-text" : "text-muted"}`}>
+            {row.gihwr !== null ? `${(row.gihwr * 100).toFixed(1)}%` : "—"}
           </div>
         </div>
       </div>

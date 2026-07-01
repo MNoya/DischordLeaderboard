@@ -236,6 +236,7 @@ export function MidwayResults({
         ratingsByName={ratingsByName}
         yourCardBySlot={yourCardBySlot}
         crowdCardBySlot={crowdCardBySlot}
+        pickStats={pickStats}
       />
     </div>
   );
