@@ -54,12 +54,13 @@ SET_CODE_RE = re.compile(r"^[A-Z0-9]{2,5}$")
 MSG_NO_CHANNEL = "Run `/trophy` in the channel where you posted your screenshot, or pass `link:` to a post."
 MSG_NO_POST = (
     "No trophy screenshot found from you in {channel}. "
-    "Post your trophy here first, then run `/trophy` — or pass `link:` to a post elsewhere."
+    "Post your trophy here, then run `/trophy` or right-click it → Apps → 🏆 Save Trophy. "
+    "To save one elsewhere, pass `link:`."
 )
 MSG_BAD_LINK = "That doesn't look like a Discord message link. Right-click a message → Copy Message Link."
 MSG_LINK_NOT_FOUND = "Couldn't find that message. Check the link and try again."
-MSG_NOT_YOUR_POST = "You can only log your own trophy posts."
-MSG_NO_IMAGE = "That post has no image. Log the message that shows your trophy screenshot."
+MSG_NOT_YOUR_POST = "You can only save your own trophy posts."
+MSG_NO_IMAGE = "That post has no image. Save the message that shows your trophy screenshot."
 
 
 @dataclass
@@ -80,6 +81,7 @@ class TrophyDraft:
     is_trophy: bool
     platform: str | None = None
     already_logged: bool = False
+    on_behalf: bool = False
 
     @property
     def can_confirm(self) -> bool:
@@ -91,7 +93,7 @@ class Trophy(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="trophy", description=desc.TROPHY)
-    @app_commands.describe(link="Link to a specific trophy post to log instead of your latest")
+    @app_commands.describe(link="Link to a specific trophy post to save instead of your latest")
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
     async def trophy(self, interaction: discord.Interaction, link: str | None = None) -> None:
@@ -154,7 +156,7 @@ class Trophy(commands.Cog):
 
 
 def _render_embed(draft: TrophyDraft) -> discord.Embed:
-    title = "🏆 Log this Trophy Deck" if draft.is_trophy else "📋 Log this Deck"
+    title = "🏆 Save this Trophy Deck" if draft.is_trophy else "📋 Save this Deck"
     embed = discord.Embed(title=title, color=0xFFC63A if draft.is_trophy else 0x8A8D91)
     embed.add_field(name="Set", value=draft.set_code, inline=True)
     embed.add_field(name="Record", value=draft.record or "*not set*", inline=True)
@@ -163,9 +165,10 @@ def _render_embed(draft: TrophyDraft) -> discord.Embed:
     embed.add_field(name="Platform", value=draft.platform or "*not set*", inline=True)
     if draft.caption:
         embed.add_field(name="Caption", value=draft.caption, inline=False)
-    embed.description = f"From [your post]({draft.source_url})"
+    whose_post = f"{draft.display_name}'s post" if draft.on_behalf else "your post"
+    embed.description = f"From [{whose_post}]({draft.source_url})"
     if draft.already_logged:
-        embed.description += "\n⚠️ This post was already logged — confirming will update it."
+        embed.description += "\n⚠️ This post was already saved — confirming will update it."
     if draft.image_url:
         embed.set_thumbnail(url=draft.image_url)
     return embed
@@ -347,15 +350,16 @@ class _ConfirmButton(ui.Button):
         emoji = "🏆" if draft.is_trophy else "📋"
         colors = color_label(draft.colors) if draft.colors else "no colors"
         oversight = (
-            f"{emoji} **{draft.display_name}** (`{draft.discord_username}`) logged "
+            f"{emoji} **{draft.display_name}** (`{draft.discord_username}`) saved "
             f"**{draft.record}** · {colors} · {draft.platform} · {draft.set_code} — "
             f"[post]({draft.source_url})"
         )
         await bot_log.get(interaction.client).post_plain(oversight)
         await _mark_post_logged(view.message, draft.set_code)
+        whose_profile = f"{draft.display_name}'s profile" if draft.on_behalf else "your profile"
         done = discord.Embed(
-            title="🏆 Trophy logged" if draft.is_trophy else "📋 Deck logged",
-            description=f"**{draft.record}** · {colors} · {draft.platform}\nAdded to [your profile]({profile}).",
+            title="🏆 Trophy saved" if draft.is_trophy else "📋 Deck saved",
+            description=f"**{draft.record}** · {colors} · {draft.platform}\nAdded to [{whose_profile}]({profile}).",
             color=0x57F287,
         )
         await interaction.response.edit_message(embed=done, view=None)
@@ -455,7 +459,7 @@ async def _present_trophy_draft(
     bot: commands.Bot, interaction: discord.Interaction, message: discord.Message
 ) -> None:
     """Parse a resolved post into a TrophyDraft and open the confirm view. Shared by the /trophy
-    slash command and the Log Trophy message context menu."""
+    slash command and the Save Trophy message context menu."""
     author = message.author
     caption = (message.content or "").strip() or None
     record = parse_caption_record(caption) or "3-0"
@@ -475,16 +479,17 @@ async def _present_trophy_draft(
         colors=parse_caption_colors(caption),
         is_trophy=is_trophy_record(record),
         already_logged=any(reaction.me for reaction in message.reactions),
+        on_behalf=str(author.id) != str(interaction.user.id),
     )
     view = TrophyConfirmView(draft, str(interaction.user.id), message)
     ephemeral = interaction.guild is not None
     await interaction.followup.send(embed=_render_embed(draft), view=view, ephemeral=ephemeral)
 
 
-@app_commands.context_menu(name="Log Trophy")
+@app_commands.context_menu(name="🏆 Save Trophy")
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
 @app_commands.allowed_installs(guilds=True, users=False)
-async def log_trophy_menu(interaction: discord.Interaction, message: discord.Message) -> None:
+async def save_trophy_menu(interaction: discord.Interaction, message: discord.Message) -> None:
     ephemeral = interaction.guild is not None
     await interaction.response.defer(ephemeral=ephemeral, thinking=True)
     audit.event("trophy_invoked", user_id=str(interaction.user.id), via="context_menu")
@@ -509,4 +514,4 @@ async def _mark_post_logged(message: discord.Message, set_code: str) -> None:
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Trophy(bot))
-    bot.tree.add_command(log_trophy_menu)
+    bot.tree.add_command(save_trophy_menu)

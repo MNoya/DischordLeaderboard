@@ -271,22 +271,26 @@ def build_bot(guild_id: int) -> commands.Bot:
         # A command goes global — the only registration DMs can see — when its allowed_contexts
         # permits DMs; the rest stay guild-scoped, where schema changes appear instantly. Each
         # command's decorator is the source of truth, so a new DM command needs no list to edit here.
-        global_names = {command.name for command in bot.tree.get_commands()
-                        if getattr(command, "allowed_contexts", None) and command.allowed_contexts.dm_channel}
+        def command_type(command) -> discord.AppCommandType:
+            return getattr(command, "type", discord.AppCommandType.chat_input)
+
+        global_cmds = [command for command in bot.tree.get_commands()
+                       if getattr(command, "allowed_contexts", None) and command.allowed_contexts.dm_channel]
+        global_keys = {(command.name, command_type(command)) for command in global_cmds}
 
         bot.tree.copy_global_to(guild=guild)
-        # Strip globally-registered commands from the guild tree to avoid duplicate registration
-        for name in global_names:
-            bot.tree.remove_command(name, guild=guild)
+        # remove_command defaults to chat_input, so a name-only strip leaves context menus double-registered
+        for command in global_cmds:
+            bot.tree.remove_command(command.name, guild=guild, type=command_type(command))
         synced_guild = await bot.tree.sync(guild=guild)
 
         if scope == "guild":
             await _reply_quietly(ctx, f"✅ Synced {len(synced_guild)} guild commands.")
             return
 
-        hidden = [c for c in bot.tree.get_commands() if c.name not in global_names]
+        hidden = [c for c in bot.tree.get_commands() if (c.name, command_type(c)) not in global_keys]
         for c in hidden:
-            bot.tree.remove_command(c.name)
+            bot.tree.remove_command(c.name, type=command_type(c))
         try:
             synced_global = await bot.tree.sync()
         finally:
