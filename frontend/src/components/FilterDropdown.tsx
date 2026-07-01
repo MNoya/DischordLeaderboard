@@ -110,7 +110,7 @@ export function FilterDropdown({
           className={cn(
             "flex items-center gap-2 w-full bg-transparent border border-border2 font-display text-text cursor-pointer transition-colors hover:bg-surface",
             isMobile
-              ? "px-2.5 py-1.5 text-[15px] tracking-[0.1em]"
+              ? "h-full px-2.5 py-1.5 text-[15px] tracking-[0.1em]"
               : "px-3.5 py-1.5 min-w-[220px] text-[15px] tracking-[0.12em]",
             open && "bg-surface",
             triggerClassName,

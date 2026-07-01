@@ -1251,7 +1251,7 @@ function DraftLogDesktop({
         <div className="flex items-baseline gap-2.5 shrink-0">
           <SectionLabel size={13}>EVENT LOG</SectionLabel>
           {summary.length > 0 && (
-            <span className="inline-flex items-baseline gap-x-3 font-display text-[13px] tracking-[0.14em] text-dim whitespace-nowrap">
+            <span className="inline-flex items-baseline gap-x-3 font-display text-[13px] tracking-[0.14em] text-subtle whitespace-nowrap">
               {summary.map((part) => (
                 <span key={part}>{part}</span>
               ))}
@@ -1417,7 +1417,7 @@ function platformCounts(trophies: SelfReportedEvent[]): Array<{ bucket: string; 
 }
 
 // Event-log header summary parts, rendered space-separated: ["88 EVENTS"] when it's all 17lands,
-// ["88 17L", "1 MTGO", "1 MTGA", "1 PAPER"] when manual trophies are mixed in, the platforms alone
+// ["88 17LANDS", "1 MTGO", "1 MTGA", "1 PAPER"] when manual trophies are mixed in, the platforms alone
 // for a manual-only player, [] when empty. While filtered, the visible-of-total count.
 function eventLogSummaryParts(
   events17L: number,
@@ -1428,7 +1428,7 @@ function eventLogSummaryParts(
   if (events17L === 0 && trophies.length === 0) return [];
   if (isFiltered) return [`${visibleRows} OF ${events17L + trophies.length}`];
   if (trophies.length === 0) return [`${events17L} EVENTS`];
-  const parts = events17L > 0 ? [`${events17L} 17L`] : [];
+  const parts = events17L > 0 ? [`${events17L} 17LANDS`] : [];
   for (const { bucket, count } of platformCounts(trophies)) parts.push(`${count} ${bucket}`);
   return parts;
 }
@@ -1436,7 +1436,15 @@ function eventLogSummaryParts(
 // Player-logged trophies — separate from the automated 17L count, one icon + tally per source.
 // Desktop: a bordered tile beside the 17L stat. Mobile: a compact inline row under the player name
 // (no label). The platform doubles as the event-log row's format value, so the dropdown can filter it.
-function ManualTrophiesBlock({ trophies, mobile = false }: { trophies: SelfReportedEvent[]; mobile?: boolean }) {
+function ManualTrophiesBlock({
+  trophies,
+  mobile = false,
+  className,
+}: {
+  trophies: SelfReportedEvent[];
+  mobile?: boolean;
+  className?: string;
+}) {
   const wins = trophies.filter((t) => t.isTrophy);
   if (wins.length === 0) return null;
   const counts = platformCounts(wins);
@@ -1454,7 +1462,7 @@ function ManualTrophiesBlock({ trophies, mobile = false }: { trophies: SelfRepor
   ));
   if (mobile) {
     return (
-      <div className="mt-0.5 flex items-center flex-wrap gap-x-2 gap-y-1">
+      <div className={cn("pl-[5px] flex items-center flex-wrap gap-x-2 gap-y-1", className)}>
         <Trophy size={iconSize} color="#ffc63a" />
         {pairs}
       </div>
@@ -1920,9 +1928,9 @@ function Mobile({
       >
         <div className="flex items-center">
           <AAvatar displayName={profile.displayName} avatarUrl={profile.avatarUrl} size={84} green />
-          <div className="flex-1 min-w-0 ml-3 flex flex-col justify-end min-h-[84px]">
+          <div className="flex-1 min-w-0 ml-3 relative flex items-center min-h-[84px]">
             <h1
-              className="font-display tracking-[0.03em] m-0 pl-[5px] truncate"
+              className="font-display tracking-[0.03em] m-0 pl-[5px] line-clamp-2 break-words"
               style={{
                 fontSize: "clamp(20px, 7vw, 44px)",
                 lineHeight: 0.95,
@@ -1930,9 +1938,11 @@ function Mobile({
             >
               {profile.displayName.toUpperCase()}
             </h1>
-            <div className="pl-[5px]">
-              <ManualTrophiesBlock trophies={profile.selfReportedEvents} mobile />
-            </div>
+            <ManualTrophiesBlock
+              trophies={profile.selfReportedEvents}
+              mobile
+              className="absolute bottom-0 left-0"
+            />
           </div>
           <div className="flex flex-col items-end gap-1.5 font-display tracking-[0.18em] shrink-0">
             {ranked && (

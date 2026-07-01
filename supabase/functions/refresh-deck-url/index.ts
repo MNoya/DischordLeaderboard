@@ -1,14 +1,16 @@
 // Refresh a Discord-CDN deck screenshot URL on demand and persist the new value.
 //
-// Frontend calls this when the stored deck_screenshot_url's `ex` (expiration) param has passed
-// or is within ~1h of passing. Function calls Discord's POST /attachments/refresh-urls, writes
-// the refreshed URL back to pod_draft_participants, and returns it. On any failure the function
-// returns the existing URL so callers degrade gracefully.
+// Frontend calls this when a stored screenshot URL's `ex` (expiration) param has passed or is
+// within ~1h of passing. Two source shapes are supported: pod decks, keyed by pod event +
+// participant name (pod_draft_participants), and self-reported trophies, keyed by the origin
+// Discord channel + message (self_reported_events). Either way the function calls Discord's
+// POST /attachments/refresh-urls, writes the refreshed URL back, and returns it. On any failure
+// it returns the existing URL so callers degrade gracefully.
 //
 // Stack: Deno runtime, Supabase Edge Functions.
 // Secrets required: SUPABASE_URL (built-in), SUPABASE_SERVICE_ROLE_KEY (built-in), DISCORD_BOT_TOKEN.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.0";
+import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.0";
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void };
 
@@ -24,11 +26,20 @@ const CORS_HEADERS = {
 interface RequestBody {
   eventId?: string;
   displayName?: string;
+  channelId?: string;
+  messageId?: string;
 }
 
 interface RefreshResponse {
   url: string | null;
   refreshed: boolean;
+}
+
+interface DeckSource {
+  table: string;
+  column: string;
+  id: string;
+  url: string | null;
 }
 
 Deno.serve(async (req) => {
@@ -47,8 +58,12 @@ Deno.serve(async (req) => {
   }
   const eventId = body.eventId?.trim();
   const displayName = body.displayName?.trim();
-  if (!eventId || !displayName) {
-    return json({ error: "eventId and displayName are required" }, 400);
+  const channelId = body.channelId?.trim();
+  const messageId = body.messageId?.trim();
+  const hasPodRef = !!eventId && !!displayName;
+  const hasMessageRef = !!channelId && !!messageId;
+  if (!hasPodRef && !hasMessageRef) {
+    return json({ error: "eventId+displayName or channelId+messageId are required" }, 400);
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -64,41 +79,34 @@ Deno.serve(async (req) => {
     global: { headers: { Authorization: `Bearer ${serviceRoleKey}` } },
   });
 
-  const { data, error } = await supabase
-    .from("pod_draft_participants")
-    .select("id, deck_screenshot_url")
-    .eq("event_id", eventId)
-    .eq("display_name", displayName)
-    .maybeSingle();
-
-  if (error) {
-    console.error(`participant lookup failed: ${error.message}`);
+  const source = hasMessageRef
+    ? await loadMessageSource(supabase, channelId!, messageId!)
+    : await loadPodSource(supabase, eventId!, displayName!);
+  if (source === "error") {
     return json({ error: "Lookup failed" }, 500);
   }
-  if (!data || !data.deck_screenshot_url) {
+  if (!source || !source.url) {
     return json({ url: null, refreshed: false } satisfies RefreshResponse, 200);
   }
 
-  const currentUrl = data.deck_screenshot_url as string;
-
-  if (!isDiscordCdnUrl(currentUrl)) {
-    return json({ url: currentUrl, refreshed: false } satisfies RefreshResponse, 200);
+  if (!isDiscordCdnUrl(source.url)) {
+    return json({ url: source.url, refreshed: false } satisfies RefreshResponse, 200);
   }
 
-  const expiryMs = parseDiscordExpiryMs(currentUrl);
+  const expiryMs = parseDiscordExpiryMs(source.url);
   if (expiryMs !== null && expiryMs - Date.now() > FRESH_WINDOW_MS) {
-    return json({ url: currentUrl, refreshed: false } satisfies RefreshResponse, 200);
+    return json({ url: source.url, refreshed: false } satisfies RefreshResponse, 200);
   }
 
-  const refreshed = await refreshViaDiscord(currentUrl, botToken);
+  const refreshed = await refreshViaDiscord(source.url, botToken);
   if (!refreshed) {
-    return json({ url: currentUrl, refreshed: false } satisfies RefreshResponse, 200);
+    return json({ url: source.url, refreshed: false } satisfies RefreshResponse, 200);
   }
 
   const writeback = supabase
-    .from("pod_draft_participants")
-    .update({ deck_screenshot_url: refreshed })
-    .eq("id", data.id)
+    .from(source.table)
+    .update({ [source.column]: refreshed })
+    .eq("id", source.id)
     .then(({ error: updateError }) => {
       if (updateError) console.warn(`writeback failed: ${updateError.message}`);
     });
@@ -106,6 +114,54 @@ Deno.serve(async (req) => {
 
   return json({ url: refreshed, refreshed: true } satisfies RefreshResponse, 200);
 });
+
+async function loadPodSource(
+  supabase: SupabaseClient,
+  eventId: string,
+  displayName: string,
+): Promise<DeckSource | null | "error"> {
+  const { data, error } = await supabase
+    .from("pod_draft_participants")
+    .select("id, deck_screenshot_url")
+    .eq("event_id", eventId)
+    .eq("display_name", displayName)
+    .maybeSingle();
+  if (error) {
+    console.error(`participant lookup failed: ${error.message}`);
+    return "error";
+  }
+  if (!data) return null;
+  return {
+    table: "pod_draft_participants",
+    column: "deck_screenshot_url",
+    id: data.id as string,
+    url: (data.deck_screenshot_url ?? null) as string | null,
+  };
+}
+
+async function loadMessageSource(
+  supabase: SupabaseClient,
+  channelId: string,
+  messageId: string,
+): Promise<DeckSource | null | "error"> {
+  const { data, error } = await supabase
+    .from("self_reported_events")
+    .select("id, screenshot_url")
+    .eq("source_channel_id", channelId)
+    .eq("source_message_id", messageId)
+    .maybeSingle();
+  if (error) {
+    console.error(`self-reported event lookup failed: ${error.message}`);
+    return "error";
+  }
+  if (!data) return null;
+  return {
+    table: "self_reported_events",
+    column: "screenshot_url",
+    id: data.id as string,
+    url: (data.screenshot_url ?? null) as string | null,
+  };
+}
 
 function isDiscordCdnUrl(url: string): boolean {
   return url.includes("cdn.discordapp.com") || url.includes("media.discordapp.net");
