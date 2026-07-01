@@ -41,21 +41,20 @@ interface Column {
 
 const ROLE_LABEL: Record<Role, string> = {
   yours: "YOUR PICK",
-  crowd: "CROWD PICK",
-  best: "BEST PICK",
+  crowd: "CROWD FAVORITE",
+  best: "BEST POSSIBLE",
 };
 
 // Keys are role names sorted alphabetically so the lookup is order-independent
 const MERGED_LABEL: Record<string, string> = {
-  "crowd+yours": "CROWD/YOUR PICK",
-  "best+yours": "BEST PICK",
-  "best+crowd": "BEST PICK",
-  "best+crowd+yours": "BEST PICK",
+  "crowd+yours": "CROWD・YOURS",
+  "best+yours": "BEST・YOURS",
+  "best+crowd": "BEST・CROWD",
+  "best+crowd+yours": "BEST・CROWD・YOURS",
 };
 
 function accentFor(roles: Role[]): string {
-  if (roles.includes("best")) return GOLD;
-  if (roles.includes("crowd")) return GREEN;
+  if (roles.includes("best") && roles.includes("yours")) return GREEN;
   return TEXT;
 }
 
