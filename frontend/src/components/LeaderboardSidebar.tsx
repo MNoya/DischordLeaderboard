@@ -10,7 +10,9 @@ import { SurfaceCard } from "./SurfaceCard";
 import { TrophyCount } from "./TrophyCount";
 import { Record } from "./Record";
 
-import { useColorsSummary, useFormatScopedTrophies, useRecentTrophies } from "../data/hooks";
+import { ArenaRankIcon } from "./ArenaRankIcon";
+import { FilterDropdown, type FilterOption } from "./FilterDropdown";
+import { useAllRecentTrophies, useColorsSummary, useFormatScopedTrophies, useRecentTrophies } from "../data/hooks";
 import { lcqDraft2Earnings } from "../data/scoring";
 import { formatsForBucket } from "../data/format-buckets";
 import { colorsOf, isCubeCode, isSoup, mainColors, playerPath, relativeTime } from "../data/utils";
@@ -23,6 +25,7 @@ interface InsightsParams {
   playerSetCode?: string;
   colors?: string;
   format?: string;
+  rank?: string;
   otherCombos?: string[];
   maxRecent?: number;
 }
@@ -46,21 +49,60 @@ export function LeaderboardSidebar({
   updated?: string | null;
   maxColors?: number;
 }) {
-  const filterActive = format !== "ALL" || colors !== "ALL";
+  const [rank, setRank] = useState("ALL");
+  const filterActive = format !== "ALL" || colors !== "ALL" || rank !== "ALL";
   const [recentLimit, setRecentLimit] = useState(maxRecent);
-  const d = useInsightsData({ setCode, playerSetCode, colors, format, otherCombos, maxRecent: recentLimit }, searchParams);
+  const d = useInsightsData({ setCode, playerSetCode, colors, format, rank, otherCombos, maxRecent: recentLimit }, searchParams);
   const canShowMoreRecent = Boolean(d.recentScoped && d.recentScoped.length >= recentLimit);
 
   return (
     <aside className="flex flex-col gap-4">
       <SurfaceCard>
-        <SectionLabel
-          size={16}
-          letterSpacing={d.lcqScope ? "0.14em" : undefined}
-          className="mb-1 text-subtle whitespace-nowrap"
-        >
-          {d.topColorsTitle}
-        </SectionLabel>
+        <div className="mb-1 flex items-center gap-1.5">
+          <Trophy size={16} color="#ffc63a" />
+          <SectionLabel
+            size={16}
+            letterSpacing={d.lcqScope ? "0.14em" : undefined}
+            className="text-subtle whitespace-nowrap"
+          >
+            {d.topColorsTitle}
+          </SectionLabel>
+          <FilterDropdown
+            value={rank}
+            onChange={setRank}
+            options={RANK_OPTIONS}
+            renderOption={renderRankOption}
+            align="right"
+            className="ml-auto shrink-0"
+            renderTrigger={({ open, selected, toggle }) => (
+              <button
+                type="button"
+                onClick={toggle}
+                aria-expanded={open}
+                className={cn(
+                  "relative flex h-7 items-center justify-center border bg-transparent pl-2.5 pr-6 font-display tracking-[0.06em] text-[12px] leading-none cursor-pointer transition-colors",
+                  open ? "border-green text-green" : "border-border2 text-text hover:border-green hover:text-green",
+                )}
+              >
+                <span key={selected.value} className="animate-fadeIn flex items-center gap-1.5 whitespace-nowrap">
+                  {selected.value !== "ALL" && (
+                    <ArenaRankIcon
+                      endRank={selected.value === "Mythic" ? "Mythic" : `${selected.value}-1`}
+                      size={15}
+                      title={selected.label}
+                    />
+                  )}
+                  {selected.value === "ALL" ? "ALL RANKS" : selected.label}
+                </span>
+                <ChevronDown
+                  size={14}
+                  strokeWidth={2.5}
+                  className={cn("absolute right-1 transition-transform", open && "rotate-180")}
+                />
+              </button>
+            )}
+          />
+        </div>
         <TopColorsRows
           topColors={d.topColors}
           maxColors={maxColors}
@@ -361,7 +403,7 @@ function RecentTrophyRows({
             />
             <span className="grid grid-cols-[1fr_auto] items-center gap-1 mono text-dim">
               <span
-                className="text-[11px] text-text justify-self-center"
+                className="text-[11px] text-text justify-self-center text-center leading-[1.15]"
                 style={LCQ_DRAFT_2_FORMATS.includes(t.format) ? { color: FMT_COLORS.LCQ } : undefined}
               >
                 {shortFormat(t.format)}
@@ -401,7 +443,7 @@ function RecentTrophyRows({
 const RECENT_POOL = 100;
 
 function useInsightsData(
-  { setCode, playerSetCode, colors = "ALL", format = "ALL", otherCombos = [], maxRecent = 10 }: InsightsParams,
+  { setCode, playerSetCode, colors = "ALL", format = "ALL", rank = "ALL", otherCombos = [], maxRecent = 10 }: InsightsParams,
   searchParams?: URLSearchParams,
 ) {
   const linkSetCode = playerSetCode ?? setCode;
@@ -409,19 +451,26 @@ function useInsightsData(
   const qs = searchParams?.toString() ?? "";
   const colorsScoped = colors !== "ALL";
   const formatScoped = !colorsScoped && format !== "ALL";
+  const rankScoped = rank !== "ALL";
 
-  const { data: topColorsAll } = useColorsSummary(formatScoped ? undefined : setCode);
+  const { data: topColorsAll } = useColorsSummary(formatScoped || rankScoped ? undefined : setCode);
   const { data: formatTrophies } = useFormatScopedTrophies(
     formatScoped ? setCode : undefined,
     formatScoped ? format : undefined,
   );
-  const { data: recentAll } = useRecentTrophies(formatScoped ? undefined : setCode, RECENT_POOL);
+  const { data: allTrophies } = useAllRecentTrophies(rankScoped && !formatScoped ? setCode : undefined);
+  const { data: recentAll } = useRecentTrophies(formatScoped || rankScoped ? undefined : setCode, RECENT_POOL);
 
-  const topColors: ColorsSummary[] | undefined = formatScoped
-    ? formatTrophies && topColorsFromTrophies(setCode, formatTrophies)
+  const trophyPool = formatScoped ? formatTrophies : rankScoped ? allTrophies : recentAll;
+  const rankFiltered = rankScoped
+    ? trophyPool?.filter((t) => rankTierOf(t.endRank) === rank)
+    : trophyPool;
+
+  const topColors: ColorsSummary[] | undefined = formatScoped || rankScoped
+    ? rankFiltered && topColorsFromTrophies(setCode, rankFiltered)
     : topColorsAll?.filter((r) => r.trophies > 0);
 
-  const recentSource: RecentTrophy[] | undefined = formatScoped ? formatTrophies : recentAll;
+  const recentSource: RecentTrophy[] | undefined = rankFiltered;
   const recentScoped = !colorsScoped
     ? recentSource
       ? recentSource.slice(0, maxRecent)
@@ -445,11 +494,13 @@ function useInsightsData(
   const lcqScope = formatScoped && format === "LCQ";
   const recentNoun = lcqScope ? "TROPHIES & DAY 2" : "TROPHIES";
   const recentTitle = scoped ? <>RECENT {scopeChip} {recentNoun}</> : "RECENT TROPHIES";
-  const recentEmpty = scoped ? `NO RECENT ${scopeLabel} ${recentNoun}` : "NO TROPHIES YET";
+  const recentEmpty = scoped || rankScoped
+    ? ["NO RECENT", rankScoped ? rank.toUpperCase() : "", scopeLabel, recentNoun].filter(Boolean).join(" ")
+    : "NO TROPHIES YET";
   const topColorsTitle = formatScoped ? (
     <>TOP COLORS {scopeChip} {lcqScope ? "TROPHIES & CASH" : "TROPHIES"}</>
   ) : (
-    "TOP COLORS BY TROPHIES"
+    "TOP COLORS"
   );
   const namedScope = colorsScoped && colors !== MULTI && colors !== OTHER;
   const showRowPips = !namedScope;
@@ -505,4 +556,26 @@ const LCQ_DRAFT_2_FORMATS = formatsForBucket("LCQ Draft 2");
 
 function lcqCashForRow(t: RecentTrophy): number {
   return LCQ_DRAFT_2_FORMATS.includes(t.format) ? lcqDraft2Earnings(t.wins) : 0;
+}
+
+const RANK_OPTIONS: FilterOption[] = [
+  { value: "ALL", label: "ALL RANKS" },
+  ...["Mythic", "Diamond", "Platinum", "Gold", "Silver", "Bronze"].map((tier) => ({
+    value: tier,
+    label: tier.toUpperCase(),
+  })),
+];
+
+const renderRankOption = (opt: FilterOption) =>
+  opt.value === "ALL" ? (
+    <span>{opt.label}</span>
+  ) : (
+    <span className="flex items-center gap-2">
+      <ArenaRankIcon endRank={opt.value === "Mythic" ? "Mythic" : `${opt.value}-1`} size={16} />
+      <span>{opt.label}</span>
+    </span>
+  );
+
+function rankTierOf(endRank: string | null | undefined): string | undefined {
+  return endRank?.split("-")[0];
 }

@@ -124,6 +124,8 @@ export interface RecentTrophy {
   finishedAt: string;
   // false only for LCQ Day 2 runs merged into the LCQ-scoped list
   isTrophy?: boolean;
+  // Arena rank when the trophy run finished ("Gold-3", "Mythic-1")
+  endRank?: string | null;
 }
 
 export type PodEventKind = "tournament" | "mock";

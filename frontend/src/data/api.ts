@@ -28,6 +28,7 @@ export const fetchFormatColorsLeaderboard = impl.fetchFormatColorsLeaderboard;
 export const fetchPlayerDraftEvents = impl.fetchPlayerDraftEvents;
 export const fetchRecentTrophies = impl.fetchRecentTrophies;
 export const fetchFormatRecentTrophies = impl.fetchFormatRecentTrophies;
+export const fetchAllRecentTrophies = impl.fetchAllRecentTrophies;
 export const fetchPodEvents = impl.fetchPodEvents;
 export const fetchPodEventBySlug = impl.fetchPodEventBySlug;
 export const fetchPodEventParticipants = impl.fetchPodEventParticipants;

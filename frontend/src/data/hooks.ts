@@ -8,6 +8,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { useCallback, useMemo } from "react";
 
 import {
+  fetchAllRecentTrophies,
   fetchAvailableFormats,
   fetchColorsLeaderboard,
   fetchColorsSummary,
@@ -288,6 +289,16 @@ export function useFormatScopedTrophies(
     queryKey: ["format-trophies", setCode, format],
     queryFn: () => fetchFormatRecentTrophies(setCode!, format!),
     enabled: !!setCode && !!format,
+    staleTime: THIRTY_MINUTES,
+  });
+}
+
+// Full trophy pool of a set. Backs the sidebar while a rank filter is active.
+export function useAllRecentTrophies(setCode: string | undefined) {
+  return useQuery({
+    queryKey: ["all-trophies", setCode],
+    queryFn: () => fetchAllRecentTrophies(setCode!),
+    enabled: !!setCode,
     staleTime: THIRTY_MINUTES,
   });
 }

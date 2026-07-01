@@ -300,6 +300,10 @@ export const fetchFormatRecentTrophies = (
   return wait(_allTrophiesFor(setCode).filter((t) => matchesFormatFilter(t.format, format)));
 };
 
+export const fetchAllRecentTrophies = (setCode: string): Promise<RecentTrophy[]> => {
+  return wait(_allTrophiesFor(setCode));
+};
+
 function _allTrophiesFor(setCode: string): RecentTrophy[] {
   if (setCode !== "SOS") return [];
   const out: RecentTrophy[] = [];
@@ -318,6 +322,7 @@ function _allTrophiesFor(setCode: string): RecentTrophy[] {
         wins: e.wins,
         losses: e.losses,
         finishedAt: e.finishedAt,
+        endRank: e.endRank ?? null,
       });
     }
   }

@@ -1027,7 +1027,7 @@ export async function fetchPlayerDraftEvents(
 // Both public_recent_trophies and public_cube_season_events carry these; selecting
 // them by name keeps the wider season-events row from shipping unused columns.
 const RECENT_TROPHY_COLUMNS =
-  "set_code, slug, display_name, avatar_url, format, colors, wins, losses, finished_at, seventeenlands_event_id";
+  "set_code, slug, display_name, avatar_url, format, colors, wins, losses, finished_at, seventeenlands_event_id, end_rank";
 
 export async function fetchRecentTrophies(
   setCode: string,
@@ -1056,7 +1056,17 @@ export async function fetchFormatRecentTrophies(
 ): Promise<RecentTrophy[]> {
   if (format === "Pod") return fetchPodRecentTrophies(setCode);
   if (format === "LCQ") return fetchLcqRecentTrophiesAndWins(setCode);
-  const group = FORMAT_RAW_GROUPS[format];
+  return fetchTrophyPool(setCode, format);
+}
+
+// Full trophy pool of a set, so the sidebar can rebuild Top Colors and Recent
+// Trophies client-side when the rank filter is active.
+export async function fetchAllRecentTrophies(setCode: string): Promise<RecentTrophy[]> {
+  return fetchTrophyPool(setCode);
+}
+
+async function fetchTrophyPool(setCode: string, format?: string): Promise<RecentTrophy[]> {
+  const group = format ? FORMAT_RAW_GROUPS[format] : null;
   const season = isCubeSeasonCode(setCode);
   const view = season ? "public_cube_season_events" : "public_recent_trophies";
 
@@ -1070,7 +1080,7 @@ export async function fetchFormatRecentTrophies(
       .order("finished_at", { ascending: false, nullsFirst: false })
       .range(from, from + pageSize - 1);
     if (season) q = q.eq("is_trophy", true);
-    q = group ? q.in("format", group) : q.ilike("format", `%${format}%`);
+    if (format) q = group ? q.in("format", group) : q.ilike("format", `%${format}%`);
     const { data, error } = await q;
     if (error) throw error;
     const batch = (data ?? []) as Array<Record<string, unknown>>;
@@ -1093,6 +1103,7 @@ function adaptRecentTrophy(row: Record<string, unknown>): RecentTrophy {
     losses: row.losses as number,
     finishedAt: row.finished_at as string,
     isTrophy: true,
+    endRank: (row.end_rank ?? null) as string | null,
   };
 }
 

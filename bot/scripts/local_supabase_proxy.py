@@ -16,6 +16,7 @@ from sqlalchemy import create_engine, text
 log = logging.getLogger(__name__)
 
 _ALLOWED_VIEWS = {
+    "public_colors_summary",
     "public_cube_seasons",
     "public_cube_season_breakdown",
     "public_cube_season_events",
