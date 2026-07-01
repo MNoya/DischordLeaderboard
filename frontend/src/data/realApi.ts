@@ -47,7 +47,6 @@ import type {
   SetSummary,
   TrophyLeaderboardRow,
 } from "../types/leaderboard";
-import { isMtgoFlashbackCode } from "./mtgoSets";
 
 function client() {
   if (!supabase) throw new Error("Supabase client is not configured");
@@ -306,27 +305,6 @@ export async function fetchTrophyLeaderboard(setCode: string): Promise<TrophyLea
   return [...bySlug.values()]
     .sort((a, b) => b.trophies - a.trophies || b.decks[0].reportedAt.localeCompare(a.decks[0].reportedAt))
     .map((r, i) => ({ ...r, rank: i + 1 }));
-}
-
-// MTGO flashback set codes that have at least one logged trophy, for populating the set switcher.
-export async function fetchTrophySetCodes(): Promise<string[]> {
-  return mtgoCodesFrom(client().from("public_self_reported_trophies").select("set_code"));
-}
-
-// MTGO flashback set codes a single player has logged a trophy in, for their profile set dropdown.
-export async function fetchPlayerTrophySetCodes(slug: string): Promise<string[]> {
-  return mtgoCodesFrom(client().from("public_self_reported_trophies").select("set_code").eq("slug", slug));
-}
-
-async function mtgoCodesFrom(query: PromiseLike<{ data: unknown[] | null; error: unknown }>): Promise<string[]> {
-  const { data, error } = await query;
-  if (error) throw error;
-  const codes = new Set<string>();
-  for (const raw of data ?? []) {
-    const code = (raw as Record<string, unknown>).set_code as string;
-    if (isMtgoFlashbackCode(code)) codes.add(code.toUpperCase());
-  }
-  return [...codes];
 }
 
 // Stats refresh globally, so a season's "Last updated" is the lifetime board's

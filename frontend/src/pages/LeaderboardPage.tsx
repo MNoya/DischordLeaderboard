@@ -43,7 +43,6 @@ import {
   useSets,
   useCubeSeasons,
   useTrophyLeaderboard,
-  useTrophySetCodes,
 } from "../data/hooks";
 import { isMtgoFlashbackCode, mtgoSetName, withMtgoSets } from "../data/mtgoSets";
 import { useAuth } from "../auth/useAuth";
@@ -72,8 +71,7 @@ export function LeaderboardPage() {
   const setMeta = sets?.find((s) => s.code === baseSetCode(activeSet));
   const { data: cubeSeasons } = useCubeSeasons();
   const latestCubeSeason = cubeSeasons?.[0]?.setCode;
-  const { data: trophySetCodes } = useTrophySetCodes();
-  const dropdownSets = useMemo(() => withMtgoSets(sets, trophySetCodes), [sets, trophySetCodes]);
+  const dropdownSets = useMemo(() => withMtgoSets(sets), [sets]);
   const isMtgo = isMtgoFlashbackCode(activeSet);
   const trophyLb = useTrophyLeaderboard(isMtgo ? activeSet : undefined);
 

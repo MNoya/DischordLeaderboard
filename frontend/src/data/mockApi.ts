@@ -121,15 +121,6 @@ export const fetchLeaderboard = (setCode: string): Promise<LeaderboardRow[]> => 
 export const fetchTrophyLeaderboard = (setCode: string): Promise<TrophyLeaderboardRow[]> =>
   wait(MTGO_TROPHY_FIXTURE[setCode.toUpperCase()] ?? []);
 
-export const fetchTrophySetCodes = (): Promise<string[]> => wait(Object.keys(MTGO_TROPHY_FIXTURE));
-
-export const fetchPlayerTrophySetCodes = (slug: string): Promise<string[]> =>
-  wait(
-    Object.entries(MTGO_TROPHY_FIXTURE)
-      .filter(([, rows]) => rows.some((r) => r.slug === slug))
-      .map(([code]) => code),
-  );
-
 // ─── colors summary (fixture-side) ──────────────────────────────────────────
 // Aggregates color combos from the curated player draft events. Only the 5
 // fixture players contribute, but they cover the SOS top of the leaderboard so

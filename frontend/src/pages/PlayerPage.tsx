@@ -32,7 +32,7 @@ import { RankBadge } from "../components/RankBadge";
 import { GoToTopButton } from "../components/GoToTopButton";
 import { Tooltip } from "../components/Tooltip";
 
-import { useAvailableFormats, useColorChips, useDraftEvents, useLeaderboard, usePlayerIdentity, usePlayerProfile, usePlayerTrophySetCodes, useSets } from "../data/hooks";
+import { useAvailableFormats, useColorChips, useDraftEvents, useLeaderboard, usePlayerIdentity, usePlayerProfile, useSets } from "../data/hooks";
 import { withMtgoSets } from "../data/mtgoSets";
 import { aggregate as scoreAggregate, computeScore, type ScoringStatRow } from "../data/scoring";
 import { canonicalSetCode, colorsOf, eventDate, eventDisplayLabel, fmtShortDate, formatTag, isCubeCode, isFlashbackEvent, isSoup, LEADERBOARD_BASE, lastUpdated, lcqCashPrize, leaderboardPath, mainColors, playerPath, prettyFormat, winPct } from "../data/utils";
@@ -121,8 +121,7 @@ export function PlayerPage() {
   const slug = params.slug!.toLowerCase();
   const navigate = useNavigate();
   const { data: sets } = useSets();
-  const { data: playerTrophySetCodes } = usePlayerTrophySetCodes(slug);
-  const dropdownSets = useMemo(() => withMtgoSets(sets, playerTrophySetCodes), [sets, playerTrophySetCodes]);
+  const dropdownSets = useMemo(() => withMtgoSets(sets), [sets]);
   const liveSetCode = sets?.find((s) => s.isActive)?.code;
   const setCode = (params.setCode ? canonicalSetCode(params.setCode, sets) : undefined) ?? liveSetCode ?? ACTIVE_SET_CODE;
   const { data: profile, isLoading, isFetching, error } = usePlayerProfile(slug, setCode);

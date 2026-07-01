@@ -23,19 +23,18 @@ const MTGO_RELEASE_DATE: Record<string, string> = {
   IPA: "2000-10-02",
 };
 
-// Synthetic SetSummary rows so MTGO flashback boards appear in the set switchers without a public_sets
-// entry. Only codes with logged trophies are passed in, so empty boards never clutter the switcher.
-export function withMtgoSets(sets: SetSummary[] | undefined, codes: string[] | undefined): SetSummary[] | undefined {
-  if (!sets || !codes || codes.length === 0) {
+// Synthetic SetSummary rows so every MTGO flashback board appears in the set switchers without a
+// public_sets entry, shown by default whether or not any trophy has been logged for them yet.
+export function withMtgoSets(sets: SetSummary[] | undefined): SetSummary[] | undefined {
+  if (!sets) {
     return sets;
   }
   const known = new Set(sets.map((s) => s.code));
-  const extra: SetSummary[] = codes
-    .filter((c) => isMtgoFlashbackCode(c) && !known.has(c.toUpperCase()))
-    .map((c) => {
-      const code = c.toUpperCase();
+  const extra: SetSummary[] = Object.keys(MTGO_FLASHBACK_SETS)
+    .filter((code) => !known.has(code))
+    .map((code) => {
       const released = MTGO_RELEASE_DATE[code] ?? "";
-      return { code, name: mtgoSetName(c), startDate: released, endDate: released, isActive: false };
+      return { code, name: mtgoSetName(code), startDate: released, endDate: released, isActive: false };
     });
   return extra.length ? [...sets, ...extra] : sets;
 }
