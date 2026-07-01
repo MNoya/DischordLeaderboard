@@ -77,6 +77,8 @@ export interface PlayerDraftEvent {
   eventName?: string | null;
   // Pod draft event slug for /pods/<slug>. Null for 17lands rows
   podEventSlug?: string | null;
+  // Arena rank when the event finished ("Gold-3", "Mythic-1"). Null for pod rows
+  endRank?: string | null;
 }
 
 export interface ColorsLeaderboardRow {

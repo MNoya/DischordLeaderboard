@@ -29,6 +29,7 @@ import { ArenaChampBadge, isArenaChampionshipFormat } from "../components/ArenaC
 import { SetCodeDropdown } from "../components/SetCodeDropdown";
 import { MobilePageHeader } from "../components/PageNav";
 import { RankBadge } from "../components/RankBadge";
+import { ArenaRankIcon, latestArenaRank, parseArenaRank } from "../components/ArenaRankIcon";
 import { GoToTopButton } from "../components/GoToTopButton";
 import { Tooltip } from "../components/Tooltip";
 
@@ -702,6 +703,7 @@ function Desktop({
   }, [filtersActive, filtered, displayRows, pointsTotal, profile.trophies, profile.events, profile.wins, profile.losses, profile.score]);
   const wp = winPct(stats.wins, stats.losses);
   const ranked = profile.rank > 0;
+  const currentRank = latestArenaRank(events);
   const [pointsModalOpen, setPointsModalOpen] = useState(false);
   const pointsBtnRef = useRef<HTMLButtonElement>(null);
 
@@ -733,6 +735,11 @@ function Desktop({
                 <span className="text-[22px]">{profile.setCode}</span>
               )}
               {ranked && <RankBadge rank={profile.rank} size="lg" />}
+              <ArenaRankIcon
+                endRank={currentRank}
+                size={40}
+                title={`${parseArenaRank(currentRank)?.label} — Arena rank at last draft`}
+              />
             </div>
           </div>
           <div className="ml-auto flex items-stretch gap-4 min-w-0">
@@ -1288,7 +1295,7 @@ function DraftLogDesktop({
 
       <div
         className="mt-3 grid gap-x-2 items-stretch"
-        style={{ gridTemplateColumns: "22px 70px max-content 1fr auto" }}
+        style={{ gridTemplateColumns: "22px 70px max-content 1fr 24px auto" }}
       >
         {rows.map((e, i) => {
           const isFB = isFlashbackEvent(e.finishedAt, setEndDate);
@@ -1581,6 +1588,9 @@ function EventLogRow({
         ) : (
           deckContent
         )}
+        <span className="flex items-center justify-center">
+          <ArenaRankIcon endRank={e.endRank} size={22} />
+        </span>
         {trophy ? (
           <span className="inline-flex items-center justify-end gap-3 text-dim group-hover:text-text transition-colors">
             <PlatformTag platform={trophy.platform} />
@@ -1757,6 +1767,7 @@ function EventLogRow({
       ) : (
         <Tooltip label="View deck in 17lands">
           <span className="inline-flex items-center gap-1.5 text-dim group-hover:text-text transition-colors">
+            <ArenaRankIcon endRank={e.endRank} size={18} className="mr-0.5" />
             <Record
               mono
               wins={e.wins}
@@ -1911,6 +1922,7 @@ function Mobile({
   }, [filtersActive, filtered, displayRows, pointsTotal, profile.trophies, profile.events, profile.wins, profile.losses, profile.score]);
   const wp = winPct(stats.wins, stats.losses);
   const ranked = profile.rank > 0;
+  const currentRank = latestArenaRank(events);
   const [pointsModalOpen, setPointsModalOpen] = useState(false);
   const pointsBtnRef = useRef<HTMLButtonElement>(null);
 
@@ -1945,9 +1957,14 @@ function Mobile({
             />
           </div>
           <div className="flex flex-col items-end gap-1.5 font-display tracking-[0.18em] shrink-0">
-            {ranked && (
-              <span style={{ marginRight: -8 }}>
-                <RankBadge rank={profile.rank} size="md" />
+            {(ranked || currentRank) && (
+              <span className="flex items-center gap-2" style={{ marginRight: -8 }}>
+                <ArenaRankIcon
+                  endRank={currentRank}
+                  size={30}
+                  title={`${parseArenaRank(currentRank)?.label} — Arena rank at last draft`}
+                />
+                {ranked && <RankBadge rank={profile.rank} size="md" />}
               </span>
             )}
             {sets ? (

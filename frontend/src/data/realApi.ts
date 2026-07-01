@@ -1005,7 +1005,7 @@ export async function fetchPlayerIdentity(slug: string): Promise<PlayerIdentity 
 // ─── public_player_draft_events ────────────────────────────────────────────
 
 const DRAFT_EVENT_COLUMNS =
-  "slug, set_code, event_id, format, expansion, wins, losses, is_trophy, colors, started_at, finished_at, seventeenlands_event_id, external_url, event_name, pod_event_slug";
+  "slug, set_code, event_id, format, expansion, wins, losses, is_trophy, colors, started_at, finished_at, seventeenlands_event_id, external_url, event_name, pod_event_slug, end_rank";
 
 export async function fetchPlayerDraftEvents(
   slug: string,
