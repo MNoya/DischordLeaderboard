@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import calendar
+import contextlib
 import logging
 import logging.handlers
 import os
@@ -34,6 +35,7 @@ from bot.commands.pod_guide import setup as setup_pod_guide
 from bot.commands.roles import RolesView, setup as setup_roles
 from bot.commands.pod_schedule import setup as setup_pod_schedule
 from bot.commands.preview_season_awards import setup as setup_preview_season_awards
+from bot.commands.save_resource import setup as setup_save_resource
 from bot.commands.set_awards import setup as setup_set_awards
 from bot.commands.signout import setup as setup_signout
 from bot.commands.signup import setup as setup_signup
@@ -183,6 +185,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_leaderboard(bot)
         await setup_stats(bot)
         await setup_trophy(bot)
+        await setup_save_resource(bot)
         await setup_help(bot)
         await setup_event_scribe(bot)
         await setup_link_17lands(bot)
@@ -247,8 +250,14 @@ def build_bot(guild_id: int) -> commands.Bot:
         await _notify_owner(bot, f"⚠️ `/{cmd_name}` crashed (invoked by {invoker}, args: {opts}):", tb)
 
     async def _reply_quietly(ctx: commands.Context, message: str) -> None:
-        """Reply via DM. Invoke `!sync` from a DM with the bot to keep everything private."""
-        await ctx.author.send(message)
+        """DM invocations reply in the DM; channel invocations delete the `!command` text and reply
+        in-channel with a self-deleting message, the closest a prefix command gets to ephemeral."""
+        if ctx.guild is None:
+            await ctx.author.send(message)
+            return
+        with contextlib.suppress(discord.HTTPException):
+            await ctx.message.delete()
+        await ctx.send(message, delete_after=15)
 
     @bot.command(name="sync")
     @commands.is_owner()
