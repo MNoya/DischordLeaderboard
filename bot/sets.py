@@ -85,7 +85,7 @@ ALL_SETS: tuple[SetSeed, ...] = (
 # MTGO-only flashback drafts, never on Arena; kept out of ALL_SETS so they never rotate or score
 MTGO_FLASHBACK_SETS: dict[str, str] = {
     "IPA": "Invasion Block",
-    "USG": "Urza's Saga Block",
+    "USG": "Urza Block",
     "MH1": "Modern Horizons",
     "MH2": "Modern Horizons 2",
 }

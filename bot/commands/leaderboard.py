@@ -933,7 +933,7 @@ def _render_ephemeral_board(
         return None
     embed = render_public_embed(data)
     if suffix:
-        embed.title = f"{embed.title} · {suffix}"
+        embed.title = f"{embed.title} {suffix}"
     return embed
 
 
@@ -1264,15 +1264,18 @@ def _apply_footer(embed: discord.Embed, data: LeaderboardData) -> None:
 def render_embed(data: LeaderboardData) -> discord.Embed:
     base_url = settings.public_site_url.rstrip("/")
     site_url = board_site_url(data.set_code, data.filter_type, data.filter_value)
-    title = f"🏆 {data.set_code} Flashback Trophies" if data.trophy_board else f"🏆 Leaderboard — {data.set_code}"
+    set_emoji = emojis.get(data.set_code.lower())
+    prefix = f"{set_emoji} " if set_emoji else ""
     embed = discord.Embed(
-        title=title,
+        title=f"🏆 Leaderboard {prefix}{data.set_code}",
         url=site_url,
         color=discord.Color.gold(),
     )
     if not data.top:
-        empty = "_No trophies logged yet for this set._" if data.trophy_board else "_No players have scored yet for this set._"
-        embed.description = empty
+        embed.description = (
+            "_No trophies logged yet for this set._" if data.trophy_board
+            else "_No players have scored yet for this set._"
+        )
     else:
         rows = _format_leaderboard(
             data.top, data.set_code, show_score=data.show_score,
@@ -1808,7 +1811,7 @@ class Leaderboard(commands.Cog):
 
         embed = render_public_embed(data)
         if suffix:
-            embed.title = f"{embed.title} · {suffix}"
+            embed.title = f"{embed.title} {suffix}"
 
         # A specific past set is a post-and-forget snapshot: send it once, no
         # tracking row (so !refresh skips it) and no cycle button (cycling needs

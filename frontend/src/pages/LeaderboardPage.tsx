@@ -44,7 +44,7 @@ import {
   useCubeSeasons,
   useTrophyLeaderboard,
 } from "../data/hooks";
-import { isMtgoFlashbackCode, mtgoSetName, withMtgoSets } from "../data/mtgoSets";
+import { isMtgoFlashbackCode, mtgoSetName, withMtgoSets, MTGO_BLOCK_GLYPHS } from "../data/mtgoSets";
 import { useAuth } from "../auth/useAuth";
 import { baseSetCode, canonicalSetCode, colorsOf, CUBE_BASE, CUBE_LIFETIME, cubeSeasonLabel, eventDate, fmtRange, fmtShortDate, isCubeCode, isCubeSeasonCode, isSoup, lastUpdated, leaderboardPath, playerPath, prettyFormat, relativeTime, sumEvents, weekOfSet, winPct } from "../data/utils";
 import { CubeSeasonSelector } from "../components/CubeSeasonSelector";
@@ -301,11 +301,32 @@ function MtgoBoard({
   const isMobile = useIsMobile();
   const onSelectSet = (c: string) => goToSet(navigate, c, sets, searchParams, latestCubeSeason);
   const releaseDate = sets?.find((s) => s.code === activeSet)?.startDate;
+  const blockGlyphs = MTGO_BLOCK_GLYPHS[activeSet];
   return (
     <div className="bg-bg text-text min-h-screen flex flex-col animate-fadeIn">
       <AppHeader subtitle="LEADERBOARD" />
-      <div className="relative px-5 md:px-10 py-5 border-b border-border bg-surface flex items-center gap-4 md:gap-6">
-        <SetGlyph code={activeSet} size={isMobile ? 52 : 84} />
+      <div className="relative px-5 md:px-10 py-5 border-b border-border bg-surface flex items-center gap-3 md:gap-4">
+        {blockGlyphs ? (
+          <div className="flex items-center gap-2 md:gap-2.5 shrink-0">
+            <i
+              className={`ss ss-${blockGlyphs[0]} text-white`}
+              style={{ fontSize: isMobile ? 52 : 84, lineHeight: 1 }}
+              aria-hidden="true"
+            />
+            <div className="flex flex-col items-center gap-1.5 md:gap-2">
+              {blockGlyphs.slice(1).map((glyph) => (
+                <i
+                  key={glyph}
+                  className={`ss ss-${glyph} text-white`}
+                  style={{ fontSize: isMobile ? 24 : 38, lineHeight: 1 }}
+                  aria-hidden="true"
+                />
+              ))}
+            </div>
+          </div>
+        ) : (
+          <SetGlyph code={activeSet} size={isMobile ? 52 : 84} />
+        )}
         <div className="min-w-0">
           <div className="flex items-baseline gap-3">
             <span

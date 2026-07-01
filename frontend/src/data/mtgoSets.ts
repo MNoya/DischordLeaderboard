@@ -5,7 +5,7 @@ import type { SetSummary } from "../types/leaderboard";
 // are showcase-only and rank on a trophy-count board rather than the scored leaderboard.
 export const MTGO_FLASHBACK_SETS: Record<string, string> = {
   IPA: "Invasion Block",
-  USG: "Urza's Saga Block",
+  USG: "Urza Block",
   MH1: "Modern Horizons",
   MH2: "Modern Horizons 2",
 };
@@ -14,13 +14,21 @@ export const isMtgoFlashbackCode = (code: string): boolean => code.toUpperCase()
 
 export const mtgoSetName = (code: string): string => MTGO_FLASHBACK_SETS[code.toUpperCase()] ?? code.toUpperCase();
 
-// Original release date of each flashback set's lead set, shown on the switcher chip. Sorting pins
-// MTGO sets to the bottom of the switcher regardless (see SetSwitcher), so these are display-only.
+// Constituent set glyphs (keyrune classes) for block flashback drafts, shown together in the board
+// hero so a block reads as its member sets. Single-set flashbacks are absent and use their own glyph.
+export const MTGO_BLOCK_GLYPHS: Record<string, string[]> = {
+  IPA: ["inv", "pls", "apc"],
+  USG: ["usg", "ulg", "uds"],
+};
+
+// Release date shown on the switcher chip. For a block draft it's the block's final set (IPA ->
+// Apocalypse, USG -> Urza's Destiny); single-set flashbacks use their own date. Sorting pins MTGO
+// sets to the bottom of the switcher regardless (see SetSwitcher), so these are display-only.
 const MTGO_RELEASE_DATE: Record<string, string> = {
   MH1: "2019-06-14",
   MH2: "2021-06-18",
-  USG: "1998-10-12",
-  IPA: "2000-10-02",
+  USG: "1999-06-07",
+  IPA: "2001-06-04",
 };
 
 // Synthetic SetSummary rows so every MTGO flashback board appears in the set switchers without a

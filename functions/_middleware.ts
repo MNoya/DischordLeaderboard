@@ -17,6 +17,7 @@ import {
   PUBLIC_SUPABASE_PUBLISHABLE_KEY,
 } from "../frontend/src/data/public-supabase-config";
 import { SITE_NAME as SITE, TITLE_SEPARATOR, TIER_LIST_PREVIEW_SETS } from "../frontend/src/data/constants";
+import { mtgoSetName } from "../frontend/src/data/mtgoSets";
 import { P0P1_SET_CODE } from "../frontend/src/data/p0p1Slots";
 import { categoryFromSlug } from "../frontend/src/data/episodes";
 
@@ -97,7 +98,7 @@ const fetchSetName = async (code: string): Promise<string> => {
   } catch {
     // fall through
   }
-  return TIER_LIST_PREVIEW_SETS[code]?.name ?? code;
+  return TIER_LIST_PREVIEW_SETS[code]?.name ?? mtgoSetName(code);
 };
 
 // Episodes span sets that never reached the leaderboard, so resolve their display name
