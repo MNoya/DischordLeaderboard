@@ -80,12 +80,13 @@ function ResultsRow({
 }) {
   return (
     <div>
-      <div className="flex items-baseline justify-center gap-3 mb-2">
+      <div className="flex items-center justify-center gap-3 mb-2">
         <SectionLabel size={22} color="white">
           {title}
         </SectionLabel>
-        <span className="font-mono tabular-nums text-[18px] text-subtle">
-          {score.toFixed(1)}
+        <span className="inline-flex items-baseline gap-[7px] rounded border border-border2 bg-surface2 px-[9px] py-1">
+          <span className="font-mono tabular-nums text-[16px] font-semibold text-subtle">{score.toFixed(1)}</span>
+          <span className="font-display tracking-[0.16em] text-[11px] text-muted">GIH</span>
         </span>
       </div>
       <PickGrid entries={entries} cardsByName={cardsByName} onTileOpen={onTileOpen} />
