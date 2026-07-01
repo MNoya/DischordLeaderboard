@@ -101,12 +101,10 @@ export function MidwayBreakdownList({
 function SlotPanel({
   slot,
   rows,
-  cardsByName,
   collapsible = false,
 }: {
   slot: SlotDefinition;
   rows: SlotRow[];
-  cardsByName: Map<string, Card>;
   collapsible?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -122,7 +120,7 @@ function SlotPanel({
         {slot.label.toUpperCase()}
       </span>
       <span className="ml-auto shrink-0 text-muted text-[12px] tabular-nums">
-        {rows.length} card{rows.length !== 1 ? "s" : ""}
+        {rows.length} card{rows.length !== 1 ? "s" : ""} chosen
       </span>
       {collapsible && (
         <ChevronDown
@@ -199,8 +197,8 @@ function GihwrRow({
         </CardImagePreview>
 
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-            <span className="text-text text-[15px] leading-snug truncate min-w-0">{row.card.name}</span>
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-text text-[15px] leading-snug line-clamp-2 min-w-0">{row.card.name}</span>
             {row.isYours && (
               <span className="shrink-0 inline-block font-display tracking-[0.14em] uppercase text-[12.5px] leading-none px-2 py-1 bg-green text-bg">
                 YOURS
