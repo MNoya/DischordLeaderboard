@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from bot import emojis
@@ -41,9 +41,13 @@ MSG_SCHEDULE_HEADER = "📅 {set_code} Pod Drafts this week:"
 
 MSG_MONDAY_DRAFT_INTRO = "Weekly schedule draft — paste it as-is, tweak it first, or press a button:"
 
-BTN_POST_FOR_ME = "Post it for me"
+BTN_POST = "Post it"
 BTN_GOT_IT = "I've got it"
 BTN_SKIP = "Skip this week"
+
+BTN_EMOJI_POST = "🚀"
+BTN_EMOJI_GOT_IT = "📝"
+BTN_EMOJI_SKIP = "⏩"
 
 MSG_BTN_POSTED = "Posted ✅"
 MSG_BTN_ALREADY_POSTED = "The schedule is already up — nothing posted."
@@ -143,6 +147,51 @@ def slots_for_week(monday: date) -> list[datetime]:
     ]
 
 
+def monday_of(moment: datetime) -> date:
+    local_date = moment.astimezone(SCHEDULE_TZ).date()
+    return local_date - timedelta(days=local_date.weekday())
+
+
+def upcoming_slots(reference: datetime, count: int = len(WEEKLY_SLOTS)) -> list[datetime]:
+    """The next `count` weekly pod slots at or after `reference`, chronological across week boundaries."""
+    week_monday = monday_of(reference)
+    upcoming: list[datetime] = []
+    while len(upcoming) < count:
+        for start in slots_for_week(week_monday):
+            if start >= reference:
+                upcoming.append(start)
+        week_monday += timedelta(days=7)
+    return upcoming[:count]
+
+
+def slot_instant(moment: datetime) -> datetime:
+    """UTC-normalized key for matching a slot start against an already-created pod's event time."""
+    return moment.astimezone(timezone.utc).replace(microsecond=0)
+
+
+def next_unscheduled_slots(
+    reference: datetime, scheduled_instants: set[datetime], count: int = len(WEEKLY_SLOTS), max_weeks: int = 6
+) -> list[datetime]:
+    """The next `count` pod slots from `reference` with no pod created yet, stopping at a paused boundary week.
+
+    Walks forward slot by slot, skipping instants already in `scheduled_instants`, so a rotation that already
+    has this week's early slots announced rolls straight to the next open ones.
+    """
+    week_monday = monday_of(reference)
+    open_slots: list[datetime] = []
+    for _ in range(max_weeks + 1):
+        if monday_kind(week_monday)[0] != MONDAY_KIND_NORMAL:
+            break
+        for start in slots_for_week(week_monday):
+            if start < reference or slot_instant(start) in scheduled_instants:
+                continue
+            open_slots.append(start)
+            if len(open_slots) == count:
+                return open_slots
+        week_monday += timedelta(days=7)
+    return open_slots
+
+
 def next_release_after(day: date) -> UpcomingRelease | None:
     for release in UPCOMING_RELEASES:
         if release.release_date > day:
@@ -184,9 +233,17 @@ def monday_blurb(set_code: str, week_index: int) -> str:
     return pool[week_index % len(pool)]
 
 
-def compose_monday_message(monday: date, set_code: str) -> str:
-    """The paste-ready weekly post — plain text so it reads identically from the owner or the bot."""
-    kind, release = monday_kind(monday)
+def compose_schedule_message(reference: datetime, set_code: str, count: int = len(WEEKLY_SLOTS)) -> str:
+    """The paste-ready post listing the next `count` pod slots from `reference`, in chronological order.
+
+    Boundary weeks pause pods, so the first upcoming slot's week decides the message: a boundary week wins
+    outright, and on a normal week only upcoming slots that themselves fall in normal weeks are listed, so a
+    window spilling into a paused week never advertises paused slots. Plain text so it reads identically from
+    the owner or the bot.
+    """
+    slots = upcoming_slots(reference, count)
+    first_monday = monday_of(slots[0])
+    kind, release = monday_kind(first_monday)
     if kind == MONDAY_KIND_RELEASE_WEEK:
         return MSG_RELEASE_WEEK.format(set_name=release.name, unix=release_unix(release))
     if kind == MONDAY_KIND_CHAMPIONSHIP_WEEK:
@@ -198,14 +255,22 @@ def compose_monday_message(monday: date, set_code: str) -> str:
         )
     if kind == MONDAY_KIND_SEASON_OVER:
         return MSG_SEASON_OVER.format(set_code=set_code, next_name=release.name, unix=release_unix(release))
-    blurb = monday_blurb(set_code, week_index_for(set_code, monday))
+    blurb = monday_blurb(set_code, week_index_for(set_code, first_monday))
     header = MSG_SCHEDULE_HEADER.format(set_code=set_code)
     slot_lines = []
-    for slot, start in zip(WEEKLY_SLOTS, slots_for_week(monday)):
+    for start in slots:
+        if monday_kind(monday_of(start))[0] != MONDAY_KIND_NORMAL:
+            continue
+        slot = slot_by_weekday(start.weekday())
         unix = int(start.timestamp())
         slot_lines.append(f"{slot.emoji} <t:{unix}:F> (<t:{unix}:R>)")
     body = header + "\n" + "\n".join(slot_lines)
     return f"{blurb}\n\n{body}" if blurb else body
+
+
+def compose_monday_message(monday: date, set_code: str) -> str:
+    """Render a whole week's schedule from its Monday — the specific-week preview and the Monday post."""
+    return compose_schedule_message(datetime.combine(monday, time.min, tzinfo=SCHEDULE_TZ), set_code)
 
 
 def release_unix(release: UpcomingRelease) -> int:

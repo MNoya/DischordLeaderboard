@@ -21,8 +21,11 @@ from bot.config import settings
 from bot.database import SessionLocal
 from bot.models import PodDraftEvent
 from bot.services.pod_schedule import (
+    BTN_EMOJI_GOT_IT,
+    BTN_EMOJI_POST,
+    BTN_EMOJI_SKIP,
     BTN_GOT_IT,
-    BTN_POST_FOR_ME,
+    BTN_POST,
     BTN_SKIP,
     CREATE_LEAD_HOURS,
     MONDAY_KIND_NORMAL,
@@ -37,11 +40,15 @@ from bot.services.pod_schedule import (
     SCHEDULE_TZ,
     WEEKLY_SLOTS,
     build_create_command,
-    compose_monday_message,
+    compose_schedule_message,
     create_command_send_time,
     highest_event_number,
     monday_kind,
-    slots_for_week,
+    monday_of,
+    next_unscheduled_slots,
+    slot_by_weekday,
+    slot_instant,
+    upcoming_slots,
 )
 from bot.sets import active_set_code
 
@@ -104,7 +111,8 @@ async def fire_monday_dm() -> None:
         return
 
     monday = upcoming_monday()
-    body, view, _ = await build_monday_package(monday)
+    reference = datetime.now(SCHEDULE_TZ)
+    body, view, _ = await build_monday_package(reference, monday)
     try:
         await owner.send(body, view=view)
         log.info(f"monday schedule DM sent for {monday.isoformat()}")
@@ -113,20 +121,22 @@ async def fire_monday_dm() -> None:
     arm_create_command_jobs(monday)
 
 
-async def build_monday_package(monday: date) -> tuple[str, "PodMondayView", list[str]]:
+async def build_monday_package(
+    reference: datetime, week_monday: date
+) -> tuple[str, "PodMondayView", list[str]]:
     """Render the draft the Monday DM and /pod-schedule share.
 
-    The paste-ready message and its buttons come first; the Sesh /create blocks are returned
-    separately as one copy-whole code block per event (empty on boundary weeks). The automated
-    Monday DM no longer batches them — each fires on its own T-47h job — but /pod-schedule still
-    previews the full set on demand.
+    `reference` drives the content — the next upcoming slots from that moment, so a mid-week /pod-schedule
+    rolls into next week instead of assuming a Monday start. `week_monday` is the week the buttons act on
+    (the next automated post, or the previewed week). The paste-ready message and its buttons come first;
+    the Sesh /create blocks are returned separately as one copy-whole code block per event, empty on
+    boundary weeks. The automated Monday DM no longer batches them — each fires on its own T-47h job — but
+    /pod-schedule still previews the full set on demand.
     """
-    message = compose_monday_message(monday, active_set_code())
+    message = compose_schedule_message(reference, active_set_code())
     body = f"{MSG_MONDAY_DRAFT_INTRO}\n```\n{message}\n```"
-    create_blocks: list[str] = []
-    if monday_kind(monday)[0] == MONDAY_KIND_NORMAL:
-        create_blocks = await _create_command_blocks(monday)
-    return body, PodMondayView(monday), create_blocks
+    create_blocks = await _create_command_blocks(reference)
+    return body, PodMondayView(week_monday, reference), create_blocks
 
 
 async def fire_fallback_post() -> None:
@@ -144,25 +154,35 @@ async def fire_fallback_post() -> None:
 class PodMondayView(discord.ui.View):
     """Persistent (timeout=None) so buttons survive restarts; the restored copy falls back to the current week."""
 
-    def __init__(self, monday: date | None = None) -> None:
+    def __init__(self, monday: date | None = None, reference: datetime | None = None) -> None:
         super().__init__(timeout=None)
         self._monday = monday
+        self._reference = reference
 
     def _week(self) -> date:
         return self._monday or upcoming_monday()
 
-    @discord.ui.button(label=BTN_POST_FOR_ME, style=discord.ButtonStyle.primary, custom_id="pod-monday-post")
+    def _ref(self) -> datetime:
+        return self._reference or datetime.now(SCHEDULE_TZ)
+
+    @discord.ui.button(
+        label=BTN_POST, emoji=BTN_EMOJI_POST, style=discord.ButtonStyle.primary, custom_id="pod-monday-post"
+    )
     async def post_for_me(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         _week_status[self._week().isoformat()] = STATUS_HANDLED
-        posted = await _post_default_if_needed(self._week())
+        posted = await _post_default_if_needed(self._ref())
         await _respond(interaction, MSG_BTN_POSTED if posted else MSG_BTN_ALREADY_POSTED)
 
-    @discord.ui.button(label=BTN_GOT_IT, style=discord.ButtonStyle.secondary, custom_id="pod-monday-got-it")
+    @discord.ui.button(
+        label=BTN_GOT_IT, emoji=BTN_EMOJI_GOT_IT, style=discord.ButtonStyle.success, custom_id="pod-monday-got-it"
+    )
     async def got_it(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         _week_status[self._week().isoformat()] = STATUS_HANDLED
         await _respond(interaction, MSG_BTN_GOT_IT)
 
-    @discord.ui.button(label=BTN_SKIP, style=discord.ButtonStyle.secondary, custom_id="pod-monday-skip")
+    @discord.ui.button(
+        label=BTN_SKIP, emoji=BTN_EMOJI_SKIP, style=discord.ButtonStyle.secondary, custom_id="pod-monday-skip"
+    )
     async def skip(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         _week_status[self._week().isoformat()] = STATUS_SKIPPED
         await _respond(interaction, MSG_BTN_SKIPPED)
@@ -172,7 +192,7 @@ async def _respond(interaction: discord.Interaction, message: str) -> None:
     await interaction.response.send_message(message, ephemeral=(interaction.guild is not None))
 
 
-async def _post_default_if_needed(monday: date | None = None) -> bool:
+async def _post_default_if_needed(reference: datetime | None = None) -> bool:
     channel = await _fetch_coordination_channel()
     if channel is None:
         return False
@@ -180,17 +200,18 @@ async def _post_default_if_needed(monday: date | None = None) -> bool:
         log.info("schedule already posted in the coordination channel; standing down")
         return False
 
-    monday = monday or upcoming_monday()
-    body = compose_monday_message(monday, active_set_code())
+    reference = reference or datetime.now(SCHEDULE_TZ)
+    body = compose_schedule_message(reference, active_set_code())
     message = await channel.send(body)
     await _pin_schedule(channel, message)
-    kind, _ = monday_kind(monday)
+    schedule_monday = monday_of(upcoming_slots(reference, 1)[0])
+    kind, _ = monday_kind(schedule_monday)
     if kind == MONDAY_KIND_RELEASE_WEEK:
         try:
             await message.add_reaction("👍")
         except discord.HTTPException:
             log.warning("could not add 👍 reaction to release-week post", exc_info=True)
-    log.info(f"posted the default weekly schedule for {monday.isoformat()} ({kind})")
+    log.info(f"posted the default weekly schedule for {schedule_monday.isoformat()} ({kind})")
     return True
 
 
@@ -227,12 +248,13 @@ async def _schedule_already_posted(channel: discord.abc.Messageable) -> bool:
     return False
 
 
-async def _create_command_blocks(monday) -> list[str]:
-    last_number = await asyncio.to_thread(_latest_event_number)
+async def _create_command_blocks(reference: datetime) -> list[str]:
+    last_number, scheduled = await asyncio.to_thread(_event_number_and_scheduled_starts)
     blocks = []
-    for i, (slot, start) in enumerate(zip(WEEKLY_SLOTS, slots_for_week(monday))):
+    for offset, start in enumerate(next_unscheduled_slots(reference, scheduled), start=1):
+        slot = slot_by_weekday(start.weekday())
         command = build_create_command(
-            active_set_code(), last_number + 1 + i, start, slot.description, slot.mentions
+            active_set_code(), last_number + offset, start, slot.description, slot.mentions
         )
         blocks.append(f"```\n{command}\n```")
     return blocks
@@ -328,6 +350,20 @@ def _latest_event_number() -> int:
             select(PodDraftEvent.name).where(PodDraftEvent.set_code == active_set_code())
         ).scalars()
         return highest_event_number(names)
+
+
+def _event_number_and_scheduled_starts() -> tuple[int, set[datetime]]:
+    """Highest recorded event number and the instants that already have a pod, so the preview never
+    re-offers a /create for a slot that is already scheduled."""
+    with SessionLocal() as session:
+        rows = session.execute(
+            select(PodDraftEvent.name, PodDraftEvent.event_time).where(
+                PodDraftEvent.set_code == active_set_code()
+            )
+        ).all()
+    highest = highest_event_number(name for name, _ in rows)
+    scheduled = {slot_instant(event_time) for _, event_time in rows if event_time is not None}
+    return highest, scheduled
 
 
 def upcoming_monday() -> date:

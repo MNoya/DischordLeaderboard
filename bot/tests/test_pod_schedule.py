@@ -11,20 +11,25 @@ from bot.services.pod_schedule import (
     MONDAY_KIND_RELEASE_WEEK,
     MONDAY_KIND_SEASON_OVER,
     SCHEDULE_TZ,
+    SLOT_EMOJI_SATURDAY,
     WEEKLY_SLOTS,
     build_create_command,
     build_underfill_message,
     compose_monday_message,
+    compose_schedule_message,
     create_command_send_time,
     format_clock,
     highest_event_number,
     monday_blurb,
     monday_kind,
     next_release_after,
+    next_unscheduled_slots,
     short_event_name,
     release_unix,
     slot_for_event_time,
+    slot_instant,
     slots_for_week,
+    upcoming_slots,
     week_index_for,
 )
 
@@ -44,6 +49,72 @@ def test_slots_for_week_tracks_dst_end():
     slots = slots_for_week(date(2026, 11, 2))
 
     assert all(slot.utcoffset().total_seconds() == -5 * 3600 for slot in slots)
+
+
+def test_upcoming_slots_from_midweek_rolls_into_next_week_in_order():
+    friday = datetime(2026, 12, 11, 10, 0, tzinfo=SCHEDULE_TZ)
+
+    slots = upcoming_slots(friday)
+
+    assert slots == [
+        datetime(2026, 12, 12, 15, 0, tzinfo=SCHEDULE_TZ),
+        datetime(2026, 12, 16, 20, 0, tzinfo=SCHEDULE_TZ),
+        datetime(2026, 12, 17, 14, 0, tzinfo=SCHEDULE_TZ),
+    ]
+
+
+def test_upcoming_slots_from_monday_returns_that_weeks_slots():
+    monday = datetime(2026, 12, 7, 0, 0, tzinfo=SCHEDULE_TZ)
+
+    slots = upcoming_slots(monday)
+
+    assert slots == slots_for_week(date(2026, 12, 7))
+
+
+def test_compose_schedule_message_starts_at_the_next_upcoming_slot():
+    friday = datetime(2026, 12, 11, 10, 0, tzinfo=SCHEDULE_TZ)
+
+    message = compose_schedule_message(friday, "MSH")
+
+    saturday = int(datetime(2026, 12, 12, 15, 0, tzinfo=SCHEDULE_TZ).timestamp())
+    next_wednesday = int(datetime(2026, 12, 16, 20, 0, tzinfo=SCHEDULE_TZ).timestamp())
+    assert f"{SLOT_EMOJI_SATURDAY} <t:{saturday}:F>" in message
+    assert message.index(f"<t:{saturday}:") < message.index(f"<t:{next_wednesday}:")
+
+
+def test_compose_schedule_message_does_not_advertise_a_paused_release_week():
+    friday_before_release = datetime(2026, 8, 7, 10, 0, tzinfo=SCHEDULE_TZ)
+
+    message = compose_schedule_message(friday_before_release, "MSH")
+
+    this_saturday = int(datetime(2026, 8, 8, 15, 0, tzinfo=SCHEDULE_TZ).timestamp())
+    release_week_wednesday = int(datetime(2026, 8, 12, 20, 0, tzinfo=SCHEDULE_TZ).timestamp())
+    assert f"<t:{this_saturday}:F>" in message
+    assert f"<t:{release_week_wednesday}:" not in message
+
+
+def test_next_unscheduled_slots_skips_already_scheduled_and_rolls_forward():
+    wednesday = datetime(2026, 12, 9, 9, 0, tzinfo=SCHEDULE_TZ)
+    scheduled = {
+        slot_instant(datetime(2026, 12, 9, 20, 0, tzinfo=SCHEDULE_TZ)),
+        slot_instant(datetime(2026, 12, 10, 14, 0, tzinfo=SCHEDULE_TZ)),
+    }
+
+    slots = next_unscheduled_slots(wednesday, scheduled)
+
+    assert slots == [
+        datetime(2026, 12, 12, 15, 0, tzinfo=SCHEDULE_TZ),
+        datetime(2026, 12, 16, 20, 0, tzinfo=SCHEDULE_TZ),
+        datetime(2026, 12, 17, 14, 0, tzinfo=SCHEDULE_TZ),
+    ]
+
+
+def test_next_unscheduled_slots_stops_before_a_paused_release_week():
+    friday_before_release = datetime(2026, 8, 7, 9, 0, tzinfo=SCHEDULE_TZ)
+
+    slots = next_unscheduled_slots(friday_before_release, set())
+
+    assert slots == [datetime(2026, 8, 8, 15, 0, tzinfo=SCHEDULE_TZ)]
 
 
 @pytest.mark.parametrize(
