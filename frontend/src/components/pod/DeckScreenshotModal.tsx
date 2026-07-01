@@ -8,12 +8,7 @@ import { Pips } from "../ManaPips";
 import { Record } from "../Record";
 import { cn } from "../../lib/utils";
 import { useIsMobile } from "../../lib/use-is-mobile";
-import {
-  isDiscordCdnUrl,
-  isDiscordUrlFresh,
-  refreshDeckUrl,
-  refreshMessageImageUrl,
-} from "../../data/refresh-deck-url";
+import { useResolvedDeckUrl } from "../../data/refresh-deck-url";
 import type { Mainboard } from "../../types/leaderboard";
 
 export const BREAKDOWN_CAPTION = "Seats, logs & replays";
@@ -33,10 +28,11 @@ export interface DeckLike {
   screenshotMessageId?: string | null;
 }
 
-type DeckTab = "screenshot" | "decklist";
+export type DeckTab = "screenshot" | "decklist";
 
 interface Props {
   participant: DeckLike;
+  initialTab?: DeckTab;
   breakdownHref?: string;
   hideDraftLog?: boolean;
   onClose: () => void;
@@ -44,40 +40,30 @@ interface Props {
   onNext?: () => void;
 }
 
-export function DeckScreenshotModal({ participant, breakdownHref, hideDraftLog = false, onClose, onPrev, onNext }: Props) {
+export function DeckScreenshotModal({ participant, initialTab = "screenshot", breakdownHref, hideDraftLog = false, onClose, onPrev, onNext }: Props) {
   const isMobile = useIsMobile();
 
   const hasScreenshot = participant.deckScreenshotUrl !== null;
+  const recordWins = Number((participant.record ?? "").split("-")[0] || 0);
+  const recordLosses = Number((participant.record ?? "").split("-")[1] || 0);
+  const hasRecord = participant.record != null && recordWins + recordLosses > 0;
   const hasDecklist = (participant.mainboard?.cards.length ?? 0) > 0;
   const deckKey = `${participant.eventId ?? ""}::${participant.participantDisplayName ?? participant.displayName}`;
-  const [tab, setTab] = useState<DeckTab>("screenshot");
+  const [tab, setTab] = useState<DeckTab>(initialTab);
   const effectiveTab: DeckTab =
     hasScreenshot && hasDecklist ? tab : hasDecklist ? "decklist" : "screenshot";
   const showPanelToggle = hasScreenshot && hasDecklist;
   const showDraftLogTab = !hideDraftLog;
   const showTabBar = showPanelToggle || showDraftLogTab || !!onPrev || !!onNext;
 
-  const canRefresh =
-    !!participant.eventId || (!!participant.screenshotChannelId && !!participant.screenshotMessageId);
-  const needsRefresh = useMemo(() => {
-    const url = participant.deckScreenshotUrl;
-    if (!url || !canRefresh) return false;
-    return isDiscordCdnUrl(url) && !isDiscordUrlFresh(url);
-  }, [participant.deckScreenshotUrl, canRefresh]);
-
-  const [resolvedUrl, setResolvedUrl] = useState<string | null>(
-    needsRefresh ? null : participant.deckScreenshotUrl,
-  );
-  const [isResolving, setIsResolving] = useState(needsRefresh);
+  const { url: resolvedUrl, resolving: isResolving } = useResolvedDeckUrl(participant);
   const [imgLoaded, setImgLoaded] = useState(false);
   const [imgFailed, setImgFailed] = useState(false);
   const [zoomed, setZoomed] = useState(true);
 
   useEffect(() => {
     setZoomed(true);
-    setResolvedUrl(needsRefresh ? null : participant.deckScreenshotUrl);
-    setIsResolving(needsRefresh);
-  }, [participant.deckScreenshotUrl, needsRefresh]);
+  }, [participant.deckScreenshotUrl]);
 
   useEffect(() => {
     setImgLoaded(false);
@@ -90,37 +76,6 @@ export function DeckScreenshotModal({ participant, breakdownHref, hideDraftLog =
   }, [resolvedUrl]);
 
   const showSkeleton = isResolving || (resolvedUrl !== null && !imgLoaded && !imgFailed);
-
-  useEffect(() => {
-    if (!needsRefresh) return;
-    const lookupName = participant.participantDisplayName ?? participant.displayName;
-    const fetchFresh =
-      participant.screenshotChannelId && participant.screenshotMessageId
-        ? refreshMessageImageUrl(participant.screenshotChannelId, participant.screenshotMessageId)
-        : participant.eventId
-          ? refreshDeckUrl(participant.eventId, lookupName)
-          : Promise.resolve(null);
-    let cancelled = false;
-    fetchFresh
-      .then((url) => {
-        if (cancelled) return;
-        setResolvedUrl(url ?? participant.deckScreenshotUrl);
-      })
-      .finally(() => {
-        if (!cancelled) setIsResolving(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    needsRefresh,
-    participant.eventId,
-    participant.displayName,
-    participant.participantDisplayName,
-    participant.deckScreenshotUrl,
-    participant.screenshotChannelId,
-    participant.screenshotMessageId,
-  ]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -163,12 +118,8 @@ export function DeckScreenshotModal({ participant, breakdownHref, hideDraftLog =
           >
             {participant.displayName}
           </span>
-          {participant.record && (
-            <Record
-              wins={Number(participant.record.split("-")[0] || 0)}
-              losses={Number(participant.record.split("-")[1] || 0)}
-              className="mono text-[20px] shrink-0"
-            />
+          {hasRecord && (
+            <Record wins={recordWins} losses={recordLosses} className="mono text-[20px] shrink-0" />
           )}
           <button
             type="button"
@@ -275,18 +226,6 @@ export function DeckScreenshotModal({ participant, breakdownHref, hideDraftLog =
             )}
           >
             {participant.deckScreenshotCaption}
-          </div>
-        )}
-        {effectiveTab === "decklist" && (participant.mainboard?.sideboard.length ?? 0) > 0 && (
-          <div className="border-t border-border shrink-0 bg-surface pl-9 pr-5 py-3">
-            <div className="font-display tracking-[0.16em] text-muted leading-none mb-2" style={{ fontSize: 13 }}>
-              SIDEBOARD
-            </div>
-            <div className="flex gap-2 overflow-x-auto themed-scrollbar pb-1">
-              {expandDuplicates(participant.mainboard!.sideboard).map((card, i) => (
-                <SideboardCard key={`${card.name}-${card.cn}-${i}`} card={card} deckSet={participant.mainboard!.set} />
-              ))}
-            </div>
           </div>
         )}
       </div>
@@ -417,10 +356,11 @@ function PanelTab({
 
 type DeckCard = Mainboard["cards"][number];
 
-const STRIP_H = 48;
+const STRIP_H = 30;
 const BADGE_H = 28;
 const COL_MIN = 132;
 const COL_MAX = 220;
+const SIDEBOARD_WIDTH = 168;
 
 // true groups copies into one card with a ×N badge (17lands style); false renders every copy as its
 // own card. Kept as a constant so both treatments are easy to compare.
@@ -454,7 +394,8 @@ function scryfallImageUrl(set: string, collectorNumber: string): string {
 }
 
 function DecklistView({ mainboard }: { mainboard: Mainboard }) {
-  const { mvPiles, lands } = useMemo(() => {
+  const [showSide, setShowSide] = useState(true);
+  const { mvPiles, lands, side } = useMemo(() => {
     const landCards: DeckCard[] = [];
     const byCmc = new Map<number, DeckCard[]>();
     for (const card of expandDuplicates(mainboard.cards)) {
@@ -473,44 +414,90 @@ function DecklistView({ mainboard }: { mainboard: Mainboard }) {
     const piles = [...byCmc.entries()]
       .sort((a, b) => a[0] - b[0])
       .map(([cmc, cards]) => ({ cmc, cards: cards.slice().sort(byColorThenName) }));
-    return { mvPiles: piles, lands: landCards.slice().sort(byColorThenName) };
+    return {
+      mvPiles: piles,
+      lands: landCards.slice().sort(byColorThenName),
+      side: expandDuplicates(mainboard.sideboard).sort(byColorThenName),
+    };
   }, [mainboard]);
+  const hasSide = side.length > 0;
 
   return (
-    <div className="h-full overflow-auto themed-scrollbar px-4 md:px-5 py-5">
-      <div className="flex gap-2 md:gap-3 items-start">
-        {mvPiles.map((pile) => (
-          <Pile key={pile.cmc} cards={pile.cards} deckSet={mainboard.set} />
+    <div className="relative h-full flex min-h-0">
+      <div className="relative flex-1 min-w-0 overflow-auto themed-scrollbar px-4 md:px-5 py-5">
+        <div className="flex gap-2 md:gap-3 items-start">
+          {mvPiles.map((pile) => (
+            <Pile key={pile.cmc} cards={pile.cards} deckSet={mainboard.set} />
+          ))}
+          {lands.length > 0 && <Pile cards={lands} deckSet={mainboard.set} />}
+        </div>
+      </div>
+      {hasSide && !showSide && (
+        <button
+          type="button"
+          onClick={() => setShowSide(true)}
+          className="absolute top-3 right-3 z-10 inline-flex items-center gap-1.5 rounded-full border border-border bg-surface2 px-3 py-1.5 font-display tracking-[0.14em] text-subtle hover:text-text hover:border-green/50 transition-colors cursor-pointer"
+          style={{ fontSize: 13 }}
+        >
+          <ChevronLeft size={15} />
+          SIDEBOARD {side.length}
+        </button>
+      )}
+      {hasSide && showSide && (
+        <aside className="shrink-0 flex flex-col min-h-0 border-l border-border bg-surface/60" style={{ width: SIDEBOARD_WIDTH }}>
+          <button
+            type="button"
+            onClick={() => setShowSide(false)}
+            className="flex items-center gap-2 px-3 py-2.5 border-b border-border font-display tracking-[0.16em] text-text hover:text-green transition-colors cursor-pointer"
+            style={{ fontSize: 15 }}
+          >
+            <span>SIDEBOARD</span>
+            <span className="ml-auto tabular-nums">{side.length}</span>
+            <ChevronRight size={18} />
+          </button>
+          <div className="flex-1 overflow-auto themed-scrollbar px-3 py-3">
+            <Pile cards={side} deckSet={mainboard.set} />
+          </div>
+        </aside>
+      )}
+    </div>
+  );
+}
+
+const CARD_CLASS =
+  "w-full overflow-hidden rounded-[5px] [outline-style:solid] outline-1 -outline-offset-1 outline-white/10 shadow-[0_-2px_6px_rgba(0,0,0,0.6)]";
+
+// Cards fan top-to-bottom with each one absolutely overlapping the previous, so only a revealed sliver
+// of the upper cards shows and their bottom edge is covered — the bottom card sits in normal flow and
+// gives the column its height.
+function Pile({ cards, deckSet }: { cards: DeckCard[]; deckSet: string | null }) {
+  const lastIndex = cards.length - 1;
+  if (lastIndex < 0) {
+    return null;
+  }
+  return (
+    <div className="flex-1" style={{ minWidth: COL_MIN, maxWidth: COL_MAX }}>
+      <div className="relative w-full [display:flow-root]">
+        {cards.slice(0, lastIndex).map((card, i) => (
+          <div key={`${card.name}-${card.cn}-${i}`} className={cn("absolute", CARD_CLASS)} style={{ top: i * STRIP_H }}>
+            <PileCard card={card} deckSet={deckSet} />
+          </div>
         ))}
-        {lands.length > 0 && <Pile cards={lands} deckSet={mainboard.set} />}
+        <div className={cn("relative", CARD_CLASS)} style={{ marginTop: lastIndex * STRIP_H }}>
+          <PileCard card={cards[lastIndex]} deckSet={deckSet} />
+        </div>
       </div>
     </div>
   );
 }
 
-function Pile({ cards, deckSet }: { cards: DeckCard[]; deckSet: string | null }) {
-  return (
-    <div className="flex flex-col flex-1" style={{ minWidth: COL_MIN, maxWidth: COL_MAX }}>
-      {cards.map((card, i) => (
-        <StackedCard key={`${card.name}-${card.cn}-${i}`} card={card} deckSet={deckSet} reveal={i < cards.length - 1} />
-      ))}
-    </div>
-  );
-}
-
-function StackedCard({ card, deckSet, reveal }: { card: DeckCard; deckSet: string | null; reveal: boolean }) {
+function PileCard({ card, deckSet }: { card: DeckCard; deckSet: string | null }) {
   const [failed, setFailed] = useState(false);
   const set = card.set ?? deckSet;
   const src = set && card.cn ? scryfallImageUrl(set, card.cn) : null;
   const count = card.count ?? 1;
   return (
-    <div
-      className={cn(
-        "relative w-full overflow-hidden rounded-[5px] shadow-[0_-1px_4px_rgba(0,0,0,0.45)]",
-        !reveal && "aspect-[488/680]",
-      )}
-      style={reveal ? { height: STRIP_H } : undefined}
-    >
+    <>
       {src && !failed ? (
         <img
           src={src}
@@ -521,12 +508,12 @@ function StackedCard({ card, deckSet, reveal }: { card: DeckCard; deckSet: strin
           draggable={false}
         />
       ) : (
-        <div className="w-full aspect-[488/680] bg-surface2 border border-border flex items-start p-2">
+        <div className="w-full aspect-[488/680] bg-surface2 flex items-start p-2">
           <span className="font-body text-subtle leading-tight" style={{ fontSize: 12 }}>{card.name}</span>
         </div>
       )}
-      {count > 1 && <CountBadge n={count} onStrip={reveal} />}
-    </div>
+      {count > 1 && <CountBadge n={count} onStrip={false} />}
+    </>
   );
 }
 
@@ -540,31 +527,5 @@ function CountBadge({ n, onStrip }: { n: number; onStrip: boolean }) {
     >
       ×{n}
     </span>
-  );
-}
-
-function SideboardCard({ card, deckSet }: { card: DeckCard; deckSet: string | null }) {
-  const [failed, setFailed] = useState(false);
-  const set = card.set ?? deckSet;
-  const src = set && card.cn ? scryfallImageUrl(set, card.cn) : null;
-  const count = card.count ?? 1;
-  return (
-    <div className="relative shrink-0 overflow-hidden rounded-[5px]" style={{ width: 94 }}>
-      {src && !failed ? (
-        <img
-          src={src}
-          alt={card.name}
-          loading="lazy"
-          onError={() => setFailed(true)}
-          className="block w-full h-auto"
-          draggable={false}
-        />
-      ) : (
-        <div className="w-full aspect-[488/680] bg-surface2 border border-border flex items-start p-1.5">
-          <span className="font-body text-subtle leading-tight" style={{ fontSize: 10 }}>{card.name}</span>
-        </div>
-      )}
-      {count > 1 && <CountBadge n={count} onStrip={false} />}
-    </div>
   );
 }

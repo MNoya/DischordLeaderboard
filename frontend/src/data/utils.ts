@@ -251,7 +251,7 @@ export function lcqCashPrize(event: { format: string; wins: number; losses: numb
 }
 
 export function stripDiscriminator(name: string): string {
-  return name.replace(/#\d+$/, "");
+  return name.replace(/#\d+/, "").trim();
 }
 
 export function podDiscordName(p: {

@@ -1,7 +1,10 @@
 import { useLayoutEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { keyruneClass } from "../Brand";
-import { LuScrollText, TbCards } from "../Icons";
-import { PlayerShield } from "./PlayerShield";
+import { ChevronsRight, LuScrollText, TbCards } from "../Icons";
+import { Tooltip } from "../Tooltip";
+import { highlightEventLabel } from "./EventLabel";
+import { PlayerShield, ShieldFrame } from "./PlayerShield";
 import { cn } from "../../lib/utils";
 import type { PodSeat } from "../../types/leaderboard";
 import type { RoundOutcome } from "./PlayerSeatPanel";
@@ -15,6 +18,8 @@ interface Props {
   onSelect: (seat: number | null) => void;
   onShowDeck?: (p: PodSeat) => void;
   eventLabel: string;
+  eventSlug: string;
+  hasDraftLog?: boolean;
   setCode: string;
   formatLabel?: string | null;
   date: string;
@@ -29,9 +34,6 @@ const ARROW_OFFSET_BY_INDEX: Record<number, number> = {
   6: ARROW_OFFSET_RAD,
 };
 const SHIELD_REF_WIDTH = 640;
-const SHIELD_VIEWBOX = "0 0 100 122";
-const SHIELD_OUTER_PATH = "M 0 0 H 100 V 60 C 100 80, 85 100, 50 122 C 15 100, 0 80, 0 60 Z";
-const SHIELD_INNER_PATH = "M 2 2 H 98 V 60 C 98 78, 84 98, 50 119 C 16 98, 2 78, 2 60 Z";
 const SHIELD_REF_DIMS = { w: 118, h: 144 };
 
 export function PodTable({
@@ -43,6 +45,8 @@ export function PodTable({
   onSelect,
   onShowDeck,
   eventLabel,
+  eventSlug,
+  hasDraftLog = false,
   setCode,
   formatLabel,
   date,
@@ -138,6 +142,8 @@ export function PodTable({
                 angle={angle}
                 participant={p}
                 onShowDeck={onShowDeck}
+                eventSlug={eventSlug}
+                hasDraftLog={hasDraftLog}
                 scale={scale}
               />
             )}
@@ -152,16 +158,23 @@ function ShieldActions({
   angle,
   participant,
   onShowDeck,
+  eventSlug,
+  hasDraftLog,
   scale,
 }: {
   angle: number;
   participant: PodSeat;
   onShowDeck: (p: PodSeat) => void;
+  eventSlug: string;
+  hasDraftLog: boolean;
   scale: number;
 }) {
   const hasDeck = !!participant.deckScreenshotUrl || !!participant.hasDeckList;
-  const hasDraftLog = !!participant.draftLogUrl;
-  if (!hasDeck && !hasDraftLog) return null;
+  const logInternalHref = hasDraftLog
+    ? `/pods/${eventSlug}/${participant.playerSlug ?? participant.seatIndex}`
+    : null;
+  const showLog = logInternalHref !== null || participant.draftLogUrl !== null;
+  if (!hasDeck && !showLog) return null;
 
   const orbitX = 50 + Math.cos(angle) * ORBIT_RADIUS_PCT;
   const orbitY = 50 + Math.sin(angle) * ORBIT_RADIUS_PCT;
@@ -182,37 +195,54 @@ function ShieldActions({
     >
       <div className="flex flex-col gap-2">
         {hasDeck && (
-          <button
-            type="button"
-            onClick={() => onShowDeck(participant)}
-            title="View deck"
-            aria-label="View deck"
-            className="group flex items-center justify-center rounded-full bg-bg border border-border hover:border-green/60 hover:bg-green/10 transition-colors cursor-pointer shadow-[0_4px_10px_rgba(0,0,0,0.55)]"
-            style={{ width: btnSize, height: btnSize }}
-          >
-            <TbCards
-              size={Math.round(btnSize * 0.46)}
-              aria-hidden="true"
-              className="text-text group-hover:text-green transition-colors"
-            />
-          </button>
+          <Tooltip label="View Deck" side="right">
+            <button
+              type="button"
+              onClick={() => onShowDeck(participant)}
+              aria-label="View Deck"
+              className="group flex items-center justify-center rounded-full bg-bg border border-border hover:border-green/60 hover:bg-green/10 transition-colors cursor-pointer shadow-[0_4px_10px_rgba(0,0,0,0.55)]"
+              style={{ width: btnSize, height: btnSize }}
+            >
+              <TbCards
+                size={Math.round(btnSize * 0.46)}
+                aria-hidden="true"
+                className="text-text group-hover:text-green transition-colors"
+              />
+            </button>
+          </Tooltip>
         )}
-        {hasDraftLog && (
-          <a
-            href={participant.draftLogUrl!}
-            target="_blank"
-            rel="noreferrer noopener"
-            title="View draft log"
-            aria-label="View draft log"
-            className="group flex items-center justify-center rounded-full bg-bg border border-border hover:border-green/60 hover:bg-green/10 transition-colors no-underline shadow-[0_4px_10px_rgba(0,0,0,0.55)]"
-            style={{ width: btnSize, height: btnSize }}
-          >
-            <LuScrollText
-              size={Math.round(btnSize * 0.46)}
-              aria-hidden="true"
-              className="text-text group-hover:text-green transition-colors"
-            />
-          </a>
+        {showLog && (
+          <Tooltip label="View Draft Log" side="right">
+            {logInternalHref ? (
+              <Link
+                to={logInternalHref}
+                aria-label="View Draft Log"
+                className="group flex items-center justify-center rounded-full bg-bg border border-border hover:border-green/60 hover:bg-green/10 transition-colors no-underline shadow-[0_4px_10px_rgba(0,0,0,0.55)]"
+                style={{ width: btnSize, height: btnSize }}
+              >
+                <LuScrollText
+                  size={Math.round(btnSize * 0.46)}
+                  aria-hidden="true"
+                  className="text-text group-hover:text-green transition-colors"
+                />
+              </Link>
+            ) : (
+              <a
+                href={participant.draftLogUrl!}
+                target="_blank"
+                rel="noreferrer noopener"
+                aria-label="View Draft Log"
+                className="group flex items-center justify-center rounded-full bg-bg border border-border hover:border-green/60 hover:bg-green/10 transition-colors no-underline shadow-[0_4px_10px_rgba(0,0,0,0.55)]"
+                style={{ width: btnSize, height: btnSize }}
+              >
+                <LuScrollText
+                  size={Math.round(btnSize * 0.46)}
+                  aria-hidden="true"
+                  className="text-text group-hover:text-green transition-colors"
+                />
+              </a>
+            )}
+          </Tooltip>
         )}
       </div>
     </div>
@@ -318,18 +348,11 @@ function PassDirectionArrows({ seatCount }: { seatCount: number }) {
               transform: `translate(-50%, -50%) rotate(${tangentDeg}deg)`,
             }}
           >
-            <svg viewBox="0 0 24 24" className="w-full h-full" aria-hidden="true">
-              <path
-                d="M 4 7 L 11 12 L 4 17 M 13 7 L 20 12 L 13 17"
-                fill="none"
-                stroke="#c4ccdb"
-                strokeOpacity="0.75"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                vectorEffect="non-scaling-stroke"
-              />
-            </svg>
+            <ChevronsRight
+              className="w-full h-full text-[#c4ccdb] opacity-75"
+              strokeWidth={2.5}
+              aria-hidden="true"
+            />
           </div>
         );
       })}
@@ -343,7 +366,7 @@ function CenterMedallion({
   formatLabel,
   date,
 }: { eventLabel: string; setCode: string; formatLabel?: string | null; date: string }) {
-  const dateLabel = formatDate(date);
+  const { weekday, date: dateLabel } = formatDateParts(date);
   const labelFontSize = medallionFontSize(eventLabel);
   const glyphCode = formatLabel ? "CUBE" : setCode;
   return (
@@ -355,7 +378,7 @@ function CenterMedallion({
         className="font-display text-text leading-none px-2"
         style={{ fontSize: labelFontSize, letterSpacing: "0.02em" }}
       >
-        {renderLabelWithGreenNumber(eventLabel)}
+        {highlightEventLabel(eventLabel)}
       </div>
       <div className="flex items-center" style={{ gap: "2.2cqw" }}>
         <i
@@ -371,10 +394,11 @@ function CenterMedallion({
         </span>
       </div>
       <div
-        className="font-display text-muted"
-        style={{ fontSize: "2.2cqw", letterSpacing: "0.32em" }}
+        className="flex items-center justify-center font-display text-muted"
+        style={{ fontSize: "2.2cqw", letterSpacing: "0.32em", gap: "1.6cqw" }}
       >
-        {dateLabel}
+        <span>{weekday}</span>
+        <span>{dateLabel}</span>
       </div>
     </div>
   );
@@ -389,23 +413,11 @@ function medallionFontSize(label: string): string {
   return "4.5cqw";
 }
 
-function renderLabelWithGreenNumber(label: string) {
-  const m = label.match(/^(.*?)(#\d+)(.*)$/);
-  if (!m) return label;
-  return (
-    <>
-      {m[1]}
-      <span className="text-green">{m[2]}</span>
-      {m[3]}
-    </>
-  );
-}
-
-function formatDate(iso: string): string {
+function formatDateParts(iso: string): { weekday: string; date: string } {
   const d = new Date(iso + "T00:00:00Z");
   const weekday = d.toLocaleString("en-US", { weekday: "short", timeZone: "UTC" }).toUpperCase();
   const month = d.toLocaleString("en-US", { month: "long", timeZone: "UTC" }).toUpperCase();
-  return `${weekday} · ${month} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
+  return { weekday, date: `${month} ${d.getUTCDate()}, ${d.getUTCFullYear()}` };
 }
 
 export function PodTableSkeleton({
@@ -469,37 +481,10 @@ export function PodTableSkeleton({
               height: h,
             }}
           >
-            <ShieldShape />
+            <ShieldFrame />
           </div>
         );
       })}
     </div>
-  );
-}
-
-function ShieldShape() {
-  return (
-    <svg
-      viewBox={SHIELD_VIEWBOX}
-      preserveAspectRatio="none"
-      className="absolute inset-0 w-full h-full overflow-visible"
-      aria-hidden="true"
-      style={{ filter: "drop-shadow(0 4px 8px rgba(0, 0, 0, 0.5))" }}
-    >
-      <defs>
-        <linearGradient id="shield-bezel-sk" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#3b4458" />
-          <stop offset="30%" stopColor="#2a3142" />
-          <stop offset="100%" stopColor="#14181f" />
-        </linearGradient>
-        <linearGradient id="shield-face-sk" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#181d27" />
-          <stop offset="55%" stopColor="#10141c" />
-          <stop offset="100%" stopColor="#06080d" />
-        </linearGradient>
-      </defs>
-      <path d={SHIELD_OUTER_PATH} fill="url(#shield-bezel-sk)" />
-      <path d={SHIELD_INNER_PATH} fill="url(#shield-face-sk)" />
-    </svg>
   );
 }

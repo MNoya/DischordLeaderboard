@@ -1,3 +1,5 @@
+import { useEffect, useMemo, useState } from "react";
+
 import { supabase } from "./supabase";
 
 const FRESH_WINDOW_MS = 60 * 60 * 1000;
@@ -55,4 +57,63 @@ export async function refreshMessageImageUrl(
     return null;
   }
   return data?.url ?? null;
+}
+
+export interface DeckUrlRef {
+  deckScreenshotUrl: string | null;
+  eventId?: string | null;
+  displayName: string;
+  participantDisplayName?: string | null;
+  screenshotChannelId?: string | null;
+  screenshotMessageId?: string | null;
+}
+
+// Resolves a deck screenshot URL, swapping an expired Discord CDN link for a freshly signed one via
+// the refresh edge function. Falls back to the stored URL when refresh isn't possible or fails.
+export function useResolvedDeckUrl(ref: DeckUrlRef): { url: string | null; resolving: boolean } {
+  const {
+    deckScreenshotUrl,
+    eventId,
+    displayName,
+    participantDisplayName,
+    screenshotChannelId,
+    screenshotMessageId,
+  } = ref;
+  const canRefresh = !!eventId || (!!screenshotChannelId && !!screenshotMessageId);
+  const needsRefresh = useMemo(() => {
+    if (!deckScreenshotUrl || !canRefresh) return false;
+    return isDiscordCdnUrl(deckScreenshotUrl) && !isDiscordUrlFresh(deckScreenshotUrl);
+  }, [deckScreenshotUrl, canRefresh]);
+
+  const [url, setUrl] = useState<string | null>(needsRefresh ? null : deckScreenshotUrl);
+  const [resolving, setResolving] = useState(needsRefresh);
+
+  useEffect(() => {
+    setUrl(needsRefresh ? null : deckScreenshotUrl);
+    setResolving(needsRefresh);
+  }, [deckScreenshotUrl, needsRefresh]);
+
+  useEffect(() => {
+    if (!needsRefresh) return;
+    const lookupName = participantDisplayName ?? displayName;
+    const fetchFresh =
+      screenshotChannelId && screenshotMessageId
+        ? refreshMessageImageUrl(screenshotChannelId, screenshotMessageId)
+        : eventId
+          ? refreshDeckUrl(eventId, lookupName)
+          : Promise.resolve(null);
+    let cancelled = false;
+    fetchFresh
+      .then((fresh) => {
+        if (!cancelled) setUrl(fresh ?? deckScreenshotUrl);
+      })
+      .finally(() => {
+        if (!cancelled) setResolving(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [needsRefresh, eventId, displayName, participantDisplayName, deckScreenshotUrl, screenshotChannelId, screenshotMessageId]);
+
+  return { url, resolving };
 }

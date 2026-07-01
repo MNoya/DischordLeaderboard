@@ -4,6 +4,8 @@ import { Record } from "../Record";
 import { keyruneClass, Trophy } from "../Brand";
 import { cn } from "../../lib/utils";
 import { HeroSection } from "../HeroSection";
+import { type DeckTab } from "./DeckScreenshotModal";
+import { highlightEventLabel } from "./EventLabel";
 import { PlayerSeatPanel } from "./PlayerSeatPanel";
 import type { PodEventMatchRow, PodEventReplayRow, PodSeat } from "../../types/leaderboard";
 
@@ -14,7 +16,7 @@ interface Props {
   replays: PodEventReplayRow[];
   selectedSeat: number | null;
   onSelect: (seat: number | null) => void;
-  onShowDeck: (p: PodSeat) => void;
+  onShowDeck: (p: PodSeat, tab?: DeckTab) => void;
   eventLabel: string;
   setCode: string;
   eventSlug: string;
@@ -253,7 +255,7 @@ function TileGrid({
             style={{ fontSize: Math.round(20 * scale), lineHeight: 1 }}
             aria-hidden="true"
           />
-          <span className="truncate">{renderEventLabel(eventLabel)}</span>
+          <span className="truncate">{highlightEventLabel(eventLabel)}</span>
         </div>
         <div style={{ width: tileW, display: "flex", justifyContent: "center" }}>
           <PassChevron direction="down" scale={scale} />
@@ -348,9 +350,9 @@ function PlayerTile({
   scale: number;
 }) {
   const isChampion = participant.placement === 1;
-  const hasRecord = participant.record != null;
   const wins = Number((participant.record ?? "").split("-")[0] || 0);
   const losses = Number((participant.record ?? "").split("-")[1] || 0);
+  const hasRecord = participant.record != null && wins + losses > 0;
   const w = REF_TILE.w * scale;
   const h = REF_TILE.h * scale;
 
@@ -428,14 +430,3 @@ function mobileLabelFontSize(label: string): number {
   return 12;
 }
 
-function renderEventLabel(label: string) {
-  const m = label.match(/^(.*?)(#\d+)(.*)$/);
-  if (!m) return label;
-  return (
-    <>
-      {m[1]}
-      <span className="text-green">{m[2]}</span>
-      {m[3]}
-    </>
-  );
-}

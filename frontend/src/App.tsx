@@ -53,8 +53,8 @@ export function App() {
 
       <Route path="/pods" element={<PodDraftsPage />} />
       <Route path="/pods/:slug" element={<PodsRoute />} />
-      <Route path="/pods/:slug/log" element={<PodDraftLogRoute />} />
-      <Route path="/pods/:slug/log/:who" element={<PodDraftLogRoute />} />
+      <Route path="/pods/:slug/:who" element={<PodDraftLogRoute />} />
+      <Route path="/pods/:slug/:who/:pack/:pick" element={<PodDraftLogRoute />} />
 
       <Route path="/tier-list" element={<TierListPage />} />
       <Route path="/tier-list/:setCode" element={<TierListPage />} />

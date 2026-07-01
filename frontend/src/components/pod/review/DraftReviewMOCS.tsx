@@ -1,13 +1,14 @@
-import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 
 import { cn } from "../../../lib/utils";
 import { Pips } from "../../ManaPips";
 import { Tooltip } from "../../Tooltip";
-import { GoSidebarCollapse, TbCards } from "../../Icons";
-import { CardImage, ReviewSetProvider } from "./ReviewCard";
+import { ArrowRight, GoSidebarCollapse, TbCards } from "../../Icons";
+import { CardImage, ReviewSetProvider, cardImageSources } from "./ReviewCard";
+import { highlightEventLabel } from "../EventLabel";
 import { AAvatar } from "../../Brand";
 import { DeckScreenshotModal, type DeckLike } from "../DeckScreenshotModal";
-import { poolBefore, poolByPack, reconstructDraft, resolveDeck, seatColors, seatHandle } from "../../../data/draft-artifact";
+import { poolBefore, poolByPack, reconstructDraft, resolveDeck, seatColors, seatHandle, type DraftPickView } from "../../../data/draft-artifact";
 import { cleanPodEventName, stripDiscriminator } from "../../../data/utils";
 import type { ArtifactCard, PodDraftArtifact } from "../../../types/leaderboard";
 
@@ -38,13 +39,15 @@ interface DraftReviewMOCSProps {
   artifact: PodDraftArtifact;
   meta: DraftReviewMeta;
   initialSeat?: number;
+  initialPack?: number;
+  initialPick?: number;
   onClose?: () => void;
-  onSeatChange?: (seatIndex: number) => void;
+  onNavigate?: (seatIndex: number, pack: number, pick: number) => void;
   eventId?: string;
   seatInfo?: ReviewSeatInfo[];
 }
 
-export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, onClose, onSeatChange, eventId, seatInfo }: DraftReviewMOCSProps) {
+export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, initialPack = 0, initialPick = 0, onClose, onNavigate, eventId, seatInfo }: DraftReviewMOCSProps) {
   const setSymbol = `/set-symbols/${meta.setCode.toLowerCase()}.png`;
   const eventTitle = useMemo(() => cleanPodEventName(meta.name, meta.setCode), [meta]);
   const N = artifact.seats.length;
@@ -66,16 +69,18 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, onClose, onSe
     [artifact, seatInfoMap],
   );
 
+  const startPack = Math.min(2, Math.max(0, initialPack));
+  const startPickSize = views[initialSeat]?.[startPack]?.length ?? 1;
+  const startPick = Math.min(startPickSize - 1, Math.max(0, initialPick));
   const [seat, setSeat] = useState(initialSeat);
-  const [pack, setPack] = useState(0);
-  const [pick, setPick] = useState(0);
-  const [showNeighbors, setShowNeighbors] = useState(true);
-  const [showTable, setShowTable] = useState(true);
-  const [hideColors, setHideColors] = useState(false);
+  const [pack, setPack] = useState(startPack);
+  const [pick, setPick] = useState(startPick);
+  const [viewMode, setViewMode] = usePersistentState<"step" | "scroll">("draftReviewViewMode", "step");
+  const [showTable, setShowTable] = usePersistentBool("draftReviewShowTable", false);
   const [deckLayout, setDeckLayout] = usePersistentState<"order" | "columns">("draftReviewDeckLayout", "columns");
-  const [revealMode, setRevealMode] = usePersistentState<RevealMode>("draftReviewRevealMode", "click");
+  const [revealMode, setRevealMode] = usePersistentState<RevealMode>("draftReviewRevealMode", "revealed");
   const [revealed, setRevealed] = useState(false);
-  const [splitSideboard, setSplitSideboard] = useState(false);
+  const [splitSideboard, setSplitSideboard] = usePersistentBool("draftReviewSplitSideboard", false);
   const [deckPopupSeat, setDeckPopupSeat] = useState<number | null>(null);
 
   useEffect(() => {
@@ -93,6 +98,18 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, onClose, onSe
   const pickShown = revealMode === "revealed" || revealed;
   const awaitingReveal = revealMode === "click" && !revealed;
 
+  const onNavigateRef = useRef(onNavigate);
+  onNavigateRef.current = onNavigate;
+  const lastNavSig = useRef(`${initialSeat}/${startPack}/${startPick}`);
+  useEffect(() => {
+    const sig = `${seat}/${pack}/${pick}`;
+    if (sig === lastNavSig.current) {
+      return;
+    }
+    lastNavSig.current = sig;
+    onNavigateRef.current?.(seat, pack, pick);
+  }, [seat, pack, pick]);
+
   const goTo = (nextPack: number, nextPick: number) => {
     setPack(nextPack);
     setPick(nextPick);
@@ -106,10 +123,9 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, onClose, onSe
     }
   };
   const handleNext = () => {
-    if (pick + 1 < packSize) {
-      goTo(pack, pick + 1);
-    } else if (pack < 2) {
-      goTo(pack + 1, 0);
+    const next = nextCoord(views, seat, pack, pick);
+    if (next) {
+      goTo(next.pack, next.pick);
     }
   };
   const changeReveal = (m: RevealMode) => {
@@ -123,7 +139,6 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, onClose, onSe
     }
     setSeat(i);
     setRevealed(false);
-    onSeatChange?.(i);
   };
 
   useEffect(() => {
@@ -134,6 +149,10 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, onClose, onSe
       const t = e.target;
       if (t instanceof HTMLElement && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) {
         return;
+      }
+      const navKey = e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === " ";
+      if (navKey && document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
       }
       if (e.key === "ArrowLeft") {
         e.preventDefault();
@@ -153,6 +172,19 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, onClose, onSe
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [handlePrev, handleNext, awaitingReveal, changeReveal, revealMode, deckPopupSeat]);
+
+  useEffect(() => {
+    const next = nextCoord(views, seat, pack, pick);
+    if (!next) {
+      return;
+    }
+    for (const idx of views[seat][next.pack][next.pick].booster) {
+      const url = cardImageSources(artifact.cards[idx], artifact.set)[0];
+      if (url) {
+        new Image().src = url;
+      }
+    }
+  }, [views, seat, pack, pick, artifact]);
 
   const view = views[seat][pack][pick];
   const boosterCards = view.booster.map((idx) => artifact.cards[idx]);
@@ -198,10 +230,17 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, onClose, onSe
   const right = (seat + 1) % N;
   const dir = PASS_DIRS[pack];
 
-  const leftCards = poolBefore(views, left, pack, pick).map((i) => artifact.cards[i]);
-  const rightCards = poolBefore(views, right, pack, pick).map((i) => artifact.cards[i]);
-  const neighborsHaveCards = leftCards.length > 0 || rightCards.length > 0;
-  const neighborsOpen = showNeighbors && neighborsHaveCards;
+  const pileFor = (seatIndex: number): Pile => {
+    const indices = poolBefore(views, seatIndex, pack, pick);
+    const side = new Set(artifact.decks?.[seatIndex]?.side ?? []);
+    const main = toCards(indices.filter((i) => !side.has(i)));
+    const board = toCards(indices.filter((i) => side.has(i)));
+    const lastInSide = indices.length > 0 && side.has(indices[indices.length - 1]);
+    return { main, board, lastInSide };
+  };
+  const leftPile = pileFor(left);
+  const centerPile = pileFor(seat);
+  const rightPile = pileFor(right);
 
   return (
     <ReviewSetProvider value={artifact.set}>
@@ -216,6 +255,8 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, onClose, onSe
         onSelectLeft={() => changeSeat(left)}
         onSelectRight={() => changeSeat(right)}
         onClose={onClose}
+        scrollOn={viewMode === "scroll"}
+        onToggleScroll={() => setViewMode(viewMode === "scroll" ? "step" : "scroll")}
       />
       <Header
         setSymbol={setSymbol}
@@ -235,38 +276,63 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, onClose, onSe
         onRevealMode={changeReveal}
         showTable={showTable}
         onToggleTable={() => setShowTable((v) => !v)}
-        hideColors={hideColors}
-        onToggleColors={() => setHideColors((v) => !v)}
+        viewMode={viewMode}
+        onViewMode={setViewMode}
       />
       <div className="relative flex min-h-0 flex-1">
-        <section className="flex min-w-0 flex-1 flex-col">
-          <BoosterPanel cards={boosterCards} pickedPos={pickShown ? view.takenPos : null} />
-          <MobileNavDivider
-            pack={pack}
-            pick={pick}
-            onJump={goTo}
-            onPrev={handlePrev}
-            onNext={handleNext}
-            atStart={linearIndex === 0}
-            atEnd={linearIndex === totalPicks - 1}
-            awaitingReveal={awaitingReveal}
-            onReveal={() => setRevealed(true)}
-            revealMode={revealMode}
-            onRevealMode={changeReveal}
-          />
-          <PoolBar
-            cards={pool}
-            rows={poolRows}
-            sideboard={sideboardCards}
-            lastInSideboard={lastInSideboard}
-            expanded={!neighborsOpen}
-            deckLayout={deckLayout}
-            onToggleDeckLayout={() => setDeckLayout((l) => (l === "order" ? "columns" : "order"))}
-            canSplit={canSplit}
-            splitSideboard={splitSideboard}
-            onToggleSplit={() => setSplitSideboard((v) => !v)}
-            onOpenDeck={canOpenDeck ? () => setDeckPopupSeat(seat) : undefined}
-          />
+        <section className="relative flex min-w-0 flex-1 flex-col">
+          {viewMode === "scroll" ? (
+            <>
+              <div className="absolute right-2 top-1 z-20 lg:hidden">
+                <MobileToggle
+                  label="SHOW PICKS"
+                  ariaLabel="Show picks"
+                  on={revealMode === "revealed"}
+                  onToggle={() => changeReveal(revealMode === "revealed" ? "click" : "revealed")}
+                />
+              </div>
+              <DraftScrollRecap
+                packs={views[seat]}
+                cards={artifact.cards}
+                revealMode={revealMode}
+                initialPack={pack}
+                initialPick={pick}
+                onActivePick={(p, k) => {
+                  setPack(p);
+                  setPick(k);
+                }}
+              />
+            </>
+          ) : (
+            <>
+              <BoosterPanel cards={boosterCards} pickedPos={pickShown ? view.takenPos : null} fadeKey={`${seat}-${pack}-${pick}`} />
+              <MobileNavDivider
+                pack={pack}
+                pick={pick}
+                onJump={goTo}
+                onPrev={handlePrev}
+                onNext={handleNext}
+                atStart={linearIndex === 0}
+                atEnd={linearIndex === totalPicks - 1}
+                awaitingReveal={awaitingReveal}
+                onReveal={() => setRevealed(true)}
+                revealMode={revealMode}
+                onRevealMode={changeReveal}
+              />
+              <PoolBar
+                cards={pool}
+                rows={poolRows}
+                sideboard={sideboardCards}
+                lastInSideboard={lastInSideboard}
+                deckLayout={deckLayout}
+                onToggleDeckLayout={() => setDeckLayout((l) => (l === "order" ? "columns" : "order"))}
+                canSplit={canSplit}
+                splitSideboard={splitSideboard}
+                onToggleSplit={() => setSplitSideboard((v) => !v)}
+                onOpenDeck={canOpenDeck ? () => setDeckPopupSeat(seat) : undefined}
+              />
+            </>
+          )}
         </section>
         <aside
           className={cn(
@@ -279,23 +345,32 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, onClose, onSe
               seats={seats}
               activeSeat={seat}
               onSelect={changeSeat}
-              hideColors={hideColors}
               passRight={dir === 1}
             />
           </div>
         </aside>
       </div>
-      <PlayersBar
-        show={showNeighbors}
-        onToggle={() => setShowNeighbors((v) => !v)}
-        canFold={neighborsHaveCards}
-        left={seats[left]}
-        active={active}
-        right={seats[right]}
-        passRight={dir === 1}
-      />
-      {neighborsOpen && (
-        <NeighborBand left={leftCards} right={rightCards} leftSeat={seats[left]} rightSeat={seats[right]} />
+      {viewMode === "step" && (
+        <BottomPanel
+          activeName={active.name}
+          activeAvatarUrl={active.avatarUrl}
+          cards={pool}
+          rows={poolRows}
+          sideboard={sideboardCards}
+          lastInSideboard={lastInSideboard}
+          deckLayout={deckLayout}
+          onToggleDeckLayout={() => setDeckLayout((l) => (l === "order" ? "columns" : "order"))}
+          canSplit={canSplit}
+          splitSideboard={splitSideboard}
+          onToggleSplit={() => setSplitSideboard((v) => !v)}
+          onOpenDeck={canOpenDeck ? () => setDeckPopupSeat(seat) : undefined}
+          left={seats[left]}
+          right={seats[right]}
+          passRight={dir === 1}
+          leftPile={leftPile}
+          centerPile={centerPile}
+          rightPile={rightPile}
+        />
       )}
       {deckPopup && (
         <DeckScreenshotModal
@@ -311,6 +386,16 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, onClose, onSe
   );
 }
 
+function nextCoord(views: DraftPickView[][][], seat: number, pack: number, pick: number): { pack: number; pick: number } | null {
+  if (pick + 1 < views[seat][pack].length) {
+    return { pack, pick: pick + 1 };
+  }
+  if (pack < 2) {
+    return { pack: pack + 1, pick: 0 };
+  }
+  return null;
+}
+
 function usePersistentState<T extends string>(key: string, fallback: T): [T, Dispatch<SetStateAction<T>>] {
   const [value, setValue] = useState<T>(() => {
     if (typeof window === "undefined") {
@@ -324,6 +409,20 @@ function usePersistentState<T extends string>(key: string, fallback: T): [T, Dis
   return [value, setValue];
 }
 
+function usePersistentBool(key: string, fallback: boolean): [boolean, Dispatch<SetStateAction<boolean>>] {
+  const [value, setValue] = useState<boolean>(() => {
+    if (typeof window === "undefined") {
+      return fallback;
+    }
+    const stored = window.localStorage.getItem(key);
+    return stored == null ? fallback : stored === "1";
+  });
+  useEffect(() => {
+    window.localStorage.setItem(key, value ? "1" : "0");
+  }, [key, value]);
+  return [value, setValue];
+}
+
 interface Seat {
   index: number;
   name: string;
@@ -331,14 +430,10 @@ interface Seat {
   avatarUrl: string | null;
 }
 
-// Renders an event title with any `#N` token in green, mirroring the placement styling on the table.
-function EventTitle({ title }: { title: string }) {
-  const parts = title.split(/(#\d+)/g);
-  return (
-    <>
-      {parts.map((part, i) => (/^#\d+$/.test(part) ? <span key={i} className="text-green">{part}</span> : part))}
-    </>
-  );
+interface Pile {
+  main: ArtifactCard[];
+  board: ArtifactCard[];
+  lastInSide: boolean;
 }
 
 // Mobile-only slim bar: the left and right neighbors stay anchored to their physical sides; the arrow
@@ -354,6 +449,8 @@ function MobileTopBar({
   onSelectLeft,
   onSelectRight,
   onClose,
+  scrollOn,
+  onToggleScroll,
 }: {
   setSymbol: string;
   eventTitle: string;
@@ -364,51 +461,56 @@ function MobileTopBar({
   onSelectLeft: () => void;
   onSelectRight: () => void;
   onClose?: () => void;
+  scrollOn: boolean;
+  onToggleScroll: () => void;
 }) {
   const arrow = passRight ? "»" : "«";
+  const name = "truncate font-display text-[13px] tracking-[0.04em] text-subtle [-webkit-tap-highlight-color:transparent] active:text-text";
   return (
-    <div className="relative flex h-10 shrink-0 items-center border-b border-border bg-surface px-2 lg:hidden">
+    <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border bg-surface px-2 lg:hidden">
       <button
         onClick={onClose}
         aria-label="Back to pod"
-        className="absolute left-2 flex items-center gap-1.5 [-webkit-tap-highlight-color:transparent] active:text-text"
+        className="flex shrink-0 items-center gap-1 text-subtle [-webkit-tap-highlight-color:transparent] active:text-text"
       >
+        <ChevronIcon dir="left" />
         <img src={setSymbol} alt="" className="h-5 w-5" />
-        <span className="max-w-[84px] truncate font-display text-[13px] tracking-[0.04em] text-subtle">
-          <EventTitle title={eventTitle} />
+        <span className="max-w-[84px] truncate font-display text-[13px] tracking-[0.04em]">
+          {highlightEventLabel(eventTitle)}
         </span>
       </button>
-      <div className="grid w-full grid-cols-[1fr_auto_1fr] items-center">
-        <div className="flex min-w-0 items-center justify-end gap-2">
-          <button
-            onClick={onSelectLeft}
-            className="max-w-[110px] truncate font-display text-[13px] tracking-[0.04em] text-subtle [-webkit-tap-highlight-color:transparent] active:text-text"
-          >
-            {left.name}
-          </button>
-          <span className="font-mono text-[13px] text-subtle">{arrow}</span>
-        </div>
-        <span className="max-w-[120px] truncate px-1 text-center font-display text-[16px] tracking-[0.06em] text-green">
+      <div className="flex min-w-0 flex-1 items-center justify-center gap-1.5">
+        <button onClick={onSelectLeft} className={cn(name, "max-w-[78px]")}>
+          {left.name}
+        </button>
+        <span className="shrink-0 font-mono text-[13px] text-subtle">{arrow}</span>
+        <span className="max-w-[96px] shrink truncate text-center font-display text-[15px] tracking-[0.06em] text-green">
           {active.name}
         </span>
-        <div className="flex min-w-0 items-center justify-start gap-2">
-          <span className="font-mono text-[13px] text-subtle">{arrow}</span>
-          <button
-            onClick={onSelectRight}
-            className="max-w-[110px] truncate font-display text-[13px] tracking-[0.04em] text-subtle [-webkit-tap-highlight-color:transparent] active:text-text"
-          >
-            {right.name}
-          </button>
-        </div>
+        <span className="shrink-0 font-mono text-[13px] text-subtle">{arrow}</span>
+        <button onClick={onSelectRight} className={cn(name, "max-w-[78px]")}>
+          {right.name}
+        </button>
       </div>
-      <button
-        onClick={onClose}
-        aria-label="Close"
-        className="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-muted [-webkit-tap-highlight-color:transparent] active:bg-white/10"
-      >
-        ✕
-      </button>
+      <MobileToggle label="SCROLL" ariaLabel="Scroll the whole draft" on={scrollOn} onToggle={onToggleScroll} />
     </div>
+  );
+}
+
+function MobileToggle({ label, on, onToggle, ariaLabel }: { label: string; on: boolean; onToggle: () => void; ariaLabel: string }) {
+  return (
+    <button
+      onClick={onToggle}
+      role="switch"
+      aria-checked={on}
+      aria-label={ariaLabel}
+      className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface2 px-2 [-webkit-tap-highlight-color:transparent] active:bg-white/10"
+    >
+      <span className={cn("font-display text-[10px] tracking-[0.1em]", on ? "text-green" : "text-subtle")}>{label}</span>
+      <span className={cn("relative h-3.5 w-6 rounded-full transition-colors", on ? "bg-green" : "bg-border2")}>
+        <span className={cn("absolute top-[2px] h-2.5 w-2.5 rounded-full bg-white transition-all", on ? "left-[11px]" : "left-[2px]")} />
+      </span>
+    </button>
   );
 }
 
@@ -430,8 +532,8 @@ function Header({
   onRevealMode,
   showTable,
   onToggleTable,
-  hideColors,
-  onToggleColors,
+  viewMode,
+  onViewMode,
 }: {
   setSymbol: string;
   eventTitle: string;
@@ -450,21 +552,29 @@ function Header({
   onRevealMode: (m: RevealMode) => void;
   showTable: boolean;
   onToggleTable: () => void;
-  hideColors: boolean;
-  onToggleColors: () => void;
+  viewMode: "step" | "scroll";
+  onViewMode: (m: "step" | "scroll") => void;
 }) {
   const revealControl = awaitingReveal ? (
     <Tooltip label="Reveal picked card" side="bottom">
       <button
         onClick={onReveal}
         aria-label="Reveal picked card"
-        className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface2 text-subtle transition-colors hover:border-white/40 hover:bg-white/10 hover:text-text"
+        className="flex h-9 min-w-[84px] items-center justify-center gap-1.5 rounded-md border border-white/40 bg-surface2 px-3 font-display text-[13px] tracking-[0.12em] text-text transition-[transform,background-color,border-color,color] duration-150 ease-out touch-manipulation [-webkit-tap-highlight-color:transparent] hover:border-white/60 hover:bg-white/10 active:scale-90 active:bg-white/20 motion-reduce:active:scale-100"
       >
+        REVEAL
         <EyeIcon off={false} />
       </button>
     </Tooltip>
   ) : (
     <NavArrow dir="next" onClick={onNext} disabled={atEnd} />
+  );
+
+  const showPicksToggle = (
+    <ShowPicksToggle
+      showPicks={revealMode === "revealed"}
+      onToggle={() => onRevealMode(revealMode === "revealed" ? "click" : "revealed")}
+    />
   );
 
   return (
@@ -474,44 +584,39 @@ function Header({
         className="flex min-w-0 flex-1 items-center gap-2.5 text-left transition-colors hover:text-green"
         aria-label="Back to pod"
       >
+        <ChevronIcon dir="left" />
         <img src={setSymbol} alt="" className="h-7 w-7 shrink-0" />
         <span className="truncate font-display text-[19px] tracking-[0.08em]">
-          <EventTitle title={eventTitle} />
+          {highlightEventLabel(eventTitle)}
         </span>
       </button>
 
-      <div className="flex items-center gap-5">
-        <ChipRow label="PACK">
-          {[0, 1, 2].map((p) => (
-            <Chip key={p} active={p === pack} onClick={() => onJump(p, 0)}>
-              {p + 1}
-            </Chip>
-          ))}
-        </ChipRow>
-        <ChipRow label="PICK">
-          {Array.from({ length: packSize }, (_, k) => (
-            <Chip key={k} active={k === pick} onClick={() => onJump(pack, k)}>
-              {k + 1}
-            </Chip>
-          ))}
-        </ChipRow>
-        <div className="flex items-center gap-2">
-          <NavArrow dir="prev" onClick={onPrev} disabled={atStart} />
-          {revealControl}
+      {viewMode === "step" && (
+        <div className="flex items-center gap-5">
+          <ChipRow label="PACK">
+            {[0, 1, 2].map((p) => (
+              <Chip key={p} active={p === pack} onClick={() => onJump(p, 0)}>
+                {p + 1}
+              </Chip>
+            ))}
+          </ChipRow>
+          <ChipRow label="PICK">
+            {Array.from({ length: packSize }, (_, k) => (
+              <Chip key={k} active={k === pick} onClick={() => onJump(pack, k)}>
+                {k + 1}
+              </Chip>
+            ))}
+          </ChipRow>
+          <div className="flex items-center gap-2">
+            <NavArrow dir="prev" onClick={onPrev} disabled={atStart} />
+            {revealControl}
+          </div>
         </div>
-        <ShowPicksToggle showPicks={revealMode === "revealed"} onToggle={() => onRevealMode(revealMode === "revealed" ? "click" : "revealed")} />
-      </div>
+      )}
 
       <div className="flex flex-1 items-center justify-end gap-2">
-        {showTable && (
-          <SwitchToggle
-            label="COLORS"
-            on={!hideColors}
-            onToggle={onToggleColors}
-            ariaLabel="Show colors"
-            tooltip={hideColors ? "Show colors" : "Hide colors"}
-          />
-        )}
+        {showPicksToggle}
+        <ScrollToggle on={viewMode === "scroll"} onToggle={() => onViewMode(viewMode === "scroll" ? "step" : "scroll")} />
         <SwitchToggle
           label="TABLE"
           on={showTable}
@@ -537,21 +642,33 @@ function SwitchToggle({
   onToggle,
   tooltip,
   ariaLabel,
+  block = false,
+  disabled = false,
 }: {
   label: string;
   on: boolean;
   onToggle: () => void;
   tooltip: string;
   ariaLabel: string;
+  block?: boolean;
+  disabled?: boolean;
 }) {
+  const [hover, setHover] = useState(false);
   return (
-    <Tooltip label={tooltip} side="bottom">
+    <Tooltip label={tooltip} side={block ? "left" : "bottom"} open={hover && !disabled}>
       <button
         onClick={onToggle}
+        onPointerEnter={(e) => e.pointerType === "mouse" && setHover(true)}
+        onPointerLeave={() => setHover(false)}
+        disabled={disabled}
         role="switch"
         aria-checked={on}
         aria-label={ariaLabel}
-        className="flex h-9 shrink-0 items-center gap-2 rounded-md border border-border bg-surface2 px-2.5 transition-colors [-webkit-tap-highlight-color:transparent] hover:border-white/40 hover:bg-white/10"
+        className={cn(
+          "flex h-9 items-center gap-2 rounded-md border border-border bg-surface2 px-2.5 transition-colors [-webkit-tap-highlight-color:transparent]",
+          disabled ? "cursor-not-allowed opacity-40" : "hover:border-white/40 hover:bg-white/10",
+          block ? "w-full justify-between" : "shrink-0",
+        )}
       >
         <span className={cn("font-display text-[12px] tracking-[0.12em]", on ? "text-green" : "text-subtle")}>
           {label}
@@ -569,14 +686,40 @@ function SwitchToggle({
   );
 }
 
-function ShowPicksToggle({ showPicks, onToggle }: { showPicks: boolean; onToggle: () => void }) {
+function ShowPicksToggle({ showPicks, onToggle, block = false }: { showPicks: boolean; onToggle: () => void; block?: boolean }) {
   return (
     <SwitchToggle
       label="SHOW PICKS"
       on={showPicks}
       onToggle={onToggle}
       ariaLabel="Show picks"
-      tooltip={showPicks ? "On: picks show as you navigate" : "Off: each pick stays hidden until you reveal it"}
+      tooltip={showPicks ? "Hide picks to guess before revealing (Space)" : "Reveal picks automatically (Space)"}
+      block={block}
+    />
+  );
+}
+
+function ShowNeighborsToggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
+  return (
+    <SwitchToggle
+      label="SHOW NEIGHBORS"
+      on={on}
+      onToggle={onToggle}
+      ariaLabel="Show neighbors"
+      tooltip={on ? "Hide Left & Right players" : "Show Left & Right players"}
+    />
+  );
+}
+
+function ScrollToggle({ on, onToggle, block = false }: { on: boolean; onToggle: () => void; block?: boolean }) {
+  return (
+    <SwitchToggle
+      label="SCROLL MODE"
+      on={on}
+      onToggle={onToggle}
+      ariaLabel="Scroll the whole draft"
+      tooltip={on ? "Whole draft in one scrollable view" : "One pick at a time"}
+      block={block}
     />
   );
 }
@@ -606,16 +749,27 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
   );
 }
 
-function BoosterPanel({ cards, pickedPos }: { cards: ArtifactCard[]; pickedPos: number | null }) {
+const BOOSTER_GAP = 8;
+const BOOSTER_PAD = 12;
+
+function BoosterPanel({ cards, pickedPos, fadeKey }: { cards: ArtifactCard[]; pickedPos: number | null; fadeKey: string }) {
   return (
-    <div className="themed-scrollbar min-h-0 flex-1 overflow-y-auto px-2 pb-2 pt-1.5 lg:px-6 lg:py-4">
-      <div className="flex flex-wrap justify-center gap-1.5 lg:gap-2">
-        {cards.map((card, i) => (
-          <div key={i} className="w-[calc((100%-1.125rem)/4)] sm:w-[calc((100%-1.5rem)/5)] lg:w-[200px]">
-            <BoosterCard card={card} picked={i === pickedPos} />
-          </div>
-        ))}
+    <div className="themed-scrollbar min-h-0 flex-1 overflow-y-auto" style={{ padding: BOOSTER_PAD }}>
+      <div key={fadeKey} className="animate-fadeUpIn">
+        <BoosterGrid cards={cards} pickedPos={pickedPos} />
       </div>
+    </div>
+  );
+}
+
+function BoosterGrid({ cards, pickedPos }: { cards: ArtifactCard[]; pickedPos: number | null }) {
+  return (
+    <div className="flex flex-wrap content-start justify-center" style={{ gap: BOOSTER_GAP }}>
+      {cards.map((card, i) => (
+        <div key={i} className="w-[calc((100%-16px)/3)] sm:w-[calc((100%-24px)/4)] lg:w-[210px]">
+          <BoosterCard card={card} picked={i === pickedPos} />
+        </div>
+      ))}
     </div>
   );
 }
@@ -633,14 +787,239 @@ function BoosterCard({ card, picked }: { card: ArtifactCard; picked: boolean }) 
   );
 }
 
-const POOL_HEIGHT_KEY = "draftReviewPoolHeight";
+// Continuous-scroll recap: every pick across all three packs stacked top-to-bottom for one seat, each
+// section showing that pick's booster with the taken card highlighted. No deck/pool state, just the
+// sequence — a fast skim. Honors the reveal mode: "click" hides each pick until its REVEAL is tapped.
+function DraftScrollRecap({
+  packs,
+  cards,
+  revealMode,
+  initialPack,
+  initialPick,
+  onActivePick,
+}: {
+  packs: DraftPickView[][];
+  cards: ArtifactCard[];
+  revealMode: RevealMode;
+  initialPack: number;
+  initialPick: number;
+  onActivePick: (pack: number, pick: number) => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const onActivePickRef = useRef(onActivePick);
+  onActivePickRef.current = onActivePick;
+  useLayoutEffect(() => {
+    const target = ref.current?.querySelector(`[data-pick="${initialPack}-${initialPick}"]`);
+    if (target instanceof HTMLElement) {
+      target.scrollIntoView({ block: "start" });
+    }
+  }, []);
+  useEffect(() => {
+    const root = ref.current;
+    if (!root) {
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        let topmost: IntersectionObserverEntry | null = null;
+        for (const entry of entries) {
+          if (entry.isIntersecting && (!topmost || entry.boundingClientRect.top < topmost.boundingClientRect.top)) {
+            topmost = entry;
+          }
+        }
+        const key = topmost && (topmost.target as HTMLElement).dataset.pick;
+        if (!key) {
+          return;
+        }
+        const [p, k] = key.split("-").map(Number);
+        onActivePickRef.current(p, k);
+      },
+      { root, rootMargin: "0px 0px -85% 0px", threshold: 0 },
+    );
+    root.querySelectorAll("[data-pick]").forEach((el) => observer.observe(el));
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <div ref={ref} className="themed-scrollbar min-h-0 flex-1 overflow-y-auto px-3 pb-3 pt-1 lg:px-8 lg:py-6">
+      {packs.map((pickViews, p) =>
+        pickViews.map((view, k) => (
+          <RecapSection key={`${p}-${k}`} pack={p} pick={k} view={view} cards={cards} revealMode={revealMode} />
+        )),
+      )}
+    </div>
+  );
+}
 
+function RecapSection({
+  pack,
+  pick,
+  view,
+  cards,
+  revealMode,
+}: {
+  pack: number;
+  pick: number;
+  view: DraftPickView;
+  cards: ArtifactCard[];
+  revealMode: RevealMode;
+}) {
+  const [clicked, setClicked] = useState(false);
+  const shown = revealMode === "revealed" || clicked;
+  const boosterCards = view.booster.map((idx) => cards[idx]);
+  const takenName = boosterCards[view.takenPos]?.n ?? "";
+  return (
+    <section data-pick={`${pack}-${pick}`} className="mb-7 scroll-mt-3 lg:mb-9">
+      <div className="mb-2 flex h-9 items-center gap-3 border-b border-border lg:mb-3 lg:h-10">
+        <span className="font-display text-[15px] tracking-[0.16em] text-subtle">PACK {pack + 1}</span>
+        <span className="font-display text-[15px] tracking-[0.16em] text-subtle">PICK {pick + 1}</span>
+        {shown ? (
+          <span className="flex min-w-0 items-center gap-2">
+            <ArrowRight size={16} className="shrink-0 text-subtle" aria-hidden="true" />
+            <span className="truncate font-display text-[16px] tracking-[0.04em] text-green">{takenName}</span>
+          </span>
+        ) : (
+          <button
+            onClick={() => setClicked(true)}
+            className="ml-1 rounded border border-border bg-surface2 px-2.5 py-1 font-display text-[12px] tracking-[0.12em] text-subtle transition-colors hover:border-white/40 hover:text-text"
+          >
+            REVEAL
+          </button>
+        )}
+      </div>
+      <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(104px,1fr))] lg:[grid-template-columns:repeat(auto-fill,minmax(148px,1fr))]">
+        {boosterCards.map((card, i) => (
+          <BoosterCard key={i} card={card} picked={shown && i === view.takenPos} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+const PANEL_DRAG_THRESHOLD = 4;
+const PANEL_MIN_HEIGHT = 64;
+const PANEL_COLLAPSE_AT = 40;
+
+function useResizableHeight(baseHeight: number, onCollapse?: () => void) {
+  const [dragHeight, setDragHeight] = useState<number | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const height = dragHeight ?? baseHeight;
+  const beginResize = (startY: number, fromHeight?: number) => {
+    const startHeight = fromHeight ?? dragHeight ?? baseHeight;
+    let collapsible = fromHeight == null;
+    if (fromHeight != null) {
+      setDragHeight(fromHeight);
+    }
+    setDragging(true);
+    const onMove = (ev: PointerEvent) => {
+      const next = startHeight - (ev.clientY - startY);
+      if (next >= PANEL_MIN_HEIGHT) {
+        collapsible = true;
+      }
+      if (onCollapse && collapsible && next < PANEL_COLLAPSE_AT) {
+        onCollapse();
+        setDragHeight(null);
+        cleanup();
+        return;
+      }
+      const floor = collapsible ? PANEL_MIN_HEIGHT : 0;
+      setDragHeight(Math.min(window.innerHeight * 0.72, Math.max(floor, next)));
+    };
+    const onUp = () => cleanup();
+    function cleanup() {
+      setDragging(false);
+      setDragHeight((h) => (h != null && h < PANEL_MIN_HEIGHT ? PANEL_MIN_HEIGHT : h));
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    }
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+  return { height, beginResize, dragging };
+}
+
+// Thick bar shared by the deck pool and the neighbor band: a tap toggles the panel collapsed, a press
+// and drag past a small threshold resizes it instead. The chevron tab on the top edge shows which way
+// a tap moves it. With nothing to show (no neighbor picks yet) it renders static, no toggle or resize.
+function PanelBar({
+  open,
+  canCollapse,
+  onToggle,
+  onResizeStart,
+  children,
+}: {
+  open: boolean;
+  canCollapse: boolean;
+  onToggle: () => void;
+  onResizeStart: (startY: number, fromHeight?: number) => void;
+  children: React.ReactNode;
+}) {
+  const handlePointerDown = (e: React.PointerEvent) => {
+    if (e.button !== 0) {
+      return;
+    }
+    e.preventDefault();
+    const startY = e.clientY;
+    let dragging = false;
+    const onMove = (ev: PointerEvent) => {
+      if (!dragging && Math.abs(ev.clientY - startY) > PANEL_DRAG_THRESHOLD) {
+        dragging = true;
+        if (open) {
+          onResizeStart(startY);
+        } else {
+          onToggle();
+          onResizeStart(startY, 0);
+        }
+      }
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      if (!dragging) {
+        onToggle();
+      }
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+  if (!canCollapse) {
+    return (
+      <div className="relative hidden h-10 w-full shrink-0 items-center border-t border-border bg-bg lg:flex">
+        {children}
+      </div>
+    );
+  }
+  return (
+    <div
+      onPointerDown={handlePointerDown}
+      className="group relative hidden h-10 w-full shrink-0 cursor-row-resize select-none items-center border-t border-border bg-bg transition-colors hover:bg-surface2 lg:flex"
+    >
+      <span className="absolute bottom-full left-1/2 flex -translate-x-1/2 translate-y-px items-center justify-center rounded-t-md border border-b-0 border-border bg-bg px-3 text-subtle transition-colors group-hover:bg-surface2 group-hover:text-text">
+        <ChevronIcon dir={open ? "down" : "up"} />
+      </span>
+      {children}
+    </div>
+  );
+}
+
+function DeckBarStat({ n, label }: { n: number; label: string }) {
+  if (n === 0) {
+    return null;
+  }
+  return (
+    <span className="flex items-baseline gap-1">
+      <span className="tabular-nums text-subtle">{n}</span>
+      <span className="text-[12px] tracking-[0.1em] text-muted">{label}</span>
+    </span>
+  );
+}
+
+// Mobile deck pool: always visible below the booster, no collapse. Desktop deck+neighbors live in
+// BottomPanel instead.
 function PoolBar({
   cards,
   rows,
   sideboard,
   lastInSideboard,
-  expanded,
   deckLayout,
   onToggleDeckLayout,
   canSplit,
@@ -652,7 +1031,6 @@ function PoolBar({
   rows: ArtifactCard[][];
   sideboard: ArtifactCard[];
   lastInSideboard: boolean;
-  expanded: boolean;
   deckLayout: "order" | "columns";
   onToggleDeckLayout: () => void;
   canSplit: boolean;
@@ -661,88 +1039,287 @@ function PoolBar({
   onOpenDeck?: () => void;
 }) {
   const order = deckLayout === "order";
-  const baseHeight = order ? 368 : expanded ? 452 : 300;
-  const [dragHeight, setDragHeight] = useState<number | null>(() => {
-    if (typeof window === "undefined") {
-      return null;
-    }
-    const stored = window.localStorage.getItem(POOL_HEIGHT_KEY);
-    return stored ? Number(stored) : null;
-  });
-  const height = dragHeight ?? baseHeight;
-
-  useEffect(() => {
-    if (dragHeight != null) {
-      window.localStorage.setItem(POOL_HEIGHT_KEY, String(dragHeight));
-    }
-  }, [dragHeight]);
-
-  const beginResize = (startY: number) => {
-    const startHeight = height;
-    const onMove = (ev: PointerEvent) => {
-      const next = startHeight - (ev.clientY - startY);
-      setDragHeight(Math.min(window.innerHeight * 0.72, Math.max(150, next)));
-    };
-    const onUp = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-  };
-
   const showSideboard = splitSideboard && sideboard.length > 0;
-  const cardWidth = expanded ? 176 : 167;
-  const controls = (
-    <PoolControls
-      canSplit={canSplit}
-      splitSideboard={splitSideboard}
-      onToggleSplit={onToggleSplit}
-      onOpenDeck={onOpenDeck}
-      deckLayout={deckLayout}
-      onToggleDeckLayout={onToggleDeckLayout}
-    />
+  return (
+    <div className="relative shrink-0 border-t border-border bg-surface/60 pb-1 pl-0 pr-1 pt-0 lg:hidden">
+      <div className="absolute bottom-2 right-2 z-20">
+        <PoolControls
+          canSplit={canSplit}
+          splitSideboard={splitSideboard}
+          onToggleSplit={onToggleSplit}
+          onOpenDeck={onOpenDeck}
+          deckLayout={deckLayout}
+          onToggleDeckLayout={onToggleDeckLayout}
+        />
+      </div>
+      <div className={cn("flex gap-1", order ? "h-[24dvh]" : "h-[32dvh]")}>
+        <PoolCards
+          order={order}
+          rows={rows}
+          cards={cards}
+          lastInSideboard={lastInSideboard}
+          showSideboard={showSideboard}
+          sideboard={sideboard}
+          cardWidth={104}
+          reveal={order ? 21 : 16}
+          sideReveal={14}
+          poolAlign="right"
+        />
+      </div>
+    </div>
   );
+}
 
+function PoolCards({
+  order,
+  rows,
+  cards,
+  lastInSideboard,
+  showSideboard,
+  sideboard,
+  cardWidth,
+  reveal,
+  sideReveal,
+  groupByType = false,
+  poolAlign,
+}: {
+  order: boolean;
+  rows: ArtifactCard[][];
+  cards: ArtifactCard[];
+  lastInSideboard: boolean;
+  showSideboard: boolean;
+  sideboard: ArtifactCard[];
+  cardWidth: number;
+  reveal: number;
+  sideReveal: number;
+  groupByType?: boolean;
+  poolAlign?: "left" | "right";
+}) {
   return (
     <>
-      <div className="relative shrink-0 border-t border-border bg-surface/60 px-2 py-2 lg:hidden">
-        <div className="absolute bottom-2 right-2 z-10">{controls}</div>
-        <div className={cn("flex gap-2", order ? "h-[24dvh]" : "h-[32dvh]")}>
-          <div className="min-w-0 flex-1">
-            {order ? (
-              <OrderStrip rows={rows} markLast={!lastInSideboard} cardWidth={94} reveal={26} />
-            ) : (
-              <Pool cards={cards} markLast={!lastInSideboard} cardWidth={94} reveal={20} />
-            )}
-          </div>
-          {showSideboard && <SideboardPane cards={sideboard} markLast={lastInSideboard} cardWidth={94} reveal={16} />}
-        </div>
+      <div className="relative min-w-0 flex-1">
+        {order ? (
+          <OrderStrip rows={rows} markLast={!lastInSideboard} cardWidth={cardWidth} reveal={reveal} />
+        ) : (
+          <Pool cards={cards} groupByType={groupByType} align={poolAlign} markLast={!lastInSideboard} cardWidth={cardWidth} reveal={reveal} />
+        )}
       </div>
-      <div className="relative hidden shrink-0 border-t border-border bg-surface/60 lg:block" style={{ height }}>
-        <div
-          onPointerDown={(e) => {
-            e.preventDefault();
-            beginResize(e.clientY);
-          }}
-          className="group absolute inset-x-0 top-0 z-20 flex h-8 -translate-y-1/2 cursor-row-resize items-center justify-center"
-          aria-label="Resize deck pool"
-        >
-          <span className="h-1.5 w-12 rounded-full bg-border2 transition-all group-hover:w-16 group-hover:bg-subtle" />
-        </div>
-        <div className="flex h-full py-3 pl-6">
-          <div className="relative min-w-0 flex-1">
-            <div className="absolute bottom-2 right-6 z-10">{controls}</div>
-            {order ? (
-              <OrderStrip rows={rows} markLast={!lastInSideboard} cardWidth={cardWidth} reveal={expanded ? 44 : 38} />
-            ) : (
-              <Pool cards={cards} markLast={!lastInSideboard} cardWidth={cardWidth} reveal={expanded ? 34 : 30} />
-            )}
-          </div>
-          {showSideboard && <SideboardPane cards={sideboard} markLast={lastInSideboard} cardWidth={cardWidth} reveal={28} />}
-        </div>
-      </div>
+      {showSideboard && (
+        <SideboardPane cards={sideboard} markLast={lastInSideboard} cardWidth={Math.round(cardWidth * 0.9)} reveal={sideReveal} />
+      )}
     </>
+  );
+}
+
+// Desktop bottom zone: one bar identifying the active player, its DECK|NEIGHBORS switch, and a single
+// collapsible/resizable panel that shows either the player's own pool or the two neighbors' pools.
+function BottomPanel({
+  activeName,
+  activeAvatarUrl,
+  cards,
+  rows,
+  sideboard,
+  lastInSideboard,
+  deckLayout,
+  onToggleDeckLayout,
+  canSplit,
+  splitSideboard,
+  onToggleSplit,
+  onOpenDeck,
+  left,
+  right,
+  passRight,
+  leftPile,
+  centerPile,
+  rightPile,
+}: {
+  activeName: string;
+  activeAvatarUrl: string | null;
+  cards: ArtifactCard[];
+  rows: ArtifactCard[][];
+  sideboard: ArtifactCard[];
+  lastInSideboard: boolean;
+  deckLayout: "order" | "columns";
+  onToggleDeckLayout: () => void;
+  canSplit: boolean;
+  splitSideboard: boolean;
+  onToggleSplit: () => void;
+  onOpenDeck?: () => void;
+  left: Seat;
+  right: Seat;
+  passRight: boolean;
+  leftPile: Pile;
+  centerPile: Pile;
+  rightPile: Pile;
+}) {
+  const [open, setOpen] = useState(true);
+  const [tab, setTab] = useState<"deck" | "neighbors">("deck");
+  const order = deckLayout === "order";
+  const baseHeight = order ? 380 : 360;
+  const { height, beginResize, dragging } = useResizableHeight(baseHeight, () => setOpen(false));
+
+  const activeTab = tab;
+  const showSideboard = splitSideboard && sideboard.length > 0;
+  let creatures = 0;
+  let lands = 0;
+  for (const card of cards) {
+    const type = card.type ?? "";
+    if (/creature/i.test(type)) {
+      creatures++;
+    } else if (/land/i.test(type)) {
+      lands++;
+    }
+  }
+  const selectTab = (t: "deck" | "neighbors") => {
+    setTab(t);
+    setOpen(true);
+  };
+
+  return (
+    <div className="hidden shrink-0 flex-col lg:flex">
+      <PanelBar open={open} canCollapse onToggle={() => setOpen((v) => !v)} onResizeStart={beginResize}>
+        <BottomBar
+          activeName={activeName}
+          activeAvatarUrl={activeAvatarUrl}
+          tab={activeTab}
+          onTab={selectTab}
+          total={cards.length}
+          creatures={creatures}
+          lands={lands}
+          left={left}
+          right={right}
+          passRight={passRight}
+        />
+      </PanelBar>
+      <div
+        className="relative shrink-0 overflow-hidden bg-surface/60"
+        style={{ height: open ? height : 0, transition: dragging ? "none" : "height 200ms ease" }}
+      >
+        {activeTab === "deck" ? (
+          <div className="relative flex h-full py-3 pl-6">
+            <div className={cn("absolute bottom-2 z-20", showSideboard ? "right-[190px]" : "right-6")}>
+              <PoolControls
+                canSplit={canSplit}
+                splitSideboard={splitSideboard}
+                onToggleSplit={onToggleSplit}
+                onOpenDeck={onOpenDeck}
+                deckLayout={deckLayout}
+                onToggleDeckLayout={onToggleDeckLayout}
+              />
+            </div>
+            <PoolCards
+              order={order}
+              rows={rows}
+              cards={cards}
+              lastInSideboard={lastInSideboard}
+              showSideboard={showSideboard}
+              sideboard={sideboard}
+              cardWidth={176}
+              reveal={order ? 44 : 28}
+              sideReveal={24}
+              groupByType
+            />
+          </div>
+        ) : (
+          <NeighborColumns left={leftPile} center={centerPile} right={rightPile} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BottomBar({
+  activeName,
+  activeAvatarUrl,
+  tab,
+  onTab,
+  total,
+  creatures,
+  lands,
+  left,
+  right,
+  passRight,
+}: {
+  activeName: string;
+  activeAvatarUrl: string | null;
+  tab: "deck" | "neighbors";
+  onTab: (t: "deck" | "neighbors") => void;
+  total: number;
+  creatures: number;
+  lands: number;
+  left: Seat;
+  right: Seat;
+  passRight: boolean;
+}) {
+  const arrow = passRight ? "»" : "«";
+  return (
+    <div className="relative flex h-full w-full items-center font-display">
+      {tab === "deck" ? (
+        <>
+          <div className="flex w-1/2 min-w-0 items-center justify-center gap-2 text-[15px] tracking-[0.08em]">
+            <AAvatar displayName={activeName} avatarUrl={activeAvatarUrl} size={22} green />
+            <span className="max-w-[220px] truncate text-green">{activeName}</span>
+          </div>
+          <div className="absolute left-1/2 flex -translate-x-1/2 items-center gap-3.5 text-[14px] tracking-[0.08em]">
+            <span className="tracking-[0.16em] text-subtle">DECK</span>
+            <DeckBarStat n={total} label="CARDS" />
+            <DeckBarStat n={creatures} label="CREATURES" />
+            <DeckBarStat n={lands} label="LANDS" />
+            <DeckBarStat n={total - creatures - lands} label="SPELLS" />
+          </div>
+        </>
+      ) : (
+        <div className="flex w-full items-stretch text-[14px] tracking-[0.08em]">
+          <div className="flex min-w-0 flex-1 items-center justify-end gap-2 pr-3">
+            <NeighborName seat={left} />
+            <span className="font-mono text-muted">{arrow}</span>
+          </div>
+          <div className="w-0.5 shrink-0" />
+          <div className="flex min-w-0 flex-[1.7] items-center justify-center gap-2 text-[15px]">
+            <AAvatar displayName={activeName} avatarUrl={activeAvatarUrl} size={20} green />
+            <span className="max-w-[220px] truncate text-green">{activeName}</span>
+          </div>
+          <div className="w-0.5 shrink-0" />
+          <div className="flex min-w-0 flex-1 items-center justify-start gap-2 pl-3">
+            <span className="font-mono text-muted">{arrow}</span>
+            <NeighborName seat={right} />
+          </div>
+        </div>
+      )}
+      <span className="absolute right-4 top-1/2 -translate-y-1/2" onPointerDown={(e) => e.stopPropagation()}>
+        <ShowNeighborsToggle
+          on={tab === "neighbors"}
+          onToggle={() => onTab(tab === "neighbors" ? "deck" : "neighbors")}
+        />
+      </span>
+    </div>
+  );
+}
+
+function NeighborName({ seat }: { seat: Seat }) {
+  return (
+    <span className="flex min-w-0 items-center gap-2">
+      <AAvatar displayName={seat.name} avatarUrl={seat.avatarUrl} size={18} />
+      <span className="max-w-[150px] truncate text-subtle">{seat.name}</span>
+    </span>
+  );
+}
+
+function NeighborColumns({ left, center, right }: { left: Pile; center: Pile; right: Pile }) {
+  return (
+    <div className="flex h-full items-stretch">
+      <div className="min-w-0 flex-1 pt-2">
+        <Pool cards={left.main} sideboard={left.board} lastPickInSideboard={left.lastInSide} markLast cardWidth={140} reveal={22} />
+      </div>
+      <div className="w-0.5 shrink-0 self-stretch bg-border" />
+      <div className="min-w-0 flex-[1.7] pt-2">
+        <Pool cards={center.main} sideboard={center.board} lastPickInSideboard={center.lastInSide} markLast cardWidth={166} reveal={26} />
+      </div>
+      <div className="w-0.5 shrink-0 self-stretch bg-border" />
+      <div className="min-w-0 flex-1 pt-2">
+        <Pool cards={right.main} sideboard={right.board} lastPickInSideboard={right.lastInSide} markLast cardWidth={140} reveal={22} align="right" />
+      </div>
+    </div>
   );
 }
 
@@ -775,14 +1352,16 @@ function PoolControls({
             </button>
           )}
           {canSplit && (
-            <button
-              onClick={onToggleSplit}
-              aria-pressed={splitSideboard}
-              className={cn(pill, splitSideboard ? active : idle, "flex-1")}
-            >
-              SIDE
-              <GoSidebarCollapse size={15} aria-hidden="true" />
-            </button>
+            <Tooltip label={splitSideboard ? "Merge the sideboard back into the pool" : "Split the sideboard out of the pool"} side="top">
+              <button
+                onClick={onToggleSplit}
+                aria-pressed={splitSideboard}
+                className={cn(pill, splitSideboard ? active : idle, "flex-1")}
+              >
+                SIDE
+                <GoSidebarCollapse size={15} aria-hidden="true" />
+              </button>
+            </Tooltip>
           )}
         </div>
       )}
@@ -806,19 +1385,19 @@ function SideboardPane({
 }) {
   const lastIndex = cards.length - 1;
   const cardClass =
-    "w-full overflow-hidden rounded-[5px] [outline-style:solid] outline-1 -outline-offset-1 outline-white/10 shadow-[0_-2px_6px_rgba(0,0,0,0.6)]";
+    "overflow-hidden rounded-[5px] [outline-style:solid] outline-1 -outline-offset-1 outline-white/10 shadow-[0_-2px_6px_rgba(0,0,0,0.6)]";
   return (
-    <div className="flex shrink-0 flex-col" style={{ width: cardWidth }}>
-      <div className="themed-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2 py-2">
-        <div className="relative w-full [display:flow-root]">
+    <div className="flex shrink-0 flex-col">
+      <div className="themed-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden py-2 pl-0.5 pr-2">
+        <div className="relative [display:flow-root]" style={{ width: cardWidth }}>
           {cards.slice(0, lastIndex).map((card, i) => (
-            <div key={i} className={cn("absolute", cardClass)} style={{ top: i * reveal }}>
+            <div key={i} className={cn("absolute", cardClass)} style={{ top: i * reveal, width: cardWidth }}>
               <CardImage card={card} />
             </div>
           ))}
           <div
             className={cn("relative", cardClass, markLast && "review-last-pick z-10")}
-            style={{ marginTop: lastIndex * reveal }}
+            style={{ marginTop: lastIndex * reveal, width: cardWidth }}
           >
             <CardImage card={cards[lastIndex]} />
           </div>
@@ -887,22 +1466,14 @@ function MobileNavDivider({
         <span className="min-w-[56px] text-center font-display text-[17px] tracking-[0.06em] text-text">
           P{pack + 1}P{pick + 1}
         </span>
-        {awaitingReveal ? (
-          <Tooltip label="Reveal picked card" side="bottom">
-            <button onClick={onReveal} aria-label="Reveal picked card" className={cn(arrow, "border-green/55 bg-surface2 text-green active:scale-90 active:bg-green/25 motion-reduce:active:scale-100")}>
-              <EyeIcon off={false} />
-            </button>
-          </Tooltip>
-        ) : (
-          <button
-            onClick={onNext}
-            disabled={atEnd}
-            aria-label="Next pick"
-            className={cn(arrow, atEnd ? "border-border text-dim opacity-40" : "border-green/55 bg-surface2 text-green active:scale-90 active:bg-green/25 motion-reduce:active:scale-100")}
-          >
-            <ChevronIcon dir="right" />
-          </button>
-        )}
+        <button
+          onClick={awaitingReveal ? onReveal : onNext}
+          disabled={!awaitingReveal && atEnd}
+          aria-label={awaitingReveal ? "Reveal picked card" : "Next pick"}
+          className={cn(arrow, !awaitingReveal && atEnd ? "border-border text-dim opacity-40" : "border-white/40 bg-surface2 text-text active:scale-90 active:bg-white/20 motion-reduce:active:scale-100")}
+        >
+          {awaitingReveal ? <EyeIcon off={false} /> : <ChevronIcon dir="right" />}
+        </button>
       </div>
 
       <ShowPicksToggle
@@ -982,37 +1553,134 @@ function OrderStrip({
   );
 }
 
+type PoolEntry = { card: ArtifactCard; idx: number };
+
+const MAX_POOL_COLUMNS = 9;
+const POOL_PAD = 8;
+const POOL_GAP = 4;
+
 function Pool({
   cards,
+  sideboard = [],
+  lastPickInSideboard = false,
+  groupByType = false,
   align = "left",
   cardWidth = 116,
   reveal = 26,
   markLast = false,
 }: {
   cards: ArtifactCard[];
+  sideboard?: ArtifactCard[];
+  lastPickInSideboard?: boolean;
+  groupByType?: boolean;
   align?: "left" | "right";
   cardWidth?: number;
   reveal?: number;
   markLast?: boolean;
 }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [maxColumns, setMaxColumns] = useState(MAX_POOL_COLUMNS);
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!groupByType || !el) {
+      return;
+    }
+    const measure = () => {
+      const available = el.clientWidth - POOL_PAD * 2;
+      setMaxColumns(Math.max(1, Math.floor((available + POOL_GAP) / (cardWidth + POOL_GAP))));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [groupByType, cardWidth]);
+  const column = (key: string, group: PoolEntry[], lastIndex: number, glow: boolean) => (
+    <div
+      key={key}
+      className="relative shrink-0"
+      style={{ width: cardWidth, height: Math.max(0, group.length - 1) * reveal + cardWidth * 1.4 }}
+    >
+      {group.map(({ card, idx }, i) => (
+        <div
+          key={i}
+          className={cn(
+            "absolute w-full overflow-hidden rounded-[5px] [outline-style:solid] outline-1 -outline-offset-1 outline-white/10 shadow-[0_-2px_6px_rgba(0,0,0,0.6)]",
+            glow && idx === lastIndex && "review-last-pick z-10",
+          )}
+          style={{ top: i * reveal }}
+        >
+          <CardImage card={card} />
+        </div>
+      ))}
+    </div>
+  );
+  const entries = cards.map((card, idx) => ({ card, idx }));
   const lastIndex = cards.length - 1;
-  const byCmc = new Map<number, { card: ArtifactCard; idx: number }[]>();
+  const glow = markLast && !lastPickInSideboard;
+
+  let track;
+  if (groupByType) {
+    const isCreature = (card: ArtifactCard) => /creature/i.test(card.type ?? "");
+    const isLand = (card: ArtifactCard) => /land/i.test(card.type ?? "");
+    const creatureCols = cmcColumns(entries.filter((e) => isCreature(e.card)));
+    const lands = entries.filter((e) => !isCreature(e.card) && isLand(e.card));
+    let spellCols = cmcColumns(entries.filter((e) => !isCreature(e.card) && !isLand(e.card)));
+    while (creatureCols.length + 1 + spellCols.length > maxColumns && spellCols.length > 1) {
+      const last = spellCols[spellCols.length - 1];
+      const prev = spellCols[spellCols.length - 2];
+      spellCols = [...spellCols.slice(0, -2), [prev[0], [...prev[1], ...last[1]]]];
+    }
+    track = (
+      <>
+        {creatureCols.map(([, group], i) => column(`c${i}`, group, lastIndex, glow))}
+        {lands.length > 0 ? (
+          column("lands", lands, lastIndex, glow)
+        ) : (
+          <div key="land-gap" className="shrink-0" style={{ width: cardWidth }} />
+        )}
+        {spellCols.map(([, group], i) => column(`o${i}`, group, lastIndex, glow))}
+      </>
+    );
+  } else {
+    track = (
+      <>
+        {cmcColumns(entries).map(([cmc, group]) => column(`m${cmc}`, group, lastIndex, glow))}
+        {sideboard.length > 0 &&
+          column(
+            "side",
+            sideboard.map((card, idx) => ({ card, idx })),
+            sideboard.length - 1,
+            markLast && lastPickInSideboard,
+          )}
+      </>
+    );
+  }
+  return (
+    <div ref={scrollRef} className="themed-scrollbar h-full overflow-auto" style={{ padding: POOL_PAD }}>
+      <div className={cn("flex w-max items-start", align === "right" && "ml-auto")} style={{ gap: POOL_GAP }}>
+        {track}
+      </div>
+    </div>
+  );
+}
+
+function cmcColumns(entries: PoolEntry[]): [number, PoolEntry[]][] {
+  const byCmc = new Map<number, PoolEntry[]>();
   let maxCmc = 0;
-  for (let idx = 0; idx < cards.length; idx++) {
-    const card = cards[idx];
-    const cmc = Math.max(0, Math.round(card.cmc ?? 0));
+  for (const entry of entries) {
+    const cmc = Math.max(0, Math.round(entry.card.cmc ?? 0));
     maxCmc = Math.max(maxCmc, cmc);
     const list = byCmc.get(cmc);
     if (list) {
-      list.push({ card, idx });
+      list.push(entry);
     } else {
-      byCmc.set(cmc, [{ card, idx }]);
+      byCmc.set(cmc, [entry]);
     }
   }
-  const columns: [number, { card: ArtifactCard; idx: number }[]][] = [];
+  const columns: [number, PoolEntry[]][] = [];
   for (let c = 1; c <= maxCmc; c++) {
     const group = byCmc.get(c) ?? [];
-    if (c === 1 && group.length === 0) {
+    if (group.length === 0) {
       continue;
     }
     columns.push([c, group]);
@@ -1021,35 +1689,7 @@ function Pool({
   if (lands.length) {
     columns.push([0, lands]);
   }
-  return (
-    <div
-      className={cn(
-        "themed-scrollbar flex h-full items-start gap-1 overflow-auto px-2 py-2",
-        align === "right" ? "justify-end" : "justify-start",
-      )}
-    >
-      {columns.map(([cmc, group]) => (
-        <div
-          key={cmc}
-          className="relative shrink-0"
-          style={{ width: cardWidth, height: Math.max(0, group.length - 1) * reveal + cardWidth * 1.4 }}
-        >
-          {group.map(({ card, idx }, i) => (
-            <div
-              key={i}
-              className={cn(
-                "absolute w-full overflow-hidden rounded-[5px] [outline-style:solid] outline-1 -outline-offset-1 outline-white/10 shadow-[0_-2px_6px_rgba(0,0,0,0.6)]",
-                markLast && idx === lastIndex && "review-last-pick z-10",
-              )}
-              style={{ top: i * reveal }}
-            >
-              <CardImage card={card} />
-            </div>
-          ))}
-        </div>
-      ))}
-    </div>
-  );
+  return columns;
 }
 
 function PassArrow({ dir }: { dir: "up" | "down" | "left" | "right" }) {
@@ -1070,21 +1710,20 @@ function PlayerGrid({
   seats,
   activeSeat,
   onSelect,
-  hideColors,
   passRight,
 }: {
   seats: Seat[];
   activeSeat: number;
   onSelect: (i: number) => void;
-  hideColors: boolean;
   passRight: boolean;
 }) {
   const topDir = passRight ? "right" : "left";
   const bottomDir = passRight ? "left" : "right";
   const leftColDir = passRight ? "up" : "down";
   const rightColDir = passRight ? "down" : "up";
+  const arrowRiseToAvatar = 20;
   const tile = (i: number) => (
-    <PlayerTile seat={seats[i]} active={i === activeSeat} onClick={() => onSelect(i)} hideColors={hideColors} />
+    <PlayerTile seat={seats[i]} active={i === activeSeat} onClick={() => onSelect(i)} />
   );
   return (
     <div className="flex h-full flex-col px-1.5 py-2">
@@ -1093,7 +1732,10 @@ function PlayerGrid({
           {tile(row.left)}
           {tile(row.right)}
           {(row.top || row.bottom) && (
-            <span className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+            <span
+              className="pointer-events-none absolute left-1/2 top-1/2"
+              style={{ transform: `translate(-50%, calc(-50% - ${arrowRiseToAvatar}px))` }}
+            >
               <PassArrow dir={row.top ? topDir : bottomDir} />
             </span>
           )}
@@ -1117,12 +1759,10 @@ function PlayerTile({
   seat,
   active,
   onClick,
-  hideColors,
 }: {
   seat: Seat;
   active: boolean;
   onClick: () => void;
-  hideColors: boolean;
 }) {
   return (
     <button
@@ -1141,130 +1781,38 @@ function PlayerTile({
       >
         {seat.name}
       </span>
-      {!hideColors && <Pips colors={seat.colors} size={14} flat />}
+      <Pips colors={seat.colors} size={14} flat />
     </button>
-  );
-}
-
-function NeighborBand({
-  left,
-  right,
-  leftSeat,
-  rightSeat,
-}: {
-  left: ArtifactCard[];
-  right: ArtifactCard[];
-  leftSeat: Seat;
-  rightSeat: Seat;
-}) {
-  return (
-    <div className="hidden h-[244px] shrink-0 items-stretch border-t border-border bg-bg lg:flex">
-      <div className="flex min-w-0 flex-1 flex-col px-6 pb-3 pt-2">
-        <PileLabel seat={leftSeat} align="left" />
-        <div className="min-h-0 flex-1">
-          <Pool cards={left} markLast cardWidth={134} reveal={30} />
-        </div>
-      </div>
-      <div className="w-px shrink-0 self-stretch bg-border" />
-      <div className="flex min-w-0 flex-1 flex-col px-6 pb-3 pt-2">
-        <PileLabel seat={rightSeat} align="right" />
-        <div className="min-h-0 flex-1">
-          <Pool cards={right} markLast cardWidth={134} reveal={30} align="right" />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function PileLabel({ seat, align }: { seat: Seat; align: "left" | "right" }) {
-  return (
-    <div className={cn("mb-1.5 flex items-center gap-2", align === "right" && "flex-row-reverse")}>
-      <AAvatar displayName={seat.name} avatarUrl={seat.avatarUrl} size={22} />
-      <span className="truncate font-display text-[13px] tracking-[0.1em] text-subtle">{seat.name}</span>
-    </div>
-  );
-}
-
-// Names the pass flow (from › active › to). Clicking anywhere folds the neighbor decks below; the chevron
-// tab seated on this bar's top edge signals the action.
-function PlayersBar({
-  show,
-  onToggle,
-  canFold,
-  left,
-  active,
-  right,
-  passRight,
-}: {
-  show: boolean;
-  onToggle: () => void;
-  canFold: boolean;
-  left: Seat;
-  active: Seat;
-  right: Seat;
-  passRight: boolean;
-}) {
-  const arrow = passRight ? "»" : "«";
-  const names = (
-    <span className="mx-auto flex w-3/5 items-center">
-      <span className="flex-1 truncate text-center font-display text-[15px] tracking-[0.08em] text-subtle">
-        {left.name}
-      </span>
-      <span className="flex-1 text-center font-mono text-[14px] text-subtle">{arrow}</span>
-      <span className="flex-1 truncate text-center font-display text-[15px] tracking-[0.08em] text-green">
-        {active.name}
-      </span>
-      <span className="flex-1 text-center font-mono text-[14px] text-subtle">{arrow}</span>
-      <span className="flex-1 truncate text-center font-display text-[15px] tracking-[0.08em] text-subtle">
-        {right.name}
-      </span>
-    </span>
-  );
-
-  if (!canFold) {
-    return (
-      <div className="relative hidden h-9 w-full shrink-0 items-center justify-center border-t border-border bg-bg lg:flex">
-        {names}
-      </div>
-    );
-  }
-
-  return (
-    <Tooltip label={show ? "Hide neighbor picks" : "Show neighbor picks"} side="top">
-      <button
-        onClick={onToggle}
-        aria-label={show ? "Hide neighbor picks" : "Show neighbor picks"}
-        className="group relative hidden h-9 w-full shrink-0 items-center justify-center border-t border-border bg-bg transition-colors hover:bg-surface2 lg:flex"
-      >
-        <span className="absolute bottom-full left-1/2 flex -translate-x-1/2 translate-y-px items-center justify-center rounded-t-md border border-b-0 border-border bg-bg px-3 text-subtle transition-colors group-hover:bg-surface2 group-hover:text-text">
-          <ChevronIcon dir={show ? "down" : "up"} />
-        </span>
-        {names}
-      </button>
-    </Tooltip>
   );
 }
 
 function NavArrow({ dir, onClick, disabled }: { dir: "prev" | "next"; onClick?: () => void; disabled?: boolean }) {
   const primary = dir === "next";
+  const label = primary ? "Next Pick" : "Previous Pick";
+  const tooltip = primary ? "Next Pick (Arrow Right)" : "Previous Pick (Arrow Left)";
+  const [hover, setHover] = useState(false);
   return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      aria-label={primary ? "Next pick" : "Previous pick"}
-      className={cn(
-        "flex h-9 w-9 items-center justify-center rounded-md border bg-surface2",
-        "transition-[transform,background-color,border-color,color] duration-150 ease-out",
-        "touch-manipulation [-webkit-tap-highlight-color:transparent]",
-        disabled
-          ? "border-border text-dim opacity-40"
-          : primary
-            ? "border-green/55 text-green hover:border-green hover:bg-green/15 active:scale-90 active:bg-green/25 motion-reduce:active:scale-100"
+    <Tooltip label={tooltip} side="bottom" open={hover && !disabled}>
+      <button
+        onClick={onClick}
+        onPointerEnter={(e) => e.pointerType === "mouse" && setHover(true)}
+        onPointerLeave={() => setHover(false)}
+        disabled={disabled}
+        aria-label={label}
+        className={cn(
+          "flex h-9 items-center justify-center rounded-md border bg-surface2",
+          primary ? "min-w-[84px] gap-1.5 px-3 font-display text-[13px] tracking-[0.12em]" : "w-9",
+          "transition-[transform,background-color,border-color,color] duration-150 ease-out",
+          "touch-manipulation [-webkit-tap-highlight-color:transparent]",
+          disabled
+            ? "border-border text-dim opacity-40"
             : "border-white/40 text-text hover:border-white/60 hover:bg-white/10 active:scale-90 active:bg-white/20 motion-reduce:active:scale-100",
-      )}
-    >
-      <ChevronIcon dir={primary ? "right" : "left"} />
-    </button>
+        )}
+      >
+        {primary && <span>NEXT</span>}
+        <ChevronIcon dir={primary ? "right" : "left"} />
+      </button>
+    </Tooltip>
   );
 }
 

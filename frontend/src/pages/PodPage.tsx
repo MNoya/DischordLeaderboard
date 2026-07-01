@@ -10,7 +10,7 @@ import { PodTable, PodTableSkeleton } from "../components/pod/PodTable";
 import { PlayerSeatPanel } from "../components/pod/PlayerSeatPanel";
 import type { RoundOutcome } from "../components/pod/PlayerSeatPanel";
 import { MobileSeatStack, MobileSeatStackSkeleton } from "../components/pod/MobileSeatStack";
-import { DeckScreenshotModal } from "../components/pod/DeckScreenshotModal";
+import { DeckScreenshotModal, type DeckTab } from "../components/pod/DeckScreenshotModal";
 import {
   useLeaderboard,
   usePodDraftArtifact,
@@ -72,6 +72,12 @@ export function PodPage() {
   const [highlightedOutcome, setHighlightedOutcome] = useState<RoundOutcome | null>(null);
   const [animateLayout, setAnimateLayout] = useState(false);
   const [deckTarget, setDeckTarget] = useState<PodSeat | null>(null);
+  const [deckInitialTab, setDeckInitialTab] = useState<DeckTab>("screenshot");
+
+  const openDeck = (seat: PodSeat, tab: DeckTab = "screenshot") => {
+    setDeckInitialTab(tab);
+    setDeckTarget(seat);
+  };
 
   const handleRoundHover = (seat: number | null, round: number | null, outcome: RoundOutcome | null) => {
     setHighlightedSeat(seat);
@@ -315,7 +321,7 @@ export function PodPage() {
           replays={loadedReplays}
           selectedSeat={selectedSeat}
           onSelect={handleSelectSeat}
-          onShowDeck={setDeckTarget}
+          onShowDeck={openDeck}
           eventLabel={eventLabel}
           setCode={event.setCode}
           eventSlug={event.slug}
@@ -337,6 +343,7 @@ export function PodPage() {
               record: deckTarget.record,
               draftLogUrl: deckTarget.draftLogUrl,
             }}
+            initialTab={deckInitialTab}
             onClose={() => setDeckTarget(null)}
             onPrev={() => cycleDeck(-1)}
             onNext={() => cycleDeck(1)}
@@ -376,8 +383,10 @@ export function PodPage() {
               highlightedRound={highlightedRound}
               highlightedOutcome={highlightedOutcome}
               onSelect={handleSelectSeat}
-              onShowDeck={setDeckTarget}
+              onShowDeck={openDeck}
               eventLabel={eventLabel}
+              eventSlug={event.slug}
+              hasDraftLog={!!draftArtifact}
               setCode={event.setCode}
               formatLabel={event.formatLabel}
               date={event.eventDate}
@@ -408,7 +417,7 @@ export function PodPage() {
                     hasDraftLog={!!draftArtifact}
                     linkableSlugs={linkableSlugs}
                     onRoundHover={handleRoundHover}
-                    onShowDeck={setDeckTarget}
+                    onShowDeck={openDeck}
                     isMock={event.kind === "mock"}
                   />
                 )}
@@ -435,6 +444,7 @@ export function PodPage() {
             record: deckTarget.record,
             draftLogUrl: deckTarget.draftLogUrl,
           }}
+          initialTab={deckInitialTab}
           onClose={() => setDeckTarget(null)}
           onPrev={() => cycleDeck(-1)}
           onNext={() => cycleDeck(1)}
@@ -445,7 +455,7 @@ export function PodPage() {
 }
 
 export function PodDraftLogRoute() {
-  const { slug, who } = useParams<{ slug: string; who?: string }>();
+  const { slug, who, pack, pick } = useParams<{ slug: string; who?: string; pack?: string; pick?: string }>();
   const navigate = useNavigate();
   const { data: event, isLoading: eventLoading } = usePodEventBySlug(slug);
   const eventId = event?.eventId;
@@ -464,16 +474,14 @@ export function PodDraftLogRoute() {
     return <Navigate to={`/pods/${slug ?? ""}`} replace />;
   }
 
-  if (who == null) {
-    const champion = seats.find((s) => s.placement === 1) ?? seats[0];
-    if (!champion) {
-      return <Navigate to={`/pods/${slug}`} replace />;
-    }
-    return <Navigate to={`/pods/${slug}/log/${seatIdentifier(champion)}`} replace />;
+  if (!who) {
+    return <Navigate to={`/pods/${slug}`} replace />;
   }
 
   const resolved = resolveLogSeat(seats, who);
   const initialSeat = resolved != null && resolved < artifact.seats.length ? resolved : 0;
+  const initialPack = pack ? Number(pack) - 1 : 0;
+  const initialPick = pick ? Number(pick) - 1 : 0;
   const seatInfo: ReviewSeatInfo[] = seats.map((s) => ({
     seatIndex: s.seatIndex,
     displayName: s.discordName,
@@ -491,11 +499,17 @@ export function PodDraftLogRoute() {
       artifact={artifact}
       meta={{ setCode: event.setCode, name: event.name }}
       initialSeat={initialSeat}
-      onClose={() => navigate(`/pods/${slug}`)}
-      onSeatChange={(i) => {
-        const target = seats.find((s) => s.seatIndex === i);
+      initialPack={initialPack}
+      initialPick={initialPick}
+      onClose={() => {
+        const current = resolved != null ? seats.find((s) => s.seatIndex === resolved) : null;
+        const query = current ? `?player=${encodeURIComponent(current.discordName)}` : "";
+        navigate(`/pods/${slug}${query}`);
+      }}
+      onNavigate={(seatIndex, p, pk) => {
+        const target = seats.find((s) => s.seatIndex === seatIndex);
         if (target) {
-          navigate(`/pods/${slug}/log/${seatIdentifier(target)}`, { replace: true });
+          navigate(`/pods/${slug}/${seatIdentifier(target)}/${p + 1}/${pk + 1}`, { replace: true });
         }
       }}
       eventId={event.eventId}
