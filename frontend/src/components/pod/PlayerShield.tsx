@@ -8,8 +8,8 @@ import type { RoundOutcome } from "./PlayerSeatPanel";
 export const SHIELD_VIEWBOX = "0 0 100 122";
 export const SHIELD_RATIO = 100 / 122;
 const FRAME_PATH = "M 0 0 H 100 V 60 C 100 80, 85 100, 50 122 C 15 100, 0 80, 0 60 Z";
-const GROOVE_PATH = "M 4 4 H 96 V 60 C 96 77, 83 96, 50 116 C 17 96, 4 77, 4 60 Z";
-const FACE_PATH = "M 6 6 H 94 V 60 C 94 76, 82 94, 50 113 C 18 94, 6 76, 6 60 Z";
+const GROOVE_PATH = "M 3.2 3.2 H 96.8 V 60 C 96.8 77.4, 83.4 96.8, 50 117.2 C 16.6 96.8, 3.2 77.4, 3.2 60 Z";
+const FACE_PATH = "M 5.2 5.2 H 94.8 V 60 C 94.8 76.4, 82.4 94.8, 50 114.2 C 17.6 94.8, 5.2 76.4, 5.2 60 Z";
 
 interface Metal {
   hi: string;

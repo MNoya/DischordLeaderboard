@@ -427,7 +427,7 @@ function MockEventRow({ event, index }: { event: PodEventSummary; index: number 
       </div>
       <div className="flex items-center pr-3 md:pr-4 pl-2 shrink-0 self-center gap-3">
         <span className="hidden lg:inline text-muted text-[13px] font-body">{BREAKDOWN_CAPTION}</span>
-        <ChamferedButton>
+        <ChamferedButton className="!pt-[11px] !pb-[3px]">
           <span className="inline-flex items-center gap-2">
             <GiRoundTable size={30} className="-my-[6px]" />
             VIEW BREAKDOWN
@@ -667,10 +667,9 @@ const STANDING_COLS_CLASS =
   "[grid-template-columns:28px_1fr_60px_50px_38px] " +
   "lg:[grid-template-columns:44px_1fr_80px_70px_150px]";
 
-const MOBILE_STANDINGS_LIMIT = 4;
+const STANDINGS_LIMIT = 4;
 
 function EventStandings({ event }: { event: PodEventSummary }) {
-  const isMobile = useIsMobile(1024);
   const { data: rows, isLoading } = usePodEventParticipants(event.eventId);
   const { data: profileBoard } = useLeaderboard(event.setCode);
   const linkableSlugs = useMemo(
@@ -690,7 +689,8 @@ function EventStandings({ event }: { event: PodEventSummary }) {
     if (!rows) return [];
     return [...rows].sort((a, b) => (a.placement ?? 99) - (b.placement ?? 99));
   }, [rows]);
-  const visible = isMobile ? sorted.slice(0, MOBILE_STANDINGS_LIMIT) : sorted;
+  const visible = sorted.slice(0, STANDINGS_LIMIT);
+  const hiddenCount = sorted.length - visible.length;
   const cycleDeck = (direction: number) => {
     if (!deckTarget || visible.length === 0) return;
     const index = visible.indexOf(deckTarget);
@@ -702,7 +702,7 @@ function EventStandings({ event }: { event: PodEventSummary }) {
       <div className="border-t border-dashed border-border2">
         <div className="flex flex-col gap-[1px] pb-[1px] bg-bg">
           {isLoading
-            ? Array.from({ length: 8 }).map((_, i) => <StandingRowSkeleton key={i} />)
+            ? Array.from({ length: STANDINGS_LIMIT }).map((_, i) => <StandingRowSkeleton key={i} />)
             : visible.map((p) => (
                 <StandingRow
                   key={`${p.eventId}-${p.displayName}`}
@@ -717,17 +717,26 @@ function EventStandings({ event }: { event: PodEventSummary }) {
               ))}
         </div>
         <Link to={`/pods/${event.slug}`} className="block no-underline">
-          <div className="flex justify-end items-center gap-4 px-3 md:px-4 py-3 bg-surface hover:bg-green/5 transition-colors cursor-pointer">
-            <span className="text-muted text-[13px] font-body">
-              {BREAKDOWN_CAPTION}
-            </span>
-            <ChamferedButton>
-              <span className="inline-flex items-center gap-2">
-                <GiRoundTable size={30} className="-my-[6px]" />
-                VIEW BREAKDOWN
-                 <ArrowRight size={14} />
+          <div className="flex justify-between items-center gap-4 pl-2 pr-3 md:pr-4 py-3 bg-surface hover:bg-green/5 transition-colors cursor-pointer">
+            {hiddenCount > 0 ? (
+              <span className="font-display text-muted tracking-[0.14em] leading-none pl-10 lg:pl-16 whitespace-nowrap" style={{ fontSize: 14 }}>
+                +{hiddenCount} MORE {hiddenCount === 1 ? "PLAYER" : "PLAYERS"}
               </span>
-            </ChamferedButton>
+            ) : (
+              <span />
+            )}
+            <div className="flex items-center gap-4">
+              <span className="hidden lg:inline text-muted text-[13px] font-body">
+                {BREAKDOWN_CAPTION}
+              </span>
+              <ChamferedButton className="!pt-[11px] !pb-[3px]">
+                <span className="inline-flex items-center gap-2 whitespace-nowrap">
+                  <GiRoundTable size={30} className="-my-[6px]" />
+                  VIEW BREAKDOWN
+                  <ArrowRight size={14} />
+                </span>
+              </ChamferedButton>
+            </div>
           </div>
         </Link>
       </div>

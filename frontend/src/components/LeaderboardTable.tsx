@@ -567,10 +567,16 @@ function TrophyCell({
         compact ? "gap-1" : "gap-1.5",
       )}
     >
-      <Trophy size={iconSize} color="#ffc63a" />
-      <span className={cn("font-display tracking-[0.02em] tabular-nums leading-none", textSize)}>
-        {trophies}
-      </span>
+      {trophies > 0 ? (
+        <>
+          <Trophy size={iconSize} color="#ffc63a" />
+          <span className={cn("font-display tracking-[0.02em] tabular-nums leading-none", textSize)}>
+            {trophies}
+          </span>
+        </>
+      ) : (
+        <span className={cn("font-display text-dim tabular-nums leading-none", textSize)}>—</span>
+      )}
     </div>
   );
 }
