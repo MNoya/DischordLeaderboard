@@ -13,7 +13,6 @@ interface SlotRow {
   card: Card;
   gihwr: number | null;
   isYours: boolean;
-  isCrowd: boolean;
 }
 
 export function MidwayBreakdownList({
@@ -54,7 +53,6 @@ export function MidwayBreakdownList({
             card: c,
             gihwr,
             isYours: yourCardBySlot.get(slot.key) === c.name,
-            isCrowd: crowdCardBySlot.get(slot.key) === c.name,
           };
         });
         rows.sort((a, b) => {
@@ -183,7 +181,7 @@ function GihwrRow({
       ? Math.max(((row.gihwr - 0.45) / (0.70 - 0.45)) * 100, 3)
       : 0;
   const isLeader = rank === 1;
-  const highlight = row.isYours ? "bg-green/[0.07]" : row.isCrowd ? "bg-green/[0.04]" : "";
+  const highlight = row.isYours ? "bg-green/[0.07]" : "";
 
   return (
     <div className="relative overflow-hidden border-b border-border2 last:border-b-0">
@@ -206,11 +204,6 @@ function GihwrRow({
             {row.isYours && (
               <span className="shrink-0 inline-block font-display tracking-[0.14em] uppercase text-[12.5px] leading-none px-2 py-1 bg-green text-bg">
                 YOURS
-              </span>
-            )}
-            {row.isCrowd && !row.isYours && (
-              <span className="shrink-0 inline-block font-display tracking-[0.12em] uppercase text-[11px] leading-none px-1.5 py-0.5 bg-white/8 text-subtle rounded-sm">
-                ◆ CROWD
               </span>
             )}
           </div>
