@@ -10,7 +10,7 @@ import {
   adaptDraftEvent,
   adaptFormatBreakdown,
   adaptLeaderboardRow,
-  adaptSelfReportedTrophy,
+  adaptSelfReportedEvent,
   adaptSet,
 } from "./adapter";
 import { adaptDbEpisode, type DbEpisodeRow, type Episode } from "./episodes";
@@ -270,11 +270,11 @@ export async function fetchLeaderboard(setCode: string): Promise<LeaderboardRow[
     .map((r, i) => ({ ...r, rank: i + 1 }));
 }
 
-// MTGO flashback board: self-reported trophies aggregated per player, ranked by count.
-// These sets have no scored data, so the standing is the raw trophy tally.
+// MTGO flashback board: self-reported results aggregated per player. These sets have no scored
+// data, so the standing is the trophy tally; non-trophy decks are carried but don't lift the rank.
 export async function fetchTrophyLeaderboard(setCode: string): Promise<TrophyLeaderboardRow[]> {
   const { data, error } = await client()
-    .from("public_self_reported_trophies")
+    .from("public_self_reported_events")
     .select("*")
     .eq("set_code", setCode)
     .order("reported_at", { ascending: false });
@@ -284,10 +284,11 @@ export async function fetchTrophyLeaderboard(setCode: string): Promise<TrophyLea
   for (const raw of data ?? []) {
     const r = raw as Record<string, unknown>;
     const slug = r.slug as string;
-    const deck = adaptSelfReportedTrophy(r);
+    const deck = adaptSelfReportedEvent(r);
     const existing = bySlug.get(slug);
     if (existing) {
-      existing.trophies += 1;
+      existing.trophies += deck.isTrophy ? 1 : 0;
+      existing.deckCount += 1;
       existing.decks.push(deck);
     } else {
       bySlug.set(slug, {
@@ -296,14 +297,20 @@ export async function fetchTrophyLeaderboard(setCode: string): Promise<TrophyLea
         displayName: (r.display_name as string) ?? slug,
         avatarUrl: (r.avatar_url ?? null) as string | null,
         rank: 0,
-        trophies: 1,
+        trophies: deck.isTrophy ? 1 : 0,
+        deckCount: 1,
         decks: [deck],
       });
     }
   }
 
   return [...bySlug.values()]
-    .sort((a, b) => b.trophies - a.trophies || b.decks[0].reportedAt.localeCompare(a.decks[0].reportedAt))
+    .sort(
+      (a, b) =>
+        b.trophies - a.trophies ||
+        b.deckCount - a.deckCount ||
+        b.decks[0].reportedAt.localeCompare(a.decks[0].reportedAt),
+    )
     .map((r, i) => ({ ...r, rank: i + 1 }));
 }
 
@@ -850,7 +857,7 @@ export async function fetchPlayerProfile(
       .eq("slug", slug)
       .maybeSingle(),
     client()
-      .from("public_self_reported_trophies")
+      .from("public_self_reported_events")
       .select("*")
       .eq("set_code", setCode)
       .eq("slug", slug)
@@ -924,7 +931,7 @@ export async function fetchPlayerProfile(
     losses: headline.losses,
     lastCalculatedAt: headline.lastCalculatedAt || undefined,
     formatBreakdown: breakdown,
-    selfReportedTrophies: trophyRows.map((r) => adaptSelfReportedTrophy(r)),
+    selfReportedEvents: trophyRows.map((r) => adaptSelfReportedEvent(r)),
   };
 }
 

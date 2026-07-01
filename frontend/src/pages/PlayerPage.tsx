@@ -55,7 +55,7 @@ import type {
   PlayerFormatBreakdown,
   PlayerIdentity,
   PlayerProfile,
-  SelfReportedTrophy,
+  SelfReportedEvent,
   SetSummary,
 } from "../types/leaderboard";
 
@@ -637,9 +637,9 @@ function Desktop({
           const labels = FORMAT_LABEL_GROUPS[opt.value] ?? [opt.value];
           return labels.some((l) => available.has(l));
         });
-    const platforms = Array.from(new Set(profile.selfReportedTrophies.map((t) => t.platform)));
+    const platforms = Array.from(new Set(profile.selfReportedEvents.map((t) => t.platform)));
     return [...base, ...platforms.map((p) => ({ value: p, label: p.toUpperCase() }))];
-  }, [availableFormatLabels, profile.selfReportedTrophies]);
+  }, [availableFormatLabels, profile.selfReportedEvents]);
   const otherSet = useMemo(() => new Set(otherCombos), [otherCombos]);
 
   const matchesFilters = useCallback(
@@ -665,7 +665,7 @@ function Desktop({
     [events, matchesFilters]
   );
   const displayRows = useMemo(() => mergeTrophyRows(filtered, profile, matchesFilters), [filtered, profile, matchesFilters]);
-  const [shotTrophy, setShotTrophy] = useState<SelfReportedTrophy | null>(null);
+  const [shotTrophy, setShotTrophy] = useState<SelfReportedEvent | null>(null);
 
   const filtersActive = formatFilter !== "ALL" || colorsFilter !== "ALL";
   // The headline points and its breakdown popover follow the format filter only, selecting the
@@ -736,7 +736,7 @@ function Desktop({
             </div>
           </div>
           <div className="ml-auto flex items-stretch gap-4 min-w-0">
-            <ManualTrophiesBlock trophies={profile.selfReportedTrophies} />
+            <ManualTrophiesBlock trophies={profile.selfReportedEvents} />
             {profile.events > 0 && (
               <StatStrip
                 stats={stats}
@@ -744,7 +744,7 @@ function Desktop({
                 showPoints={ranked}
                 onPointsClick={() => setPointsModalOpen((o) => !o)}
                 pointsBtnRef={pointsBtnRef}
-                trophiesLabel={profile.selfReportedTrophies.length > 0 ? "17L TROPHIES" : "TROPHIES"}
+                trophiesLabel={profile.selfReportedEvents.some((e) => e.isTrophy) ? "17L TROPHIES" : "TROPHIES"}
               />
             )}
           </div>
@@ -759,7 +759,7 @@ function Desktop({
           events={events}
           filtered={filtered}
           rows={displayRows}
-          summary={eventLogSummaryParts(events.length, profile.selfReportedTrophies, displayRows.length, filtersActive)}
+          summary={eventLogSummaryParts(events.length, profile.selfReportedEvents, displayRows.length, filtersActive)}
           onOpenTrophy={setShotTrophy}
           formatFilter={formatFilter}
           setFormatFilter={setFormatFilter}
@@ -787,7 +787,7 @@ function Desktop({
 
 // A self-reported trophy rendered inline in the event log as a synthetic event. Carries the
 // trophy for the deck-screenshot modal; never counted toward the scored stat strip.
-type LogEntry = PlayerDraftEvent & { trophy?: SelfReportedTrophy };
+type LogEntry = PlayerDraftEvent & { trophy?: SelfReportedEvent };
 
 // MTGO 3-win runs read as Traditional, MTGA 7-win runs as Premier — derived from the record alone.
 function trophyFormatLabel(record: string): string {
@@ -795,7 +795,7 @@ function trophyFormatLabel(record: string): string {
   return wins >= 7 ? "Premier Draft" : "Trad Draft";
 }
 
-function selfTrophyToEntry(trophy: SelfReportedTrophy, fallbackSet: string): LogEntry {
+function selfTrophyToEntry(trophy: SelfReportedEvent, fallbackSet: string): LogEntry {
   const [w, l] = trophy.record.split("-");
   return {
     slug: "",
@@ -807,7 +807,7 @@ function selfTrophyToEntry(trophy: SelfReportedTrophy, fallbackSet: string): Log
     expansion: trophy.setCode || fallbackSet,
     wins: Number(w) || 0,
     losses: Number(l) || 0,
-    isTrophy: true,
+    isTrophy: trophy.isTrophy,
     colors: trophy.colors,
     startedAt: trophy.reportedAt,
     finishedAt: trophy.reportedAt,
@@ -824,7 +824,7 @@ function mergeTrophyRows(
   profile: PlayerProfile,
   matches: (colors: string, format: string) => boolean,
 ): LogEntry[] {
-  const trophyRows = profile.selfReportedTrophies
+  const trophyRows = profile.selfReportedEvents
     .map((t) => selfTrophyToEntry(t, profile.setCode))
     .filter((e) => matches(e.colors, e.format));
   return [...filteredEvents, ...trophyRows].sort((a, b) =>
@@ -837,7 +837,7 @@ function TrophyDeckModal({
   displayName,
   onClose,
 }: {
-  trophy: SelfReportedTrophy;
+  trophy: SelfReportedEvent;
   displayName: string;
   onClose: () => void;
 }) {
@@ -1230,7 +1230,7 @@ function DraftLogDesktop({
   filtered: PlayerDraftEvent[];
   rows: LogEntry[];
   summary: string[];
-  onOpenTrophy: (t: SelfReportedTrophy) => void;
+  onOpenTrophy: (t: SelfReportedEvent) => void;
   formatFilter: string;
   setFormatFilter: (v: string) => void;
   colorsFilter: string;
@@ -1407,7 +1407,7 @@ function platformBucket(platform: string): (typeof PLATFORM_BUCKETS)[number] {
   return "OTHER";
 }
 
-function platformCounts(trophies: SelfReportedTrophy[]): Array<{ bucket: string; count: number }> {
+function platformCounts(trophies: SelfReportedEvent[]): Array<{ bucket: string; count: number }> {
   const counts = new Map<string, number>();
   for (const t of trophies) {
     const bucket = platformBucket(t.platform);
@@ -1421,7 +1421,7 @@ function platformCounts(trophies: SelfReportedTrophy[]): Array<{ bucket: string;
 // for a manual-only player, [] when empty. While filtered, the visible-of-total count.
 function eventLogSummaryParts(
   events17L: number,
-  trophies: SelfReportedTrophy[],
+  trophies: SelfReportedEvent[],
   visibleRows: number,
   isFiltered: boolean,
 ): string[] {
@@ -1436,9 +1436,10 @@ function eventLogSummaryParts(
 // Player-logged trophies — separate from the automated 17L count, one icon + tally per source.
 // Desktop: a bordered tile beside the 17L stat. Mobile: a compact inline row under the player name
 // (no label). The platform doubles as the event-log row's format value, so the dropdown can filter it.
-function ManualTrophiesBlock({ trophies, mobile = false }: { trophies: SelfReportedTrophy[]; mobile?: boolean }) {
-  if (trophies.length === 0) return null;
-  const counts = platformCounts(trophies);
+function ManualTrophiesBlock({ trophies, mobile = false }: { trophies: SelfReportedEvent[]; mobile?: boolean }) {
+  const wins = trophies.filter((t) => t.isTrophy);
+  if (wins.length === 0) return null;
+  const counts = platformCounts(wins);
   const iconSize = mobile ? 18 : 24;
   const numCls = mobile ? "text-[16px]" : "text-[clamp(22px,2.4vw,32px)]";
   const pairs = counts.map(({ bucket, count }) => (
@@ -1498,7 +1499,7 @@ function EventLogRow({
   variant: "desktop" | "mobile";
   hideBottomBorder?: boolean;
   playerDisplayName?: string;
-  onOpenTrophy?: (t: SelfReportedTrophy) => void;
+  onOpenTrophy?: (t: SelfReportedEvent) => void;
 }) {
   const trophy = e.trophy ?? null;
   const href = e.externalUrl ?? null;
@@ -1837,9 +1838,9 @@ function Mobile({
           const labels = FORMAT_LABEL_GROUPS[opt.value] ?? [opt.value];
           return labels.some((l) => available.has(l));
         });
-    const platforms = Array.from(new Set(profile.selfReportedTrophies.map((t) => t.platform)));
+    const platforms = Array.from(new Set(profile.selfReportedEvents.map((t) => t.platform)));
     return [...base, ...platforms.map((p) => ({ value: p, label: p.toUpperCase() }))];
-  }, [availableFormatLabels, profile.selfReportedTrophies]);
+  }, [availableFormatLabels, profile.selfReportedEvents]);
   const otherSet = useMemo(() => new Set(otherCombos), [otherCombos]);
 
   const matchesFilters = useCallback(
@@ -1865,7 +1866,7 @@ function Mobile({
     [events, matchesFilters]
   );
   const displayRows = useMemo(() => mergeTrophyRows(filtered, profile, matchesFilters), [filtered, profile, matchesFilters]);
-  const [shotTrophy, setShotTrophy] = useState<SelfReportedTrophy | null>(null);
+  const [shotTrophy, setShotTrophy] = useState<SelfReportedEvent | null>(null);
 
   const filtersActive = formatFilter !== "ALL" || colorsFilter !== "ALL";
   // The headline points and its breakdown popover follow the format filter only, selecting the
@@ -1930,7 +1931,7 @@ function Mobile({
               {profile.displayName.toUpperCase()}
             </h1>
             <div className="pl-[5px]">
-              <ManualTrophiesBlock trophies={profile.selfReportedTrophies} mobile />
+              <ManualTrophiesBlock trophies={profile.selfReportedEvents} mobile />
             </div>
           </div>
           <div className="flex flex-col items-end gap-1.5 font-display tracking-[0.18em] shrink-0">
@@ -1950,7 +1951,7 @@ function Mobile({
         {profile.events > 0 && (
         <div className={cn("mt-[18px] grid gap-[5px]", ranked ? "grid-cols-5" : "grid-cols-4")}>
           <StatChip
-            label={profile.selfReportedTrophies.length > 0 ? "17L TROPHIES" : "TROPHIES"}
+            label={profile.selfReportedEvents.some((e) => e.isTrophy) ? "17L TROPHIES" : "TROPHIES"}
             value={
               <span className="flex items-center gap-[3px]">
                 <Trophy size={12} color="#ffc63a" />
@@ -1983,7 +1984,7 @@ function Mobile({
           <div className="flex items-baseline gap-2">
             <SectionLabel size={12}>EVENT LOG</SectionLabel>
             <span className="inline-flex items-baseline gap-x-2.5 font-display text-[11px] tracking-[0.12em] text-dim">
-              {eventLogSummaryParts(events.length, profile.selfReportedTrophies, displayRows.length, filtersActive).map(
+              {eventLogSummaryParts(events.length, profile.selfReportedEvents, displayRows.length, filtersActive).map(
                 (part) => (
                   <span key={part}>{part}</span>
                 ),

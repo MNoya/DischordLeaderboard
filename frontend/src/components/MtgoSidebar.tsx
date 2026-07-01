@@ -10,12 +10,13 @@ import { Record } from "./Record";
 import { cn } from "../lib/utils";
 import { colorsOf, isSoup, mainColors, playerPath, relativeTime } from "../data/utils";
 import { colorsDisplayName, MULTI } from "../data/filters";
-import type { SelfReportedTrophy, TrophyLeaderboardRow } from "../types/leaderboard";
+import type { SelfReportedEvent, TrophyLeaderboardRow } from "../types/leaderboard";
 
-// Insights sidebar for MTGO flashback boards, derived entirely from the self-reported trophies each
+// Insights sidebar for MTGO flashback boards, derived entirely from the self-reported results each
 // row already carries — these sets have no scored 17lands data the normal LeaderboardSidebar reads.
+// Top Colors counts trophies only; the recent feed shows every logged deck, trophies marked.
 
-interface DeckEntry extends SelfReportedTrophy {
+interface DeckEntry extends SelfReportedEvent {
   slug: string;
   displayName: string;
 }
@@ -35,11 +36,12 @@ export function MtgoSidebar({
     () => (rows ?? []).flatMap((r) => r.decks.map((d) => ({ ...d, slug: r.slug, displayName: r.displayName }))),
     [rows],
   );
-  const topColors = useMemo(() => aggregateColors(decks), [decks]);
+  const topColors = useMemo(() => aggregateColors(decks.filter((d) => d.isTrophy)), [decks]);
   const recent = useMemo(
     () => [...decks].sort((a, b) => b.reportedAt.localeCompare(a.reportedAt)),
     [decks],
   );
+  const trophyTotal = useMemo(() => decks.filter((d) => d.isTrophy).length, [decks]);
 
   return (
     <aside className="flex flex-col gap-4">
@@ -51,7 +53,7 @@ export function MtgoSidebar({
       <SurfaceCard>
         <div className="mb-1 flex items-center gap-1.5">
           <Trophy size={16} color="#ffc63a" />
-          <SectionLabel size={16} className="text-subtle">RECENT TROPHIES</SectionLabel>
+          <SectionLabel size={16} className="text-subtle">RECENT DECKS</SectionLabel>
         </div>
         <RecentTrophyRows recent={recent} setCode={setCode} maxRecent={maxRecent} loading={!rows} />
       </SurfaceCard>
@@ -59,7 +61,7 @@ export function MtgoSidebar({
       {rows && (
         <div className="mono text-[11px] text-muted -mt-2 flex justify-between px-12">
           <span>{rows.length} PLAYERS</span>
-          <span>{decks.length} TROPHIES</span>
+          <span>{trophyTotal} TROPHIES</span>
         </div>
       )}
     </aside>
@@ -147,7 +149,7 @@ function RecentTrophyRows({
     return <div className="mono text-[11px] text-muted py-2">LOADING…</div>;
   }
   if (recent.length === 0) {
-    return <div className="mono text-[11px] text-muted py-2">NO TROPHIES YET</div>;
+    return <div className="mono text-[11px] text-muted py-2">NO DECKS YET</div>;
   }
   const canShowMore = recent.length > limit;
   return (
@@ -177,6 +179,7 @@ function RecentTrophyRows({
             </span>
             <Record wins={wins} losses={losses} mono className="mono text-[13px] text-subtle text-right" />
             <span className="flex items-center gap-1.5 justify-end whitespace-nowrap">
+              {t.isTrophy && <Trophy size={11} color="#ffc63a" />}
               <span className="mono text-[11px] text-text">{t.platform}</span>
               <span className="mono text-[11px] text-dim tabular-nums transition-colors group-hover:text-text">
                 {relativeTime(t.reportedAt)}

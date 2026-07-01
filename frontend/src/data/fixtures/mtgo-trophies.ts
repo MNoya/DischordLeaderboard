@@ -1,12 +1,18 @@
-import type { SelfReportedTrophy, TrophyLeaderboardRow } from "../../types/leaderboard";
+import type { SelfReportedEvent, TrophyLeaderboardRow } from "../../types/leaderboard";
 
 // Synthetic MTGO flashback trophy boards for mock mode (VITE_DATA_MODE=mock). Fictional players.
 
 let seq = 0;
 
-const deck = (setCode: string, colors: string, record: string, reportedAt: string): SelfReportedTrophy => ({
+const isTrophyRecord = (record: string): boolean => {
+  const [wins, losses] = record.split("-").map((n) => Number(n) || 0);
+  return wins >= 7 || (wins > 0 && losses === 0);
+};
+
+const deck = (setCode: string, colors: string, record: string, reportedAt: string): SelfReportedEvent => ({
   setCode,
   record,
+  isTrophy: isTrophyRecord(record),
   colors,
   platform: "MTGO",
   caption: null,
@@ -19,20 +25,26 @@ const deck = (setCode: string, colors: string, record: string, reportedAt: strin
 
 const rank = (rows: Omit<TrophyLeaderboardRow, "rank">[]): TrophyLeaderboardRow[] =>
   [...rows]
-    .sort((a, b) => b.trophies - a.trophies || b.decks[0].reportedAt.localeCompare(a.decks[0].reportedAt))
+    .sort(
+      (a, b) =>
+        b.trophies - a.trophies ||
+        b.deckCount - a.deckCount ||
+        b.decks[0].reportedAt.localeCompare(a.decks[0].reportedAt),
+    )
     .map((r, i) => ({ ...r, rank: i + 1 }));
 
 const player = (
   setCode: string,
   slug: string,
   displayName: string,
-  decks: SelfReportedTrophy[],
+  decks: SelfReportedEvent[],
 ): Omit<TrophyLeaderboardRow, "rank"> => ({
   setCode,
   slug,
   displayName,
   avatarUrl: null,
-  trophies: decks.length,
+  trophies: decks.filter((d) => d.isTrophy).length,
+  deckCount: decks.length,
   decks,
 });
 

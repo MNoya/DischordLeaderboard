@@ -47,7 +47,7 @@ export function TrophyLeaderboard({
                 <div className="font-display text-[18px] leading-none tracking-[0.04em] whitespace-nowrap overflow-hidden text-ellipsis transition-colors group-hover/row:text-green">
                   {r.displayName.toUpperCase()}
                 </div>
-                <DeckPips decks={r.decks} />
+                <DeckPips decks={r.decks.filter((d) => d.isTrophy)} />
               </div>
             </div>
             <div className="text-right flex items-center justify-end gap-1.5">

@@ -33,7 +33,7 @@ _ALLOWED_VIEWS = {
     "public_pod_draft_replays",
     "public_pod_scoring",
     "public_recent_trophies",
-    "public_self_reported_trophies",
+    "public_self_reported_events",
     "public_sets",
 }
 

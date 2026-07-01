@@ -3,8 +3,8 @@ from datetime import date, datetime, timezone
 import pytest
 
 from bot.discord_helpers import parse_message_link
-from bot.models import MagicSet, Player, SelfReportedTrophy
-from bot.services.self_reported_trophies import get_or_create_player, upsert_trophy
+from bot.models import MagicSet, Player, SelfReportedEvent
+from bot.services.self_reported_events import get_or_create_player, is_trophy_record, upsert_event
 
 
 @pytest.mark.parametrize(
@@ -24,6 +24,26 @@ def test_parse_message_link_valid(url, expected):
 @pytest.mark.parametrize("url", ["", "not a link", "https://discord.com/channels/5/6", "https://example.com/a/b/c"])
 def test_parse_message_link_invalid(url):
     assert parse_message_link(url) is None
+
+
+@pytest.mark.parametrize(
+    "record, expected",
+    [
+        ("3-0", True),
+        ("4-0", True),
+        ("7-2", True),
+        ("8-1", True),
+        ("2-1", False),
+        ("3-1", False),
+        ("0-1", False),
+        ("0-0", False),
+        ("", False),
+        (None, False),
+        ("garbage", False),
+    ],
+)
+def test_is_trophy_record(record, expected):
+    assert is_trophy_record(record) is expected
 
 
 def _seed_player(session, discord_id="111"):
@@ -58,15 +78,27 @@ def test_get_or_create_player_returns_existing(session):
 def test_upsert_resolves_set_id_from_code(session):
     player = _seed_player(session)
 
-    trophy = upsert_trophy(
-        session, player_id=player.id, set_code="SOS", record="3-0", colors="WR",
+    event = upsert_event(
+        session, player_id=player.id, set_code="SOS", record="3-0", is_trophy=True, colors="WR",
         platform="MTGO", caption="finally hit it", screenshot_url="https://cdn/x.png",
         source_channel_id="c1", source_message_id="m1", source_url="u1",
     )
 
-    assert trophy.set_id is not None
-    assert trophy.caption == "finally hit it"
-    assert session.get(MagicSet, trophy.set_id).code == "SOS"
+    assert event.set_id is not None
+    assert event.caption == "finally hit it"
+    assert session.get(MagicSet, event.set_id).code == "SOS"
+
+
+def test_upsert_persists_is_trophy_flag(session):
+    player = _seed_player(session)
+
+    event = upsert_event(
+        session, player_id=player.id, set_code="SOS", record="2-1", is_trophy=False, colors="WR",
+        platform="MTGO", caption=None, screenshot_url=None,
+        source_channel_id="c1", source_message_id="m1", source_url="u1",
+    )
+
+    assert event.is_trophy is False
 
 
 def test_upsert_is_idempotent_per_message(session):
@@ -76,10 +108,10 @@ def test_upsert_is_idempotent_per_message(session):
         source_channel_id="c1", source_message_id="m1", source_url="u1",
     )
 
-    upsert_trophy(session, record="3-0", colors="WR", platform="MTGO", **kwargs)
-    upsert_trophy(session, record="7-2", colors="UBg", platform="MTGA Mobile", **kwargs)
+    upsert_event(session, record="3-0", is_trophy=True, colors="WR", platform="MTGO", **kwargs)
+    upsert_event(session, record="7-2", is_trophy=True, colors="UBg", platform="MTGA Mobile", **kwargs)
 
-    rows = session.query(SelfReportedTrophy).all()
+    rows = session.query(SelfReportedEvent).all()
     assert len(rows) == 1
     assert (rows[0].record, rows[0].colors, rows[0].platform) == ("7-2", "UBg", "MTGA Mobile")
 
@@ -87,41 +119,41 @@ def test_upsert_is_idempotent_per_message(session):
 def test_upsert_distinct_messages_create_distinct_rows(session):
     player = _seed_player(session)
 
-    upsert_trophy(
-        session, player_id=player.id, set_code="SOS", record="3-0", colors=None,
+    upsert_event(
+        session, player_id=player.id, set_code="SOS", record="3-0", is_trophy=True, colors=None,
         platform="Paper", caption=None, screenshot_url=None,
         source_channel_id="c1", source_message_id="m1", source_url="u1",
     )
-    upsert_trophy(
-        session, player_id=player.id, set_code="SOS", record="3-1", colors=None,
+    upsert_event(
+        session, player_id=player.id, set_code="SOS", record="3-1", is_trophy=False, colors=None,
         platform="Paper", caption=None, screenshot_url=None,
         source_channel_id="c1", source_message_id="m2", source_url="u2",
     )
 
-    assert session.query(SelfReportedTrophy).count() == 2
+    assert session.query(SelfReportedEvent).count() == 2
 
 
 def test_upsert_timestamps_with_supplied_event_time(session):
     player = _seed_player(session)
     posted = datetime(2026, 4, 22, 15, 30, tzinfo=timezone.utc)
 
-    trophy = upsert_trophy(
-        session, player_id=player.id, set_code="SOS", record="3-0", colors=None,
+    event = upsert_event(
+        session, player_id=player.id, set_code="SOS", record="3-0", is_trophy=True, colors=None,
         platform="MTGO", caption=None, screenshot_url=None, reported_at=posted,
         source_channel_id="c1", source_message_id="m1", source_url="u1",
     )
 
-    assert trophy.reported_at == posted
+    assert event.reported_at == posted
 
 
 def test_upsert_unknown_set_code_leaves_set_id_null(session):
     player = _seed_player(session)
 
-    trophy = upsert_trophy(
-        session, player_id=player.id, set_code="ZZZ", record="3-0", colors=None,
+    event = upsert_event(
+        session, player_id=player.id, set_code="ZZZ", record="3-0", is_trophy=True, colors=None,
         platform="MTGA Mobile", caption=None, screenshot_url=None,
         source_channel_id="c1", source_message_id="m9", source_url="u9",
     )
 
-    assert trophy.set_id is None
-    assert trophy.set_code == "ZZZ"
+    assert event.set_id is None
+    assert event.set_code == "ZZZ"

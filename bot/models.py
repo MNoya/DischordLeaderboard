@@ -318,21 +318,24 @@ class PodDraftReplay(Base):
     )
 
 
-class SelfReportedTrophy(Base):
-    """A trophy a player posted in trophy-hype and logged to their profile via /trophy.
+class SelfReportedEvent(Base):
+    """A draft result a player posted in trophy-hype and logged to their profile via /trophy.
 
-    Unverified self-report: showcase only, never scored. The source_url links back to the
-    original public post for accountability. Unique per (player_id, source_message_id) so
-    re-running /trophy on the same post updates rather than duplicates.
+    Unverified self-report: showcase only, never scored. is_trophy marks whether the result was a
+    trophy (a full run win) versus a non-trophy deck the player chose to log anyway; only trophies
+    rank the MTGO flashback board. The source_url links back to the original public post for
+    accountability. Unique per (player_id, source_message_id) so re-running /trophy on the same
+    post updates rather than duplicates.
     """
-    __tablename__ = "self_reported_trophies"
+    __tablename__ = "self_reported_events"
 
     id                = Column(String, primary_key=True, default=lambda: str(uuid4()))
     player_id         = Column(String, ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
-    # Nullable so a trophy in a not-yet-registered set still persists, mirroring draft_events
+    # Nullable so a result in a not-yet-registered set still persists, mirroring draft_events
     set_id            = Column(String, ForeignKey("sets.id"), nullable=True)
     set_code          = Column(String, nullable=False)
     record            = Column(String, nullable=False)
+    is_trophy         = Column(Boolean, nullable=False, server_default=text("true"))
     # WUBRG-normalized (uppercase main, lowercase splash); null when the player left it unknown
     colors            = Column(String, nullable=True)
     platform          = Column(String, nullable=False)
@@ -349,7 +352,7 @@ class SelfReportedTrophy(Base):
     player = relationship("Player")
 
     __table_args__ = (
-        UniqueConstraint("player_id", "source_message_id", name="uq_self_trophy_player_message"),
+        UniqueConstraint("player_id", "source_message_id", name="uq_self_event_player_message"),
     )
 
 

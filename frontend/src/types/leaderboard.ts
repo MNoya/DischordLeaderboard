@@ -259,11 +259,13 @@ export interface PlayerIdentity {
   avatarUrl: string | null;
 }
 
-// Unverified trophy a player logged via /trophy from a trophy-hype post. Showcase only — never
-// scored. colors uses the 17lands convention (uppercase main, lowercase splash); '' for none.
-export interface SelfReportedTrophy {
+// Unverified draft result a player logged via /trophy from a trophy-hype post. Showcase only —
+// never scored. isTrophy marks a trophy (a full run win) versus a non-trophy deck logged anyway.
+// colors uses the 17lands convention (uppercase main, lowercase splash); '' for none.
+export interface SelfReportedEvent {
   setCode: string;
   record: string;
+  isTrophy: boolean;
   colors: string;
   platform: string;
   // The player's original post text, kept as a keepsake shown with the deck
@@ -276,8 +278,9 @@ export interface SelfReportedTrophy {
   reportedAt: string;
 }
 
-// One player's standing on an MTGO-only trophy-count board, aggregated from self-reported
-// trophies for a flashback set. Ranked by trophy count; decks holds the logged posts, newest first.
+// One player's standing on an MTGO-only trophy-count board, aggregated from self-reported results
+// for a flashback set. Ranked by trophy count; decks holds every logged post (trophy or not),
+// newest first, and deckCount is that full tally.
 export interface TrophyLeaderboardRow {
   setCode: string;
   slug: string;
@@ -285,7 +288,8 @@ export interface TrophyLeaderboardRow {
   avatarUrl: string | null;
   rank: number;
   trophies: number;
-  decks: SelfReportedTrophy[];
+  deckCount: number;
+  decks: SelfReportedEvent[];
 }
 
 export interface PlayerProfile {
@@ -301,5 +305,5 @@ export interface PlayerProfile {
   losses: number;
   lastCalculatedAt?: string | null; // when this player's data was last pulled from 17lands
   formatBreakdown: PlayerFormatBreakdown[];
-  selfReportedTrophies: SelfReportedTrophy[];
+  selfReportedEvents: SelfReportedEvent[];
 }

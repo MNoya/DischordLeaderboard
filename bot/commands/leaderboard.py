@@ -28,7 +28,7 @@ from bot.services.pod_deck_color import PAIR_EMOJI_NAME
 from bot.services.pod_drafts import pod_summary_by_set_for_player
 from bot.services.active_set import resolve_active_set
 from bot.services.pod_format import PEASANT_CODE, PEASANT_LABEL
-from bot.services.self_reported_trophies import rank_self_reported_trophies
+from bot.services.self_reported_events import rank_self_reported_events
 from bot.sets import ALL_SETS, MTGO_FLASHBACK_SETS, active_set_code, is_mtgo_flashback_code, set_name_for
 
 
@@ -592,8 +592,9 @@ def process_leaderboard_for_peasant(
 
 
 def process_leaderboard_for_mtgo(session: Session, set_code: str, top_n: int = 25) -> LeaderboardData:
-    """MTGO flashback board: self-reported trophies ranked by count, a snapshot with no scored data."""
-    ranked = rank_self_reported_trophies(session, set_code)
+    """MTGO flashback board: self-reported results ranked by trophy count, a snapshot with no scored
+    data. Non-trophy decks don't lift the standing but keep their loggers on the board."""
+    ranked = rank_self_reported_events(session, set_code)
     top = [
         LeaderboardEntry(
             rank=idx + 1,
@@ -601,9 +602,9 @@ def process_leaderboard_for_mtgo(session: Session, set_code: str, top_n: int = 2
             slug=player.slug,
             display_name=player.display_name,
             score=0.0,
-            trophies=count,
+            trophies=trophy_count,
         )
-        for idx, (player, count) in enumerate(ranked[:top_n])
+        for idx, (player, trophy_count, _deck_count) in enumerate(ranked[:top_n])
     ]
     return LeaderboardData(
         set_code=set_code.upper(),

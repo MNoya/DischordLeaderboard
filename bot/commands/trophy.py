@@ -1,10 +1,12 @@
-"""/trophy — log a trophy posted in trophy-hype to your profile.
+"""/trophy — log a draft result posted in trophy-hype to your profile.
 
-Showcase only, never scored. Record, colors, and set are read from the post caption; the set
-defaults to the active one but a named code or set name (e.g. MH1, "Urza's Saga", MTGO-only
-flashbacks) overrides it. The player picks the platform and fills anything that didn't parse.
-Bare `/trophy` grabs your most recent image post in the current channel; `/trophy link:<url>`
-logs one from anywhere. Idempotent per post via the upsert in services.self_reported_trophies.
+Showcase only, never scored. Trophies and non-trophy decks both log; a trophy flag is guessed
+from the record and the player can flip it, and only trophies rank the MTGO flashback board.
+Record, colors, and set are read from the post caption; the set defaults to the active one but a
+named code or set name (e.g. MH1, "Urza's Saga", MTGO-only flashbacks) overrides it. The player
+picks the platform and fills anything that didn't parse. Bare `/trophy` grabs your most recent
+image post in the current channel; `/trophy link:<url>` logs one from anywhere. Idempotent per
+post via the upsert in services.self_reported_events.
 """
 from __future__ import annotations
 
@@ -33,7 +35,7 @@ from bot.services.pod_deck_color import GUILDS, PAIR_EMOJI_NAME, color_label
 from bot.services.pod_drafts import parse_caption_record
 from bot.services.pod_thread_backfill import parse_caption_colors
 from bot.services.pod_tournament import TROPHY_HYPE_HISTORY_LIMIT
-from bot.services.self_reported_trophies import get_or_create_player, upsert_trophy
+from bot.services.self_reported_events import get_or_create_player, is_trophy_record, upsert_event
 from bot.sets import ALL_SETS, active_set_code, parse_caption_set_code
 
 logger = logging.getLogger(__name__)
@@ -75,7 +77,9 @@ class TrophyDraft:
     caption: str | None
     record: str | None
     colors: str | None
+    is_trophy: bool
     platform: str | None = None
+    already_logged: bool = False
 
     @property
     def can_confirm(self) -> bool:
@@ -91,10 +95,9 @@ class Trophy(commands.Cog):
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
     async def trophy(self, interaction: discord.Interaction, link: str | None = None) -> None:
-        user_id = str(interaction.user.id)
         ephemeral = interaction.guild is not None
         await interaction.response.defer(ephemeral=ephemeral, thinking=True)
-        audit.event("trophy_invoked", user_id=user_id, link=link)
+        audit.event("trophy_invoked", user_id=str(interaction.user.id), link=link)
 
         if link is not None:
             message, error = await self._message_from_link(interaction, link)
@@ -104,24 +107,7 @@ class Trophy(commands.Cog):
             await interaction.followup.send(error, ephemeral=ephemeral)
             return
 
-        caption = (message.content or "").strip() or None
-        draft = TrophyDraft(
-            discord_id=user_id,
-            discord_username=str(interaction.user),
-            display_name=await resolve_display_name(self.bot, interaction.user),
-            avatar_hash=extract_avatar_hash(interaction.user),
-            set_code=parse_caption_set_code(caption) or active_set_code(message.created_at),
-            source_channel_id=str(message.channel.id),
-            source_message_id=str(message.id),
-            source_url=message.jump_url,
-            event_time=message.created_at,
-            image_url=first_image_url(message),
-            caption=caption,
-            record=parse_caption_record(caption) or "3-0",
-            colors=parse_caption_colors(caption),
-        )
-        view = TrophyConfirmView(draft, user_id)
-        await interaction.followup.send(embed=_render_embed(draft), view=view, ephemeral=ephemeral)
+        await _present_trophy_draft(self.bot, interaction, message)
 
     async def _latest_own_post(
         self, interaction: discord.Interaction
@@ -168,24 +154,29 @@ class Trophy(commands.Cog):
 
 
 def _render_embed(draft: TrophyDraft) -> discord.Embed:
-    embed = discord.Embed(title="🏆 Log this Trophy Deck", color=0xFFC63A)
+    title = "🏆 Log this Trophy Deck" if draft.is_trophy else "📋 Log this Deck"
+    embed = discord.Embed(title=title, color=0xFFC63A if draft.is_trophy else 0x8A8D91)
     embed.add_field(name="Set", value=draft.set_code, inline=True)
     embed.add_field(name="Record", value=draft.record or "*not set*", inline=True)
+    embed.add_field(name="Trophy", value="Yes" if draft.is_trophy else "No", inline=True)
     embed.add_field(name="Colors", value=color_label(draft.colors) if draft.colors else "None", inline=True)
     embed.add_field(name="Platform", value=draft.platform or "*not set*", inline=True)
     if draft.caption:
         embed.add_field(name="Caption", value=draft.caption, inline=False)
     embed.description = f"From [your post]({draft.source_url})"
+    if draft.already_logged:
+        embed.description += "\n⚠️ This post was already logged — confirming will update it."
     if draft.image_url:
         embed.set_thumbnail(url=draft.image_url)
     return embed
 
 
 class TrophyConfirmView(ui.View):
-    def __init__(self, draft: TrophyDraft, user_id: str) -> None:
+    def __init__(self, draft: TrophyDraft, user_id: str, message: discord.Message) -> None:
         super().__init__(timeout=300)
         self.draft = draft
         self.user_id = user_id
+        self.message = message
         self._build()
 
     def _build(self) -> None:
@@ -194,6 +185,7 @@ class TrophyConfirmView(ui.View):
         self.add_item(_ColorSelect(self.draft))
         self.add_item(_PlatformSelect(self.draft))
         self.add_item(_RecordButton(self.draft.record))
+        self.add_item(_TrophyToggleButton(self.draft.is_trophy))
         self.add_item(_ConfirmButton(disabled=not self.draft.can_confirm))
         self.add_item(_CancelButton())
 
@@ -301,6 +293,20 @@ class _RecordButton(ui.Button):
         await interaction.response.send_modal(_RecordModal(self.view))
 
 
+class _TrophyToggleButton(ui.Button):
+    def __init__(self, is_trophy: bool) -> None:
+        super().__init__(
+            label=f"Trophy: {'Yes' if is_trophy else 'No'}",
+            style=discord.ButtonStyle.success if is_trophy else discord.ButtonStyle.secondary,
+            emoji="🏆",
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view: TrophyConfirmView = self.view
+        view.draft.is_trophy = not view.draft.is_trophy
+        await view.rerender(interaction)
+
+
 class _ConfirmButton(ui.Button):
     def __init__(self, disabled: bool) -> None:
         super().__init__(label="Confirm", style=discord.ButtonStyle.success, emoji="🏆", disabled=disabled)
@@ -316,11 +322,12 @@ class _ConfirmButton(ui.Button):
                 display_name=draft.display_name,
                 avatar_hash=draft.avatar_hash,
             )
-            upsert_trophy(
+            upsert_event(
                 session,
                 player_id=player.id,
                 set_code=draft.set_code,
                 record=draft.record,
+                is_trophy=draft.is_trophy,
                 colors=draft.colors,
                 platform=draft.platform,
                 caption=draft.caption,
@@ -334,18 +341,20 @@ class _ConfirmButton(ui.Button):
             session.commit()
         audit.event(
             "trophy_logged", user_id=view.user_id, set_code=draft.set_code,
-            record=draft.record, platform=draft.platform,
+            record=draft.record, is_trophy=draft.is_trophy, platform=draft.platform,
         )
         logger.info(f"trophy: {view.user_id} logged {draft.record} {draft.colors} on {draft.platform}")
+        emoji = "🏆" if draft.is_trophy else "📋"
         colors = color_label(draft.colors) if draft.colors else "no colors"
         oversight = (
-            f"🏆 **{draft.display_name}** (`{draft.discord_username}`) logged "
+            f"{emoji} **{draft.display_name}** (`{draft.discord_username}`) logged "
             f"**{draft.record}** · {colors} · {draft.platform} · {draft.set_code} — "
             f"[post]({draft.source_url})"
         )
         await bot_log.get(interaction.client).post_plain(oversight)
+        await _mark_post_logged(view.message, draft.set_code)
         done = discord.Embed(
-            title="🏆 Trophy logged",
+            title="🏆 Trophy logged" if draft.is_trophy else "📋 Deck logged",
             description=f"**{draft.record}** · {colors} · {draft.platform}\nAdded to [your profile]({profile}).",
             color=0x57F287,
         )
@@ -395,6 +404,7 @@ class _RecordModal(ui.Modal, title="Record"):
             )
             return
         self._view.draft.record = record
+        self._view.draft.is_trophy = is_trophy_record(record)
         self._view.draft.caption = self.caption.value.strip() or None
         await self._view.rerender(interaction)
 
@@ -441,5 +451,62 @@ class _SetWriteInModal(ui.Modal, title="Set"):
         await self._view.rerender(interaction)
 
 
+async def _present_trophy_draft(
+    bot: commands.Bot, interaction: discord.Interaction, message: discord.Message
+) -> None:
+    """Parse a resolved post into a TrophyDraft and open the confirm view. Shared by the /trophy
+    slash command and the Log Trophy message context menu."""
+    author = message.author
+    caption = (message.content or "").strip() or None
+    record = parse_caption_record(caption) or "3-0"
+    draft = TrophyDraft(
+        discord_id=str(author.id),
+        discord_username=str(author),
+        display_name=await resolve_display_name(bot, author),
+        avatar_hash=extract_avatar_hash(author),
+        set_code=parse_caption_set_code(caption) or active_set_code(message.created_at),
+        source_channel_id=str(message.channel.id),
+        source_message_id=str(message.id),
+        source_url=message.jump_url,
+        event_time=message.created_at,
+        image_url=first_image_url(message),
+        caption=caption,
+        record=record,
+        colors=parse_caption_colors(caption),
+        is_trophy=is_trophy_record(record),
+        already_logged=any(reaction.me for reaction in message.reactions),
+    )
+    view = TrophyConfirmView(draft, str(interaction.user.id), message)
+    ephemeral = interaction.guild is not None
+    await interaction.followup.send(embed=_render_embed(draft), view=view, ephemeral=ephemeral)
+
+
+@app_commands.context_menu(name="Log Trophy")
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
+@app_commands.allowed_installs(guilds=True, users=False)
+async def log_trophy_menu(interaction: discord.Interaction, message: discord.Message) -> None:
+    ephemeral = interaction.guild is not None
+    await interaction.response.defer(ephemeral=ephemeral, thinking=True)
+    audit.event("trophy_invoked", user_id=str(interaction.user.id), via="context_menu")
+    is_own = message.author.id == interaction.user.id
+    if not is_own and not await interaction.client.is_owner(interaction.user):
+        await interaction.followup.send(MSG_NOT_YOUR_POST, ephemeral=ephemeral)
+        return
+    if first_image_url(message) is None:
+        await interaction.followup.send(MSG_NO_IMAGE, ephemeral=ephemeral)
+        return
+    await _present_trophy_draft(interaction.client, interaction, message)
+
+
+async def _mark_post_logged(message: discord.Message, set_code: str) -> None:
+    """React to the trophy-hype post with the set's emoji (🏆 when it has none), marking it logged."""
+    emoji = emojis.get_emoji(set_code.lower()) or emojis.get_emoji(set_code) or "🏆"
+    try:
+        await message.add_reaction(emoji)
+    except discord.HTTPException:
+        logger.warning(f"trophy: could not react to post {message.id}", exc_info=True)
+
+
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Trophy(bot))
+    bot.tree.add_command(log_trophy_menu)
