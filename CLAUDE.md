@@ -52,7 +52,7 @@ npm run preview
 ```bash
 docker run -d --name dischord-pg -p 5433:5432 \
   -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=devpw -e POSTGRES_DB=dischord \
-  postgres:16-alpine
+  postgres:17-alpine
 ```
 
 To wipe and re-seed:
