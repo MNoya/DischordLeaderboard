@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 
 import { cn } from "../../../lib/utils";
 import { Pips } from "../../ManaPips";
@@ -75,13 +75,17 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, initialPack =
   const [seat, setSeat] = useState(initialSeat);
   const [pack, setPack] = useState(startPack);
   const [pick, setPick] = useState(startPick);
-  const [viewMode, setViewMode] = usePersistentState<"step" | "scroll">("draftReviewViewMode", "step");
+  const [viewMode, setViewMode] = usePersistentState<"step" | "scroll">("draftReviewViewMode", defaultViewMode());
   const [showTable, setShowTable] = usePersistentBool("draftReviewShowTable", false);
   const [deckLayout, setDeckLayout] = usePersistentState<"order" | "columns">("draftReviewDeckLayout", "columns");
   const [revealMode, setRevealMode] = usePersistentState<RevealMode>("draftReviewRevealMode", "revealed");
   const [revealed, setRevealed] = useState(false);
   const [splitSideboard, setSplitSideboard] = usePersistentBool("draftReviewSplitSideboard", false);
   const [deckPopupSeat, setDeckPopupSeat] = useState<number | null>(null);
+  const viewportHeight = useViewportHeight();
+  const [maxBoosterHeight, setMaxBoosterHeight] = useState(0);
+  const reportBoosterHeight = useCallback((h: number) => setMaxBoosterHeight((prev) => (h > prev ? h : prev)), []);
+  const deckPanelHeight = deckPanelDefaultHeight(viewportHeight, maxBoosterHeight);
 
   useEffect(() => {
     const html = document.documentElement;
@@ -192,17 +196,16 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, initialPack =
 
   const deck = artifact.decks?.[seat];
   const sideSet = useMemo(() => new Set(deck?.side ?? []), [deck]);
-  const canSplit = (deck?.side?.length ?? 0) > 0;
-  const splitActive = splitSideboard && canSplit;
+  const hasSideboard = (deck?.side?.length ?? 0) > 0;
 
   const toCards = (indices: number[]) => indices.map((idx) => artifact.cards[idx]);
   const poolIdx = poolBefore(views, seat, pack, pick);
   const poolRowsIdx = poolByPack(views, seat, pack, pick);
-  const pool = toCards(splitActive ? poolIdx.filter((idx) => !sideSet.has(idx)) : poolIdx);
-  const poolRows = (splitActive ? poolRowsIdx.map((row) => row.filter((idx) => !sideSet.has(idx))) : poolRowsIdx).map(toCards);
-  const sideboardCards = splitActive ? toCards(poolIdx.filter((idx) => sideSet.has(idx))) : [];
+  const pool = toCards(hasSideboard ? poolIdx.filter((idx) => !sideSet.has(idx)) : poolIdx);
+  const poolRows = (hasSideboard ? poolRowsIdx.map((row) => row.filter((idx) => !sideSet.has(idx))) : poolRowsIdx).map(toCards);
+  const sideboardCards = hasSideboard ? toCards(poolIdx.filter((idx) => sideSet.has(idx))) : [];
   const lastPickIdx = poolIdx.length > 0 ? poolIdx[poolIdx.length - 1] : null;
-  const lastInSideboard = splitActive && lastPickIdx != null && sideSet.has(lastPickIdx);
+  const lastInSideboard = hasSideboard && lastPickIdx != null && sideSet.has(lastPickIdx);
 
   const activeInfo = seatInfoMap.get(seat);
   const canOpenDeck = !!activeInfo && (activeInfo.deckScreenshotUrl != null || (deck?.main.length ?? 0) > 0);
@@ -305,7 +308,12 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, initialPack =
             </>
           ) : (
             <>
-              <BoosterPanel cards={boosterCards} pickedPos={pickShown ? view.takenPos : null} fadeKey={`${seat}-${pack}-${pick}`} />
+              <BoosterPanel
+                cards={boosterCards}
+                pickedPos={pickShown ? view.takenPos : null}
+                fadeKey={`${seat}-${pack}-${pick}`}
+                onNaturalHeight={reportBoosterHeight}
+              />
               <MobileNavDivider
                 pack={pack}
                 pick={pick}
@@ -326,7 +334,7 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, initialPack =
                 lastInSideboard={lastInSideboard}
                 deckLayout={deckLayout}
                 onToggleDeckLayout={() => setDeckLayout((l) => (l === "order" ? "columns" : "order"))}
-                canSplit={canSplit}
+                canSplit={hasSideboard}
                 splitSideboard={splitSideboard}
                 onToggleSplit={() => setSplitSideboard((v) => !v)}
                 onOpenDeck={canOpenDeck ? () => setDeckPopupSeat(seat) : undefined}
@@ -352,6 +360,7 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, initialPack =
       </div>
       {viewMode === "step" && (
         <BottomPanel
+          defaultHeight={deckPanelHeight}
           activeName={active.name}
           activeAvatarUrl={active.avatarUrl}
           cards={pool}
@@ -360,7 +369,7 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, initialPack =
           lastInSideboard={lastInSideboard}
           deckLayout={deckLayout}
           onToggleDeckLayout={() => setDeckLayout((l) => (l === "order" ? "columns" : "order"))}
-          canSplit={canSplit}
+          canSplit={hasSideboard}
           splitSideboard={splitSideboard}
           onToggleSplit={() => setSplitSideboard((v) => !v)}
           onOpenDeck={canOpenDeck ? () => setDeckPopupSeat(seat) : undefined}
@@ -394,6 +403,15 @@ function nextCoord(views: DraftPickView[][][], seat: number, pack: number, pick:
     return { pack: pack + 1, pick: 0 };
   }
   return null;
+}
+
+const DESKTOP_MIN_WIDTH = 1024;
+
+function defaultViewMode(): "step" | "scroll" {
+  if (typeof window === "undefined") {
+    return "step";
+  }
+  return window.innerWidth < DESKTOP_MIN_WIDTH ? "scroll" : "step";
 }
 
 function usePersistentState<T extends string>(key: string, fallback: T): [T, Dispatch<SetStateAction<T>>] {
@@ -752,9 +770,31 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
 const BOOSTER_GAP = 8;
 const BOOSTER_PAD = 12;
 
-function BoosterPanel({ cards, pickedPos, fadeKey }: { cards: ArtifactCard[]; pickedPos: number | null; fadeKey: string }) {
+function BoosterPanel({
+  cards,
+  pickedPos,
+  fadeKey,
+  onNaturalHeight,
+}: {
+  cards: ArtifactCard[];
+  pickedPos: number | null;
+  fadeKey: string;
+  onNaturalHeight?: (height: number) => void;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const content = scrollRef.current?.firstElementChild as HTMLElement | null | undefined;
+    if (!content || !onNaturalHeight) {
+      return;
+    }
+    const measure = () => onNaturalHeight(content.offsetHeight + BOOSTER_PAD * 2);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [cards, onNaturalHeight]);
   return (
-    <div className="themed-scrollbar min-h-0 flex-1 overflow-y-auto" style={{ padding: BOOSTER_PAD }}>
+    <div ref={scrollRef} className="themed-scrollbar min-h-0 flex-1 overflow-y-auto" style={{ padding: BOOSTER_PAD }}>
       <div key={fadeKey} className="animate-fadeUpIn">
         <BoosterGrid cards={cards} pickedPos={pickedPos} />
       </div>
@@ -1039,7 +1079,6 @@ function PoolBar({
   onOpenDeck?: () => void;
 }) {
   const order = deckLayout === "order";
-  const showSideboard = splitSideboard && sideboard.length > 0;
   return (
     <div className="relative shrink-0 border-t border-border bg-surface/60 pb-1 pl-0 pr-1 pt-0 lg:hidden">
       <div className="absolute bottom-2 right-2 z-20">
@@ -1058,7 +1097,7 @@ function PoolBar({
           rows={rows}
           cards={cards}
           lastInSideboard={lastInSideboard}
-          showSideboard={showSideboard}
+          splitSideboard={splitSideboard}
           sideboard={sideboard}
           cardWidth={104}
           reveal={order ? 21 : 16}
@@ -1075,7 +1114,7 @@ function PoolCards({
   rows,
   cards,
   lastInSideboard,
-  showSideboard,
+  splitSideboard,
   sideboard,
   cardWidth,
   reveal,
@@ -1087,7 +1126,7 @@ function PoolCards({
   rows: ArtifactCard[][];
   cards: ArtifactCard[];
   lastInSideboard: boolean;
-  showSideboard: boolean;
+  splitSideboard: boolean;
   sideboard: ArtifactCard[];
   cardWidth: number;
   reveal: number;
@@ -1095,16 +1134,18 @@ function PoolCards({
   groupByType?: boolean;
   poolAlign?: "left" | "right";
 }) {
+  const showPane = splitSideboard && sideboard.length > 0;
+  const inlineSideboard = showPane ? [] : sideboard;
   return (
     <>
       <div className="relative min-w-0 flex-1">
         {order ? (
-          <OrderStrip rows={rows} markLast={!lastInSideboard} cardWidth={cardWidth} reveal={reveal} />
+          <OrderStrip rows={rows} sideboard={inlineSideboard} lastPickInSideboard={lastInSideboard} markLast cardWidth={cardWidth} reveal={reveal} />
         ) : (
-          <Pool cards={cards} groupByType={groupByType} align={poolAlign} markLast={!lastInSideboard} cardWidth={cardWidth} reveal={reveal} />
+          <Pool cards={cards} sideboard={inlineSideboard} lastPickInSideboard={lastInSideboard} groupByType={groupByType} align={poolAlign} markLast cardWidth={cardWidth} reveal={reveal} />
         )}
       </div>
-      {showSideboard && (
+      {showPane && (
         <SideboardPane cards={sideboard} markLast={lastInSideboard} cardWidth={Math.round(cardWidth * 0.9)} reveal={sideReveal} />
       )}
     </>
@@ -1114,6 +1155,7 @@ function PoolCards({
 // Desktop bottom zone: one bar identifying the active player, its DECK|NEIGHBORS switch, and a single
 // collapsible/resizable panel that shows either the player's own pool or the two neighbors' pools.
 function BottomPanel({
+  defaultHeight,
   activeName,
   activeAvatarUrl,
   cards,
@@ -1133,6 +1175,7 @@ function BottomPanel({
   centerPile,
   rightPile,
 }: {
+  defaultHeight: number;
   activeName: string;
   activeAvatarUrl: string | null;
   cards: ArtifactCard[];
@@ -1155,11 +1198,10 @@ function BottomPanel({
   const [open, setOpen] = useState(true);
   const [tab, setTab] = useState<"deck" | "neighbors">("deck");
   const order = deckLayout === "order";
-  const baseHeight = order ? 380 : 360;
-  const { height, beginResize, dragging } = useResizableHeight(baseHeight, () => setOpen(false));
+  const showSideboard = splitSideboard && sideboard.length > 0;
+  const { height, beginResize, dragging } = useResizableHeight(defaultHeight, () => setOpen(false));
 
   const activeTab = tab;
-  const showSideboard = splitSideboard && sideboard.length > 0;
   let creatures = 0;
   let lands = 0;
   for (const card of cards) {
@@ -1196,8 +1238,8 @@ function BottomPanel({
         style={{ height: open ? height : 0, transition: dragging ? "none" : "height 200ms ease" }}
       >
         {activeTab === "deck" ? (
-          <div className="relative flex h-full py-3 pl-6">
-            <div className={cn("absolute bottom-2 z-20", showSideboard ? "right-[190px]" : "right-6")}>
+          <div className="relative flex h-full py-1 pl-6">
+            <div className={cn("absolute bottom-2 z-20", showSideboard ? "right-[200px]" : "right-6")}>
               <PoolControls
                 canSplit={canSplit}
                 splitSideboard={splitSideboard}
@@ -1212,11 +1254,11 @@ function BottomPanel({
               rows={rows}
               cards={cards}
               lastInSideboard={lastInSideboard}
-              showSideboard={showSideboard}
+              splitSideboard={splitSideboard}
               sideboard={sideboard}
-              cardWidth={176}
-              reveal={order ? 44 : 28}
-              sideReveal={24}
+              cardWidth={DECK_CARD_WIDTH}
+              reveal={order ? DECK_ORDER_REVEAL : DECK_CURVE_REVEAL}
+              sideReveal={DECK_SIDE_REVEAL}
               groupByType
             />
           </div>
@@ -1226,6 +1268,34 @@ function BottomPanel({
       </div>
     </div>
   );
+}
+
+const DECK_CARD_WIDTH = 176;
+const DECK_CURVE_REVEAL = 28;
+const DECK_ORDER_REVEAL = 44;
+const DECK_SIDE_REVEAL = 24;
+const CARD_ASPECT = 1.4;
+const DECK_PANEL_MAX_FRACTION = 0.72;
+const DECK_PANEL_FLOOR = 120;
+const DECK_WRAPPER_PAD_Y = 4;
+const REVIEW_HEADER_HEIGHT = 60;
+const DECK_PANEL_BAR_HEIGHT = 40;
+
+function useViewportHeight() {
+  const [viewportHeight, setViewportHeight] = useState(() => (typeof window === "undefined" ? 900 : window.innerHeight));
+  useEffect(() => {
+    const onResize = () => setViewportHeight(window.innerHeight);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  return viewportHeight;
+}
+
+function deckPanelDefaultHeight(viewportHeight: number, boosterHeight: number) {
+  const oneCard = Math.ceil(DECK_CARD_WIDTH * CARD_ASPECT + POOL_PAD * 2 + DECK_WRAPPER_PAD_Y * 2);
+  const cap = Math.min(oneCard, viewportHeight * DECK_PANEL_MAX_FRACTION);
+  const leftoverBelowBooster = viewportHeight - REVIEW_HEADER_HEIGHT - DECK_PANEL_BAR_HEIGHT - boosterHeight;
+  return Math.max(DECK_PANEL_FLOOR, Math.min(cap, leftoverBelowBooster));
 }
 
 function BottomBar({
@@ -1352,7 +1422,7 @@ function PoolControls({
             </button>
           )}
           {canSplit && (
-            <Tooltip label={splitSideboard ? "Merge the sideboard back into the pool" : "Split the sideboard out of the pool"} side="top">
+            <Tooltip label={splitSideboard ? "Merge the sideboard into the deck column" : "Split the sideboard into its own panel"} side="top">
               <button
                 onClick={onToggleSplit}
                 aria-pressed={splitSideboard}
@@ -1507,11 +1577,15 @@ function LayoutToggle({ layout, onToggle }: { layout: "order" | "columns"; onTog
 // then P2P1, then P3P1), the same fanned treatment the curve uses by cost. Single horizontal scroll.
 function OrderStrip({
   rows,
+  sideboard = [],
+  lastPickInSideboard = false,
   markLast = false,
   cardWidth,
   reveal,
 }: {
   rows: ArtifactCard[][];
+  sideboard?: ArtifactCard[];
+  lastPickInSideboard?: boolean;
   markLast?: boolean;
   cardWidth: number;
   reveal: number;
@@ -1524,6 +1598,7 @@ function OrderStrip({
     }
   }
   const lastCol = lastRow >= 0 ? rows[lastRow].length - 1 : -1;
+  const glowStrip = markLast && !lastPickInSideboard;
   return (
     <div className="themed-scrollbar flex h-full items-start gap-1 overflow-x-auto px-2 py-2">
       {Array.from({ length: positions }, (_, i) => {
@@ -1539,7 +1614,7 @@ function OrderStrip({
                 key={di}
                 className={cn(
                   "absolute w-full overflow-hidden rounded-[5px] [outline-style:solid] outline-1 -outline-offset-1 outline-white/10 shadow-[0_-2px_6px_rgba(0,0,0,0.6)]",
-                  markLast && ri === lastRow && i === lastCol && "review-last-pick z-10",
+                  glowStrip && ri === lastRow && i === lastCol && "review-last-pick z-10",
                 )}
                 style={{ top: di * reveal }}
               >
@@ -1549,15 +1624,35 @@ function OrderStrip({
           </div>
         );
       })}
+      {sideboard.length > 0 && <div className="shrink-0" style={{ width: Math.round(cardWidth * SIDE_COLUMN_GAP_RATIO) }} />}
+      {sideboard.length > 0 && (
+        <div
+          className="relative shrink-0"
+          style={{ width: cardWidth, height: Math.max(0, sideboard.length - 1) * reveal + cardWidth * 1.4 }}
+        >
+          {sideboard.map((card, di) => (
+            <div
+              key={di}
+              className={cn(
+                "absolute w-full overflow-hidden rounded-[5px] [outline-style:solid] outline-1 -outline-offset-1 outline-white/10 shadow-[0_-2px_6px_rgba(0,0,0,0.6)]",
+                markLast && lastPickInSideboard && di === sideboard.length - 1 && "review-last-pick z-10",
+              )}
+              style={{ top: di * reveal }}
+            >
+              <CardImage card={card} />
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
 type PoolEntry = { card: ArtifactCard; idx: number };
 
-const MAX_POOL_COLUMNS = 9;
 const POOL_PAD = 8;
 const POOL_GAP = 4;
+const SIDE_COLUMN_GAP_RATIO = 0.1;
 
 function Pool({
   cards,
@@ -1579,21 +1674,18 @@ function Pool({
   markLast?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [maxColumns, setMaxColumns] = useState(MAX_POOL_COLUMNS);
+  const [poolWidth, setPoolWidth] = useState(0);
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!groupByType || !el) {
       return;
     }
-    const measure = () => {
-      const available = el.clientWidth - POOL_PAD * 2;
-      setMaxColumns(Math.max(1, Math.floor((available + POOL_GAP) / (cardWidth + POOL_GAP))));
-    };
+    const measure = () => setPoolWidth(el.clientWidth);
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [groupByType, cardWidth]);
+  }, [groupByType]);
   const column = (key: string, group: PoolEntry[], lastIndex: number, glow: boolean) => (
     <div
       key={key}
@@ -1622,23 +1714,43 @@ function Pool({
   if (groupByType) {
     const isCreature = (card: ArtifactCard) => /creature/i.test(card.type ?? "");
     const isLand = (card: ArtifactCard) => /land/i.test(card.type ?? "");
-    const creatureCols = cmcColumns(entries.filter((e) => isCreature(e.card)));
+    const creatureCols = creatureCurveColumns(entries.filter((e) => isCreature(e.card)));
     const lands = entries.filter((e) => !isCreature(e.card) && isLand(e.card));
     let spellCols = cmcColumns(entries.filter((e) => !isCreature(e.card) && !isLand(e.card)));
-    while (creatureCols.length + 1 + spellCols.length > maxColumns && spellCols.length > 1) {
+    if (spellCols.length > 4) {
+      spellCols = groupLowSpellColumns(spellCols);
+    }
+    const spacerWidth = Math.round(cardWidth * SIDE_COLUMN_GAP_RATIO);
+    const landWidth = lands.length > 0 ? cardWidth : spacerWidth;
+    const sideWidth = sideboard.length > 0 ? spacerWidth + cardWidth : 0;
+    const available = poolWidth > 0 ? poolWidth - POOL_PAD * 2 : Infinity;
+    const trackWidth = () => {
+      const elementCount = creatureCols.length + 1 + spellCols.length + (sideboard.length > 0 ? 2 : 0);
+      const columnsWidth = (creatureCols.length + spellCols.length) * cardWidth + landWidth + sideWidth;
+      return columnsWidth + Math.max(0, elementCount - 1) * POOL_GAP;
+    };
+    while (spellCols.length > 1 && trackWidth() > available) {
       const last = spellCols[spellCols.length - 1];
       const prev = spellCols[spellCols.length - 2];
       spellCols = [...spellCols.slice(0, -2), [prev[0], [...prev[1], ...last[1]]]];
     }
     track = (
       <>
-        {creatureCols.map(([, group], i) => column(`c${i}`, group, lastIndex, glow))}
+        {creatureCols.map((group, i) => column(`c${i}`, group, lastIndex, glow))}
         {lands.length > 0 ? (
           column("lands", lands, lastIndex, glow)
         ) : (
-          <div key="land-gap" className="shrink-0" style={{ width: cardWidth }} />
+          <div key="land-gap" className="shrink-0" style={{ width: spacerWidth }} />
         )}
         {spellCols.map(([, group], i) => column(`o${i}`, group, lastIndex, glow))}
+        {sideboard.length > 0 && <div key="side-gap" className="shrink-0" style={{ width: spacerWidth }} />}
+        {sideboard.length > 0 &&
+          column(
+            "side",
+            sideboard.map((card, idx) => ({ card, idx })),
+            sideboard.length - 1,
+            markLast && lastPickInSideboard,
+          )}
       </>
     );
   } else {
@@ -1662,6 +1774,47 @@ function Pool({
       </div>
     </div>
   );
+}
+
+function creatureCurveColumns(entries: PoolEntry[]): PoolEntry[][] {
+  if (entries.length === 0) {
+    return [];
+  }
+  const byCmc = new Map<number, PoolEntry[]>();
+  let minCmc = 2;
+  let maxCmc = 2;
+  for (const entry of entries) {
+    const cmc = Math.max(0, Math.round(entry.card.cmc ?? 0));
+    minCmc = Math.min(minCmc, cmc);
+    maxCmc = Math.max(maxCmc, cmc);
+    const list = byCmc.get(cmc);
+    if (list) {
+      list.push(entry);
+    } else {
+      byCmc.set(cmc, [entry]);
+    }
+  }
+  const columns: PoolEntry[][] = [];
+  for (let cmc = minCmc; cmc <= maxCmc; cmc++) {
+    columns.push(byCmc.get(cmc) ?? []);
+  }
+  return columns;
+}
+
+function groupLowSpellColumns(columns: [number, PoolEntry[]][]): [number, PoolEntry[]][] {
+  const cheap: PoolEntry[] = [];
+  const rest: [number, PoolEntry[]][] = [];
+  for (const [cmc, group] of columns) {
+    if (cmc === 1 || cmc === 2) {
+      cheap.push(...group);
+    } else {
+      rest.push([cmc, group]);
+    }
+  }
+  if (cheap.length === 0) {
+    return columns;
+  }
+  return [[2, cheap], ...rest];
 }
 
 function cmcColumns(entries: PoolEntry[]): [number, PoolEntry[]][] {
