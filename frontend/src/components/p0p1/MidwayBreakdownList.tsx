@@ -9,8 +9,6 @@ import { GIH_SAMPLE_FLOOR } from "../../data/p0p1Results";
 import type { CardRating } from "../../data/p0p1Results";
 import type { Card, P0P1PickStat, SlotDefinition, SlotKey } from "../../types/p0p1";
 
-const GREEN = "#2ee85c";
-
 interface SlotRow {
   card: Card;
   gihwr: number | null;
@@ -185,7 +183,7 @@ function GihwrRow({
       ? Math.max(((row.gihwr - 0.45) / (0.70 - 0.45)) * 100, 3)
       : 0;
   const isLeader = rank === 1;
-  const highlighted = row.isYours || row.isCrowd;
+  const highlight = row.isYours ? "bg-green/[0.07]" : row.isCrowd ? "bg-green/[0.04]" : "";
 
   return (
     <div className="relative overflow-hidden border-b border-border2 last:border-b-0">
@@ -193,7 +191,7 @@ function GihwrRow({
         <div className="absolute inset-y-0 left-0 bg-subtle/[0.07]" style={{ width: `${fillPct}%` }} />
       )}
 
-      <div className={`relative flex items-center gap-2.5 ${wide ? "pl-4" : "pl-1.5"} pr-3 py-1.5 ${highlighted ? "bg-green/[0.04]" : ""}`}>
+      <div className={`relative flex items-center gap-2.5 ${wide ? "pl-4" : "pl-1.5"} pr-3 py-1.5 ${highlight}`}>
         <span className={`w-4 shrink-0 text-right font-mono tabular-nums text-[13px] ${isLeader ? "text-text font-bold" : "text-muted"}`}>
           {rank}
         </span>
@@ -206,7 +204,7 @@ function GihwrRow({
           <div className="flex items-center gap-1.5 flex-wrap min-w-0">
             <span className="text-text text-[15px] leading-snug truncate min-w-0">{row.card.name}</span>
             {row.isYours && (
-              <span className="shrink-0 inline-block font-display tracking-[0.12em] uppercase text-[11px] leading-none px-1.5 py-0.5 bg-green/20 rounded-sm" style={{ color: GREEN }}>
+              <span className="shrink-0 inline-block font-display tracking-[0.14em] uppercase text-[12.5px] leading-none px-2 py-1 bg-green text-bg">
                 YOURS
               </span>
             )}
