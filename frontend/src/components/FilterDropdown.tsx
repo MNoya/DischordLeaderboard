@@ -13,6 +13,9 @@ import { ChevronDown } from "./Icons";
 export interface FilterOption {
   value: string;
   label: string;
+  // Options sharing a section render under a divider + header when the section changes. Options with
+  // no section render flush; give a trailing group (e.g. MTGO flashbacks) a section to set it apart.
+  section?: string;
 }
 
 const SEARCH_THRESHOLD = 8;
@@ -161,29 +164,36 @@ export function FilterDropdown({
           <div className="menu-scrollbar min-h-0 flex-1 overflow-y-auto">
             {filtered.map((o, i) => {
               const isSelected = o.value === value;
+              const showSectionHeader = o.section && o.section !== filtered[i - 1]?.section;
               return (
-                <button
-                  key={o.value}
-                  type="button"
-                  onClick={() => {
-                    onChange(o.value);
-                    setOpen(false);
-                  }}
-                  role="option"
-                  aria-selected={isSelected}
-                  className={cn(
-                    "w-full text-left flex items-center gap-2 border-l-2 font-display cursor-pointer transition-colors whitespace-nowrap",
-                    isMobile
-                      ? "px-2.5 py-2.5 text-[15px] tracking-[0.08em]"
-                      : "px-3.5 py-2.5 text-[15px] tracking-[0.06em]",
-                    i > 0 && "border-t border-border",
-                    isSelected
-                      ? "border-l-green bg-surface2 text-green"
-                      : "border-l-transparent bg-transparent text-text hover:bg-surface2",
+                <React.Fragment key={o.value}>
+                  {showSectionHeader && (
+                    <div className="border-t border-border2 px-3.5 pt-2.5 pb-1 font-display text-[11px] tracking-[0.2em] text-muted select-none">
+                      {o.section}
+                    </div>
                   )}
-                >
-                  {renderOption ? renderOption(o) : o.label}
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onChange(o.value);
+                      setOpen(false);
+                    }}
+                    role="option"
+                    aria-selected={isSelected}
+                    className={cn(
+                      "w-full text-left flex items-center gap-2 border-l-2 font-display cursor-pointer transition-colors whitespace-nowrap",
+                      isMobile
+                        ? "px-2.5 py-2.5 text-[15px] tracking-[0.08em]"
+                        : "px-3.5 py-2.5 text-[15px] tracking-[0.06em]",
+                      i > 0 && !showSectionHeader && "border-t border-border",
+                      isSelected
+                        ? "border-l-green bg-surface2 text-green"
+                        : "border-l-transparent bg-transparent text-text hover:bg-surface2",
+                    )}
+                  >
+                    {renderOption ? renderOption(o) : o.label}
+                  </button>
+                </React.Fragment>
               );
             })}
             {filtered.length === 0 && (

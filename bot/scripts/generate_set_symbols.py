@@ -3,7 +3,16 @@
 Keyrune ships each set glyph as a monochrome ``#444`` SVG; the leaderboard renders
 white symbols on dark surfaces (Discord unfurls, the site), so each glyph is
 recolored to white and rasterized to PNG. Run with no args to (re)generate every
-set in ``bot.sets.ALL_SETS``, or pass specific codes (e.g. ``MSH SOS``).
+set in ``bot.sets.ALL_SETS`` plus the ``MTGO_FLASHBACK_SETS``, or pass specific
+codes (e.g. ``MSH SOS`` or ``MH1 IPA``).
+
+A code with no keyrune glyph of its own borrows another set's via ``KEYRUNE_ALIAS``
+(e.g. ``IPA`` -> Invasion); keep that map in sync with ``KEYRUNE_OVERRIDES`` in
+``frontend/src/components/Brand.tsx``.
+
+Downstream: upload the same PNG to the bot's Discord application as an emoji named by
+the lowercase code (``mh1``, ``war`` …). ``/event-scribe`` and set embeds look the
+symbol up by that name, so a set with no uploaded emoji renders without its glyph.
 
 Requires ``inkscape`` (rasterizer) and ``pngquant`` (optional optimization) on PATH.
 """
@@ -17,14 +26,15 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from bot.sets import ALL_SETS
+from bot.sets import ALL_SETS, MTGO_FLASHBACK_SETS
 
 KEYRUNE_SVG_URL = "https://cdn.jsdelivr.net/gh/andrewgioia/keyrune@latest/svg/{code}.svg"
 OUTPUT_DIR = Path(__file__).resolve().parents[2] / "frontend" / "public" / "set-symbols"
 SYMBOL_PX = 256
 
-# Arena-only sets keyrune has no glyph for borrow their source set's symbol.
-KEYRUNE_ALIAS = {"SIR": "soi"}
+# Sets keyrune has no glyph of their own borrow a source set's symbol. Mirror any block/flashback
+# override here and in KEYRUNE_OVERRIDES (frontend/src/components/Brand.tsx).
+KEYRUNE_ALIAS = {"SIR": "soi", "IPA": "inv"}
 
 
 def generate(codes: list[str]) -> tuple[list[str], list[str]]:
@@ -109,7 +119,7 @@ def main(argv: list[str]) -> int:
     if shutil.which("inkscape") is None:
         print("inkscape not found on PATH; install it to rasterize set symbols", file=sys.stderr)
         return 1
-    codes = [arg.upper() for arg in argv] or [s.code for s in ALL_SETS]
+    codes = [arg.upper() for arg in argv] or [s.code for s in ALL_SETS] + list(MTGO_FLASHBACK_SETS)
     generated, missing = generate(codes)
     print(f"generated {len(generated)}: {', '.join(generated) or '(none)'}")
     if missing:

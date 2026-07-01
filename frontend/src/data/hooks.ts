@@ -19,6 +19,9 @@ import {
   fetchFormatLeaderboard,
   fetchFormatRecentTrophies,
   fetchLeaderboard,
+  fetchTrophyLeaderboard,
+  fetchTrophySetCodes,
+  fetchPlayerTrophySetCodes,
   fetchOtherColorsLeaderboard,
   fetchPlayerDraftEvents,
   fetchPlayerIdentity,
@@ -149,6 +152,32 @@ export function useLeaderboard(setCode: string | undefined) {
     queryKey: ["leaderboard", setCode],
     queryFn: () => fetchLeaderboard(setCode!),
     enabled: !!setCode,
+    staleTime: THIRTY_MINUTES,
+  });
+}
+
+export function useTrophyLeaderboard(setCode: string | undefined) {
+  return useQuery({
+    queryKey: ["trophy-leaderboard", setCode],
+    queryFn: () => fetchTrophyLeaderboard(setCode!),
+    enabled: !!setCode,
+    staleTime: THIRTY_MINUTES,
+  });
+}
+
+export function useTrophySetCodes() {
+  return useQuery({
+    queryKey: ["trophy-set-codes"],
+    queryFn: fetchTrophySetCodes,
+    staleTime: THIRTY_MINUTES,
+  });
+}
+
+export function usePlayerTrophySetCodes(slug: string | undefined) {
+  return useQuery({
+    queryKey: ["player-trophy-set-codes", slug],
+    queryFn: () => fetchPlayerTrophySetCodes(slug!),
+    enabled: !!slug,
     staleTime: THIRTY_MINUTES,
   });
 }

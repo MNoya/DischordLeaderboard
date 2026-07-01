@@ -141,6 +141,7 @@ export const fmtPts = (n: number) => Math.round(n).toLocaleString("en-US");
 // Reserves a square box of `size` so swapping codes doesn't reflow neighbours
 const KEYRUNE_OVERRIDES: Record<string, string> = {
   CUBE: "pz1",
+  IPA: "inv",
 };
 
 export function keyruneClass(code: string): string {

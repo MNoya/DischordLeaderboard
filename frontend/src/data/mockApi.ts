@@ -29,6 +29,7 @@ import type {
   PodSetCode,
   RecentTrophy,
   SetSummary,
+  TrophyLeaderboardRow,
 } from "../types/leaderboard";
 import type { Card, P0P1Pick, P0P1PickStat, SlotKey } from "../types/p0p1";
 import type { Episode } from "./episodes";
@@ -44,6 +45,7 @@ import {
 
 import { setsFixture } from "./fixtures/sets";
 import { leaderboardSosFixture } from "./fixtures/leaderboard-sos";
+import { MTGO_TROPHY_FIXTURE } from "./fixtures/mtgo-trophies";
 import { archetypeSosWrFixture } from "./fixtures/archetype-sos-wr";
 import {
   chonceDraftEvents,
@@ -115,6 +117,18 @@ export const fetchLeaderboard = (setCode: string): Promise<LeaderboardRow[]> => 
   // Other sets are scheduled placeholders with no player data yet.
   return wait([]);
 };
+
+export const fetchTrophyLeaderboard = (setCode: string): Promise<TrophyLeaderboardRow[]> =>
+  wait(MTGO_TROPHY_FIXTURE[setCode.toUpperCase()] ?? []);
+
+export const fetchTrophySetCodes = (): Promise<string[]> => wait(Object.keys(MTGO_TROPHY_FIXTURE));
+
+export const fetchPlayerTrophySetCodes = (slug: string): Promise<string[]> =>
+  wait(
+    Object.entries(MTGO_TROPHY_FIXTURE)
+      .filter(([, rows]) => rows.some((r) => r.slug === slug))
+      .map(([code]) => code),
+  );
 
 // ─── colors summary (fixture-side) ──────────────────────────────────────────
 // Aggregates color combos from the curated player draft events. Only the 5

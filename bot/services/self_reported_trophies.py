@@ -8,11 +8,25 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from bot.models import MagicSet, Player, SelfReportedTrophy
 from bot.slug import disambiguate_slug, slugify
+
+
+def rank_self_reported_trophies(session: Session, set_code: str) -> list[tuple[Player, int]]:
+    """Players with logged trophies for a set, most trophies first (ties by name). Powers the MTGO
+    flashback board, which has no scored data — the standing is the raw trophy count."""
+    count = func.count(SelfReportedTrophy.id)
+    rows = session.execute(
+        select(Player, count)
+        .join(SelfReportedTrophy, SelfReportedTrophy.player_id == Player.id)
+        .where(func.upper(SelfReportedTrophy.set_code) == set_code.upper())
+        .group_by(Player.id)
+        .order_by(count.desc(), Player.display_name)
+    ).all()
+    return [(player, n) for player, n in rows]
 
 
 def get_or_create_player(

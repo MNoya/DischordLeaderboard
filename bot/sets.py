@@ -13,6 +13,7 @@ a real ``end_date`` is filled in when a successor set is added. Keep an anticipa
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -81,6 +82,14 @@ ALL_SETS: tuple[SetSeed, ...] = (
     SetSeed("MSH", "Marvel Super Heroes", date(2026, 6, 23), date(2026, 8, 10)),
 )
 
+# MTGO-only flashback drafts, never on Arena; kept out of ALL_SETS so they never rotate or score
+MTGO_FLASHBACK_SETS: dict[str, str] = {
+    "IPA": "Invasion Block",
+    "USG": "Urza's Saga Block",
+    "MH1": "Modern Horizons",
+    "MH2": "Modern Horizons 2",
+}
+
 
 def active_set_code(when: datetime | None = None) -> str:
     """Leaderboard set code at an instant, mirroring the ``public_sets`` view: a set with an
@@ -121,6 +130,10 @@ def upcoming_sets(when: datetime | None = None) -> tuple[SetSeed, ...]:
 
 def is_known_set(code: str) -> bool:
     return any(s.code == code.upper() for s in ALL_SETS)
+
+
+def is_mtgo_flashback_code(code: str) -> bool:
+    return code.upper() in MTGO_FLASHBACK_SETS
 
 
 @dataclass(frozen=True)
@@ -194,4 +207,30 @@ def set_name_for(code: str) -> str:
     for s in ALL_SETS:
         if s.code == upper:
             return s.name
-    return upper
+    return MTGO_FLASHBACK_SETS.get(upper, upper)
+
+
+def parse_caption_set_code(caption: str | None) -> str | None:
+    """Set code named in a trophy caption, matching known codes and set names — e.g.
+    'MH1 flashback 3-0' -> 'MH1', "Urza's Saga trophy" -> 'USG'. Codes match only as
+    uppercase-written tokens so ordinary words don't resolve to a code; names match
+    case-insensitively, longest first. Returns None when nothing matches, letting the
+    caller fall back to the active set."""
+    if not caption:
+        return None
+
+    codes = {s.code for s in ALL_SETS} | set(MTGO_FLASHBACK_SETS)
+    for token in re.findall(r"[A-Za-z0-9]+", caption):
+        if token.isupper() and token in codes:
+            return token
+
+    names = {s.name.lower(): s.code for s in ALL_SETS}
+    names.update({name.lower(): code for code, name in MTGO_FLASHBACK_SETS.items()})
+    for name, code in list(names.items()):
+        base = re.sub(r"\s+(block|draft)$", "", name)
+        names.setdefault(base, code)
+    lowered = caption.lower()
+    for name in sorted(names, key=len, reverse=True):
+        if re.search(rf"\b{re.escape(name)}\b", lowered):
+            return names[name]
+    return None

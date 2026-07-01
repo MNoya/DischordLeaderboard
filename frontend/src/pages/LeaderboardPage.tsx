@@ -12,7 +12,9 @@ import {
 } from "../components/Icons";
 import { Footer } from "../components/Footer";
 import { Pip, Pips } from "../components/ManaPips";
-import { SetSwitcherDesktop } from "../components/SetSwitcher";
+import { SetSwitcherDesktop, SetSwitcherMobile } from "../components/SetSwitcher";
+import { TrophyLeaderboard } from "../components/TrophyLeaderboard";
+import { MtgoSidebar } from "../components/MtgoSidebar";
 import { FilterDropdown } from "../components/FilterDropdown";
 import { SetFilterDropdown, type SetFilterOption } from "../components/SetFilterDropdown";
 import { ColorsSwitcher } from "../components/ColorsSwitcher";
@@ -40,16 +42,19 @@ import {
   usePrefetchers,
   useSets,
   useCubeSeasons,
+  useTrophyLeaderboard,
+  useTrophySetCodes,
 } from "../data/hooks";
+import { isMtgoFlashbackCode, mtgoSetName, withMtgoSets } from "../data/mtgoSets";
 import { useAuth } from "../auth/useAuth";
-import { baseSetCode, canonicalSetCode, colorsOf, CUBE_BASE, CUBE_LIFETIME, cubeSeasonLabel, eventDate, fmtRange, isCubeCode, isCubeSeasonCode, isSoup, lastUpdated, leaderboardPath, playerPath, prettyFormat, relativeTime, sumEvents, weekOfSet, winPct } from "../data/utils";
+import { baseSetCode, canonicalSetCode, colorsOf, CUBE_BASE, CUBE_LIFETIME, cubeSeasonLabel, eventDate, fmtRange, fmtShortDate, isCubeCode, isCubeSeasonCode, isSoup, lastUpdated, leaderboardPath, playerPath, prettyFormat, relativeTime, sumEvents, weekOfSet, winPct } from "../data/utils";
 import { CubeSeasonSelector } from "../components/CubeSeasonSelector";
 import { colorsDisplayName, FORMAT_LABEL_GROUPS, FORMAT_OPTIONS, matchesFormatFilter, MULTI, OTHER } from "../data/filters";
 import { FMT_COLORS, FMT_DEFAULT_COLOR, renderFormatOption, shortFormat } from "../data/format-display";
 import { guildLogoTransform, guildSvgUrl } from "../data/guild-art";
 import { ACTIVE_SET_CODE } from "../data/constants";
 import { cn } from "../lib/utils";
-import type { CubeSeason, LeaderboardRow, PlayerDraftEvent, PlayerFormatBreakdown, SetSummary } from "../types/leaderboard";
+import type { CubeSeason, LeaderboardRow, PlayerDraftEvent, PlayerFormatBreakdown, SetSummary, TrophyLeaderboardRow } from "../types/leaderboard";
 import type { LeaderboardTableRow } from "../components/LeaderboardTable";
 
 // ─── Page entry ────────────────────────────────────────────────────────────
@@ -67,6 +72,10 @@ export function LeaderboardPage() {
   const setMeta = sets?.find((s) => s.code === baseSetCode(activeSet));
   const { data: cubeSeasons } = useCubeSeasons();
   const latestCubeSeason = cubeSeasons?.[0]?.setCode;
+  const { data: trophySetCodes } = useTrophySetCodes();
+  const dropdownSets = useMemo(() => withMtgoSets(sets, trophySetCodes), [sets, trophySetCodes]);
+  const isMtgo = isMtgoFlashbackCode(activeSet);
+  const trophyLb = useTrophyLeaderboard(isMtgo ? activeSet : undefined);
 
   // Filters live in the URL as query params (?format=Premier or ?colors=WR).
   // Per spec they're mutually exclusive, so picking a non-ALL value in one
@@ -192,10 +201,23 @@ export function LeaderboardPage() {
   const { user } = useAuth();
   const { data: mySlug } = usePlayerSlugByDiscordId(user?.discordId);
 
+  if (isMtgo) {
+    return (
+      <MtgoBoard
+        activeSet={activeSet}
+        sets={dropdownSets}
+        rows={trophyLb.data}
+        loading={trophyLb.isLoading}
+        searchParams={searchParams}
+        latestCubeSeason={latestCubeSeason}
+      />
+    );
+  }
+
   return isMobile ? (
     <Mobile
       activeSet={activeSet}
-      sets={sets}
+      sets={dropdownSets}
       cubeSeasons={cubeSeasons}
       latestCubeSeason={latestCubeSeason}
       rows={rows}
@@ -212,7 +234,7 @@ export function LeaderboardPage() {
   ) : (
     <Desktop
       activeSet={activeSet}
-      sets={sets}
+      sets={dropdownSets}
       setMeta={setMeta}
       cubeSeasons={cubeSeasons}
       latestCubeSeason={latestCubeSeason}
@@ -257,6 +279,71 @@ interface FilterRowProps {
   colorChipsLoading: boolean;
   formatOptions: typeof FORMAT_OPTIONS;
   updated: string | null;
+}
+
+// ─── MTGO flashback board ────────────────────────────────────────────────────
+// Trophy-count board for MTGO-only sets: its own minimal chrome, no filters or scored columns.
+
+function MtgoBoard({
+  activeSet,
+  sets,
+  rows,
+  loading,
+  searchParams,
+  latestCubeSeason,
+}: {
+  activeSet: string;
+  sets: SetSummary[] | undefined;
+  rows: TrophyLeaderboardRow[] | undefined;
+  loading: boolean;
+  searchParams: URLSearchParams;
+  latestCubeSeason?: string;
+}) {
+  const navigate = useNavigate();
+  const isMobile = useIsMobile();
+  const onSelectSet = (c: string) => goToSet(navigate, c, sets, searchParams, latestCubeSeason);
+  const releaseDate = sets?.find((s) => s.code === activeSet)?.startDate;
+  return (
+    <div className="bg-bg text-text min-h-screen flex flex-col animate-fadeIn">
+      <AppHeader subtitle="LEADERBOARD" />
+      <div className="relative px-5 md:px-10 py-5 border-b border-border bg-surface flex items-center gap-4 md:gap-6">
+        <SetGlyph code={activeSet} size={isMobile ? 52 : 84} />
+        <div className="min-w-0">
+          <div className="flex items-baseline gap-3">
+            <span
+              className="font-display tracking-[0.04em]"
+              style={{ fontSize: isMobile ? 32 : 56, lineHeight: 0.9 }}
+            >
+              {activeSet}
+            </span>
+            <span className="font-display text-[15px] md:text-[22px] text-muted tracking-[0.06em] truncate">
+              {mtgoSetName(activeSet).toUpperCase()}
+            </span>
+          </div>
+          {releaseDate && (
+            <div className="mono text-[11px] text-muted mt-1 tracking-[0.04em]">{fmtShortDate(releaseDate)}</div>
+          )}
+        </div>
+        <div className="flex-1" />
+        {sets && (
+          isMobile ? (
+            <div className="w-[150px] shrink-0">
+              <SetSwitcherMobile sets={sets} activeCode={activeSet} onChange={onSelectSet} />
+            </div>
+          ) : (
+            <SetSwitcherDesktop sets={sets} activeCode={activeSet} onChange={onSelectSet} />
+          )
+        )}
+      </div>
+      <div className="px-5 md:px-10 py-4 grid gap-6 lg:grid-cols-[1fr_320px]">
+        <TrophyLeaderboard rows={rows} loading={loading} />
+        <div className="lg:pt-4">
+          <MtgoSidebar rows={rows} setCode={activeSet} />
+        </div>
+      </div>
+      <Footer className="mt-auto px-10 pt-5 pb-3" />
+    </div>
+  );
 }
 
 // ─── Desktop ───────────────────────────────────────────────────────────────

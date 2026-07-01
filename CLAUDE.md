@@ -95,7 +95,7 @@ ACTIVE_SET_CODE = "SOS"
 ALL_SETS = (SetSeed("FIN", ...), SetSeed("TLA", ...), SetSeed("ECL", ...), SetSeed("SOS", ...))
 ```
 
-There is **no `is_current` flag on `sets`** and **no env var** for the active set. Rotation = bump the constant + push to master. Use the `/new-set <CODE>` Claude Code skill (`.claude/skills/new-set/`) to automate: it web-looks-up the official name + Arena release date, edits `bot/sets.py`, runs `seed_sets` + `refresh_stats`, and commits locally.
+There is **no `is_current` flag on `sets`** and **no env var** for the active set. Rotation = bump the constant + push to master. Use the `/add-set <CODE>` Claude Code skill (`.claude/skills/add-set/`) to automate: it web-looks-up the official name + Arena release date, edits `bot/sets.py`, runs `seed_sets` + `refresh_stats`, and commits locally.
 
 ### Scoring formula — `bot/scoring.py`
 

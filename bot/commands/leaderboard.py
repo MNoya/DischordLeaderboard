@@ -28,7 +28,8 @@ from bot.services.pod_deck_color import PAIR_EMOJI_NAME
 from bot.services.pod_drafts import pod_summary_by_set_for_player
 from bot.services.active_set import resolve_active_set
 from bot.services.pod_format import PEASANT_CODE, PEASANT_LABEL
-from bot.sets import ALL_SETS, active_set_code
+from bot.services.self_reported_trophies import rank_self_reported_trophies
+from bot.sets import ALL_SETS, MTGO_FLASHBACK_SETS, active_set_code, is_mtgo_flashback_code, set_name_for
 
 
 # Color archetype label → PlayerArchetypeScore.archetype key
@@ -114,6 +115,7 @@ class LeaderboardData:
     show_score: bool = True
     filter_type: str | None = None
     filter_value: str | None = None
+    trophy_board: bool = False
 
 
 def process_leaderboard(
@@ -587,6 +589,31 @@ def process_leaderboard_for_peasant(
 ) -> LeaderboardData:
     """Peasant Cube pod board: a single season-long board, independent of the selected set."""
     return _pod_board(session, viewer_discord_id, top_n, set_code=PEASANT_CODE, set_name=PEASANT_LABEL)
+
+
+def process_leaderboard_for_mtgo(session: Session, set_code: str, top_n: int = 25) -> LeaderboardData:
+    """MTGO flashback board: self-reported trophies ranked by count, a snapshot with no scored data."""
+    ranked = rank_self_reported_trophies(session, set_code)
+    top = [
+        LeaderboardEntry(
+            rank=idx + 1,
+            player_id=player.discord_id or player.id,
+            slug=player.slug,
+            display_name=player.display_name,
+            score=0.0,
+            trophies=count,
+        )
+        for idx, (player, count) in enumerate(ranked[:top_n])
+    ]
+    return LeaderboardData(
+        set_code=set_code.upper(),
+        set_name=set_name_for(set_code),
+        top=top,
+        viewer=None,
+        drafter_count=len(ranked),
+        show_score=False,
+        trophy_board=True,
+    )
 
 
 def _pod_board(
@@ -1144,10 +1171,15 @@ def _lcq_cash_label(e: LeaderboardEntry) -> str:
     return f"{e.lcq.cash // 1000}K"
 
 
-def _board_columns(show_score: bool, filter_type: str | None, filter_value: str | None) -> list[_Column]:
+def _board_columns(
+    show_score: bool, filter_type: str | None, filter_value: str | None, trophy_board: bool = False,
+) -> list[_Column]:
     """Column specs per board variant: scored boards carry Points, Pod counts drafts,
-    Direct counts boxes, and LCQ adds the Draft 2 record + cash columns.
+    Direct counts boxes, LCQ adds the Draft 2 record + cash columns, and the MTGO flashback
+    board carries only its trophy count.
     """
+    if trophy_board:
+        return [_Column("🏆", "c", lambda e: str(e.trophies))]
     if filter_type == "format" and filter_value == LCQ_FILTER:
         return [
             _Column("Pts", "c", lambda e: str(round(e.score))),
@@ -1166,7 +1198,7 @@ def _board_columns(show_score: bool, filter_type: str | None, filter_value: str 
 
 def _format_leaderboard(
     top: list[LeaderboardEntry], set_code: str | None = None, show_score: bool = True,
-    filter_type: str | None = None, filter_value: str | None = None,
+    filter_type: str | None = None, filter_value: str | None = None, trophy_board: bool = False,
 ) -> str:
     """Wrap each row in inline code (single backticks) — renders as monospace
     without the code-block brick, and spaces are preserved so columns align.
@@ -1178,7 +1210,8 @@ def _format_leaderboard(
     """
     rank_col_width = max(max(len(f"{e.rank}.") for e in top), len("#"))
     name_width = max(max(display_width(e.display_name) for e in top), len("Name"))
-    header_cells, row_cells = _table_cells(_board_columns(show_score, filter_type, filter_value), top)
+    columns = _board_columns(show_score, filter_type, filter_value, trophy_board)
+    header_cells, row_cells = _table_cells(columns, top)
 
     lines = [f"`{'#':<{rank_col_width}} {'Name':<{name_width}}  " + "  ".join(header_cells) + "`"]
     for i, e in enumerate(top):
@@ -1231,17 +1264,19 @@ def _apply_footer(embed: discord.Embed, data: LeaderboardData) -> None:
 def render_embed(data: LeaderboardData) -> discord.Embed:
     base_url = settings.public_site_url.rstrip("/")
     site_url = board_site_url(data.set_code, data.filter_type, data.filter_value)
+    title = f"🏆 {data.set_code} Flashback Trophies" if data.trophy_board else f"🏆 Leaderboard — {data.set_code}"
     embed = discord.Embed(
-        title=f"🏆 Leaderboard — {data.set_code}",
+        title=title,
         url=site_url,
         color=discord.Color.gold(),
     )
     if not data.top:
-        embed.description = "_No players have scored yet for this set._"
+        empty = "_No trophies logged yet for this set._" if data.trophy_board else "_No players have scored yet for this set._"
+        embed.description = empty
     else:
         rows = _format_leaderboard(
             data.top, data.set_code, show_score=data.show_score,
-            filter_type=data.filter_type, filter_value=data.filter_value,
+            filter_type=data.filter_type, filter_value=data.filter_value, trophy_board=data.trophy_board,
         )
         site_display = base_url.split("://", 1)[-1].split("/", 1)[0]
         link = f"[{site_display}]({site_url})"
@@ -1706,6 +1741,22 @@ class Leaderboard(commands.Cog):
             )
             return
 
+        # set:MH1 / IPA / … → MTGO flashback trophy board, posted as a snapshot
+        if set is not None and is_mtgo_flashback_code(set):
+            if format is not None or color is not None:
+                await interaction.response.send_message(
+                    f"Format and color filters aren't available for `{set.upper()}`.", ephemeral=ephemeral,
+                )
+                return
+            await interaction.response.defer()
+            with SessionLocal() as session:
+                data = process_leaderboard_for_mtgo(session, set.upper())
+            await interaction.followup.send(
+                embed=render_public_embed(data),
+                view=render_view(set_code=set.upper(), include_filter=False),
+            )
+            return
+
         format_value = format.value if format is not None else None
         color_value = color.value if color is not None else None
         if format_value in SPECIAL_FORMATS and color_value is not None:
@@ -1837,6 +1888,11 @@ class Leaderboard(commands.Cog):
             app_commands.Choice(name=f"{s.code} — {s.name}", value=s.code)
             for s in reversed(ALL_SETS)
             if s.code != CUBE_CODE and (cur in s.code.upper() or cur in s.name.upper())
+        ]
+        matches += [
+            app_commands.Choice(name=f"{code} — {name} (MTGO)", value=code)
+            for code, name in MTGO_FLASHBACK_SETS.items()
+            if cur in code or cur in name.upper()
         ]
         return matches[:25]
 

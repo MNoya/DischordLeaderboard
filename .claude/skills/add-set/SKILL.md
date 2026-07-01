@@ -72,9 +72,11 @@ Run:
 python -m bot.scripts.generate_set_symbols <CODE>
 ```
 
-This pulls the keyrune glyph, recolors it white, and writes `frontend/public/set-symbols/<code>.png` (served on the site and used as the Discord-unfurl thumbnail for the set's routes). Requires `inkscape` and `pngquant` on PATH.
+This pulls the keyrune glyph, recolors it white (preserving the glyph's aspect ratio via `_squarify`), and writes `frontend/public/set-symbols/<code>.png` (served on the site and used as the Discord-unfurl thumbnail for the set's routes). Requires `inkscape` and `pngquant` on PATH. A code keyrune lacks a glyph for borrows another set's via `KEYRUNE_ALIAS` (e.g. `SIR` → Shadows over Innistrad Remastered).
 
 If the script reports `no keyrune glyph, skipped: <CODE>` — keyrune has no symbol for that code (e.g. `CUBE`, or a brand-new set keyrune hasn't published yet) — there is simply no symbol and the leaderboard falls back to the LLU logo. Tell the user; do **not** treat it as an error or block the commit.
+
+**Then tell the user to upload the PNG as a Discord application emoji** (Developer Portal → the bot's application → Emojis), named by the **lowercase code** (`sos`, `war`, `mh1` …). `/event-scribe` and the set embeds resolve the symbol by that emoji name at startup, so a set whose emoji isn't uploaded renders without its glyph. This upload is manual — the script can't push emojis to Discord.
 
 ### 5. Show diff
 

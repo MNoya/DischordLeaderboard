@@ -1,9 +1,10 @@
 """/trophy — log a trophy posted in trophy-hype to your profile.
 
-Showcase only, never scored. Record + colors are read from the post caption with the same
-parsers pod-backfill uses; the player picks the platform and fills anything that didn't parse.
-Bare `/trophy` grabs your most recent image post in trophy-hype; `/trophy link:<url>` backfills
-an older one. Idempotent per post via the upsert in services.self_reported_trophies.
+Showcase only, never scored. Record, colors, and set are read from the post caption; the set
+defaults to the active one but a named code or set name (e.g. MH1, "Urza's Saga", MTGO-only
+flashbacks) overrides it. The player picks the platform and fills anything that didn't parse.
+Bare `/trophy` grabs your most recent image post in the current channel; `/trophy link:<url>`
+logs one from anywhere. Idempotent per post via the upsert in services.self_reported_trophies.
 """
 from __future__ import annotations
 
@@ -18,7 +19,6 @@ from discord.ext import commands
 
 from bot import audit, emojis
 from bot.commands import descriptions as desc
-from bot.config import settings
 from bot.database import SessionLocal
 from bot.discord_helpers import (
     extract_avatar_hash,
@@ -34,7 +34,7 @@ from bot.services.pod_drafts import parse_caption_record
 from bot.services.pod_thread_backfill import parse_caption_colors
 from bot.services.pod_tournament import TROPHY_HYPE_HISTORY_LIMIT
 from bot.services.self_reported_trophies import get_or_create_player, upsert_trophy
-from bot.sets import ALL_SETS, active_set_code
+from bot.sets import ALL_SETS, active_set_code, parse_caption_set_code
 
 logger = logging.getLogger(__name__)
 
@@ -47,13 +47,12 @@ PLATFORM_CHOICES: tuple[tuple[str, str], ...] = (
 WRITE_IN_EMOJI = "manax"
 WRITE_IN = "__write_in__"
 SET_SELECT_LIMIT = 23
-TROPHY_HYPE_NAME_MATCH = "trophy-hype"
 SET_CODE_RE = re.compile(r"^[A-Z0-9]{2,5}$")
 
-MSG_NO_CHANNEL = "Couldn't find a trophy-hype channel here. Post your trophy in one, or pass `link:` to a post."
+MSG_NO_CHANNEL = "Run `/trophy` in the channel where you posted your screenshot, or pass `link:` to a post."
 MSG_NO_POST = (
     "No trophy screenshot found from you in {channel}. "
-    "Post your trophy there first, then run `/trophy` — or pass `link:` to an older post."
+    "Post your trophy here first, then run `/trophy` — or pass `link:` to a post elsewhere."
 )
 MSG_BAD_LINK = "That doesn't look like a Discord message link. Right-click a message → Copy Message Link."
 MSG_LINK_NOT_FOUND = "Couldn't find that message. Check the link and try again."
@@ -111,7 +110,7 @@ class Trophy(commands.Cog):
             discord_username=str(interaction.user),
             display_name=await resolve_display_name(self.bot, interaction.user),
             avatar_hash=extract_avatar_hash(interaction.user),
-            set_code=active_set_code(message.created_at),
+            set_code=parse_caption_set_code(caption) or active_set_code(message.created_at),
             source_channel_id=str(message.channel.id),
             source_message_id=str(message.id),
             source_url=message.jump_url,
@@ -127,24 +126,14 @@ class Trophy(commands.Cog):
     async def _latest_own_post(
         self, interaction: discord.Interaction
     ) -> tuple[discord.Message | None, str | None]:
-        channel = self._trophy_hype_channel(interaction)
-        if channel is None:
+        channel = interaction.channel
+        if not isinstance(channel, (discord.TextChannel, discord.Thread, discord.DMChannel)):
             return None, MSG_NO_CHANNEL
         async for message in channel.history(limit=TROPHY_HYPE_HISTORY_LIMIT):
             if message.author.id == interaction.user.id and first_image_url(message) is not None:
                 return message, None
-        return None, MSG_NO_POST.format(channel=channel.mention)
-
-    def _trophy_hype_channel(self, interaction: discord.Interaction) -> discord.TextChannel | None:
-        guild = interaction.guild
-        if guild is None and settings.discord_guild_id:
-            guild = interaction.client.get_guild(settings.discord_guild_id)
-        if guild is None:
-            return None
-        for channel in guild.text_channels:
-            if TROPHY_HYPE_NAME_MATCH in channel.name:
-                return channel
-        return None
+        label = channel.mention if isinstance(channel, (discord.TextChannel, discord.Thread)) else "this DM"
+        return None, MSG_NO_POST.format(channel=label)
 
     async def _message_from_link(
         self, interaction: discord.Interaction, link: str
@@ -186,7 +175,7 @@ def _render_embed(draft: TrophyDraft) -> discord.Embed:
     embed.add_field(name="Platform", value=draft.platform or "*not set*", inline=True)
     if draft.caption:
         embed.add_field(name="Caption", value=draft.caption, inline=False)
-    embed.description = f"From [your trophy-hype post]({draft.source_url})"
+    embed.description = f"From [your post]({draft.source_url})"
     if draft.image_url:
         embed.set_thumbnail(url=draft.image_url)
     return embed

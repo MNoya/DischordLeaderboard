@@ -276,6 +276,18 @@ export interface SelfReportedTrophy {
   reportedAt: string;
 }
 
+// One player's standing on an MTGO-only trophy-count board, aggregated from self-reported
+// trophies for a flashback set. Ranked by trophy count; decks holds the logged posts, newest first.
+export interface TrophyLeaderboardRow {
+  setCode: string;
+  slug: string;
+  displayName: string;
+  avatarUrl: string | null;
+  rank: number;
+  trophies: number;
+  decks: SelfReportedTrophy[];
+}
+
 export interface PlayerProfile {
   slug: string;
   displayName: string;
