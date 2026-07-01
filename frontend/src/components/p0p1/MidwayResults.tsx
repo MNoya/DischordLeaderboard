@@ -171,11 +171,6 @@ export function MidwayResults({
     if (idx !== -1) pager.open(idx);
   };
 
-  // Maps for breakdown badges
-  const crowdCardBySlot = useMemo(
-    () => new Map(crowdTeam.picks.map((p) => [p.slot, p.cardName])) as Map<SlotKey, string>,
-    [crowdTeam.picks],
-  );
   const yourCardBySlot = useMemo(
     () => (showYourPicks ? (picksBySlot as Map<SlotKey, string>) : new Map<SlotKey, string>()),
     [showYourPicks, picksBySlot],
@@ -236,7 +231,6 @@ export function MidwayResults({
         cardsByName={cardsByName}
         ratingsByName={ratingsByName}
         yourCardBySlot={yourCardBySlot}
-        crowdCardBySlot={crowdCardBySlot}
         pickStats={pickStats}
       />
     </div>
