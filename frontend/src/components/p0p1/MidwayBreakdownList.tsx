@@ -66,6 +66,20 @@ export function MidwayBreakdownList({
     );
   }, [cards, ratingsByName, yourCardBySlot, crowdCardBySlot, pickedBySlot]);
 
+  const { gihwrMin, gihwrMax } = useMemo(() => {
+    let min = Infinity;
+    let max = -Infinity;
+    for (const rows of bySlot.values()) {
+      for (const row of rows) {
+        if (row.gihwr !== null) {
+          if (row.gihwr < min) min = row.gihwr;
+          if (row.gihwr > max) max = row.gihwr;
+        }
+      }
+    }
+    return { gihwrMin: min === Infinity ? 0 : min, gihwrMax: max === -Infinity ? 0 : max };
+  }, [bySlot]);
+
   return (
     <div className="flex flex-col gap-1.5 lg:gap-3">
       <div className="flex justify-center">
@@ -78,7 +92,8 @@ export function MidwayBreakdownList({
             key={slot.key}
             slot={slot}
             rows={bySlot.get(slot.key) ?? []}
-            cardsByName={cardsByName}
+            gihwrMin={gihwrMin}
+            gihwrMax={gihwrMax}
           />
         ))}
       </div>
@@ -89,7 +104,8 @@ export function MidwayBreakdownList({
             key={slot.key}
             slot={slot}
             rows={bySlot.get(slot.key) ?? []}
-            cardsByName={cardsByName}
+            gihwrMin={gihwrMin}
+            gihwrMax={gihwrMax}
             collapsible
           />
         ))}
@@ -101,17 +117,20 @@ export function MidwayBreakdownList({
 function SlotPanel({
   slot,
   rows,
+  gihwrMin,
+  gihwrMax,
   collapsible = false,
 }: {
   slot: SlotDefinition;
   rows: SlotRow[];
+  gihwrMin: number;
+  gihwrMax: number;
   collapsible?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const accent = breakdownStripAccent(slot.key);
   const showRows = !collapsible || expanded;
   const wide = slot.key === "wildcard_uncommon";
-  const topGihwr = rows.find((r) => r.gihwr !== null)?.gihwr ?? 0;
 
   const header = (
     <div className={`flex-1 flex items-center gap-2 ${wide ? "pl-4 pr-3" : "px-3"} py-2.5 min-w-0`}>
@@ -153,7 +172,8 @@ function SlotPanel({
               key={row.card.name}
               rank={i + 1}
               row={row}
-              topGihwr={topGihwr}
+              gihwrMin={gihwrMin}
+              gihwrMax={gihwrMax}
               wide={wide}
             />
           ))}
@@ -166,17 +186,22 @@ function SlotPanel({
 function GihwrRow({
   rank,
   row,
-  topGihwr,
+  gihwrMin,
+  gihwrMax,
   wide,
 }: {
   rank: number;
   row: SlotRow;
-  topGihwr: number;
+  gihwrMin: number;
+  gihwrMax: number;
   wide: boolean;
 }) {
+  const span = gihwrMax - gihwrMin;
   const fillPct =
-    row.gihwr !== null && topGihwr > 0
-      ? Math.max(((row.gihwr - 0.45) / (0.70 - 0.45)) * 100, 3)
+    row.gihwr !== null
+      ? span > 0
+        ? Math.max(((row.gihwr - gihwrMin) / span) * 100, 3)
+        : 100
       : 0;
   const isLeader = rank === 1;
   const highlight = row.isYours ? "bg-green/[0.07]" : "";
