@@ -6,7 +6,9 @@ from bot.services.pod_tournament import (
     deck_complete,
     incomplete_top_decks,
     normalize_player_name,
-    build_deck_reminder_text,
+    build_deck_ping,
+    deck_missing_parts,
+    format_reported_result,
 )
 
 
@@ -44,9 +46,52 @@ def test_championship_requires_all_when_pod_smaller_than_top_n():
     assert incomplete_top_decks(standings, deck_data) == ["Caedmon"]
 
 
-def test_deck_reminder_text_carries_mentions():
-    text = build_deck_reminder_text("<@1> <@2>")
-    assert "<@1>" in text and "<@2>" in text
+def test_deck_missing_parts_reports_each_gap():
+    assert deck_missing_parts(_deck("WU", "http://img/x.png")) == []
+    assert deck_missing_parts(_deck("WU", None)) == ["screenshot"]
+    assert deck_missing_parts(_deck(None, "http://img/x.png")) == ["colors"]
+    assert deck_missing_parts(_deck(None, None)) == ["screenshot", "colors"]
+    assert deck_missing_parts(None) == ["screenshot", "colors"]
+
+
+def test_deck_ping_is_action_forward_split_by_audience():
+    text = build_deck_ping((["1"], ["1", "2"]), (["3"], ["3"]), "https://limitedlevelups.com/pods/pod-7")
+
+    assert text == (
+        "Championship post is waiting on a few decks 🏆\n"
+        "Please post your deck screenshot <@1>\n"
+        "Use this button to register your deck colors <@1> <@2>\n"
+        "\n"
+        "Your deck shows on your seat at [limitedlevelups.com/pods/pod-7]"
+        "(<https://limitedlevelups.com/pods/pod-7>) 🎨\n"
+        "Please post your deck screenshot <@3>\n"
+        "Use this button to register your deck colors <@3>"
+    )
+
+
+def test_deck_ping_pod_link_suppresses_embed_and_hides_scheme():
+    text = build_deck_ping(([], []), (["3"], []), "https://limitedlevelups.com/pods/pod-7")
+    assert "[limitedlevelups.com/pods/pod-7](<https://limitedlevelups.com/pods/pod-7>)" in text
+
+
+def test_deck_ping_drops_championship_block_once_post_is_clear():
+    text = build_deck_ping(([], []), (["3"], ["3"]), "https://limitedlevelups.com/pods/pod-7")
+    assert "waiting" not in text
+    assert text.startswith("Your deck shows on your seat")
+
+
+def test_deck_ping_is_empty_when_nobody_owes_anything():
+    assert build_deck_ping(([], []), ([], []), "https://limitedlevelups.com/pods/pod-7") == ""
+
+
+def test_reported_result_uses_display_names_either_side():
+    match = {
+        "a_name": "marlo#1", "b_name": "bob#2",
+        "a_display": "Marlo", "b_display": "Bob", "score": "2-1",
+    }
+
+    assert format_reported_result({**match, "winner_name": "marlo#1"}) == "Marlo wins 2-1 vs Bob"
+    assert format_reported_result({**match, "winner_name": "bob#2"}) == "Bob wins 2-1 vs Marlo"
 
 
 def _standings(*names: str) -> list:

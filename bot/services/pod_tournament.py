@@ -46,7 +46,9 @@ from bot.services.pod_drafts import (
     DM_KIND_SUBMIT_DECK,
     DM_KIND_SUBMIT_DECK_FINAL,
     FinalStanding,
+    has_arena_suffix,
     normalize_player_name,
+    strip_arena_suffix,
     _normalized_column,
     active_event_for_discord_user_in_dm,
     add_pairing,
@@ -117,12 +119,41 @@ CHAMPIONSHIP_RECONCILE_WINDOW = timedelta(hours=24)  # startup sweep only revisi
 TOURNAMENT_REHYDRATE_WINDOW = timedelta(hours=24)  # startup sweep only rebuilds managers for recently-scheduled pods
 
 
-def build_deck_reminder_text(mentions: str) -> str:
-    return f"{mentions} drop your deck screenshot and set your colors so the championship post can go up 🏆"
+CHAMPIONSHIP_DECK_HEADER = "Championship post is waiting on a few decks 🏆"
+
+DeckPingAudience = tuple[list[str], list[str]]  # (owes-screenshot ids, owes-colors ids)
 
 
-def build_deck_request_text(mentions: str) -> str:
-    return f"{mentions} share your deck screenshot and set your colors too 🎨"
+def build_deck_ping(blocking: DeckPingAudience, other: DeckPingAudience, pod_url: str) -> str:
+    """Compose the R3 deck-chase ping action-forward, split by why the deck is wanted. Top finishers
+    who still gate the championship post get the urgent block; everyone else gets the pod-page nudge.
+    The championship block only appears when a top finisher is actually blocking, so the "waiting"
+    line never shows once the post is clear to go up. Returns "" when nobody owes anything."""
+    blocks = [
+        _deck_action_block(CHAMPIONSHIP_DECK_HEADER, *blocking),
+        _deck_action_block(_pod_page_deck_header(pod_url), *other),
+    ]
+    return "\n\n".join(block for block in blocks if block)
+
+
+def _pod_page_deck_header(pod_url: str) -> str:
+    label = pod_url.split("://", 1)[-1]
+    return f"Your deck shows on your seat at [{label}](<{pod_url}>) 🎨"
+
+
+def _deck_action_block(header: str, screenshot_ids: list[str], colors_ids: list[str]) -> str:
+    if not screenshot_ids and not colors_ids:
+        return ""
+    lines = [header]
+    if screenshot_ids:
+        lines.append(f"Please post your deck screenshot {_mention_run(screenshot_ids)}")
+    if colors_ids:
+        lines.append(f"Use this button to register your deck colors {_mention_run(colors_ids)}")
+    return "\n".join(lines)
+
+
+def _mention_run(discord_ids: list[str]) -> str:
+    return " ".join(f"<@{i}>" for i in discord_ids)
 
 
 def match_was_played(match: dict) -> bool:
@@ -156,11 +187,15 @@ def build_thread_link_button(guild_id: int | str, thread_id: int | str) -> ui.Bu
     )
 
 
+def pod_page_url(event_name: str) -> str:
+    return f"{settings.public_site_url.rstrip('/')}/pods/{slugify(event_name)}"
+
+
 def build_replays_link_button(event_name: str) -> ui.Button:
     return ui.Button(
         label="Draft Recap",
         style=discord.ButtonStyle.link,
-        url=f"{settings.public_site_url.rstrip('/')}/pods/{slugify(event_name)}",
+        url=pod_page_url(event_name),
         emoji=emojis.get_emoji("llu") or "🎬",
     )
 
@@ -1247,6 +1282,11 @@ async def _handle_result_submission(interaction: discord.Interaction, value: str
         result_phrase=format_result_change(result["a_name"], result["b_name"], winner_name, score),
     )
     if round_num >= TOTAL_ROUNDS:
+        newly_reported = not result.get("was_reported") or result.get("winner_changed")
+        if match_state is not None and match_was_played(match_state) and newly_reported:
+            asyncio.create_task(_announce_round_result(
+                interaction.client, event_id, format_reported_result(match_state),
+            ))
         asyncio.create_task(_send_final_submit_deck_dms_for_match(
             interaction.client, event_id, result["a_name"], result["b_name"],
         ))
@@ -1444,6 +1484,30 @@ def _commit_result(match_id: str, winner_name: str, score: str):
             "round": match.round,
             "event_id": match.event_id,
         }
+
+
+async def _announce_round_result(bot_client, event_id: str, phrase: str) -> None:
+    """Post a single reported result to the pod thread for immediate feedback, e.g. 'Marlo wins
+    2-1 vs Bob'. Best-effort — a missing thread or send failure is logged, not raised."""
+    thread_id = await asyncio.to_thread(_load_event_thread_id_sync, event_id)
+    if thread_id is None:
+        return
+    try:
+        thread = bot_client.get_channel(int(thread_id)) or await bot_client.fetch_channel(int(thread_id))
+    except discord.HTTPException:
+        log.info(f"[R3-RESULT] could not fetch thread event={event_id}", exc_info=True)
+        return
+    try:
+        await thread.send(phrase, allowed_mentions=discord.AllowedMentions.none())
+    except discord.HTTPException:
+        log.warning(f"[R3-RESULT] announce failed event={event_id}", exc_info=True)
+
+
+def _load_event_thread_id_sync(event_id: str) -> str | None:
+    with SessionLocal() as session:
+        return session.execute(
+            select(PodDraftEvent.discord_thread_id).where(PodDraftEvent.id == event_id)
+        ).scalar_one_or_none()
 
 
 async def _r3_deck_recovery_scan(
@@ -1673,7 +1737,10 @@ def _load_participant_displays(event_id: str) -> dict[str, dict]:
         ).all()
     out: dict[str, dict] = {}
     for dm, participant_dn, player_dn, slug, arena in rows:
-        info = {"display_name": player_dn or participant_dn, "slug": slug, "arena": arena}
+        raw = player_dn or participant_dn
+        display = strip_arena_suffix(raw) if raw else raw
+        arena_ref = arena or (raw if raw and has_arena_suffix(raw) else None)
+        info = {"display_name": display, "slug": slug, "arena": arena_ref}
         if dm:
             out[normalize_player_name(dm)] = info
         if participant_dn:
@@ -2346,6 +2413,16 @@ def deck_complete(data: "ParticipantDeckData | None") -> bool:
     return bool(data and data.colors and data.screenshot_url)
 
 
+def deck_missing_parts(data: "ParticipantDeckData | None") -> list[str]:
+    """Which share-complete pieces a participant still owes, in "screenshot", "colors" order."""
+    missing = []
+    if not (data and data.screenshot_url):
+        missing.append("screenshot")
+    if not (data and data.colors):
+        missing.append("colors")
+    return missing
+
+
 def incomplete_top_decks(standings, deck_data) -> list[str]:
     """Names among the top finishers (ANNOUNCEMENT_TOP_N, or fewer for a smaller pod) still missing
     colors or a screenshot. Empty list means the championship post is clear to go up."""
@@ -2356,51 +2433,71 @@ def incomplete_top_decks(standings, deck_data) -> list[str]:
 
 
 async def _ping_missing_deck_participants(manager) -> None:
-    """At R3 end, @ping every linked participant still missing colors or a deck screenshot. Only the
-    top finishers gate the championship post, so they get the blocking wording; everyone else gets a
-    plain ask."""
+    """At R3 end, post a single deck-chase ping split by audience: top finishers gating the
+    championship post get the urgent block, everyone else the pod-page nudge. Skips silently once
+    every participant has both colors and a screenshot on record."""
     event_id = manager.event_id
     deck_data = await asyncio.to_thread(_load_event_deck_data_sync, event_id)
     dm_info = await asyncio.to_thread(_load_dm_info_sync, event_id)
     prior = await asyncio.to_thread(_load_matches, event_id)
+    event_name = await asyncio.to_thread(load_event_name_sync, event_id)
     standings = pod_swiss.compute_standings(manager.tournament_players, prior)
-    blocking_keys = {normalize_player_name(n) for n in incomplete_top_decks(standings, deck_data)}
-    blocking_ids: list[str] = []
-    other_ids: list[str] = []
-    for key, info in dm_info.items():
-        if not info.discord_id or deck_complete(deck_data.get(key)):
-            continue
-        bucket = blocking_ids if key in blocking_keys else other_ids
-        bucket.append(info.discord_id)
-    if not blocking_ids and not other_ids:
+    blocking, other = _missing_deck_mentions(standings, dm_info, deck_data)
+    content = build_deck_ping(blocking, other, pod_page_url(event_name))
+    if not content:
         log.info(f"[FINALIZE] deck_ping.skip event={event_id} reason=all_complete")
         return
     thread = await manager._fetch_thread()
     if thread is None:
         log.info(f"[FINALIZE] deck_ping.skip event={event_id} reason=no_thread")
         return
-    lines = []
-    if blocking_ids:
-        lines.append(build_deck_reminder_text(_mention_run(blocking_ids)))
-    if other_ids:
-        lines.append(build_deck_request_text(_mention_run(other_ids)))
     view = ui.View(timeout=None)
     view.add_item(build_live_submit_deck_button())
     try:
         await thread.send(
-            content="\n".join(lines),
+            content=content,
             allowed_mentions=discord.AllowedMentions(users=True),
             view=view,
         )
+        blocking_count = len(set(blocking[0]) | set(blocking[1]))
+        other_count = len(set(other[0]) | set(other[1]))
         log.info(
-            f"[FINALIZE] deck_ping.sent event={event_id} blocking={len(blocking_ids)} other={len(other_ids)}"
+            f"[FINALIZE] deck_ping.sent event={event_id} blocking={blocking_count} other={other_count}"
         )
     except Exception:
         log.warning(f"[FINALIZE] deck_ping.error event={event_id}", exc_info=True)
 
 
-def _mention_run(discord_ids: list[str]) -> str:
-    return " ".join(f"<@{i}>" for i in discord_ids)
+def _missing_deck_mentions(standings, dm_info, deck_data) -> tuple[DeckPingAudience, DeckPingAudience]:
+    """Split incomplete participants into the championship blockers (top finishers still gating the
+    post) and everyone else, each as (owes-screenshot, owes-colors) id lists. Standings order first
+    so top finishers lead; participants absent from standings fall to the non-blocking audience."""
+    blocking_keys = {normalize_player_name(n) for n in incomplete_top_decks(standings, deck_data)}
+    blocking: DeckPingAudience = ([], [])
+    other: DeckPingAudience = ([], [])
+    seen: set[str] = set()
+
+    def collect(key: str) -> None:
+        info = dm_info.get(key)
+        data = deck_data.get(key)
+        if info is None or not info.discord_id or deck_complete(data):
+            return
+        seen.add(key)
+        missing = deck_missing_parts(data)
+        screenshot_ids, colors_ids = blocking if key in blocking_keys else other
+        if "screenshot" in missing:
+            screenshot_ids.append(info.discord_id)
+        if "colors" in missing:
+            colors_ids.append(info.discord_id)
+
+    for standing in standings:
+        key = normalize_player_name(standing.player_name)
+        if key not in seen:
+            collect(key)
+    for key in dm_info:
+        if key not in seen:
+            collect(key)
+    return blocking, other
 
 
 async def _championship_deadline(manager) -> None:
@@ -3049,6 +3146,18 @@ def _name_with_arena(display: str, arena: str | None) -> str:
     return f"`{arena}` ({display})"
 
 
+def format_reported_result(m: dict) -> str:
+    """A reported match as plain text, display names preferred: 'Marlo wins 2-1 vs Bob'. Shared by
+    the round-results list and the live per-result announcement so their wording can't drift."""
+    a_disp = m.get("a_display") or m["a_name"]
+    b_disp = m.get("b_display") or m["b_name"]
+    if m["winner_name"].lower() == m["a_name"].lower():
+        winner_disp, loser_disp = a_disp, b_disp
+    else:
+        winner_disp, loser_disp = b_disp, a_disp
+    return f"{winner_disp} wins {m['score']} vs {loser_disp}"
+
+
 def _match_line(m: dict, *, seat_label: str | None = None, show_arena: bool = False) -> str:
     """One pairing line: result once reported, otherwise the matchup. Pending cross-record matches
     show inline records with the higher record first; same-record matches lean on the group header.
@@ -3059,11 +3168,7 @@ def _match_line(m: dict, *, seat_label: str | None = None, show_arena: bool = Fa
     if winner == SKIPPED_SENTINEL:
         return f"🚫{NBSP}{NBSP}Not played: {a_disp} vs {b_disp}"
     if winner:
-        if winner.lower() == m["a_name"].lower():
-            winner_disp, loser_disp = a_disp, b_disp
-        else:
-            winner_disp, loser_disp = b_disp, a_disp
-        return f"▫️{NBSP}{NBSP}{winner_disp} wins {m['score']} vs {loser_disp}"
+        return f"▫️{NBSP}{NBSP}{format_reported_result(m)}"
     if show_arena:
         a_disp = _name_with_arena(a_disp, m.get("a_arena"))
         b_disp = _name_with_arena(b_disp, m.get("b_arena"))
@@ -3468,10 +3573,12 @@ async def _relock_prior_rounds(manager, current_round: int) -> None:
 def format_result_change(a_name: str, b_name: str, winner_name: str | None, score: str | None) -> str:
     """The corrected result as plain text for the regenerate notice: 'Bob wins 2-1 vs Alice', or a
     cleared/no-result fallback. Shared by prod and testlobby so both word it identically."""
+    a_disp, b_disp = strip_arena_suffix(a_name), strip_arena_suffix(b_name)
     if winner_name and winner_name not in (SKIPPED_SENTINEL, CLEAR_SENTINEL):
-        loser = b_name if winner_name.lower() == a_name.lower() else a_name
-        return f"{winner_name} wins {score} vs {loser}" if score else f"{winner_name} wins vs {loser}"
-    return f"{a_name} vs {b_name} result cleared"
+        winner_is_a = winner_name.lower() == a_name.lower()
+        winner_disp, loser_disp = (a_disp, b_disp) if winner_is_a else (b_disp, a_disp)
+        return f"{winner_disp} wins {score} vs {loser_disp}" if score else f"{winner_disp} wins vs {loser_disp}"
+    return f"{a_disp} vs {b_disp} result cleared"
 
 
 def bracket_regen_notice(result_phrase: str | None, round_num: int, pairings_url: str | None) -> str:
