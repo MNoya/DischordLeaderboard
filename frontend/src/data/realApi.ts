@@ -1478,10 +1478,20 @@ function adaptPodLeaderboardRow(row: Record<string, unknown>): PodLeaderboardRow
   };
 }
 
-// --- P0P1 contest (stubs — wired to Supabase later) ---
+// --- P0P1 contest ---
 
 import type { Card, P0P1Pick, P0P1PickStat, SlotKey } from "../types/p0p1";
 import { cardsMshFixture } from "./fixtures/cards-msh";
+import type { RatingsSnapshot } from "./p0p1Results";
+import ratingsMsh from "./fixtures/p0p1-ratings-msh.json";
+const RATINGS_BY_SET: Record<string, RatingsSnapshot> = {
+  MSH: ratingsMsh as RatingsSnapshot,
+};
+export const fetchP0P1Ratings = (setCode: string): Promise<RatingsSnapshot> => {
+  const snapshot = RATINGS_BY_SET[setCode];
+  if (!snapshot) return Promise.reject(new Error(`No ratings fixture for set ${setCode}`));
+  return Promise.resolve(snapshot);
+};
 
 export const fetchP0P1Cards = (_setCode: string): Promise<Card[]> =>
   Promise.resolve(cardsMshFixture);
