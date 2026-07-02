@@ -248,12 +248,18 @@ def attach_arena_alias(
     display_name: str,
     avatar_hash: str | None,
     arena_name: str,
+    overwrite: bool = False,
 ) -> tuple[str | None, str | None]:
     """Find-or-create the active player for `discord_id` and bind `arena_name` as a normalized alias.
 
     Returns (player_id, collision_player_id). On a clean link collision_player_id is None; when the
     alias already belongs to a different active player, player_id is None and collision_player_id
     names the owner. Shared by /link-arena and the lobby claim-seat button so the two never drift.
+
+    Player.arena_name only ever holds a full ArenaID#12345 handle — a bare Draftmancer nickname is
+    stored as an alias only, so it can't shadow the real handle in pairing displays. `overwrite` is
+    the explicit /link-arena path: the user is declaring their handle, so it replaces whatever is
+    stored.
     """
     normalized = normalize_player_name(arena_name)
 
@@ -278,19 +284,24 @@ def attach_arena_alias(
             discord_username=discord_username,
             display_name=display_name,
             avatar_hash=avatar_hash,
-            arena_name=arena_name,
+            arena_name=arena_name if full_arena_handle(arena_name) else None,
             arena_aliases=[normalized],
             active=True,
             leaderboard_opt_in=False,
         )
         session.add(player)
     else:
-        if not (player.arena_name or "").strip():
+        if overwrite or (full_arena_handle(arena_name) and not full_arena_handle(player.arena_name)):
             player.arena_name = arena_name
         if normalized not in player.arena_aliases:
             player.arena_aliases = [*player.arena_aliases, normalized]
     session.flush()
     return player.id, None
+
+
+def full_arena_handle(name: str | None) -> bool:
+    """Whether `name` is a complete ArenaID#12345 handle rather than a bare Draftmancer nickname."""
+    return "#" in (name or "")
 
 
 def build_mock_session(session: Session, set_code: str) -> tuple[str, int]:

@@ -47,6 +47,7 @@ from bot.services.pod_pairing_select import pairing_label
 from bot.services.pod_seating_select import seating_mode_label
 from bot.services.pod_drafts import (
     attach_arena_alias,
+    full_arena_handle,
     normalize_player_name,
     classify_lobby_names,
     delete_event_sync,
@@ -59,7 +60,12 @@ from bot.services.pod_drafts import (
     seed_event_participants,
     update_event_format,
 )
-from bot.services.pod_tournament import persist_pairing_mode, persist_seating_mode, start_tournament
+from bot.services.pod_tournament import (
+    persist_pairing_mode,
+    persist_seating_mode,
+    refresh_round_pairing_messages,
+    start_tournament,
+)
 from bot.services.player_stats import leaderboard_seat_order
 from bot.slug import disambiguate_slug, slugify
 
@@ -1247,6 +1253,7 @@ class PodDraftManager:
             return f"`{arena_name}` is already linked to another player."
         log.info(f"[LINK] seat_linked event={self.event_id} member={member} arena={arena_name!r}")
         await self.refresh_lobby_now()
+        await refresh_round_pairing_messages(self)
         return None
 
     def _sync_leaderboard_seeding(self) -> None:
@@ -1788,7 +1795,8 @@ def _find_guild_member_for_arena(guild: discord.Guild, arena_name: str) -> disco
 
 def _ensure_players_for_members_sync(pairs: list[tuple[str, discord.Member]]) -> None:
     """For each (arena_name, member) pair, find or lazily create a Player row keyed by discord_id.
-    Backfills `arena_name` on existing rows when null, never overwrites a value set by /pod-link-arena."""
+    Only a full ArenaID#12345 handle is stored as `arena_name` — a bare Draftmancer nickname goes to
+    aliases only — and a stored full handle is never overwritten here."""
     if not pairs:
         return
     with SessionLocal() as session:
@@ -1800,7 +1808,7 @@ def _ensure_players_for_members_sync(pairs: list[tuple[str, discord.Member]]) ->
                 select(Player).where(Player.discord_id == discord_id)
             ).scalar_one_or_none()
             if existing is not None:
-                if existing.arena_name is None:
+                if full_arena_handle(arena_name) and not full_arena_handle(existing.arena_name):
                     existing.arena_name = arena_name
                     log.info(f"backfilled arena_name for {member.display_name} → {arena_name}")
                 if normalized and normalized not in existing.arena_aliases:
@@ -1814,7 +1822,7 @@ def _ensure_players_for_members_sync(pairs: list[tuple[str, discord.Member]]) ->
                 discord_username=member.name,
                 display_name=member.display_name,
                 avatar_hash=extract_avatar_hash(member),
-                arena_name=arena_name,
+                arena_name=arena_name if full_arena_handle(arena_name) else None,
                 arena_aliases=[normalized] if normalized else [],
                 active=True,
                 leaderboard_opt_in=False,

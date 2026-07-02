@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 from types import SimpleNamespace
 
+import pytest
 from sqlalchemy import select
 
 from bot.models import Player
@@ -203,6 +204,42 @@ def test_attach_dedupes_alias_and_keeps_existing_arena_name(session):
     player = session.execute(select(Player).where(Player.discord_id == "34")).scalar_one()
     assert player.arena_aliases == ["primary"]
     assert player.arena_name == "Primary#1"
+
+
+@pytest.mark.parametrize(
+    ("stored", "candidate", "overwrite", "expected"),
+    [
+        ("Moth", "MothQueen#11111", False, "MothQueen#11111"),
+        ("Moth", "DreamShard#68947", True, "DreamShard#68947"),
+        ("Moth", "Wanderer", False, "Moth"),
+        ("MothQueen#11111", "DreamShard#68947", False, "MothQueen#11111"),
+        ("MothQueen#11111", "DreamShard#68947", True, "DreamShard#68947"),
+        (None, "Wanderer", False, None),
+        (None, "MothQueen#11111", False, "MothQueen#11111"),
+    ],
+)
+def test_attach_arena_name_adoption(session, stored, candidate, overwrite, expected):
+    _seed_player(session, discord_id="40", username="moth", display_name="Moth", arena_name=stored)
+
+    attach_arena_alias(
+        session, discord_id="40", discord_username="moth", display_name="Moth",
+        avatar_hash=None, arena_name=candidate, overwrite=overwrite,
+    )
+
+    player = session.execute(select(Player).where(Player.discord_id == "40")).scalar_one()
+    assert player.arena_name == expected
+    assert normalize_player_name(candidate) in player.arena_aliases
+
+
+def test_attach_creates_player_without_arena_name_for_bare_nickname(session):
+    attach_arena_alias(
+        session, discord_id="41", discord_username="wand", display_name="Wanderer",
+        avatar_hash=None, arena_name="Wanderer",
+    )
+
+    created = session.execute(select(Player).where(Player.discord_id == "41")).scalar_one()
+    assert created.arena_name is None
+    assert "wanderer" in created.arena_aliases
 
 
 # --- classify_lobby_names ---

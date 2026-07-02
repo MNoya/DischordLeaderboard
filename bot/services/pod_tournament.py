@@ -1012,6 +1012,27 @@ async def _attach_round_link(manager: "PodDraftManager", round_num: int) -> None
         log.warning(f"could not attach nav link to round {round_num}", exc_info=True)
 
 
+async def refresh_round_pairing_messages(manager) -> None:
+    """Re-render posted round messages that still show unreported pairings, so a fresh Arena link
+    replaces the player's placeholder name mid-round. Fully reported rounds render results only and
+    are left untouched."""
+    for round_num, msg in sorted(manager.round_messages.items()):
+        states = await asyncio.to_thread(
+            render_round_states, manager.event_id, round_num, bracket=manager.pairing_mode == "bracket",
+        )
+        real = [s for s in states if not s.get("placeholder")]
+        if not real or all(s.get("winner_name") for s in real):
+            continue
+        url, label = _round_nav_link(manager, round_num)
+        try:
+            await msg.edit(
+                embed=round_embed(round_num, states),
+                view=RoundResultsView(states, link_url=url, link_label=label),
+            )
+        except discord.HTTPException:
+            log.warning(f"could not refresh round {round_num} pairings after arena link", exc_info=True)
+
+
 class MatchResultSelect(ui.Select):
     """Per-match dropdown; placeholder + labels use Discord display names. Option values still encode
     the draftmancer_name (DB primary key) so result commits resolve correctly."""

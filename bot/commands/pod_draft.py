@@ -54,6 +54,7 @@ from bot.services.pod_tournament import (
     build_standings_embed_for_event,
     build_thread_link_button,
     post_trophy_hype_for_event,
+    refresh_round_pairing_messages,
 )
 
 
@@ -194,6 +195,7 @@ class PodDraft(commands.Cog):
                 display_name=interaction.user.display_name,
                 avatar_hash=extract_avatar_hash(interaction.user),
                 arena_name=arena_name,
+                overwrite=True,
             )
             if collision_id is not None:
                 audit.event("pod_link_arena_collision", user_id=user_id, arena_name=arena_name,
@@ -215,6 +217,7 @@ class PodDraft(commands.Cog):
 
         for manager in list(ACTIVE_POD_MANAGERS.values()):
             asyncio.create_task(manager.refresh_lobby_now())
+            asyncio.create_task(refresh_round_pairing_messages(manager))
 
     @app_commands.command(name="pod-seeding", description=desc.POD_SEEDING)
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
