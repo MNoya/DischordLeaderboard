@@ -29,7 +29,7 @@ import { ArenaChampBadge, isArenaChampionshipFormat } from "../components/ArenaC
 import { SetCodeDropdown } from "../components/SetCodeDropdown";
 import { MobilePageHeader } from "../components/PageNav";
 import { RankBadge } from "../components/RankBadge";
-import { ArenaRankIcon, latestArenaRank, parseArenaRank } from "../components/ArenaRankIcon";
+import { ArenaRankIcon } from "../components/ArenaRankIcon";
 import { GoToTopButton } from "../components/GoToTopButton";
 import { Tooltip } from "../components/Tooltip";
 
@@ -703,7 +703,6 @@ function Desktop({
   }, [filtersActive, filtered, displayRows, pointsTotal, profile.trophies, profile.events, profile.wins, profile.losses, profile.score]);
   const wp = winPct(stats.wins, stats.losses);
   const ranked = profile.rank > 0;
-  const currentRank = latestArenaRank(events);
   const [pointsModalOpen, setPointsModalOpen] = useState(false);
   const pointsBtnRef = useRef<HTMLButtonElement>(null);
 
@@ -735,11 +734,6 @@ function Desktop({
                 <span className="text-[22px]">{profile.setCode}</span>
               )}
               {ranked && <RankBadge rank={profile.rank} size="lg" />}
-              <ArenaRankIcon
-                endRank={currentRank}
-                size={40}
-                title={`${parseArenaRank(currentRank)?.label} — Arena rank at last draft`}
-              />
             </div>
           </div>
           <div className="ml-auto flex items-stretch gap-4 min-w-0">
@@ -1922,7 +1916,6 @@ function Mobile({
   }, [filtersActive, filtered, displayRows, pointsTotal, profile.trophies, profile.events, profile.wins, profile.losses, profile.score]);
   const wp = winPct(stats.wins, stats.losses);
   const ranked = profile.rank > 0;
-  const currentRank = latestArenaRank(events);
   const [pointsModalOpen, setPointsModalOpen] = useState(false);
   const pointsBtnRef = useRef<HTMLButtonElement>(null);
 
@@ -1957,14 +1950,9 @@ function Mobile({
             />
           </div>
           <div className="flex flex-col items-end gap-1.5 font-display tracking-[0.18em] shrink-0">
-            {(ranked || currentRank) && (
+            {ranked && (
               <span className="flex items-center gap-2" style={{ marginRight: -8 }}>
-                <ArenaRankIcon
-                  endRank={currentRank}
-                  size={30}
-                  title={`${parseArenaRank(currentRank)?.label} — Arena rank at last draft`}
-                />
-                {ranked && <RankBadge rank={profile.rank} size="md" />}
+                <RankBadge rank={profile.rank} size="md" />
               </span>
             )}
             {sets ? (

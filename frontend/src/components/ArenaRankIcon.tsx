@@ -1,5 +1,3 @@
-import type { PlayerDraftEvent } from "../types/leaderboard";
-
 const TIER_FILE_PREFIX: Record<string, string> = {
   Bronze: "bronze",
   Silver: "silver",
@@ -24,15 +22,6 @@ export function parseArenaRank(endRank: string | null | undefined): { label: str
     return null;
   }
   return { label: `${tier} ${div}`, file: `${prefix}${div}` };
-}
-
-export function latestArenaRank(events: PlayerDraftEvent[]): string | null {
-  for (const event of events) {
-    if (parseArenaRank(event.endRank)) {
-      return event.endRank ?? null;
-    }
-  }
-  return null;
 }
 
 export function ArenaRankIcon({
