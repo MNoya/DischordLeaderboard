@@ -345,7 +345,7 @@ def _build_standings_row(
     has_log = data is not None and data.draft_log_url
     log_suffix = ""
     if has_log and slug and event_name:
-        review_url = f"{settings.public_site_url.rstrip('/')}/pods/{slugify(event_name)}/log/{slug}"
+        review_url = f"{settings.public_site_url.rstrip('/')}/pods/{slugify(event_name)}/{slug}"
         log_suffix = f"  [Draft Log]({review_url}) 📜"
     review_suffix = (
         " 🙋" if DRAFT_REVIEW_FEATURE_ENABLED and show_review_flag

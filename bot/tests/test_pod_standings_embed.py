@@ -44,7 +44,7 @@ def test_draft_log_link_points_at_in_site_reviewer_keyed_on_slug():
         include_submit_cta=False,
     )
 
-    assert "/pods/sos-early-pod-draft-4/log/arcyl" in embed.description
+    assert "/pods/sos-early-pod-draft-4/arcyl" in embed.description
     assert "magicprotools.com" not in embed.description
 
 
