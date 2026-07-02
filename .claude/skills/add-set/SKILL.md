@@ -36,14 +36,14 @@ If the search yields a confident, single answer for everything you need, use it.
 
 - Set name (full official, e.g. `Secrets of Strixhaven`)
 - MTG Arena release date (`YYYY-MM-DD`)
-- End date (`YYYY-MM-DD`) — only for backfill (old set); leave blank for the new active set
+- End date (`YYYY-MM-DD`) — only for backfill (old set); for a new set you set an *anticipated* end date yourself (see Mode NEW below)
 
 ### 3. Decide mode: NEW vs OLD
 
-Compare the release date to the current `ACTIVE_SET_CODE`'s `start_date`:
+There is **no `ACTIVE_SET_CODE` constant in `bot/sets.py`** — the active set is derived from today's date by `active_set_code()`, and the current newest set is simply the last entry in `ALL_SETS`. Compare the release date to that newest entry's `start_date`:
 
-- **release date > current active start_date** → **NEW** (rotate)
-- **release date <= current active start_date** → **OLD** (backfill)
+- **release date > newest start_date** → **NEW** (rotate)
+- **release date <= newest start_date** → **OLD** (backfill)
 
 ### 4. Edit `bot/sets.py`
 
@@ -51,16 +51,16 @@ Preserve the column-aligned formatting of surrounding rows in `ALL_SETS` (visual
 
 #### Mode NEW (rotate)
 
-1. Locate the entry in `ALL_SETS` whose `code` equals the current `ACTIVE_SET_CODE`.
-2. If that entry's `end_date` is `None` or `>=` the new release date, change it to `(new release date - 1 day)`.
-3. Append a new `SetSeed(...)` row immediately after that entry. Use `end_date=None`.
-4. Change `ACTIVE_SET_CODE = "<NEW CODE>"`.
-5. Bump the frontend mirror `ACTIVE_SET_CODE` in `frontend/src/data/constants.ts` to the new code.
+Rotation is automatic: `active_set_code()` flips to whichever released set holds today's date, so there is no flag to set — the dates do the work. Every set (except the permanent `CUBE`) must carry an `end_date`; `active_set_code()` skips `None`-ended seeds when matching the active window, so a normal set left open-ended would not rotate in cleanly.
+
+1. Locate the current newest entry in `ALL_SETS` (the last one). Change its `end_date` to `(new release date - 1 day)` — it currently holds an *anticipated* rotation date that the real successor now replaces.
+2. Append a new `SetSeed(...)` row immediately after it. Give it an **anticipated** `end_date` (never `None`): the next set's announced Arena release minus a day if known, otherwise roughly 7 weeks after this release. This keeps the new set inside an active window until its own successor arrives.
+3. Bump the frontend fallback `ACTIVE_SET_CODE` in `frontend/src/data/constants.ts` to the new code. This is only a fallback for when the live set feed hasn't loaded — the site reads the real active set from the network — but keep it current.
 
 #### Mode OLD (backfill)
 
 1. Insert the new `SetSeed(...)` row at the chronologically correct position in `ALL_SETS`, sorted by `start_date`. Use the provided `end_date` (do NOT use `None`).
-2. Do **not** change `ACTIVE_SET_CODE`.
+2. Do **not** touch the newest set or the frontend `ACTIVE_SET_CODE` fallback — a backfill never changes what is active.
 3. Do **not** adjust any other row's `end_date` — existing dates are already correct for sets surrounding a backfilled entry.
 4. If the user reports the set was tracked in 17lands under a non-matching expansion code, also pass `expansion_match="<17lands expansion string>"`. Otherwise omit it.
 
@@ -78,9 +78,22 @@ If the script reports `no keyrune glyph, skipped: <CODE>` — keyrune has no sym
 
 **Then tell the user to upload the PNG as a Discord application emoji** (Developer Portal → the bot's application → Emojis), named by the **lowercase code** (`sos`, `war`, `mh1` …). `/event-scribe` and the set embeds resolve the symbol by that emoji name at startup, so a set whose emoji isn't uploaded renders without its glyph. This upload is manual — the script can't push emojis to Discord.
 
+### 4c. Add the Collector Booster Arena Direct window
+
+Collector Booster Arena Direct Sealed pays **one box per trophy** instead of the play direct's two, so `boxes_for_event` needs the event's date range recorded. Run:
+
+```
+python -m bot.scripts.find_collector_window <CODE>
+```
+
+It resolves the range from the MTG Scribe calendar and prints paste-ready rows.
+
+- If it prints a window, add the `CollectorBoosterWindow(...)` row to `COLLECTOR_BOOSTER_WINDOWS` in `bot/sets.py` and the matching `{ setCode, startDate, endDate }` row to the `COLLECTOR_BOOSTER_WINDOWS` mirror in `frontend/src/data/scoring.ts`. Keep both lists ordered by date (append for a new set). These two lists reimplement the same rule and must stay in sync.
+- If it prints `no Collector Booster Arena Direct found ... yet`, Scribe hasn't scheduled it. Skip this step and tell the user to re-run `find_collector_window <CODE>` once the Arena Direct appears (usually partway into the set's cycle), then add the rows.
+
 ### 5. Show diff
 
-Run `git diff bot/sets.py` and display it to the user.
+Run `git diff bot/sets.py frontend/src/data/scoring.ts` and display it to the user.
 
 ### 6. Run scripts against the local DATABASE_URL
 
@@ -107,7 +120,7 @@ git add bot/sets.py frontend/public/set-symbols/<code>.png
 git commit -m "<subject>"
 ```
 
-Omit the PNG from `git add` if no glyph was generated (the `skipped` case above).
+Omit the PNG from `git add` if no glyph was generated (the `skipped` case above). Also `git add frontend/src/data/scoring.ts` if a collector window row was added in step 4c, and `frontend/src/data/constants.ts` if you bumped the `ACTIVE_SET_CODE` fallback (Mode NEW).
 
 Subject lines (must start with uppercase — memory: `feedback_commit_subject_uppercase.md`):
 
@@ -121,7 +134,7 @@ Tell the user:
 
 - The new commit's short SHA and subject.
 - Mode used (rotate vs backfill).
-- `Push when ready: git push` — Railway redeploys on master push. For NEW mode the bot rotates the leaderboard automatically because `ACTIVE_SET_CODE` changed; for OLD mode the new row just becomes available for stats lookups.
+- `Push when ready: git push` — Railway redeploys on master push. For NEW mode the leaderboard rotates on its own once the new set's `start_date` arrives (date-derived by `active_set_code()`); for OLD mode the new row just becomes available for stats lookups.
 
 Never push automatically.
 

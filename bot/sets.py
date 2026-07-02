@@ -162,6 +162,7 @@ COLLECTOR_BOOSTER_WINDOWS: tuple[CollectorBoosterWindow, ...] = (
     CollectorBoosterWindow("ECL", date(2026, 1, 30), date(2026, 2, 1)),
     CollectorBoosterWindow("TMT", date(2026, 3, 13), date(2026, 3, 15)),
     CollectorBoosterWindow("SOS", date(2026, 4, 30), date(2026, 5, 4)),
+    CollectorBoosterWindow("MSH", date(2026, 6, 30), date(2026, 7, 6)),
 )
 
 # Windows widen by a day each side so a draft finished just before/after the
