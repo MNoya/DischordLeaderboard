@@ -45,8 +45,10 @@ class PodGuide(commands.Cog):
         if will_pin:
             await interaction.response.defer()
             await self._remove_existing_pins(interaction.channel)
-            body = render_pod_guide(mention)
-            message = await interaction.followup.send(body, allowed_mentions=discord.AllowedMentions.none(), wait=True)
+            embed = discord.Embed(description=render_pod_guide_embed_body(mention), color=discord.Color.green())
+            message = await interaction.followup.send(
+                embed=embed, allowed_mentions=discord.AllowedMentions.none(), wait=True
+            )
             await self._pin(message)
             await self._react_love(message)
         else:
@@ -89,11 +91,16 @@ class PodGuide(commands.Cog):
             log.warning("could not read pins while refreshing the pod guide", exc_info=True)
             return
         for message in pins:
-            if message.author == self.bot.user and GUIDE_MARKER in message.content:
+            if message.author == self.bot.user and self._is_pod_guide(message):
                 try:
                     await message.delete()
                 except discord.HTTPException:
                     log.warning("could not remove a stale pod guide pin", exc_info=True)
+
+    def _is_pod_guide(self, message: discord.Message) -> bool:
+        if GUIDE_MARKER in message.content:
+            return True
+        return any(GUIDE_MARKER in (embed.description or "") for embed in message.embeds)
 
 
 async def setup(bot: commands.Bot) -> None:
