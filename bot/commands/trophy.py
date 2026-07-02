@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 # (label, application-emoji name); names resolve via emojis.get_emoji, None until added + reload
 PLATFORM_CHOICES: tuple[tuple[str, str], ...] = (
     ("MTGO", "mtgo"),
-    ("MTGA Mobile", "mtga"),
+    ("MTGA", "mtga"),
     ("Paper", "cardboard"),
 )
 WRITE_IN_EMOJI = "manax"

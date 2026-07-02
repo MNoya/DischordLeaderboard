@@ -109,11 +109,11 @@ def test_upsert_is_idempotent_per_message(session):
     )
 
     upsert_event(session, record="3-0", is_trophy=True, colors="WR", platform="MTGO", **kwargs)
-    upsert_event(session, record="7-2", is_trophy=True, colors="UBg", platform="MTGA Mobile", **kwargs)
+    upsert_event(session, record="7-2", is_trophy=True, colors="UBg", platform="MTGA", **kwargs)
 
     rows = session.query(SelfReportedEvent).all()
     assert len(rows) == 1
-    assert (rows[0].record, rows[0].colors, rows[0].platform) == ("7-2", "UBg", "MTGA Mobile")
+    assert (rows[0].record, rows[0].colors, rows[0].platform) == ("7-2", "UBg", "MTGA")
 
 
 def test_upsert_distinct_messages_create_distinct_rows(session):
@@ -151,7 +151,7 @@ def test_upsert_unknown_set_code_leaves_set_id_null(session):
 
     event = upsert_event(
         session, player_id=player.id, set_code="ZZZ", record="3-0", is_trophy=True, colors=None,
-        platform="MTGA Mobile", caption=None, screenshot_url=None,
+        platform="MTGA", caption=None, screenshot_url=None,
         source_channel_id="c1", source_message_id="m9", source_url="u9",
     )
 

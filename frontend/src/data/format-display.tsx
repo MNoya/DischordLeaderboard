@@ -15,7 +15,7 @@ export const FMT_COLORS: Record<string, string> = {
   Pod: "#a86bff",
   // Self-reported platforms (values are the platform strings the trophy stores)
   MTGO: "#e8503a",
-  "MTGA Mobile": "#e8503a",
+  MTGA: "#e8503a",
   Paper: "#a9744f",
 };
 

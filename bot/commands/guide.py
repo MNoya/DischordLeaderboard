@@ -30,6 +30,7 @@ GUIDE_COLOR = discord.Color.green()
 HISTORY_SCAN_LIMIT = 20
 WEBHOOK_NAME = "LLU Server Guide"
 WEBHOOK_USERNAME_LIMIT = 80
+WEBHOOK_FALLBACK_NOTE = " (posted as the bot, grant Manage Webhooks to post as the server owner)"
 MODERATOR_ROLE_NAME = "Moderator"
 
 TEXT_DISPLAY_TYPE = 10
@@ -50,23 +51,24 @@ async def sync_channel(guild: discord.Guild, channel_name: str,
         return SYNC_NO_CHANNEL, f"⚠️ `{channel_name}`: no matching channel"
     mod_mention = _moderator_mention(guild)
     pod_drafters_mention = _pod_drafters_mention(guild)
-    rendered = [render_page(page.name, guild.text_channels, guild.me.mention, mod_mention, pod_drafters_mention)
+    rendered = [render_page(page.name, guild.text_channels, _bot_mention(guild), mod_mention, pod_drafters_mention)
                 for page in pages]
     show_titles = len(pages) > 1
     views = [_build_view(content, show_title=show_titles) for content in rendered]
     try:
         webhook = await _guide_webhook(channel)
+        webhook_note = "" if webhook is not None else WEBHOOK_FALLBACK_NOTE
         messages = await _guide_messages(channel, guild.me, webhook)
         topic_note = await _sync_topic(channel, _channel_topic(rendered))
         if _all_current(messages, views, webhook):
-            return SYNC_CURRENT, f"✅ {channel.mention} up to date{topic_note}"
+            return SYNC_CURRENT, f"✅ {channel.mention} up to date{topic_note}{webhook_note}"
         had_existing = bool(messages)
         for message in messages:
             await _delete_guide_message(message, webhook)
         await _post_pages(channel, webhook, views)
         status = SYNC_UPDATED if had_existing else SYNC_POSTED
         word = "reposted" if had_existing else "posted"
-        return status, f"✅ {channel.mention} {word}{topic_note}"
+        return status, f"✅ {channel.mention} {word}{topic_note}{webhook_note}"
     except discord.Forbidden:
         return SYNC_FORBIDDEN, (f"⚠️ {channel.mention}: missing permissions "
                                 "(View Channel, Send Messages, Read Message History, Embed Links)")
@@ -151,6 +153,14 @@ async def _post_pages(channel: discord.TextChannel, webhook: discord.Webhook | N
             allowed_mentions=discord.AllowedMentions.none(),
             wait=True,
         )
+
+
+def _bot_mention(guild: discord.Guild) -> str:
+    """The bot's managed integration role renders in its role colour, nicer than the plain user
+    mention; fall back to the user mention when the role can't be resolved."""
+    if guild.self_role is not None:
+        return guild.self_role.mention
+    return guild.me.mention
 
 
 def _moderator_mention(guild: discord.Guild) -> str:
