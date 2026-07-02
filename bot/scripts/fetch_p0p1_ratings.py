@@ -4,7 +4,8 @@ Usage:
     python -m bot.scripts.fetch_p0p1_ratings --set-code MSH [--phase midway|final] [--end-date YYYY-MM-DD]
 
 Writes frontend/src/data/fixtures/p0p1-ratings-{set_code_lower}.json. Commit the result
-and redeploy to flip the contest into midway or final phase.
+and redeploy to flip the contest into midway or final phase. dateRange is the exact
+17lands query window (start_date/end_date), not decorative.
 """
 from __future__ import annotations
 
@@ -45,7 +46,7 @@ def main() -> None:
 
     client = SeventeenLandsClient()
     print(f"Fetching {set_code} {FORMAT} card ratings from 17lands...")
-    raw = client.fetch_card_ratings(set_code, FORMAT)
+    raw = client.fetch_card_ratings(set_code, FORMAT, start_date=start, end_date=end)
     print(f"Received {len(raw)} card rows")
 
     cards = []

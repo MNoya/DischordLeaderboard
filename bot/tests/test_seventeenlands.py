@@ -195,6 +195,38 @@ def test_fetch_drafts_handles_null_drafts():
 
 
 @responses.activate
+def test_fetch_card_ratings_includes_date_params_when_set():
+    responses.add(
+        responses.GET,
+        f"{DEFAULT_BASE_URL}/card_ratings/data",
+        json=[{"name": "Bolt", "ever_drawn_win_rate": 0.55}],
+        status=200,
+    )
+
+    _client().fetch_card_ratings("MSH", start_date="2026-06-23", end_date="2026-07-02")
+
+    request = responses.calls[0].request
+    assert "start_date=2026-06-23" in request.url
+    assert "end_date=2026-07-02" in request.url
+
+
+@responses.activate
+def test_fetch_card_ratings_omits_date_params_when_none():
+    responses.add(
+        responses.GET,
+        f"{DEFAULT_BASE_URL}/card_ratings/data",
+        json=[{"name": "Bolt", "ever_drawn_win_rate": 0.55}],
+        status=200,
+    )
+
+    _client().fetch_card_ratings("MSH")
+
+    request = responses.calls[0].request
+    assert "start_date" not in request.url
+    assert "end_date" not in request.url
+
+
+@responses.activate
 def test_verify_token_true_for_200_with_drafts_key():
     responses.add(
         responses.GET,
