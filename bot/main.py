@@ -524,11 +524,11 @@ def build_bot(guild_id: int) -> commands.Bot:
                 await reconcile_ping_roles(bot)
             except Exception:
                 log.exception("ping-role reconcile failed")
-        if not settings.auto_refresh_enabled:
+        if settings.auto_refresh_enabled:
+            if not auto_refresh_tick.is_running():
+                auto_refresh_tick.start()
+        else:
             log.info("AUTO_REFRESH_ENABLED=false; skipping the scheduled 17lands refresh tick")
-            return
-        if not auto_refresh_tick.is_running():
-            auto_refresh_tick.start()
         if settings.media_sync_enabled and not media_sync_tick.is_running():
             media_sync_tick.start()
         if settings.media_sync_enabled and not media_freshness_tick.is_running():
