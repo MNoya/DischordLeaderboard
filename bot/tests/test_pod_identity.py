@@ -11,11 +11,13 @@ from bot.models import Player
 from bot.services.pod_draft_manager import _find_guild_member_for_arena
 from bot.services.pod_drafts import (
     attach_arena_alias,
+    has_arena_suffix,
     levenshtein,
     lobby_match_status,
     normalize_player_name,
     player_for_name,
     classify_lobby_names,
+    strip_arena_suffix,
     suggest_lobby_name,
 )
 
@@ -74,6 +76,37 @@ def test_normalize_strips_only_trailing_suffix():
 
 def test_normalize_empty_string():
     assert normalize_player_name("") == ""
+
+
+# --- strip_arena_suffix / has_arena_suffix ---
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("Alice#48087", "Alice"),
+        ("Alias#13488 (Bob)", "Alias (Bob)"),
+        ("Marlo#?????", "Marlo"),
+        ("driftwood60", "driftwood60"),
+        ("Plain Name", "Plain Name"),
+        ("#12345", "#12345"),
+    ],
+)
+def test_strip_arena_suffix_preserves_case_and_nickname(raw, expected):
+    assert strip_arena_suffix(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "raw, present",
+    [
+        ("Alice#48087", True),
+        ("Alias#13488 (Bob)", True),
+        ("Marlo#?????", True),
+        ("driftwood60", False),
+        ("Name#abc", False),
+    ],
+)
+def test_has_arena_suffix(raw, present):
+    assert has_arena_suffix(raw) is present
 
 
 # --- player_for_name priority ---

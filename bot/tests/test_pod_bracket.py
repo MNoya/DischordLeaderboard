@@ -142,3 +142,9 @@ def test_format_result_change_cleared_names_both_without_score():
     assert "Arcyl" in phrase
     assert "Bramblewick" in phrase
     assert not any(ch.isdigit() for ch in phrase)
+
+
+def test_format_result_change_drops_arena_ids_from_both_players():
+    phrase = format_result_change("Arcyl#48087", "Bramblewick#13488", "Arcyl#48087", "2-0")
+
+    assert phrase == "Arcyl wins 2-0 vs Bramblewick"

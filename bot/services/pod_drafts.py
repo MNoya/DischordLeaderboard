@@ -123,6 +123,21 @@ def normalize_player_name(name: str) -> str:
     return _ARENA_ID_RE.sub("", name.replace("\\", "")).lower()
 
 
+_ARENA_TOKEN_RE = re.compile(r"\s*#[0-9?]+(?=$|\s|\))")
+
+
+def strip_arena_suffix(name: str) -> str:
+    """Display name with the MTG Arena `#12345` discriminator removed, case preserved. For surfaces that
+    show the friendly name (standings, reported results) rather than the pre-match Arena reference.
+    Handles a trailing suffix (`Alice#48087`) and one embedded before a nickname (`Alias#13488 (Bob)`)."""
+    stripped = _ARENA_TOKEN_RE.sub("", name).strip()
+    return stripped or name
+
+
+def has_arena_suffix(name: str) -> bool:
+    return bool(name and _ARENA_TOKEN_RE.search(name))
+
+
 def name_token_match(norm: str, field: str) -> bool:
     """True when norm appears as a standalone word token of field, e.g. `wonderland`
     in `Alice (Wonderland)`."""
