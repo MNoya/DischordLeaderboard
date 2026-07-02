@@ -66,8 +66,9 @@ export function poolByPack(views: DraftPickView[][][], seat: number, pack: numbe
 
 const WUBRG = ["W", "U", "B", "R", "G"];
 
-// A seat's colors, inferred from its built deck (falling back to its full pool). A color counts when it
-// shows on enough cards to read as a main color rather than an off-color splash.
+// A seat's colors, inferred from its built deck. Colors on enough cards to read as main colors come
+// first as uppercase; the rest present in the deck follow as lowercase splashes, matching the
+// 17lands-style casing Pips renders.
 export function seatColors(artifact: PodDraftArtifact, seat: number): string {
   const deck = artifact.decks?.[seat]?.main ?? [];
   const counts = new Map<string, number>();
@@ -83,7 +84,9 @@ export function seatColors(artifact: PodDraftArtifact, seat: number): string {
     }
   }
   const threshold = Math.max(2, colored * 0.15);
-  return WUBRG.filter((c) => (counts.get(c) ?? 0) >= threshold).join("");
+  const main = WUBRG.filter((c) => (counts.get(c) ?? 0) >= threshold);
+  const splashes = WUBRG.filter((c) => !main.includes(c) && (counts.get(c) ?? 0) > 0);
+  return main.join("") + splashes.join("").toLowerCase();
 }
 
 // Draftmancer names carry a discriminator (`Noya#08011`); the board shows the bare handle.
