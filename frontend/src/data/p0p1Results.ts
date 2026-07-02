@@ -4,7 +4,7 @@
 import type { Card, P0P1PickStat, SlotKey } from "../types/p0p1";
 import type { SlotDefinition } from "../types/p0p1";
 
-export type P0P1Phase = "voting" | "postVoting" | "midway" | "final";
+export type P0P1Phase = "voting" | "postVoting" | "midway" | "finalizing" | "final";
 
 export interface CardRating {
   card_name: string;

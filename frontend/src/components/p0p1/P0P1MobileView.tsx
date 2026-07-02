@@ -18,7 +18,9 @@ import { GoToTopButton } from "../GoToTopButton";
 import { SiteFooter } from "../SiteFooter";
 import { ChevronDown } from "../Icons";
 import { MidwayResults } from "./MidwayResults";
+import { FinalizingBanner } from "./FinalizingBanner";
 import type { useP0P1Ballot } from "../../data/useP0P1Ballot";
+import type { P0P1Phase } from "../../data/p0p1Results";
 import {
   P0P1_SET_CODE as SET_CODE,
   P0P1_VOTING_DEADLINE as VOTING_DEADLINE,
@@ -52,6 +54,7 @@ export function P0P1MobileView({ ballot }: { ballot: Ballot }) {
     editingSlotKey,
     setEditingSlotKey,
     selectAndClose,
+    phase,
     p0p1Sets,
   } = ballot;
 
@@ -77,7 +80,7 @@ export function P0P1MobileView({ ballot }: { ballot: Ballot }) {
       <AppHeader subtitle="P0 P1 Challenge" subtitleShort="P0 P1" />
 
       <main className={`flex-1 flex flex-col w-full px-4 pt-4 ${loginBarVisible ? "pb-20" : "pb-4"}`}>
-        <MobileIntro sets={p0p1Sets} isPastDeadline={isPastDeadline} />
+        <MobileIntro sets={p0p1Sets} phase={phase} />
         {dataReady ? (
           <>
             {!isPastDeadline && (
@@ -127,6 +130,7 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
     cardsByName,
     dataReady,
     resultsDataReady,
+    midwayDataReady,
     user,
     authLoading,
     signIn,
@@ -153,13 +157,14 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
   const groupedStats = hasParticipated && pickStats ? groupBySlot(pickStats) : undefined;
   const isCompleteEntrant = isPastDeadline && Boolean(user) && isComplete;
   const didNotVote = isPastDeadline && Boolean(user) && !isComplete;
+  const showMidway = phase === "midway" || (phase === "finalizing" && midwayDataReady);
 
   return (
     <div className="bg-bg text-text min-h-screen flex flex-col animate-fadeIn">
       <AppHeader subtitle="P0 P1 Challenge" subtitleShort="P0 P1" />
 
       <main className={`flex-1 flex flex-col w-full px-3 pt-3 ${loginBarVisible ? "pb-24" : "pb-4"}`}>
-        <MobileIntro sets={p0p1Sets} isPastDeadline={isPastDeadline} />
+        <MobileIntro sets={p0p1Sets} phase={phase} />
         {dataReady ? (
           <>
             {!isPastDeadline && (
@@ -196,7 +201,9 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
               </div>
             )}
 
-            {phase === "midway" ? (
+            {phase === "finalizing" && <FinalizingBanner showingMidway={showMidway} />}
+
+            {showMidway ? (
               resultsDataReady && ratingsSnapshot && cards && pickStats ? (
                 <MidwayResults
                   ratingsSnapshot={ratingsSnapshot}
@@ -215,7 +222,7 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
                   ⚠️ Final Results Page — TO BE IMPLEMENTED
                 </div>
               ) : null
-            ) : phase === "postVoting" ? (
+            ) : phase === "postVoting" || phase === "finalizing" ? (
               pickStats && pickStats.length > 0 && (
                 <>
                   {didNotVote && <MobileDidNotVoteLine />}
@@ -403,12 +410,13 @@ function MobileLoginBar({ show, signIn, text }: { show: boolean; signIn: () => v
 
 function MobileIntro({
   sets,
-  isPastDeadline,
+  phase,
 }: {
   sets: SetSummary[] | undefined;
-  isPastDeadline: boolean;
+  phase: P0P1Phase;
 }) {
   const [open, setOpen] = useState(true);
+  const isPastDeadline = phase !== "voting";
 
   return (
     <section className="bg-surface border border-border rounded-xl p-4 mb-3 flex flex-col gap-2.5">
@@ -430,7 +438,7 @@ function MobileIntro({
         </span>
         <div className="flex flex-col items-end gap-1 shrink-0">
           <div className="flex items-center gap-2">
-            <CountdownStacked deadline={VOTING_DEADLINE} scoringDate={SCORING_DATE} pastDeadline={isPastDeadline} />
+            <CountdownStacked deadline={VOTING_DEADLINE} scoringDate={SCORING_DATE} phase={phase} />
             <ChevronDown size={22} className={`shrink-0 text-muted transition-transform ${open ? "" : "-rotate-90"}`} />
           </div>
           {isPastDeadline && (
@@ -532,23 +540,31 @@ export function SlotsListSkeleton() {
 function CountdownStacked({
   deadline,
   scoringDate,
-  pastDeadline = false,
+  phase,
 }: {
   deadline: Date;
   scoringDate?: Date;
-  pastDeadline?: boolean;
+  phase: P0P1Phase;
 }) {
   useTick(30_000);
   const now = p0p1Now();
   const deadlineDiff = deadline.getTime() - now;
 
-  if (!pastDeadline && deadlineDiff > 0) {
+  if (phase === "voting") {
     return (
       <div className="flex flex-col items-end leading-tight whitespace-nowrap shrink-0">
         <span className="text-muted text-[11px] tracking-[0.04em]">Closes in</span>
         <span className="text-green text-[13px]">{formatRemaining(deadlineDiff)}</span>
       </div>
     );
+  }
+
+  if (phase === "final") {
+    return <span className="text-green text-[13px] whitespace-nowrap">Results are in</span>;
+  }
+
+  if (phase === "finalizing") {
+    return <span className="text-green text-[13px] whitespace-nowrap">Tallying final results</span>;
   }
 
   if (scoringDate) {
@@ -568,7 +584,6 @@ function CountdownStacked({
         </div>
       );
     }
-    return <span className="text-green text-[13px] whitespace-nowrap">Results are in</span>;
   }
 
   return <span className="text-muted text-[13px] whitespace-nowrap">Entries have closed</span>;

@@ -9,6 +9,7 @@ import { SlotPip, SLOT_ACCENT } from "../components/p0p1/slotVisuals";
 import { P0P1ProgressBar } from "../components/p0p1/ProgressBar";
 import { ClearAll } from "../components/p0p1/ClearAll";
 import { P0P1Hero } from "../components/p0p1/P0P1Hero";
+import { FinalizingBanner } from "../components/p0p1/FinalizingBanner";
 import { AutoSaveBadge } from "../components/p0p1/AutoSaveBadge";
 import { P0P1MobileSelector } from "../components/p0p1/P0P1MobileView";
 import { GoToTopButton } from "../components/GoToTopButton";
@@ -31,6 +32,7 @@ export function P0P1Page() {
     cardsByName,
     dataReady,
     resultsDataReady,
+    midwayDataReady,
     user,
     authLoading,
     signIn,
@@ -73,9 +75,10 @@ export function P0P1Page() {
     </button>
   );
 
+  const showMidway = phase === "midway" || (phase === "finalizing" && midwayDataReady);
   const ballotScorecard =
     user && isPastDeadline && isComplete && pickStats && pickStats.length > 0 ? (
-      phase === "midway" && resultsDataReady && ratingsSnapshot && cards ? (
+      (phase === "midway" || phase === "finalizing") && resultsDataReady && ratingsSnapshot && cards ? (
         <MidwayBallotScorecard ratingsSnapshot={ratingsSnapshot} cards={cards} picksBySlot={picksBySlot} />
       ) : (
         <P0P1BallotScorecard pickStats={pickStats} picksBySlot={picksBySlot} />
@@ -100,7 +103,7 @@ export function P0P1Page() {
   return (
     <div className="bg-bg text-text min-h-screen flex flex-col animate-fadeIn">
       <AppHeader subtitle="P0 P1 Challenge" subtitleShort="P0 P1" />
-      <P0P1Hero cta={heroCta} belowIntro={belowIntro} isPastDeadline={isPastDeadline} />
+      <P0P1Hero cta={heroCta} belowIntro={belowIntro} phase={phase} />
 
       <main className="flex-1 px-10 pb-5 pt-5">
         {!isPastDeadline &&
@@ -115,7 +118,9 @@ export function P0P1Page() {
             <RosterStripSkeleton />
           ))}
 
-        {phase === "midway" ? (
+        {phase === "finalizing" && <FinalizingBanner showingMidway={showMidway} />}
+
+        {showMidway ? (
           resultsDataReady && ratingsSnapshot && cards && pickStats ? (
             <MidwayResults
               ratingsSnapshot={ratingsSnapshot}
@@ -138,7 +143,7 @@ export function P0P1Page() {
           ) : (
             <CardGridSkeleton />
           )
-        ) : phase === "postVoting" ? (
+        ) : phase === "postVoting" || phase === "finalizing" ? (
           pickStats && pickStats.length > 0 && (
             <PostVotingStats
               pickStats={pickStats}

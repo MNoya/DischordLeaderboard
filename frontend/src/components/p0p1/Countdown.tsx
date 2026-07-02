@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { p0p1Now } from "../../data/p0p1DevState";
+import type { P0P1Phase } from "../../data/p0p1Results";
 
 export function pluralizeUnit(value: number, unit: string) {
   return `${value} ${unit}${value === 1 ? "" : "s"}`;
@@ -30,22 +31,38 @@ export function P0P1Countdown({
   deadline,
   scoringDate,
   size = 13,
-  pastDeadline = false,
+  phase,
 }: {
   deadline: Date;
   scoringDate?: Date;
   size?: number;
-  pastDeadline?: boolean;
+  phase: P0P1Phase;
 }) {
   useTick(30_000);
   const now = p0p1Now();
   const deadlineDiff = deadline.getTime() - now;
 
-  if (!pastDeadline && deadlineDiff > 0) {
+  if (phase === "voting") {
     return (
       <span className="whitespace-nowrap" style={{ fontSize: size }}>
         <span className="text-muted">Closes in </span>
         <span className="text-green">{formatRemaining(deadlineDiff)}</span>
+      </span>
+    );
+  }
+
+  if (phase === "final") {
+    return (
+      <span className="text-green" style={{ fontSize: size }}>
+        Results are in
+      </span>
+    );
+  }
+
+  if (phase === "finalizing") {
+    return (
+      <span className="text-green" style={{ fontSize: size }}>
+        Tallying final results
       </span>
     );
   }
@@ -67,11 +84,6 @@ export function P0P1Countdown({
         </span>
       );
     }
-    return (
-      <span className="text-green" style={{ fontSize: size }}>
-        Results are in
-      </span>
-    );
   }
 
   return (

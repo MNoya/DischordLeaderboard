@@ -10,18 +10,20 @@ import {
   P0P1_VOTING_DEADLINE as VOTING_DEADLINE,
   P0P1_SCORING_DATE as SCORING_DATE,
 } from "../../data/p0p1Slots";
+import type { P0P1Phase } from "../../data/p0p1Results";
 
 export function P0P1Hero({
   cta,
   innerRef,
   belowIntro,
-  isPastDeadline,
+  phase,
 }: {
   cta: ReactNode;
   innerRef?: Ref<HTMLDivElement>;
   belowIntro?: ReactNode;
-  isPastDeadline?: boolean;
+  phase: P0P1Phase;
 }) {
+  const isPastDeadline = phase !== "voting";
   return (
     <div ref={innerRef} className="sticky top-0 z-30 px-10 py-5 border-b border-border bg-surface flex flex-wrap items-center gap-x-8 gap-y-3">
       <SetGlyph code={SET_CODE} size={84} />
@@ -34,7 +36,7 @@ export function P0P1Hero({
           <span className="font-display text-[22px] text-muted tracking-[0.06em]">{P0P1_SET_NAME.toUpperCase()}</span>
         </div>
         <div className="mono text-[11px] mt-1">
-          <P0P1Countdown deadline={VOTING_DEADLINE} scoringDate={SCORING_DATE} size={11} pastDeadline={isPastDeadline} />
+          <P0P1Countdown deadline={VOTING_DEADLINE} scoringDate={SCORING_DATE} size={11} phase={phase} />
         </div>
         {isPastDeadline && (
           <div className="w-full mt-2">
