@@ -248,6 +248,10 @@ def build_bot(guild_id: int) -> commands.Bot:
         cmd_name = interaction.command.qualified_name if interaction.command else "unknown"
         invoker = f"{interaction.user} (`{interaction.user.id}`)"
         opts = ", ".join(f"{k}={v!r}" for k, v in interaction.namespace) or "no args"
+        if isinstance(original, app_commands.CommandNotFound):
+            hint = f"⚠️ `{original.name}` clicked by {invoker} but not registered. Run `!sync` if you renamed it."
+            await _notify_owner(bot, hint, "")
+            return
         tb = "".join(traceback.format_exception(type(original), original, original.__traceback__))
         await _notify_owner(bot, f"⚠️ `/{cmd_name}` crashed (invoked by {invoker}, args: {opts}):", tb)
 
@@ -546,9 +550,11 @@ async def _notify_owner(bot: commands.Bot, header: str, body: str) -> None:
         return
     try:
         owner = bot.get_user(owner_id) or await bot.fetch_user(owner_id)
-        # Discord caps message body at 2000 chars; truncate the traceback to fit comfortably
-        snippet = body[-1700:]
-        await owner.send(f"{header}\n```\n{snippet}\n```")
+        if body:
+            # Discord caps message body at 2000 chars; truncate the traceback to fit comfortably
+            await owner.send(f"{header}\n```\n{body[-1700:]}\n```")
+        else:
+            await owner.send(header)
     except discord.HTTPException:
         log.warning("could not DM owner about crash", exc_info=True)
 
