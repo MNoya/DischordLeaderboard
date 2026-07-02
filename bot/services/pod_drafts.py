@@ -130,6 +130,7 @@ def name_token_match(norm: str, field: str) -> bool:
 
 
 _FUZZY_MIN_LEN = 5
+_SUGGEST_MAX_EDITS = 2
 
 
 def within_one_edit(a: str, b: str) -> bool:
@@ -154,6 +155,40 @@ def within_one_edit(a: str, b: str) -> bool:
             edited = True
             j += 1
     return True
+
+
+def levenshtein(a: str, b: str) -> int:
+    """Edit distance between two strings; a transposition counts as two edits."""
+    if a == b:
+        return 0
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cost = 0 if ca == cb else 1
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost))
+        prev = cur
+    return prev[-1]
+
+
+def suggest_lobby_name(declared: str, live_names: Sequence[str]) -> str | None:
+    """Closest live Draftmancer name to `declared` within a few edits, for a did-you-mean hint
+    when /link-arena resolves to no seat in any active lobby. Catches transpositions like
+    `sytlish`→`stylish` that within_one_edit rejects."""
+    norm = normalize_player_name(declared)
+    if len(norm) < _FUZZY_MIN_LEN:
+        return None
+    best_name = None
+    best_dist = _SUGGEST_MAX_EDITS + 1
+    for name in live_names:
+        candidate = normalize_player_name(name)
+        if len(candidate) < _FUZZY_MIN_LEN:
+            continue
+        dist = levenshtein(norm, candidate)
+        if dist < best_dist:
+            best_dist = dist
+            best_name = name
+    return best_name if best_dist <= _SUGGEST_MAX_EDITS else None
 
 
 def _normalized_column(col):
@@ -238,6 +273,20 @@ def player_for_name(session: Session, name: str) -> Player | None:
             return near[0]
 
     return None
+
+
+def lobby_match_status(declared: str, player_id: str, live_names: Sequence[str]) -> tuple[bool, str | None]:
+    """Whether a live lobby seat now resolves to `player_id`, plus a did-you-mean name when it doesn't.
+
+    Mirrors the lobby-card classifier: matched is True exactly when some Draftmancer name in
+    `live_names` resolves via player_for_name to the just-linked player. When unmatched, the second
+    element is the closest live name to `declared` (or None), surfaced as a /link-arena typo hint."""
+    with SessionLocal() as session:
+        for name in live_names:
+            player = player_for_name(session, name)
+            if player is not None and player.id == player_id:
+                return True, None
+    return False, suggest_lobby_name(declared, live_names)
 
 
 def attach_arena_alias(

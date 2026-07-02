@@ -38,6 +38,7 @@ from bot.services.pod_drafts import (
     load_event_set_code_sync,
     load_event_thread_id_sync,
     attach_arena_alias,
+    lobby_match_status,
     search_event_names_sync,
 )
 from bot.services.player_stats import SeededAttendee, rank_ordered_names, seed_attendees, seated_ring_order
@@ -61,6 +62,12 @@ from bot.services.pod_tournament import (
 log = logging.getLogger(__name__)
 
 _ARENA_INPUT_RE = re.compile(r"^.+#\d+$")
+
+MSG_LINK_ARENA_NO_LOBBY_MATCH = (
+    "⚠️ No one in an active pod lobby is drafting as `{arena_name}`. Check that it matches "
+    "your Draftmancer name exactly."
+)
+MSG_LINK_ARENA_DID_YOU_MEAN = "Did you mean `{suggestion}`? Re-run /link-arena with that exact handle."
 
 YES_EMOJI = "✅"
 MAYBE_EMOJI = "🤷"
@@ -215,9 +222,31 @@ class PodDraft(commands.Cog):
             allowed_mentions=no_pings,
         )
 
+        await self._warn_if_no_lobby_match(interaction, arena_name, player_id)
+
         for manager in list(ACTIVE_POD_MANAGERS.values()):
             asyncio.create_task(manager.refresh_lobby_now())
             asyncio.create_task(refresh_round_pairing_messages(manager))
+
+    async def _warn_if_no_lobby_match(
+        self, interaction: discord.Interaction, arena_name: str, player_id: str
+    ) -> None:
+        """Ephemeral nudge when the just-linked handle resolves to no seat in any live lobby — the
+        typo case where the link silently takes no effect. Skipped when no lobby is running."""
+        live_names = _live_lobby_names()
+        if not live_names:
+            return
+        matched, suggestion = await asyncio.to_thread(
+            lobby_match_status, arena_name, player_id, live_names,
+        )
+        if matched:
+            return
+        warning = MSG_LINK_ARENA_NO_LOBBY_MATCH.format(arena_name=arena_name)
+        if suggestion is not None:
+            warning = f"{warning}\n{MSG_LINK_ARENA_DID_YOU_MEAN.format(suggestion=suggestion)}"
+        audit.event("pod_link_arena_no_lobby_match", user_id=str(interaction.user.id),
+                    arena_name=arena_name, suggestion=suggestion)
+        await interaction.followup.send(warning, ephemeral=(interaction.guild is not None))
 
     @app_commands.command(name="pod-seeding", description=desc.POD_SEEDING)
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
@@ -959,6 +988,16 @@ def _find_manager_for_thread(interaction: discord.Interaction):
         if str(manager.thread_id) == channel_id:
             return manager
     return next(iter(ACTIVE_POD_MANAGERS.values()), None)
+
+
+def _live_lobby_names() -> list[str]:
+    """Draftmancer usernames currently seated across all active, not-yet-complete real pod lobbies."""
+    names: list[str] = []
+    for manager in ACTIVE_POD_MANAGERS.values():
+        if manager.draft_complete or manager.kind == "mock":
+            continue
+        names.extend(n for n in manager.non_bot_session_names() if n)
+    return names
 
 
 async def setup(bot: commands.Bot) -> None:

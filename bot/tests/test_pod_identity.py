@@ -11,9 +11,12 @@ from bot.models import Player
 from bot.services.pod_draft_manager import _find_guild_member_for_arena
 from bot.services.pod_drafts import (
     attach_arena_alias,
+    levenshtein,
+    lobby_match_status,
     normalize_player_name,
     player_for_name,
     classify_lobby_names,
+    suggest_lobby_name,
 )
 
 _ARENA_INPUT_RE = re.compile(r"^.+#\d+$")
@@ -282,6 +285,82 @@ def test_classify_preserves_order(session):
     result = classify_lobby_names(session, names)
     assert [n for n, _ in result] == names
     assert [dn for _, dn in result] == ["One", None, "Three", None]
+
+
+# --- lobby did-you-mean fuzzy suggestion ---
+
+@pytest.mark.parametrize(
+    ("a", "b", "expected"),
+    [
+        ("abc", "abc", 0),
+        ("abc", "abd", 1),
+        ("abc", "ab", 1),
+        ("stylish", "sytlish", 2),
+    ],
+)
+def test_levenshtein_distance(a, b, expected):
+    assert levenshtein(a, b) == expected
+
+
+def test_suggest_catches_transposition():
+    live = ["Stylish Greninja#01952", "Baneless#56063"]
+    assert suggest_lobby_name("Sytlish Greninja#01952", live) == "Stylish Greninja#01952"
+
+
+def test_suggest_returns_none_when_nothing_close():
+    assert suggest_lobby_name("Totally Different#1", ["Baneless#56063"]) is None
+
+
+def test_suggest_ignores_short_names():
+    assert suggest_lobby_name("ab#1", ["abz#2"]) is None
+
+
+def test_suggest_picks_closest_of_several():
+    live = ["Zephyrus#1", "Vortexia#2", "Baneless#3"]
+    assert suggest_lobby_name("Vortexib#9", live) == "Vortexia#2"
+
+
+# --- lobby_match_status ---
+
+def test_lobby_match_status_matched_when_seat_resolves(session, monkeypatch):
+    monkeypatch.setattr("bot.services.pod_drafts.SessionLocal", _session_factory(session))
+    player = _seed_player(
+        session, discord_id="50", username="greninja", display_name="Sage Mode Greninja",
+        arena_name="Stylish Greninja#01952",
+    )
+
+    matched, suggestion = lobby_match_status(
+        "Stylish Greninja#01952", player.id, ["Stylish Greninja#01952", "Baneless#1"],
+    )
+
+    assert matched is True
+    assert suggestion is None
+
+
+def test_lobby_match_status_unmatched_returns_suggestion(session, monkeypatch):
+    monkeypatch.setattr("bot.services.pod_drafts.SessionLocal", _session_factory(session))
+    player = _seed_player(
+        session, discord_id="51", username="greninja", display_name="Sage Mode Greninja",
+        arena_name="Sytlish Greninja#01952",
+    )
+
+    matched, suggestion = lobby_match_status(
+        "Sytlish Greninja#01952", player.id, ["Stylish Greninja#01952", "Baneless#1"],
+    )
+
+    assert matched is False
+    assert suggestion == "Stylish Greninja#01952"
+
+
+def _session_factory(session):
+    class _Ctx:
+        def __enter__(self):
+            return session
+
+        def __exit__(self, *exc):
+            return False
+
+    return lambda: _Ctx()
 
 
 # --- /link-arena input format (regex) ---
