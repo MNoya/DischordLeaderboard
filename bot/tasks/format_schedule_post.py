@@ -23,6 +23,7 @@ from bot.commands.event_scribe import (
     schedule_title_marker,
     select_groups,
 )
+from bot.commands.guide import SYNC_CURRENT, sync_channel
 from bot.config import settings
 from bot.services import mtgscribe
 from bot.services.format_schedule import (
@@ -30,17 +31,20 @@ from bot.services.format_schedule import (
     ANNOUNCE_NONE,
     ANNOUNCE_WINDOWS,
     DEDUP_LOOKBACK,
+    FORMAT_ARCHIVE_CATEGORY,
     OPEN_TZ,
     SCHEDULE_PINS,
     SchedulePin,
     already_announced,
     announcement_format,
+    archive_candidates,
     latest_channel_in_category,
     newest_set,
     newly_opened,
     next_rotation,
     previous_window_start,
 )
+from bot.services.server_guide import OVERVIEW_PAGE, stripped_channel_name
 
 LOOKBACK_DAYS = 90
 HISTORY_SCAN_LIMIT = 100
@@ -96,6 +100,50 @@ async def fire_window() -> None:
             scheduled = announce_groups(events, pin)
             fresh = newly_opened(scheduled, since, now)
             await _announce(channel, pin, fresh, scheduled, emojis)
+
+    await _rotate_set_channels(guild)
+
+
+async def _rotate_set_channels(guild: discord.Guild) -> None:
+    """Post-rotation channel upkeep: move stale set channels to the Format Archive and re-sync the
+    channel-overview guide page so its active-set link follows. The new set's channel is mod-created
+    during preview season and coexists with the outgoing one until the leaderboard rotates — the bot
+    only archives what the rotation left behind, never creates."""
+    stale = archive_candidates(guild.text_channels)
+    if stale:
+        archive = discord.utils.get(guild.categories, name=FORMAT_ARCHIVE_CATEGORY)
+        if archive is None:
+            log.warning(f"format-schedule: no '{FORMAT_ARCHIVE_CATEGORY}' category; skipping archiving")
+        else:
+            for channel in stale:
+                await _archive_channel(channel, archive)
+    status, detail = await sync_channel(guild, OVERVIEW_PAGE.channel, (OVERVIEW_PAGE,))
+    if status != SYNC_CURRENT:
+        log.info(f"format-schedule: channel-overview sync: {detail}")
+
+
+async def _archive_channel(channel: discord.TextChannel, archive: discord.CategoryChannel) -> None:
+    neighbor = _alphabetical_neighbor(archive, channel)
+    try:
+        if neighbor is None:
+            await channel.move(beginning=True, category=archive)
+        else:
+            await channel.move(after=neighbor, category=archive)
+        log.info(f"format-schedule: archived #{channel.name} to {FORMAT_ARCHIVE_CATEGORY}")
+    except discord.HTTPException:
+        log.warning(f"format-schedule: could not archive #{channel.name}", exc_info=True)
+
+
+def _alphabetical_neighbor(archive: discord.CategoryChannel,
+                           channel: discord.TextChannel) -> discord.TextChannel | None:
+    """The archived channel to slot after, keeping the category's emoji-blind alphabetical order.
+    ``None`` sorts the newcomer to the top."""
+    name = stripped_channel_name(channel.name)
+    neighbor = None
+    for existing in archive.text_channels:
+        if stripped_channel_name(existing.name) < name:
+            neighbor = existing
+    return neighbor
 
 
 def select_pin(events: list, pin: SchedulePin) -> tuple[list, list, str]:

@@ -20,6 +20,7 @@ from sqlalchemy import func, select
 
 from bot.commands.delete_account import setup as setup_delete_account
 from bot.commands.event_scribe import setup as setup_event_scribe
+from bot.commands.guide import setup as setup_guide
 from bot.commands.help import setup as setup_help
 from bot.commands.link_17lands import setup as setup_link_17lands
 from bot.commands.messages import MSG_TOKEN_INVALIDATED
@@ -186,6 +187,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_stats(bot)
         await setup_trophy(bot)
         await setup_save_resource(bot)
+        await setup_guide(bot)
         await setup_help(bot)
         await setup_event_scribe(bot)
         await setup_link_17lands(bot)

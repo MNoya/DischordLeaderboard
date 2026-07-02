@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     discord_guild_id: int | None = None
     discord_admin_role_id: int | None = None
     discord_botlog_channel_id: int | None = None
+    feedback_channel_id: int = 1504825374188507156
     public_site_url: str = "https://limitedlevelups.com"
     auto_refresh_enabled: bool = True
 

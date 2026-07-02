@@ -11,12 +11,13 @@ routing follows the set with no name match or config edit.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import bot.services.mtgscribe as mtgscribe
-from bot.sets import ALL_SETS
+from bot.sets import ALL_SETS, SetSeed, active_set_code
 
 OPEN_TZ = ZoneInfo("America/Los_Angeles")
 EVENT_DAY_TZ = ZoneInfo("America/New_York")
@@ -25,6 +26,8 @@ DEDUP_LOOKBACK = timedelta(hours=24)
 
 PERMANENT_CUBE_CODE = "CUBE"
 LATEST_SET_CATEGORY = "MTG Strategy"
+FORMAT_ARCHIVE_CATEGORY = "Format Archive"
+SET_NAME_STOPWORDS = frozenset({"a", "an", "and", "at", "in", "of", "the"})
 
 
 ANNOUNCE_NONE = "none"
@@ -87,6 +90,52 @@ def newest_set():
         if seed.start_date > newest.start_date:
             newest = seed
     return newest
+
+
+def channel_words(name: str) -> set[str]:
+    return set(re.findall(r"[a-z0-9]+", name.lower()))
+
+
+def significant_set_words(set_name: str) -> set[str]:
+    return channel_words(set_name) - SET_NAME_STOPWORDS
+
+
+def channel_matches_set(channel_name: str, set_name: str) -> bool:
+    """Whether a discussion channel belongs to a set, by word overlap in either direction so a full
+    channel name matches its set ("marvel-super-heroes" ↔ "Marvel Super Heroes") and a shortened one
+    still resolves ("strixhaven" ↔ "Strixhaven: School of Mages"). Deliberately conservative — a
+    channel matching no set is left alone."""
+    channel = channel_words(channel_name)
+    set_words = significant_set_words(set_name)
+    if not channel or not set_words:
+        return False
+    return set_words <= channel or channel <= set_words
+
+
+def active_set_seed(when: datetime | None = None) -> SetSeed:
+    code = active_set_code(when)
+    for seed in ALL_SETS:
+        if seed.code == code:
+            return seed
+    return ALL_SETS[-1]
+
+
+def archive_candidates(text_channels, when: datetime | None = None) -> list:
+    """MTG Strategy channels belonging to sets older than the active one — what a rotation leaves
+    behind for the Format Archive. The upcoming set's mod-created channel and the permanent strategy
+    channels match no stale set, so they stay put."""
+    active = active_set_seed(when)
+    stale_sets = [seed for seed in ALL_SETS
+                  if seed.code != PERMANENT_CUBE_CODE and seed.start_date < active.start_date]
+    candidates = []
+    for channel in text_channels:
+        if channel.category is None or channel.category.name != LATEST_SET_CATEGORY:
+            continue
+        if channel_matches_set(channel.name, active.name):
+            continue
+        if any(channel_matches_set(channel.name, seed.name) for seed in stale_sets):
+            candidates.append(channel)
+    return candidates
 
 
 def previous_window_start(now: datetime) -> datetime:

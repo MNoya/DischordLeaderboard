@@ -64,6 +64,7 @@ docker exec dischord-pg psql -U postgres -d dischord -c 'DROP SCHEMA public CASC
 ### Owner-only prefix commands (DM the bot)
 
 - `!sync` — push slash-command schema changes to Discord. Run after editing any command's name/description/options. Body-only changes don't need it.
+- `!guide` — sync the Server Guide channels (channel-overview, quick-links, rules, limitedlevelups-com) from `bot/server_guide/*.md`: the guide embed in each channel is edited in place, posted fresh when missing, with per-channel results reported. Open to the bot owner, administrators and the Moderator role, not owner-only. Pages post through a webhook wearing the server owner's identity (needs Manage Webhooks; falls back to posting as the bot). Guide channels need channel-level overwrites for the bot's role (View Channel, Send Messages, Read Message History, Embed Links) — native Server Guide resource channels carry an @everyone deny that beats server-level role grants. The format-schedule tick re-syncs channel-overview on its own and moves stale set channels to Format Archive after a rotation; the bot never creates channels.
 - `!refresh` — re-pull 17lands for active players against the active set's window and recompute scores. Same code path as the periodic tick. Posted leaderboards are frozen snapshots, so this edits no messages; fresh standings surface on the next `/leaderboard` or on the website. For full-history reconciliation (formula change, retroactive set add, drift recovery) run `python -m bot.scripts.refresh_stats` from a console instead.
 
 ## Architecture

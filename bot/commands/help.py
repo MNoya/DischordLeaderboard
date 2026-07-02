@@ -8,6 +8,7 @@ from discord.ext import commands
 
 from bot import audit
 from bot.commands import descriptions as desc
+from bot.config import settings
 from bot.discord_helpers import command_line, in_pod_coordination
 
 logger = logging.getLogger(__name__)
@@ -68,9 +69,6 @@ HELP_EXAMPLES: dict[str, list[list[str]]] = {
 }
 
 
-FEEDBACK_CHANNEL_ID = 1504825374188507156
-
-
 class HelpView(discord.ui.View):
     def __init__(self) -> None:
         super().__init__(timeout=600)
@@ -82,7 +80,7 @@ class HelpView(discord.ui.View):
 
 
 def render_help_embed(sections: list[tuple[str, list[tuple[str, str]]]] = HELP_SECTIONS) -> discord.Embed:
-    embed = discord.Embed(title=HELP_TITLE, color=discord.Color.blurple())
+    embed = discord.Embed(title=HELP_TITLE, color=discord.Color.green())
     for section_label, items in sections:
         lines = []
         for cmd, blurb in items:
@@ -92,7 +90,7 @@ def render_help_embed(sections: list[tuple[str, list[tuple[str, str]]]] = HELP_S
         embed.add_field(name=section_label, value="\n".join(lines), inline=False)
     embed.add_field(
         name="💬 Found a bug or have any ideas?",
-        value=f"Post in <#{FEEDBACK_CHANNEL_ID}>",
+        value=f"Post in <#{settings.feedback_channel_id}>",
         inline=False,
     )
     return embed
