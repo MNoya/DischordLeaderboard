@@ -54,7 +54,7 @@ SET_CODE_RE = re.compile(r"^[A-Z0-9]{2,5}$")
 MSG_NO_CHANNEL = "Run `/trophy` in the channel where you posted your screenshot, or pass `link:` to a post."
 MSG_NO_POST = (
     "No trophy screenshot found from you in {channel}. "
-    "Post your trophy here, then run `/trophy` or right-click it → Apps → 🏆 Save Trophy. "
+    "Post your screenshot here, then run `/trophy` or right-click it → Apps → 🏆 Record Event. "
     "To save one elsewhere, pass `link:`."
 )
 MSG_BAD_LINK = "That doesn't look like a Discord message link. Right-click a message → Copy Message Link."
@@ -459,7 +459,7 @@ async def _present_trophy_draft(
     bot: commands.Bot, interaction: discord.Interaction, message: discord.Message
 ) -> None:
     """Parse a resolved post into a TrophyDraft and open the confirm view. Shared by the /trophy
-    slash command and the Save Trophy message context menu."""
+    slash command and the Record Event message context menu."""
     author = message.author
     caption = (message.content or "").strip() or None
     record = parse_caption_record(caption) or "3-0"
@@ -486,7 +486,7 @@ async def _present_trophy_draft(
     await interaction.followup.send(embed=_render_embed(draft), view=view, ephemeral=ephemeral)
 
 
-@app_commands.context_menu(name="🏆 Save Trophy")
+@app_commands.context_menu(name="🏆 Record Event")
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
 @app_commands.allowed_installs(guilds=True, users=False)
 async def save_trophy_menu(interaction: discord.Interaction, message: discord.Message) -> None:
