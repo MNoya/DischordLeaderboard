@@ -33,6 +33,12 @@ export function useIsLandscapePhone(): boolean {
   return matches;
 }
 
+export function useIsCompact(): boolean {
+  const isMobile = useIsMobile();
+  const isLandscapePhone = useIsLandscapePhone();
+  return isMobile || isLandscapePhone;
+}
+
 const SET_VISIBLE_BREAKPOINTS: Array<[number, number]> = [
   [1400, 6],
   [1100, 5],

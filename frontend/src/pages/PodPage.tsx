@@ -5,7 +5,7 @@ import { AppHeader } from "../components/AppHeader";
 import { DraftReviewMOCS, type ReviewSeatInfo } from "../components/pod/review/DraftReviewMOCS";
 import { SectionLabel } from "../components/SectionLabel";
 import { BackButton, MobilePageHeader, PrevNextNav } from "../components/PageNav";
-import { useIsMobile } from "../lib/use-is-mobile";
+import { useIsLandscapePhone, useIsMobile } from "../lib/use-is-mobile";
 import { PodTable, PodTableSkeleton } from "../components/pod/PodTable";
 import { PlayerSeatPanel } from "../components/pod/PlayerSeatPanel";
 import type { RoundOutcome } from "../components/pod/PlayerSeatPanel";
@@ -31,6 +31,9 @@ const TABLE_MAX_WIDE = 720;
 const TABLE_MAX_SHRUNK = 640;
 const ANIMATION_MS = 500;
 const CHROME_OFFSET = 260;
+const CHROME_OFFSET_LANDSCAPE = 84;
+const PANEL_MIN_WIDTH = 360;
+const PANEL_MIN_WIDTH_LANDSCAPE = 280;
 
 function compareParticipants(a: PodEventParticipantRow, b: PodEventParticipantRow): number {
   const ap = a.placement ?? Number.MAX_SAFE_INTEGER;
@@ -66,6 +69,7 @@ export function PodPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const preselectName = searchParams.get("player");
   const isMobile = useIsMobile();
+  const isLandscapePhone = useIsLandscapePhone();
   const [selectedSeat, setSelectedSeat] = useState<number | null>(null);
   const [highlightedSeat, setHighlightedSeat] = useState<number | null>(null);
   const [highlightedRound, setHighlightedRound] = useState<number | null>(null);
@@ -143,6 +147,23 @@ export function PodPage() {
   const carryQuery = preselectName ? `?player=${encodeURIComponent(preselectName)}` : "";
   const prevTo = prevSlug ? `/pods/${prevSlug}${carryQuery}` : null;
   const nextTo = nextSlug ? `/pods/${nextSlug}${carryQuery}` : null;
+
+  const chromeOffset = isLandscapePhone ? CHROME_OFFSET_LANDSCAPE : CHROME_OFFSET;
+  const panelMinWidth = isLandscapePhone ? PANEL_MIN_WIDTH_LANDSCAPE : PANEL_MIN_WIDTH;
+  const mainClass = `flex-1 flex flex-col pl-4 pr-4 min-h-0 ${isLandscapePhone ? "pb-2" : "md:pl-10 md:pr-12 lg:pr-14 pb-10"}`;
+  const tableColumnPad = isLandscapePhone ? "py-1" : "py-8 md:py-12";
+  const contentRowPad = isLandscapePhone ? "py-1" : "py-3";
+  const pageHeader = isLandscapePhone ? (
+    <MobilePageHeader
+      backTo="/pods"
+      prevTo={prevTo}
+      nextTo={nextTo}
+      prevAriaLabel="Previous pod"
+      nextAriaLabel="Next pod"
+    />
+  ) : (
+    <AppHeader subtitle="POD DRAFT BREAKDOWN" />
+  );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -250,26 +271,28 @@ export function PodPage() {
     }
     return (
       <div className="bg-bg text-text h-screen flex flex-col overflow-hidden">
-        <AppHeader subtitle="POD DRAFT BREAKDOWN" />
-        <main className="flex-1 flex flex-col pl-4 pr-4 md:pl-10 md:pr-12 lg:pr-14 pb-10 min-h-0">
-          <div className="pt-5 pb-2 flex items-center justify-between gap-4 shrink-0">
-            <BackButton to="/pods" label="BACK TO POD DRAFTS" inline />
-          </div>
+        {pageHeader}
+        <main className={mainClass}>
+          {!isLandscapePhone && (
+            <div className="pt-5 pb-2 flex items-center justify-between gap-4 shrink-0">
+              <BackButton to="/pods" label="BACK TO POD DRAFTS" inline />
+            </div>
+          )}
           {preselectName ? (
-            <div className="flex-1 flex items-stretch min-h-0 py-3">
-              <div className="flex items-center min-w-0 shrink-0 py-8 md:py-12 justify-end" style={{ width: "55%" }}>
+            <div className={`flex-1 flex items-stretch min-h-0 ${contentRowPad}`}>
+              <div className={`flex items-center min-w-0 shrink-0 justify-end ${tableColumnPad}`} style={{ width: "55%" }}>
                 <PodTableSkeleton
-                  maxWidth={`min(${TABLE_MAX_SHRUNK}px, calc(100vh - ${CHROME_OFFSET}px))`}
+                  maxWidth={`min(${TABLE_MAX_SHRUNK}px, calc(100vh - ${chromeOffset}px))`}
                 />
               </div>
               <div className="min-w-0 shrink-0 self-start max-h-full" style={{ width: "45%" }}>
-                <PodPanelSkeleton />
+                <PodPanelSkeleton minWidth={panelMinWidth} />
               </div>
             </div>
           ) : (
-            <div className="flex-1 flex items-center justify-center min-h-0 py-3">
+            <div className={`flex-1 flex items-center justify-center min-h-0 ${contentRowPad}`}>
               <PodTableSkeleton
-                maxWidth={`min(${TABLE_MAX_WIDE}px, calc(100vh - ${CHROME_OFFSET}px))`}
+                maxWidth={`min(${TABLE_MAX_WIDE}px, calc(100vh - ${chromeOffset}px))`}
               />
             </div>
           )}
@@ -355,22 +378,24 @@ export function PodPage() {
 
   return (
     <div className="bg-bg text-text h-screen flex flex-col overflow-hidden">
-      <AppHeader subtitle="POD DRAFT BREAKDOWN" />
+      {pageHeader}
 
-      <main className="flex-1 flex flex-col pl-4 pr-4 md:pl-10 md:pr-12 lg:pr-14 pb-10 min-h-0">
-        <div className="pt-5 pb-2 flex items-center justify-between gap-4 shrink-0">
-          <BackButton to="/pods" label="BACK TO POD DRAFTS" inline />
-          <PrevNextNav
-            prevTo={prevTo}
-            nextTo={nextTo}
-            prevAriaLabel="Previous pod"
-            nextAriaLabel="Next pod"
-          />
-        </div>
+      <main className={mainClass}>
+        {!isLandscapePhone && (
+          <div className="pt-5 pb-2 flex items-center justify-between gap-4 shrink-0">
+            <BackButton to="/pods" label="BACK TO POD DRAFTS" inline />
+            <PrevNextNav
+              prevTo={prevTo}
+              nextTo={nextTo}
+              prevAriaLabel="Previous pod"
+              nextAriaLabel="Next pod"
+            />
+          </div>
+        )}
 
-        <div className="flex-1 flex items-stretch min-h-0 py-3">
+        <div className={`flex-1 flex items-stretch min-h-0 ${contentRowPad}`}>
           <div
-            className={`flex items-center min-w-0 shrink-0 py-8 md:py-12 ${open ? "justify-end" : "justify-center"}`}
+            className={`flex items-center min-w-0 shrink-0 ${tableColumnPad} ${open ? "justify-end" : "justify-center"}`}
             style={{
               width: open ? "55%" : "100%",
               transition: animateLayout ? `width ${ANIMATION_MS}ms ease-out` : "none",
@@ -390,7 +415,7 @@ export function PodPage() {
               setCode={event.setCode}
               formatLabel={event.formatLabel}
               date={event.eventDate}
-              maxWidth={`min(${tableMaxPx}px, calc(100vh - ${CHROME_OFFSET}px))`}
+              maxWidth={`min(${tableMaxPx}px, calc(100vh - ${chromeOffset}px))`}
             />
           </div>
           <div
@@ -404,7 +429,7 @@ export function PodPage() {
             }}
           >
             <div className="pod-panel-shell bg-surface border border-border flex flex-col min-h-0 flex-1 overflow-hidden">
-              <div className="flex flex-col min-h-0 flex-1" style={{ minWidth: 360 }}>
+              <div className="flex flex-col min-h-0 flex-1" style={{ minWidth: panelMinWidth }}>
                 {displayParticipant && (
                   <PlayerSeatPanel
                     key={displayParticipant.displayName}
@@ -534,10 +559,10 @@ function resolveLogSeat(seats: PodSeat[], who: string): number | null {
   return null;
 }
 
-function PodPanelSkeleton() {
+function PodPanelSkeleton({ minWidth = PANEL_MIN_WIDTH }: { minWidth?: number }) {
   return (
     <div className="pod-panel-shell bg-surface border border-border max-h-full overflow-hidden">
-      <div style={{ minWidth: 360 }}>
+      <div style={{ minWidth }}>
         <div className="flex items-center gap-4 px-4 md:px-5 xl:px-8 py-7 border-b border-border">
           <div className="w-[60px] h-[60px] bg-surface2 animate-pulse shrink-0" />
           <div className="min-w-0 flex-1 flex flex-col gap-2">

@@ -9,7 +9,7 @@ import {
 import { Pips } from "../ManaPips";
 import { Record } from "../Record";
 import { cn } from "../../lib/utils";
-import { useIsMobile } from "../../lib/use-is-mobile";
+import { useIsCompact, useIsLandscapePhone } from "../../lib/use-is-mobile";
 import { playerPath, podSeatName, stripDiscriminator } from "../../data/utils";
 import { useResolvedDeckUrl } from "../../data/refresh-deck-url";
 import type { DeckTab } from "./DeckScreenshotModal";
@@ -148,27 +148,29 @@ function SeatHeader({
   onViewCardPool: () => void;
   isMock?: boolean;
 }) {
-  const isMobile = useIsMobile();
+  const isMobile = useIsCompact();
+  const isLandscape = useIsLandscapePhone();
   const isChampion = participant.placement === 1;
   const wins = Number((participant.record ?? "").split("-")[0] || 0);
   const losses = Number((participant.record ?? "").split("-")[1] || 0);
   const hasRecord = participant.record != null && wins + losses > 0;
   const hasDeck = participant.deckScreenshotUrl !== null || !!participant.hasDeckList;
 
+  const nameFontSize = isLandscape ? 24 : 32;
   const nameLink = profileHref ? (
     <Link
       to={profileHref}
       target="_blank"
       rel="noreferrer noopener"
       className="self-start max-w-full no-underline font-display leading-none truncate text-text hover:text-green transition-colors"
-      style={{ fontSize: 32, letterSpacing: "0.04em" }}
+      style={{ fontSize: nameFontSize, letterSpacing: "0.04em" }}
     >
       {participant.discordName}
     </Link>
   ) : (
     <span
       className="self-start max-w-full font-display leading-none truncate text-text"
-      style={{ fontSize: 32, letterSpacing: "0.04em" }}
+      style={{ fontSize: nameFontSize, letterSpacing: "0.04em" }}
     >
       {participant.discordName}
     </span>
@@ -209,9 +211,9 @@ function SeatHeader({
 
   if (isMobile) {
     return (
-      <header className="shrink-0 flex flex-col gap-4 px-4 md:px-5 xl:px-8 py-7 border-b border-border">
+      <header className={cn("shrink-0 flex flex-col px-4 md:px-5 xl:px-8 border-b border-border", isLandscape ? "gap-3 py-4" : "gap-4 py-7")}>
         <div className="flex items-center gap-4 min-w-0">
-          <AAvatar displayName={participant.discordName} avatarUrl={participant.avatarUrl} size={60} green={isChampion} />
+          <AAvatar displayName={participant.discordName} avatarUrl={participant.avatarUrl} size={isLandscape ? 44 : 60} green={isChampion} />
           <div className="min-w-0 flex-1 flex items-start justify-between gap-3">
             <div className="min-w-0 flex flex-col gap-2">
               {nameLink}
@@ -394,7 +396,7 @@ function RoundRow({
   onHover?: (opponentSeatIndex: number | null, round: number | null, outcome: RoundOutcome | null) => void;
   onViewDeck: (participant: PodSeat) => void;
 }) {
-  const isMobile = useIsMobile();
+  const isMobile = useIsCompact();
   const isSkipped = match.winnerName === SKIPPED_SENTINEL;
   const isPending = !isSkipped && match.winnerName == null;
   const won = !isSkipped && !isPending && match.winnerName === podSeatName(participant);
@@ -571,7 +573,7 @@ function ResultBadge({
   yourScore: string | null;
   oppScore: string | null;
 }) {
-  const isMobile = useIsMobile();
+  const isMobile = useIsCompact();
   if (outcome === "skip" || outcome === "pending") {
     return (
       <span
@@ -621,7 +623,7 @@ function GamesGrid({
   playerGames: PodEventReplayRow[];
   opponentGames: PodEventReplayRow[];
 }) {
-  const isMobile = useIsMobile();
+  const isMobile = useIsCompact();
   if (playerGames.length === 0 && opponentGames.length === 0) {
     return (
       <div className="px-4 md:px-5 xl:px-8 py-4 text-muted text-[13px] font-body">
@@ -662,7 +664,7 @@ function PlayerReplayCell({
   row: PodEventReplayRow | null;
   durationMin: number | null | undefined;
 }) {
-  const isMobile = useIsMobile();
+  const isMobile = useIsCompact();
   if (!row) {
     return (
       <div
@@ -724,7 +726,7 @@ function PlayerReplayCell({
 }
 
 function OpponentReplayCell({ row }: { row: PodEventReplayRow | null }) {
-  const isMobile = useIsMobile();
+  const isMobile = useIsCompact();
   if (!row) {
     if (isMobile) return null;
     return (

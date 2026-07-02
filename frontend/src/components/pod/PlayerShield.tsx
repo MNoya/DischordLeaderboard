@@ -1,5 +1,6 @@
 import { type CSSProperties, useId, useLayoutEffect, useRef } from "react";
 import { Pips } from "../ManaPips";
+import { useIsLandscapePhone } from "../../lib/use-is-mobile";
 import { Record } from "../Record";
 import { cn } from "../../lib/utils";
 import type { PodSeat } from "../../types/leaderboard";
@@ -105,11 +106,12 @@ export function PlayerShield({ participant, selected, highlighted = false, highl
   const wins = Number((participant.record ?? "").split("-")[0] || 0);
   const losses = Number((participant.record ?? "").split("-")[1] || 0);
   const hasRecord = participant.record != null && wins + losses > 0;
+  const raiseForName = useIsLandscapePhone();
   const dims = {
     w: REF.w * scale,
     h: REF.h * scale,
-    nameMax: REF.nameMax * scale,
-    nameMin: REF.nameMin * scale,
+    nameMax: raiseForName ? Math.max(REF.nameMax * scale, 13) : REF.nameMax * scale,
+    nameMin: raiseForName ? Math.max(REF.nameMin * scale, 10) : REF.nameMin * scale,
     pip: REF.pip * scale,
     rec: REF.rec * scale,
   };
@@ -152,7 +154,7 @@ export function PlayerShield({ participant, selected, highlighted = false, highl
           radius={Math.max(3, 6 * scale)}
         />
         {participant.deckColors && (
-          <div className="shrink-0" style={{ marginTop: -dims.pip * 0.5 }}>
+          <div className="shrink-0 z-10" style={{ marginTop: -dims.pip * (raiseForName ? 1.15 : 0.5) }}>
             <Pips colors={participant.deckColors} size={dims.pip} />
           </div>
         )}
