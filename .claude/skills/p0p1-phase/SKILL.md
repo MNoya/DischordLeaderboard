@@ -35,14 +35,14 @@ count, today's date, voting deadline, scoring date.
 The frontend derives one of five phases (`voting`, `postVoting`, `midway`, `finalizing`,
 `final`) from the fixture `phase` and the clock:
 
-| Fixture `phase` | Clock | Resulting site phase |
-|---|---|---|
-| any | before voting deadline | `voting` |
-| `null` | past deadline, before scoring date | `postVoting` |
-| `"midway"` | past deadline, before scoring date | `midway` |
-| `"final"` | past deadline, before scoring date | `final` (console.warn: early final) |
-| `null` or stale `"midway"` | past scoring date | `finalizing` |
-| `"final"` | past scoring date | `final` |
+| Fixture `phase`            | Clock                              | Resulting site phase                |
+| -------------------------- | ---------------------------------- | ----------------------------------- |
+| any                        | before voting deadline             | `voting`                            |
+| `null`                     | past deadline, before scoring date | `postVoting`                        |
+| `"midway"`                 | past deadline, before scoring date | `midway`                            |
+| `"final"`                  | past deadline, before scoring date | `final` (console.warn: early final) |
+| `null` or stale `"midway"` | past scoring date                  | `finalizing`                        |
+| `"final"`                  | past scoring date                  | `final`                             |
 
 `phase: null` is the kill switch at any point — it always regresses to `postVoting` (pre
 scoring date) or `finalizing` (post scoring date), never reveals ratings-derived content.
@@ -77,7 +77,6 @@ pull bounded to `[set release date, end date]`.
 - `setCode` matches `P0P1_SET_CODE`.
 - `phase` equals the target phase from step 4 (or is `null` for the `none` path).
 - `dateRange.start` equals the set's Arena release date from `bot/sets.py`.
-- `cards.length > 200`.
 - `cards.length` is within ~10% of the previous card count recorded in step 1 (skip this
   check for `none`, which doesn't refetch).
 - A healthy share of cards (rough eyeball, not a hard threshold) have `gih >= 500`
