@@ -99,7 +99,7 @@ def _standings(*names: str) -> list:
 
 
 def _deck(colors: str | None, screenshot: str | None) -> ParticipantDeckData:
-    return ParticipantDeckData(colors=colors, screenshot_url=screenshot, screenshot_caption=None, draft_log_url=None)
+    return ParticipantDeckData(colors=colors, screenshot_url=screenshot, screenshot_caption=None)
 
 
 def _complete_decks(*names: str) -> dict:

@@ -33,7 +33,6 @@ export interface ReviewSeatInfo {
   deckScreenshotUrl: string | null;
   deckScreenshotCaption: string | null;
   record: string | null;
-  draftLogUrl: string | null;
 }
 
 interface DraftReviewMOCSProps {
@@ -227,7 +226,6 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, initialPack =
       deckScreenshotCaption: info.deckScreenshotCaption,
       mainboard: resolveDeck(artifact, s),
       record: info.record,
-      draftLogUrl: info.draftLogUrl,
     };
   }
 

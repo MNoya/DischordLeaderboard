@@ -20,7 +20,6 @@ from bot.services.pod_drafts import (
     record_event,
     record_match,
     set_participant_deck_colors,
-    set_participant_review_choice,
     update_event_time_if_changed,
     upsert_participant,
 )
@@ -499,7 +498,7 @@ def test_set_participant_deck_colors_saves(session):
     _seed_pod_for_deck_color_tests(session)
     ok = set_participant_deck_colors(session, "thread-42", "42", "WU")
     assert ok is True
-    in_pod, color, _ = get_participant_deck_state(session, "thread-42", "42")
+    in_pod, color = get_participant_deck_state(session, "thread-42", "42")
     assert in_pod is True
     assert color == "WU"
 
@@ -512,10 +511,9 @@ def test_set_participant_deck_colors_rejects_non_participant(session):
 
 def test_get_participant_deck_state_signals_not_in_pod(session):
     _seed_pod_for_deck_color_tests(session)
-    in_pod, color, wants_review = get_participant_deck_state(session, "thread-42", "99")
+    in_pod, color = get_participant_deck_state(session, "thread-42", "99")
     assert in_pod is False
     assert color is None
-    assert wants_review is None
 
 
 def test_participant_dm_info_returns_linked_player_data(session):
@@ -544,44 +542,8 @@ def test_set_participant_deck_colors_overwrites_on_resubmit(session):
     _seed_pod_for_deck_color_tests(session)
     set_participant_deck_colors(session, "thread-42", "42", "WU")
     set_participant_deck_colors(session, "thread-42", "42", "URg")
-    _, color, _ = get_participant_deck_state(session, "thread-42", "42")
+    _, color = get_participant_deck_state(session, "thread-42", "42")
     assert color == "URg"
-
-
-def test_get_participant_deck_state_defaults_review_to_none(session):
-    _seed_pod_for_deck_color_tests(session)
-    in_pod, _, wants_review = get_participant_deck_state(session, "thread-42", "42")
-    assert in_pod is True
-    assert wants_review is None
-
-
-def test_set_participant_review_choice_saves(session):
-    _seed_pod_for_deck_color_tests(session)
-    assert set_participant_review_choice(session, "thread-42", "42", True) is True
-    _, _, wants_review = get_participant_deck_state(session, "thread-42", "42")
-    assert wants_review is True
-
-
-def test_set_participant_review_choice_toggles(session):
-    _seed_pod_for_deck_color_tests(session)
-    set_participant_review_choice(session, "thread-42", "42", True)
-    set_participant_review_choice(session, "thread-42", "42", False)
-    _, _, wants_review = get_participant_deck_state(session, "thread-42", "42")
-    assert wants_review is False
-
-
-def test_set_participant_review_choice_independent_of_colors(session):
-    _seed_pod_for_deck_color_tests(session)
-    set_participant_deck_colors(session, "thread-42", "42", "WU")
-    set_participant_review_choice(session, "thread-42", "42", True)
-    _, color, wants_review = get_participant_deck_state(session, "thread-42", "42")
-    assert color == "WU"
-    assert wants_review is True
-
-
-def test_set_participant_review_choice_rejects_non_participant(session):
-    _seed_pod_for_deck_color_tests(session)
-    assert set_participant_review_choice(session, "thread-42", "99", True) is False
 
 
 def _draft_log_payload():

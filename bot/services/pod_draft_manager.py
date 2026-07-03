@@ -40,7 +40,6 @@ from bot.services.lobby_embed import (
     render as render_lobby_embed,
     render_ready_check_progress,
 )
-from bot.services.magicprotools import submit_to_api as submit_to_magicprotools
 from bot.services import pod_format
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_pairing_select import pairing_label
@@ -83,6 +82,8 @@ _READY_DEBOUNCE_S = 2.0
 _LOBBY_FULL_THRESHOLD = 8
 _LOBBY_HALF_THRESHOLD = _LOBBY_FULL_THRESHOLD // 2
 _LOBBY_FULL_PROMPT_DELAY_S = 10
+_RESTART_SETTLE_S = 2.5
+_RESTART_READY_MIN_PLAYERS = 2
 _AI_BOT_NAME_RE = re.compile(r"^Bot #\d+$")
 
 _SEEDING_REFRESH_HOOK = None
@@ -180,13 +181,14 @@ class PodDraftManager:
         self._lobby_post_lock = asyncio.Lock()
         self._ready_timeout_task: asyncio.Task | None = None
         self.drafting = False
+        self.draft_paused = False
+        self.draft_cancelled = False
         self.draft_complete = False
         self.last_decliner_name: str | None = None
         self.last_cancel_reason: str | None = None
         self.last_ready_summary: tuple[int, int] | None = None
         self.initiated_by: str | None = None
         self.draft_logs: dict[str, dict] = {}
-        self.mpt_task: asyncio.Task | None = None
         self.current_round = 0
         self.finalized = False
         self.tournament_roster: list[str] = []  # draftmancer userNames, set on endDraft
@@ -805,6 +807,10 @@ class PodDraftManager:
         return "linked"
 
     async def _on_end_draft(self, *_) -> None:
+        if self.draft_cancelled:
+            self.draft_cancelled = False
+            log.warning(f"[DRAFT] end_ignored_restart event={self.event_id}")
+            return
         log.info(f"[DRAFT] end_received event={self.event_id} session_users={len(self.session_users)}")
         self.drafting = False
         self.draft_complete = True
@@ -815,10 +821,7 @@ class PodDraftManager:
             f"[DRAFT] roster_snapshot event={self.event_id} roster_size={len(self.tournament_roster)}"
         )
         await self.refresh_lobby_now()
-        payload = next(iter(self.draft_logs.values()), None)
-        if payload is not None:
-            self.mpt_task = asyncio.create_task(self._submit_logs_to_magicprotools(payload))
-        else:
+        if not self.draft_logs:
             log.warning(f"[DRAFT] end_no_payload event={self.event_id}")
         if self.kind == "mock":
             asyncio.create_task(self._finalize_mock())
@@ -841,11 +844,6 @@ class PodDraftManager:
                 ))
             except Exception:
                 log.warning(f"[DRAFT] mock_finalize.thread_post_error event={self.event_id}", exc_info=True)
-        if self.mpt_task is not None:
-            try:
-                await self.mpt_task
-            except Exception:
-                log.warning(f"[DRAFT] mock_finalize.mpt_await_error event={self.event_id}", exc_info=True)
         await self.disconnect_safely()
 
     def _mark_mock_finalized(self) -> None:
@@ -924,75 +922,6 @@ class PodDraftManager:
                     break
         log.info(f"[DRAFT] log_stored event={self.event_id} total={len(self.draft_logs)}")
         await asyncio.to_thread(self._persist_draft_log_gz, log_payload)
-
-    async def _submit_logs_to_magicprotools(self, log_payload: dict) -> None:
-        """For each Draftmancer seat in the log, submit to MagicProTools and stash the URL on the
-        matching pod_draft_participants row. Per-seat failures log + continue."""
-        if settings.mpt_api_key is None:
-            log.warning(f"[DRAFT] mpt_skipped event={self.event_id} reason=api_key_unset")
-            return
-        users = log_payload.get("users") or {}
-        if not isinstance(users, dict):
-            return
-        seats = [
-            (uid, ud) for uid, ud in users.items()
-            if isinstance(ud, dict)
-            and ud.get("userName") and ud.get("userName") != _BOT_USER_NAME
-            and not ud.get("isBot")
-        ]
-        log.info(f"[DRAFT] mpt_submit.start event={self.event_id} seats={len(seats)}")
-        stored = 0
-        for user_id, user_data in seats:
-            user_name = user_data["userName"]
-            try:
-                url = await submit_to_magicprotools(user_id, log_payload)
-            except Exception:
-                log.warning(
-                    f"[DRAFT] mpt_submit.seat_error event={self.event_id} seat={user_name!r}",
-                    exc_info=True,
-                )
-                continue
-            if not url:
-                continue
-            try:
-                wrote = await asyncio.to_thread(self._store_draft_log_url, user_name, url)
-            except Exception:
-                log.warning(
-                    f"[DRAFT] mpt_submit.store_error event={self.event_id} seat={user_name!r}",
-                    exc_info=True,
-                )
-                continue
-            if wrote:
-                stored += 1
-                log.info(f"[DRAFT] mpt_submit.seat_stored event={self.event_id} seat={user_name!r}")
-        log.info(f"[DRAFT] mpt_submit.done event={self.event_id} stored={stored}/{len(seats)}")
-        if seats and stored == 0:
-            await bot_log_mod.get(self.bot).post(
-                f"MPT submit produced 0/{len(seats)} stored URLs for event `{self.event_id}`.",
-                fingerprint=f"mpt_zero_stored:{self.event_id}",
-                tag="DRAFT",
-            )
-
-    def _store_draft_log_url(self, draftmancer_name: str, url: str) -> bool:
-        try:
-            with SessionLocal() as session:
-                rows = session.execute(
-                    select(PodDraftParticipant)
-                    .where(
-                        PodDraftParticipant.event_id == self.event_id,
-                        func.lower(PodDraftParticipant.draftmancer_name) == draftmancer_name.lower(),
-                    )
-                ).scalars().all()
-                if not rows:
-                    log.warning(f"[DRAFT] mpt_submit.no_row event={self.event_id} seat={draftmancer_name!r}")
-                    return False
-                for row in rows:
-                    row.draft_log_url = url
-                session.commit()
-                return True
-        except Exception:
-            log.warning(f"magicprotools: store url failed for {draftmancer_name}", exc_info=True)
-            return False
 
     def _persist_draft_log_gz(self, log_payload: dict) -> None:
         try:
@@ -1118,6 +1047,79 @@ class PodDraftManager:
         await self._start_draft()
         return None
 
+    async def pause_draft(self) -> str | None:
+        """Emit pauseDraft to Draftmancer. Pick-phase only. Returns an error string or None."""
+        if not self.sio.connected:
+            return "Draftmancer session is not connected."
+        if not self.drafting or self.draft_complete:
+            return "No draft in progress to pause."
+        if self.draft_paused:
+            return "The draft is already paused."
+        try:
+            await self.sio.emit("pauseDraft")
+        except Exception:
+            log.exception(f"[DRAFT] pause_failed event={self.event_id}")
+            return "Could not pause the draft — see logs."
+        self.draft_paused = True
+        log.info(f"[DRAFT] paused event={self.event_id}")
+        return None
+
+    async def resume_draft(self) -> str | None:
+        """Emit resumeDraft to Draftmancer. Returns an error string or None."""
+        if not self.sio.connected:
+            return "Draftmancer session is not connected."
+        if not self.drafting or self.draft_complete:
+            return "No draft in progress to resume."
+        if not self.draft_paused:
+            return "The draft isn't paused."
+        try:
+            await self.sio.emit("resumeDraft")
+        except Exception:
+            log.exception(f"[DRAFT] resume_failed event={self.event_id}")
+            return "Could not resume the draft — see logs."
+        self.draft_paused = False
+        log.info(f"[DRAFT] resumed event={self.event_id}")
+        return None
+
+    async def restart_draft(self, thread, *, initiated_by: str | None = None) -> str | None:
+        """Stop the in-flight draft on Draftmancer and reopen the lobby with a fresh ready check on the
+        same session. Pick-phase only. `draft_cancelled` swallows the endDraft that stopDraft triggers so
+        the tournament phase never fires. Returns an error string (nothing changed) or None."""
+        if not self.sio.connected:
+            return "Draftmancer session is not connected."
+        if self.draft_complete:
+            return "The draft is already complete — nothing to restart."
+        if not self.drafting:
+            return "No draft in progress to restart."
+        log.warning(f"[DRAFT] restart event={self.event_id} by={initiated_by}")
+        self.draft_cancelled = True
+        self.draft_paused = False
+        self.drafting = False
+        self._cancel_end_watchdog()
+        try:
+            await self.sio.emit("stopDraft")
+        except Exception:
+            self.draft_cancelled = False
+            self.drafting = True
+            log.exception(f"[DRAFT] restart.stop_failed event={self.event_id}")
+            return "Could not stop the draft — see logs."
+        await asyncio.sleep(_RESTART_SETTLE_S)
+        self.draft_logs = {}
+        await self._mark_socket_status("connected")
+        await self.refresh_lobby_now()
+        ready_err = await self.initiate_ready_check(
+            thread, initiated_by=initiated_by, min_players=_RESTART_READY_MIN_PLAYERS,
+        )
+        if ready_err is not None:
+            log.info(f"[DRAFT] restart.ready_skipped event={self.event_id} reason={ready_err!r}")
+            try:
+                await thread.send(
+                    "♻️ Draft stopped and the lobby is reopened. Run `/pod-start` once everyone's ready."
+                )
+            except Exception:
+                log.warning(f"[DRAFT] restart.notice_failed event={self.event_id}", exc_info=True)
+        return None
+
     async def _start_draft(self) -> None:
         await self._reapply_seating_if_set()
         result = await self._emit_with_ack("startDraft")
@@ -1141,6 +1143,8 @@ class PodDraftManager:
                     log.warning("[DRAFT] start_failed.thread_post_error", exc_info=True)
             return
         self.drafting = True
+        self.draft_cancelled = False
+        self.draft_paused = False
         log.info(f"[DRAFT] started event={self.event_id} session_users={len(self.session_users)}")
         self._schedule_end_watchdog()
         await self._retire_lobby_full_prompt()

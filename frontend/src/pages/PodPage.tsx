@@ -321,6 +321,8 @@ export function PodPage() {
   }
 
   const eventLabel = cleanPodEventName(event.name, event.setCode).toUpperCase();
+  const deckLogHref =
+    draftArtifact && deckTarget ? `/pods/${event.slug}/${deckTarget.playerSlug ?? deckTarget.seatIndex}` : null;
   const open = selectedParticipant !== null;
   const tableMaxPx = open ? TABLE_MAX_SHRUNK : TABLE_MAX_WIDE;
   const loadedMatches = matches ?? [];
@@ -364,9 +366,9 @@ export function PodPage() {
               deckScreenshotCaption: deckTarget.deckScreenshotCaption,
               mainboard: deckTargetMainboard,
               record: deckTarget.record,
-              draftLogUrl: deckTarget.draftLogUrl,
             }}
             initialTab={deckInitialTab}
+            draftLogHref={deckLogHref}
             onClose={() => setDeckTarget(null)}
             onPrev={() => cycleDeck(-1)}
             onNext={() => cycleDeck(1)}
@@ -467,9 +469,9 @@ export function PodPage() {
             deckScreenshotCaption: deckTarget.deckScreenshotCaption,
             mainboard: deckTargetMainboard,
             record: deckTarget.record,
-            draftLogUrl: deckTarget.draftLogUrl,
           }}
           initialTab={deckInitialTab}
+          draftLogHref={deckLogHref}
           onClose={() => setDeckTarget(null)}
           onPrev={() => cycleDeck(-1)}
           onNext={() => cycleDeck(1)}
@@ -516,7 +518,6 @@ export function PodDraftLogRoute() {
     deckScreenshotUrl: s.deckScreenshotUrl,
     deckScreenshotCaption: s.deckScreenshotCaption,
     record: s.record,
-    draftLogUrl: s.draftLogUrl,
   }));
 
   const current = resolved != null ? seats.find((s) => s.seatIndex === resolved) : null;

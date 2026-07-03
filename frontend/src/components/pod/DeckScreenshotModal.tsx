@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { ChevronLeft, ChevronRight, X, ZoomIn, ZoomOut } from "lucide-react";
 import { ArrowRight, GiRoundTable, ImageIcon, LuScrollText, TbCards } from "../Icons";
 import { ChamferedButton } from "../ChamferedButton";
@@ -23,7 +23,6 @@ export interface DeckLike {
   deckScreenshotCaption?: string | null;
   mainboard?: Mainboard | null;
   record?: string | null;
-  draftLogUrl?: string | null;
   // Self-reported trophies refresh their Discord CDN screenshot by message ref instead of pod event
   screenshotChannelId?: string | null;
   screenshotMessageId?: string | null;
@@ -36,13 +35,15 @@ interface Props {
   initialTab?: DeckTab;
   breakdownHref?: string;
   hideDraftLog?: boolean;
+  draftLogHref?: string | null;
   onClose: () => void;
   onPrev?: () => void;
   onNext?: () => void;
 }
 
-export function DeckScreenshotModal({ participant, initialTab = "screenshot", breakdownHref, hideDraftLog = false, onClose, onPrev, onNext }: Props) {
+export function DeckScreenshotModal({ participant, initialTab = "screenshot", breakdownHref, hideDraftLog = false, draftLogHref, onClose, onPrev, onNext }: Props) {
   const isMobile = useIsMobile();
+  const navigate = useNavigate();
 
   const hasScreenshot = participant.deckScreenshotUrl !== null;
   const recordWins = Number((participant.record ?? "").split("-")[0] || 0);
@@ -259,12 +260,8 @@ export function DeckScreenshotModal({ participant, initialTab = "screenshot", br
             )}
             {!hideDraftLog && (
               <PanelTab
-                disabled={!participant.draftLogUrl}
-                onClick={
-                  participant.draftLogUrl
-                    ? () => window.open(participant.draftLogUrl!, "_blank", "noopener,noreferrer")
-                    : undefined
-                }
+                disabled={!draftLogHref}
+                onClick={draftLogHref ? () => navigate(draftLogHref) : undefined}
                 icon={<LuScrollText size={16} />}
               >
                 <span className="lg:hidden">LOG</span>

@@ -201,7 +201,6 @@ export interface PodEventParticipantRow {
   placement: number | null;
   record: string | null;
   deckColors: string | null;
-  draftLogUrl: string | null;
   deckScreenshotUrl: string | null;
   deckScreenshotCaption: string | null;
   playerSlug: string | null;

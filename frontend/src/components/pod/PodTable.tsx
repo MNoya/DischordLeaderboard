@@ -173,7 +173,7 @@ function ShieldActions({
   const logInternalHref = hasDraftLog
     ? `/pods/${eventSlug}/${participant.playerSlug ?? participant.seatIndex}`
     : null;
-  const showLog = logInternalHref !== null || participant.draftLogUrl !== null;
+  const showLog = logInternalHref !== null;
   if (!hasDeck && !showLog) return null;
 
   const orbitX = 50 + Math.cos(angle) * ORBIT_RADIUS_PCT;
@@ -213,35 +213,18 @@ function ShieldActions({
         )}
         {showLog && (
           <Tooltip label="View Draft Log" side="right">
-            {logInternalHref ? (
-              <Link
-                to={logInternalHref}
-                aria-label="View Draft Log"
-                className="group flex items-center justify-center rounded-full bg-bg border border-border hover:border-green/60 hover:bg-green/10 transition-colors no-underline shadow-[0_4px_10px_rgba(0,0,0,0.55)]"
-                style={{ width: btnSize, height: btnSize }}
-              >
-                <LuScrollText
-                  size={Math.round(btnSize * 0.46)}
-                  aria-hidden="true"
-                  className="text-text group-hover:text-green transition-colors"
-                />
-              </Link>
-            ) : (
-              <a
-                href={participant.draftLogUrl!}
-                target="_blank"
-                rel="noreferrer noopener"
-                aria-label="View Draft Log"
-                className="group flex items-center justify-center rounded-full bg-bg border border-border hover:border-green/60 hover:bg-green/10 transition-colors no-underline shadow-[0_4px_10px_rgba(0,0,0,0.55)]"
-                style={{ width: btnSize, height: btnSize }}
-              >
-                <LuScrollText
-                  size={Math.round(btnSize * 0.46)}
-                  aria-hidden="true"
-                  className="text-text group-hover:text-green transition-colors"
-                />
-              </a>
-            )}
+            <Link
+              to={logInternalHref!}
+              aria-label="View Draft Log"
+              className="group flex items-center justify-center rounded-full bg-bg border border-border hover:border-green/60 hover:bg-green/10 transition-colors no-underline shadow-[0_4px_10px_rgba(0,0,0,0.55)]"
+              style={{ width: btnSize, height: btnSize }}
+            >
+              <LuScrollText
+                size={Math.round(btnSize * 0.46)}
+                aria-hidden="true"
+                className="text-text group-hover:text-green transition-colors"
+              />
+            </Link>
           </Tooltip>
         )}
       </div>

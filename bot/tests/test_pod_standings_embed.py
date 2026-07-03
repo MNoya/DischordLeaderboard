@@ -1,6 +1,5 @@
 from bot.services.pod_swiss import Standing
 from bot.services.pod_tournament import (
-    ParticipantDeckData,
     build_champion_embed,
     normalize_player_name,
 )
@@ -37,10 +36,7 @@ def test_draft_log_link_points_at_in_site_reviewer_keyed_on_slug():
         _standings(),
         event_name="SOS Early Pod Draft 4",
         displays={key: {"display_name": "Arcyl", "slug": "arcyl"}},
-        deck_data={key: ParticipantDeckData(
-            colors="WU", screenshot_url=None, screenshot_caption=None,
-            draft_log_url="https://magicprotools.com/draft/abc123",
-        )},
+        event_has_log=True,
         include_submit_cta=False,
     )
 
@@ -54,10 +50,20 @@ def test_draft_log_link_omitted_without_slug():
         _standings(),
         event_name="SOS Early Pod Draft 4",
         displays={key: {"display_name": "Arcyl", "slug": None}},
-        deck_data={key: ParticipantDeckData(
-            colors="WU", screenshot_url=None, screenshot_caption=None,
-            draft_log_url="https://magicprotools.com/draft/abc123",
-        )},
+        event_has_log=True,
+        include_submit_cta=False,
+    )
+
+    assert "Draft Log" not in embed.description
+
+
+def test_draft_log_link_omitted_without_event_log():
+    key = normalize_player_name("Arcyl")
+    embed = build_champion_embed(
+        _standings(),
+        event_name="SOS Early Pod Draft 4",
+        displays={key: {"display_name": "Arcyl", "slug": "arcyl"}},
+        event_has_log=False,
         include_submit_cta=False,
     )
 

@@ -4,7 +4,6 @@ export interface PodParticipant {
   slug: string;
   displayName: string;
   deckColors: string;
-  draftLogUrl: string | null;
   deckScreenshotUrl: string | null;
   deckScreenshotCaption: string | null;
   placement: number;
@@ -77,14 +76,14 @@ export const podSos3Fixture: PodEvent = {
   totalRounds: 3,
 
   participants: [
-    { eventId: EVENT_ID, playerId: PLAYERS.noya.id,           slug: "noya",           displayName: "Noya",           deckColors: "WU",  draftLogUrl: "https://magicprotools.com/draft/noya-mock-log",  deckScreenshotUrl: mockDeckSvg("NOYA", "WU"),               deckScreenshotCaption: "Pure WU tempo, splash for nothing — went 5 picks deep on counterspells.", placement: 2, record: "2-1", seatIndex: 0 },
-    { eventId: EVENT_ID, playerId: PLAYERS.wave.id,           slug: "waveofshadow",   displayName: "WaveofShadow",   deckColors: "UBg", draftLogUrl: "https://magicprotools.com/draft/wave-mock-log",  deckScreenshotUrl: mockDeckSvg("WAVEOFSHADOW", "UBg"),      deckScreenshotCaption: "UB tempo, late green splash for removal.", placement: 1, record: "3-0", seatIndex: 1 },
-    { eventId: EVENT_ID, playerId: PLAYERS.elfandor.id,       slug: "elfandor",       displayName: "Elfandor",       deckColors: "WR",  draftLogUrl: "https://magicprotools.com/draft/elf-mock-log",   deckScreenshotUrl: mockDeckSvg("ELFANDOR", "WR"),           deckScreenshotCaption: "Classic Boros aggro.", placement: 3, record: "2-1", seatIndex: 2 },
-    { eventId: EVENT_ID, playerId: PLAYERS.flutterdev.id,     slug: "flutterdev",     displayName: "flutterdev",     deckColors: "BG",  draftLogUrl: null,                                              deckScreenshotUrl: null,                                    deckScreenshotCaption: null, placement: 4, record: "1-2", seatIndex: 3 },
-    { eventId: EVENT_ID, playerId: PLAYERS.oophies.id,        slug: "oophies",        displayName: "Oophies",        deckColors: "RG",  draftLogUrl: "https://magicprotools.com/draft/oo-mock-log",    deckScreenshotUrl: mockDeckSvg("OOPHIES", "RG"),            deckScreenshotCaption: "Gruul stompy, big creatures.", placement: 5, record: "1-2", seatIndex: 4 },
-    { eventId: EVENT_ID, playerId: PLAYERS.adoodwithgood.id,  slug: "adoodwithgood",  displayName: "adoodwithgood",  deckColors: "UR",  draftLogUrl: null,                                              deckScreenshotUrl: null,                                    deckScreenshotCaption: null, placement: 6, record: "1-2", seatIndex: 5 },
-    { eventId: EVENT_ID, playerId: PLAYERS.lark.id,           slug: "lark",           displayName: "Lark",           deckColors: "WB",  draftLogUrl: "https://magicprotools.com/draft/lark-mock-log",  deckScreenshotUrl: mockDeckSvg("LARK", "WB"),               deckScreenshotCaption: "Orzhov sacrifice, never found the engine.", placement: 7, record: "0-3", seatIndex: 6 },
-    { eventId: EVENT_ID, playerId: PLAYERS.samp.id,           slug: "samp",           displayName: "samp",           deckColors: "WG",  draftLogUrl: null,                                              deckScreenshotUrl: mockDeckSvg("SAMP", "WG"),               deckScreenshotCaption: "Selesnya tokens. Anthem effects everywhere.", placement: 8, record: "2-1", seatIndex: 7 },
+    { eventId: EVENT_ID, playerId: PLAYERS.noya.id,           slug: "noya",           displayName: "Noya",           deckColors: "WU",  deckScreenshotUrl: mockDeckSvg("NOYA", "WU"),               deckScreenshotCaption: "Pure WU tempo, splash for nothing — went 5 picks deep on counterspells.", placement: 2, record: "2-1", seatIndex: 0 },
+    { eventId: EVENT_ID, playerId: PLAYERS.wave.id,           slug: "waveofshadow",   displayName: "WaveofShadow",   deckColors: "UBg",  deckScreenshotUrl: mockDeckSvg("WAVEOFSHADOW", "UBg"),      deckScreenshotCaption: "UB tempo, late green splash for removal.", placement: 1, record: "3-0", seatIndex: 1 },
+    { eventId: EVENT_ID, playerId: PLAYERS.elfandor.id,       slug: "elfandor",       displayName: "Elfandor",       deckColors: "WR",   deckScreenshotUrl: mockDeckSvg("ELFANDOR", "WR"),           deckScreenshotCaption: "Classic Boros aggro.", placement: 3, record: "2-1", seatIndex: 2 },
+    { eventId: EVENT_ID, playerId: PLAYERS.flutterdev.id,     slug: "flutterdev",     displayName: "flutterdev",     deckColors: "BG",                                              deckScreenshotUrl: null,                                    deckScreenshotCaption: null, placement: 4, record: "1-2", seatIndex: 3 },
+    { eventId: EVENT_ID, playerId: PLAYERS.oophies.id,        slug: "oophies",        displayName: "Oophies",        deckColors: "RG",    deckScreenshotUrl: mockDeckSvg("OOPHIES", "RG"),            deckScreenshotCaption: "Gruul stompy, big creatures.", placement: 5, record: "1-2", seatIndex: 4 },
+    { eventId: EVENT_ID, playerId: PLAYERS.adoodwithgood.id,  slug: "adoodwithgood",  displayName: "adoodwithgood",  deckColors: "UR",                                              deckScreenshotUrl: null,                                    deckScreenshotCaption: null, placement: 6, record: "1-2", seatIndex: 5 },
+    { eventId: EVENT_ID, playerId: PLAYERS.lark.id,           slug: "lark",           displayName: "Lark",           deckColors: "WB",  deckScreenshotUrl: mockDeckSvg("LARK", "WB"),               deckScreenshotCaption: "Orzhov sacrifice, never found the engine.", placement: 7, record: "0-3", seatIndex: 6 },
+    { eventId: EVENT_ID, playerId: PLAYERS.samp.id,           slug: "samp",           displayName: "samp",           deckColors: "WG",                                              deckScreenshotUrl: mockDeckSvg("SAMP", "WG"),               deckScreenshotCaption: "Selesnya tokens. Anthem effects everywhere.", placement: 8, record: "2-1", seatIndex: 7 },
   ],
 
   matches: [

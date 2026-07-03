@@ -853,7 +853,6 @@ function TrophyDeckModal({
         screenshotChannelId: trophy.sourceChannelId,
         screenshotMessageId: trophy.sourceMessageId,
         mainboard: null,
-        draftLogUrl: null,
       }}
       hideDraftLog
       onClose={onClose}

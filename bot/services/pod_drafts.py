@@ -875,15 +875,14 @@ def participants_with_discord_for_event(session: Session, event_id: str) -> list
         select(
             PodDraftParticipant.id,
             PodDraftParticipant.deck_colors,
-            PodDraftParticipant.wants_draft_review,
             Player.discord_id,
         )
         .join(Player, Player.id == PodDraftParticipant.player_id)
         .where(PodDraftParticipant.event_id == event_id)
     ).all()
     return [
-        {"participant_id": pid, "deck_colors": dc, "wants_draft_review": wr, "discord_id": did}
-        for pid, dc, wr, did in rows
+        {"participant_id": pid, "deck_colors": dc, "discord_id": did}
+        for pid, dc, did in rows
         if did
     ]
 
@@ -954,7 +953,6 @@ def list_champions(session: Session, set_code: str | None = None) -> list[dict]:
             "champion_draftmancer_name": participant.draftmancer_name,
             "player_slug": player.slug if player else None,
             "discord_id": player.discord_id if player else None,
-            "draft_log_url": participant.draft_log_url,
         }
         for event, participant, player in rows
     ]
@@ -1110,10 +1108,10 @@ def get_participant_deck_state(
     session: Session,
     discord_thread_id: str,
     discord_id: str,
-) -> tuple[bool, str | None, bool | None]:
-    """Return (is_participant, deck_colors, wants_draft_review). is_participant=False short-circuits the gate."""
+) -> tuple[bool, str | None]:
+    """Return (is_participant, deck_colors). is_participant=False short-circuits the gate."""
     row = session.execute(
-        select(PodDraftParticipant.deck_colors, PodDraftParticipant.wants_draft_review)
+        select(PodDraftParticipant.deck_colors)
         .join(Player, Player.id == PodDraftParticipant.player_id)
         .join(PodDraftEvent, PodDraftEvent.id == PodDraftParticipant.event_id)
         .where(
@@ -1122,32 +1120,8 @@ def get_participant_deck_state(
         )
     ).first()
     if row is None:
-        return False, None, None
-    colors, wants_review = row
-    return True, colors, wants_review
-
-
-def set_participant_review_choice(
-    session: Session,
-    discord_thread_id: str,
-    discord_id: str,
-    wants_review: bool,
-) -> bool:
-    """Save wants_draft_review on the (event, player) participant row. Returns False if the user isn't in this pod."""
-    participant = session.execute(
-        select(PodDraftParticipant)
-        .join(Player, Player.id == PodDraftParticipant.player_id)
-        .join(PodDraftEvent, PodDraftEvent.id == PodDraftParticipant.event_id)
-        .where(
-            PodDraftEvent.discord_thread_id == discord_thread_id,
-            Player.discord_id == discord_id,
-        )
-    ).scalar_one_or_none()
-    if participant is None:
-        return False
-    participant.wants_draft_review = wants_review
-    session.flush()
-    return True
+        return False, None
+    return True, row[0]
 
 
 

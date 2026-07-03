@@ -712,6 +712,7 @@ function EventStandings({ event }: { event: PodEventSummary }) {
                       ? playerPath(p.playerSlug, event.setCode)
                       : null
                   }
+                  logHref={draftArtifact ? `/pods/${event.slug}/${p.playerSlug ?? p.seatIndex}` : null}
                   onShowDeck={p.deckScreenshotUrl ? () => setDeckTarget(p) : undefined}
                 />
               ))}
@@ -751,8 +752,10 @@ function EventStandings({ event }: { event: PodEventSummary }) {
             deckScreenshotCaption: deckTarget.deckScreenshotCaption,
             mainboard: deckTargetMainboard,
             record: deckTarget.record,
-            draftLogUrl: deckTarget.draftLogUrl,
           }}
+          draftLogHref={
+            draftArtifact ? `/pods/${event.slug}/${deckTarget.playerSlug ?? deckTarget.seatIndex}` : null
+          }
           breakdownHref={`/pods/${event.slug}?player=${encodeURIComponent(podDiscordName(deckTarget))}`}
           onClose={() => setDeckTarget(null)}
           onPrev={() => cycleDeck(-1)}
@@ -766,21 +769,24 @@ function EventStandings({ event }: { event: PodEventSummary }) {
 function StandingRow({
   p,
   profileHref,
+  logHref,
   onShowDeck,
 }: {
   p: PodEventParticipantRow;
   profileHref?: string | null;
+  logHref?: string | null;
   onShowDeck?: () => void;
 }) {
+  const navigate = useNavigate();
   const wins = p.record ? Number(p.record.split("-")[0] || 0) : 0;
   const losses = p.record ? Number(p.record.split("-")[1] || 0) : 0;
   const name = podDiscordName(p);
   const hasDeck = !!onShowDeck;
-  const draftLogUrl = !hasDeck ? p.draftLogUrl : null;
-  const interactive = hasDeck || !!draftLogUrl;
+  const draftLog = !hasDeck ? (logHref ?? null) : null;
+  const interactive = hasDeck || !!draftLog;
   const handleRowClick = () => {
     if (onShowDeck) onShowDeck();
-    else if (draftLogUrl) window.open(draftLogUrl, "_blank", "noopener,noreferrer");
+    else if (draftLog) navigate(draftLog);
   };
   return (
     <div
@@ -845,11 +851,9 @@ function StandingRow({
           </span>
           <TbCards size={17} aria-hidden="true" className="transition-colors" />
         </button>
-      ) : draftLogUrl ? (
-        <a
-          href={draftLogUrl}
-          target="_blank"
-          rel="noreferrer noopener"
+      ) : draftLog ? (
+        <Link
+          to={draftLog}
           onClick={(e) => e.stopPropagation()}
           className="group/action inline-flex items-center justify-center gap-2 bg-bg border border-border text-text hover:border-green/60 hover:bg-green/10 hover:text-green group-hover/row:border-green/60 group-hover/row:bg-green/10 group-hover/row:text-green peer-hover/name:!border-border peer-hover/name:!bg-bg peer-hover/name:!text-text transition-colors px-1.5 lg:px-3 no-underline whitespace-nowrap"
           style={{ height: 34 }}
@@ -861,7 +865,7 @@ function StandingRow({
             DRAFT LOG
           </span>
           <LuScrollText size={16} aria-hidden="true" className="transition-colors" />
-        </a>
+        </Link>
       ) : (
         <span />
       )}

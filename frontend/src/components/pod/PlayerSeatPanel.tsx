@@ -244,7 +244,6 @@ function SeatHeader({
           ))}
           <DraftLogButton
             internalHref={draftLogHref}
-            externalHref={participant.draftLogUrl}
             variant="mobile"
           />
           {isMock && participant.hasDeckList && (
@@ -285,7 +284,6 @@ function SeatHeader({
         ))}
         <DraftLogButton
           internalHref={draftLogHref}
-          externalHref={participant.draftLogUrl}
           variant="desktop"
         />
         {isMock && participant.hasDeckList && (
@@ -298,11 +296,9 @@ function SeatHeader({
 
 function DraftLogButton({
   internalHref,
-  externalHref,
   variant,
 }: {
   internalHref: string | null;
-  externalHref: string | null;
   variant: "mobile" | "desktop";
 }) {
   const mobile = variant === "mobile";
@@ -322,14 +318,6 @@ function DraftLogButton({
         <span>VIEW DRAFT LOG</span>
         {icon}
       </Link>
-    );
-  }
-  if (externalHref) {
-    return (
-      <a href={externalHref} target="_blank" rel="noreferrer noopener" className={cn(base, enabled)} style={style}>
-        <span>VIEW DRAFT LOG</span>
-        {icon}
-      </a>
     );
   }
   return (

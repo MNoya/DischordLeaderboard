@@ -1,10 +1,8 @@
 """CLI wrapper for bot.services.pod_log_ingest — ingest a raw Draftmancer DraftLog .txt.
 
-    DATABASE_URL=... [MPT_API_KEY=...] python -m bot.scripts.ingest_pod_draft_log \\
-        <event_id> <path/to/DraftLog.txt> [--no-mpt]
+    DATABASE_URL=... python -m bot.scripts.ingest_pod_draft_log <event_id> <path/to/DraftLog.txt>
 
-Idempotent — re-running overwrites the stored draft log and re-aligns names from the same log. Pass
---no-mpt to skip the MagicProTools submission step.
+Idempotent — re-running overwrites the stored draft log and re-aligns names from the same log.
 """
 from __future__ import annotations
 
@@ -13,10 +11,10 @@ import json
 import sys
 from pathlib import Path
 
-from bot.services.pod_log_ingest import ingest_draft_log_sync, log_user_names, submit_log_to_mpt
+from bot.services.pod_log_ingest import ingest_draft_log_sync, log_user_names
 
 
-async def main(event_id: str, log_path: Path, submit_mpt: bool) -> int:
+async def main(event_id: str, log_path: Path) -> int:
     with log_path.open() as f:
         draft_log = json.load(f)
 
@@ -39,26 +37,15 @@ async def main(event_id: str, log_path: Path, submit_mpt: bool) -> int:
     print(f"stored draft_log_gz: {summary.stored_bytes:,} bytes")
     print(f"done: renamed={summary.renamed} unchanged={summary.unchanged} arena_fixed={summary.arena_fixed}")
 
-    if submit_mpt:
-        mpt = await submit_log_to_mpt(event_id, draft_log)
-        if mpt is None:
-            print("MPT_API_KEY not set; skipping MagicProTools submission")
-        else:
-            for user_name, url in mpt.results:
-                print(f"  {user_name}: {url or 'MPT submit failed'}")
-            print(f"MPT done: submitted={mpt.submitted} failed={mpt.failed}")
-
     return 0
 
 
 if __name__ == "__main__":
-    raw_args = sys.argv[1:]
-    submit_mpt = "--no-mpt" not in raw_args
-    pos = [a for a in raw_args if a != "--no-mpt"]
+    pos = sys.argv[1:]
     if len(pos) != 2:
         print(
-            "usage: python -m bot.scripts.ingest_pod_draft_log <event_id> <path/to/DraftLog.txt> [--no-mpt]",
+            "usage: python -m bot.scripts.ingest_pod_draft_log <event_id> <path/to/DraftLog.txt>",
             file=sys.stderr,
         )
         sys.exit(64)
-    sys.exit(asyncio.run(main(pos[0], Path(pos[1]), submit_mpt)))
+    sys.exit(asyncio.run(main(pos[0], Path(pos[1]))))

@@ -17,7 +17,6 @@ function participantToRow(p: PodParticipant): PodEventParticipantRow {
     placement: p.placement ?? null,
     record: p.record,
     deckColors: p.deckColors,
-    draftLogUrl: p.draftLogUrl,
     deckScreenshotUrl: p.deckScreenshotUrl,
     deckScreenshotCaption: p.deckScreenshotCaption,
     playerSlug: p.slug,

@@ -1422,7 +1422,6 @@ function adaptPodEventParticipant(row: Record<string, unknown>): PodEventPartici
     placement: (row.placement ?? null) as number | null,
     record: (row.record ?? null) as string | null,
     deckColors: (row.deck_colors ?? null) as string | null,
-    draftLogUrl: (row.draft_log_url ?? null) as string | null,
     deckScreenshotUrl: (row.deck_screenshot_url ?? null) as string | null,
     deckScreenshotCaption: (row.deck_screenshot_caption ?? null) as string | null,
     playerSlug: (row.player_slug ?? null) as string | null,

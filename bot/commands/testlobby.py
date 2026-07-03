@@ -42,10 +42,14 @@ from bot.services.pod_settings_view import PodSettingsView
 from bot.services.pod_drafts import normalize_player_name
 from bot.services.pod_swiss import Standing
 from bot.services.pod_tournament import (
+    REVIEW_EMOJI,
     ParticipantDeckData,
     actor_label,
+    build_draft_review_message,
     build_trophy_hype_view,
     mark_trophy_match,
+    pod_voice_channel_url,
+    render_draft_review_embed,
     round_embed,
     start_tournament,
 )
@@ -59,7 +63,6 @@ _INVOKER_SEAT = "Noya"
 
 # Module-level scratch store for the SubmitDeck POC; cleared on bot restart.
 _TEST_DECK_COLORS: dict[int, str] = {}
-_TEST_REVIEW_CHOICES: dict[int, bool] = {}
 
 # Fictional 8-player roster for the live-seeded tournament path (`podbracket` / `podswiss` / `round1`).
 _LIVE_TEST_ROSTER = ["Ava", "Bram", "Cara", "Dex", "Eli", "Fern", "Gus", "Hana"]
@@ -329,18 +332,26 @@ async def _test_submit_deck_color(interaction: discord.Interaction, color: str) 
     log.info(f"testlobby deck color saved: user={interaction.user.id} color={color}")
 
 
-async def _test_lookup_deck_state(interaction: discord.Interaction) -> tuple[str | None, bool | None]:
-    return _TEST_DECK_COLORS.get(interaction.user.id), _TEST_REVIEW_CHOICES.get(interaction.user.id)
-
-
-async def _test_review_toggle(interaction: discord.Interaction, wants_review: bool) -> None:
-    _TEST_REVIEW_CHOICES[interaction.user.id] = wants_review
-    log.info(f"testlobby review choice saved: user={interaction.user.id} wants={wants_review}")
+async def _test_lookup_deck_state(interaction: discord.Interaction) -> str | None:
+    return _TEST_DECK_COLORS.get(interaction.user.id)
 
 
 def _submit_deck_view() -> SubmitDeckView:
     """Build a SubmitDeckView (button form) for the testlobby channel preview."""
-    return SubmitDeckView(_test_submit_deck_color, _test_lookup_deck_state, _test_review_toggle)
+    return SubmitDeckView(_test_submit_deck_color, _test_lookup_deck_state)
+
+
+def _review_preview_roster() -> list[dict]:
+    """Fixture roster for the `!test review` preview — fictional seats with varied colors, records, slugs."""
+    colors = ["WU", "BRg", "UG", "R", "WUBRG", "BR", "WGu", "UB"]
+    records = ["3-0", "2-1", "2-1", "2-1", "1-2", "1-2", "1-2", "0-3"]
+    return [
+        {
+            "seat_index": i, "name": name, "colors": colors[i % len(colors)],
+            "result": records[i % len(records)], "slug": slugify(name),
+        }
+        for i, name in enumerate(_LIVE_TEST_ROSTER)
+    ]
 
 
 _TEST_DECK_SCREENSHOT_URL = "https://placehold.co/1280x720/2b2d31/ffffff/png?text=Deck+Screenshot"
@@ -362,7 +373,6 @@ def _trophy_hype_preview() -> discord.ui.LayoutView:
             colors="URg",
             screenshot_url=_TEST_DECK_SCREENSHOT_URL,
             screenshot_caption="Izzet spells with a green splash for the bombs",
-            draft_log_url=None,
         )},
         guild_id=1,
         thread_id=1,
@@ -441,7 +451,7 @@ _LINKED_EIGHT: list[tuple[str, str]] = [
 _VALID_STATES = (
     "empty", "partial", "linked", "unlinked", "ready", "notready", "cancelled", "superseded",
     "drafting", "complete", "submit", "podbracket", "podswiss", "podrandom", "podlobby", "format",
-    "seeding", "trophyhype", "round1", "round2", "round3", "voicelink",
+    "seeding", "trophyhype", "round1", "round2", "round3", "voicelink", "review",
 )
 
 _LIVE_POD_MODES = {"podbracket": "bracket", "podswiss": "swiss", "podrandom": "random"}
@@ -662,6 +672,19 @@ async def setup(bot: commands.Bot) -> None:
                 await ctx.send(f"(no '{settings.pod_draft_voice_channel_name}' voice channel in this server)")
                 return
             await ctx.send(channel.jump_url)
+            return
+
+        if state == "review":
+            voice_url = pod_voice_channel_url(ctx.guild)
+            embed = render_draft_review_embed(_review_preview_roster(), event_name="Pod Draft Preview")
+            msg = await ctx.send(
+                content=build_draft_review_message(voice_url),
+                embed=embed, allowed_mentions=discord.AllowedMentions.none(),
+            )
+            try:
+                await msg.add_reaction(REVIEW_EMOJI)
+            except discord.HTTPException:
+                pass
             return
 
         if state == "format":

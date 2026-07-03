@@ -23,8 +23,7 @@ class NotInPodError(Exception):
 
 
 SubmitCallback = Callable[[discord.Interaction, str], Awaitable[None]]
-LookupCallback = Callable[[discord.Interaction], Awaitable[tuple[str | None, bool | None]]]
-ReviewToggleCallback = Callable[[discord.Interaction, bool], Awaitable[None]]
+LookupCallback = Callable[[discord.Interaction], Awaitable[str | None]]
 OrganizerCallback = Callable[[discord.Interaction], Awaitable[bool]]
 
 
@@ -67,11 +66,6 @@ NOT_IN_POD_MSG = "You are not registered as a player in this pod"
 
 SAVED_MSG = "Choices saved. Adjust or dismiss below"
 
-REVIEW_YES_VALUE = "yes"
-REVIEW_NO_VALUE = "no"
-
-DRAFT_REVIEW_FEATURE_ENABLED = False
-
 
 def color_label(code: str) -> str:
     if code in GUILD_LABEL:
@@ -99,11 +93,10 @@ class SubmitDeckView(ui.View):
         self,
         on_submit: SubmitCallback,
         on_lookup: LookupCallback,
-        on_review_toggle: ReviewToggleCallback,
         on_organizer: OrganizerCallback | None = None,
     ) -> None:
         super().__init__(timeout=None)
-        self.add_item(SubmitDeckButton(on_submit, on_lookup, on_review_toggle, on_organizer))
+        self.add_item(SubmitDeckButton(on_submit, on_lookup, on_organizer))
 
 
 class SubmitDeckButton(ui.Button):
@@ -111,7 +104,6 @@ class SubmitDeckButton(ui.Button):
         self,
         on_submit: SubmitCallback,
         on_lookup: LookupCallback,
-        on_review_toggle: ReviewToggleCallback,
         on_organizer: OrganizerCallback | None = None,
     ) -> None:
         super().__init__(
@@ -122,14 +114,13 @@ class SubmitDeckButton(ui.Button):
         )
         self._submit = on_submit
         self._lookup = on_lookup
-        self._review_toggle = on_review_toggle
         self._organizer = on_organizer
 
     async def callback(self, interaction: discord.Interaction) -> None:
         if self._organizer is not None and await self._organizer(interaction):
             return
         try:
-            current_color, current_review = await self._lookup(interaction)
+            current_color = await self._lookup(interaction)
         except NotInPodError:
             await interaction.response.send_message(NOT_IN_POD_MSG, ephemeral=True)
             return
@@ -141,10 +132,7 @@ class SubmitDeckButton(ui.Button):
             except discord.HTTPException:
                 pass
 
-        view = DeckColorSelectView(
-            self._submit, self._review_toggle,
-            current_value=current_color, current_review=current_review,
-        )
+        view = DeckColorSelectView(self._submit, current_value=current_color)
         await interaction.response.send_message(view=view, ephemeral=True)
         try:
             _PREV_EPHEMERAL[interaction.user.id] = await interaction.original_response()
@@ -153,27 +141,13 @@ class SubmitDeckButton(ui.Button):
 
 
 class DeckColorSelectView(ui.View):
-    def __init__(
-        self,
-        on_submit: SubmitCallback,
-        on_review_toggle: ReviewToggleCallback,
-        current_value: str | None,
-        current_review: bool | None,
-    ) -> None:
+    def __init__(self, on_submit: SubmitCallback, current_value: str | None) -> None:
         super().__init__(timeout=300)
-        self.add_item(DeckColorSelect(on_submit, on_review_toggle, current_value, current_review))
-        if DRAFT_REVIEW_FEATURE_ENABLED:
-            self.add_item(DraftReviewSelect(on_submit, on_review_toggle, current_value, current_review))
+        self.add_item(DeckColorSelect(on_submit, current_value))
 
 
 class DeckColorSelect(ui.Select):
-    def __init__(
-        self,
-        on_submit: SubmitCallback,
-        on_review_toggle: ReviewToggleCallback,
-        current_value: str | None,
-        current_review: bool | None,
-    ) -> None:
+    def __init__(self, on_submit: SubmitCallback, current_value: str | None) -> None:
         from bot import emojis as _emojis
         guild_codes = {code for code, _ in GUILDS}
         is_write_in = current_value is not None and current_value not in guild_codes
@@ -195,15 +169,11 @@ class DeckColorSelect(ui.Select):
         )
         super().__init__(placeholder="Choose your deck colors", options=options, min_values=1, max_values=1)
         self._submit = on_submit
-        self._review_toggle = on_review_toggle
-        self._current_review = current_review
 
     async def callback(self, interaction: discord.Interaction) -> None:
         value = self.values[0]
         if value == OTHER_VALUE:
-            await interaction.response.send_modal(
-                DeckColorWriteInModal(self._submit, self._review_toggle, self._current_review),
-            )
+            await interaction.response.send_modal(DeckColorWriteInModal(self._submit))
             return
         await interaction.response.defer()
         try:
@@ -213,61 +183,7 @@ class DeckColorSelect(ui.Select):
             return
         await interaction.edit_original_response(
             content=SAVED_MSG,
-            view=DeckColorSelectView(
-                self._submit, self._review_toggle,
-                current_value=value, current_review=self._current_review,
-            ),
-        )
-
-
-class DraftReviewSelect(ui.Select):
-    """Mirror of the deck-color picker for the post-pod review opt-in. Selected option is shown
-    in the placeholder, so state is unambiguous. min_values=1 so opening + closing without picking
-    leaves the prior value intact."""
-
-    def __init__(
-        self,
-        on_submit: SubmitCallback,
-        on_review_toggle: ReviewToggleCallback,
-        current_value: str | None,
-        current_review: bool | None,
-    ) -> None:
-        options = [
-            discord.SelectOption(
-                label="Yes, staying for draft review",
-                value=REVIEW_YES_VALUE,
-                emoji="🙋",
-                default=current_review is True,
-            ),
-            discord.SelectOption(
-                label="No, skipping draft review",
-                value=REVIEW_NO_VALUE,
-                emoji="⏭️",
-                default=current_review is False,
-            ),
-        ]
-        super().__init__(
-            placeholder="Staying for draft review?",
-            options=options, min_values=1, max_values=1,
-        )
-        self._submit = on_submit
-        self._review_toggle = on_review_toggle
-        self._current_color = current_value
-
-    async def callback(self, interaction: discord.Interaction) -> None:
-        wants_review = self.values[0] == REVIEW_YES_VALUE
-        await interaction.response.defer()
-        try:
-            await self._review_toggle(interaction, wants_review)
-        except NotInPodError:
-            await interaction.edit_original_response(content=NOT_IN_POD_MSG, view=None)
-            return
-        await interaction.edit_original_response(
-            content=SAVED_MSG,
-            view=DeckColorSelectView(
-                self._submit, self._review_toggle,
-                current_value=self._current_color, current_review=wants_review,
-            ),
+            view=DeckColorSelectView(self._submit, current_value=value),
         )
 
 
@@ -280,26 +196,16 @@ class DeckColorWriteInModal(ui.Modal, title="Deck colors"):
         required=True,
     )
 
-    def __init__(
-        self,
-        on_submit: SubmitCallback,
-        on_review_toggle: ReviewToggleCallback,
-        current_review: bool | None,
-    ) -> None:
+    def __init__(self, on_submit: SubmitCallback) -> None:
         super().__init__()
         self._submit = on_submit
-        self._review_toggle = on_review_toggle
-        self._current_review = current_review
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         cleaned = _sanitize(self.colors.value)
         if cleaned is None:
             await interaction.response.edit_message(
                 content=f"⚠️ `{self.colors.value}` isn't valid — use only W/U/B/R/G letters, 1–5 chars.",
-                view=DeckColorSelectView(
-                    self._submit, self._review_toggle,
-                    current_value=None, current_review=self._current_review,
-                ),
+                view=DeckColorSelectView(self._submit, current_value=None),
             )
             return
         await interaction.response.defer()
@@ -310,38 +216,21 @@ class DeckColorWriteInModal(ui.Modal, title="Deck colors"):
             return
         await interaction.edit_original_response(
             content=SAVED_MSG,
-            view=DeckColorSelectView(
-                self._submit, self._review_toggle,
-                current_value=cleaned, current_review=self._current_review,
-            ),
+            view=DeckColorSelectView(self._submit, current_value=cleaned),
         )
 
 
 LIVE_COLOR_CUSTOM_ID = "poddeckselect-color"
-LIVE_REVIEW_CUSTOM_ID = "poddeckselect-review"
 
 
 class LiveDeckColorSelectView(ui.View):
-    """Persistent direct-dropdown view for DM Submit Deck flow — both selects are visible on the
-    message itself, so players don't need to click a button first. Interactions defer silently and
-    rely on the parent module's refresh helper to re-render the message after persistence."""
+    """Persistent direct-dropdown view for the DM Submit Deck flow — the select is visible on the message
+    itself, so players don't need to click a button first. Interactions defer silently and rely on the
+    parent module's refresh helper to re-render the message after persistence."""
 
-    def __init__(
-        self,
-        on_submit: SubmitCallback,
-        on_lookup: LookupCallback,
-        on_review_toggle: ReviewToggleCallback,
-        current_value: str | None = None,
-        current_review: bool | None = None,
-    ) -> None:
+    def __init__(self, on_submit: SubmitCallback, current_value: str | None = None) -> None:
         super().__init__(timeout=None)
-        self.add_item(LiveDeckColorSelect(
-            on_submit, on_lookup, on_review_toggle, current_value, current_review,
-        ))
-        if DRAFT_REVIEW_FEATURE_ENABLED:
-            self.add_item(LiveDraftReviewSelect(
-                on_submit, on_lookup, on_review_toggle, current_value, current_review,
-            ))
+        self.add_item(LiveDeckColorSelect(on_submit, current_value))
 
 
 def _dm_ephemeral(interaction: discord.Interaction) -> bool:
@@ -349,14 +238,7 @@ def _dm_ephemeral(interaction: discord.Interaction) -> bool:
 
 
 class LiveDeckColorSelect(ui.Select):
-    def __init__(
-        self,
-        on_submit: SubmitCallback,
-        on_lookup: LookupCallback,
-        on_review_toggle: ReviewToggleCallback,
-        current_value: str | None,
-        current_review: bool | None,
-    ) -> None:
+    def __init__(self, on_submit: SubmitCallback, current_value: str | None) -> None:
         from bot import emojis as _emojis
         guild_codes = {code for code, _ in GUILDS}
         is_write_in = current_value is not None and current_value not in guild_codes
@@ -382,61 +264,15 @@ class LiveDeckColorSelect(ui.Select):
             options=options, min_values=1, max_values=1,
         )
         self._submit = on_submit
-        self._lookup = on_lookup
-        self._review_toggle = on_review_toggle
-        self._current_review = current_review
 
     async def callback(self, interaction: discord.Interaction) -> None:
         value = self.values[0]
         if value == OTHER_VALUE:
-            await interaction.response.send_modal(LiveDeckColorWriteInModal(
-                self._submit, self._lookup, self._review_toggle, self._current_review,
-            ))
+            await interaction.response.send_modal(LiveDeckColorWriteInModal(self._submit))
             return
         await interaction.response.defer()
         try:
             await self._submit(interaction, value)
-        except NotInPodError:
-            await interaction.followup.send(NOT_IN_POD_MSG, ephemeral=_dm_ephemeral(interaction))
-
-
-class LiveDraftReviewSelect(ui.Select):
-    def __init__(
-        self,
-        on_submit: SubmitCallback,
-        on_lookup: LookupCallback,
-        on_review_toggle: ReviewToggleCallback,
-        current_value: str | None,
-        current_review: bool | None,
-    ) -> None:
-        options = [
-            discord.SelectOption(
-                label="Yes, staying for draft review",
-                value=REVIEW_YES_VALUE,
-                emoji="🙋",
-                default=current_review is True,
-            ),
-            discord.SelectOption(
-                label="No, skipping draft review",
-                value=REVIEW_NO_VALUE,
-                emoji="⏭️",
-                default=current_review is False,
-            ),
-        ]
-        super().__init__(
-            custom_id=LIVE_REVIEW_CUSTOM_ID,
-            placeholder="Staying for draft review?",
-            options=options, min_values=1, max_values=1,
-        )
-        self._submit = on_submit
-        self._lookup = on_lookup
-        self._review_toggle = on_review_toggle
-
-    async def callback(self, interaction: discord.Interaction) -> None:
-        wants_review = self.values[0] == REVIEW_YES_VALUE
-        await interaction.response.defer()
-        try:
-            await self._review_toggle(interaction, wants_review)
         except NotInPodError:
             await interaction.followup.send(NOT_IN_POD_MSG, ephemeral=_dm_ephemeral(interaction))
 
@@ -450,18 +286,9 @@ class LiveDeckColorWriteInModal(ui.Modal, title="Deck colors"):
         required=True,
     )
 
-    def __init__(
-        self,
-        on_submit: SubmitCallback,
-        on_lookup: LookupCallback,
-        on_review_toggle: ReviewToggleCallback,
-        current_review: bool | None,
-    ) -> None:
+    def __init__(self, on_submit: SubmitCallback) -> None:
         super().__init__()
         self._submit = on_submit
-        self._lookup = on_lookup
-        self._review_toggle = on_review_toggle
-        self._current_review = current_review
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         cleaned = _sanitize(self.colors.value)

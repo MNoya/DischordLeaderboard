@@ -48,7 +48,6 @@ class Settings(BaseSettings):
     sesh_bot_id: int = 616754792965865495
     draftmancer_ws_url: str = f"wss://{DRAFTMANCER_HOST}"
     draftmancer_web_url: str = f"https://{DRAFTMANCER_HOST}"
-    mpt_api_key: SecretStr | None = None
 
     youtube_api_key: SecretStr | None = None
     youtube_channel_handle: str = "limitedlevel-ups"

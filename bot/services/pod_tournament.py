@@ -21,7 +21,7 @@ from sqlalchemy import delete, func, select, update
 
 from bot import emojis
 from bot.config import settings
-from bot.discord_helpers import NBSP, first_image_url
+from bot.discord_helpers import NBSP, display_width, first_image_url
 from bot.slug import slugify
 from bot.database import SessionLocal
 from bot.models import Player as DbPlayer, PodDraftEvent, PodDraftMatch, PodDraftParticipant
@@ -29,7 +29,6 @@ from bot.services import bot_log as bot_log_mod, pod_bracket, pod_swiss
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_deck_color import (
     PAIR_EMOJI_NAME,
-    DRAFT_REVIEW_FEATURE_ENABLED,
     SAVED_MSG,
     LiveDeckColorSelectView,
     NotInPodError,
@@ -70,7 +69,6 @@ from bot.services.pod_drafts import (
     seed_event_participants,
     set_match_result,
     set_participant_deck_colors,
-    set_participant_review_choice,
     submit_deck_dm_for_participant,
     upsert_dm_message,
 )
@@ -233,13 +231,10 @@ class ParticipantDeckData(NamedTuple):
     colors: str | None
     screenshot_url: str | None
     screenshot_caption: str | None
-    draft_log_url: str | None
-    wants_draft_review: bool | None = None
 
 
 def _load_event_deck_data_sync(event_id: str) -> dict[str, ParticipantDeckData]:
-    """Return normalized_name → deck colors + screenshot URL + caption + MPT URL + review opt-in
-    for every participant."""
+    """Return normalized_name → deck colors + screenshot URL + caption for every participant."""
     with SessionLocal() as session:
         rows = session.execute(
             select(
@@ -248,17 +243,12 @@ def _load_event_deck_data_sync(event_id: str) -> dict[str, ParticipantDeckData]:
                 PodDraftParticipant.deck_colors,
                 PodDraftParticipant.deck_screenshot_url,
                 PodDraftParticipant.deck_screenshot_caption,
-                PodDraftParticipant.draft_log_url,
-                PodDraftParticipant.wants_draft_review,
             )
             .where(PodDraftParticipant.event_id == event_id)
         ).all()
     out: dict[str, ParticipantDeckData] = {}
-    for dm, dn, dc, ds, dcap, dlog, dreview in rows:
-        data = ParticipantDeckData(
-            colors=dc, screenshot_url=ds, screenshot_caption=dcap, draft_log_url=dlog,
-            wants_draft_review=dreview,
-        )
+    for dm, dn, dc, ds, dcap in rows:
+        data = ParticipantDeckData(colors=dc, screenshot_url=ds, screenshot_caption=dcap)
         for src in (dm, dn):
             if src:
                 out[normalize_player_name(src)] = data
@@ -267,6 +257,14 @@ def _load_event_deck_data_sync(event_id: str) -> dict[str, ParticipantDeckData]:
 
 def _colors_only(deck_data: dict[str, ParticipantDeckData]) -> dict[str, str | None]:
     return {k: v.colors for k, v in deck_data.items()}
+
+
+def _event_has_draft_log_sync(event_id: str) -> bool:
+    """True when the event has a captured draft log, so the in-site reviewer has something to show."""
+    with SessionLocal() as session:
+        return session.execute(
+            select(PodDraftEvent.draft_log_gz).where(PodDraftEvent.id == event_id)
+        ).scalar_one_or_none() is not None
 
 
 def _load_event_started_at_sync(event_id: str) -> datetime | None:
@@ -354,16 +352,15 @@ def _build_standings_row(
     deck_data: dict[str, ParticipantDeckData],
     leaderboard_url: str | None,
     event_name: str | None = None,
-    show_review_flag: bool = False,
+    event_has_log: bool = False,
     inline_caption: bool = False,
     show_medal: bool = True,
 ) -> str:
     """One standings row used by both the V2 announcement and the thread-side classic embed:
     `{rank}. {medal} {name}  {wins}-{losses}  {colors}  [Draft Log]({url}) 📜`.
     The Draft Log link points at the in-site reviewer keyed on the player's slug, so it needs both
-    event_name and a resolved slug to render. Set show_review_flag for the in-thread variant to append
-    🙋 for review opt-ins. Set inline_caption to splice an italicized caption between the W-L record and
-    the color glyph."""
+    event_name and a resolved slug to render. Set inline_caption to splice an italicized caption between
+    the W-L record and the color glyph."""
     key = normalize_player_name(s.player_name)
     info = displays.get(key, {})
     name = info.get("display_name") or s.player_name
@@ -377,15 +374,10 @@ def _build_standings_row(
     )
     color_glyph = _format_deck_color_emojis(player_colors.get(key))
     color_suffix = f"  {color_glyph}" if color_glyph else ""
-    has_log = data is not None and data.draft_log_url
     log_suffix = ""
-    if has_log and slug and event_name:
+    if event_has_log and slug and event_name:
         review_url = f"{settings.public_site_url.rstrip('/')}/pods/{slugify(event_name)}/{slug}"
         log_suffix = f"  [Draft Log]({review_url}) 📜"
-    review_suffix = (
-        " 🙋" if DRAFT_REVIEW_FEATURE_ENABLED and show_review_flag
-        and data is not None and data.wants_draft_review else ""
-    )
     caption_cleaned = (
         _clean_caption(data.screenshot_caption)
         if inline_caption and data is not None and data.screenshot_caption else ""
@@ -393,7 +385,7 @@ def _build_standings_row(
     caption_inline = f"  _{_escape_italics(caption_cleaned)}_" if caption_cleaned else ""
     return (
         f"{prefix}{rendered}  {s.wins}-{s.losses}"
-        f"{caption_inline}{color_suffix}{log_suffix}{review_suffix}"
+        f"{caption_inline}{color_suffix}{log_suffix}"
     )
 
 
@@ -553,21 +545,21 @@ def _load_active_event_for_user_sync(discord_id: str) -> tuple[str, str] | None:
         return active_event_for_discord_user_in_dm(session, discord_id)
 
 
-async def live_deck_state_lookup(interaction: discord.Interaction) -> tuple[str | None, bool | None]:
+async def live_deck_state_lookup(interaction: discord.Interaction) -> str | None:
     """Resolve the participant; raise NotInPodError if the user isn't in any active pod."""
     event_id, thread_id = await _resolve_event_for_interaction(interaction)
     if thread_id is None:
         raise NotInPodError()
     discord_id = str(interaction.user.id)
 
-    def _do() -> tuple[bool, str | None, bool | None]:
+    def _do() -> tuple[bool, str | None]:
         with SessionLocal() as session:
             return get_participant_deck_state(session, thread_id, discord_id)
 
-    in_pod, color, wants_review = await asyncio.to_thread(_do)
+    in_pod, color = await asyncio.to_thread(_do)
     if not in_pod:
         raise NotInPodError()
-    return color or None, wants_review
+    return color or None
 
 
 async def live_deck_color_submit(interaction: discord.Interaction, color: str) -> None:
@@ -600,35 +592,6 @@ async def live_deck_color_submit(interaction: discord.Interaction, color: str) -
     asyncio.create_task(_refresh_submit_deck_dm(interaction.client, event_id, discord_id))
 
 
-async def live_review_choice_submit(interaction: discord.Interaction, wants_review: bool) -> None:
-    event_id, thread_id = await _resolve_event_for_interaction(interaction)
-    if thread_id is None:
-        raise NotInPodError()
-    discord_id = str(interaction.user.id)
-
-    def _do() -> bool:
-        with SessionLocal() as session:
-            ok = set_participant_review_choice(session, thread_id, discord_id, wants_review)
-            session.commit()
-            return ok
-
-    ok = await asyncio.to_thread(_do)
-    if not ok:
-        raise NotInPodError()
-
-    actor = actor_label(interaction)
-    surface = surface_label(interaction)
-    if event_id is None:
-        log.info(f"{actor} set review opt-in: {wants_review} (from {surface}, no event)")
-        return
-    event_name = await asyncio.to_thread(load_event_name_sync, event_id)
-    log.info(f"[{event_name}] {actor} set review opt-in: {wants_review} (from {surface})")
-    manager = ACTIVE_POD_MANAGERS.get(event_id)
-    if manager is not None:
-        await _post_or_update_live_standings(manager)
-    asyncio.create_task(_refresh_submit_deck_dm(interaction.client, event_id, discord_id))
-
-
 ORGANIZER_DECK_OVERRIDE: OrganizerCallback | None = None
 
 
@@ -647,8 +610,7 @@ async def _dispatch_organizer_deck_override(interaction: discord.Interaction) ->
 
 
 def build_live_submit_deck_view() -> SubmitDeckView:
-    return SubmitDeckView(live_deck_color_submit, live_deck_state_lookup, live_review_choice_submit,
-                          _dispatch_organizer_deck_override)
+    return SubmitDeckView(live_deck_color_submit, live_deck_state_lookup, _dispatch_organizer_deck_override)
 
 
 def build_live_submit_deck_button() -> SubmitDeckButton:
@@ -657,24 +619,18 @@ def build_live_submit_deck_button() -> SubmitDeckButton:
     Shares the persistent custom_id ('poddecksubmit') with build_live_submit_deck_view, so the
     persistent view registered at startup catches the click regardless of which message it came from.
     """
-    return SubmitDeckButton(live_deck_color_submit, live_deck_state_lookup, live_review_choice_submit,
-                            _dispatch_organizer_deck_override)
+    return SubmitDeckButton(live_deck_color_submit, live_deck_state_lookup, _dispatch_organizer_deck_override)
 
 
-def build_live_deck_color_select_view(
-    current_value: str | None = None, current_review: bool | None = None,
-) -> LiveDeckColorSelectView:
-    """Direct-dropdown variant for DMs — both selects are visible on the message itself."""
-    return LiveDeckColorSelectView(
-        live_deck_color_submit, live_deck_state_lookup, live_review_choice_submit,
-        current_value=current_value, current_review=current_review,
-    )
+def build_live_deck_color_select_view(current_value: str | None = None) -> LiveDeckColorSelectView:
+    """Direct-dropdown variant for DMs — the select is visible on the message itself."""
+    return LiveDeckColorSelectView(live_deck_color_submit, current_value=current_value)
 
 
-def _build_submit_deck_dm_embed(deck_colors: str | None, wants_draft_review: bool | None) -> discord.Embed:
+def _build_submit_deck_dm_embed(deck_colors: str | None) -> discord.Embed:
     """Embed body for the Submit Deck DM. Pre-submit shows the prompt; post-submit collapses to
-    SAVED_MSG (the dropdown defaults already convey the saved values visually)."""
-    if deck_colors is not None or wants_draft_review is not None:
+    SAVED_MSG (the dropdown default already conveys the saved value visually)."""
+    if deck_colors is not None:
         body = SAVED_MSG
     else:
         body = "🎨 **Submit your deck colors** when you're done drafting"
@@ -689,8 +645,8 @@ async def _send_submit_deck_dms(bot_client, event_id: str) -> None:
         existing = await asyncio.to_thread(_load_submit_deck_dm_sync, p["participant_id"])
         if existing is not None:
             continue
-        embed = _build_submit_deck_dm_embed(p["deck_colors"], p["wants_draft_review"])
-        view = build_live_deck_color_select_view(p["deck_colors"], p["wants_draft_review"])
+        embed = _build_submit_deck_dm_embed(p["deck_colors"])
+        view = build_live_deck_color_select_view(p["deck_colors"])
         msg = None
         try:
             user = bot_client.get_user(int(p["discord_id"])) or await bot_client.fetch_user(int(p["discord_id"]))
@@ -714,11 +670,11 @@ async def _send_submit_deck_dms(bot_client, event_id: str) -> None:
             )
 
 
-def build_final_submit_deck_dm_embed(deck_colors: str | None, wants_draft_review: bool | None) -> discord.Embed:
+def build_final_submit_deck_dm_embed(deck_colors: str | None) -> discord.Embed:
     """Embed body for the post-R3 Submit Deck DM. Mirrors `_build_submit_deck_dm_embed` but with a thank-you header."""
     chordo_love = emojis.get("chordo_love")
     header = f"{chordo_love} Thank you for playing!"
-    if deck_colors is not None or wants_draft_review is not None:
+    if deck_colors is not None:
         body = f"{header}\n{SAVED_MSG}"
     else:
         body = f"{header}\n🎨 **Please submit your deck colors with the dropdown below**"
@@ -739,11 +695,11 @@ async def _send_final_submit_deck_dms_for_match(
         existing = await asyncio.to_thread(_load_final_submit_deck_dm_sync, info.participant_id)
         if existing is not None:
             continue
-        deck_colors, wants_review = await asyncio.to_thread(
+        deck_colors = await asyncio.to_thread(
             _load_participant_deck_state_sync, event_id, info.discord_id,
         )
-        embed = build_final_submit_deck_dm_embed(deck_colors, wants_review)
-        view = build_live_deck_color_select_view(deck_colors, wants_review)
+        embed = build_final_submit_deck_dm_embed(deck_colors)
+        view = build_live_deck_color_select_view(deck_colors)
         msg = None
         try:
             user = bot_client.get_user(int(info.discord_id)) \
@@ -789,17 +745,17 @@ def _load_submit_deck_dm_sync(participant_id: str):
         return row
 
 
-def _load_participant_deck_state_sync(event_id: str, discord_id: str) -> tuple[str | None, bool | None]:
+def _load_participant_deck_state_sync(event_id: str, discord_id: str) -> str | None:
     with SessionLocal() as session:
         row = session.execute(
-            select(PodDraftParticipant.deck_colors, PodDraftParticipant.wants_draft_review)
+            select(PodDraftParticipant.deck_colors)
             .join(DbPlayer, DbPlayer.id == PodDraftParticipant.player_id)
             .where(
                 PodDraftParticipant.event_id == event_id,
                 DbPlayer.discord_id == discord_id,
             )
         ).first()
-    return (row[0], row[1]) if row else (None, None)
+    return row[0] if row else None
 
 
 async def _refresh_submit_deck_dm(bot_client, event_id: str, discord_id: str) -> None:
@@ -808,26 +764,21 @@ async def _refresh_submit_deck_dm(bot_client, event_id: str, discord_id: str) ->
     participant_id = await asyncio.to_thread(_load_participant_id_sync, event_id, discord_id)
     if participant_id is None:
         return
-    deck_colors, wants_review = await asyncio.to_thread(_load_participant_deck_state_sync, event_id, discord_id)
+    deck_colors = await asyncio.to_thread(_load_participant_deck_state_sync, event_id, discord_id)
     r1_row = await asyncio.to_thread(_load_submit_deck_dm_sync, participant_id)
     if r1_row is not None:
         await _edit_submit_deck_dm(
-            bot_client, r1_row,
-            _build_submit_deck_dm_embed(deck_colors, wants_review),
-            deck_colors, wants_review,
+            bot_client, r1_row, _build_submit_deck_dm_embed(deck_colors), deck_colors,
         )
     final_row = await asyncio.to_thread(_load_final_submit_deck_dm_sync, participant_id)
     if final_row is not None:
         await _edit_submit_deck_dm(
-            bot_client, final_row,
-            build_final_submit_deck_dm_embed(deck_colors, wants_review),
-            deck_colors, wants_review,
+            bot_client, final_row, build_final_submit_deck_dm_embed(deck_colors), deck_colors,
         )
 
 
 async def _edit_submit_deck_dm(
-    bot_client, dm_row, embed: discord.Embed,
-    deck_colors: str | None, wants_review: bool | None,
+    bot_client, dm_row, embed: discord.Embed, deck_colors: str | None,
 ) -> None:
     try:
         channel = bot_client.get_channel(int(dm_row.dm_channel_id)) \
@@ -836,7 +787,7 @@ async def _edit_submit_deck_dm(
         await msg.edit(
             content=None,
             embed=embed,
-            view=build_live_deck_color_select_view(deck_colors, wants_review),
+            view=build_live_deck_color_select_view(deck_colors),
         )
     except discord.HTTPException:
         log.warning(f"refresh_submit_deck_dm: could not edit DM {dm_row.dm_message_id}", exc_info=True)
@@ -1845,6 +1796,101 @@ def _emojis_for_color_set(colors: set[str]) -> str:
     return "".join(out)
 
 
+REVIEW_EMOJI = "🙋"
+REVIEW_REACT_PROMPT = f"React {REVIEW_EMOJI} if you would like to review your draft"
+
+
+async def build_draft_review_embed(event_id: str) -> discord.Embed | None:
+    """Draft-review roster table, one row per seat in Draftmancer order with the player's colors and a
+    masked link to the in-site draft log. Table only — the react/join prompt lives in the message content
+    (see build_draft_review_message). None when the pod has no participants yet."""
+    roster = await asyncio.to_thread(_load_review_roster_sync, event_id)
+    if not roster:
+        return None
+    event_name = await asyncio.to_thread(load_event_name_sync, event_id)
+    return render_draft_review_embed(roster, event_name)
+
+
+def render_draft_review_embed(roster: list[dict], event_name: str | None) -> discord.Embed:
+    """Monospace roster table (same inline-code trick as /leaderboard): header `🪑 Player Result` + Colors,
+    each row wrapped as a masked link to the player's in-site draft log. Mana emoji render after the code
+    span — they don't render inside it."""
+    event_slug = slugify(event_name) if event_name else None
+    site = settings.public_site_url.rstrip("/")
+    seat_w = max([display_width("🪑"), *(display_width(_review_seat_label(r)) for r in roster)])
+    name_w = max([len("Player"), *(display_width(r["name"]) for r in roster)])
+    result_w = max([len("Result"), *(display_width(r["result"]) for r in roster)])
+
+    def cell(value: str, width: int) -> str:
+        return value + " " * max(0, width - display_width(value))
+
+    def center(value: str, width: int) -> str:
+        pad = max(0, width - display_width(value))
+        left = pad // 2
+        return " " * left + value + " " * (pad - left)
+
+    header = f"`{cell('🪑', seat_w)} {cell('Player', name_w)}  {cell('Result', result_w)}`  Colors"
+    lines = [header]
+    for r in roster:
+        inner = f"{cell(_review_seat_label(r), seat_w)} {cell(r['name'], name_w)}  {center(r['result'], result_w)}"
+        colors = _format_deck_color_emojis(r["colors"])
+        suffix = f"  {colors}" if colors else ""
+        if r["slug"] and event_slug:
+            lines.append(f"[`{inner}`](<{site}/pods/{event_slug}/{r['slug']}>){suffix}")
+        else:
+            lines.append(f"`{inner}`{suffix}")
+
+    return discord.Embed(description="\n".join(lines), color=discord.Color.green())
+
+
+def _review_seat_label(seat: dict) -> str:
+    return str(seat["seat_index"] + 1) if seat["seat_index"] is not None else "—"
+
+
+def build_draft_review_message(voice_url: str | None) -> str:
+    """Message content above the table embed: the react/join prompt. Who started the review comes from
+    Discord's own '/pod-review' command attribution. The bare voice URL renders as a channel chip and
+    unfurls the native Join Voice card below the table."""
+    return f"{REVIEW_REACT_PROMPT} and join {voice_url}" if voice_url else f"{REVIEW_REACT_PROMPT}."
+
+
+def pod_voice_channel_url(guild: discord.Guild | None) -> str | None:
+    """Bare jump URL for the pod voice channel — in message content Discord renders it as a channel chip
+    and unfurls the Join Voice card. None when the channel is absent."""
+    if guild is None:
+        return None
+    channel = discord.utils.get(guild.voice_channels, name=settings.pod_draft_voice_channel_name)
+    return channel.jump_url if channel is not None else None
+
+
+def _load_review_roster_sync(event_id: str) -> list[dict]:
+    with SessionLocal() as session:
+        rows = session.execute(
+            select(
+                PodDraftParticipant.seat_index,
+                PodDraftParticipant.draftmancer_name,
+                PodDraftParticipant.display_name,
+                PodDraftParticipant.deck_colors,
+                PodDraftParticipant.record,
+                DbPlayer.display_name,
+                DbPlayer.slug,
+            )
+            .outerjoin(DbPlayer, DbPlayer.id == PodDraftParticipant.player_id)
+            .where(PodDraftParticipant.event_id == event_id)
+        ).all()
+    roster: list[dict] = []
+    for seat_index, dm_name, part_display, colors, record, player_display, slug in rows:
+        roster.append({
+            "seat_index": seat_index,
+            "name": player_display or part_display or dm_name or "?",
+            "colors": colors,
+            "result": record or "—",
+            "slug": slug,
+        })
+    roster.sort(key=lambda r: (r["seat_index"] is None, r["seat_index"] or 0))
+    return roster
+
+
 def _format_champion_title(names_with_colors: list[tuple[str, str | None]], short_event: str) -> str:
     """Headline-style title — single: `Name takes {event} with {colors}`; multi: `A {colors} and
     B {colors} share {event}`."""
@@ -2045,12 +2091,13 @@ def build_champion_embed(
     champion_locked: bool = True,
     pending_count: int = 0,
     deck_data: dict[str, "ParticipantDeckData"] | None = None,
+    event_has_log: bool = False,
     include_submit_cta: bool = True,
 ) -> discord.Embed:
     """Thread-side standings embed. `player_colors` adds a mana-emoji glyph after each player's record.
-    `deck_data` appends an inline Draft Log link per row when the participant has a captured draft log.
-    `include_submit_cta` controls the trailing Submit-Deck CTA; the /pod-standings command
-    sets it to False since it posts a snapshot, not a call to action."""
+    `event_has_log` appends an inline Draft Log link per row pointing at the in-site reviewer when the
+    event has a captured draft log. `include_submit_cta` controls the trailing Submit-Deck CTA; the
+    /pod-standings command sets it to False since it posts a snapshot, not a call to action."""
     displays = displays or {}
     player_colors = player_colors or {}
     deck_data = deck_data or {}
@@ -2059,7 +2106,8 @@ def build_champion_embed(
         _build_standings_row(
             s, displays=displays, player_colors=player_colors,
             deck_data=deck_data, leaderboard_url=leaderboard_url, event_name=event_name,
-            show_review_flag=True, show_medal=medals_locked or (champion_locked and s.rank == 1),
+            event_has_log=event_has_log,
+            show_medal=medals_locked or (champion_locked and s.rank == 1),
         )
         for s in standings
     ]
@@ -2106,6 +2154,7 @@ async def build_standings_embed_for_event(event_id: str) -> discord.Embed | None
     displays = await asyncio.to_thread(_load_participant_displays, event_id)
     event_name = await asyncio.to_thread(load_event_name_sync, event_id)
     deck_data = await asyncio.to_thread(_load_event_deck_data_sync, event_id)
+    event_has_log = await asyncio.to_thread(_event_has_draft_log_sync, event_id)
     player_colors = _colors_only(deck_data)
     return build_champion_embed(
         standings,
@@ -2116,6 +2165,7 @@ async def build_standings_embed_for_event(event_id: str) -> discord.Embed | None
         champion_locked=champion_locked,
         pending_count=pending_count,
         deck_data=deck_data,
+        event_has_log=event_has_log,
         include_submit_cta=False,
     )
 
@@ -2955,6 +3005,7 @@ async def _post_or_update_live_standings(manager) -> None:
     displays = await asyncio.to_thread(_load_participant_displays, event_id)
     event_name = await asyncio.to_thread(load_event_name_sync, event_id)
     deck_data = await asyncio.to_thread(_load_event_deck_data_sync, event_id)
+    event_has_log = await asyncio.to_thread(_event_has_draft_log_sync, event_id)
     player_colors = _colors_only(deck_data)
     embed = build_champion_embed(
         standings,
@@ -2965,6 +3016,7 @@ async def _post_or_update_live_standings(manager) -> None:
         champion_locked=champion_locked,
         pending_count=pending_count,
         deck_data=deck_data,
+        event_has_log=event_has_log,
     )
 
     async with manager._standings_post_lock:
