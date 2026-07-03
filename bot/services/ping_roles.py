@@ -32,7 +32,7 @@ from bot.services.pod_schedule import (
 log = logging.getLogger(__name__)
 
 MSG_ROLE_GRANTED = (
-    "{emoji} {user} you're now on {role} and will be pinged for drafts at this time of day.\n"
+    "{emoji} {user} you're now on {role} and will be pinged for drafts at this time of day. "
     "Run `/roles` to manage your notifications."
 )
 

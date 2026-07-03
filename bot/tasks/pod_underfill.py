@@ -28,6 +28,7 @@ from bot.tasks.pod_draft_reminder import fetch_sesh_rsvps
 
 UNDERFILL_CHECK_HOURS = (24, 3)
 NUDGE_SEARCH_LIMIT = 100
+CATCH_UP_DELAY_S = 5
 
 log = logging.getLogger(__name__)
 
@@ -40,14 +41,23 @@ def init_underfill(bot: commands.Bot) -> None:
     _bot = bot
 
 
-def schedule_underfill_checks(scheduler, event_id: str, event_time: datetime) -> None:
+def schedule_underfill_checks(scheduler, event_id: str, event_time: datetime, created_at: datetime) -> None:
+    """Arm the T-24h / T-3h checks, firing an immediate catch-up for any check whose time already passed.
+
+    A past check is only caught up when the event predates it (`created_at <= run_at`): that means the
+    check was missed to downtime, not that the event was created short-notice. Freshly created events
+    stay silent until their first future check, since the nudge means "created a while ago, still unfilled".
+    """
     now = datetime.now(timezone.utc)
+    catch_up = False
     for hours in UNDERFILL_CHECK_HOURS:
         run_at = event_time - timedelta(hours=hours)
         job_id = f"pod-underfill{hours}-{event_id}"
         if run_at <= now:
             with contextlib.suppress(Exception):
                 scheduler.remove_job(job_id)
+            if event_time > now and created_at <= run_at:
+                catch_up = True
             continue
         scheduler.add_job(
             fire_underfill,
@@ -58,6 +68,17 @@ def schedule_underfill_checks(scheduler, event_id: str, event_time: datetime) ->
             replace_existing=True,
         )
         log.info(f"scheduled T-{hours}h underfill check for event {event_id} at {run_at.isoformat()}")
+
+    if catch_up:
+        scheduler.add_job(
+            fire_underfill,
+            "date",
+            run_date=now + timedelta(seconds=CATCH_UP_DELAY_S),
+            args=[event_id, min(UNDERFILL_CHECK_HOURS)],
+            id=f"pod-underfill-catchup-{event_id}",
+            replace_existing=True,
+        )
+        log.info(f"scheduled catch-up underfill check for event {event_id} (missed a check to downtime)")
 
 
 async def fire_underfill(event_id: str, hours_before: int) -> None:

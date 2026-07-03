@@ -1,7 +1,8 @@
 """Owner-only `!test` triggers for the pod-draft scheduler, each reusing the production path.
 
-`underfill` renders the underfill nudge with sample numbers. `createsend` fires the real per-event
-/create DM for a week. `rolegrant` posts the auto-grant announcement embed so its look can be checked.
+`underfill` renders the underfill nudge with sample numbers. `reminder` renders the roster reminder
+embed with sample rosters. `createsend` fires the real per-event /create DM for a week. `rolegrant`
+posts the auto-grant announcement embed so its look can be checked.
 The Monday schedule package itself is exercised through the real `/pod-schedule` command.
 """
 from __future__ import annotations
@@ -23,6 +24,7 @@ from bot.services.pod_schedule import (
     monday_kind,
     slots_for_week,
 )
+from bot.tasks.pod_draft_reminder import ROSTER_REMINDER_LEAD_MIN, build_roster_embed
 from bot.tasks.pod_schedule_post import fire_create_command, upcoming_monday
 
 
@@ -39,6 +41,17 @@ async def setup(bot: commands.Bot) -> None:
             name, yes_count, settings.pod_draft_target_players, _next_slot(), ctx.message.jump_url,
         )
         await ctx.send(body, allowed_mentions=discord.AllowedMentions.none())
+
+    @test_group.command(name="reminder")
+    @commands.is_owner()
+    async def test_reminder(ctx: commands.Context) -> None:
+        """Owner-only. Post a sample roster reminder embed in this channel — no DB or sesh lookup."""
+        name = ctx.channel.name if isinstance(ctx.channel, discord.Thread) else "Sample Pod Draft - Jun 25"
+        starts_at = datetime.now(SCHEDULE_TZ) + timedelta(minutes=ROSTER_REMINDER_LEAD_MIN)
+        yes = ["Nissa Revane", "Chandra Nalaar", "Jace Beleren", "Liliana Vess", "Gideon Jura"]
+        maybe = ["Ajani Goldmane", "Kaya Bala"]
+        embed = build_roster_embed(name, starts_at, yes, maybe)
+        await ctx.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
 
     @test_group.command(name="createsend")
     @commands.is_owner()
