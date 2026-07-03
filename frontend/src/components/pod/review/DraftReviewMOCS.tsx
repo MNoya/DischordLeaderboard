@@ -9,7 +9,7 @@ import { CardImage, CardPreviewProvider, ReviewSetProvider, StackColumn, cardIma
 import { highlightEventLabel } from "../EventLabel";
 import { AAvatar } from "../../Brand";
 import { DeckScreenshotModal, type DeckLike } from "../DeckScreenshotModal";
-import { poolBefore, poolByPack, reconstructDraft, resolveDeck, seatColors, seatHandle, type DraftPickView } from "../../../data/draft-artifact";
+import { poolBefore, poolByPack, reconstructDraft, resolveDeck, seatHandle, type DraftPickView } from "../../../data/draft-artifact";
 import { cleanPodEventName, stripDiscriminator } from "../../../data/utils";
 import type { ArtifactCard, PodDraftArtifact } from "../../../types/leaderboard";
 
@@ -64,7 +64,7 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, initialPack =
         return {
           index: i,
           name: info ? stripDiscriminator(info.displayName) : seatHandle(name),
-          colors: seatColors(artifact, i),
+          colors: info?.deckColors ?? "",
           avatarUrl: info?.avatarUrl ?? null,
         };
       }),

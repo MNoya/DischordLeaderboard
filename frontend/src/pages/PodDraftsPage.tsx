@@ -1057,9 +1057,9 @@ function SetHero({
             {setMeta?.name?.toUpperCase() ?? ""}
           </span>
         </div>
-        <div className="mono text-[11px] text-muted mt-1">
-          {setMeta && fmtRange(setMeta.startDate, setMeta.endDate)}
-          {week && ` · ${week}`}
+        <div className="mono text-[11px] text-muted mt-1 flex justify-between gap-4">
+          {setMeta && <span>{fmtRange(setMeta.startDate, setMeta.endDate)}</span>}
+          {week && <span>{week}</span>}
         </div>
       </div>
       <div className="flex-1" />

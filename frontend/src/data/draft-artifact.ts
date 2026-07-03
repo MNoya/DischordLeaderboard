@@ -64,31 +64,6 @@ export function poolByPack(views: DraftPickView[][][], seat: number, pack: numbe
   return rows;
 }
 
-const WUBRG = ["W", "U", "B", "R", "G"];
-
-// A seat's colors, inferred from its built deck. Colors on enough cards to read as main colors come
-// first as uppercase; the rest present in the deck follow as lowercase splashes, matching the
-// 17lands-style casing Pips renders.
-export function seatColors(artifact: PodDraftArtifact, seat: number): string {
-  const deck = artifact.decks?.[seat]?.main ?? [];
-  const counts = new Map<string, number>();
-  let colored = 0;
-  for (const idx of deck) {
-    const card = artifact.cards[idx];
-    if (!card?.c?.length) {
-      continue;
-    }
-    colored += 1;
-    for (const color of card.c) {
-      counts.set(color, (counts.get(color) ?? 0) + 1);
-    }
-  }
-  const threshold = Math.max(2, colored * 0.15);
-  const main = WUBRG.filter((c) => (counts.get(c) ?? 0) >= threshold);
-  const splashes = WUBRG.filter((c) => !main.includes(c) && (counts.get(c) ?? 0) > 0);
-  return main.join("") + splashes.join("").toLowerCase();
-}
-
 // Draftmancer names carry a discriminator (`Noya#08011`); the board shows the bare handle.
 export function seatHandle(name: string): string {
   const hash = name.indexOf("#");
