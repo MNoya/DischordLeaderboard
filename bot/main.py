@@ -78,6 +78,7 @@ from bot.sets import active_set_code
 from bot.tasks.pod_draft_reminder import init_reminder
 from bot.tasks.format_schedule_post import init_format_schedule
 from bot.tasks.pod_schedule_post import init_schedule_post
+from bot.tasks.set_awards_post import init_set_awards_schedule
 from bot.tasks.pod_underfill import init_underfill
 
 
@@ -177,6 +178,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         init_underfill(bot)
         init_schedule_post(bot)
         init_format_schedule(bot)
+        init_set_awards_schedule(bot)
 
         # Load cogs into memory and mirror to the guild tree so dispatch works.
         # Discord-side sync is handled by the owner-only `!sync` text command, not on startup.

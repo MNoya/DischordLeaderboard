@@ -15,9 +15,12 @@ from bot.services.format_schedule import (
     effective_start,
     latest_channel_in_category,
     newest_set,
+    awards_eve_set,
+    channel_for_set,
     newly_opened,
     next_rotation,
     previous_window_start,
+    set_seed_for_channel,
 )
 from bot.sets import ALL_SETS
 from bot.tasks.format_schedule_post import announcement_for
@@ -69,6 +72,42 @@ def test_newest_set_ignores_permanent_cube():
 
     assert newest.code != "CUBE"
     assert all(seed.start_date <= newest.start_date for seed in ALL_SETS if seed.code != "CUBE")
+
+
+def test_set_seed_for_channel_resolves_the_outgoing_set():
+    when = datetime(2026, 7, 1, tzinfo=timezone.utc)
+
+    stale = set_seed_for_channel("secrets-of-strixhaven", when)
+    active = set_seed_for_channel("marvel-super-heroes", when)
+    unmatched = set_seed_for_channel("whats-the-build", when)
+
+    assert stale.code == "SOS"
+    assert active is None
+    assert unmatched is None
+
+
+def test_awards_eve_set_returns_outgoing_on_release_eve():
+    eve = datetime(2026, 4, 20, 15, tzinfo=timezone.utc)
+    ordinary = datetime(2026, 4, 15, 15, tzinfo=timezone.utc)
+
+    outgoing = awards_eve_set(eve)
+
+    assert outgoing.code == "TMT"
+    assert awards_eve_set(ordinary) is None
+
+
+def test_channel_for_set_matches_name_within_strategy_category():
+    strategy = _StubCategory("MTG Strategy")
+    other = _StubCategory("Format Archive")
+    sos = next(seed for seed in ALL_SETS if seed.code == "SOS")
+    channels = [
+        _StubChannel("secrets-of-strixhaven", strategy, None),
+        _StubChannel("secrets-of-strixhaven-old", other, None),
+    ]
+
+    match = channel_for_set(channels, sos)
+
+    assert match.name == "secrets-of-strixhaven"
 
 
 def test_set_pin_routes_by_latest_set_category():

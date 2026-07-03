@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 
 import discord
 from discord.ext import commands
+from sqlalchemy import func, select
 
 from bot.commands.event_scribe import (
     build_announcement,
@@ -24,7 +25,10 @@ from bot.commands.event_scribe import (
     select_groups,
 )
 from bot.commands.guide import SYNC_CURRENT, sync_channel
+from bot.commands.leaderboard import build_set_send_off_embeds
 from bot.config import settings
+from bot.database import SessionLocal
+from bot.models import MagicSet
 from bot.services import mtgscribe
 from bot.services.format_schedule import (
     ANNOUNCE_COMPETITIVE,
@@ -43,8 +47,10 @@ from bot.services.format_schedule import (
     newly_opened,
     next_rotation,
     previous_window_start,
+    set_seed_for_channel,
 )
 from bot.services.server_guide import OVERVIEW_PAGE, stripped_channel_name
+from bot.sets import RELEASE_TIME, RELEASE_TZ
 
 LOOKBACK_DAYS = 90
 HISTORY_SCAN_LIMIT = 100
@@ -70,17 +76,42 @@ def init_format_schedule(bot: commands.Bot) -> None:
             id=f"format-schedule-{window.hour:02d}{window.minute:02d}",
             replace_existing=True,
         )
+    bot.pod_scheduler.add_job(
+        fire_rotation,
+        "cron",
+        hour=RELEASE_TIME.hour,
+        minute=RELEASE_TIME.minute,
+        timezone=RELEASE_TZ,
+        id="format-schedule-rotation",
+        replace_existing=True,
+    )
     windows = ", ".join(f"{w.hour:02d}:{w.minute:02d}" for w in ANNOUNCE_WINDOWS)
-    log.info(f"format-schedule armed: {windows} {OPEN_TZ.key}")
+    log.info(f"format-schedule armed: {windows} {OPEN_TZ.key}; "
+             f"rotation {RELEASE_TIME.hour:02d}:{RELEASE_TIME.minute:02d} {RELEASE_TZ.key}")
 
 
-async def fire_window() -> None:
+def _guild() -> discord.Guild | None:
     if _bot is None:
-        log.error("fire_window: bot reference is not initialised")
-        return
+        log.error("format-schedule: bot reference is not initialised")
+        return None
     guild = _bot.get_guild(settings.discord_guild_id) if settings.discord_guild_id else None
     if guild is None:
         log.warning("format-schedule: guild unavailable; skipping tick")
+    return guild
+
+
+async def fire_rotation() -> None:
+    """Channel rotation on its own cron at the noon-ET release instant, so the outgoing set's send-off
+    and archive land right as the new set goes live. The announce tick also calls
+    ``_rotate_set_channels`` as an idempotent fallback should this window be missed."""
+    guild = _guild()
+    if guild is not None:
+        await _rotate_set_channels(guild)
+
+
+async def fire_window() -> None:
+    guild = _guild()
+    if guild is None:
         return
 
     now = datetime.now(timezone.utc)
@@ -105,24 +136,71 @@ async def fire_window() -> None:
 
 
 async def _rotate_set_channels(guild: discord.Guild) -> None:
-    """Post-rotation channel upkeep: move stale set channels to the Format Archive and re-sync the
-    channel-overview guide page so its active-set link follows. The new set's channel is mod-created
-    during preview season and coexists with the outgoing one until the leaderboard rotates — the bot
-    only archives what the rotation left behind, never creates."""
+    """Post-rotation channel upkeep: give each outgoing set channel its send-off standings, move it to
+    the Format Archive, and re-sync the channel-overview guide page so its active-set link follows. The
+    new set's channel is mod-created during preview season and coexists with the outgoing one until the
+    leaderboard rotates — the bot only archives what the rotation left behind, never creates."""
     stale = archive_candidates(guild.text_channels)
     if stale:
         archive = discord.utils.get(guild.categories, name=FORMAT_ARCHIVE_CATEGORY)
         if archive is None:
             log.warning(f"format-schedule: no '{FORMAT_ARCHIVE_CATEGORY}' category; skipping archiving")
         else:
+            admin_channel = _admin_channel(guild)
             for channel in stale:
-                await _archive_channel(channel, archive)
+                await _post_send_off(channel)
+                if await _archive_channel(channel, archive):
+                    await _notify_archived(admin_channel, channel)
     status, detail = await sync_channel(guild, OVERVIEW_PAGE.channel, (OVERVIEW_PAGE,))
     if status != SYNC_CURRENT:
         log.info(f"format-schedule: channel-overview sync: {detail}")
 
 
-async def _archive_channel(channel: discord.TextChannel, archive: discord.CategoryChannel) -> None:
+def _admin_channel(guild: discord.Guild) -> discord.TextChannel | None:
+    for channel in guild.text_channels:
+        if "admin" in channel.name.lower():
+            return channel
+    return None
+
+
+async def _post_send_off(channel: discord.TextChannel) -> None:
+    """Post the outgoing set's final standings into its channel before it's archived — the overall board
+    plus each per-format board that has players. Skipped when the channel matches no stale set."""
+    seed = set_seed_for_channel(channel.name)
+    if seed is None:
+        return
+    embeds = await asyncio.to_thread(send_off_embeds, seed.code)
+    for embed in embeds:
+        try:
+            await channel.send(embed=embed)
+        except discord.HTTPException:
+            log.warning(f"format-schedule: could not post the {seed.code} send-off in #{channel.name}", exc_info=True)
+            return
+
+
+def send_off_embeds(set_code: str) -> list[discord.Embed]:
+    """The outgoing set's final leaderboard embeds, built off the DB — shared by the rotation tick and
+    `!test sendoff` so both render the same boards."""
+    with SessionLocal() as session:
+        magic_set = session.execute(
+            select(MagicSet).where(func.upper(MagicSet.code) == set_code.upper())
+        ).scalar_one_or_none()
+        if magic_set is None:
+            return []
+        return build_set_send_off_embeds(session, magic_set)
+
+
+async def _notify_archived(admin_channel: discord.TextChannel | None, channel: discord.TextChannel) -> None:
+    if admin_channel is None:
+        log.info("format-schedule: no admin channel found; skipping archive notice")
+        return
+    try:
+        await admin_channel.send(f"📥 Moved {channel.mention} to **{FORMAT_ARCHIVE_CATEGORY}**.")
+    except discord.HTTPException:
+        log.warning(f"format-schedule: could not post archive notice for #{channel.name}", exc_info=True)
+
+
+async def _archive_channel(channel: discord.TextChannel, archive: discord.CategoryChannel) -> bool:
     neighbor = _alphabetical_neighbor(archive, channel)
     try:
         if neighbor is None:
@@ -130,8 +208,10 @@ async def _archive_channel(channel: discord.TextChannel, archive: discord.Catego
         else:
             await channel.move(after=neighbor, category=archive)
         log.info(f"format-schedule: archived #{channel.name} to {FORMAT_ARCHIVE_CATEGORY}")
+        return True
     except discord.HTTPException:
         log.warning(f"format-schedule: could not archive #{channel.name}", exc_info=True)
+        return False
 
 
 def _alphabetical_neighbor(archive: discord.CategoryChannel,
@@ -221,14 +301,14 @@ async def _delete_quietly(message: discord.Message) -> None:
 async def _pinned_schedule(channel: discord.TextChannel, marker: str) -> discord.Message | None:
     try:
         async for message in channel.pins():
-            if _bot.user is not None and message.author.id == _bot.user.id and marker in _message_text(message):
+            if _bot.user is not None and message.author.id == _bot.user.id and marker in message_text(message):
                 return message
     except discord.HTTPException:
         log.warning(f"format-schedule: could not read pins in #{channel.name}", exc_info=True)
     return None
 
 
-def _message_text(message: discord.Message) -> str:
+def message_text(message: discord.Message) -> str:
     """Flatten everything a bot message might carry its text in. A schedule pin is a Components V2
     message (title in a TextDisplay), an announcement is an embed (text in the description), and plain
     posts use ``content`` — so pin-matching and announcement dedup both read from one place."""
@@ -290,7 +370,7 @@ async def _recent_bot_messages(channel: discord.TextChannel) -> list[str]:
         async for message in channel.history(after=since, limit=HISTORY_SCAN_LIMIT):
             if _bot.user is None or message.author.id != _bot.user.id:
                 continue
-            text = _message_text(message)
+            text = message_text(message)
             if text:
                 texts.append(text)
     except discord.HTTPException:

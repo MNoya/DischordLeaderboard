@@ -138,6 +138,58 @@ def archive_candidates(text_channels, when: datetime | None = None) -> list:
     return candidates
 
 
+def channel_for_set(channels, seed: SetSeed, category: str = LATEST_SET_CATEGORY):
+    """The discussion channel for a set within ``category``, matched by name — MTG Strategy for the live
+    set, Format Archive for one that rotated out. ``None`` when none matches."""
+    for channel in channels:
+        if channel.category is None or channel.category.name != category:
+            continue
+        if channel_matches_set(channel.name, seed.name):
+            return channel
+    return None
+
+
+def set_before(seed: SetSeed) -> SetSeed | None:
+    """The set that rotated out just before ``seed`` — the newest-started set whose start precedes it,
+    excluding the permanent cube. ``None`` when ``seed`` is the earliest."""
+    previous: SetSeed | None = None
+    for candidate in ALL_SETS:
+        if candidate.code == PERMANENT_CUBE_CODE or candidate.start_date >= seed.start_date:
+            continue
+        if previous is None or candidate.start_date > previous.start_date:
+            previous = candidate
+    return previous
+
+
+def awards_eve_set(when: datetime | None = None) -> SetSeed | None:
+    """The outgoing set to run a send-off ceremony for — the active set — when a new set releases the
+    next day, else ``None``. Awards run the day before a rotation, so this returns a set only on that
+    eve. The date is read in Eastern, the release clock, so ``8 AM`` Pacific still resolves to the same
+    calendar day as the noon-ET flip it precedes."""
+    now = when or datetime.now(timezone.utc)
+    tomorrow = (now.astimezone(EVENT_DAY_TZ) + timedelta(days=1)).date()
+    for seed in ALL_SETS:
+        if seed.code != PERMANENT_CUBE_CODE and seed.start_date == tomorrow:
+            return active_set_seed(now)
+    return None
+
+
+def set_seed_for_channel(channel_name: str, when: datetime | None = None) -> SetSeed | None:
+    """The stale set a to-be-archived channel belongs to — the outgoing set whose send-off standings
+    the channel should carry before it moves. Matches the same stale seeds ``archive_candidates`` uses,
+    newest-started first so an overlapping range resolves to the later set. ``None`` when none match."""
+    active = active_set_seed(when)
+    matched: SetSeed | None = None
+    for seed in ALL_SETS:
+        if seed.code == PERMANENT_CUBE_CODE or seed.start_date >= active.start_date:
+            continue
+        if not channel_matches_set(channel_name, seed.name):
+            continue
+        if matched is None or seed.start_date > matched.start_date:
+            matched = seed
+    return matched
+
+
 def previous_window_start(now: datetime) -> datetime:
     """The announce window immediately before ``now`` (UTC). A tick announces events that opened since
     this instant — a span that ends at the current window, so consecutive ticks never overlap and each

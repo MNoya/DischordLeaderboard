@@ -1242,17 +1242,19 @@ def _center_right_bias(s: str, width: int) -> str:
     return ' ' * left + s + ' ' * right
 
 
-def _apply_footer(embed: discord.Embed, data: LeaderboardData) -> None:
+def _apply_footer(embed: discord.Embed, data: LeaderboardData, show_note: bool = True) -> None:
     """Two-line footer:
 
       Row 1: ``N active drafters``
       Row 2: ``Last updated | Today at HH:MM``  (timestamp appended by Discord)
 
     The clickable site link is on the embed title (via ``embed.url``); the URL
-    no longer appears in the footer to avoid redundancy.
+    no longer appears in the footer to avoid redundancy. ``show_note`` drops the
+    drafter-count line, used when many boards post together (the set send-off) and
+    the repeated call-to-action would be noise.
     """
     rows: list[str] = []
-    if data.drafter_count > 0:
+    if show_note and data.drafter_count > 0:
         label = "player" if data.drafter_count == 1 else "players"
         rows.append(f"{data.drafter_count} {label} sharing their drafts · /join to add yours")
     if data.last_updated is not None:
@@ -1262,7 +1264,7 @@ def _apply_footer(embed: discord.Embed, data: LeaderboardData) -> None:
         embed.set_footer(text="\n".join(rows))
 
 
-def render_embed(data: LeaderboardData) -> discord.Embed:
+def render_embed(data: LeaderboardData, show_note: bool = True) -> discord.Embed:
     base_url = settings.public_site_url.rstrip("/")
     site_url = board_site_url(data.set_code, data.filter_type, data.filter_value)
     set_emoji = emojis.get(data.set_code.lower())
@@ -1282,10 +1284,13 @@ def render_embed(data: LeaderboardData) -> discord.Embed:
             data.top, data.set_code, show_score=data.show_score,
             filter_type=data.filter_type, filter_value=data.filter_value, trophy_board=data.trophy_board,
         )
-        site_display = base_url.split("://", 1)[-1].split("/", 1)[0]
-        link = f"[{site_display}]({site_url})"
-        embed.description = f"{rows}\n\nCheck the full leaderboard at {link}"
-    _apply_footer(embed, data)
+        if show_note:
+            site_display = base_url.split("://", 1)[-1].split("/", 1)[0]
+            link = f"[{site_display}]({site_url})"
+            embed.description = f"{rows}\n\nCheck the full leaderboard at {link}"
+        else:
+            embed.description = rows
+    _apply_footer(embed, data, show_note=show_note)
     return embed
 
 
@@ -1573,6 +1578,30 @@ def render_filtered_data(
         data.filter_value = filter_value
 
     return data, suffix
+
+
+SEND_OFF_FORMATS: tuple[str | None, ...] = (None, "Premier", "Trad", "Direct", LCQ_FILTER)
+
+
+def build_set_send_off_embeds(session: Session, magic_set: MagicSet) -> list[discord.Embed]:
+    """The final standings for a set that just rotated out — the overall board followed by Premier,
+    Traditional, Direct, and LCQ, each rendered through the same path `/leaderboard` uses so they can't
+    drift. A format with no scored players is dropped, so a set that ran no Direct or LCQ simply omits
+    that board. The repeated site call-to-action is suppressed since many boards post at once."""
+    embeds: list[discord.Embed] = []
+    for format_value in SEND_OFF_FORMATS:
+        filter_type, filter_value = encode_filter(format_value, None)
+        data, suffix = render_filtered_data(
+            session, filter_type=filter_type, filter_value=filter_value,
+            viewer_discord_id=None, magic_set=magic_set,
+        )
+        if data is None or not data.top:
+            continue
+        embed = render_embed(data, show_note=False)
+        if suffix:
+            embed.title = f"{embed.title} {suffix}"
+        embeds.append(embed)
+    return embeds
 
 
 def _filter_clause(filter_type: str | None, filter_value: str | None):

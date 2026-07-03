@@ -92,11 +92,13 @@ The bot is the only writer. The frontend reads through curated `public_*` Postgr
 ### Set rotation — `bot/sets.py` is the single source of truth
 
 ```python
-ACTIVE_SET_CODE = "SOS"
-ALL_SETS = (SetSeed("FIN", ...), SetSeed("TLA", ...), SetSeed("ECL", ...), SetSeed("SOS", ...))
+ALL_SETS = (..., SetSeed("SOS", "Secrets of Strixhaven", date(2026, 4, 21), date(2026, 6, 22)),
+                 SetSeed("MSH", "Marvel Super Heroes", date(2026, 6, 23), date(2026, 8, 10)))
 ```
 
-There is **no `is_current` flag on `sets`** and **no env var** for the active set. Rotation = bump the constant + push to master. Use the `/add-set <CODE>` Claude Code skill (`.claude/skills/add-set/`) to automate: it web-looks-up the official name + Arena release date, edits `bot/sets.py`, runs `seed_sets` + `refresh_stats`, and commits locally.
+The active set is **derived from today's date** by `active_set_code()` — there is **no `ACTIVE_SET_CODE` constant**, no `is_current` flag on `sets`, and no env var. Each `SetSeed` carries its Arena `start_date`/`end_date`; the board flips to a set at noon ET on its `start_date` and mirrors the `public_sets` view the frontend reads. Rotation = add the new set to `ALL_SETS` with its dates + push to master; the flip happens on its own when the date arrives. Use the `/add-set <CODE>` Claude Code skill (`.claude/skills/add-set/`) to automate: it web-looks-up the official name + Arena release date, edits `bot/sets.py`, runs `seed_sets` + `refresh_stats`, and commits locally.
+
+Discord set channels rotate separately and are **not** driven by `!guide`: a dedicated cron in `bot/tasks/format_schedule_post.py` fires at the noon-ET release instant (the 3×/day announce tick re-runs it as an idempotent fallback) and, once the new set's `start_date` passes, posts the outgoing set's send-off standings into its channel, moves it to "Format Archive", notifies the `-admin` channel, and re-syncs channel-overview. The eve of a rotation, `bot/tasks/set_awards_post.py` runs the Set Awards ceremony (8 AM PT, with a T-15 warning) in that same channel and pins it. Creating the incoming set's channel is manual by design — the bot never creates channels, so a mod adds it during preview season for old/new coexistence.
 
 ### Scoring formula — `bot/scoring.py`
 
