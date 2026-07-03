@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { Link } from "react-router-dom";
 
 import { cn } from "../../../lib/utils";
 import { Pips } from "../../ManaPips";
 import { Tooltip } from "../../Tooltip";
 import { ArrowRight, GoSidebarCollapse, TbCards } from "../../Icons";
-import { CardImage, ReviewSetProvider, cardImageSources } from "./ReviewCard";
+import { CardImage, CardPreviewProvider, ReviewSetProvider, StackColumn, cardImageSources } from "./ReviewCard";
 import { highlightEventLabel } from "../EventLabel";
 import { AAvatar } from "../../Brand";
 import { DeckScreenshotModal, type DeckLike } from "../DeckScreenshotModal";
@@ -42,12 +43,13 @@ interface DraftReviewMOCSProps {
   initialPack?: number;
   initialPick?: number;
   onClose?: () => void;
+  backHref?: string;
   onNavigate?: (seatIndex: number, pack: number, pick: number) => void;
   eventId?: string;
   seatInfo?: ReviewSeatInfo[];
 }
 
-export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, initialPack = 0, initialPick = 0, onClose, onNavigate, eventId, seatInfo }: DraftReviewMOCSProps) {
+export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, initialPack = 0, initialPick = 0, onClose, backHref, onNavigate, eventId, seatInfo }: DraftReviewMOCSProps) {
   const setSymbol = `/set-symbols/${meta.setCode.toLowerCase()}.png`;
   const eventTitle = useMemo(() => cleanPodEventName(meta.name, meta.setCode), [meta]);
   const N = artifact.seats.length;
@@ -247,6 +249,7 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, initialPack =
 
   return (
     <ReviewSetProvider value={artifact.set}>
+    <CardPreviewProvider setCode={meta.setCode}>
     <div className="fixed inset-0 z-50 flex select-none flex-col bg-bg text-text">
       <MobileTopBar
         setSymbol={setSymbol}
@@ -258,6 +261,7 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, initialPack =
         onSelectLeft={() => changeSeat(left)}
         onSelectRight={() => changeSeat(right)}
         onClose={onClose}
+        backHref={backHref}
         scrollOn={viewMode === "scroll"}
         onToggleScroll={() => setViewMode(viewMode === "scroll" ? "step" : "scroll")}
       />
@@ -265,6 +269,7 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, initialPack =
         setSymbol={setSymbol}
         eventTitle={eventTitle}
         onClose={onClose}
+        backHref={backHref}
         pack={pack}
         pick={pick}
         packSize={packSize}
@@ -391,6 +396,7 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, initialPack =
         />
       )}
     </div>
+    </CardPreviewProvider>
     </ReviewSetProvider>
   );
 }
@@ -467,6 +473,7 @@ function MobileTopBar({
   onSelectLeft,
   onSelectRight,
   onClose,
+  backHref,
   scrollOn,
   onToggleScroll,
 }: {
@@ -479,24 +486,33 @@ function MobileTopBar({
   onSelectLeft: () => void;
   onSelectRight: () => void;
   onClose?: () => void;
+  backHref?: string;
   scrollOn: boolean;
   onToggleScroll: () => void;
 }) {
   const arrow = passRight ? "»" : "«";
   const name = "truncate font-display text-[13px] tracking-[0.04em] text-subtle [-webkit-tap-highlight-color:transparent] active:text-text";
+  const backClass = "flex shrink-0 items-center gap-1 text-subtle [-webkit-tap-highlight-color:transparent] active:text-text";
+  const backContent = (
+    <>
+      <ChevronIcon dir="left" />
+      <img src={setSymbol} alt="" className="h-5 w-5" />
+      <span className="max-w-[84px] truncate font-display text-[13px] tracking-[0.04em]">
+        {highlightEventLabel(eventTitle)}
+      </span>
+    </>
+  );
   return (
     <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border bg-surface px-2 lg:hidden">
-      <button
-        onClick={onClose}
-        aria-label="Back to pod"
-        className="flex shrink-0 items-center gap-1 text-subtle [-webkit-tap-highlight-color:transparent] active:text-text"
-      >
-        <ChevronIcon dir="left" />
-        <img src={setSymbol} alt="" className="h-5 w-5" />
-        <span className="max-w-[84px] truncate font-display text-[13px] tracking-[0.04em]">
-          {highlightEventLabel(eventTitle)}
-        </span>
-      </button>
+      {backHref ? (
+        <Link to={backHref} aria-label="Back to pod" className={backClass}>
+          {backContent}
+        </Link>
+      ) : (
+        <button onClick={onClose} aria-label="Back to pod" className={backClass}>
+          {backContent}
+        </button>
+      )}
       <div className="flex min-w-0 flex-1 items-center justify-center gap-1.5">
         <button onClick={onSelectLeft} className={cn(name, "max-w-[78px]")}>
           {left.name}
@@ -536,6 +552,7 @@ function Header({
   setSymbol,
   eventTitle,
   onClose,
+  backHref,
   pack,
   pick,
   packSize,
@@ -556,6 +573,7 @@ function Header({
   setSymbol: string;
   eventTitle: string;
   onClose?: () => void;
+  backHref?: string;
   pack: number;
   pick: number;
   packSize: number;
@@ -597,17 +615,31 @@ function Header({
 
   return (
     <header className="hidden h-[60px] shrink-0 items-center gap-5 border-b border-border bg-surface px-5 lg:flex">
-      <button
-        onClick={onClose}
-        className="flex min-w-0 flex-1 items-center gap-2.5 text-left transition-colors hover:text-green"
-        aria-label="Back to pod"
-      >
-        <ChevronIcon dir="left" />
-        <img src={setSymbol} alt="" className="h-7 w-7 shrink-0" />
-        <span className="truncate font-display text-[19px] tracking-[0.08em]">
-          {highlightEventLabel(eventTitle)}
-        </span>
-      </button>
+      {backHref ? (
+        <Link
+          to={backHref}
+          className="flex min-w-0 flex-1 items-center gap-2.5 text-left transition-colors hover:text-green"
+          aria-label="Back to pod"
+        >
+          <ChevronIcon dir="left" />
+          <img src={setSymbol} alt="" className="h-7 w-7 shrink-0" />
+          <span className="truncate font-display text-[19px] tracking-[0.08em]">
+            {highlightEventLabel(eventTitle)}
+          </span>
+        </Link>
+      ) : (
+        <button
+          onClick={onClose}
+          className="flex min-w-0 flex-1 items-center gap-2.5 text-left transition-colors hover:text-green"
+          aria-label="Back to pod"
+        >
+          <ChevronIcon dir="left" />
+          <img src={setSymbol} alt="" className="h-7 w-7 shrink-0" />
+          <span className="truncate font-display text-[19px] tracking-[0.08em]">
+            {highlightEventLabel(eventTitle)}
+          </span>
+        </button>
+      )}
 
       {viewMode === "step" && (
         <div className="flex items-center gap-5">
@@ -1453,25 +1485,18 @@ function SideboardPane({
   cardWidth: number;
   reveal: number;
 }) {
-  const lastIndex = cards.length - 1;
-  const cardClass =
-    "overflow-hidden rounded-[5px] [outline-style:solid] outline-1 -outline-offset-1 outline-white/10 shadow-[0_-2px_6px_rgba(0,0,0,0.6)]";
   return (
     <div className="flex shrink-0 flex-col">
       <div className="themed-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden py-2 pl-0.5 pr-2">
-        <div className="relative [display:flow-root]" style={{ width: cardWidth }}>
-          {cards.slice(0, lastIndex).map((card, i) => (
-            <div key={i} className={cn("absolute", cardClass)} style={{ top: i * reveal, width: cardWidth }}>
-              <CardImage card={card} />
-            </div>
-          ))}
-          <div
-            className={cn("relative", cardClass, markLast && "review-last-pick z-10")}
-            style={{ marginTop: lastIndex * reveal, width: cardWidth }}
-          >
-            <CardImage card={cards[lastIndex]} />
-          </div>
-        </div>
+        <StackColumn
+          count={cards.length}
+          reveal={reveal}
+          width={cardWidth}
+          cardClassName={POOL_CARD_CLASS}
+          glowIndex={markLast ? cards.length - 1 : null}
+          cardAt={(i) => cards[i]}
+          renderCard={(i) => <CardImage card={cards[i]} />}
+        />
       </div>
     </div>
   );
@@ -1653,6 +1678,8 @@ type PoolEntry = { card: ArtifactCard; idx: number };
 const POOL_PAD = 8;
 const POOL_GAP = 4;
 const SIDE_COLUMN_GAP_RATIO = 0.1;
+const POOL_CARD_CLASS =
+  "overflow-hidden rounded-[5px] [outline-style:solid] outline-1 -outline-offset-1 outline-white/10 shadow-[0_-2px_6px_rgba(0,0,0,0.6)] transition-[outline-color] group-hover:outline-white/50 hover:outline-white/50";
 
 function Pool({
   cards,
@@ -1687,24 +1714,17 @@ function Pool({
     return () => observer.disconnect();
   }, [groupByType]);
   const column = (key: string, group: PoolEntry[], lastIndex: number, glow: boolean) => (
-    <div
+    <StackColumn
       key={key}
-      className="relative shrink-0"
-      style={{ width: cardWidth, height: Math.max(0, group.length - 1) * reveal + cardWidth * 1.4 }}
-    >
-      {group.map(({ card, idx }, i) => (
-        <div
-          key={i}
-          className={cn(
-            "absolute w-full overflow-hidden rounded-[5px] [outline-style:solid] outline-1 -outline-offset-1 outline-white/10 shadow-[0_-2px_6px_rgba(0,0,0,0.6)]",
-            glow && idx === lastIndex && "review-last-pick z-10",
-          )}
-          style={{ top: i * reveal }}
-        >
-          <CardImage card={card} />
-        </div>
-      ))}
-    </div>
+      count={group.length}
+      reveal={reveal}
+      width={cardWidth}
+      className="shrink-0"
+      cardClassName={POOL_CARD_CLASS}
+      glowIndex={glow ? group.findIndex((e) => e.idx === lastIndex) : null}
+      cardAt={(i) => group[i].card}
+      renderCard={(i) => <CardImage card={group[i].card} />}
+    />
   );
   const entries = cards.map((card, idx) => ({ card, idx }));
   const lastIndex = cards.length - 1;

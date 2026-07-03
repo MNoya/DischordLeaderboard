@@ -47,6 +47,7 @@ THREAD_POLL_TIMEOUT_S = 120
 class SeshListener(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+        self._announced_grants: set[tuple[int, int]] = set()
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
@@ -303,8 +304,10 @@ class SeshListener(commands.Cog):
     ) -> None:
         """Sticky-grant a slot's subscription role to everyone RSVP'd Yes to a time-specific pod.
 
-        Each fresh grant is announced in the event thread (pinging the member, never the role)
-        so they know they're now subscribed and how to opt out.
+        Sesh hands the full attendee list on every RSVP edit with no delta, so the loop re-runs over
+        everyone and relies on `grant_role` to no-op those already subscribed. The announcement is
+        deduped per (thread, member) rather than on `grant_role` alone: back-to-back edits can both
+        re-add before the member-role cache reflects the first add, which would double-announce.
         """
         spec = auto_grant_spec_for_event(event_time)
         if guild is None or spec is None:
@@ -317,8 +320,14 @@ class SeshListener(commands.Cog):
             member = await resolve_member(guild, token)
             if member is None:
                 continue
-            if await grant_role(member, role) and thread is not None:
-                await self._announce_grant(thread, member, role, spec.emoji)
+            granted = await grant_role(member, role)
+            if not granted or thread is None:
+                continue
+            key = (thread.id, member.id)
+            if key in self._announced_grants:
+                continue
+            self._announced_grants.add(key)
+            await self._announce_grant(thread, member, role, spec.emoji)
 
     async def _announce_grant(
         self, thread: discord.Thread, member: discord.Member, role: discord.Role, emoji: str,

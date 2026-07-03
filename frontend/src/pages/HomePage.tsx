@@ -36,7 +36,7 @@ import {
   usePodEvents,
   useSets,
 } from "../data/hooks";
-import { buildTierListSets, resolveTierList, TIER_ORDER, useTierList, type TierCard } from "../data/tierList";
+import { buildTierListSets, resolveTierList, tierColor, TIER_ORDER, useTierList, type TierCard } from "../data/tierList";
 import { ACTIVE_SET_CODE } from "../data/constants";
 import { FMT_COLORS, shortFormat } from "../data/format-display";
 import { FORMAT_OPTIONS } from "../data/filters";
@@ -1144,16 +1144,6 @@ function podWhenLabel(event: PodEventSummary): string {
 }
 
 const TIER_LETTERS = ["A", "B", "C", "D"] as const;
-const MAIN_TIERS = TIER_ORDER.filter((t) => t !== "SB" && t !== "TBD");
-
-function tierColor(tier: string): string {
-  const i = MAIN_TIERS.indexOf(tier);
-  if (i === -1) {
-    return "#4a5260";
-  }
-  const hue = Math.round(130 - (130 * i) / (MAIN_TIERS.length - 1));
-  return `hsl(${hue}, 62%, 47%)`;
-}
 
 function sampleTiers(cards: TierCard[] | undefined): Array<{ letter: string; color: string; cards: TierCard[] }> {
   if (!cards?.length) {

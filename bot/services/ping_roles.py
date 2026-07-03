@@ -31,10 +31,9 @@ from bot.services.pod_schedule import (
 
 log = logging.getLogger(__name__)
 
-MSG_ROLE_GRANTED_TITLE = "{emoji} New Pod Drafter"
 MSG_ROLE_GRANTED = (
-    "{user} you now have {role} and will be notified about drafts at this time of day.\n"
-    "Manage your roles with `/roles`"
+    "{emoji} {user} you're now on {role} and will be pinged for drafts at this time of day.\n"
+    "Run `/roles` to manage your notifications."
 )
 
 
@@ -77,10 +76,13 @@ def blurb_with_time(spec: PingRole) -> str:
 
 
 def build_grant_embed(user_mention: str, role: discord.Role, emoji: str) -> discord.Embed:
-    """The embed announcing a fresh auto-grant in the event thread. Shared by the listener and tests."""
+    """The embed announcing a fresh auto-grant in the event thread. Shared by the listener and tests.
+
+    A role mention inside an embed never pings (only message content does), so the role tag is safe;
+    it renders as the colored role pill from the viewer's role cache.
+    """
     return discord.Embed(
-        title=MSG_ROLE_GRANTED_TITLE.format(emoji=emoji),
-        description=MSG_ROLE_GRANTED.format(user=user_mention, role=role.mention),
+        description=MSG_ROLE_GRANTED.format(emoji=emoji, user=user_mention, role=role.mention),
         color=role.color if role.color.value else discord.Color.blurple(),
     )
 

@@ -1385,8 +1385,8 @@ function PodEventButton({ size = "md" }: { size?: "sm" | "md" }) {
         style={{ clipPath: chamfer }}
       >
         <GiRoundTable size={isSm ? 14 : 16} className="text-green shrink-0" />
-        <span className="hidden xl:inline">VIEW EVENT</span>
-        <ArrowRight size={isSm ? 10 : 12} className="hidden xl:inline-block" />
+        <span className={isSm ? "inline" : "hidden xl:inline"}>VIEW EVENT</span>
+        <ArrowRight size={isSm ? 10 : 12} className={isSm ? "inline-block" : "hidden xl:inline-block"} />
       </span>
     </span>
   );
@@ -1698,18 +1698,13 @@ function EventLogRow({
           {cashPrize && <CashPrizePill amount={cashPrize} className="mx-1.5" />}
           {tag && <FormatTagPill tag={tag} />}
         </div>
-        <div className="flex items-center gap-2 mt-0.5">
+        <div className="mt-0.5">
           <span className="text-[11px] text-muted">
             {[
               podWithoutDeck ? "Deck not submitted" : formatDeckColors(e.colors),
               fmtShortDate(eventDate(e)),
             ].filter(Boolean).join(" · ")}
           </span>
-          {podSlug && (
-            <span className="flex-1 flex justify-center">
-              <PodEventButton size="sm" />
-            </span>
-          )}
         </div>
       </div>
       {trophy ? (
@@ -1725,30 +1720,31 @@ function EventLogRow({
           />
         </span>
       ) : isPod ? (
-        podNewTabHref ? (
-          <Tooltip label="Open in new tab">
-            <button
-              type="button"
-              onClick={(ev) => {
-                ev.preventDefault();
-                ev.stopPropagation();
-                window.open(podNewTabHref, "_blank", "noopener,noreferrer");
-              }}
-              aria-label="Open event in new tab"
-              className="inline-flex items-center gap-1.5 text-dim group-hover:text-text transition-colors bg-transparent border-none p-0 cursor-pointer"
-            >
-              <Record
-                mono
-                wins={e.wins}
-                losses={e.losses}
-                color={recordColor}
-                className="font-display text-[22px]"
-              />
-              <ExternalLink size={16} aria-hidden="true" />
-            </button>
-          </Tooltip>
-        ) : (
-          <span className="inline-flex items-center">
+        <span className="inline-flex items-center gap-2.5">
+          {podSlug && <PodEventButton size="sm" />}
+          {podNewTabHref ? (
+            <Tooltip label="Open in new tab">
+              <button
+                type="button"
+                onClick={(ev) => {
+                  ev.preventDefault();
+                  ev.stopPropagation();
+                  window.open(podNewTabHref, "_blank", "noopener,noreferrer");
+                }}
+                aria-label="Open event in new tab"
+                className="inline-flex items-center gap-1.5 text-dim group-hover:text-text transition-colors bg-transparent border-none p-0 cursor-pointer"
+              >
+                <Record
+                  mono
+                  wins={e.wins}
+                  losses={e.losses}
+                  color={recordColor}
+                  className="font-display text-[22px]"
+                />
+                <ExternalLink size={16} aria-hidden="true" />
+              </button>
+            </Tooltip>
+          ) : (
             <Record
               mono
               wins={e.wins}
@@ -1756,8 +1752,8 @@ function EventLogRow({
               color={recordColor}
               className="font-display text-[22px]"
             />
-          </span>
-        )
+          )}
+        </span>
       ) : (
         <Tooltip label="View deck in 17lands">
           <span className="inline-flex items-center gap-1.5 text-dim group-hover:text-text transition-colors">

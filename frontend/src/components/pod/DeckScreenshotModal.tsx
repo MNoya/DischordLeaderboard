@@ -7,6 +7,7 @@ import { ChamferedButton } from "../ChamferedButton";
 import { Pips } from "../ManaPips";
 import { Record } from "../Record";
 import { cn } from "../../lib/utils";
+import { StackColumn } from "./review/ReviewCard";
 import { useIsMobile } from "../../lib/use-is-mobile";
 import { useResolvedDeckUrl } from "../../data/refresh-deck-url";
 import type { Mainboard } from "../../types/leaderboard";
@@ -465,28 +466,23 @@ function DecklistView({ mainboard }: { mainboard: Mainboard }) {
 }
 
 const CARD_CLASS =
-  "w-full overflow-hidden rounded-[5px] [outline-style:solid] outline-1 -outline-offset-1 outline-white/10 shadow-[0_-2px_6px_rgba(0,0,0,0.6)]";
+  "w-full overflow-hidden rounded-[5px] [outline-style:solid] outline-1 -outline-offset-1 outline-white/10 shadow-[0_-2px_6px_rgba(0,0,0,0.6)] transition-[outline-color] group-hover:outline-white/50 hover:outline-white/50";
 
 // Cards fan top-to-bottom with each one absolutely overlapping the previous, so only a revealed sliver
 // of the upper cards shows and their bottom edge is covered — the bottom card sits in normal flow and
-// gives the column its height.
+// gives the column its height. Hovering a sliver lifts that card to the front.
 function Pile({ cards, deckSet }: { cards: DeckCard[]; deckSet: string | null }) {
-  const lastIndex = cards.length - 1;
-  if (lastIndex < 0) {
+  if (cards.length === 0) {
     return null;
   }
   return (
     <div className="flex-1" style={{ minWidth: COL_MIN, maxWidth: COL_MAX }}>
-      <div className="relative w-full [display:flow-root]">
-        {cards.slice(0, lastIndex).map((card, i) => (
-          <div key={`${card.name}-${card.cn}-${i}`} className={cn("absolute", CARD_CLASS)} style={{ top: i * STRIP_H }}>
-            <PileCard card={card} deckSet={deckSet} />
-          </div>
-        ))}
-        <div className={cn("relative", CARD_CLASS)} style={{ marginTop: lastIndex * STRIP_H }}>
-          <PileCard card={cards[lastIndex]} deckSet={deckSet} />
-        </div>
-      </div>
+      <StackColumn
+        count={cards.length}
+        reveal={STRIP_H}
+        cardClassName={CARD_CLASS}
+        renderCard={(i) => <PileCard card={cards[i]} deckSet={deckSet} />}
+      />
     </div>
   );
 }

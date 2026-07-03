@@ -519,6 +519,9 @@ export function PodDraftLogRoute() {
     draftLogUrl: s.draftLogUrl,
   }));
 
+  const current = resolved != null ? seats.find((s) => s.seatIndex === resolved) : null;
+  const backHref = `/pods/${slug}${current ? `?player=${encodeURIComponent(current.discordName)}` : ""}`;
+
   return (
     <DraftReviewMOCS
       artifact={artifact}
@@ -526,11 +529,8 @@ export function PodDraftLogRoute() {
       initialSeat={initialSeat}
       initialPack={initialPack}
       initialPick={initialPick}
-      onClose={() => {
-        const current = resolved != null ? seats.find((s) => s.seatIndex === resolved) : null;
-        const query = current ? `?player=${encodeURIComponent(current.discordName)}` : "";
-        navigate(`/pods/${slug}${query}`);
-      }}
+      onClose={() => navigate(backHref)}
+      backHref={backHref}
       onNavigate={(seatIndex, p, pk) => {
         const target = seats.find((s) => s.seatIndex === seatIndex);
         if (target) {

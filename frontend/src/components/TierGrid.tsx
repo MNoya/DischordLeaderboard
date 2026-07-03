@@ -8,11 +8,11 @@ import {
   hasActiveFilters,
   inclusionRank,
   isCardFilteredOut,
+  tierColor,
   TIER_ORDER,
   TREND_COLOR,
-  TREND_GLYPH,
   TREND_LABEL,
-  trendSteps,
+  trendGlyphStack,
   useTierList,
   type Grader,
   type TierCard,
@@ -53,15 +53,6 @@ const columnOf = (color: string) => (color === "L" ? "C" : color);
 function columnPipClass(code: string): string {
   if (code === "M") return "ms ms-multicolor ms-duo ms-duo-color ms-grad";
   return `ms ms-cost ms-${COLUMN_MS[code]}`;
-}
-
-// Green (top) → red (bottom) accent down the grade column; SB/TBD stay neutral.
-const MAIN_TIERS = TIER_ORDER.filter((t) => t !== "SB" && t !== "TBD");
-function tierColor(tier: string): string {
-  const i = MAIN_TIERS.indexOf(tier);
-  if (i === -1) return "#4a5260";
-  const hue = Math.round(130 - (130 * i) / (MAIN_TIERS.length - 1));
-  return `hsl(${hue}, 62%, 47%)`;
 }
 
 // When a set has no consensus list, the grid is built from grader lists alone: the popup
@@ -610,12 +601,6 @@ function CardBar({
         )}
     </div>
   );
-}
-
-function trendGlyphStack(card: TierCard): string[] {
-  if (!card.trend) return [];
-  const char = TREND_GLYPH[card.trend];
-  return Array.from({ length: Math.min(trendSteps(card), 3) }, () => char);
 }
 
 function GradesPanel({ card }: { card: TierCard }) {
