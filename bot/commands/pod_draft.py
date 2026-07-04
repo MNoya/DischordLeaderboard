@@ -121,7 +121,7 @@ class PodDraft(commands.Cog):
             log.warning(f"ready-check: failed — {err}")
             await interaction.followup.send(f"⚠️ {err}", ephemeral=True)
         else:
-            await interaction.followup.send("Ready Check initiated, watch the thread for status.", ephemeral=True)
+            await interaction.followup.send("Ready Check initiated, accept in Draftmancer!", ephemeral=False)
 
     @app_commands.command(name="pod-start", description=desc.POD_START)
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)

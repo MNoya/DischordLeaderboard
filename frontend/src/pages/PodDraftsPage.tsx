@@ -33,6 +33,7 @@ import { podDraftMessageLink } from "../data/site";
 import {
   useLeaderboard,
   usePodDraftArtifact,
+  usePodEventMatches,
   usePodEventParticipants,
   usePodEvents,
   usePodLeaderboard,
@@ -599,6 +600,15 @@ function EventRowBody({ event, nowMs }: { event: PodEventSummary; nowMs: number 
   const startMs = new Date(event.eventTime).getTime();
   const inProgress = !hasChamp && startMs <= nowMs;
   const isUpcoming = !hasChamp && startMs > nowMs;
+  const { data: matches } = usePodEventMatches(inProgress ? event.eventId : undefined);
+  const currentRound = useMemo(() => {
+    if (!matches || matches.length === 0) return null;
+    let latest = 1;
+    for (const m of matches) {
+      if (m.round > latest) latest = m.round;
+    }
+    return Math.min(latest, event.totalRounds);
+  }, [matches, event.totalRounds]);
   return (
     <div
       className={cn(
@@ -635,12 +645,13 @@ function EventRowBody({ event, nowMs }: { event: PodEventSummary; nowMs: number 
         </div>
       )}
       {inProgress && (
-        <span
-          className="font-display text-muted tracking-[0.18em] shrink-0"
-          style={{ fontSize: 10 }}
+        <div
+          className="flex items-center gap-2.5 shrink-0 font-display tracking-[0.18em]"
+          style={{ fontSize: 13 }}
         >
-          IN PROGRESS
-        </span>
+          {currentRound != null && <span className="text-text">ROUND {currentRound}</span>}
+          <span className="text-muted">IN PROGRESS</span>
+        </div>
       )}
       <div className="hidden lg:block flex-1" />
     </div>

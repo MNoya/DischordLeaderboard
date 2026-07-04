@@ -1,8 +1,8 @@
 """/pod-backfill — reconstruct a pod-draft event from its Discord thread.
 
 Pipeline: scrape the thread (seats, records, decks, DraftLog) → gaps-first confirmation wizard →
-idempotent writes in one transaction → post-process (DraftLog ingest, MagicProTools, replay
-backfill, optional announcement). Matches come from the DB or the match editor — replay-based
+idempotent writes in one transaction → post-process (DraftLog ingest, replay backfill, optional
+announcement). Matches come from the DB or the match editor — replay-based
 pairing inference proved unreliable and was removed.
 See spec/pod-backfill-handoff.md.
 """

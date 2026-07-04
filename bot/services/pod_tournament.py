@@ -123,31 +123,30 @@ DeckPingAudience = tuple[list[str], list[str]]  # (owes-screenshot ids, owes-col
 
 
 def build_deck_ping(blocking: DeckPingAudience, other: DeckPingAudience, pod_url: str) -> str:
-    """Compose the R3 deck-chase ping action-forward, split by why the deck is wanted. Top finishers
-    who still gate the championship post get the urgent block; everyone else gets the pod-page nudge.
-    The championship block only appears when a top finisher is actually blocking, so the "waiting"
-    line never shows once the post is clear to go up. Returns "" when nobody owes anything."""
-    blocks = [
-        _deck_action_block(CHAMPIONSHIP_DECK_HEADER, *blocking),
-        _deck_action_block(_pod_page_deck_header(pod_url), *other),
-    ]
-    return "\n\n".join(block for block in blocks if block)
-
-
-def _pod_page_deck_header(pod_url: str) -> str:
-    label = pod_url.split("://", 1)[-1]
-    return f"Your deck shows on your seat at [{label}](<{pod_url}>) 🎨"
-
-
-def _deck_action_block(header: str, screenshot_ids: list[str], colors_ids: list[str]) -> str:
+    """Compose the R3 deck-chase ping action-forward. Everyone who owes a screenshot or colors is
+    pinged on one line each — blocking and non-blocking players merged so the ask isn't repeated.
+    The "waiting" header only shows when a top finisher is actually blocking the championship post;
+    once it's clear to go up the ping is just the pod-page nudge. Returns "" when nobody owes."""
+    block_shots, block_colors = blocking
+    other_shots, other_colors = other
+    screenshot_ids = block_shots + other_shots
+    colors_ids = block_colors + other_colors
     if not screenshot_ids and not colors_ids:
         return ""
-    lines = [header]
+    lines = []
+    if block_shots or block_colors:
+        lines.append(CHAMPIONSHIP_DECK_HEADER)
     if screenshot_ids:
-        lines.append(f"Please post your deck screenshot {_mention_run(screenshot_ids)}")
+        lines.append(f"Post your deck screenshot {_mention_run(screenshot_ids)}")
     if colors_ids:
-        lines.append(f"Use this button to register your deck colors {_mention_run(colors_ids)}")
+        lines.append(f"Register your deck colors with the button below {_mention_run(colors_ids)}")
+    lines.append(_pod_page_deck_line(pod_url))
     return "\n".join(lines)
+
+
+def _pod_page_deck_line(pod_url: str) -> str:
+    label = pod_url.split("://", 1)[-1]
+    return f"Draft Recap: [{label}]({pod_url}) 🎨"
 
 
 def _mention_run(discord_ids: list[str]) -> str:
@@ -1047,7 +1046,8 @@ class MatchResultSelect(ui.Select):
                 (f"{b_disp} wins: 2-0", f"{b_disp} wins 2-0 vs {a_disp}", f"{match_id}|{b_name}|2-0", True),
             ]
             if allow_skip:
-                values.append(("No Match Played", None, f"{match_id}|{SKIPPED_SENTINEL}|0-0", False))
+                skip_long = f"{a_disp} vs {b_disp} 🚫 Not Played"
+                values.append(("No Match Played", skip_long, f"{match_id}|{SKIPPED_SENTINEL}|0-0", False))
             if selected_value:
                 values.insert(0, ("Clear Result", None, f"{match_id}|{CLEAR_SENTINEL}|0-0", False))
             options = []
@@ -2602,16 +2602,6 @@ async def maybe_post_championship(manager, *, force: bool = False) -> None:
         )
         return
 
-    mpt_task = manager.mpt_task
-    if mpt_task is not None and not mpt_task.done():
-        try:
-            await asyncio.wait_for(asyncio.shield(mpt_task), timeout=15)
-        except asyncio.TimeoutError:
-            log.warning(f"MPT submission still running after 15s for {event_id}; posting announcement anyway")
-        except Exception:
-            log.warning(f"MPT submission failed for {event_id}", exc_info=True)
-        deck_data = await asyncio.to_thread(_load_event_deck_data_sync, event_id)
-
     if manager.champion_announced:
         return
     target = await _resolve_announcement_target(manager)
@@ -2868,7 +2858,6 @@ class _RecoveryManager:
         self.champion_discord_ids: set[str] = set()
         self.champion_announcement_message = None
         self.championship_task = None
-        self.mpt_task = None
 
     async def _fetch_thread(self):
         try:
