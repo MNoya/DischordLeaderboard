@@ -299,16 +299,12 @@ function MobileMenu({
   const { user, loading, signIn, signOut } = useAuth();
   const { data: profileSlug } = usePlayerSlugByDiscordId(user?.discordId);
 
-  const userRow = user && (
-    <>
-      {user.avatarUrl ? (
-        <img src={user.avatarUrl} alt="" className="w-6 h-6 rounded-full" />
-      ) : (
-        <div className="w-6 h-6 rounded-full bg-surface" />
-      )}
-      <span className="text-text text-sm truncate">{user.username}</span>
-    </>
-  );
+  const avatarEl = user &&
+    (user.avatarUrl ? (
+      <img src={user.avatarUrl} alt="" className="w-6 h-6 rounded-full" />
+    ) : (
+      <div className="w-6 h-6 rounded-full bg-surface" />
+    ));
 
   return (
     <>
@@ -322,7 +318,22 @@ function MobileMenu({
         role="menu"
       >
         {includeAuth && !loading && user && (
-          <div className="flex items-center gap-3 px-5 min-h-[54px] border-b border-border">{userRow}</div>
+          profileSlug ? (
+            <Link
+              to={`/leaderboard/player/${profileSlug}`}
+              onClick={onClose}
+              role="menuitem"
+              className="flex items-center gap-3 px-5 min-h-[54px] no-underline font-display text-[17px] tracking-[0.14em] border-b border-border transition-colors text-text bg-transparent hover:bg-surface"
+            >
+              {avatarEl}
+              MY PROFILE
+            </Link>
+          ) : (
+            <div className="flex items-center gap-3 px-5 min-h-[54px] border-b border-border">
+              {avatarEl}
+              <span className="text-text text-sm truncate">{user.username}</span>
+            </div>
+          )
         )}
         {items.map((n) => {
           const active = n.match(pathname);
@@ -351,17 +362,6 @@ function MobileMenu({
             <DiscordIcon size={18} />
             LOG IN
           </button>
-        )}
-        {includeAuth && !loading && user && profileSlug && (
-          <Link
-            to={`/leaderboard/player/${profileSlug}`}
-            onClick={onClose}
-            role="menuitem"
-            className="flex items-center gap-3 min-h-[54px] px-5 no-underline font-display text-[17px] tracking-[0.14em] border-b border-border transition-colors text-text bg-transparent hover:bg-surface"
-          >
-            <User size={18} />
-            MY PROFILE
-          </Link>
         )}
         {includeAuth && !loading && user && (
           <button
