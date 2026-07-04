@@ -89,11 +89,14 @@ export function useMediaFeed() {
   const videos = useYouTubeVideos();
   const data = useMemo(() => {
     const live = episodes.data ? mergeMedia(episodes.data, videos.data ?? []) : undefined;
-    if (db.data && live) {
-      return overlayLiveMedia(db.data, live);
+    if (db.data) {
+      return live ? overlayLiveMedia(db.data, live) : db.data;
     }
-    return db.data ?? live;
-  }, [db.data, episodes.data, videos.data]);
+    if (db.isLoading) {
+      return undefined;
+    }
+    return live;
+  }, [db.data, db.isLoading, episodes.data, videos.data]);
   return {
     data,
     isLoading: db.isLoading && episodes.isLoading,
