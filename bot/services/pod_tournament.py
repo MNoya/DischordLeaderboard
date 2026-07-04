@@ -910,6 +910,8 @@ async def advance_to_round(manager: "PodDraftManager", round_num: int) -> None:
     prior = await asyncio.to_thread(_load_matches, manager.event_id)
     if round_num == 1:
         await asyncio.to_thread(manager.persist_seat_indexes_from_log)
+    if round_num == 2:
+        await asyncio.to_thread(manager.persist_decklists_from_log)
     seats = await asyncio.to_thread(_load_seat_indexes, manager.event_id)
     if round_num == 1 and manager.pairing_mode != "random":
         seats = await _recover_round1_seats(manager, players, seats)

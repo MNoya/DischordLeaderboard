@@ -215,6 +215,7 @@ class PodDraftManager:
         self.sio.on("setReady", self._on_set_ready)
         self.sio.on("endDraft", self._on_end_draft)
         self.sio.on("draftLog", self._on_draft_log)
+        self.sio.on("shareDecklist", self._on_share_decklist)
 
     @property
     def _connect_user_id(self) -> str:
@@ -902,7 +903,7 @@ class PodDraftManager:
         """The locked drafter list, frozen at endDraft. Prefers the draft log's seated users — immune
         to players closing their tab at draft end or spectators joining after — and falls back to
         whoever is in the session right now."""
-        payload = next(iter(self.draft_logs.values()), None)
+        payload = self._full_draft_log()
         users = payload.get("users") if isinstance(payload, dict) else None
         if isinstance(users, dict):
             seated = [u.get("userName") for u in users.values() if isinstance(u, dict) and u.get("userName")]
@@ -922,6 +923,38 @@ class PodDraftManager:
                     break
         log.info(f"[DRAFT] log_stored event={self.event_id} total={len(self.draft_logs)}")
         await asyncio.to_thread(self._persist_draft_log_gz, log_payload)
+
+    async def _on_share_decklist(self, payload) -> None:
+        """Draftmancer streams shareDecklist to the session owner on every deckbuild edit (card moved
+        main↔side, lands set) after the draft ends — there is no submit gate. Keep the stored log's per-seat
+        decklist current in memory only; persist_decklists_from_log writes the settled result once at round 2,
+        by which point round 1 has been played. Mocks disconnect at draft end and are never reviewed, so they
+        are ignored; as a non-player owner the bot receives the full decklist, not hashes-only."""
+        if self.kind == "mock" or not isinstance(payload, dict):
+            return
+        user_id = payload.get("userID")
+        decklist = payload.get("decklist")
+        if not user_id or not isinstance(decklist, dict) or decklist.get("main") is None:
+            return
+        log_payload = self._full_draft_log()
+        users = log_payload.get("users") if isinstance(log_payload, dict) else None
+        if not isinstance(users, dict) or not isinstance(users.get(user_id), dict):
+            return
+        users[user_id]["decklist"] = decklist
+
+    def persist_decklists_from_log(self) -> bool:
+        """Re-persist the artifact with players' post-draft deckbuild edits, called once at round 2 after
+        round 1 has settled the decks. shareDecklist keeps the in-memory log current live; this is the single
+        write. Returns False when no draft log is in memory (e.g. after a mid-event bot restart), leaving the
+        draft-end decks in place."""
+        log_payload = self._full_draft_log()
+        if not isinstance(log_payload, dict):
+            return False
+        self._persist_draft_log_gz(log_payload)
+        return True
+
+    def _full_draft_log(self) -> dict | None:
+        return next(iter(self.draft_logs.values()), None)
 
     def _persist_draft_log_gz(self, log_payload: dict) -> None:
         try:
@@ -973,7 +1006,7 @@ class PodDraftManager:
         """Write seat_index from the in-memory draft log to participants so round-1 pairing and every
         later re-render read the same seating. Idempotent with _persist_draft_log_gz.
         Returns False when no draft log is in memory yet."""
-        payload = next(iter(self.draft_logs.values()), None)
+        payload = self._full_draft_log()
         users = payload.get("users") if isinstance(payload, dict) else None
         if not isinstance(users, dict):
             return False
@@ -1421,7 +1454,7 @@ class PodDraftManager:
         if not self.draft_logs:
             log.warning(f"[DRAFT] share_log.skipped event={self.event_id} reason=no_payload")
             return False
-        payload = next(iter(self.draft_logs.values()))
+        payload = self._full_draft_log()
         try:
             await self.sio.emit("shareDraftLog", payload)
             log.info(f"[DRAFT] share_log.done event={self.event_id}")

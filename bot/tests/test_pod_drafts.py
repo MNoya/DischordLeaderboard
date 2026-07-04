@@ -594,6 +594,54 @@ def test_build_compact_decklist_ids_absent_from_card_table_are_dropped():
     assert compact["decks"][0]["main"] == [0, 2]
 
 
+def _share_decklist_manager():
+    from bot.services.pod_draft_manager import PodDraftManager
+
+    mgr = PodDraftManager(object(), "evt", "sid", 123, "SOS", 8)
+    mgr.draft_logs = {"Alice#1": _draft_log_payload()}
+    return mgr
+
+
+def test_share_decklist_patches_seat_in_memory():
+    import asyncio
+
+    mgr = _share_decklist_manager()
+
+    asyncio.run(mgr._on_share_decklist({"userID": "u2", "decklist": {"main": ["d"], "side": []}}))
+
+    assert mgr.draft_logs["Alice#1"]["users"]["u2"]["decklist"] == {"main": ["d"], "side": []}
+
+
+def test_share_decklist_ignored_for_mock_hashes_only_and_unknown_seat():
+    import asyncio
+
+    for kind, payload in [
+        ("mock", {"userID": "u1", "decklist": {"main": ["a"], "side": []}}),
+        ("tournament", {"userID": "u1", "decklist": {"hashes": {"main": 42}}}),
+        ("tournament", {"userID": "ghost", "decklist": {"main": ["a"], "side": []}}),
+    ]:
+        mgr = _share_decklist_manager()
+        mgr.kind = kind
+        original = mgr.draft_logs["Alice#1"]["users"]["u1"]["decklist"].copy()
+
+        asyncio.run(mgr._on_share_decklist(payload))
+
+        assert mgr.draft_logs["Alice#1"]["users"]["u1"]["decklist"] == original
+
+
+def test_persist_decklists_from_log_writes_when_log_present_else_skips():
+    mgr = _share_decklist_manager()
+    persisted: list[dict] = []
+    mgr._persist_draft_log_gz = lambda payload: persisted.append(payload)
+
+    assert mgr.persist_decklists_from_log() is True
+    assert len(persisted) == 1
+
+    mgr.draft_logs = {}
+    assert mgr.persist_decklists_from_log() is False
+    assert len(persisted) == 1
+
+
 @pytest.mark.parametrize(
     "current_round, championship_posted, existing_url, existing_caption, new_caption, captured",
     [
