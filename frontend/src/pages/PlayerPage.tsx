@@ -580,11 +580,14 @@ function statsFromEvents(events: PlayerDraftEvent[]): StatStripStats {
   return { trophies, events: countedEvents, wins, losses, score: computeScore(rows) };
 }
 
-function aggregate(events: PlayerDraftEvent[]): PlayerAggregates {
+function aggregate(
+  events: PlayerDraftEvent[],
+  selfReported: readonly SelfReportedEvent[] = [],
+): PlayerAggregates {
   const colorCount: PlayerAggregates["colorCount"] = { W: 0, U: 0, B: 0, R: 0, G: 0 };
   const comboCount: Record<string, number> = {};
   const comboTrophies: Record<string, number> = {};
-  for (const e of events) {
+  for (const e of [...events, ...selfReported]) {
     const main = mainColors(e.colors);
     for (const c of main) {
       if (c in colorCount) colorCount[c as keyof typeof colorCount]++;
@@ -754,7 +757,7 @@ function Desktop({
 
       <div className="grid" style={{ gridTemplateColumns: profile.events > 0 ? "440px minmax(0, 1fr)" : "minmax(0, 1fr)" }}>
         {profile.events > 0 && (
-          <BreakdownPanel breakdown={profile.formatBreakdown} totalScore={profile.score} events={events} showPoints={ranked} lockedFormats={lockedFormats} />
+          <BreakdownPanel breakdown={profile.formatBreakdown} totalScore={profile.score} events={events} selfReported={profile.selfReportedEvents} showPoints={ranked} lockedFormats={lockedFormats} />
         )}
         <DraftLogDesktop
           events={events}
@@ -995,12 +998,14 @@ function BreakdownPanel({
   breakdown,
   totalScore,
   events,
+  selfReported,
   showPoints,
   lockedFormats,
 }: {
   breakdown: PlayerFormatBreakdown[];
   totalScore: number;
   events: PlayerDraftEvent[];
+  selfReported: SelfReportedEvent[];
   showPoints: boolean;
   lockedFormats?: string[] | null;
 }) {
@@ -1009,7 +1014,7 @@ function BreakdownPanel({
     [breakdown],
   );
   const total = formatBreakdown.reduce((s, f) => s + f.scoreContribution, 0) || 1;
-  const { colorCount, comboCount, comboTrophies } = aggregate(events);
+  const { colorCount, comboCount, comboTrophies } = aggregate(events, selfReported);
   const comboEntries = Object.entries(comboCount).sort((a, b) => b[1] - a[1]);
   const comboTotal = comboEntries.reduce((s, [, n]) => s + n, 0) || 1;
   const colorTotal = Object.values(colorCount).reduce((a, b) => a + b, 0) || 1;
@@ -1986,7 +1991,7 @@ function Mobile({
       </section>
 
       {profile.events > 0 && (
-        <MobileBreakdown breakdown={profile.formatBreakdown} events={events} showPoints={ranked} lockedFormats={lockedFormats} />
+        <MobileBreakdown breakdown={profile.formatBreakdown} events={events} selfReported={profile.selfReportedEvents} showPoints={ranked} lockedFormats={lockedFormats} />
       )}
 
       <section ref={eventLogRef} className="py-4 px-[18px]">
@@ -2078,11 +2083,13 @@ function isBreakdownTab(v: unknown): v is BreakdownTab {
 function MobileBreakdown({
   breakdown,
   events,
+  selfReported,
   showPoints,
   lockedFormats,
 }: {
   breakdown: PlayerFormatBreakdown[];
   events: PlayerDraftEvent[];
+  selfReported: SelfReportedEvent[];
   showPoints: boolean;
   lockedFormats?: string[] | null;
 }) {
@@ -2112,8 +2119,8 @@ function MobileBreakdown({
       </div>
       <div className="px-[18px] py-4">
         {activeTab === "format" && <MobileFormatTab breakdown={breakdown} lockedFormats={lockedFormats} />}
-        {activeTab === "deckColors" && <MobileDeckColorsTab events={events} />}
-        {activeTab === "manaPips" && <MobileManaPipsTab events={events} />}
+        {activeTab === "deckColors" && <MobileDeckColorsTab events={events} selfReported={selfReported} />}
+        {activeTab === "manaPips" && <MobileManaPipsTab events={events} selfReported={selfReported} />}
       </div>
     </section>
   );
@@ -2213,8 +2220,8 @@ function MobileFormatTab({ breakdown, lockedFormats }: { breakdown: PlayerFormat
   );
 }
 
-function MobileDeckColorsTab({ events }: { events: PlayerDraftEvent[] }) {
-  const { comboCount, comboTrophies } = aggregate(events);
+function MobileDeckColorsTab({ events, selfReported }: { events: PlayerDraftEvent[]; selfReported: SelfReportedEvent[] }) {
+  const { comboCount, comboTrophies } = aggregate(events, selfReported);
   const comboEntries = Object.entries(comboCount).sort((a, b) => b[1] - a[1]);
   const comboTotal = comboEntries.reduce((s, [, n]) => s + n, 0) || 1;
   const [hover, setHover] = useState<string | null>(null);
@@ -2280,8 +2287,8 @@ function MobileDeckColorsTab({ events }: { events: PlayerDraftEvent[] }) {
   );
 }
 
-function MobileManaPipsTab({ events }: { events: PlayerDraftEvent[] }) {
-  const { colorCount } = aggregate(events);
+function MobileManaPipsTab({ events, selfReported }: { events: PlayerDraftEvent[]; selfReported: SelfReportedEvent[] }) {
+  const { colorCount } = aggregate(events, selfReported);
   const colorTotal = Object.values(colorCount).reduce((a, b) => a + b, 0) || 1;
   const [hover, setHover] = useState<string | null>(null);
   return (
