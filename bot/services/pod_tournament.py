@@ -1853,7 +1853,7 @@ def build_draft_review_message(voice_url: str | None) -> str:
     """Message content above the table embed: the react/join prompt. Who started the review comes from
     Discord's own '/pod-review' command attribution. The bare voice URL renders as a channel chip and
     unfurls the native Join Voice card below the table."""
-    return f"{REVIEW_REACT_PROMPT} and join {voice_url}" if voice_url else f"{REVIEW_REACT_PROMPT}."
+    return f"{REVIEW_REACT_PROMPT}. Join {voice_url} !" if voice_url else f"{REVIEW_REACT_PROMPT}."
 
 
 def pod_voice_channel_url(guild: discord.Guild | None) -> str | None:

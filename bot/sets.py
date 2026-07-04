@@ -80,6 +80,9 @@ ALL_SETS: tuple[SetSeed, ...] = (
     SetSeed("TMT", "Teenage Mutant Ninja Turtles", date(2026, 3, 3), date(2026, 4, 20)),
     SetSeed("SOS", "Secrets of Strixhaven", date(2026, 4, 21), date(2026, 6, 22)),
     SetSeed("MSH", "Marvel Super Heroes", date(2026, 6, 23), date(2026, 8, 10)),
+    SetSeed("HOB", "The Hobbit", date(2026, 8, 11), date(2026, 9, 28)),
+    SetSeed("FRA", "Reality Fracture", date(2026, 9, 29), date(2026, 11, 9)),
+    SetSeed("TRE", "Star Trek", date(2026, 11, 10), date(2027, 1, 4)),
 )
 
 # MTGO-only flashback drafts, never on Arena; kept out of ALL_SETS so they never rotate or score
