@@ -706,6 +706,7 @@ function Desktop({
   }, [filtersActive, filtered, displayRows, pointsTotal, profile.trophies, profile.events, profile.wins, profile.losses, profile.score]);
   const wp = winPct(stats.wins, stats.losses);
   const ranked = profile.rank > 0;
+  const hasBreakdown = profile.events > 0 || profile.selfReportedEvents.length > 0;
   const [pointsModalOpen, setPointsModalOpen] = useState(false);
   const pointsBtnRef = useRef<HTMLButtonElement>(null);
 
@@ -755,8 +756,8 @@ function Desktop({
         </div>
       </section>
 
-      <div className="grid" style={{ gridTemplateColumns: profile.events > 0 ? "440px minmax(0, 1fr)" : "minmax(0, 1fr)" }}>
-        {profile.events > 0 && (
+      <div className="grid" style={{ gridTemplateColumns: hasBreakdown ? "440px minmax(0, 1fr)" : "minmax(0, 1fr)" }}>
+        {hasBreakdown && (
           <BreakdownPanel breakdown={profile.formatBreakdown} totalScore={profile.score} events={events} selfReported={profile.selfReportedEvents} showPoints={ranked} lockedFormats={lockedFormats} />
         )}
         <DraftLogDesktop
@@ -1033,7 +1034,7 @@ function BreakdownPanel({
 
   return (
     <section className="py-6 pl-10 pr-8 border-r border-border">
-      {showPoints && (
+      {showPoints && formatBreakdown.length > 0 && (
         <>
           <SectionLabel size={13} className="mb-3.5 text-center" style={{ width: 148 }}>POINTS BY FORMAT</SectionLabel>
           <div className="flex items-center gap-5 mb-4">
@@ -1060,7 +1061,7 @@ function BreakdownPanel({
         </>
       )}
 
-      <SectionLabel size={13} className={cn("mb-3 text-center", showPoints && "mt-6")} style={{ width: 148 }}>DECK COLORS</SectionLabel>
+      <SectionLabel size={13} className={cn("mb-3 text-center", showPoints && formatBreakdown.length > 0 && "mt-6")} style={{ width: 148 }}>DECK COLORS</SectionLabel>
       <div className="flex items-center gap-5">
         <DonutChart
           pieHole={0.5}
@@ -1916,6 +1917,7 @@ function Mobile({
   }, [filtersActive, filtered, displayRows, pointsTotal, profile.trophies, profile.events, profile.wins, profile.losses, profile.score]);
   const wp = winPct(stats.wins, stats.losses);
   const ranked = profile.rank > 0;
+  const hasBreakdown = profile.events > 0 || profile.selfReportedEvents.length > 0;
   const [pointsModalOpen, setPointsModalOpen] = useState(false);
   const pointsBtnRef = useRef<HTMLButtonElement>(null);
 
@@ -1990,7 +1992,7 @@ function Mobile({
         )}
       </section>
 
-      {profile.events > 0 && (
+      {hasBreakdown && (
         <MobileBreakdown breakdown={profile.formatBreakdown} events={events} selfReported={profile.selfReportedEvents} showPoints={ranked} lockedFormats={lockedFormats} />
       )}
 
