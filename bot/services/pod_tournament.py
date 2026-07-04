@@ -137,16 +137,17 @@ def build_deck_ping(blocking: DeckPingAudience, other: DeckPingAudience, pod_url
     if block_shots or block_colors:
         lines.append(CHAMPIONSHIP_DECK_HEADER)
     if screenshot_ids:
-        lines.append(f"Post your deck screenshot {_mention_run(screenshot_ids)}")
+        lines.append(f"Please post your deck screenshot {_mention_run(screenshot_ids)}")
     if colors_ids:
         lines.append(f"Register your deck colors with the button below {_mention_run(colors_ids)}")
+    lines.append("")
     lines.append(_pod_page_deck_line(pod_url))
     return "\n".join(lines)
 
 
 def _pod_page_deck_line(pod_url: str) -> str:
     label = pod_url.split("://", 1)[-1]
-    return f"Draft Recap: [{label}]({pod_url}) 🎨"
+    return f"Draft Recap at [{label}]({pod_url}) 🎨"
 
 
 def _mention_run(discord_ids: list[str]) -> str:

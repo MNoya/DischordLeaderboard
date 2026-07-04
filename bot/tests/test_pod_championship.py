@@ -59,9 +59,10 @@ def test_deck_ping_is_action_forward_split_by_audience():
 
     assert text == (
         "Championship post is waiting on a few decks 🏆\n"
-        "Post your deck screenshot <@1> <@3>\n"
+        "Please post your deck screenshot <@1> <@3>\n"
         "Register your deck colors with the button below <@1> <@2> <@3>\n"
-        "Draft Recap: [limitedlevelups.com/pods/pod-7]"
+        "\n"
+        "Draft Recap at [limitedlevelups.com/pods/pod-7]"
         "(https://limitedlevelups.com/pods/pod-7) 🎨"
     )
 
@@ -74,7 +75,7 @@ def test_deck_ping_pod_link_embeds_and_hides_scheme():
 def test_deck_ping_drops_championship_header_once_post_is_clear():
     text = build_deck_ping(([], []), (["3"], ["3"]), "https://limitedlevelups.com/pods/pod-7")
     assert "waiting" not in text
-    assert text.startswith("Post your deck screenshot")
+    assert text.startswith("Please post your deck screenshot")
 
 
 def test_deck_ping_is_empty_when_nobody_owes_anything():
