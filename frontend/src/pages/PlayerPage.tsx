@@ -286,6 +286,31 @@ function useUrlFilters(): [
   ];
 }
 
+// The open deck modal is URL state (?deck=<sourceMessageId>) so a profile link opens straight to a
+// deck. Opening pushes a history entry (browser Back closes the modal); closing replaces it away.
+function useSharedDeck(
+  selfReportedEvents: SelfReportedEvent[],
+): [SelfReportedEvent | null, (trophy: SelfReportedEvent | null) => void] {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const deckId = searchParams.get("deck");
+  const shotTrophy = useMemo(() => {
+    if (!deckId) return null;
+    return selfReportedEvents.find((t) => t.sourceMessageId === deckId) ?? null;
+  }, [deckId, selfReportedEvents]);
+  const setShotTrophy = useCallback(
+    (trophy: SelfReportedEvent | null) => {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        if (trophy) next.set("deck", trophy.sourceMessageId);
+        else next.delete("deck");
+        return next;
+      }, { replace: !trophy });
+    },
+    [setSearchParams],
+  );
+  return [shotTrophy, setShotTrophy];
+}
+
 function MobilePlayerHeader({
   sibling,
   navigate,
@@ -669,7 +694,7 @@ function Desktop({
     [events, matchesFilters]
   );
   const displayRows = useMemo(() => mergeTrophyRows(filtered, profile, matchesFilters), [filtered, profile, matchesFilters]);
-  const [shotTrophy, setShotTrophy] = useState<SelfReportedEvent | null>(null);
+  const [shotTrophy, setShotTrophy] = useSharedDeck(profile.selfReportedEvents);
 
   const filtersActive = formatFilter !== "ALL" || colorsFilter !== "ALL";
   // The headline points and its breakdown popover follow the format filter only, selecting the
@@ -1880,7 +1905,7 @@ function Mobile({
     [events, matchesFilters]
   );
   const displayRows = useMemo(() => mergeTrophyRows(filtered, profile, matchesFilters), [filtered, profile, matchesFilters]);
-  const [shotTrophy, setShotTrophy] = useState<SelfReportedEvent | null>(null);
+  const [shotTrophy, setShotTrophy] = useSharedDeck(profile.selfReportedEvents);
 
   const filtersActive = formatFilter !== "ALL" || colorsFilter !== "ALL";
   // The headline points and its breakdown popover follow the format filter only, selecting the
