@@ -36,7 +36,11 @@ const LEADERBOARD_DESCRIPTION =
   "Check ranks and trophies from the community. /join on Discord to share your drafts and climb the leaderboard";
 const HOME_DESCRIPTION = "Weekly episodes, set reviews, strategy and community events. Join the Discord and climb the leaderboard.";
 
-type ImageIntent = { kind: "url"; url: string } | { kind: "setSymbol"; code: string } | { kind: "logo" } | null;
+type ImageIntent =
+  | { kind: "url"; url: string }
+  | { kind: "setSymbol"; code: string }
+  | { kind: "avatarProxy"; slug: string }
+  | null;
 
 type RouteMeta = {
   ogTitle: string;
@@ -116,37 +120,25 @@ const fetchEpisodeSetName = async (code: string): Promise<string | null> => {
   return null;
 };
 
-type PlayerCard = { name: string; avatarUrl: string | null };
-
-// Stored Discord avatars come sized for the site's 128px slot; embeds want a larger thumbnail.
-const upsizeAvatar = (url: string | null): string | null => {
-  if (!url) return null;
-  return url.replace(/([?&]size=)\d+/, "$1512");
-};
-
-const fetchPlayer = async (slug: string): Promise<PlayerCard> => {
+const fetchPlayerName = async (slug: string): Promise<string> => {
   try {
-    const resp = await restGet(
-      `public_leaderboard?slug=eq.${encodeURIComponent(slug)}&select=display_name,avatar_url&limit=1`,
-    );
+    const resp = await restGet(`public_leaderboard?slug=eq.${encodeURIComponent(slug)}&select=display_name&limit=1`);
     if (resp.ok) {
-      const rows = (await resp.json()) as Array<{ display_name: string; avatar_url: string | null }>;
-      if (rows[0]?.display_name) {
-        return { name: rows[0].display_name, avatarUrl: upsizeAvatar(rows[0].avatar_url) };
-      }
+      const rows = (await resp.json()) as Array<{ display_name: string }>;
+      if (rows[0]?.display_name) return rows[0].display_name;
     }
   } catch {
     // fall through to the slug
   }
-  return { name: slugToName(slug), avatarUrl: null };
+  return slugToName(slug);
 };
 
-const playerMeta = (player: PlayerCard): RouteMeta => ({
-  ogTitle: `${player.name}'s Profile`,
-  tabTitle: `${player.name}${TITLE_SEPARATOR}${SITE}`,
+const playerMeta = (name: string, slug: string): RouteMeta => ({
+  ogTitle: `${name}'s Profile`,
+  tabTitle: `${name}${TITLE_SEPARATOR}${SITE}`,
   siteName: SITE,
-  description: `View ${player.name}'s drafts on the Limited Level-Ups community website`,
-  image: player.avatarUrl ? { kind: "url", url: player.avatarUrl } : { kind: "logo" },
+  description: `View ${name}'s drafts on the Limited Level-Ups community website`,
+  image: { kind: "avatarProxy", slug },
 });
 
 const resolveMeta = async (pathname: string): Promise<RouteMeta> => {
@@ -157,7 +149,7 @@ const resolveMeta = async (pathname: string): Promise<RouteMeta> => {
   const [section, ...rest] = segments;
 
   if (section === "player" && rest[0]) {
-    return playerMeta(await fetchPlayer(rest[0]));
+    return playerMeta(await fetchPlayerName(rest[0]), rest[0]);
   }
 
   if (section === "leaderboard") {
@@ -168,11 +160,11 @@ const resolveMeta = async (pathname: string): Promise<RouteMeta> => {
       return page("About", "Learn how the community leaderboard works.");
     }
     if (rest[0] === "player" && rest[1]) {
-      return playerMeta(await fetchPlayer(rest[1]));
+      return playerMeta(await fetchPlayerName(rest[1]), rest[1]);
     }
     const setCode = rest[0].toUpperCase();
     if (rest[1] === "player" && rest[2]) {
-      return playerMeta(await fetchPlayer(rest[2]));
+      return playerMeta(await fetchPlayerName(rest[2]), rest[2]);
     }
     // CUBE is a word, not an acronym, and its seasons are virtual CUBE-<SET> codes;
     // render "Cube" / "Cube SOS" but resolve the symbol/name from the base CUBE set.
@@ -318,14 +310,14 @@ const META_CRAWLER_THUMB_SIZE = 245;
 
 // Meta crawlers (WhatsApp, FB) flatten transparency to white and lose white-on-transparent set symbols; serve the opaque logo, keep opaque avatars
 const metaCrawlerImage = (image: ImageIntent, origin: string): ImageIntent => {
-  if (image !== null && image.kind === "url") return image;
+  if (image !== null && (image.kind === "url" || image.kind === "avatarProxy")) return image;
   return { kind: "url", url: `${origin}/llu-logo.png` };
 };
 
 const resolveImageUrl = async (image: ImageIntent, origin: string, assets: Fetcher): Promise<string | null> => {
   if (image === null) return null;
   if (image.kind === "url") return image.url;
-  if (image.kind === "logo") return `${origin}/llu-logo-transparent.png`;
+  if (image.kind === "avatarProxy") return `${origin}/api/avatar/${encodeURIComponent(image.slug)}.png`;
   const candidate = `${origin}/set-symbols/${image.code.toLowerCase()}.png`;
   try {
     const resp = await assets.fetch(candidate);
