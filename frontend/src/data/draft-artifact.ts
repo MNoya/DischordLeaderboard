@@ -1,9 +1,74 @@
 // Client-side derivations over the pod draft artifact (public_pod_draft_log). The deck view reads
-// resolveDeck; a future draft-review view reads the same artifact's packs/picks.
+// resolveDeck; the draft-review view reads reconstructDraft over the same artifact's packs/picks.
 
 import type { Mainboard, MainboardCard, PodDraftArtifact } from "../types/leaderboard";
 
 type ArtifactCard = PodDraftArtifact["cards"][number];
+
+// One pick from a single seat's vantage: the booster exactly as that seat saw it, the position taken,
+// and the card index taken. Indices address the artifact card table.
+export interface DraftPickView {
+  booster: number[];
+  takenPos: number;
+  takenCard: number;
+}
+
+const PASS_DIRS = [1, -1, 1];
+
+// Replays the whole draft and captures every seat's view at every pick. Returns views[seat][pack][pick].
+// The pass rotation mirrors bot/scripts/draftmancer_log.py::simulate so positions stay faithful.
+export function reconstructDraft(artifact: PodDraftArtifact): DraftPickView[][][] {
+  const n = artifact.seats.length;
+  const views: DraftPickView[][][] = artifact.seats.map(() => [[], [], []]);
+  for (let pack = 0; pack < 3; pack++) {
+    let boosters = artifact.seats.map((_, seat) => [...artifact.packs[seat + pack * n]]);
+    const dir = PASS_DIRS[pack];
+    const size = boosters[0]?.length ?? 0;
+    for (let pick = 0; pick < size; pick++) {
+      for (let seat = 0; seat < n; seat++) {
+        const pos = artifact.picks[seat][pack][pick];
+        const booster = [...boosters[seat]];
+        views[seat][pack].push({ booster, takenPos: pos, takenCard: booster[pos] });
+      }
+      for (let seat = 0; seat < n; seat++) {
+        boosters[seat].splice(artifact.picks[seat][pack][pick], 1);
+      }
+      boosters = boosters.map((_, seat) => boosters[((seat - dir) % n + n) % n]);
+    }
+  }
+  return views;
+}
+
+// Card indices a seat has taken strictly before the given pick — the pool built up to this point.
+export function poolBefore(views: DraftPickView[][][], seat: number, pack: number, pick: number): number[] {
+  const out: number[] = [];
+  for (let p = 0; p <= pack; p++) {
+    const picks = views[seat][p];
+    const upto = p < pack ? picks.length : pick;
+    for (let k = 0; k < upto; k++) {
+      out.push(picks[k].takenCard);
+    }
+  }
+  return out;
+}
+
+// The same pool grouped into one array per pack up to the current one — drives the order view's
+// one-row-per-pack layout. The current pack only includes picks made before `pick`.
+export function poolByPack(views: DraftPickView[][][], seat: number, pack: number, pick: number): number[][] {
+  const rows: number[][] = [];
+  for (let p = 0; p <= pack; p++) {
+    const picks = views[seat][p];
+    const upto = p < pack ? picks.length : pick;
+    rows.push(picks.slice(0, upto).map((v) => v.takenCard));
+  }
+  return rows;
+}
+
+// Draftmancer names carry a discriminator (`Noya#08011`); the board shows the bare handle.
+export function seatHandle(name: string): string {
+  const hash = name.indexOf("#");
+  return hash === -1 ? name : name.slice(0, hash);
+}
 
 // A seat's built deck (maindeck + sideboard), grouped by name with counts and sorted by mana value.
 // Returns null when the event predates deck capture (decks is null) or the seat built nothing. Basics

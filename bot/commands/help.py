@@ -9,7 +9,7 @@ from discord.ext import commands
 from bot import audit
 from bot.commands import descriptions as desc
 from bot.config import settings
-from bot.discord_helpers import command_line
+from bot.discord_helpers import command_line, in_pod_coordination
 
 logger = logging.getLogger(__name__)
 
@@ -41,9 +41,13 @@ POD_HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         ("/pod-seeding", desc.POD_SEEDING),
         ("/pod-ready", desc.POD_READY),
         ("/pod-start", desc.POD_START),
+        ("/pod-pause", desc.POD_PAUSE),
+        ("/pod-unpause", desc.POD_UNPAUSE),
         ("/pod-settings", desc.POD_SETTINGS),
         ("/pod-takeover", desc.POD_TAKEOVER),
         ("/pod-standings", desc.POD_STANDINGS),
+        ("/pod-review", desc.POD_REVIEW),
+        ("/roles", desc.ROLES),
         ("/help", desc.HELP),
     ]),
     ("🔗 Integration", [
@@ -51,6 +55,7 @@ POD_HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         ("/link-arena", desc.LINK_ARENA),
     ]),
     ("⚙️ Admin", [
+        ("/pod-restart", desc.POD_RESTART.removeprefix("[Admin] ")),
         ("/pod-champion", desc.POD_CHAMPION.removeprefix("[Admin] ")),
         ("/pod-backfill", desc.POD_BACKFILL.removeprefix("[Admin] ")),
         ("/pod-schedule", desc.POD_SCHEDULE.removeprefix("[Admin] ")),
@@ -68,9 +73,6 @@ HELP_EXAMPLES: dict[str, list[list[str]]] = {
 }
 
 
-FEEDBACK_CHANNEL_ID = 1504825374188507156
-
-
 class HelpView(discord.ui.View):
     def __init__(self) -> None:
         super().__init__(timeout=600)
@@ -82,7 +84,7 @@ class HelpView(discord.ui.View):
 
 
 def render_help_embed(sections: list[tuple[str, list[tuple[str, str]]]] = HELP_SECTIONS) -> discord.Embed:
-    embed = discord.Embed(title=HELP_TITLE, color=discord.Color.blurple())
+    embed = discord.Embed(title=HELP_TITLE, color=discord.Color.green())
     for section_label, items in sections:
         lines = []
         for cmd, blurb in items:
@@ -92,7 +94,7 @@ def render_help_embed(sections: list[tuple[str, list[tuple[str, str]]]] = HELP_S
         embed.add_field(name=section_label, value="\n".join(lines), inline=False)
     embed.add_field(
         name="💬 Found a bug or have any ideas?",
-        value=f"Post in <#{FEEDBACK_CHANNEL_ID}>",
+        value=f"Post in <#{settings.feedback_channel_id}>",
         inline=False,
     )
     return embed
@@ -106,17 +108,9 @@ class Help(commands.Cog):
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
     async def help(self, interaction: discord.Interaction) -> None:
-        sections = POD_HELP_SECTIONS if _in_pod_coordination(interaction.channel) else HELP_SECTIONS
+        sections = POD_HELP_SECTIONS if in_pod_coordination(interaction.channel) else HELP_SECTIONS
         audit.event("help_invoked", user_id=str(interaction.user.id))
         await interaction.response.send_message(embed=render_help_embed(sections), view=HelpView(), ephemeral=False)
-
-
-def _in_pod_coordination(channel: discord.interactions.InteractionChannel | None) -> bool:
-    if channel is None:
-        return False
-    if channel.id == settings.pod_draft_channel_id:
-        return True
-    return getattr(channel, "parent_id", None) == settings.pod_draft_channel_id
 
 
 async def setup(bot: commands.Bot) -> None:

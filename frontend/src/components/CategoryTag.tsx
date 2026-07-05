@@ -4,7 +4,7 @@ import { SetGlyph } from "./Brand";
 
 const CATEGORY_STYLE: Record<EpisodeCategory, string> = {
   "Set Review": "bg-teal text-bg",
-  Draft: "bg-red text-bg",
+  Draft: "bg-indigo text-bg",
   Sealed: "bg-blue text-bg",
   Rankings: "bg-purple text-bg",
   Metagame: "bg-gold text-bg",
@@ -15,7 +15,7 @@ const CATEGORY_STYLE: Record<EpisodeCategory, string> = {
 
 export const CATEGORY_COLOR: Record<EpisodeCategory, string> = {
   "Set Review": "text-teal",
-  Draft: "text-red",
+  Draft: "text-indigo",
   Sealed: "text-blue",
   Rankings: "text-purple",
   Metagame: "text-gold",

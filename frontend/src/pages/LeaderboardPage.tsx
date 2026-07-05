@@ -1,5 +1,5 @@
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import React, { Fragment, useEffect, useMemo, useState } from "react";
+import React, { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
 import { AppHeader } from "../components/AppHeader";
 import { useIsMobile } from "../lib/use-is-mobile";
@@ -12,7 +12,9 @@ import {
 } from "../components/Icons";
 import { Footer } from "../components/Footer";
 import { Pip, Pips } from "../components/ManaPips";
-import { SetSwitcherDesktop } from "../components/SetSwitcher";
+import { SetSwitcherDesktop, SetSwitcherMobile } from "../components/SetSwitcher";
+import { TrophyLeaderboard } from "../components/TrophyLeaderboard";
+import { MtgoSidebar } from "../components/MtgoSidebar";
 import { FilterDropdown } from "../components/FilterDropdown";
 import { SetFilterDropdown, type SetFilterOption } from "../components/SetFilterDropdown";
 import { ColorsSwitcher } from "../components/ColorsSwitcher";
@@ -36,18 +38,22 @@ import {
   useLeaderboard,
   useOtherColorsLeaderboard,
   usePlayerProfile,
+  usePlayerSlugByDiscordId,
   usePrefetchers,
   useSets,
   useCubeSeasons,
+  useTrophyLeaderboard,
 } from "../data/hooks";
-import { baseSetCode, canonicalSetCode, colorsOf, CUBE_BASE, CUBE_LIFETIME, cubeSeasonLabel, eventDate, fmtRange, isCubeCode, isCubeSeasonCode, isSoup, lastUpdated, leaderboardPath, playerPath, prettyFormat, relativeTime, sumEvents, weekOfSet, winPct } from "../data/utils";
+import { isMtgoFlashbackCode, mtgoSetName, withMtgoSets, MTGO_BLOCK_GLYPHS } from "../data/mtgoSets";
+import { useAuth } from "../auth/useAuth";
+import { baseSetCode, canonicalSetCode, colorsOf, CUBE_BASE, CUBE_LIFETIME, cubeSeasonLabel, eventDate, fmtRange, fmtShortDate, isCubeCode, isCubeSeasonCode, isSoup, lastUpdated, leaderboardPath, playerPath, profileSearch, prettyFormat, relativeTime, sumEvents, weekOfSet, winPct } from "../data/utils";
 import { CubeSeasonSelector } from "../components/CubeSeasonSelector";
 import { colorsDisplayName, FORMAT_LABEL_GROUPS, FORMAT_OPTIONS, matchesFormatFilter, MULTI, OTHER } from "../data/filters";
 import { FMT_COLORS, FMT_DEFAULT_COLOR, renderFormatOption, shortFormat } from "../data/format-display";
 import { guildLogoTransform, guildSvgUrl } from "../data/guild-art";
 import { ACTIVE_SET_CODE } from "../data/constants";
 import { cn } from "../lib/utils";
-import type { CubeSeason, LeaderboardRow, PlayerDraftEvent, PlayerFormatBreakdown, SetSummary } from "../types/leaderboard";
+import type { CubeSeason, LeaderboardRow, PlayerDraftEvent, PlayerFormatBreakdown, SetSummary, TrophyLeaderboardRow } from "../types/leaderboard";
 import type { LeaderboardTableRow } from "../components/LeaderboardTable";
 
 // ─── Page entry ────────────────────────────────────────────────────────────
@@ -65,6 +71,9 @@ export function LeaderboardPage() {
   const setMeta = sets?.find((s) => s.code === baseSetCode(activeSet));
   const { data: cubeSeasons } = useCubeSeasons();
   const latestCubeSeason = cubeSeasons?.[0]?.setCode;
+  const dropdownSets = useMemo(() => withMtgoSets(sets), [sets]);
+  const isMtgo = isMtgoFlashbackCode(activeSet);
+  const trophyLb = useTrophyLeaderboard(isMtgo ? activeSet : undefined);
 
   // Filters live in the URL as query params (?format=Premier or ?colors=WR).
   // Per spec they're mutually exclusive, so picking a non-ALL value in one
@@ -184,12 +193,29 @@ export function LeaderboardPage() {
     });
   };
 
-  const filterProps: FilterRowProps = { format, setFormat, colors, setColors, colorChips, colorChipsLoading, formatOptions };
+  const updated = setMeta?.lastRefreshedAt ? lastUpdated(setMeta.lastRefreshedAt) : null;
+  const filterProps: FilterRowProps = { format, setFormat, colors, setColors, colorChips, colorChipsLoading, formatOptions, updated };
+
+  const { user } = useAuth();
+  const { data: mySlug } = usePlayerSlugByDiscordId(user?.discordId);
+
+  if (isMtgo) {
+    return (
+      <MtgoBoard
+        activeSet={activeSet}
+        sets={dropdownSets}
+        rows={trophyLb.data}
+        loading={trophyLb.isLoading}
+        searchParams={searchParams}
+        latestCubeSeason={latestCubeSeason}
+      />
+    );
+  }
 
   return isMobile ? (
     <Mobile
       activeSet={activeSet}
-      sets={sets}
+      sets={dropdownSets}
       cubeSeasons={cubeSeasons}
       latestCubeSeason={latestCubeSeason}
       rows={rows}
@@ -201,11 +227,12 @@ export function LeaderboardPage() {
       searchParams={searchParams}
       sort={sort}
       onSort={onSort}
+      mySlug={mySlug ?? undefined}
     />
   ) : (
     <Desktop
       activeSet={activeSet}
-      sets={sets}
+      sets={dropdownSets}
       setMeta={setMeta}
       cubeSeasons={cubeSeasons}
       latestCubeSeason={latestCubeSeason}
@@ -218,6 +245,7 @@ export function LeaderboardPage() {
       searchParams={searchParams}
       sort={sort}
       onSort={onSort}
+      mySlug={mySlug ?? undefined}
     />
   );
 }
@@ -248,6 +276,93 @@ interface FilterRowProps {
   colorChips: string[];
   colorChipsLoading: boolean;
   formatOptions: typeof FORMAT_OPTIONS;
+  updated: string | null;
+}
+
+// ─── MTGO flashback board ────────────────────────────────────────────────────
+// Trophy-count board for MTGO-only sets: its own minimal chrome, no filters or scored columns.
+
+function MtgoBoard({
+  activeSet,
+  sets,
+  rows,
+  loading,
+  searchParams,
+  latestCubeSeason,
+}: {
+  activeSet: string;
+  sets: SetSummary[] | undefined;
+  rows: TrophyLeaderboardRow[] | undefined;
+  loading: boolean;
+  searchParams: URLSearchParams;
+  latestCubeSeason?: string;
+}) {
+  const navigate = useNavigate();
+  const isMobile = useIsMobile();
+  const onSelectSet = (c: string) => goToSet(navigate, c, sets, searchParams, latestCubeSeason);
+  const releaseDate = sets?.find((s) => s.code === activeSet)?.startDate;
+  const blockGlyphs = MTGO_BLOCK_GLYPHS[activeSet];
+  return (
+    <div className="bg-bg text-text min-h-screen flex flex-col animate-fadeIn">
+      <AppHeader subtitle="LEADERBOARD" />
+      <div className="relative px-5 md:px-10 py-5 border-b border-border bg-surface flex items-center gap-3 md:gap-4">
+        {blockGlyphs ? (
+          <div className="flex items-center gap-2 md:gap-2.5 shrink-0">
+            <i
+              className={`ss ss-${blockGlyphs[0]} text-white`}
+              style={{ fontSize: isMobile ? 52 : 84, lineHeight: 1 }}
+              aria-hidden="true"
+            />
+            <div className="flex flex-col items-center gap-1.5 md:gap-2">
+              {blockGlyphs.slice(1).map((glyph) => (
+                <i
+                  key={glyph}
+                  className={`ss ss-${glyph} text-white`}
+                  style={{ fontSize: isMobile ? 24 : 38, lineHeight: 1 }}
+                  aria-hidden="true"
+                />
+              ))}
+            </div>
+          </div>
+        ) : (
+          <SetGlyph code={activeSet} size={isMobile ? 52 : 84} />
+        )}
+        <div className="min-w-0">
+          <div className="flex items-baseline gap-3">
+            <span
+              className="font-display tracking-[0.04em]"
+              style={{ fontSize: isMobile ? 32 : 56, lineHeight: 0.9 }}
+            >
+              {activeSet}
+            </span>
+            <span className="font-display text-[15px] md:text-[22px] text-muted tracking-[0.06em] truncate">
+              {mtgoSetName(activeSet).toUpperCase()}
+            </span>
+          </div>
+          {releaseDate && (
+            <div className="mono text-[11px] text-muted mt-1 tracking-[0.04em]">{fmtShortDate(releaseDate)}</div>
+          )}
+        </div>
+        <div className="flex-1" />
+        {sets && (
+          isMobile ? (
+            <div className="w-[150px] shrink-0">
+              <SetSwitcherMobile sets={sets} activeCode={activeSet} onChange={onSelectSet} />
+            </div>
+          ) : (
+            <SetSwitcherDesktop sets={sets} activeCode={activeSet} onChange={onSelectSet} />
+          )
+        )}
+      </div>
+      <div className="px-5 md:px-10 py-4 grid gap-6 lg:grid-cols-[1fr_320px]">
+        <TrophyLeaderboard rows={rows} loading={loading} />
+        <div className="lg:pt-4">
+          <MtgoSidebar rows={rows} setCode={activeSet} />
+        </div>
+      </div>
+      <Footer className="mt-auto px-10 pt-5 pb-3" />
+    </div>
+  );
 }
 
 // ─── Desktop ───────────────────────────────────────────────────────────────
@@ -267,6 +382,7 @@ function Desktop({
   searchParams,
   sort,
   onSort,
+  mySlug,
 }: {
   activeSet: string;
   sets: SetSummary[] | undefined;
@@ -282,6 +398,7 @@ function Desktop({
   searchParams: URLSearchParams;
   sort: SortState;
   onSort: (key: SortKey) => void;
+  mySlug?: string;
 }) {
   const navigate = useNavigate();
   const { prefetchSet, prefetchPlayer } = usePrefetchers();
@@ -312,13 +429,13 @@ function Desktop({
           sort={sort}
           onSort={onSort}
           onRowPrefetch={(r) => prefetchPlayer(r.slug, profileSet)}
+          highlightSlug={mySlug}
+          playerHref={(r) => playerHrefFor(r, profileSet, searchParams)}
+          rowExpandable={(r) => r.events > 0}
           renderExpanded={(r) => (
             <DesktopExpandedRow
               row={r}
-              to={{
-                pathname: playerPath(r.slug, profileSet),
-                search: searchParams.toString(),
-              }}
+              to={playerHrefFor(r, profileSet, searchParams)}
               activeFormat={filters.format}
               activeColors={filters.colors}
               otherCombos={otherCombos}
@@ -334,15 +451,15 @@ function Desktop({
             otherCombos={otherCombos}
             onColorsSelect={filters.setColors}
             searchParams={searchParams}
+            updated={filters.updated}
             stats={{
               players: rows?.length ?? 0,
               events: sumEvents(rows),
-              updated: lastUpdated(rows),
             }}
           />
         </div>
       </div>
-      <Footer className="mt-auto px-10 pt-5 pb-3" updated={lastUpdated(rows)} />
+      <Footer className="mt-auto px-10 pt-5 pb-3" />
     </div>
   );
 }
@@ -416,9 +533,9 @@ function SetHero({
             <div className="text-right whitespace-nowrap">{seasonRange || " "}</div>
           </div>
         ) : (
-          <div className="mono text-[11px] text-muted mt-1">
-            {setMeta && fmtRange(setMeta.startDate, setMeta.endDate)}
-            {week && ` · ${week}`}
+          <div className="mono text-[11px] text-muted mt-1 flex justify-between gap-4">
+            {setMeta && <span>{fmtRange(setMeta.startDate, setMeta.endDate)}</span>}
+            {week && <span>{week}</span>}
           </div>
         )}
       </div>
@@ -590,6 +707,7 @@ function Mobile({
   searchParams,
   sort,
   onSort,
+  mySlug,
 }: {
   activeSet: string;
   sets: SetSummary[] | undefined;
@@ -601,6 +719,7 @@ function Mobile({
   error: Error | null;
   filters: FilterRowProps;
   colorsMode: boolean;
+  mySlug?: string;
   searchParams: URLSearchParams;
   sort: SortState;
   onSort: (key: SortKey) => void;
@@ -608,15 +727,32 @@ function Mobile({
   const navigate = useNavigate();
   const { prefetchPlayer } = usePrefetchers();
   const profileSet = baseSetCode(activeSet);
+  const setMeta = sets?.find((s) => s.code === profileSet);
+  const updated = setMeta?.lastRefreshedAt ? lastUpdated(setMeta.lastRefreshedAt) : null;
   const isCube = profileSet === CUBE_BASE;
   const setOptions = useMemo<SetFilterOption[]>(() => (sets ? setFilterOptionsFrom(sets) : []), [sets]);
+
+  const chromeRef = useRef<HTMLDivElement>(null);
+  const [chromeHeight, setChromeHeight] = useState(0);
+  useEffect(() => {
+    const el = chromeRef.current;
+    if (!el) {
+      return;
+    }
+    const measure = () => setChromeHeight(el.getBoundingClientRect().height);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   return (
-    <div className="bg-bg text-text min-h-screen flex flex-col overflow-x-hidden animate-fadeIn">
-      <div className="sticky top-0 z-10 bg-bg">
+    <div className="bg-bg text-text min-h-screen flex flex-col overflow-x-clip animate-fadeIn">
+      <div ref={chromeRef} className="sticky top-0 z-10 bg-bg">
         <AppHeader subtitle="LEADERBOARD" />
 
         <div className="px-3 py-2 border-b border-border bg-surface flex items-stretch gap-2">
-          <div className="basis-[60%] min-w-0 flex">
+          <div className="basis-1/2 min-w-0 flex">
             <FilterDropdown
               value={filters.format}
               options={filters.formatOptions}
@@ -624,10 +760,11 @@ function Mobile({
               variant="mobile"
               renderValue={renderFormatOption}
               renderOption={renderFormatOption}
+              triggerClassName="py-2"
             />
           </div>
           {sets && (
-            <div className="basis-[40%] min-w-0 flex">
+            <div className="basis-1/2 min-w-0 flex">
               <SetFilterDropdown
                 value={profileSet}
                 options={setOptions}
@@ -635,6 +772,7 @@ function Mobile({
                 variant="mobile"
                 align="right"
                 searchable
+                subtext={updated ? `UPDATED ${updated}` : undefined}
               />
             </div>
           )}
@@ -680,20 +818,21 @@ function Mobile({
         showHeader={false}
         mode={boardModeFor(filters.format)}
         onRowPrefetch={(r) => prefetchPlayer(r.slug, profileSet)}
+        highlightSlug={mySlug}
+        stickyTop={chromeHeight}
+        playerHref={(r) => playerHrefFor(r, profileSet, searchParams)}
+        rowExpandable={(r) => r.events > 0}
         renderExpanded={(r) => (
           <MobileExpandedRow
             row={r}
-            to={{
-              pathname: playerPath(r.slug, profileSet),
-              search: searchParams.toString(),
-            }}
+            to={playerHrefFor(r, profileSet, searchParams)}
             activeFormat={filters.format}
             activeColors={filters.colors}
             otherCombos={otherCombos}
           />
         )}
       />
-      <Footer className="mt-auto px-4 py-4" updated={lastUpdated(rows)} />
+      <Footer className="mt-auto px-4 py-4" />
     </div>
   );
 }
@@ -721,6 +860,12 @@ function useDelayedExpandedData(slug: string, setCode: string) {
 }
 
 type PlayerLinkTo = string | { pathname: string; search: string };
+
+function playerHrefFor(row: LeaderboardTableRow, setCode: string, params: URLSearchParams): string {
+  const qs = profileSearch(params);
+  const path = playerPath(row.slug, setCode);
+  return qs ? `${path}?${qs}` : path;
+}
 
 function DesktopExpandedRow({
   row,

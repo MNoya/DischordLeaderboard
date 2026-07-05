@@ -354,43 +354,65 @@ class SetAwards(commands.Cog):
             return
 
         await interaction.response.defer(ephemeral=True)
-        in_thread = isinstance(interaction.channel, discord.Thread)
-        empty = SetAwardsData(code, _window_label(seed), (), trophy_hype_mention(interaction.guild))
-        ceremony = await interaction.channel.send(
-            view=build_set_awards_view(empty, reveal=0), allowed_mentions=discord.AllowedMentions.none(),
-        )
-
-        with SessionLocal() as session:
-            mset = session.execute(select(MagicSet).where(MagicSet.code == code)).scalar_one_or_none()
-            if mset is None:
-                await ceremony.delete()
-                await interaction.followup.send(f"Set {code} is not in the database.", ephemeral=True)
-                return
-            ranked, _, _ = awards_svc.build_payload(session, mset, seed)
-
-        ranked["mvp"] = awards_svc.mvp(await _scan_trophy_hype(interaction.guild, seed))
-        awards_svc.cache_mvp(seed, ranked["mvp"])
-        winners, runners = awards_svc.assign(ranked)
-        data = build_data(code, seed, winners, runners, interaction.guild, mention=not in_thread)
-        if not data.awards:
-            await ceremony.delete()
+        count = await run_set_awards_ceremony(interaction.channel, interaction.guild, code, seed)
+        if count is None:
             await interaction.followup.send("No awards could be computed for this set.", ephemeral=True)
             return
+        suffix = " (in a thread, pings suppressed)" if isinstance(interaction.channel, discord.Thread) else ""
+        await interaction.followup.send(f"🏆 Posted {count} awards.{suffix}", ephemeral=True)
 
-        if in_thread:
-            allowed = discord.AllowedMentions.none()
-        else:
-            ping_ids = _ping_ids(winners, runners)
-            allowed = discord.AllowedMentions(users=[discord.Object(id=uid) for uid in ping_ids])
-        await reveal_set_awards(ceremony, data, allowed_mentions=allowed)
 
-        audit.event(
-            "set_awards_posted", set_code=code, awards=len(data.awards),
-            in_thread=in_thread, channel_id=str(interaction.channel.id),
-        )
-        log.info(f"set awards posted for {code}: {len(data.awards)} awards (thread={in_thread})")
-        suffix = " (in a thread, pings suppressed)" if in_thread else ""
-        await interaction.followup.send(f"🏆 Posted {len(data.awards)} awards.{suffix}", ephemeral=True)
+async def run_set_awards_ceremony(
+    channel: discord.abc.Messageable, guild: discord.Guild | None, code: str, seed,
+) -> int | None:
+    """Post the ceremony into ``channel``: an empty placeholder while the payload computes, then the
+    timed reveal. Winners are pinged outside a thread, suppressed inside one. Returns the award count,
+    or None when nothing could be computed (the placeholder is removed). Shared by ``/set-awards`` and
+    the scheduled day-before ceremony so both render one way."""
+    in_thread = isinstance(channel, discord.Thread)
+    empty = SetAwardsData(code, _window_label(seed), (), trophy_hype_mention(guild))
+    ceremony = await channel.send(
+        view=build_set_awards_view(empty, reveal=0), allowed_mentions=discord.AllowedMentions.none(),
+    )
+
+    with SessionLocal() as session:
+        mset = session.execute(select(MagicSet).where(MagicSet.code == code)).scalar_one_or_none()
+        if mset is None:
+            await ceremony.delete()
+            return None
+        ranked, _, _ = awards_svc.build_payload(session, mset, seed)
+
+    ranked["mvp"] = awards_svc.mvp(await _scan_trophy_hype(guild, seed))
+    awards_svc.cache_mvp(seed, ranked["mvp"])
+    winners, runners = awards_svc.assign(ranked)
+    data = build_data(code, seed, winners, runners, guild, mention=not in_thread)
+    if not data.awards:
+        await ceremony.delete()
+        return None
+
+    if in_thread:
+        allowed = discord.AllowedMentions.none()
+    else:
+        ping_ids = _ping_ids(winners, runners)
+        allowed = discord.AllowedMentions(users=[discord.Object(id=uid) for uid in ping_ids])
+    await reveal_set_awards(ceremony, data, allowed_mentions=allowed)
+    await _pin_ceremony(ceremony)
+
+    audit.event(
+        "set_awards_posted", set_code=code, awards=len(data.awards),
+        in_thread=in_thread, channel_id=str(channel.id),
+    )
+    log.info(f"set awards posted for {code}: {len(data.awards)} awards (thread={in_thread})")
+    return len(data.awards)
+
+
+async def _pin_ceremony(ceremony: discord.Message) -> None:
+    """Pin the ceremony so it's the durable marker the next set's warning links back to. A full pin
+    board or missing Manage Messages just leaves it unpinned — the link is a nicety, not load-bearing."""
+    try:
+        await ceremony.pin()
+    except discord.HTTPException:
+        log.warning("set awards: could not pin the ceremony", exc_info=True)
 
 
 def _window_label(seed) -> str:

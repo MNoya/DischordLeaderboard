@@ -161,3 +161,6 @@ design/var-D-bento.png
 backups/
 
 .DS_Store
+
+# P1P1 quiz spec reference screenshots (DraftBot)
+spec/p1p1-images/

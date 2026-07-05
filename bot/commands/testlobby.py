@@ -14,13 +14,14 @@ from uuid import uuid4
 import discord
 from discord.ext import commands
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import any_, delete, select, update
 
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.models import MagicSet, Player, PodDraftEvent, PodDraftParticipant
 from bot.services.lobby_embed import (
     LobbyReadyButtonView,
+    register_force_start_preview,
     register_settings_preview,
     render as render_lobby_embed,
     render_ready_check_progress,
@@ -31,7 +32,7 @@ from bot.services.pod_draft_manager import PodDraftManager, start_manager
 from bot.services.pod_drafts import seed_event_participants
 from bot.sets import active_set_code
 from bot.services.pod_format import format_display
-from bot.services.pod_pairing_select import pairing_label
+from bot.services.pod_pairing_select import DEFAULT_PAIRING_MODE, pairing_label
 from bot.services.pod_seating_select import seating_mode_label
 from bot.services.player_stats import rank_players_for_set
 from bot.commands.pod_draft import build_seeding_image_message_from_names, post_manual_seating_table, post_table
@@ -41,9 +42,14 @@ from bot.services.pod_settings_view import PodSettingsView
 from bot.services.pod_drafts import normalize_player_name
 from bot.services.pod_swiss import Standing
 from bot.services.pod_tournament import (
+    REVIEW_EMOJI,
     ParticipantDeckData,
     actor_label,
+    build_draft_review_message,
     build_trophy_hype_view,
+    mark_trophy_match,
+    pod_voice_channel_url,
+    render_draft_review_embed,
     round_embed,
     start_tournament,
 )
@@ -57,11 +63,23 @@ _INVOKER_SEAT = "Noya"
 
 # Module-level scratch store for the SubmitDeck POC; cleared on bot restart.
 _TEST_DECK_COLORS: dict[int, str] = {}
-_TEST_REVIEW_CHOICES: dict[int, bool] = {}
 
-# Fictional 8-player roster for the live-seeded tournament path (`podbracket` / `podswiss`).
+# Fictional 8-player roster for the live-seeded tournament path (`podbracket` / `podswiss` / `round1`).
 _LIVE_TEST_ROSTER = ["Ava", "Bram", "Cara", "Dex", "Eli", "Fern", "Gus", "Hana"]
 _LIVE_TEST_STATUS = "test"
+
+# Arena handles for the fictional roster so the live round embeds exercise the real Round 1 arena
+# rendering. Bram's handle diverges from the Discord name (shows the 'arena (discord)' form); the rest
+# match (collapse to the handle alone).
+_LIVE_TEST_ARENA = {
+    "Bram": "driftwood#49190",
+    "Cara": "Cara#10003",
+    "Dex": "Dex#10004",
+    "Eli": "Eli#10005",
+    "Fern": "Fern#10006",
+    "Gus": "Gus#10007",
+    "Hana": "Hana#10008",
+}
 
 
 def _looks_like_prod_db() -> bool:
@@ -87,6 +105,32 @@ def _ensure_invoker_player_sync(session, discord_id: int, display_name: str) -> 
         )
         session.add(player)
         session.flush()
+    return player.id
+
+
+def _ensure_fictional_player_sync(session, display_name: str, arena_name: str) -> str:
+    """Find-or-create a discord-less Player carrying `arena_name` for a fictional live-test roster
+    member, so the round embeds resolve a linked Arena handle. Keyed on the arena alias so repeated
+    `!test` runs reuse the same row instead of piling up duplicates."""
+    normalized = normalize_player_name(arena_name)
+    existing = session.execute(
+        select(Player).where(normalized == any_(Player.arena_aliases))
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing.id
+    taken = set(session.execute(select(Player.slug)).scalars().all())
+    player = Player(
+        slug=disambiguate_slug(slugify(display_name), taken),
+        discord_id=f"testlobby-{normalized}",
+        discord_username=display_name,
+        display_name=display_name,
+        arena_name=arena_name,
+        arena_aliases=[normalized],
+        active=True,
+        leaderboard_opt_in=False,
+    )
+    session.add(player)
+    session.flush()
     return player.id
 
 
@@ -124,6 +168,19 @@ def _seed_live_test_event_sync(
                         PodDraftParticipant.draftmancer_name == name,
                     )
                     .values(seat_index=seat)
+                )
+            for name in roster:
+                arena = _LIVE_TEST_ARENA.get(name)
+                if arena is None:
+                    continue
+                player_id = _ensure_fictional_player_sync(session, name, arena)
+                session.execute(
+                    update(PodDraftParticipant)
+                    .where(
+                        PodDraftParticipant.event_id == event_id,
+                        PodDraftParticipant.draftmancer_name == name,
+                    )
+                    .values(player_id=player_id)
                 )
             if invoker_id is not None:
                 player_id = _ensure_invoker_player_sync(session, invoker_id, roster[0])
@@ -200,7 +257,7 @@ async def _purge_and_reset_test(ctx) -> None:
                 if task is not None and not task.done():
                     task.cancel()
             await old.disconnect_safely()
-    await _reset_podbracket(ctx.channel, ctx.bot.user)
+    await _delete_last_test_messages(ctx.channel)
 
 
 def _top_ranked_names_sync(n: int) -> list[str]:
@@ -255,7 +312,9 @@ async def _start_live_test_lobby(ctx) -> None:
         return
     await _purge_and_reset_test(ctx)
     channel_id = ctx.channel.id
-    event_id, session_id = await asyncio.to_thread(_seed_live_test_event_sync, channel_id, "swiss")
+    event_id, session_id = await asyncio.to_thread(
+        _seed_live_test_event_sync, channel_id, DEFAULT_PAIRING_MODE,
+    )
     url = f"{settings.draftmancer_web_url}/?session={session_id}"
     log.info(f"[testlobby] live lobby connecting event={event_id} session={session_id}")
     manager = await start_manager(
@@ -273,18 +332,26 @@ async def _test_submit_deck_color(interaction: discord.Interaction, color: str) 
     log.info(f"testlobby deck color saved: user={interaction.user.id} color={color}")
 
 
-async def _test_lookup_deck_state(interaction: discord.Interaction) -> tuple[str | None, bool | None]:
-    return _TEST_DECK_COLORS.get(interaction.user.id), _TEST_REVIEW_CHOICES.get(interaction.user.id)
-
-
-async def _test_review_toggle(interaction: discord.Interaction, wants_review: bool) -> None:
-    _TEST_REVIEW_CHOICES[interaction.user.id] = wants_review
-    log.info(f"testlobby review choice saved: user={interaction.user.id} wants={wants_review}")
+async def _test_lookup_deck_state(interaction: discord.Interaction) -> str | None:
+    return _TEST_DECK_COLORS.get(interaction.user.id)
 
 
 def _submit_deck_view() -> SubmitDeckView:
     """Build a SubmitDeckView (button form) for the testlobby channel preview."""
-    return SubmitDeckView(_test_submit_deck_color, _test_lookup_deck_state, _test_review_toggle)
+    return SubmitDeckView(_test_submit_deck_color, _test_lookup_deck_state)
+
+
+def _review_preview_roster() -> list[dict]:
+    """Fixture roster for the `!test review` preview — fictional seats with varied colors, records, slugs."""
+    colors = ["WU", "BRg", "UG", "R", "WUBRG", "BR", "WGu", "UB"]
+    records = ["3-0", "2-1", "2-1", "2-1", "1-2", "1-2", "1-2", "0-3"]
+    return [
+        {
+            "seat_index": i, "name": name, "colors": colors[i % len(colors)],
+            "result": records[i % len(records)], "slug": slugify(name),
+        }
+        for i, name in enumerate(_LIVE_TEST_ROSTER)
+    ]
 
 
 _TEST_DECK_SCREENSHOT_URL = "https://placehold.co/1280x720/2b2d31/ffffff/png?text=Deck+Screenshot"
@@ -306,7 +373,6 @@ def _trophy_hype_preview() -> discord.ui.LayoutView:
             colors="URg",
             screenshot_url=_TEST_DECK_SCREENSHOT_URL,
             screenshot_caption="Izzet spells with a green splash for the bombs",
-            draft_log_url=None,
         )},
         guild_id=1,
         thread_id=1,
@@ -314,17 +380,51 @@ def _trophy_hype_preview() -> discord.ui.LayoutView:
 
 
 def _round1_preview_states(seated: bool) -> list[dict]:
-    """Round-1 match states from the fixture roster, fed through the prod `round_embed` builder.
-    Seated cross-pairs 1v5/2v6/... like real seat pairing; `seated=False` previews the random header."""
+    """In-memory Round-1 match states for the no-DB `round1` snapshot, fed through the prod `round_embed`
+    builder so the rendering stays in sync — only the match data is fixtured. Arena handles come from
+    `_LIVE_TEST_ARENA` (Bram diverges → 'arena (discord)'; the rest collapse to the handle). Seated
+    cross-pairs 1v5/2v6/...; `seated=False` previews the random header. Use `podswiss` to drive rounds."""
     roster = _LIVE_TEST_ROSTER
     states: list[dict] = []
     for offset in range(4):
         a, b = roster[offset], roster[offset + 4]
+        a_arena = _LIVE_TEST_ARENA.get(a) or f"{a}#10001"
+        b_arena = _LIVE_TEST_ARENA.get(b) or f"{b}#10005"
         states.append({
-            "a_name": a, "a_display": a, "a_record": "0-0", "a_seat": offset + 1 if seated else None,
-            "b_name": b, "b_display": b, "b_record": "0-0", "b_seat": offset + 5 if seated else None,
+            "a_name": a, "a_display": a, "a_arena": a_arena,
+            "a_record": "0-0", "a_seat": offset + 1 if seated else None,
+            "b_name": b, "b_display": b, "b_arena": b_arena,
+            "b_record": "0-0", "b_seat": offset + 5 if seated else None,
             "winner_name": None, "score": None,
         })
+    return states
+
+
+# Fixture records for the no-DB `round2` / `round3` snapshots: round 2 splits into Winners (1-0) and
+# Losers (0-1); round 3 into Trophy (2-0), 1-1, and Last Chance (0-2).
+_LATER_ROUND_PREVIEW = {
+    2: [("Ava", "Bram", "1-0", "1-0"), ("Cara", "Dex", "1-0", "1-0"),
+        ("Eli", "Fern", "0-1", "0-1"), ("Gus", "Hana", "0-1", "0-1")],
+    3: [("Ava", "Bram", "2-0", "2-0"), ("Cara", "Dex", "1-1", "1-1"),
+        ("Eli", "Fern", "1-1", "1-1"), ("Gus", "Hana", "0-2", "0-2")],
+}
+
+
+def _later_round_preview_states(round_num: int) -> list[dict]:
+    """In-memory match states for the no-DB `round2` / `round3` snapshots, fed through the prod
+    `round_embed` builder so the grouped rendering (Winners/Losers, Trophy/1-1/Last Chance) and arena
+    handles stay in sync. Only the match data is fixtured."""
+    states: list[dict] = []
+    for a, b, a_record, b_record in _LATER_ROUND_PREVIEW[round_num]:
+        states.append({
+            "match_id": f"{a}-{b}", "a_name": a, "b_name": b,
+            "a_display": a, "b_display": b,
+            "a_arena": _LIVE_TEST_ARENA.get(a) or f"{a}#10001",
+            "b_arena": _LIVE_TEST_ARENA.get(b) or f"{b}#10005",
+            "a_record": a_record, "b_record": b_record,
+            "winner_name": None, "score": None,
+        })
+    mark_trophy_match(states, round_num)
     return states
 
 
@@ -351,7 +451,7 @@ _LINKED_EIGHT: list[tuple[str, str]] = [
 _VALID_STATES = (
     "empty", "partial", "linked", "unlinked", "ready", "notready", "cancelled", "superseded",
     "drafting", "complete", "submit", "podbracket", "podswiss", "podrandom", "podlobby", "format",
-    "seeding", "trophyhype", "round1",
+    "seeding", "trophyhype", "round1", "round2", "round3", "voicelink", "review",
 )
 
 _LIVE_POD_MODES = {"podbracket": "bracket", "podswiss": "swiss", "podrandom": "random"}
@@ -360,20 +460,19 @@ _LAST_MESSAGE: dict[int, discord.Message] = {}
 _LAST_PROGRESS_MESSAGES: dict[int, list[discord.Message]] = {}
 
 
-async def _reset_podbracket(channel, bot_user) -> None:
-    """Wipe a prior testlobby run from this thread before starting fresh: drop the tracked preview
-    messages and delete the bot's own messages so the new bracket isn't buried under stale rounds."""
-    _LAST_MESSAGE.pop(channel.id, None)
-    _LAST_PROGRESS_MESSAGES.pop(channel.id, None)
-    try:
-        async for msg in channel.history(limit=200):
-            if msg.author.id == bot_user.id:
-                try:
-                    await msg.delete()
-                except discord.HTTPException:
-                    pass
-    except discord.HTTPException:
-        log.warning("could not sweep testlobby thread history", exc_info=True)
+async def _delete_last_test_messages(channel) -> None:
+    """Clear the previous testlobby preview before a fresh run by deleting only the tracked last
+    message(s) for this channel — never sweep the channel history, which would also take out unrelated
+    bot messages."""
+    last = _LAST_MESSAGE.pop(channel.id, None)
+    progress = _LAST_PROGRESS_MESSAGES.pop(channel.id, None) or []
+    for msg in [last, *progress]:
+        if msg is None:
+            continue
+        try:
+            await msg.delete()
+        except discord.HTTPException:
+            pass
 
 
 _PROGRESS_STATES = ("ready", "notready", "cancelled", "superseded", "drafting", "complete")
@@ -381,7 +480,7 @@ _PROGRESS_STATES = ("ready", "notready", "cancelled", "superseded", "drafting", 
 def _preview_settings_labels() -> dict:
     return dict(
         format_label=format_display(active_set_code()),
-        pairing_label=pairing_label("swiss"),
+        pairing_label=pairing_label(DEFAULT_PAIRING_MODE),
         seating_label=seating_mode_label("random"),
     )
 
@@ -413,12 +512,12 @@ def _build(state: str) -> tuple[discord.Embed, discord.ui.View | None]:
         spectators=_SPECTATORS,
         **_preview_settings_labels(),
     )
-    has_unrecognized = any(dn is None for _, dn in in_session)
     view: discord.ui.View | None = (
         None if state in ("drafting", "complete")
         else LobbyReadyButtonView(
             draftmancer_url=_DRAFTMANCER_URL,
-            ready_disabled=(render_state == "ready" or has_unrecognized),
+            ready_disabled=(render_state == "ready"),
+            show_force_start=(render_state == "unlinked"),
         )
     )
     return embed, view
@@ -431,7 +530,9 @@ def _build_ready_progress(state: str) -> list[tuple[discord.Embed, discord.ui.Vi
     if state not in _PROGRESS_STATES:
         return []
     in_session = list(_LINKED_EIGHT)
-    active_view = LobbyReadyButtonView(draftmancer_url=_DRAFTMANCER_URL, ready_disabled=True)
+    active_view = LobbyReadyButtonView(
+        draftmancer_url=_DRAFTMANCER_URL, ready_disabled=True, show_force_start=True,
+    )
     if state == "ready":
         embed = render_ready_check_progress(
             _THREAD_NAME, in_session, state="ready",
@@ -467,34 +568,6 @@ def _build_ready_progress(state: str) -> list[tuple[discord.Embed, discord.ui.Vi
     return [(embed, None)]
 
 
-async def _sync_progress_cards(
-    channel: discord.abc.Messageable,
-    cards: list[tuple[discord.Embed, discord.ui.View | None]],
-) -> None:
-    """Reconcile the tracked progress messages with `cards`: edit overlapping ones in place, post any
-    extras, delete any surplus — so a single card stays editable while `superseded` shows two."""
-    existing = _LAST_PROGRESS_MESSAGES.get(channel.id, [])
-    kept: list[discord.Message] = []
-    for i, (embed, view) in enumerate(cards):
-        if i < len(existing):
-            try:
-                await existing[i].edit(embed=embed, view=view)
-                kept.append(existing[i])
-                continue
-            except discord.HTTPException:
-                pass
-        kept.append(await channel.send(embed=embed, view=view))
-    for surplus in existing[len(cards):]:
-        try:
-            await surplus.delete()
-        except discord.HTTPException:
-            pass
-    if kept:
-        _LAST_PROGRESS_MESSAGES[channel.id] = kept
-    else:
-        _LAST_PROGRESS_MESSAGES.pop(channel.id, None)
-
-
 async def _settings_preview_noop(interaction: discord.Interaction, value: str) -> str | None:
     return None
 
@@ -513,33 +586,51 @@ async def _settings_preview_on_seated(interaction: discord.Interaction, labels: 
     await post_manual_seating_table(interaction.client, interaction.channel, labels, actor_label(interaction))
 
 
+async def _settings_preview_link_targets() -> list[str]:
+    return ["Stranger#12345"]
+
+
+async def _settings_preview_on_link(
+    interaction: discord.Interaction, arena_name: str, member: discord.abc.User,
+) -> str | None:
+    return None
+
+
 def _settings_preview_view() -> PodSettingsView:
-    """No-op Settings panel so `!test` can preview the format + pairing + seats dropdowns with no pod.
-    Defaults to Seats: Random (like a fresh pod); pick Manual in the dropdown to reveal the Seat Order button."""
+    """No-op Settings panel so `!test` can preview the format + pairing + seats dropdowns plus the Link
+    Players flow with no pod. Defaults to Seats: Random (like a fresh pod); pick Manual in the dropdown
+    to reveal the Seat Order button."""
     return PodSettingsView(
         on_format=_settings_preview_noop, on_pairing=_settings_preview_noop,
-        current_code=None, current_mode="swiss",
+        current_code=None, current_mode=DEFAULT_PAIRING_MODE,
         on_seating_mode=_settings_preview_noop, current_seating="random",
         on_seating=_settings_preview_seating_noop, seat_order_provider=_settings_preview_seat_order,
         on_seated=_settings_preview_on_seated,
+        link_targets_provider=_settings_preview_link_targets, on_link=_settings_preview_on_link,
     )
 
 
 async def setup(bot: commands.Bot) -> None:
     """Wire the lobby states as the `!test` fallback and register the settings preview."""
     register_settings_preview(_settings_preview_view)
+    register_force_start_preview(lambda: (5, 8, ["Bram", "Cara", "Dex"]))
 
     async def test_lobby(ctx: commands.Context, state: str = "", extra: str = "") -> None:
         """Owner-only. Render the pod-draft lobby embed in this channel.
 
         `state` ∈ empty | partial | linked | unlinked | ready | notready | cancelled | superseded |
         drafting | complete | submit | podbracket | podswiss | podrandom | podlobby | format |
-        seeding | trophyhype.
-        No arg → posts the beginning lobby state. A specific state → edits the last in place.
+        seeding | trophyhype | round1 | round2 | round3 | voicelink.
+        `ready` shows the active ready-check card; clicking its Force Start button previews the ephemeral
+        confirm dialog (no live pod needed). `round1`/`round2`/`round3` are no-DB snapshots of each round
+        embed (`round1 random` for the random-pairing header).
+        No arg → posts the beginning lobby state. Every invocation posts fresh messages.
         `podbracket` / `podswiss` / `podrandom` seed a real 8-player pod (seat 1 = you) and hand off to
-        the prod tournament code. `podlobby` connects to a live Draftmancer session for ready-check
-        testing. `seeding [count]` posts the /pod-seeding embed (table + round-table PNG) for `count`
-        players (default 8; ranked players padded with fillers), no sesh needed."""
+        the prod tournament code, so the round embeds + result dropdowns drive the real round-to-round
+        flow (these write to the local DB). `round1` (`round1 random` for random pairing) is a no-DB
+        snapshot of the Round 1 embed only — to drive rounds, use `podswiss`. `podlobby` connects to a
+        live Draftmancer session for ready-check testing. `seeding [count]` posts the /pod-seeding embed
+        (table + round-table PNG) for `count` players (default 8; ranked padded with fillers), no sesh."""
         if state and state not in _VALID_STATES:
             await ctx.send(f"unknown state `{state}`; pick one of: {', '.join(_VALID_STATES)}")
             return
@@ -568,12 +659,40 @@ async def setup(bot: commands.Bot) -> None:
             await ctx.send(embed=round_embed(1, _round1_preview_states(seated=extra != "random")))
             return
 
+        if state in ("round2", "round3"):
+            round_num = int(state[-1])
+            await ctx.send(embed=round_embed(round_num, _later_round_preview_states(round_num)))
+            return
+
+        if state == "voicelink":
+            channel = discord.utils.get(
+                ctx.guild.voice_channels, name=settings.pod_draft_voice_channel_name,
+            ) if ctx.guild else None
+            if channel is None:
+                await ctx.send(f"(no '{settings.pod_draft_voice_channel_name}' voice channel in this server)")
+                return
+            await ctx.send(channel.jump_url)
+            return
+
+        if state == "review":
+            voice_url = pod_voice_channel_url(ctx.guild)
+            embed = render_draft_review_embed(_review_preview_roster(), event_name="Pod Draft Preview")
+            msg = await ctx.send(
+                content=build_draft_review_message(voice_url),
+                embed=embed, allowed_mentions=discord.AllowedMentions.none(),
+            )
+            try:
+                await msg.add_reaction(REVIEW_EMOJI)
+            except discord.HTTPException:
+                pass
+            return
+
         if state == "format":
             async def _test_apply(inter: discord.Interaction, code: str) -> str | None:
                 embed = render_lobby_embed(
                     _THREAD_NAME, _RSVPS_YES, _RSVPS_MAYBE, list(_LINKED_EIGHT),
                     state="linked", draftmancer_url=_DRAFTMANCER_URL,
-                    format_label=format_display(code), pairing_label=pairing_label("swiss"),
+                    format_label=format_display(code), pairing_label=pairing_label(DEFAULT_PAIRING_MODE),
                     seating_label=seating_mode_label("random"),
                 )
                 await inter.channel.send(embed=embed)
@@ -586,17 +705,8 @@ async def setup(bot: commands.Bot) -> None:
 
         await _evict_test_managers_for_channel(ctx.channel.id)
         embed, view = _build(state)
-        progress = _build_ready_progress(state)
-        last = _LAST_MESSAGE.get(ctx.channel.id)
-        if last is not None:
-            try:
-                await last.edit(embed=embed, view=view, attachments=[])
-                await _sync_progress_cards(ctx.channel, progress)
-                return
-            except discord.HTTPException:
-                _LAST_MESSAGE.pop(ctx.channel.id, None)
-        msg = await ctx.send(embed=embed, view=view)
-        _LAST_MESSAGE[ctx.channel.id] = msg
-        await _sync_progress_cards(ctx.channel, progress)
+        _LAST_MESSAGE[ctx.channel.id] = await ctx.send(embed=embed, view=view)
+        posted = [await ctx.send(embed=e, view=v) for e, v in _build_ready_progress(state)]
+        _LAST_PROGRESS_MESSAGES[ctx.channel.id] = posted
 
     register_test_fallback(test_lobby)

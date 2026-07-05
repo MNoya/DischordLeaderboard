@@ -76,6 +76,7 @@ class MagicSet(Base):
     name       = Column(String, nullable=False)
     start_date = Column(Date, nullable=False)
     end_date   = Column(Date, nullable=True)
+    last_refreshed_at = Column(DateTime(timezone=True), nullable=True)
 
     stats = relationship("PlayerStats", back_populates="set")
 
@@ -205,7 +206,7 @@ class PodDraftEvent(Base):
     sesh_message_id     = Column(String, nullable=True)
     socket_status       = Column(String, nullable=False)
     kind                = Column(String, nullable=False, server_default="tournament")
-    pairing_mode        = Column(String, nullable=False, server_default="swiss")
+    pairing_mode        = Column(String, nullable=False, server_default="bracket")
     seating_mode        = Column(String, nullable=False, server_default="random")
     current_round       = Column(Integer, nullable=True)
     draft_log_gz        = Column(LargeBinary, nullable=True)
@@ -241,11 +242,9 @@ class PodDraftParticipant(Base):
     placement           = Column(Integer, nullable=True)
     record              = Column(String, nullable=True)
     eliminated_round    = Column(Integer, nullable=True)
-    draft_log_url       = Column(String, nullable=True)
     deck_colors             = Column(String, nullable=True)
     deck_screenshot_url     = Column(String, nullable=True)
     deck_screenshot_caption = Column(String, nullable=True)
-    wants_draft_review      = Column(Boolean, nullable=True)
 
     event  = relationship("PodDraftEvent", back_populates="participants")
     player = relationship("Player")
@@ -314,6 +313,44 @@ class PodDraftReplay(Base):
         UniqueConstraint("event_id", "player_id", "game_id", name="uq_pod_draft_replay_event_player_game"),
         Index("ix_pod_draft_replays_event_player", "event_id", "player_id"),
         Index("ix_pod_draft_replays_event_time", "event_id", "game_time"),
+    )
+
+
+class SelfReportedEvent(Base):
+    """A draft result a player posted in trophy-hype and logged to their profile via /trophy.
+
+    Unverified self-report: showcase only, never scored. is_trophy marks whether the result was a
+    trophy (a full run win) versus a non-trophy deck the player chose to log anyway; only trophies
+    rank the MTGO flashback board. The source_url links back to the original public post for
+    accountability. Unique per (player_id, source_message_id) so re-running /trophy on the same
+    post updates rather than duplicates.
+    """
+    __tablename__ = "self_reported_events"
+
+    id                = Column(String, primary_key=True, default=lambda: str(uuid4()))
+    player_id         = Column(String, ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    # Nullable so a result in a not-yet-registered set still persists, mirroring draft_events
+    set_id            = Column(String, ForeignKey("sets.id"), nullable=True)
+    set_code          = Column(String, nullable=False)
+    record            = Column(String, nullable=False)
+    is_trophy         = Column(Boolean, nullable=False, server_default=text("true"))
+    # WUBRG-normalized (uppercase main, lowercase splash); null when the player left it unknown
+    colors            = Column(String, nullable=True)
+    platform          = Column(String, nullable=False)
+    # The player's original post text, kept as a memory to show alongside the deck on their profile
+    caption           = Column(Text, nullable=True)
+    # Discord CDN attachment URL (dim-stripped), refreshed browser-side via the message ref when its
+    # signed expiry lapses — same treatment as pod deck screenshots
+    screenshot_url    = Column(String, nullable=True)
+    source_channel_id = Column(String, nullable=False)
+    source_message_id = Column(String, nullable=False)
+    source_url        = Column(String, nullable=False)
+    reported_at       = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    player = relationship("Player")
+
+    __table_args__ = (
+        UniqueConstraint("player_id", "source_message_id", name="uq_self_event_player_message"),
     )
 
 

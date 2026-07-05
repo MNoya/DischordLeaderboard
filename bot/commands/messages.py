@@ -9,6 +9,10 @@ MSG_NOW_HIDDEN = (
 )
 MSG_ALREADY_HIDDEN = "Your rank is already hidden. Run `/join` to show it again."
 MSG_RANKED_AGAIN = "👋 Your rank is back in the standings."
+MSG_TOKEN_INVALIDATED = (
+    "⚠️ Your 17lands token appears to be invalid (possibly regenerated). "
+    "Please use `/link-17lands` to provide your new token."
+)
 MSG_ADMIN_ONLY = "This command is reserved for the bot admin."
 
 MSG_MOCK_NOT_TEXT_CHANNEL = "Run `/mock-draft` in a server text channel — the thread is created there."

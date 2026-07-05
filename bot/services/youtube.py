@@ -55,18 +55,34 @@ class YouTubeClient:
             detail = details.get(video_id)
             if detail is None:
                 continue
-            videos.append(
-                YouTubeVideo(
-                    id=video_id,
-                    title=detail["title"],
-                    published_at=detail["published_at"],
-                    description=detail["description"],
-                    thumbnail=detail["thumbnail"],
-                    duration_seconds=detail["duration_seconds"],
-                    playlists=sorted(membership.get(video_id, set())),
-                )
-            )
+            videos.append(self._to_video(video_id, detail, sorted(membership.get(video_id, set()))))
         return videos
+
+    def fetch_recent_uploads(self, limit: int = 8) -> list[YouTubeVideo]:
+        """Newest uploads only, skipping the curated-playlist crawl. Playlists stay empty so categorization
+        falls back to the title; the daily full sync reconciles them."""
+        _, uploads_playlist = self._resolve_channel()
+        recent_ids = self._recent_upload_ids(uploads_playlist, limit)
+        details = self._video_details(recent_ids)
+        videos: list[YouTubeVideo] = []
+        for video_id in recent_ids:
+            detail = details.get(video_id)
+            if detail is None:
+                continue
+            videos.append(self._to_video(video_id, detail, []))
+        return videos
+
+    @staticmethod
+    def _to_video(video_id: str, detail: dict, playlists: list[str]) -> YouTubeVideo:
+        return YouTubeVideo(
+            id=video_id,
+            title=detail["title"],
+            published_at=detail["published_at"],
+            description=detail["description"],
+            thumbnail=detail["thumbnail"],
+            duration_seconds=detail["duration_seconds"],
+            playlists=playlists,
+        )
 
     def _get(self, path: str, params: dict) -> dict:
         params = {**params, "key": self.api_key}
@@ -107,13 +123,16 @@ class YouTubeClient:
             if page:
                 params["pageToken"] = page
             body = self._get("playlistItems", params)
-            for entry in body.get("items", []):
-                video_id = entry.get("snippet", {}).get("resourceId", {}).get("videoId")
-                if video_id:
-                    ids.append(video_id)
+            ids.extend(_video_ids_from_items(body))
             page = body.get("nextPageToken", "")
             if not page:
                 return ids
+
+    def _recent_upload_ids(self, playlist_id: str, limit: int) -> list[str]:
+        body = self._get(
+            "playlistItems", {"part": "snippet", "playlistId": playlist_id, "maxResults": min(limit, 50)}
+        )
+        return _video_ids_from_items(body)
 
     # videos.list carries the authoritative publish date (playlistItems reports the date a video
     # was *added* to a playlist, which is wrong for featured back-catalogue videos), plus the
@@ -138,6 +157,15 @@ class YouTubeClient:
                     "duration_seconds": _parse_iso_duration(item.get("contentDetails", {}).get("duration", "")),
                 }
         return details
+
+
+def _video_ids_from_items(body: dict) -> list[str]:
+    ids: list[str] = []
+    for entry in body.get("items", []):
+        video_id = entry.get("snippet", {}).get("resourceId", {}).get("videoId")
+        if video_id:
+            ids.append(video_id)
+    return ids
 
 
 def _parse_iso_duration(iso: str) -> int:

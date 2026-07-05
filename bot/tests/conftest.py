@@ -15,7 +15,7 @@ from bot.models import Base  # noqa: E402
 
 @pytest.fixture(scope="session")
 def postgres_url():
-    with PostgresContainer("postgres:16-alpine") as pg:
+    with PostgresContainer("postgres:17-alpine") as pg:
         url = pg.get_connection_url()
         os.environ["DATABASE_URL"] = url
         yield url

@@ -7,6 +7,7 @@ announcement path alongside the pinned schedule.
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 from discord.ext import commands
@@ -17,11 +18,11 @@ from bot.services import mtgscribe
 from bot.services.format_schedule import (
     ANNOUNCE_NONE,
     SCHEDULE_PINS,
-    channel_name_for,
     newly_opened,
     previous_window_start,
 )
-from bot.tasks.format_schedule_post import announce_groups, announcement_for, select_pin
+from bot.sets import active_set_code
+from bot.tasks.format_schedule_post import announce_groups, announcement_for, select_pin, send_off_embeds
 
 
 async def setup(bot: commands.Bot) -> None:
@@ -35,7 +36,8 @@ async def setup(bot: commands.Bot) -> None:
         emojis = {emoji.name: emoji for emoji in await ctx.bot.fetch_application_emojis()}
         since = previous_window_start(now)
         for pin in SCHEDULE_PINS:
-            await ctx.send(f"__**#{channel_name_for(pin)}**__")
+            heading = f"#{pin.channel_name}" if pin.channel_name else f"newest in “{pin.category}”"
+            await ctx.send(f"__**{heading}**__")
             if pin.maintain_pin:
                 in_progress, upcoming, scope = select_pin(events, pin)
                 await ctx.send(view=build_schedule_view(in_progress, upcoming, emojis, scope))
@@ -45,6 +47,20 @@ async def setup(bot: commands.Bot) -> None:
             for group in newly_opened(groups, since, now):
                 embed, _ = announcement_for(pin, group, groups, emojis)
                 await ctx.send(embed=embed)
+
+    @test_group.command(name="sendoff")
+    @commands.is_owner()
+    async def test_send_off(ctx: commands.Context, set_code: str = "") -> None:
+        """Owner-only. Post the set send-off boards (overall + Premier/Trad/Direct/LCQ) in this channel,
+        the same embeds the rotation tick posts before archiving. Defaults to the active set; pass a
+        code to preview another set's boards."""
+        code = (set_code or active_set_code()).upper()
+        embeds = await asyncio.to_thread(send_off_embeds, code)
+        if not embeds:
+            await ctx.send(f"No send-off boards for {code} — set not in the database or no scored players.")
+            return
+        for embed in embeds:
+            await ctx.send(embed=embed)
 
 
 def _fixture_events(now: datetime) -> list:

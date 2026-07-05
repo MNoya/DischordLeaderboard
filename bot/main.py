@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import calendar
+import contextlib
 import logging
 import logging.handlers
 import os
@@ -19,8 +20,10 @@ from sqlalchemy import func, select
 
 from bot.commands.delete_account import setup as setup_delete_account
 from bot.commands.event_scribe import setup as setup_event_scribe
+from bot.commands.guide import setup as setup_guide
 from bot.commands.help import setup as setup_help
 from bot.commands.link_17lands import setup as setup_link_17lands
+from bot.commands.messages import MSG_TOKEN_INVALIDATED
 from bot.commands.leaderboard_visibility import setup as setup_leaderboard_visibility
 from bot.commands.leaderboard import (
     LeaderboardView,
@@ -30,12 +33,15 @@ from bot.commands.pod_backfill import setup as setup_pod_backfill
 from bot.commands.mock_draft import setup as setup_mock_draft
 from bot.commands.pod_draft import setup as setup_pod_draft
 from bot.commands.pod_guide import setup as setup_pod_guide
+from bot.commands.roles import RolesView, setup as setup_roles
 from bot.commands.pod_schedule import setup as setup_pod_schedule
 from bot.commands.preview_season_awards import setup as setup_preview_season_awards
+from bot.commands.save_resource import setup as setup_save_resource
 from bot.commands.set_awards import setup as setup_set_awards
 from bot.commands.signout import setup as setup_signout
 from bot.commands.signup import setup as setup_signup
 from bot.commands.stats import setup as setup_stats
+from bot.commands.trophy import setup as setup_trophy
 from bot.config import settings
 from bot.database import SessionLocal, run_migrations
 from bot.discord_helpers import refresh_player_profiles
@@ -62,14 +68,17 @@ from bot.services.pod_tournament import (
     register_persistent_views as register_pod_views,
     rehydrate_active_tournaments,
 )
-from bot.services.media_sync import sync_media, SyncResult
+from bot.services.media_sync import sync_media, sync_recent, SyncResult
+from bot.services.ping_roles import reconcile_ping_roles
 from bot.services.active_set import resolve_active_set
 from bot.services.refresh import refresh_active_players
+from bot.services.refresh_report import build_refresh_report, format_elapsed
 from bot.services.seventeenlands import MinIntervalLimiter, SeventeenLandsClient
 from bot.sets import active_set_code
 from bot.tasks.pod_draft_reminder import init_reminder
 from bot.tasks.format_schedule_post import init_format_schedule
 from bot.tasks.pod_schedule_post import init_schedule_post
+from bot.tasks.set_awards_post import init_set_awards_schedule
 from bot.tasks.pod_underfill import init_underfill
 
 
@@ -80,13 +89,19 @@ LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
 AUTO_REFRESH_TZ = ZoneInfo("America/Montevideo")
 AUTO_REFRESH_TIMES = [
     dtime(hour=2, minute=0, tzinfo=AUTO_REFRESH_TZ),
-    dtime(hour=8, minute=0, tzinfo=AUTO_REFRESH_TZ),
+    dtime(hour=6, minute=0, tzinfo=AUTO_REFRESH_TZ),
+    dtime(hour=10, minute=0, tzinfo=AUTO_REFRESH_TZ),
     dtime(hour=14, minute=0, tzinfo=AUTO_REFRESH_TZ),
-    dtime(hour=20, minute=0, tzinfo=AUTO_REFRESH_TZ),
+    dtime(hour=18, minute=0, tzinfo=AUTO_REFRESH_TZ),
+    dtime(hour=22, minute=0, tzinfo=AUTO_REFRESH_TZ),
 ]
-AUTO_REFRESH_17L_INTERVAL_S = 3.0
+AUTO_REFRESH_17L_INTERVAL_S = 7.0
 
 MEDIA_SYNC_TIME = dtime(hour=3, minute=30, tzinfo=AUTO_REFRESH_TZ)
+MEDIA_FRESHNESS_TZ = ZoneInfo("America/New_York")
+MEDIA_FRESHNESS_INTERVAL_MIN = 30
+PUBLISH_WINDOW_START_ET = 10
+PUBLISH_WINDOW_END_ET = 1
 PROFILE_SYNC_TIME = dtime(hour=4, minute=0, tzinfo=AUTO_REFRESH_TZ)
 PROFILE_SYNC_WEEKDAY = calendar.MONDAY
 
@@ -163,6 +178,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         init_underfill(bot)
         init_schedule_post(bot)
         init_format_schedule(bot)
+        init_set_awards_schedule(bot)
 
         # Load cogs into memory and mirror to the guild tree so dispatch works.
         # Discord-side sync is handled by the owner-only `!sync` text command, not on startup.
@@ -171,12 +187,16 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_delete_account(bot)
         await setup_leaderboard(bot)
         await setup_stats(bot)
+        await setup_trophy(bot)
+        await setup_save_resource(bot)
+        await setup_guide(bot)
         await setup_help(bot)
         await setup_event_scribe(bot)
         await setup_link_17lands(bot)
         await setup_leaderboard_visibility(bot)
         await setup_pod_draft(bot)
         await setup_pod_guide(bot)
+        await setup_roles(bot)
         await setup_mock_draft(bot)
         await setup_pod_backfill(bot)
         await setup_pod_schedule(bot)
@@ -203,7 +223,8 @@ def build_bot(guild_id: int) -> commands.Bot:
         # Register the persistent leaderboard view so Join buttons on previously-posted
         # messages keep dispatching after a bot restart
         bot.add_view(LeaderboardView())
-        bot.add_view(LobbyReadyButtonView())
+        bot.add_view(LobbyReadyButtonView(show_force_start=True))
+        bot.add_view(RolesView())
 
         log.info("setup_hook: cogs loaded; run `!sync` to publish slash commands to Discord")
 
@@ -229,12 +250,22 @@ def build_bot(guild_id: int) -> commands.Bot:
         cmd_name = interaction.command.qualified_name if interaction.command else "unknown"
         invoker = f"{interaction.user} (`{interaction.user.id}`)"
         opts = ", ".join(f"{k}={v!r}" for k, v in interaction.namespace) or "no args"
+        if isinstance(original, app_commands.CommandNotFound):
+            hint = f"⚠️ `{original.name}` clicked by {invoker} but not registered. Run `!sync` if you renamed it."
+            await _notify_owner(bot, hint, "")
+            return
         tb = "".join(traceback.format_exception(type(original), original, original.__traceback__))
         await _notify_owner(bot, f"⚠️ `/{cmd_name}` crashed (invoked by {invoker}, args: {opts}):", tb)
 
     async def _reply_quietly(ctx: commands.Context, message: str) -> None:
-        """Reply via DM. Invoke `!sync` from a DM with the bot to keep everything private."""
-        await ctx.author.send(message)
+        """DM invocations reply in the DM; channel invocations delete the `!command` text and reply
+        in-channel with a self-deleting message, the closest a prefix command gets to ephemeral."""
+        if ctx.guild is None:
+            await ctx.author.send(message)
+            return
+        with contextlib.suppress(discord.HTTPException):
+            await ctx.message.delete()
+        await ctx.send(message, delete_after=15)
 
     @bot.command(name="sync")
     @commands.is_owner()
@@ -257,22 +288,26 @@ def build_bot(guild_id: int) -> commands.Bot:
         # A command goes global — the only registration DMs can see — when its allowed_contexts
         # permits DMs; the rest stay guild-scoped, where schema changes appear instantly. Each
         # command's decorator is the source of truth, so a new DM command needs no list to edit here.
-        global_names = {command.name for command in bot.tree.get_commands()
-                        if getattr(command, "allowed_contexts", None) and command.allowed_contexts.dm_channel}
+        def command_type(command) -> discord.AppCommandType:
+            return getattr(command, "type", discord.AppCommandType.chat_input)
+
+        global_cmds = [command for command in bot.tree.get_commands()
+                       if getattr(command, "allowed_contexts", None) and command.allowed_contexts.dm_channel]
+        global_keys = {(command.name, command_type(command)) for command in global_cmds}
 
         bot.tree.copy_global_to(guild=guild)
-        # Strip globally-registered commands from the guild tree to avoid duplicate registration
-        for name in global_names:
-            bot.tree.remove_command(name, guild=guild)
+        # remove_command defaults to chat_input, so a name-only strip leaves context menus double-registered
+        for command in global_cmds:
+            bot.tree.remove_command(command.name, guild=guild, type=command_type(command))
         synced_guild = await bot.tree.sync(guild=guild)
 
         if scope == "guild":
             await _reply_quietly(ctx, f"✅ Synced {len(synced_guild)} guild commands.")
             return
 
-        hidden = [c for c in bot.tree.get_commands() if c.name not in global_names]
+        hidden = [c for c in bot.tree.get_commands() if (c.name, command_type(c)) not in global_keys]
         for c in hidden:
-            bot.tree.remove_command(c.name)
+            bot.tree.remove_command(c.name, type=command_type(c))
         try:
             synced_global = await bot.tree.sync()
         finally:
@@ -288,11 +323,6 @@ def build_bot(guild_id: int) -> commands.Bot:
         ``trigger`` is "manual" (``!refresh`` DM) or "auto" (periodic tick); both use the
         same active-set window. Tag is included in the channel post so the source is obvious.
         """
-        msg_invalidated_dm = (
-            "⚠️ Your 17lands token appears to be invalid (possibly regenerated). "
-            "Please use `/link-17lands` to provide your new token."
-        )
-
         def _do_db_work() -> dict:
             limiter = (
                 MinIntervalLimiter(min_interval_s=AUTO_REFRESH_17L_INTERVAL_S)
@@ -321,11 +351,17 @@ def build_bot(guild_id: int) -> commands.Bot:
         for player in invalidated_players:
             if not player.discord_id:
                 continue
+            dmed = True
             try:
                 user = await bot.fetch_user(int(player.discord_id))
-                await user.send(msg_invalidated_dm)
+                await user.send(MSG_TOKEN_INVALIDATED)
             except discord.HTTPException as e:
+                dmed = False
                 log.warning(f"could not DM player {player.id}: {e}")
+            status = "DMed" if dmed else "DM failed"
+            await bot.bot_log.post_plain(
+                f"🔑 Token invalidated — **{player.display_name}** ({status}):\n{MSG_TOKEN_INVALIDATED}"
+            )
 
         result = {
             "summary": summary,
@@ -340,7 +376,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         summary = result["summary"]
         per_player = summary.get("per_player", [])
         n_players = len(per_player)
-        elapsed = _fmt_elapsed(summary.get("elapsed_s", 0.0))
+        elapsed = format_elapsed(summary.get("elapsed_s", 0.0))
         avg = f"{summary['elapsed_s'] / n_players:.1f}s avg" if n_players else ""
         trigger = result["trigger"].title()
 
@@ -359,23 +395,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         for row in rows:
             log.info(row)
 
-        body = f"🔄 {trigger} refresh complete · {elapsed} · {n_players} players"
-        if avg:
-            body += f" · {avg}"
-        if summary["errors"]:
-            body += (
-                f"\nUpdated: {summary['updated']} · "
-                f"Invalidated: {summary['invalidated']} · "
-                f"Errors: {summary['errors']}"
-            )
-        if unknown:
-            tally = ", ".join(f"`{fmt}` ×{n}" for fmt, n in sorted(unknown.items(), key=lambda kv: (-kv[1], kv[0])))
-            body += f"\n⚠️ New format(s) observed (stored, not scoring): {tally}"
-        if unrouted:
-            tally = ", ".join(f"`{exp}` ×{n}" for exp, n in sorted(unrouted.items(), key=lambda kv: (-kv[1], kv[0])))
-            body += f"\n⚠️ Unrouted expansion(s) — events stored without a set (add to bot/sets.py): {tally}"
-
-        await bot.bot_log.post_plain(body)
+        await bot.bot_log.post_plain(build_refresh_report(summary, result["trigger"]))
 
     @bot.command(name="refresh")
     @commands.is_owner()
@@ -427,6 +447,30 @@ def build_bot(guild_id: int) -> commands.Bot:
 
     @media_sync_tick.before_loop
     async def _before_media_sync() -> None:
+        await bot.wait_until_ready()
+
+    async def run_media_freshness() -> SyncResult:
+        def _do_sync() -> SyncResult:
+            with SessionLocal() as session:
+                return sync_recent(session)
+
+        return await asyncio.to_thread(_do_sync)
+
+    @tasks.loop(minutes=MEDIA_FRESHNESS_INTERVAL_MIN)
+    async def media_freshness_tick() -> None:
+        hour = datetime.now(MEDIA_FRESHNESS_TZ).hour
+        if not (hour >= PUBLISH_WINDOW_START_ET or hour < PUBLISH_WINDOW_END_ET):
+            return
+        try:
+            result = await run_media_freshness()
+            if result.total:
+                log.info(f"media-freshness: ingested {result.total} fresh episode(s)")
+        except Exception:
+            log.exception("media-freshness tick failed")
+            await _notify_owner(bot, "⚠️ media-freshness tick crashed:", traceback.format_exc())
+
+    @media_freshness_tick.before_loop
+    async def _before_media_freshness() -> None:
         await bot.wait_until_ready()
 
     async def run_profile_reconcile() -> dict:
@@ -482,13 +526,19 @@ def build_bot(guild_id: int) -> commands.Bot:
             await rehydrate_active_tournaments(bot)
             await rehydrate_active_lobbies(bot)
             await reconcile_unannounced_championships(bot)
-        if not settings.auto_refresh_enabled:
+            try:
+                await reconcile_ping_roles(bot)
+            except Exception:
+                log.exception("ping-role reconcile failed")
+        if settings.auto_refresh_enabled:
+            if not auto_refresh_tick.is_running():
+                auto_refresh_tick.start()
+        else:
             log.info("AUTO_REFRESH_ENABLED=false; skipping the scheduled 17lands refresh tick")
-            return
-        if not auto_refresh_tick.is_running():
-            auto_refresh_tick.start()
         if settings.media_sync_enabled and not media_sync_tick.is_running():
             media_sync_tick.start()
+        if settings.media_sync_enabled and not media_freshness_tick.is_running():
+            media_freshness_tick.start()
         if settings.profile_sync_enabled and not profile_sync_tick.is_running():
             profile_sync_tick.start()
 
@@ -502,18 +552,13 @@ async def _notify_owner(bot: commands.Bot, header: str, body: str) -> None:
         return
     try:
         owner = bot.get_user(owner_id) or await bot.fetch_user(owner_id)
-        # Discord caps message body at 2000 chars; truncate the traceback to fit comfortably
-        snippet = body[-1700:]
-        await owner.send(f"{header}\n```\n{snippet}\n```")
+        if body:
+            # Discord caps message body at 2000 chars; truncate the traceback to fit comfortably
+            await owner.send(f"{header}\n```\n{body[-1700:]}\n```")
+        else:
+            await owner.send(header)
     except discord.HTTPException:
         log.warning("could not DM owner about crash", exc_info=True)
-
-
-def _fmt_elapsed(seconds: float) -> str:
-    if seconds < 60:
-        return f"{seconds:.1f}s"
-    minutes, sec = divmod(int(round(seconds)), 60)
-    return f"{minutes}m {sec}s"
 
 
 def _fmt_eta(delta: object) -> str:

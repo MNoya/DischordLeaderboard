@@ -80,7 +80,7 @@ export function DonutChart({
   padding?: number;
   pieHole?: number;
   defs?: React.ReactNode;
-  activeKey?: string | null;
+  activeKey?: string | string[] | null;
   onHoverEntry?: (key: string | null) => void;
 }) {
   const isPie = pieHole != null;
@@ -112,8 +112,11 @@ export function DonutChart({
   const SEAM_OVERLAP = 1;
   const HOVER_OFFSET = 7;
 
+  const activeKeySet = activeKey == null ? null : new Set(Array.isArray(activeKey) ? activeKey : [activeKey]);
+  const isActiveKey = (key: string) => activeKeySet != null && activeKeySet.has(key);
+
   function renderSlice(s: SliceMeta): React.ReactNode {
-    const isActive = activeKey != null && activeKey === s.entry.key;
+    const isActive = isActiveKey(s.entry.key);
     const sliceOuter = outerR + (isActive ? HOVER_OFFSET : 0);
     const sliceDrawR = (sliceOuter + innerR) / 2;
     const sliceDrawSW = sliceOuter - innerR;
@@ -166,10 +169,9 @@ export function DonutChart({
   }
 
   const nonActiveArcs = slices
-    .filter((s) => activeKey !== s.entry.key)
+    .filter((s) => !isActiveKey(s.entry.key))
     .map(renderSlice);
-  const activeSlice = slices.find((s) => activeKey === s.entry.key);
-  const activeArc = activeSlice ? renderSlice(activeSlice) : null;
+  const activeArcs = slices.filter((s) => isActiveKey(s.entry.key)).map(renderSlice);
 
   const dividers: React.ReactNode[] = [];
   if (slices.length > 1) {
@@ -236,7 +238,7 @@ export function DonutChart({
         )}
         {nonActiveArcs}
         {dividers}
-        {activeArc}
+        {activeArcs}
         {!isPie && topLabel != null && (
           <text
             x={cx}

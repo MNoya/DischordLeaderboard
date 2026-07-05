@@ -10,6 +10,7 @@ export interface SetSummary {
   isActive: boolean;
   early?: boolean; // shown before release_date when early-access data already exists
   custom?: boolean; // synthesized for pod-only cube formats with no row in `sets`
+  lastRefreshedAt?: string | null; // when the full active-player refresh last completed for this set
 }
 
 export interface PodSetCode {
@@ -76,6 +77,8 @@ export interface PlayerDraftEvent {
   eventName?: string | null;
   // Pod draft event slug for /pods/<slug>. Null for 17lands rows
   podEventSlug?: string | null;
+  // Arena rank when the event finished ("Gold-3", "Mythic-1"). Null for pod rows
+  endRank?: string | null;
 }
 
 export interface ColorsLeaderboardRow {
@@ -121,6 +124,8 @@ export interface RecentTrophy {
   finishedAt: string;
   // false only for LCQ Day 2 runs merged into the LCQ-scoped list
   isTrophy?: boolean;
+  // Arena rank when the trophy run finished ("Gold-3", "Mythic-1")
+  endRank?: string | null;
 }
 
 export type PodEventKind = "tournament" | "mock";
@@ -177,7 +182,9 @@ export interface ArtifactCard {
 // The canonical pod draft artifact from public_pod_draft_log. Everything references the card table
 // by index. `decks` is null for events drafted before deck capture existed.
 export interface PodDraftArtifact {
+  t?: number;
   v: number;
+  sid?: string;
   set: string | null;
   seats: string[]; // Draftmancer names; array index === participant seatIndex
   cards: ArtifactCard[];
@@ -194,7 +201,6 @@ export interface PodEventParticipantRow {
   placement: number | null;
   record: string | null;
   deckColors: string | null;
-  draftLogUrl: string | null;
   deckScreenshotUrl: string | null;
   deckScreenshotCaption: string | null;
   playerSlug: string | null;
@@ -216,6 +222,7 @@ export interface PodEventMatchRow {
 export interface PodSeat extends PodEventParticipantRow {
   seatIndex: number;
   discordName: string;
+  hasDeckList?: boolean;
 }
 
 export interface PodEventReplayRow {
@@ -255,6 +262,39 @@ export interface PlayerIdentity {
   avatarUrl: string | null;
 }
 
+// Unverified draft result a player logged via /trophy from a trophy-hype post. Showcase only —
+// never scored. isTrophy marks a trophy (a full run win) versus a non-trophy deck logged anyway.
+// colors uses the 17lands convention (uppercase main, lowercase splash); '' for none.
+export interface SelfReportedEvent {
+  setCode: string;
+  record: string;
+  isTrophy: boolean;
+  colors: string;
+  platform: string;
+  // The player's original post text, kept as a keepsake shown with the deck
+  caption: string | null;
+  // Discord CDN URL; refreshed browser-side via the message ref when its signed expiry lapses
+  screenshotUrl: string | null;
+  sourceChannelId: string;
+  sourceMessageId: string;
+  sourceUrl: string;
+  reportedAt: string;
+}
+
+// One player's standing on an MTGO-only trophy-count board, aggregated from self-reported results
+// for a flashback set. Ranked by trophy count; decks holds every logged post (trophy or not),
+// newest first, and deckCount is that full tally.
+export interface TrophyLeaderboardRow {
+  setCode: string;
+  slug: string;
+  displayName: string;
+  avatarUrl: string | null;
+  rank: number;
+  trophies: number;
+  deckCount: number;
+  decks: SelfReportedEvent[];
+}
+
 export interface PlayerProfile {
   slug: string;
   displayName: string;
@@ -266,5 +306,7 @@ export interface PlayerProfile {
   events: number;
   wins: number;
   losses: number;
+  lastCalculatedAt?: string | null; // when this player's data was last pulled from 17lands
   formatBreakdown: PlayerFormatBreakdown[];
+  selfReportedEvents: SelfReportedEvent[];
 }

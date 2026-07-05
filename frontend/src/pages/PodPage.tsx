@@ -1,17 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { AppHeader } from "../components/AppHeader";
+import { DraftReviewMOCS, type ReviewSeatInfo } from "../components/pod/review/DraftReviewMOCS";
 import { SectionLabel } from "../components/SectionLabel";
 import { BackButton, MobilePageHeader, PrevNextNav } from "../components/PageNav";
-import { useIsMobile } from "../lib/use-is-mobile";
+import { useIsLandscapePhone, useIsMobile } from "../lib/use-is-mobile";
 import { PodTable, PodTableSkeleton } from "../components/pod/PodTable";
 import { PlayerSeatPanel } from "../components/pod/PlayerSeatPanel";
 import type { RoundOutcome } from "../components/pod/PlayerSeatPanel";
 import { MobileSeatStack, MobileSeatStackSkeleton } from "../components/pod/MobileSeatStack";
-import { DeckScreenshotModal } from "../components/pod/DeckScreenshotModal";
+import { DeckScreenshotModal, type DeckTab } from "../components/pod/DeckScreenshotModal";
 import {
-  useLeaderboard,
   usePodDraftArtifact,
   usePodEventBySlug,
   usePodEventMatches,
@@ -30,6 +30,9 @@ const TABLE_MAX_WIDE = 720;
 const TABLE_MAX_SHRUNK = 640;
 const ANIMATION_MS = 500;
 const CHROME_OFFSET = 260;
+const CHROME_OFFSET_LANDSCAPE = 84;
+const PANEL_MIN_WIDTH = 360;
+const PANEL_MIN_WIDTH_LANDSCAPE = 280;
 
 function compareParticipants(a: PodEventParticipantRow, b: PodEventParticipantRow): number {
   const ap = a.placement ?? Number.MAX_SAFE_INTEGER;
@@ -65,12 +68,19 @@ export function PodPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const preselectName = searchParams.get("player");
   const isMobile = useIsMobile();
+  const isLandscapePhone = useIsLandscapePhone();
   const [selectedSeat, setSelectedSeat] = useState<number | null>(null);
   const [highlightedSeat, setHighlightedSeat] = useState<number | null>(null);
   const [highlightedRound, setHighlightedRound] = useState<number | null>(null);
   const [highlightedOutcome, setHighlightedOutcome] = useState<RoundOutcome | null>(null);
   const [animateLayout, setAnimateLayout] = useState(false);
   const [deckTarget, setDeckTarget] = useState<PodSeat | null>(null);
+  const [deckInitialTab, setDeckInitialTab] = useState<DeckTab>("screenshot");
+
+  const openDeck = (seat: PodSeat, tab: DeckTab = "screenshot") => {
+    setDeckInitialTab(tab);
+    setDeckTarget(seat);
+  };
 
   const handleRoundHover = (seat: number | null, round: number | null, outcome: RoundOutcome | null) => {
     setHighlightedSeat(seat);
@@ -114,11 +124,6 @@ export function PodPage() {
   const { data: matches, isLoading: matchesLoading } = usePodEventMatches(eventId);
   const { data: replays, isLoading: replaysLoading } = usePodEventReplays(eventId);
   const { data: setEvents } = usePodEvents(event?.setCode);
-  const { data: profileBoard } = useLeaderboard(event?.setCode);
-  const linkableSlugs = useMemo(
-    () => new Set((profileBoard ?? []).map((r) => r.slug)),
-    [profileBoard],
-  );
 
   const { prevSlug, nextSlug } = useMemo(() => {
     if (!setEvents || !event) return { prevSlug: null, nextSlug: null };
@@ -136,6 +141,23 @@ export function PodPage() {
   const carryQuery = preselectName ? `?player=${encodeURIComponent(preselectName)}` : "";
   const prevTo = prevSlug ? `/pods/${prevSlug}${carryQuery}` : null;
   const nextTo = nextSlug ? `/pods/${nextSlug}${carryQuery}` : null;
+
+  const chromeOffset = isLandscapePhone ? CHROME_OFFSET_LANDSCAPE : CHROME_OFFSET;
+  const panelMinWidth = isLandscapePhone ? PANEL_MIN_WIDTH_LANDSCAPE : PANEL_MIN_WIDTH;
+  const mainClass = `flex-1 flex flex-col pl-4 pr-4 min-h-0 ${isLandscapePhone ? "pb-2" : "md:pl-10 md:pr-12 lg:pr-14 pb-10"}`;
+  const tableColumnPad = isLandscapePhone ? "py-1" : "py-8 md:py-12";
+  const contentRowPad = isLandscapePhone ? "py-1" : "py-3";
+  const pageHeader = isLandscapePhone ? (
+    <MobilePageHeader
+      backTo="/pods"
+      prevTo={prevTo}
+      nextTo={nextTo}
+      prevAriaLabel="Previous pod"
+      nextAriaLabel="Next pod"
+    />
+  ) : (
+    <AppHeader subtitle="POD DRAFT BREAKDOWN" />
+  );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -157,10 +179,15 @@ export function PodPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [prevTo, nextTo, navigate, deckTarget]);
 
-  const seats = useMemo<PodSeat[]>(
-    () => (participantRows ? assignSeats(participantRows) : []),
-    [participantRows],
-  );
+  const seats = useMemo<PodSeat[]>(() => {
+    if (!participantRows) return [];
+    const base = assignSeats(participantRows);
+    if (!draftArtifact) return base;
+    return base.map((s) => ({
+      ...s,
+      hasDeckList: resolveDeck(draftArtifact, s.seatIndex) !== null,
+    }));
+  }, [participantRows, draftArtifact]);
 
   const participantsBySeatName = useMemo(() => {
     const m = new Map<string, PodSeat>();
@@ -238,26 +265,28 @@ export function PodPage() {
     }
     return (
       <div className="bg-bg text-text h-screen flex flex-col overflow-hidden">
-        <AppHeader subtitle="POD DRAFT BREAKDOWN" />
-        <main className="flex-1 flex flex-col pl-4 pr-4 md:pl-10 md:pr-12 lg:pr-14 pb-10 min-h-0">
-          <div className="pt-5 pb-2 flex items-center justify-between gap-4 shrink-0">
-            <BackButton to="/pods" label="BACK TO POD DRAFTS" inline />
-          </div>
+        {pageHeader}
+        <main className={mainClass}>
+          {!isLandscapePhone && (
+            <div className="pt-5 pb-2 flex items-center justify-between gap-4 shrink-0">
+              <BackButton to="/pods" label="BACK TO POD DRAFTS" inline />
+            </div>
+          )}
           {preselectName ? (
-            <div className="flex-1 flex items-stretch min-h-0 py-3">
-              <div className="flex items-center min-w-0 shrink-0 py-8 md:py-12 justify-end" style={{ width: "55%" }}>
+            <div className={`flex-1 flex items-stretch min-h-0 ${contentRowPad}`}>
+              <div className={`flex items-center min-w-0 shrink-0 justify-end ${tableColumnPad}`} style={{ width: "55%" }}>
                 <PodTableSkeleton
-                  maxWidth={`min(${TABLE_MAX_SHRUNK}px, calc(100vh - ${CHROME_OFFSET}px))`}
+                  maxWidth={`min(${TABLE_MAX_SHRUNK}px, calc(100vh - ${chromeOffset}px))`}
                 />
               </div>
               <div className="min-w-0 shrink-0 self-start max-h-full" style={{ width: "45%" }}>
-                <PodPanelSkeleton />
+                <PodPanelSkeleton minWidth={panelMinWidth} />
               </div>
             </div>
           ) : (
-            <div className="flex-1 flex items-center justify-center min-h-0 py-3">
+            <div className={`flex-1 flex items-center justify-center min-h-0 ${contentRowPad}`}>
               <PodTableSkeleton
-                maxWidth={`min(${TABLE_MAX_WIDE}px, calc(100vh - ${CHROME_OFFSET}px))`}
+                maxWidth={`min(${TABLE_MAX_WIDE}px, calc(100vh - ${chromeOffset}px))`}
               />
             </div>
           )}
@@ -286,6 +315,8 @@ export function PodPage() {
   }
 
   const eventLabel = cleanPodEventName(event.name, event.setCode).toUpperCase();
+  const deckLogHref =
+    draftArtifact && deckTarget ? `/pods/${event.slug}/${deckTarget.playerSlug ?? deckTarget.seatIndex}` : null;
   const open = selectedParticipant !== null;
   const tableMaxPx = open ? TABLE_MAX_SHRUNK : TABLE_MAX_WIDE;
   const loadedMatches = matches ?? [];
@@ -309,10 +340,11 @@ export function PodPage() {
           replays={loadedReplays}
           selectedSeat={selectedSeat}
           onSelect={handleSelectSeat}
-          onShowDeck={setDeckTarget}
+          onShowDeck={openDeck}
           eventLabel={eventLabel}
           setCode={event.setCode}
-          linkableSlugs={linkableSlugs}
+          eventSlug={event.slug}
+          hasDraftLog={!!draftArtifact}
           formatLabel={event.formatLabel}
           isMock={event.kind === "mock"}
         />
@@ -327,8 +359,9 @@ export function PodPage() {
               deckScreenshotCaption: deckTarget.deckScreenshotCaption,
               mainboard: deckTargetMainboard,
               record: deckTarget.record,
-              draftLogUrl: deckTarget.draftLogUrl,
             }}
+            initialTab={deckInitialTab}
+            draftLogHref={deckLogHref}
             onClose={() => setDeckTarget(null)}
             onPrev={() => cycleDeck(-1)}
             onNext={() => cycleDeck(1)}
@@ -340,22 +373,24 @@ export function PodPage() {
 
   return (
     <div className="bg-bg text-text h-screen flex flex-col overflow-hidden">
-      <AppHeader subtitle="POD DRAFT BREAKDOWN" />
+      {pageHeader}
 
-      <main className="flex-1 flex flex-col pl-4 pr-4 md:pl-10 md:pr-12 lg:pr-14 pb-10 min-h-0">
-        <div className="pt-5 pb-2 flex items-center justify-between gap-4 shrink-0">
-          <BackButton to="/pods" label="BACK TO POD DRAFTS" inline />
-          <PrevNextNav
-            prevTo={prevTo}
-            nextTo={nextTo}
-            prevAriaLabel="Previous pod"
-            nextAriaLabel="Next pod"
-          />
-        </div>
+      <main className={mainClass}>
+        {!isLandscapePhone && (
+          <div className="pt-5 pb-2 flex items-center justify-between gap-4 shrink-0">
+            <BackButton to="/pods" label="BACK TO POD DRAFTS" inline />
+            <PrevNextNav
+              prevTo={prevTo}
+              nextTo={nextTo}
+              prevAriaLabel="Previous pod"
+              nextAriaLabel="Next pod"
+            />
+          </div>
+        )}
 
-        <div className="flex-1 flex items-stretch min-h-0 py-3">
+        <div className={`flex-1 flex items-stretch min-h-0 ${contentRowPad}`}>
           <div
-            className={`flex items-center min-w-0 shrink-0 py-8 md:py-12 ${open ? "justify-end" : "justify-center"}`}
+            className={`flex items-center min-w-0 shrink-0 ${tableColumnPad} ${open ? "justify-end" : "justify-center"}`}
             style={{
               width: open ? "55%" : "100%",
               transition: animateLayout ? `width ${ANIMATION_MS}ms ease-out` : "none",
@@ -368,12 +403,14 @@ export function PodPage() {
               highlightedRound={highlightedRound}
               highlightedOutcome={highlightedOutcome}
               onSelect={handleSelectSeat}
-              onShowDeck={setDeckTarget}
+              onShowDeck={openDeck}
               eventLabel={eventLabel}
+              eventSlug={event.slug}
+              hasDraftLog={!!draftArtifact}
               setCode={event.setCode}
               formatLabel={event.formatLabel}
               date={event.eventDate}
-              maxWidth={`min(${tableMaxPx}px, calc(100vh - ${CHROME_OFFSET}px))`}
+              maxWidth={`min(${tableMaxPx}px, calc(100vh - ${chromeOffset}px))`}
             />
           </div>
           <div
@@ -387,7 +424,7 @@ export function PodPage() {
             }}
           >
             <div className="pod-panel-shell bg-surface border border-border flex flex-col min-h-0 flex-1 overflow-hidden">
-              <div className="flex flex-col min-h-0 flex-1" style={{ minWidth: 360 }}>
+              <div className="flex flex-col min-h-0 flex-1" style={{ minWidth: panelMinWidth }}>
                 {displayParticipant && (
                   <PlayerSeatPanel
                     key={displayParticipant.displayName}
@@ -396,9 +433,10 @@ export function PodPage() {
                     matches={loadedMatches}
                     replays={loadedReplays}
                     setCode={event.setCode}
-                    linkableSlugs={linkableSlugs}
+                    eventSlug={event.slug}
+                    hasDraftLog={!!draftArtifact}
                     onRoundHover={handleRoundHover}
-                    onShowDeck={setDeckTarget}
+                    onShowDeck={openDeck}
                     isMock={event.kind === "mock"}
                   />
                 )}
@@ -423,8 +461,9 @@ export function PodPage() {
             deckScreenshotCaption: deckTarget.deckScreenshotCaption,
             mainboard: deckTargetMainboard,
             record: deckTarget.record,
-            draftLogUrl: deckTarget.draftLogUrl,
           }}
+          initialTab={deckInitialTab}
+          draftLogHref={deckLogHref}
           onClose={() => setDeckTarget(null)}
           onPrev={() => cycleDeck(-1)}
           onNext={() => cycleDeck(1)}
@@ -434,10 +473,89 @@ export function PodPage() {
   );
 }
 
-function PodPanelSkeleton() {
+export function PodDraftLogRoute() {
+  const { slug, who, pack, pick } = useParams<{ slug: string; who?: string; pack?: string; pick?: string }>();
+  const navigate = useNavigate();
+  const { data: event, isLoading: eventLoading } = usePodEventBySlug(slug);
+  const eventId = event?.eventId;
+  const { data: participantRows, isLoading: participantsLoading } = usePodEventParticipants(eventId);
+  const { data: artifact, isLoading: artifactLoading } = usePodDraftArtifact(eventId);
+
+  const seats = useMemo(
+    () => (participantRows ? assignSeats(participantRows) : []),
+    [participantRows],
+  );
+
+  if (eventLoading || (event && (participantsLoading || artifactLoading))) {
+    return <div className="fixed inset-0 z-50 bg-bg" />;
+  }
+  if (!event || !artifact) {
+    return <Navigate to={`/pods/${slug ?? ""}`} replace />;
+  }
+
+  if (!who) {
+    return <Navigate to={`/pods/${slug}`} replace />;
+  }
+
+  const resolved = resolveLogSeat(seats, who);
+  const initialSeat = resolved != null && resolved < artifact.seats.length ? resolved : 0;
+  const initialPack = pack ? Number(pack) - 1 : 0;
+  const initialPick = pick ? Number(pick) - 1 : 0;
+  const seatInfo: ReviewSeatInfo[] = seats.map((s) => ({
+    seatIndex: s.seatIndex,
+    displayName: s.discordName,
+    participantDisplayName: s.displayName,
+    avatarUrl: s.avatarUrl,
+    deckColors: s.deckColors,
+    deckScreenshotUrl: s.deckScreenshotUrl,
+    deckScreenshotCaption: s.deckScreenshotCaption,
+    record: s.record,
+  }));
+
+  const current = resolved != null ? seats.find((s) => s.seatIndex === resolved) : null;
+  const backHref = `/pods/${slug}${current ? `?player=${encodeURIComponent(current.discordName)}` : ""}`;
+
+  return (
+    <DraftReviewMOCS
+      artifact={artifact}
+      meta={{ setCode: event.setCode, name: event.name }}
+      initialSeat={initialSeat}
+      initialPack={initialPack}
+      initialPick={initialPick}
+      onClose={() => navigate(backHref)}
+      backHref={backHref}
+      onNavigate={(seatIndex, p, pk) => {
+        const target = seats.find((s) => s.seatIndex === seatIndex);
+        if (target) {
+          navigate(`/pods/${slug}/${seatIdentifier(target)}/${p + 1}/${pk + 1}`, { replace: true });
+        }
+      }}
+      eventId={event.eventId}
+      seatInfo={seatInfo}
+    />
+  );
+}
+
+function seatIdentifier(seat: PodSeat): string {
+  return seat.playerSlug ?? String(seat.seatIndex);
+}
+
+function resolveLogSeat(seats: PodSeat[], who: string): number | null {
+  const bySlug = seats.find((s) => s.playerSlug === who);
+  if (bySlug) {
+    return bySlug.seatIndex;
+  }
+  const n = Number(who);
+  if (Number.isInteger(n) && seats.some((s) => s.seatIndex === n)) {
+    return n;
+  }
+  return null;
+}
+
+function PodPanelSkeleton({ minWidth = PANEL_MIN_WIDTH }: { minWidth?: number }) {
   return (
     <div className="pod-panel-shell bg-surface border border-border max-h-full overflow-hidden">
-      <div style={{ minWidth: 360 }}>
+      <div style={{ minWidth }}>
         <div className="flex items-center gap-4 px-4 md:px-5 xl:px-8 py-7 border-b border-border">
           <div className="w-[60px] h-[60px] bg-surface2 animate-pulse shrink-0" />
           <div className="min-w-0 flex-1 flex flex-col gap-2">

@@ -10,17 +10,24 @@ from discord.ext import commands
 
 from bot import audit, emojis
 from bot.commands import descriptions as desc
+from bot.discord_helpers import in_pod_coordination
 from bot.services.pod_schedule import POD_DRAFTERS_ROLE_NAME
 
 log = logging.getLogger(__name__)
 
 GUIDE_PATH = Path(__file__).resolve().parents[1] / "pod-draft-guide.md"
 GUIDE_MARKER = "Pod Draft Guide"
+GUIDE_SIGNOFF = "Thank you for playing!"
 
 
 def render_pod_guide(pod_drafters_mention: str) -> str:
     text = GUIDE_PATH.read_text(encoding="utf-8").strip()
     return text.replace(":mtga:", emojis.get("mtga")).replace(f"@{POD_DRAFTERS_ROLE_NAME}", pod_drafters_mention)
+
+
+def render_pod_guide_embed_body(pod_drafters_mention: str) -> str:
+    guide = render_pod_guide(pod_drafters_mention).replace(GUIDE_SIGNOFF, "").rstrip()
+    return f"{guide} {emojis.get('chordo_love')}"
 
 
 class PodGuide(commands.Cog):
@@ -31,19 +38,24 @@ class PodGuide(commands.Cog):
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
     async def pod_guide(self, interaction: discord.Interaction) -> None:
-        body = render_pod_guide(self._resolve_pod_drafters_mention(interaction.guild))
         is_owner = await self.bot.is_owner(interaction.user)
-        audit.event("pod_guide_invoked", user_id=str(interaction.user.id), pinned=is_owner)
-        no_pings = discord.AllowedMentions.none()
-        if is_owner:
+        will_pin = is_owner and in_pod_coordination(interaction.channel)
+        audit.event("pod_guide_invoked", user_id=str(interaction.user.id), pinned=will_pin)
+        mention = self._resolve_pod_drafters_mention(interaction.guild)
+        if will_pin:
             await interaction.response.defer()
             await self._remove_existing_pins(interaction.channel)
-            message = await interaction.followup.send(body, allowed_mentions=no_pings, wait=True)
+            embed = discord.Embed(description=render_pod_guide_embed_body(mention), color=discord.Color.green())
+            message = await interaction.followup.send(
+                embed=embed, allowed_mentions=discord.AllowedMentions.none(), wait=True
+            )
             await self._pin(message)
             await self._react_love(message)
         else:
             await interaction.response.send_message(
-                body, allowed_mentions=no_pings, ephemeral=(interaction.guild is not None)
+                embed=discord.Embed(description=render_pod_guide_embed_body(mention), color=discord.Color.green()),
+                allowed_mentions=discord.AllowedMentions.none(),
+                ephemeral=(interaction.guild is not None and not is_owner),
             )
 
     def _resolve_pod_drafters_mention(self, guild: discord.Guild | None) -> str:
@@ -79,11 +91,16 @@ class PodGuide(commands.Cog):
             log.warning("could not read pins while refreshing the pod guide", exc_info=True)
             return
         for message in pins:
-            if message.author == self.bot.user and GUIDE_MARKER in message.content:
+            if message.author == self.bot.user and self._is_pod_guide(message):
                 try:
                     await message.delete()
                 except discord.HTTPException:
                     log.warning("could not remove a stale pod guide pin", exc_info=True)
+
+    def _is_pod_guide(self, message: discord.Message) -> bool:
+        if GUIDE_MARKER in message.content:
+            return True
+        return any(GUIDE_MARKER in (embed.description or "") for embed in message.embeds)
 
 
 async def setup(bot: commands.Bot) -> None:

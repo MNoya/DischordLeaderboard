@@ -52,7 +52,7 @@ npm run preview
 ```bash
 docker run -d --name dischord-pg -p 5433:5432 \
   -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=devpw -e POSTGRES_DB=dischord \
-  postgres:16-alpine
+  postgres:17-alpine
 ```
 
 To wipe and re-seed:
@@ -64,6 +64,7 @@ docker exec dischord-pg psql -U postgres -d dischord -c 'DROP SCHEMA public CASC
 ### Owner-only prefix commands (DM the bot)
 
 - `!sync` — push slash-command schema changes to Discord. Run after editing any command's name/description/options. Body-only changes don't need it.
+- `!guide` — sync the Server Guide channels (channel-overview, quick-links, rules, limitedlevelups-com) from `bot/server_guide/*.md`: the guide embed in each channel is edited in place, posted fresh when missing, with per-channel results reported. Open to the bot owner, administrators and the Moderator role, not owner-only. Pages post through a webhook wearing the server owner's identity (needs Manage Webhooks; falls back to posting as the bot). Guide channels need channel-level overwrites for the bot's role (View Channel, Send Messages, Read Message History, Embed Links) — native Server Guide resource channels carry an @everyone deny that beats server-level role grants. The format-schedule tick re-syncs channel-overview on its own and moves stale set channels to Format Archive after a rotation; the bot never creates channels.
 - `!refresh` — re-pull 17lands for active players against the active set's window and recompute scores. Same code path as the periodic tick. Posted leaderboards are frozen snapshots, so this edits no messages; fresh standings surface on the next `/leaderboard` or on the website. For full-history reconciliation (formula change, retroactive set add, drift recovery) run `python -m bot.scripts.refresh_stats` from a console instead.
 
 ## Architecture
@@ -91,11 +92,13 @@ The bot is the only writer. The frontend reads through curated `public_*` Postgr
 ### Set rotation — `bot/sets.py` is the single source of truth
 
 ```python
-ACTIVE_SET_CODE = "SOS"
-ALL_SETS = (SetSeed("FIN", ...), SetSeed("TLA", ...), SetSeed("ECL", ...), SetSeed("SOS", ...))
+ALL_SETS = (..., SetSeed("SOS", "Secrets of Strixhaven", date(2026, 4, 21), date(2026, 6, 22)),
+                 SetSeed("MSH", "Marvel Super Heroes", date(2026, 6, 23), date(2026, 8, 10)))
 ```
 
-There is **no `is_current` flag on `sets`** and **no env var** for the active set. Rotation = bump the constant + push to master. Use the `/new-set <CODE>` Claude Code skill (`.claude/skills/new-set/`) to automate: it web-looks-up the official name + Arena release date, edits `bot/sets.py`, runs `seed_sets` + `refresh_stats`, and commits locally.
+The active set is **derived from today's date** by `active_set_code()` — there is **no `ACTIVE_SET_CODE` constant**, no `is_current` flag on `sets`, and no env var. Each `SetSeed` carries its Arena `start_date`/`end_date`; the board flips to a set at noon ET on its `start_date` and mirrors the `public_sets` view the frontend reads. Rotation = add the new set to `ALL_SETS` with its dates + push to master; the flip happens on its own when the date arrives. Use the `/add-set <CODE>` Claude Code skill (`.claude/skills/add-set/`) to automate: it web-looks-up the official name + Arena release date, edits `bot/sets.py`, runs `seed_sets` + `refresh_stats`, and commits locally.
+
+Discord set channels rotate separately and are **not** driven by `!guide`: a dedicated cron in `bot/tasks/format_schedule_post.py` fires at the noon-ET release instant (the 3×/day announce tick re-runs it as an idempotent fallback) and, once the new set's `start_date` passes, posts the outgoing set's send-off standings into its channel, moves it to "Format Archive", notifies the `-admin` channel, and re-syncs channel-overview. The eve of a rotation, `bot/tasks/set_awards_post.py` runs the Set Awards ceremony (8 AM PT, with a T-15 warning) in that same channel and pins it. Creating the incoming set's channel is manual by design — the bot never creates channels, so a mod adds it during preview season for old/new coexistence.
 
 ### Scoring formula — `bot/scoring.py`
 
@@ -155,13 +158,13 @@ On push/PR to `master`: spin up Postgres service container → `alembic upgrade 
 - **Branch is `master`**, never `main`.
 - **Never `git push`.** Pushing to `master` deploys via CI/CD; the user pushes manually from their git IDE. Commits are fine — the push itself is always the user's call, even right after they approved a commit.
 - **Solo repo: commit directly to `master`** for routine changes. Large changesets get a branch — **never a PR**. Merge back by squash, or with a merge commit when the intermediate history is worth keeping; ask which when finishing a branch.
-- **Bundle frontend changes; the user reviews locally before commit.** Commit backend first, leave frontend uncommitted until the user explicitly approves.
+- **Hold commits until the user asks; bundle backend + frontend in one commit.** Leave changes staged in the working tree and don't prompt to commit after each task — the user iterates locally and commits everything together on their own timing.
 - **Tests target logic, not framework behavior.** No tests for "does Postgres work" or "does Alembic apply migrations" — focus on aggregator / scoring / signup branches / interaction handling.
 - **Bot user-facing strings avoid first-person.** Use "Check your DMs" not "I sent you a DM". No "sign up" in user copy — use "join" / "joined" / "on the leaderboard" (internal Python identifiers like `process_signup`, `SignupKind` stay as-is).
 - **Use the short set code (`SOS`) in user-visible strings**, not the full name ("Secrets of Strixhaven") — too long for embed slots.
 - **Shared user-facing message strings live in `bot/commands/messages.py`** (the `MSG_*` constants), parallel to `descriptions.py` for command descriptions. Any string used by more than one command/listener goes there — never duplicate the same copy inline across modules, and don't park shared strings in a service module just because the first caller lived there. A string used by exactly one command may stay as a local `MSG_*` in that command's module; promote it to `messages.py` the moment a second caller needs it. Service modules (`bot/services/`) hold logic, not user copy.
 - **Code comments: default to none.** If a comment runs longer than one line, delete the whole block — don't shrink it, delete it. The code is already self-explanatory if names are right. No periods at end of single-line comments (they're labels, not sentences). No parenthetical asides. Don't paraphrase library / decorator behavior at the declaration site — that belongs in upstream docs, not your file.
-- **Commit style**: subjects start with uppercase; no manual line wrapping in description paragraphs; no `Co-Authored-By: Claude` or any AI trailer; plain senior-engineer prose, no AI/ML jargon. Use `- ` bullets when a commit has 2+ distinct changes.
+- **Commit style**: subjects start with uppercase; no manual line wrapping in description paragraphs; no `Co-Authored-By: Claude` or any AI trailer; plain senior-engineer prose, no AI/ML jargon. Use `- ` bullets when a commit has 2+ distinct changes; prefer one bullet per distinct change over fewer "and"-joined bullets.
 - **Ask before saving memory** and **ask before architectural decisions** — surface structural questions rather than auto-deciding.
 
 ## Operational notes

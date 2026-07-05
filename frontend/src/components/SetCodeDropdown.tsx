@@ -3,6 +3,7 @@ import { cn } from "../lib/utils";
 import { SetGlyph } from "./Brand";
 import { ChevronDown } from "./Icons";
 import { FilterDropdown, type FilterOption } from "./FilterDropdown";
+import { isMtgoFlashbackCode } from "../data/mtgoSets";
 import type { SetSummary } from "../types/leaderboard";
 
 const CHAMFER = "polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%)";
@@ -21,8 +22,17 @@ export function SetCodeDropdown({
   const options: FilterOption[] = React.useMemo(
     () =>
       [...sets]
-        .sort((a, b) => b.startDate.localeCompare(a.startDate))
-        .map((s) => ({ value: s.code, label: s.name })),
+        .sort((a, b) => {
+          const aMtgo = isMtgoFlashbackCode(a.code);
+          const bMtgo = isMtgoFlashbackCode(b.code);
+          if (aMtgo !== bMtgo) return aMtgo ? 1 : -1;
+          return b.startDate.localeCompare(a.startDate);
+        })
+        .map((s) => ({
+          value: s.code,
+          label: s.name,
+          section: isMtgoFlashbackCode(s.code) ? "MTGO FLASHBACKS" : undefined,
+        })),
     [sets],
   );
 

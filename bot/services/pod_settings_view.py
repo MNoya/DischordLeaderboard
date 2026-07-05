@@ -16,7 +16,8 @@ from bot.services.pod_notices import send_settings_notice
 from bot.services.pod_drafts import is_championship
 from bot.services.pod_registration_embed import update_registered_embed
 from bot.services.pod_format_select import SELECT_PLACEHOLDER as FORMAT_PLACEHOLDER
-from bot.services.pod_format_select import format_options
+from bot.services.pod_format_select import WRITE_IN_VALUE as FORMAT_WRITE_IN_VALUE
+from bot.services.pod_format_select import FormatWriteInModal, format_options
 from bot.services.pod_pairing_select import SELECT_PLACEHOLDER as PAIRING_PLACEHOLDER
 from bot.services.pod_pairing_select import pairing_change_message, pairing_options
 from bot.services.pod_seating_select import (
@@ -35,11 +36,17 @@ from bot.sets import active_set_code
 Apply = Callable[[discord.Interaction, str], Awaitable[str | None]]
 KickApply = Callable[[discord.Interaction, str], Awaitable[str | None]]
 KickTargetsProvider = Callable[[], list[tuple[str, str]]]
+LinkApply = Callable[[discord.Interaction, str, discord.abc.User], Awaitable[str | None]]
+LinkTargetsProvider = Callable[[], Awaitable[list[str]]]
 CancelApply = Callable[[discord.Interaction], Awaitable[str | None]]
 
 
 def kick_notice(actor: str, name: str) -> str:
     return f"🔨 **{name}** was removed by {actor}"
+
+
+def link_notice(actor: str, member_name: str, arena_name: str) -> str:
+    return f"🔗 **{member_name}** linked to `{arena_name}` by {actor}"
 
 
 def cancel_notice(actor: str) -> str:
@@ -56,6 +63,8 @@ class PodSettingsView(ui.View):
                  on_seated: SeatedNotify | None = None,
                  kick_targets_provider: KickTargetsProvider | None = None,
                  on_kick: KickApply | None = None,
+                 link_targets_provider: LinkTargetsProvider | None = None,
+                 on_link: LinkApply | None = None,
                  on_cancel: CancelApply | None = None,
                  event_name: str | None = None) -> None:
         super().__init__(timeout=300)
@@ -71,6 +80,8 @@ class PodSettingsView(ui.View):
         self.on_seated = on_seated
         self.kick_targets_provider = kick_targets_provider
         self.on_kick = on_kick
+        self.link_targets_provider = link_targets_provider
+        self.on_link = on_link
         self.on_cancel = on_cancel
         self.event_name = event_name
         self.add_item(_FormatSetting(current_code))
@@ -81,6 +92,8 @@ class PodSettingsView(ui.View):
                 and (current_seating or "random") == "manual"):
             self.add_item(SeatOrderButton(
                 seat_order_provider=seat_order_provider, on_seating=on_seating, on_seated=on_seated, row=3))
+        if link_targets_provider is not None and on_link is not None:
+            self.add_item(_LinkPlayersButton(row=3))
         if kick_targets_provider is not None and on_kick is not None:
             self.add_item(_KickPlayerButton(row=3))
         if on_cancel is not None:
@@ -101,6 +114,7 @@ class PodSettingsView(ui.View):
             on_seating=self.on_seating, seat_order_provider=self.seat_order_provider,
             on_seating_table=self.on_seating_table, on_seated=self.on_seated,
             kick_targets_provider=self.kick_targets_provider, on_kick=self.on_kick,
+            link_targets_provider=self.link_targets_provider, on_link=self.on_link,
             on_cancel=self.on_cancel, event_name=self.event_name,
         ))
         if interaction.channel is not None:
@@ -114,6 +128,11 @@ class PodSettingsView(ui.View):
             championship=is_championship(self.event_name),
         )
 
+    async def _apply_format_code(self, interaction: discord.Interaction, code: str) -> None:
+        await self.apply(interaction, on_apply=self.on_format, value=code, attr="current_code",
+                         notice=format_change_message(actor_label(interaction), code),
+                         marker=settings_notice_marker("Format"))
+
 
 class _FormatSetting(ui.Select):
     def __init__(self, current_code: str | None) -> None:
@@ -123,9 +142,10 @@ class _FormatSetting(ui.Select):
     async def callback(self, interaction: discord.Interaction) -> None:
         view: PodSettingsView = self.view
         code = self.values[0]
-        await view.apply(interaction, on_apply=view.on_format, value=code, attr="current_code",
-                         notice=format_change_message(actor_label(interaction), code),
-                         marker=settings_notice_marker("Format"))
+        if code == FORMAT_WRITE_IN_VALUE:
+            await interaction.response.send_modal(FormatWriteInModal(view._apply_format_code))
+            return
+        await view._apply_format_code(interaction, code)
 
 
 class _PairingSetting(ui.Select):
@@ -198,6 +218,73 @@ class _KickSelect(ui.Select):
         await interaction.edit_original_response(content=f"🔨 **{name}** removed.", view=None)
         if interaction.channel is not None:
             await interaction.channel.send(kick_notice(actor_label(interaction), name))
+
+
+class _LinkPlayersButton(ui.Button):
+    def __init__(self, row: int | None = None) -> None:
+        super().__init__(label="Link Players", emoji="🔗", style=discord.ButtonStyle.grey, row=row)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view: PodSettingsView = self.view
+        targets = await view.link_targets_provider()
+        if not targets:
+            await interaction.response.send_message(
+                "Everyone in the Draftmancer session is already linked.", ephemeral=True,
+            )
+            return
+        await interaction.response.send_message(
+            "Pick the unlinked Draftmancer seat to assign:",
+            view=_LinkSeatSelectView(targets, view.on_link), ephemeral=True,
+        )
+
+
+class _LinkSeatSelectView(ui.View):
+    def __init__(self, targets: list[str], on_link: LinkApply) -> None:
+        super().__init__(timeout=120)
+        self.add_item(_LinkSeatSelect(targets, on_link))
+
+
+class _LinkSeatSelect(ui.Select):
+    def __init__(self, targets: list[str], on_link: LinkApply) -> None:
+        options = [discord.SelectOption(label=name, value=name) for name in targets[:25]]
+        super().__init__(placeholder="Unlinked Draftmancer seat", options=options,
+                         min_values=1, max_values=1)
+        self.on_link = on_link
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        arena_name = self.values[0]
+        await interaction.response.edit_message(
+            content=f"Who is `{arena_name}`?",
+            view=_LinkMemberSelectView(arena_name, self.on_link),
+        )
+
+
+class _LinkMemberSelectView(ui.View):
+    def __init__(self, arena_name: str, on_link: LinkApply) -> None:
+        super().__init__(timeout=120)
+        self.add_item(_LinkMemberSelect(arena_name, on_link))
+
+
+class _LinkMemberSelect(ui.UserSelect):
+    def __init__(self, arena_name: str, on_link: LinkApply) -> None:
+        super().__init__(placeholder="Pick the Discord member", min_values=1, max_values=1)
+        self.arena_name = arena_name
+        self.on_link = on_link
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer()
+        member = self.values[0]
+        err = await self.on_link(interaction, self.arena_name, member)
+        if err:
+            await interaction.followup.send(f"⚠️ {err}", ephemeral=True)
+            return
+        await interaction.edit_original_response(
+            content=f"🔗 **{member.display_name}** linked as `{self.arena_name}`.", view=None,
+        )
+        if interaction.channel is not None:
+            await interaction.channel.send(
+                link_notice(actor_label(interaction), member.display_name, self.arena_name)
+            )
 
 
 class _CancelDraftButton(ui.Button):

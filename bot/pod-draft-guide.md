@@ -5,7 +5,7 @@
 
 **Draft Setup:**
 1. Ten minutes before the scheduled draft time, the bot will create a table on [Draftmancer](<https://draftmancer.com>), sharing the link in Discord and notifying all who signed up.
-2. Set your Draftmancer name to your Arena handle (`ArenaID#12345`). If your Arena name doesn't match your Discord name, run **`/link-arena`** so the bot knows it's you.
+2. Set your Draftmancer name to your Arena handle (`ArenaID#12345`). If your Arena name doesn't match your Discord name, run `/link-arena` so the bot knows it's you.
 3. Press **Ready Check** in the thread once everyone has joined the table. Draft will start as soon as everyone clicks **Ready** in Draftmancer.
 
 **After Drafting:**

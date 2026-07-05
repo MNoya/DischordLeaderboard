@@ -10,6 +10,7 @@ import {
   adaptDraftEvent,
   adaptFormatBreakdown,
   adaptLeaderboardRow,
+  adaptSelfReportedEvent,
   adaptSet,
 } from "./adapter";
 import { adaptDbEpisode, type DbEpisodeRow, type Episode } from "./episodes";
@@ -23,8 +24,10 @@ import {
   type GroupTotals,
   type ScoringStatRow,
 } from "./scoring";
+import { mergeSelfReportedTrophies, type SelfReportedTrophyTally } from "./selfReported";
 import { baseSetCode, colorsOf, CUBE_BASE, isCubeCode, isCubeSeasonCode, isSoup } from "./utils";
 import { formatsForBucket } from "./format-buckets";
+import { IDENTITY_VIEWS } from "./constants";
 import { FORMAT_LABEL_GROUPS, FORMAT_RAW_GROUPS, MULTI, OTHER } from "./filters";
 import type {
   ColorsLeaderboardRow,
@@ -44,6 +47,7 @@ import type {
   PodSetCode,
   RecentTrophy,
   SetSummary,
+  TrophyLeaderboardRow,
 } from "../types/leaderboard";
 
 function client() {
@@ -64,11 +68,24 @@ const eventsViewFor = (setCode: string): string =>
 export async function fetchDbEpisodes(): Promise<Episode[]> {
   const { data, error } = await client()
     .from("public_episodes")
-    .select("*")
+    .select(DB_EPISODE_COLUMNS)
     .order("published_at", { ascending: false });
   if (error) throw error;
   return (data ?? []).map((r) => adaptDbEpisode(r as unknown as DbEpisodeRow));
 }
+
+export async function fetchRecentDbEpisodes(limit = 8): Promise<Episode[]> {
+  const { data, error } = await client()
+    .from("public_episodes")
+    .select(DB_EPISODE_COLUMNS)
+    .order("published_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []).map((r) => adaptDbEpisode(r as unknown as DbEpisodeRow));
+}
+
+const DB_EPISODE_COLUMNS =
+  "guid, kind, number, title, link, image, published_at, duration_seconds, audio_url, youtube_id, category, set_code, set_name, set_released_at";
 
 export async function fetchCubeSeasons(): Promise<CubeSeason[]> {
   const { data, error } = await client()
@@ -164,14 +181,28 @@ export async function fetchAvailableFormats(setCode: string): Promise<string[]> 
 
 export async function fetchLeaderboard(setCode: string): Promise<LeaderboardRow[]> {
   if (isCubeSeasonCode(setCode)) return fetchCubeSeasonLeaderboard(setCode);
-  const [leaderboard, breakdown, pod] = await Promise.all([
-    client().from("public_leaderboard").select("*").eq("set_code", setCode),
-    client().from("public_player_format_breakdown").select("*").eq("set_code", setCode),
-    client().from("public_pod_scoring").select("*").eq("set_code", setCode),
+  const [leaderboard, breakdown, pod, selfReported] = await Promise.all([
+    client()
+      .from("public_leaderboard")
+      .select("slug, display_name, avatar_url, trophies, events, wins, losses, last_calculated_at")
+      .eq("set_code", setCode),
+    client()
+      .from("public_player_format_breakdown")
+      .select("slug, format_label, events, wins, losses, trophies")
+      .eq("set_code", setCode),
+    client()
+      .from("public_pod_scoring")
+      .select("slug, display_name, avatar_url, trophies, wins_2_1, leaderboard_opt_in")
+      .eq("set_code", setCode),
+    client()
+      .from("public_self_reported_events")
+      .select("slug, display_name, avatar_url, is_trophy")
+      .eq("set_code", setCode),
   ]);
   if (leaderboard.error) throw leaderboard.error;
   if (breakdown.error) throw breakdown.error;
   if (pod.error) throw pod.error;
+  if (selfReported.error) throw selfReported.error;
 
   // 17lands score: group every breakdown row per slug, then aggregate (confidence is aggregate)
   const groupsBySlug = new Map<string, GroupTotals[]>();
@@ -238,11 +269,70 @@ export async function fetchLeaderboard(setCode: string): Promise<LeaderboardRow[
     }
   }
 
+  // Self-reported trophies (paper/MTGO runs logged via /trophy). Zero score: they lift the trophy
+  // count only, and a self-report-only player enters the board the way pod-only players do.
+  const tallyBySlug = new Map<string, SelfReportedTrophyTally>();
+  for (const raw of selfReported.data ?? []) {
+    const r = raw as Record<string, unknown>;
+    if (r.is_trophy !== true) continue;
+    const slug = r.slug as string;
+    const existing = tallyBySlug.get(slug);
+    if (existing) {
+      existing.trophies += 1;
+    } else {
+      tallyBySlug.set(slug, {
+        slug,
+        displayName: (r.display_name as string) ?? slug,
+        avatarUrl: (r.avatar_url ?? null) as string | null,
+        trophies: 1,
+      });
+    }
+  }
+
+  return mergeSelfReportedTrophies([...bySlug.values()], [...tallyBySlug.values()], setCode);
+}
+
+// MTGO flashback board: self-reported results aggregated per player. These sets have no scored
+// data, so the standing is the trophy tally; non-trophy decks are carried but don't lift the rank.
+export async function fetchTrophyLeaderboard(setCode: string): Promise<TrophyLeaderboardRow[]> {
+  const { data, error } = await client()
+    .from("public_self_reported_events")
+    .select("*")
+    .eq("set_code", setCode)
+    .order("reported_at", { ascending: false });
+  if (error) throw error;
+
+  const bySlug = new Map<string, TrophyLeaderboardRow>();
+  for (const raw of data ?? []) {
+    const r = raw as Record<string, unknown>;
+    const slug = r.slug as string;
+    const deck = adaptSelfReportedEvent(r);
+    const existing = bySlug.get(slug);
+    if (existing) {
+      existing.trophies += deck.isTrophy ? 1 : 0;
+      existing.deckCount += 1;
+      existing.decks.push(deck);
+    } else {
+      bySlug.set(slug, {
+        setCode,
+        slug,
+        displayName: (r.display_name as string) ?? slug,
+        avatarUrl: (r.avatar_url ?? null) as string | null,
+        rank: 0,
+        trophies: deck.isTrophy ? 1 : 0,
+        deckCount: 1,
+        decks: [deck],
+      });
+    }
+  }
+
   return [...bySlug.values()]
-    .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      return a.displayName.localeCompare(b.displayName);
-    })
+    .sort(
+      (a, b) =>
+        b.trophies - a.trophies ||
+        b.deckCount - a.deckCount ||
+        b.decks[0].reportedAt.localeCompare(a.decks[0].reportedAt),
+    )
     .map((r, i) => ({ ...r, rank: i + 1 }));
 }
 
@@ -350,12 +440,15 @@ export async function fetchFormatLeaderboard(
   if (format === "Direct") return fetchDirectLeaderboard(setCode);
   if (isCubeSeasonCode(setCode)) return fetchCubeSeasonFormatLeaderboard(setCode, format);
   const labels = FORMAT_LABEL_GROUPS[format] ?? [format];
+  const labelSet = new Set(labels);
+  // Fetch the whole breakdown (not just the filtered labels): a format's points must carry the
+  // player-wide confidence factor over all their trophies, matching the profile and the overall
+  // board. Scoring only the filtered groups would shrink confidence to that format alone.
   const [breakdown, leaderboard] = await Promise.all([
     client()
       .from("public_player_format_breakdown")
       .select("*")
-      .eq("set_code", setCode)
-      .in("format_label", labels),
+      .eq("set_code", setCode),
     client()
       .from("public_leaderboard")
       .select("slug, display_name, avatar_url, last_calculated_at")
@@ -378,14 +471,16 @@ export async function fetchFormatLeaderboard(
     const slug = r.slug as string;
     const events = (r.events as number) ?? 0;
     if (events <= 0 || !info.has(slug)) continue;
+    const label = r.format_label as string;
     const wins = (r.wins as number) ?? 0;
     const losses = (r.losses as number) ?? 0;
     const trophies = (r.trophies as number) ?? 0;
 
     const list = groupsBySlug.get(slug) ?? [];
-    list.push({ label: r.format_label as string, events, wins, losses, trophies });
+    list.push({ label, events, wins, losses, trophies });
     groupsBySlug.set(slug, list);
 
+    if (!labelSet.has(label)) continue;
     const t = totalsBySlug.get(slug) ?? { trophies: 0, events: 0, wins: 0, losses: 0 };
     t.trophies += trophies;
     t.events += events;
@@ -395,16 +490,20 @@ export async function fetchFormatLeaderboard(
   }
 
   const rows: LeaderboardRow[] = [];
-  for (const [slug, groups] of groupsBySlug) {
+  for (const [slug, t] of totalsBySlug) {
     const inf = info.get(slug)!;
-    const t = totalsBySlug.get(slug)!;
+    const contributions = aggregate(groupsBySlug.get(slug) ?? []).contributionByLabel;
+    let score = 0;
+    for (const label of labels) {
+      score += contributions.get(label) ?? 0;
+    }
     rows.push({
       setCode,
       slug,
       displayName: inf.display_name as string,
       avatarUrl: (inf.avatar_url ?? null) as string | null,
       rank: 0,
-      score: scoreFromGroups(groups),
+      score: Math.round(score * 100) / 100,
       trophies: t.trophies,
       events: t.events,
       wins: t.wins,
@@ -576,60 +675,27 @@ async function fetchDirectLeaderboard(setCode: string): Promise<LeaderboardRow[]
     .map((r, i) => ({ ...r, rank: i + 1 }));
 }
 
+// Per-color archetype tallies come pre-aggregated from public_colors_summary
+// (~20 rows), not from a client-side pass over every draft event. The view owns
+// the overlapping tally — each deck counts toward its main-color archetype and,
+// when it qualifies as Soup, toward MULTI — and the cube vs non-cube Soup rule.
 export async function fetchColorsSummary(setCode: string): Promise<ColorsSummary[]> {
-  // First page carries an exact count; the rest fetch in parallel so the color
-  // pills wait on one round-trip of latency, not N stacked ones (the page can be
-  // far from the DB region — sequential pagination was the slowest thing on load).
-  const pageSize = 1000;
-  const eventsView = eventsViewFor(setCode);
-  const page = (from: number) =>
-    client()
-      .from(eventsView)
-      .select("slug, colors, is_trophy")
-      .eq("set_code", setCode)
-      .range(from, from + pageSize - 1);
-
-  const first = await client()
-    .from(eventsView)
-    .select("slug, colors, is_trophy", { count: "exact" })
-    .eq("set_code", setCode)
-    .range(0, pageSize - 1);
-  if (first.error) throw first.error;
-
-  const allEvents = [...((first.data ?? []) as Array<Record<string, unknown>>)];
-  const total = first.count ?? allEvents.length;
-  const restPages = Math.max(0, Math.ceil(total / pageSize) - 1);
-  if (restPages > 0) {
-    const results = await Promise.all(
-      Array.from({ length: restPages }, (_, i) => page((i + 1) * pageSize)),
-    );
-    for (const r of results) {
-      if (r.error) throw r.error;
-      allEvents.push(...((r.data ?? []) as Array<Record<string, unknown>>));
-    }
-  }
-
-  const cube = isCubeCode(setCode);
-  const agg = new Map<string, { trophies: number; events: number; players: Set<string> }>();
-  for (const raw of allEvents) {
-    const colors = (raw.colors as string | null) ?? "";
-    const slug = raw.slug as string;
-    // Overlapping tally: a deck counts toward its main-color archetype and, when it
-    // qualifies as Soup, also toward Soup — matching the boards' filters.
-    const keys: string[] = [];
-    const main = colorsOf(colors);
-    if (main) keys.push(main);
-    if (isSoup(colors, cube)) keys.push(MULTI);
-    for (const key of keys) {
-      const cur = agg.get(key) ?? { trophies: 0, events: 0, players: new Set<string>() };
-      cur.events += 1;
-      if (raw.is_trophy) cur.trophies += 1;
-      cur.players.add(slug);
-      agg.set(key, cur);
-    }
-  }
-  return Array.from(agg.entries())
-    .map(([colors, v]) => ({ setCode, colors, trophies: v.trophies, events: v.events, players: v.players.size }))
+  const { data, error } = await client()
+    .from("public_colors_summary")
+    .select("colors, trophies, events, players")
+    .eq("set_code", setCode);
+  if (error) throw error;
+  return (data ?? [])
+    .map((raw) => {
+      const r = raw as Record<string, unknown>;
+      return {
+        setCode,
+        colors: r.colors as string,
+        trophies: (r.trophies as number) ?? 0,
+        events: (r.events as number) ?? 0,
+        players: (r.players as number) ?? 0,
+      };
+    })
     .sort((a, b) => b.trophies - a.trophies);
 }
 
@@ -794,7 +860,7 @@ export async function fetchPlayerProfile(
   setCode: string,
 ): Promise<PlayerProfile | null> {
   setCode = baseSetCode(setCode); // cube seasons share the lifetime profile
-  const [headlineResp, breakdownResp, podResp] = await Promise.all([
+  const [headlineResp, breakdownResp, podResp, trophiesResp] = await Promise.all([
     client()
       .from("public_player")
       .select("*")
@@ -812,13 +878,28 @@ export async function fetchPlayerProfile(
       .eq("set_code", setCode)
       .eq("slug", slug)
       .maybeSingle(),
+    client()
+      .from("public_self_reported_events")
+      .select("*")
+      .eq("set_code", setCode)
+      .eq("slug", slug)
+      .order("reported_at", { ascending: false }),
   ]);
   if (headlineResp.error) throw headlineResp.error;
   if (breakdownResp.error) throw breakdownResp.error;
   if (podResp.error) throw podResp.error;
-  if (!headlineResp.data) return null;
+  if (trophiesResp.error) throw trophiesResp.error;
+  const trophyRows = (trophiesResp.data ?? []) as Record<string, unknown>[];
+  if (!headlineResp.data && !podResp.data && trophyRows.length === 0) return null;
 
-  const headline = adaptLeaderboardRow(headlineResp.data as Record<string, unknown>);
+  let headline: LeaderboardRow;
+  if (headlineResp.data) {
+    headline = adaptLeaderboardRow(headlineResp.data as Record<string, unknown>);
+  } else if (podResp.data) {
+    headline = podOnlyHeadline(slug, setCode, podResp.data as Record<string, unknown>);
+  } else {
+    headline = trophyOnlyHeadline(slug, setCode, trophyRows[0]);
+  }
   const breakdown = (breakdownResp.data ?? []).map((r) =>
     adaptFormatBreakdown(r as Record<string, unknown>),
   );
@@ -870,7 +951,43 @@ export async function fetchPlayerProfile(
     events: headline.events,
     wins: headline.wins,
     losses: headline.losses,
+    lastCalculatedAt: headline.lastCalculatedAt || undefined,
     formatBreakdown: breakdown,
+    selfReportedEvents: trophyRows.map((r) => adaptSelfReportedEvent(r)),
+  };
+}
+
+function podOnlyHeadline(slug: string, setCode: string, pod: Record<string, unknown>): LeaderboardRow {
+  return {
+    setCode,
+    slug,
+    displayName: (pod.display_name as string | null) ?? slug,
+    avatarUrl: (pod.avatar_url as string | null) ?? null,
+    rank: 0,
+    score: 0,
+    trophies: 0,
+    events: (pod.events as number) ?? 0,
+    wins: (pod.wins as number) ?? 0,
+    losses: (pod.losses as number) ?? 0,
+    lastCalculatedAt: "",
+  };
+}
+
+// A player whose only footprint is self-reported trophies — no 17lands stats, no pods. Their
+// profile still renders so the trophy-case band has a home.
+function trophyOnlyHeadline(slug: string, setCode: string, trophy: Record<string, unknown>): LeaderboardRow {
+  return {
+    setCode,
+    slug,
+    displayName: (trophy.display_name as string | null) ?? slug,
+    avatarUrl: (trophy.avatar_url as string | null) ?? null,
+    rank: 0,
+    score: 0,
+    trophies: 0,
+    events: 0,
+    wins: 0,
+    losses: 0,
+    lastCalculatedAt: "",
   };
 }
 
@@ -891,23 +1008,30 @@ export async function fetchPlayerSlugByDiscordId(discordId: string): Promise<str
 }
 
 export async function fetchPlayerIdentity(slug: string): Promise<PlayerIdentity | null> {
-  const { data, error } = await client()
-    .from("public_player")
-    .select("slug, display_name, avatar_url")
-    .eq("slug", slug)
-    .limit(1)
-    .maybeSingle();
-  if (error) throw error;
-  if (!data) return null;
-  const row = data as Record<string, unknown>;
-  return {
-    slug: row.slug as string,
-    displayName: row.display_name as string,
-    avatarUrl: (row.avatar_url as string | null) ?? null,
-  };
+  for (const view of IDENTITY_VIEWS) {
+    const { data, error } = await client()
+      .from(view)
+      .select("slug, display_name, avatar_url")
+      .eq("slug", slug)
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    if (data) {
+      const row = data as Record<string, unknown>;
+      return {
+        slug: row.slug as string,
+        displayName: row.display_name as string,
+        avatarUrl: (row.avatar_url as string | null) ?? null,
+      };
+    }
+  }
+  return null;
 }
 
 // ─── public_player_draft_events ────────────────────────────────────────────
+
+const DRAFT_EVENT_COLUMNS =
+  "slug, set_code, event_id, format, expansion, wins, losses, is_trophy, colors, started_at, finished_at, seventeenlands_event_id, external_url, event_name, pod_event_slug, end_rank";
 
 export async function fetchPlayerDraftEvents(
   slug: string,
@@ -916,15 +1040,20 @@ export async function fetchPlayerDraftEvents(
   setCode = baseSetCode(setCode); // cube seasons share the lifetime profile
   const { data, error } = await client()
     .from("public_player_draft_events")
-    .select("*")
+    .select(DRAFT_EVENT_COLUMNS)
     .eq("slug", slug)
     .eq("set_code", setCode)
     .order("finished_at", { ascending: false, nullsFirst: false });
   if (error) throw error;
-  return (data ?? []).map((r) => adaptDraftEvent(r as Record<string, unknown>));
+  return (data ?? []).map((r) => adaptDraftEvent(r as unknown as Record<string, unknown>));
 }
 
 // ─── public_recent_trophies ────────────────────────────────────────────────
+
+// Both public_recent_trophies and public_cube_season_events carry these; selecting
+// them by name keeps the wider season-events row from shipping unused columns.
+const RECENT_TROPHY_COLUMNS =
+  "set_code, slug, display_name, avatar_url, format, colors, wins, losses, finished_at, seventeenlands_event_id, end_rank";
 
 export async function fetchRecentTrophies(
   setCode: string,
@@ -934,7 +1063,7 @@ export async function fetchRecentTrophies(
   // the full event log, so it needs the explicit trophy filter.
   let query = client()
     .from(isCubeSeasonCode(setCode) ? "public_cube_season_events" : "public_recent_trophies")
-    .select("*")
+    .select(RECENT_TROPHY_COLUMNS)
     .eq("set_code", setCode);
   if (isCubeSeasonCode(setCode)) query = query.eq("is_trophy", true);
   const { data, error } = await query
@@ -953,7 +1082,17 @@ export async function fetchFormatRecentTrophies(
 ): Promise<RecentTrophy[]> {
   if (format === "Pod") return fetchPodRecentTrophies(setCode);
   if (format === "LCQ") return fetchLcqRecentTrophiesAndWins(setCode);
-  const group = FORMAT_RAW_GROUPS[format];
+  return fetchTrophyPool(setCode, format);
+}
+
+// Full trophy pool of a set, so the sidebar can rebuild Top Colors and Recent
+// Trophies client-side when the rank filter is active.
+export async function fetchAllRecentTrophies(setCode: string): Promise<RecentTrophy[]> {
+  return fetchTrophyPool(setCode);
+}
+
+async function fetchTrophyPool(setCode: string, format?: string): Promise<RecentTrophy[]> {
+  const group = format ? FORMAT_RAW_GROUPS[format] : null;
   const season = isCubeSeasonCode(setCode);
   const view = season ? "public_cube_season_events" : "public_recent_trophies";
 
@@ -962,12 +1101,12 @@ export async function fetchFormatRecentTrophies(
   for (let from = 0; ; from += pageSize) {
     let q = client()
       .from(view)
-      .select("*")
+      .select(RECENT_TROPHY_COLUMNS)
       .eq("set_code", setCode)
       .order("finished_at", { ascending: false, nullsFirst: false })
       .range(from, from + pageSize - 1);
     if (season) q = q.eq("is_trophy", true);
-    q = group ? q.in("format", group) : q.ilike("format", `%${format}%`);
+    if (format) q = group ? q.in("format", group) : q.ilike("format", `%${format}%`);
     const { data, error } = await q;
     if (error) throw error;
     const batch = (data ?? []) as Array<Record<string, unknown>>;
@@ -990,6 +1129,7 @@ function adaptRecentTrophy(row: Record<string, unknown>): RecentTrophy {
     losses: row.losses as number,
     finishedAt: row.finished_at as string,
     isTrophy: true,
+    endRank: (row.end_rank ?? null) as string | null,
   };
 }
 
@@ -1308,7 +1448,6 @@ function adaptPodEventParticipant(row: Record<string, unknown>): PodEventPartici
     placement: (row.placement ?? null) as number | null,
     record: (row.record ?? null) as string | null,
     deckColors: (row.deck_colors ?? null) as string | null,
-    draftLogUrl: (row.draft_log_url ?? null) as string | null,
     deckScreenshotUrl: (row.deck_screenshot_url ?? null) as string | null,
     deckScreenshotCaption: (row.deck_screenshot_caption ?? null) as string | null,
     playerSlug: (row.player_slug ?? null) as string | null,

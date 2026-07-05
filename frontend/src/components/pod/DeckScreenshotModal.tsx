@@ -1,18 +1,16 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { ChevronLeft, ChevronRight, X, ZoomIn, ZoomOut } from "lucide-react";
 import { ArrowRight, GiRoundTable, ImageIcon, LuScrollText, TbCards } from "../Icons";
 import { ChamferedButton } from "../ChamferedButton";
 import { Pips } from "../ManaPips";
 import { Record } from "../Record";
 import { cn } from "../../lib/utils";
+import { StackColumn, useFallbackImage } from "./review/ReviewCard";
+import { cardImageSources } from "../../data/cardImages";
 import { useIsMobile } from "../../lib/use-is-mobile";
-import {
-  isDiscordCdnUrl,
-  isDiscordUrlFresh,
-  refreshDeckUrl,
-} from "../../data/refresh-deck-url";
+import { useResolvedDeckUrl } from "../../data/refresh-deck-url";
 import type { Mainboard } from "../../types/leaderboard";
 
 export const BREAKDOWN_CAPTION = "Seats, logs & replays";
@@ -26,48 +24,49 @@ export interface DeckLike {
   deckScreenshotCaption?: string | null;
   mainboard?: Mainboard | null;
   record?: string | null;
-  draftLogUrl?: string | null;
+  // Self-reported trophies refresh their Discord CDN screenshot by message ref instead of pod event
+  screenshotChannelId?: string | null;
+  screenshotMessageId?: string | null;
 }
 
-type DeckTab = "screenshot" | "decklist";
+export type DeckTab = "screenshot" | "decklist";
 
 interface Props {
   participant: DeckLike;
+  initialTab?: DeckTab;
   breakdownHref?: string;
+  hideDraftLog?: boolean;
+  draftLogHref?: string | null;
   onClose: () => void;
   onPrev?: () => void;
   onNext?: () => void;
 }
 
-export function DeckScreenshotModal({ participant, breakdownHref, onClose, onPrev, onNext }: Props) {
+export function DeckScreenshotModal({ participant, initialTab = "screenshot", breakdownHref, hideDraftLog = false, draftLogHref, onClose, onPrev, onNext }: Props) {
   const isMobile = useIsMobile();
+  const navigate = useNavigate();
 
   const hasScreenshot = participant.deckScreenshotUrl !== null;
+  const recordWins = Number((participant.record ?? "").split("-")[0] || 0);
+  const recordLosses = Number((participant.record ?? "").split("-")[1] || 0);
+  const hasRecord = participant.record != null && recordWins + recordLosses > 0;
   const hasDecklist = (participant.mainboard?.cards.length ?? 0) > 0;
   const deckKey = `${participant.eventId ?? ""}::${participant.participantDisplayName ?? participant.displayName}`;
-  const [tab, setTab] = useState<DeckTab>("screenshot");
+  const [tab, setTab] = useState<DeckTab>(initialTab);
   const effectiveTab: DeckTab =
     hasScreenshot && hasDecklist ? tab : hasDecklist ? "decklist" : "screenshot";
+  const showPanelToggle = hasScreenshot && hasDecklist;
+  const showDraftLogTab = !hideDraftLog;
+  const showTabBar = showPanelToggle || showDraftLogTab || !!onPrev || !!onNext;
 
-  const needsRefresh = useMemo(() => {
-    const url = participant.deckScreenshotUrl;
-    if (!url || !participant.eventId) return false;
-    return isDiscordCdnUrl(url) && !isDiscordUrlFresh(url);
-  }, [participant.deckScreenshotUrl, participant.eventId]);
-
-  const [resolvedUrl, setResolvedUrl] = useState<string | null>(
-    needsRefresh ? null : participant.deckScreenshotUrl,
-  );
-  const [isResolving, setIsResolving] = useState(needsRefresh);
+  const { url: resolvedUrl, resolving: isResolving } = useResolvedDeckUrl(participant);
   const [imgLoaded, setImgLoaded] = useState(false);
   const [imgFailed, setImgFailed] = useState(false);
   const [zoomed, setZoomed] = useState(true);
 
   useEffect(() => {
     setZoomed(true);
-    setResolvedUrl(needsRefresh ? null : participant.deckScreenshotUrl);
-    setIsResolving(needsRefresh);
-  }, [participant.deckScreenshotUrl, needsRefresh]);
+  }, [participant.deckScreenshotUrl]);
 
   useEffect(() => {
     setImgLoaded(false);
@@ -80,29 +79,6 @@ export function DeckScreenshotModal({ participant, breakdownHref, onClose, onPre
   }, [resolvedUrl]);
 
   const showSkeleton = isResolving || (resolvedUrl !== null && !imgLoaded && !imgFailed);
-
-  useEffect(() => {
-    if (!needsRefresh || !participant.eventId) return;
-    const lookupName = participant.participantDisplayName ?? participant.displayName;
-    let cancelled = false;
-    refreshDeckUrl(participant.eventId, lookupName)
-      .then((url) => {
-        if (cancelled) return;
-        setResolvedUrl(url ?? participant.deckScreenshotUrl);
-      })
-      .finally(() => {
-        if (!cancelled) setIsResolving(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    needsRefresh,
-    participant.eventId,
-    participant.displayName,
-    participant.participantDisplayName,
-    participant.deckScreenshotUrl,
-  ]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -145,12 +121,8 @@ export function DeckScreenshotModal({ participant, breakdownHref, onClose, onPre
           >
             {participant.displayName}
           </span>
-          {participant.record && (
-            <Record
-              wins={Number(participant.record.split("-")[0] || 0)}
-              losses={Number(participant.record.split("-")[1] || 0)}
-              className="mono text-[20px] shrink-0"
-            />
+          {hasRecord && (
+            <Record wins={recordWins} losses={recordLosses} className="mono text-[20px] shrink-0" />
           )}
           <button
             type="button"
@@ -259,58 +231,48 @@ export function DeckScreenshotModal({ participant, breakdownHref, onClose, onPre
             {participant.deckScreenshotCaption}
           </div>
         )}
-        {effectiveTab === "decklist" && (participant.mainboard?.sideboard.length ?? 0) > 0 && (
-          <div className="border-t border-border shrink-0 bg-surface pl-9 pr-5 py-3">
-            <div className="font-display tracking-[0.16em] text-muted leading-none mb-2" style={{ fontSize: 13 }}>
-              SIDEBOARD
-            </div>
-            <div className="flex gap-2 overflow-x-auto themed-scrollbar pb-1">
-              {participant.mainboard!.sideboard.map((card) => (
-                <SideboardCard key={`${card.name}-${card.cn}`} card={card} deckSet={participant.mainboard!.set} />
-              ))}
-            </div>
-          </div>
-        )}
       </div>
       <div className="flex-1 min-h-0 w-full max-w-[1400px] flex flex-col items-center justify-center gap-10 px-4 md:px-0">
+        {showTabBar && (
         <div
           onClick={(e) => e.stopPropagation()}
           className="shrink-0 w-full lg:w-auto flex items-center justify-between gap-2 lg:gap-4 rounded-2xl bg-surface border border-border shadow-lg px-3 py-2 lg:px-4"
         >
           {onPrev ? <PanelChevron side="left" onClick={onPrev} /> : <span className="w-10 shrink-0" />}
           <div className="flex items-center gap-1.5">
-            <PanelTab
-              active={effectiveTab === "screenshot"}
-              disabled={!hasScreenshot}
-              onClick={() => setTab("screenshot")}
-              icon={<ImageIcon size={16} />}
-            >
-              IMAGE
-            </PanelTab>
-            <PanelTab
-              active={effectiveTab === "decklist"}
-              disabled={!hasDecklist}
-              onClick={() => setTab("decklist")}
-              icon={<TbCards size={17} />}
-            >
-              <span className="lg:hidden">POOL</span>
-              <span className="hidden lg:inline">CARD POOL</span>
-            </PanelTab>
-            <PanelTab
-              disabled={!participant.draftLogUrl}
-              onClick={
-                participant.draftLogUrl
-                  ? () => window.open(participant.draftLogUrl!, "_blank", "noopener,noreferrer")
-                  : undefined
-              }
-              icon={<LuScrollText size={16} />}
-            >
-              <span className="lg:hidden">LOG</span>
-              <span className="hidden lg:inline">DRAFT LOG</span>
-            </PanelTab>
+            {showPanelToggle && (
+              <PanelTab
+                active={effectiveTab === "screenshot"}
+                onClick={() => setTab("screenshot")}
+                icon={<ImageIcon size={16} />}
+              >
+                IMAGE
+              </PanelTab>
+            )}
+            {showPanelToggle && (
+              <PanelTab
+                active={effectiveTab === "decklist"}
+                onClick={() => setTab("decklist")}
+                icon={<TbCards size={17} />}
+              >
+                <span className="lg:hidden">POOL</span>
+                <span className="hidden lg:inline">CARD POOL</span>
+              </PanelTab>
+            )}
+            {!hideDraftLog && (
+              <PanelTab
+                disabled={!draftLogHref}
+                onClick={draftLogHref ? () => navigate(draftLogHref) : undefined}
+                icon={<LuScrollText size={16} />}
+              >
+                <span className="lg:hidden">LOG</span>
+                <span className="hidden lg:inline">DRAFT LOG</span>
+              </PanelTab>
+            )}
           </div>
           {onNext ? <PanelChevron side="right" onClick={onNext} /> : <span className="w-10 shrink-0" />}
         </div>
+        )}
         {breakdownHref && (
           <Link
             to={breakdownHref}
@@ -393,9 +355,22 @@ function PanelTab({
 
 type DeckCard = Mainboard["cards"][number];
 
-const STRIP_H = 36;
+const STRIP_H = 30;
+const BADGE_H = 28;
 const COL_MIN = 132;
 const COL_MAX = 220;
+const SIDEBOARD_WIDTH = 168;
+
+// true groups copies into one card with a ×N badge (17lands style); false renders every copy as its
+// own card. Kept as a constant so both treatments are easy to compare.
+const GROUP_DUPLICATE_CARDS = false;
+
+function expandDuplicates(cards: DeckCard[]): DeckCard[] {
+  if (GROUP_DUPLICATE_CARDS) {
+    return cards;
+  }
+  return cards.flatMap((card) => Array.from({ length: card.count ?? 1 }, () => ({ ...card, count: 1 })));
+}
 
 const COLOR_RANK: Record<string, number> = { W: 0, U: 1, B: 2, R: 3, G: 4 };
 
@@ -413,15 +388,12 @@ function byColorThenName(a: DeckCard, b: DeckCard): number {
   return colorSortKey(a.colors ?? []) - colorSortKey(b.colors ?? []) || a.name.localeCompare(b.name);
 }
 
-function scryfallImageUrl(set: string, collectorNumber: string): string {
-  return `https://api.scryfall.com/cards/${set.toLowerCase()}/${encodeURIComponent(collectorNumber)}?format=image&version=normal`;
-}
-
 function DecklistView({ mainboard }: { mainboard: Mainboard }) {
-  const { mvPiles, lands } = useMemo(() => {
+  const [showSide, setShowSide] = useState(true);
+  const { mvPiles, lands, side } = useMemo(() => {
     const landCards: DeckCard[] = [];
     const byCmc = new Map<number, DeckCard[]>();
-    for (const card of mainboard.cards) {
+    for (const card of expandDuplicates(mainboard.cards)) {
       if (isLand(card.type)) {
         landCards.push(card);
         continue;
@@ -437,96 +409,114 @@ function DecklistView({ mainboard }: { mainboard: Mainboard }) {
     const piles = [...byCmc.entries()]
       .sort((a, b) => a[0] - b[0])
       .map(([cmc, cards]) => ({ cmc, cards: cards.slice().sort(byColorThenName) }));
-    return { mvPiles: piles, lands: landCards.slice().sort(byColorThenName) };
+    return {
+      mvPiles: piles,
+      lands: landCards.slice().sort(byColorThenName),
+      side: expandDuplicates(mainboard.sideboard).sort(byColorThenName),
+    };
   }, [mainboard]);
+  const hasSide = side.length > 0;
 
   return (
-    <div className="h-full overflow-auto themed-scrollbar px-4 md:px-5 py-5">
-      <div className="flex gap-2 md:gap-3 items-start">
-        {mvPiles.map((pile) => (
-          <Pile key={pile.cmc} cards={pile.cards} deckSet={mainboard.set} />
-        ))}
-        {lands.length > 0 && <Pile cards={lands} deckSet={mainboard.set} />}
+    <div className="relative h-full flex min-h-0">
+      <div className="relative flex-1 min-w-0 overflow-auto themed-scrollbar px-4 md:px-5 py-5">
+        <div className="flex gap-2 md:gap-3 items-start">
+          {mvPiles.map((pile) => (
+            <Pile key={pile.cmc} cards={pile.cards} deckSet={mainboard.set} />
+          ))}
+          {lands.length > 0 && <Pile cards={lands} deckSet={mainboard.set} />}
+        </div>
       </div>
+      {hasSide && !showSide && (
+        <button
+          type="button"
+          onClick={() => setShowSide(true)}
+          className="absolute top-3 right-3 z-10 inline-flex items-center gap-1.5 rounded-full border border-border bg-surface2 px-3 py-1.5 font-display tracking-[0.14em] text-subtle hover:text-text hover:border-green/50 transition-colors cursor-pointer"
+          style={{ fontSize: 13 }}
+        >
+          <ChevronLeft size={15} />
+          SIDEBOARD {side.length}
+        </button>
+      )}
+      {hasSide && showSide && (
+        <aside className="shrink-0 flex flex-col min-h-0 border-l border-border bg-surface/60" style={{ width: SIDEBOARD_WIDTH }}>
+          <button
+            type="button"
+            onClick={() => setShowSide(false)}
+            className="flex items-center gap-2 px-3 py-2.5 border-b border-border font-display tracking-[0.16em] text-text hover:text-green transition-colors cursor-pointer"
+            style={{ fontSize: 15 }}
+          >
+            <span>SIDEBOARD</span>
+            <span className="ml-auto tabular-nums">{side.length}</span>
+            <ChevronRight size={18} />
+          </button>
+          <div className="flex-1 overflow-auto themed-scrollbar px-3 py-3">
+            <Pile cards={side} deckSet={mainboard.set} />
+          </div>
+        </aside>
+      )}
     </div>
   );
 }
 
+const CARD_CLASS =
+  "w-full overflow-hidden rounded-[5px] [outline-style:solid] outline-1 -outline-offset-1 outline-white/10 shadow-[0_-2px_6px_rgba(0,0,0,0.6)] transition-[outline-color] group-hover:outline-white/50 hover:outline-white/50";
+
+// Cards fan top-to-bottom with each one absolutely overlapping the previous, so only a revealed sliver
+// of the upper cards shows and their bottom edge is covered — the bottom card sits in normal flow and
+// gives the column its height. Hovering a sliver lifts that card to the front.
 function Pile({ cards, deckSet }: { cards: DeckCard[]; deckSet: string | null }) {
+  if (cards.length === 0) {
+    return null;
+  }
   return (
-    <div className="flex flex-col flex-1" style={{ minWidth: COL_MIN, maxWidth: COL_MAX }}>
-      {cards.map((card, i) => (
-        <StackedCard key={`${card.name}-${card.cn}`} card={card} deckSet={deckSet} reveal={i < cards.length - 1} />
-      ))}
+    <div className="flex-1" style={{ minWidth: COL_MIN, maxWidth: COL_MAX }}>
+      <StackColumn
+        count={cards.length}
+        reveal={STRIP_H}
+        cardClassName={CARD_CLASS}
+        renderCard={(i) => <PileCard card={cards[i]} deckSet={deckSet} />}
+      />
     </div>
   );
 }
 
-function StackedCard({ card, deckSet, reveal }: { card: DeckCard; deckSet: string | null; reveal: boolean }) {
-  const [failed, setFailed] = useState(false);
+function PileCard({ card, deckSet }: { card: DeckCard; deckSet: string | null }) {
   const set = card.set ?? deckSet;
-  const src = set && card.cn ? scryfallImageUrl(set, card.cn) : null;
+  const sources = useMemo(() => cardImageSources(card.name, set), [card.name, set]);
+  const { src, onError } = useFallbackImage(sources);
   const count = card.count ?? 1;
   return (
-    <div
-      className={cn(
-        "relative w-full overflow-hidden rounded-[5px] shadow-[0_-1px_4px_rgba(0,0,0,0.45)]",
-        !reveal && "aspect-[488/680]",
-      )}
-      style={reveal ? { height: STRIP_H } : undefined}
-    >
-      {src && !failed ? (
+    <>
+      {src ? (
         <img
+          key={src}
           src={src}
           alt={card.name}
           loading="lazy"
-          onError={() => setFailed(true)}
+          onError={onError}
           className="block w-full h-auto"
           draggable={false}
         />
       ) : (
-        <div className="w-full aspect-[488/680] bg-surface2 border border-border flex items-start p-2">
+        <div className="w-full aspect-[488/680] bg-surface2 flex items-start p-2">
           <span className="font-body text-subtle leading-tight" style={{ fontSize: 12 }}>{card.name}</span>
         </div>
       )}
-      {count > 1 && <CountBadge n={count} />}
-    </div>
+      {count > 1 && <CountBadge n={count} onStrip={false} />}
+    </>
   );
 }
 
-function CountBadge({ n }: { n: number }) {
+// On a revealed strip the badge sits centered in the visible sliver; on the fully shown bottom card it
+// pins to the top-right corner so it reads as a count chip instead of floating over the card art.
+function CountBadge({ n, onStrip }: { n: number; onStrip: boolean }) {
   return (
     <span
       className="absolute right-1.5 inline-flex items-center justify-center bg-black/85 text-white font-display tabular-nums rounded px-2 leading-none"
-      style={{ fontSize: 16, height: 26, top: (STRIP_H - 26) / 2, letterSpacing: "0.04em" }}
+      style={{ fontSize: 17, height: BADGE_H, top: onStrip ? (STRIP_H - BADGE_H) / 2 : 6, letterSpacing: "0.04em" }}
     >
       ×{n}
     </span>
-  );
-}
-
-function SideboardCard({ card, deckSet }: { card: DeckCard; deckSet: string | null }) {
-  const [failed, setFailed] = useState(false);
-  const set = card.set ?? deckSet;
-  const src = set && card.cn ? scryfallImageUrl(set, card.cn) : null;
-  const count = card.count ?? 1;
-  return (
-    <div className="relative shrink-0 overflow-hidden rounded-[5px]" style={{ width: 94 }}>
-      {src && !failed ? (
-        <img
-          src={src}
-          alt={card.name}
-          loading="lazy"
-          onError={() => setFailed(true)}
-          className="block w-full h-auto"
-          draggable={false}
-        />
-      ) : (
-        <div className="w-full aspect-[488/680] bg-surface2 border border-border flex items-start p-1.5">
-          <span className="font-body text-subtle leading-tight" style={{ fontSize: 10 }}>{card.name}</span>
-        </div>
-      )}
-      {count > 1 && <CountBadge n={count} />}
-    </div>
   );
 }

@@ -9,7 +9,6 @@ import re
 import discord
 from discord import app_commands
 from discord.ext import commands
-from sqlalchemy import any_, select
 
 from bot import audit, emojis
 from bot.commands import descriptions as desc
@@ -17,7 +16,6 @@ from bot.commands.messages import MSG_ADMIN_ONLY
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.discord_helpers import display_width, extract_avatar_hash, player_url
-from bot.models import Player
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_draft_manager import (
     cancel_pod_event,
@@ -39,7 +37,8 @@ from bot.services.pod_drafts import (
     load_event_sesh_message_id_sync,
     load_event_set_code_sync,
     load_event_thread_id_sync,
-    normalize_player_name,
+    attach_arena_alias,
+    lobby_match_status,
     search_event_names_sync,
 )
 from bot.services.player_stats import SeededAttendee, rank_ordered_names, seed_attendees, seated_ring_order
@@ -49,20 +48,31 @@ from bot.sets import active_set_code
 from bot.tasks.pod_draft_reminder import fetch_sesh_rsvps, fire_reminder
 from bot.services.pod_settings_view import PodSettingsView
 from bot.services.pod_tournament import (
+    REVIEW_EMOJI,
     actor_label,
     build_champion_announcement_view_for_event,
+    build_draft_review_embed,
+    build_draft_review_message,
     build_live_submit_deck_button,
+    pod_voice_channel_url,
     build_replays_link_button,
     build_standings_embed_for_event,
     build_thread_link_button,
     post_trophy_hype_for_event,
+    refresh_round_pairing_messages,
 )
-from bot.slug import disambiguate_slug, slugify
 
 
 log = logging.getLogger(__name__)
 
 _ARENA_INPUT_RE = re.compile(r"^.+#\d+$")
+
+MSG_LINK_ARENA_NO_LOBBY_MATCH = (
+    "⚠️ No one in an active pod lobby is drafting as `{arena_name}`. Check that it matches "
+    "your Draftmancer name exactly."
+)
+MSG_LINK_ARENA_DID_YOU_MEAN = "Did you mean `{suggestion}`? Re-run /link-arena with that exact handle."
+MSG_NO_ACTIVE_POD = "No active pod draft session right now."
 
 YES_EMOJI = "✅"
 MAYBE_EMOJI = "🤷"
@@ -99,10 +109,7 @@ class PodDraft(commands.Cog):
     async def pod_ready(self, interaction: discord.Interaction) -> None:
         manager = _find_manager_for_thread(interaction)
         if manager is None:
-            await interaction.response.send_message(
-                "No active pod draft session right now.",
-                ephemeral=True,
-            )
+            await interaction.response.send_message(MSG_NO_ACTIVE_POD, ephemeral=True)
             return
         thread = interaction.channel
         log.info(f"ready-check: {interaction.user} in thread {interaction.channel_id}")
@@ -114,7 +121,7 @@ class PodDraft(commands.Cog):
             log.warning(f"ready-check: failed — {err}")
             await interaction.followup.send(f"⚠️ {err}", ephemeral=True)
         else:
-            await interaction.followup.send("Ready Check initiated, watch the thread for status.", ephemeral=True)
+            await interaction.followup.send("Ready Check initiated, accept in Draftmancer!", ephemeral=False)
 
     @app_commands.command(name="pod-start", description=desc.POD_START)
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
@@ -122,10 +129,7 @@ class PodDraft(commands.Cog):
     async def pod_start(self, interaction: discord.Interaction) -> None:
         manager = _find_manager_for_thread(interaction)
         if manager is None:
-            await interaction.response.send_message(
-                "No active pod draft session right now.",
-                ephemeral=True,
-            )
+            await interaction.response.send_message(MSG_NO_ACTIVE_POD, ephemeral=True)
             return
         log.info(f"pod-start: {interaction.user} force-starting in thread {interaction.channel_id}")
         await interaction.response.defer(ephemeral=True, thinking=False)
@@ -135,6 +139,93 @@ class PodDraft(commands.Cog):
             await interaction.followup.send(f"⚠️ {err}", ephemeral=True)
         else:
             await interaction.followup.send("Force-starting the draft, watch the thread.", ephemeral=True)
+
+    @app_commands.command(name="pod-pause", description=desc.POD_PAUSE)
+    @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def pod_pause(self, interaction: discord.Interaction) -> None:
+        manager = _find_manager_for_thread(interaction)
+        if manager is None:
+            await interaction.response.send_message(MSG_NO_ACTIVE_POD, ephemeral=True)
+            return
+        err = await manager.pause_draft()
+        if err is not None:
+            await interaction.response.send_message(f"⚠️ {err}", ephemeral=True)
+            return
+        log.info(f"pod-pause: {interaction.user} paused draft in thread {interaction.channel_id}")
+        await interaction.response.send_message(
+            f"⏸️ {interaction.user.mention} paused the draft. Resume with `/pod-unpause`.",
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+    @app_commands.command(name="pod-unpause", description=desc.POD_UNPAUSE)
+    @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def pod_unpause(self, interaction: discord.Interaction) -> None:
+        manager = _find_manager_for_thread(interaction)
+        if manager is None:
+            await interaction.response.send_message(MSG_NO_ACTIVE_POD, ephemeral=True)
+            return
+        err = await manager.resume_draft()
+        if err is not None:
+            await interaction.response.send_message(f"⚠️ {err}", ephemeral=True)
+            return
+        log.info(f"pod-unpause: {interaction.user} resumed draft in thread {interaction.channel_id}")
+        await interaction.response.send_message(
+            f"▶️ {interaction.user.mention} resumed the draft.",
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+    @app_commands.command(name="pod-restart", description=desc.POD_RESTART)
+    @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def pod_restart(self, interaction: discord.Interaction) -> None:
+        if not await self._is_owner_or_admin(interaction.user):
+            await interaction.response.send_message(MSG_ADMIN_ONLY, ephemeral=True)
+            return
+        manager = _find_manager_for_thread(interaction)
+        if manager is None:
+            await interaction.response.send_message(MSG_NO_ACTIVE_POD, ephemeral=True)
+            return
+        log.warning(f"pod-restart: {interaction.user} restarting draft in thread {interaction.channel_id}")
+        await interaction.response.defer(ephemeral=True, thinking=False)
+        err = await manager.restart_draft(interaction.channel, initiated_by=actor_label(interaction))
+        if err is not None:
+            log.warning(f"pod-restart: failed — {err}")
+            await interaction.followup.send(f"⚠️ {err}", ephemeral=True)
+        else:
+            await interaction.followup.send("Draft stopped, the lobby is reopening — watch the thread.", ephemeral=True)
+
+    @app_commands.command(name="pod-review", description=desc.POD_REVIEW)
+    @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def pod_review(self, interaction: discord.Interaction) -> None:
+        thread_id = str(interaction.channel_id) if interaction.channel_id else None
+        event_id = await asyncio.to_thread(load_event_id_by_thread_sync, thread_id) if thread_id else None
+        if event_id is None:
+            await interaction.response.send_message("Run this inside a pod-draft thread.", ephemeral=True)
+            return
+        embed = await build_draft_review_embed(event_id)
+        if embed is None:
+            await interaction.response.send_message("No players are on record for this pod yet.", ephemeral=True)
+            return
+        log.info(f"pod-review: {interaction.user} started review for event_id={event_id}")
+        voice_url = pod_voice_channel_url(interaction.guild)
+        await interaction.response.send_message(
+            content=build_draft_review_message(voice_url),
+            embed=embed,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+        message = await interaction.original_response()
+        try:
+            await message.add_reaction(REVIEW_EMOJI)
+        except discord.HTTPException:
+            log.warning("pod-review: could not add the review reaction", exc_info=True)
+
+    async def _is_owner_or_admin(self, user: discord.abc.User) -> bool:
+        if await self.bot.is_owner(user):
+            return True
+        return isinstance(user, discord.Member) and user.guild_permissions.administrator
 
     @commands.command(name="start")
     @commands.is_owner()
@@ -189,53 +280,25 @@ class PodDraft(commands.Cog):
             )
             return
 
-        normalized = normalize_player_name(arena_name)
-
         with SessionLocal() as session:
-            collision = session.execute(
-                select(Player)
-                .where(
-                    Player.active.is_(True),
-                    Player.discord_id != user_id,
-                    normalized == any_(Player.arena_aliases),
-                )
-                .limit(1)
-            ).scalar_one_or_none()
-            if collision is not None:
+            player_id, collision_id = attach_arena_alias(
+                session,
+                discord_id=user_id,
+                discord_username=interaction.user.name,
+                display_name=interaction.user.display_name,
+                avatar_hash=extract_avatar_hash(interaction.user),
+                arena_name=arena_name,
+                overwrite=True,
+            )
+            if collision_id is not None:
                 audit.event("pod_link_arena_collision", user_id=user_id, arena_name=arena_name,
-                            collides_with=collision.id)
+                            collides_with=collision_id)
                 await interaction.response.send_message(
                     f"❌ `{arena_name}` is already linked to another player. "
                     "If this is your account, ask an admin for help.",
                     ephemeral=True,
                 )
                 return
-
-            player = session.execute(
-                select(Player).where(Player.discord_id == user_id)
-            ).scalar_one_or_none()
-            if player is None:
-                taken_slugs = set(session.execute(select(Player.slug)).scalars().all())
-                slug = disambiguate_slug(slugify(interaction.user.display_name), taken_slugs)
-                player = Player(
-                    slug=slug,
-                    discord_id=user_id,
-                    discord_username=interaction.user.name,
-                    display_name=interaction.user.display_name,
-                    avatar_hash=extract_avatar_hash(interaction.user),
-                    arena_name=arena_name,
-                    arena_aliases=[normalized],
-                    active=True,
-                    leaderboard_opt_in=False,
-                )
-                session.add(player)
-            else:
-                if not (player.arena_name or "").strip():
-                    player.arena_name = arena_name
-                if normalized not in player.arena_aliases:
-                    player.arena_aliases = [*player.arena_aliases, normalized]
-            session.flush()
-            player_id = player.id
             session.commit()
 
         audit.event("pod_link_arena_success", user_id=user_id, player_id=player_id)
@@ -245,8 +308,31 @@ class PodDraft(commands.Cog):
             allowed_mentions=no_pings,
         )
 
+        await self._warn_if_no_lobby_match(interaction, arena_name, player_id)
+
         for manager in list(ACTIVE_POD_MANAGERS.values()):
             asyncio.create_task(manager.refresh_lobby_now())
+            asyncio.create_task(refresh_round_pairing_messages(manager))
+
+    async def _warn_if_no_lobby_match(
+        self, interaction: discord.Interaction, arena_name: str, player_id: str
+    ) -> None:
+        """Ephemeral nudge when the just-linked handle resolves to no seat in any live lobby — the
+        typo case where the link silently takes no effect. Skipped when no lobby is running."""
+        live_names = _live_lobby_names()
+        if not live_names:
+            return
+        matched, suggestion = await asyncio.to_thread(
+            lobby_match_status, arena_name, player_id, live_names,
+        )
+        if matched:
+            return
+        warning = MSG_LINK_ARENA_NO_LOBBY_MATCH.format(arena_name=arena_name)
+        if suggestion is not None:
+            warning = f"{warning}\n{MSG_LINK_ARENA_DID_YOU_MEAN.format(suggestion=suggestion)}"
+        audit.event("pod_link_arena_no_lobby_match", user_id=str(interaction.user.id),
+                    arena_name=arena_name, suggestion=suggestion)
+        await interaction.followup.send(warning, ephemeral=(interaction.guild is not None))
 
     @app_commands.command(name="pod-seeding", description=desc.POD_SEEDING)
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
@@ -345,19 +431,30 @@ class PodDraft(commands.Cog):
         name="pod-champion",
         description=desc.POD_CHAMPION,
     )
-    @app_commands.describe(event="Pod-draft event to announce")
+    @app_commands.describe(event="Pod-draft event to announce; defaults to the current thread")
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
-    async def pod_champion(self, interaction: discord.Interaction, event: str) -> None:
+    async def pod_champion(self, interaction: discord.Interaction, event: str | None = None) -> None:
         if not await self.bot.is_owner(interaction.user):
             await interaction.response.send_message(MSG_ADMIN_ONLY, ephemeral=True)
             return
         await interaction.response.defer(thinking=False)
 
-        event_id = await asyncio.to_thread(load_event_id_by_name_sync, event)
-        if event_id is None:
-            await interaction.followup.send(f"No pod-draft event named `{event}`.", ephemeral=True)
-            return
+        if event:
+            event_id = await asyncio.to_thread(load_event_id_by_name_sync, event)
+            if event_id is None:
+                await interaction.followup.send(f"No pod-draft event named `{event}`.", ephemeral=True)
+                return
+        else:
+            channel = interaction.channel
+            thread_id = str(channel.id) if channel is not None else None
+            event_id = await asyncio.to_thread(load_event_id_by_thread_sync, thread_id) if thread_id else None
+            if event_id is None:
+                await interaction.followup.send(
+                    "Run this inside a pod-draft thread, or pass an `event` to announce a specific pod.",
+                    ephemeral=True,
+                )
+                return
 
         view = await build_champion_announcement_view_for_event(
             event_id, guild_id=interaction.guild_id,
@@ -386,7 +483,7 @@ class PodDraft(commands.Cog):
     async def pod_takeover(self, interaction: discord.Interaction) -> None:
         manager = _find_manager_for_thread(interaction)
         if manager is None:
-            await interaction.response.send_message("No active pod draft session right now.", ephemeral=True)
+            await interaction.response.send_message(MSG_NO_ACTIVE_POD, ephemeral=True)
             return
 
         target = _pick_takeover_target(manager, interaction.user.display_name)
@@ -683,7 +780,8 @@ async def delete_stale_seeding_messages(
 
 async def build_pod_settings_view(bot, event_id: str, *, is_owner: bool) -> PodSettingsView:
     """Settings panel wired for `event_id`. Shared by /pod-settings and the lobby Settings button.
-    Kick Player appears when a Draftmancer session is live; Cancel Draft only for the bot owner."""
+    Kick Player and Link Players appear when a Draftmancer session is live; Cancel Draft only for the
+    bot owner."""
     current_code = await asyncio.to_thread(load_event_set_code_sync, event_id)
     current_mode = await asyncio.to_thread(load_event_pairing_mode_sync, event_id)
     current_seating = await asyncio.to_thread(load_event_seating_mode_sync, event_id)
@@ -709,14 +807,20 @@ async def build_pod_settings_view(bot, event_id: str, *, is_owner: bool) -> PodS
     seat_order_provider = None
     kick_targets_provider = None
     on_kick = None
+    link_targets_provider = None
+    on_link = None
     if manager is not None:
         async def on_seating(inter: discord.Interaction, ordered_user_names: list[str]) -> str | None:
             return await set_event_seating(event_id, ordered_user_names)
         seat_order_provider = manager.seating_lobby_order
         kick_targets_provider = manager.kick_targets
+        link_targets_provider = manager.unrecognized_lobby_names
 
         async def on_kick(inter: discord.Interaction, user_id: str) -> str | None:
             return await manager.kick_player(user_id)
+
+        async def on_link(inter: discord.Interaction, arena_name: str, member: discord.abc.User) -> str | None:
+            return await manager.link_seat(member, arena_name)
 
     on_cancel = None
     if is_owner:
@@ -730,6 +834,7 @@ async def build_pod_settings_view(bot, event_id: str, *, is_owner: bool) -> PodS
         on_seating=on_seating, seat_order_provider=seat_order_provider,
         on_seating_table=on_seating_table, on_seated=on_seated,
         kick_targets_provider=kick_targets_provider, on_kick=on_kick,
+        link_targets_provider=link_targets_provider, on_link=on_link,
         on_cancel=on_cancel, event_name=event_name,
     )
 
@@ -980,6 +1085,16 @@ def _find_manager_for_thread(interaction: discord.Interaction):
         if str(manager.thread_id) == channel_id:
             return manager
     return next(iter(ACTIVE_POD_MANAGERS.values()), None)
+
+
+def _live_lobby_names() -> list[str]:
+    """Draftmancer usernames currently seated across all active, not-yet-complete real pod lobbies."""
+    names: list[str] = []
+    for manager in ACTIVE_POD_MANAGERS.values():
+        if manager.draft_complete or manager.kind == "mock":
+            continue
+        names.extend(n for n in manager.non_bot_session_names() if n)
+    return names
 
 
 async def setup(bot: commands.Bot) -> None:

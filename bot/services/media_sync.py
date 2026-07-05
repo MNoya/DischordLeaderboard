@@ -90,18 +90,40 @@ def sync_media(session: Session) -> SyncResult:
         log.warning("media sync: YOUTUBE_API_KEY unset, syncing podcast feed only")
 
     items = _merge(podcasts, videos)
+    _classify_items(items)
+    return _upsert(session, items)
+
+
+def sync_recent(session: Session, limit: int = 8) -> SyncResult:
+    """Insert brand-new drops and backfill a freshly published video onto an existing podcast-only
+    row, reclassifying it from the video's playlists. Rows that already carry a video are left
+    untouched — the daily ``sync_media`` owns full reconciliation and back-catalogue pruning."""
+    podcasts = sorted(
+        _fetch_podcast_items(settings.libsyn_feed_url), key=lambda i: i.published_at, reverse=True
+    )[:limit]
+
+    videos: list[YouTubeVideo] = []
+    if settings.youtube_api_key:
+        client = YouTubeClient(settings.youtube_api_key.get_secret_value(), settings.youtube_channel_handle)
+        videos = client.fetch_recent_uploads(limit)
+    else:
+        log.warning("media freshness: YOUTUBE_API_KEY unset, checking podcast feed only")
+
+    items = _merge(podcasts, videos)
+    _classify_items(items)
+    return _ingest_fresh(session, items)
+
+
+def _classify_items(items: list[_Item]) -> None:
     for item in items:
         item.category = classify_category(item.playlists, item.title, item.kind, item.guid)
         media_set = resolve_episode_set(item.guid, item.playlists, item.title, item.published_at)
         if media_set is EVERGREEN:
-            item.set_code = item.set_name = None
-            item.set_released_at = None
+            item.set_code = item.set_name = item.set_released_at = None
         else:
             item.set_code = media_set.code
             item.set_name = media_set.name
             item.set_released_at = media_set.start_date
-
-    return _upsert(session, items)
 
 
 def classify_category(playlists: list[str], title: str, kind: str, guid: str = "") -> str:
@@ -228,21 +250,7 @@ def _upsert(session: Session, items: list[_Item]) -> SyncResult:
         if row is None:
             row = Episode(guid=item.guid)
             session.add(row)
-        row.kind = item.kind
-        row.number = item.number
-        row.title = item.title
-        row.link = item.link
-        row.summary = item.summary or None
-        row.image = item.image or None
-        row.published_at = item.published_at
-        row.duration_seconds = item.duration_seconds
-        row.audio_url = item.audio_url
-        row.youtube_id = item.youtube_id
-        row.category = item.category
-        row.set_code = item.set_code
-        row.set_name = item.set_name
-        row.set_released_at = item.set_released_at
-        row.playlists = item.playlists or None
+        _assign(row, item)
 
     if len(items) >= 100:
         for guid, row in existing.items():
@@ -250,6 +258,51 @@ def _upsert(session: Session, items: list[_Item]) -> SyncResult:
                 session.delete(row)
 
     session.commit()
+    return _result(items)
+
+
+def _ingest_fresh(session: Session, items: list[_Item]) -> SyncResult:
+    guids = [item.guid for item in items]
+    existing = (
+        {row.guid: row for row in session.execute(select(Episode).where(Episode.guid.in_(guids))).scalars()}
+        if guids
+        else {}
+    )
+    applied: list[_Item] = []
+    for item in items:
+        row = existing.get(item.guid)
+        if row is None:
+            row = Episode(guid=item.guid)
+            session.add(row)
+        else:
+            video_just_landed = row.youtube_id is None and item.youtube_id is not None
+            if not video_just_landed:
+                continue
+        _assign(row, item)
+        applied.append(item)
+    session.commit()
+    return _result(applied)
+
+
+def _assign(row: Episode, item: _Item) -> None:
+    row.kind = item.kind
+    row.number = item.number
+    row.title = item.title
+    row.link = item.link
+    row.summary = item.summary or None
+    row.image = item.image or None
+    row.published_at = item.published_at
+    row.duration_seconds = item.duration_seconds
+    row.audio_url = item.audio_url
+    row.youtube_id = item.youtube_id
+    row.category = item.category
+    row.set_code = item.set_code
+    row.set_name = item.set_name
+    row.set_released_at = item.set_released_at
+    row.playlists = item.playlists or None
+
+
+def _result(items: list[_Item]) -> SyncResult:
     return SyncResult(
         total=len(items),
         matched=sum(1 for i in items if i.kind == "episode" and i.youtube_id),

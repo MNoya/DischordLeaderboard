@@ -36,7 +36,7 @@ function youtubeDevApi(key: string | undefined): Plugin {
   return {
     name: "youtube-dev-api",
     configureServer(server) {
-      server.middlewares.use("/api/youtube", async (_req, res) => {
+      server.middlewares.use("/api/youtube", async (req, res) => {
         res.setHeader("content-type", "application/json");
         res.setHeader("cache-control", "public, max-age=3600");
         if (!key) {
@@ -45,7 +45,8 @@ function youtubeDevApi(key: string | undefined): Plugin {
           return;
         }
         try {
-          const videos = await fetchUploads(key);
+          const recent = new URL(req.url ?? "", "http://localhost").searchParams.has("recent");
+          const videos = await fetchUploads(key, recent ? 1 : 10);
           res.end(JSON.stringify({ videos }));
         } catch (error) {
           res.statusCode = 502;
@@ -56,7 +57,7 @@ function youtubeDevApi(key: string | undefined): Plugin {
   };
 }
 
-async function fetchUploads(key: string) {
+async function fetchUploads(key: string, maxPages: number) {
   const channelUrl = `${YOUTUBE_API}/channels?part=contentDetails&forHandle=${CHANNEL_HANDLE}&key=${key}`;
   const channelRes = await fetch(channelUrl);
   const channelJson = await channelRes.json();
@@ -67,7 +68,7 @@ async function fetchUploads(key: string) {
 
   const videos: Array<Record<string, string>> = [];
   let pageToken = "";
-  for (let page = 0; page < 10; page += 1) {
+  for (let page = 0; page < maxPages; page += 1) {
     const url =
       `${YOUTUBE_API}/playlistItems?part=snippet&maxResults=50&playlistId=${uploads}&key=${key}` +
       (pageToken ? `&pageToken=${pageToken}` : "");

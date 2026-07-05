@@ -8,6 +8,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { useCallback, useMemo } from "react";
 
 import {
+  fetchAllRecentTrophies,
   fetchAvailableFormats,
   fetchColorsLeaderboard,
   fetchColorsSummary,
@@ -19,6 +20,7 @@ import {
   fetchFormatLeaderboard,
   fetchFormatRecentTrophies,
   fetchLeaderboard,
+  fetchTrophyLeaderboard,
   fetchOtherColorsLeaderboard,
   fetchPlayerDraftEvents,
   fetchPlayerIdentity,
@@ -35,13 +37,14 @@ import {
   fetchRecentTrophies,
   fetchSets,
   fetchDbEpisodes,
+  fetchRecentDbEpisodes,
   upsertP0P1Pick,
   deleteAllP0P1Picks,
   fetchP0P1Ratings,
 } from "./api";
 import { fetchEpisodes } from "./episodes";
 import { fetchDiscordStats } from "./discord";
-import { fetchYouTubeVideos, mergeMedia, overlayLiveMedia } from "./youtube";
+import { fetchYouTubeVideos, mergeMedia, overlayLiveMedia, toVideoEpisode, type YouTubeVideo } from "./youtube";
 import type { P0P1Pick, SlotKey } from "../types/p0p1";
 import { MULTI, OTHER } from "./filters";
 const THIRTY_MINUTES = 30 * 60 * 1000;
@@ -55,10 +58,10 @@ export function useEpisodes() {
   });
 }
 
-export function useYouTubeVideos() {
+export function useYouTubeVideos(recent = false) {
   return useQuery({
-    queryKey: ["youtube"],
-    queryFn: fetchYouTubeVideos,
+    queryKey: ["youtube", recent ? "recent" : "full"],
+    queryFn: () => fetchYouTubeVideos(recent),
     staleTime: ONE_HOUR,
   });
 }
@@ -81,25 +84,64 @@ export function useDbEpisodes() {
 
 // DB rows are the authoritative, categorized base; the live RSS/YouTube feeds overlay any
 // freshly published item the next bot sync hasn't picked up yet, so new drops appear at once.
+// The recent-videos list is folded in alongside the full list: it is the same cache the home
+// page warms, so a fresh drop's thumbnail resolves from cache instead of flashing the podcast
+// cover while the full list refetches cold.
 export function useMediaFeed() {
   const db = useDbEpisodes();
   const episodes = useEpisodes();
   const videos = useYouTubeVideos();
+  const recentVideos = useYouTubeVideos(true);
+  const mergedVideos = useMemo(
+    () => mergeVideoLists(recentVideos.data, videos.data),
+    [recentVideos.data, videos.data],
+  );
   const data = useMemo(() => {
-    const live = episodes.data ? mergeMedia(episodes.data, videos.data ?? []) : undefined;
-    if (db.data && live) {
-      return overlayLiveMedia(db.data, live);
+    const live = episodes.data ? mergeMedia(episodes.data, mergedVideos) : undefined;
+    if (db.data) {
+      return live ? overlayLiveMedia(db.data, live) : db.data;
     }
-    return db.data ?? live;
-  }, [db.data, episodes.data, videos.data]);
+    if (db.isLoading) {
+      return undefined;
+    }
+    return live;
+  }, [db.data, db.isLoading, episodes.data, mergedVideos]);
   return {
     data,
     isLoading: db.isLoading && episodes.isLoading,
     isPending: db.isLoading || episodes.isLoading,
     isError: db.isError && episodes.isError,
-    thumbnailsPending: videos.isLoading && !db.data,
+    thumbnailsPending: videos.isLoading && recentVideos.isLoading && !db.data,
     setsReady: db.data !== undefined,
   };
+}
+
+function mergeVideoLists(recent: YouTubeVideo[] | undefined, full: YouTubeVideo[] | undefined): YouTubeVideo[] {
+  const byId = new Map<string, YouTubeVideo>();
+  for (const video of recent ?? []) {
+    byId.set(video.id, video);
+  }
+  for (const video of full ?? []) {
+    byId.set(video.id, video);
+  }
+  return [...byId.values()];
+}
+
+// DB top-N renders immediately; recent YouTube overlays new video drops in the background, podcasts ride the backend tick
+export function useRecentEpisodes(limit = 8) {
+  const db = useQuery({
+    queryKey: ["recent-episodes", limit],
+    queryFn: () => fetchRecentDbEpisodes(limit),
+    staleTime: ONE_HOUR,
+  });
+  const videos = useYouTubeVideos(true);
+  const data = useMemo(() => {
+    if (!db.data) {
+      return undefined;
+    }
+    return videos.data ? overlayLiveMedia(db.data, videos.data.map(toVideoEpisode)) : db.data;
+  }, [db.data, videos.data]);
+  return { data, isLoading: db.isLoading };
 }
 
 export function useSets() {
@@ -131,6 +173,15 @@ export function useLeaderboard(setCode: string | undefined) {
   return useQuery({
     queryKey: ["leaderboard", setCode],
     queryFn: () => fetchLeaderboard(setCode!),
+    enabled: !!setCode,
+    staleTime: THIRTY_MINUTES,
+  });
+}
+
+export function useTrophyLeaderboard(setCode: string | undefined) {
+  return useQuery({
+    queryKey: ["trophy-leaderboard", setCode],
+    queryFn: () => fetchTrophyLeaderboard(setCode!),
     enabled: !!setCode,
     staleTime: THIRTY_MINUTES,
   });
@@ -261,6 +312,16 @@ export function useFormatScopedTrophies(
     queryKey: ["format-trophies", setCode, format],
     queryFn: () => fetchFormatRecentTrophies(setCode!, format!),
     enabled: !!setCode && !!format,
+    staleTime: THIRTY_MINUTES,
+  });
+}
+
+// Full trophy pool of a set. Backs the sidebar while a rank filter is active.
+export function useAllRecentTrophies(setCode: string | undefined) {
+  return useQuery({
+    queryKey: ["all-trophies", setCode],
+    queryFn: () => fetchAllRecentTrophies(setCode!),
+    enabled: !!setCode,
     staleTime: THIRTY_MINUTES,
   });
 }

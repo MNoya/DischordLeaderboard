@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 
+import discord
+from discord import ui
 from discord.ext import commands
 from sqlalchemy import select
 
@@ -25,6 +27,7 @@ from bot.database import SessionLocal
 from bot.models import MagicSet
 from bot.services.player_stats import rank_players_for_set
 from bot.services.pod_registration_embed import build_registered_embed
+from bot.services.pod_tournament import build_deck_ping, build_live_submit_deck_button, pod_page_url
 from bot.sets import active_set_code
 
 PREVIEW_ROSTER_SIZE = 10
@@ -53,6 +56,19 @@ async def setup(bot: commands.Bot) -> None:
         )
         await _send(ctx, projected_file, projected_embed)
         await _send(ctx, live_file, live_embed)
+
+    @test_group.command(name="deckping")
+    @commands.is_owner()
+    async def test_deckping(ctx: commands.Context) -> None:
+        """Owner-only. Preview the R3 deck-chase ping: one action line each, trailed by pings."""
+        me = ctx.author.id
+        view = ui.View(timeout=None)
+        view.add_item(build_live_submit_deck_button())
+        await ctx.send(
+            build_deck_ping(([me, me], [me, me]), ([me], [me, me]), pod_page_url("Sample Pod 7")),
+            allowed_mentions=discord.AllowedMentions(users=True),
+            view=view,
+        )
 
 
 async def _send(ctx: commands.Context, file, embed) -> None:

@@ -23,24 +23,40 @@ log = logging.getLogger("bot.lobby_embed")
 
 READY_CHECK_CUSTOM_ID = "pod-draft:ready-check"
 SETTINGS_CUSTOM_ID = "pod-draft:settings"
+FORCE_START_CUSTOM_ID = "pod-draft:force-start"
 
 _NO_ACTIVE_POD_MSG = "No active pod-draft session in this thread."
+
+
+def _active_manager_for_channel(channel_id: int | None):
+    from bot.services.pod_active import ACTIVE_POD_MANAGERS
+    return next((m for m in ACTIVE_POD_MANAGERS.values() if m.thread_id == channel_id), None)
 
 
 class LobbyReadyButtonView(discord.ui.View):
     def __init__(
         self, draftmancer_url: str | None = None, ready_disabled: bool = False,
+        show_force_start: bool = False, spectate_url: str | None = None,
     ) -> None:
         super().__init__(timeout=None)
         if ready_disabled:
             self.ready_check.disabled = True
         self.add_item(SettingsButton())
+        if show_force_start:
+            self.add_item(ForceStartButton())
         if draftmancer_url:
             self.add_item(discord.ui.Button(
                 label="Join Draftmancer",
                 style=discord.ButtonStyle.link,
                 url=draftmancer_url,
                 emoji=emojis.get_emoji("draftmancer"),
+            ))
+        if spectate_url:
+            self.add_item(discord.ui.Button(
+                label="Spectate",
+                style=discord.ButtonStyle.link,
+                url=spectate_url,
+                emoji="👀",
             ))
 
     @discord.ui.button(
@@ -50,14 +66,10 @@ class LobbyReadyButtonView(discord.ui.View):
     async def ready_check(
         self, interaction: discord.Interaction, button: discord.ui.Button,
     ) -> None:
-        from bot.services.pod_active import ACTIVE_POD_MANAGERS
         channel = interaction.channel
         channel_id = channel.id if channel else None
         actor = actor_label(interaction)
-        manager = next(
-            (m for m in ACTIVE_POD_MANAGERS.values() if m.thread_id == channel_id),
-            None,
-        )
+        manager = _active_manager_for_channel(channel_id)
         if manager is None:
             log.info(f"{actor} clicked Ready Check in channel={channel_id} (no active pod)")
             await interaction.response.send_message(_NO_ACTIVE_POD_MSG, ephemeral=True)
@@ -79,6 +91,76 @@ class SettingsButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         await open_settings_panel(interaction)
+
+
+class ForceStartButton(discord.ui.Button):
+    """On the active ready-check card: an understated escape hatch to skip the remaining ready checks
+    and start the draft, behind a confirmation so a stray click can't launch the pod with players away."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            label="Force Start", style=discord.ButtonStyle.secondary,
+            custom_id=FORCE_START_CUSTOM_ID, emoji="⏭️",
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        actor = actor_label(interaction)
+        manager = _active_manager_for_channel(interaction.channel_id)
+        if manager is None:
+            if _force_start_preview_factory is not None:
+                ready, total, pending = _force_start_preview_factory()
+                await interaction.response.send_message(
+                    force_start_confirm_text(ready, total, pending),
+                    view=ForceStartConfirmView(None), ephemeral=True,
+                )
+                return
+            log.info(f"{actor} clicked Force Start in channel={interaction.channel_id} (no active pod)")
+            await interaction.response.send_message(_NO_ACTIVE_POD_MSG, ephemeral=True)
+            return
+        non_bot = manager.player_session_users()
+        total = len(non_bot)
+        pending = [u.get("userName") for u in non_bot
+                   if u.get("userID") not in manager.ready_users and u.get("userName")]
+        ready = total - len(pending)
+        log.info(f"[{manager.event_name}] {actor} opened Force Start confirm ({ready}/{total} ready)")
+        await interaction.response.send_message(
+            force_start_confirm_text(ready, total, pending),
+            view=ForceStartConfirmView(manager),
+            ephemeral=True,
+        )
+
+
+def force_start_confirm_text(ready: int, total: int, pending: list[str]) -> str:
+    """Confirmation prompt for skipping the ready check, naming who'd be left behind. Shared by the live
+    Force Start button and the `!test forcestart` preview so the copy never drifts."""
+    if pending:
+        return (
+            f"⏭️ {ready}/{total} ready — still waiting on {', '.join(pending)}.\n"
+            "Start the draft now without them?"
+        )
+    return f"⏭️ {ready}/{total} ready. Start the draft now?"
+
+
+class ForceStartConfirmView(discord.ui.View):
+    def __init__(self, manager) -> None:
+        super().__init__(timeout=60)
+        self.manager = manager
+
+    @discord.ui.button(label="Start now", style=discord.ButtonStyle.success)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if self.manager is None:
+            await interaction.response.edit_message(content="Preview only — no live pod to start.", view=None)
+            return
+        actor = actor_label(interaction)
+        log.info(f"[{self.manager.event_name}] {actor} confirmed Force Start")
+        await interaction.response.defer()
+        err = await self.manager.force_start()
+        message = f"⚠️ {err}" if err else "Force-starting the draft, watch the thread."
+        await interaction.edit_original_response(content=message, view=None)
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.grey)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await interaction.response.edit_message(content="Force start cancelled.", view=None)
 
 
 async def open_settings_panel(interaction: discord.Interaction) -> None:
@@ -126,15 +208,15 @@ def render(
     names by RSVP type; `in_session` is Draftmancer sessionUsers as (arena_name,
     linked_display_name_or_None). `draftmancer_url` appears under the header.
 
-    Buckets: In Draftmancer (linked + in session), Unrecognized name (in session, no Player row),
-    Waiting on (Yes RSVP not in session), Maybe (Maybe RSVP not in session). Waiting + Maybe are
-    hidden once ready check fires; the live Ready/Pending split lives on the separate ready-check
-    progress card, not here. `spectators` lists Draftmancer sessionSpectators comma-separated below
-    Maybe whenever any are present, regardless of state."""
+    Buckets: In Draftmancer (counts every session user; lists the linked ones), Unrecognized (in
+    session, no Player row), Waiting on (Yes RSVP not in session), Maybe (Maybe RSVP not in session).
+    Waiting + Maybe are hidden once ready check fires; the live Ready/Pending split lives on the
+    separate ready-check progress card, not here. `spectators` lists Draftmancer sessionSpectators
+    comma-separated below Maybe whenever any are present, regardless of state."""
     in_draftmancer = [(arena, dn) for arena, dn in in_session if dn is not None]
     unrecognized = [arena for arena, dn in in_session if dn is None]
     mention_map = display_name_by_mention_id or {}
-    in_session_keys = {dn.lower() for _, dn in in_draftmancer if dn}
+    in_session_keys = {dn.lower() for _, dn in in_session if dn}
     in_session_keys |= {arena.lower() for arena, _ in in_session}
     waiting_yes = [
         name for name in rsvps_yes
@@ -148,7 +230,7 @@ def render(
 
     banner_state = state
     if state not in ("ready", "notready", "drafting", "complete") and unrecognized:
-        banner_state = "onhold"
+        banner_state = "has_unlinked"
     status_lines, color = ready_status_banner(
         banner_state, decliner_name=decliner_name, cancel_reason=cancel_reason,
         initiated_by=initiated_by,
@@ -163,11 +245,11 @@ def render(
     embed = discord.Embed(title=title, description=description, color=color)
     _set_settings_footer(embed, format_label, pairing_label, seating_label)
 
-    if in_draftmancer:
+    if in_session:
         trailing = "\n​" if show_pending else ""
         in_drft_label = "Players" if state == "complete" else "In Draftmancer"
         _player_columns(
-            embed, f"✅ {in_drft_label} ({len(in_draftmancer)})", in_draftmancer,
+            embed, f"✅ {in_drft_label} ({len(in_session)})", in_draftmancer,
             trailing=trailing, spacer=show_pending,
         )
 
@@ -265,7 +347,7 @@ def render_ready_check_progress(
     `❌ <name> is Not Ready` + `✅ ready_count/total_count Ready` — with no link, buttons, or roster,
     since the retry controls live on the main lobby card.
     """
-    in_draftmancer = [(arena, dn) for arena, dn in in_session if dn is not None]
+    roster = _seat_rows(in_session)
 
     declined = state == "notready"
     status_lines, color = ready_status_banner(
@@ -285,14 +367,14 @@ def render_ready_check_progress(
         return embed
 
     if state in ("drafting", "complete"):
-        ready_players = in_draftmancer
+        ready_players = roster
         pending_players = []
     elif ready_arena_names is not None:
-        ready_players = [(a, dn) for a, dn in in_draftmancer if a in ready_arena_names]
-        pending_players = [(a, dn) for a, dn in in_draftmancer if a not in ready_arena_names]
+        ready_players = [(a, dn) for a, dn in roster if a in ready_arena_names]
+        pending_players = [(a, dn) for a, dn in roster if a not in ready_arena_names]
     else:
         ready_players = []
-        pending_players = in_draftmancer
+        pending_players = roster
 
     ready_label = "Players" if state == "complete" else "Ready"
     two_groups = bool(pending_players) or state == "ready"
@@ -326,8 +408,8 @@ def ready_status_banner(
         retry = "! Click Ready Check to retry" if retry_hint else ""
         reason = f"`{decliner_name}` is Not Ready" if decliner_name else (cancel_reason or "Ready Check cancelled")
         return [f"### ❌ {reason}{retry}"], discord.Color.red()
-    if state == "onhold":
-        return ["### ⏳ Ready Check on hold until everyone is linked"], discord.Color.orange()
+    if state == "has_unlinked":
+        return ["### ⚠️ Some players aren't recognized yet"], discord.Color.orange()
     return [], discord.Color.blurple()
 
 
@@ -336,6 +418,21 @@ def _quote_block(lines: list[str], *, trailing: str = "") -> str:
     if not lines:
         return "​"
     return "\n".join(f"> {line}" for line in lines) + trailing
+
+
+_ARENA_SUFFIX_RE = re.compile(r"#[0-9?]+$")
+
+
+def _seat_rows(in_session: list[tuple[str, str | None]]) -> list[tuple[str, str]]:
+    """(arena_handle, display_label) for every Draftmancer seat. An unlinked seat keeps its place in
+    the roster with a ⚠️ marker rather than being dropped, so the lobby never hides who is present."""
+    rows: list[tuple[str, str]] = []
+    for arena, dn in in_session:
+        if dn is not None:
+            rows.append((arena, dn))
+        else:
+            rows.append((arena, f"{_ARENA_SUFFIX_RE.sub('', arena) or arena} ⚠️"))
+    return rows
 
 
 def _player_columns(
@@ -372,3 +469,13 @@ def register_settings_preview(factory) -> None:
     """Let the testlobby sandbox preview the Settings panel even though it has no live pod manager."""
     global _settings_preview_factory
     _settings_preview_factory = factory
+
+
+# testlobby injects a (ready, total, pending) factory so the Force Start confirm is previewable
+_force_start_preview_factory = None
+
+
+def register_force_start_preview(factory) -> None:
+    """Let the testlobby sandbox preview the Force Start confirm dialog without a live pod manager."""
+    global _force_start_preview_factory
+    _force_start_preview_factory = factory

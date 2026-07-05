@@ -5,7 +5,10 @@ import { FilterDropdown, type FilterOption } from "./FilterDropdown";
 import { cn } from "../lib/utils";
 import { useSetVisibleCap } from "../lib/use-is-mobile";
 import { CUBE_BASE } from "../data/utils";
+import { isMtgoFlashbackCode } from "../data/mtgoSets";
 import type { SetSummary } from "../types/leaderboard";
+
+const MTGO_SECTION = "MTGO FLASHBACKS";
 
 const FUTURE_RELEASE_RANK = "9999-99-99";
 const NO_RELEASE_RANK = "";
@@ -17,6 +20,9 @@ function releaseRank(s: SetSummary): string {
 }
 
 function byDateDesc(a: SetSummary, b: SetSummary): number {
+  const aMtgo = isMtgoFlashbackCode(a.code);
+  const bMtgo = isMtgoFlashbackCode(b.code);
+  if (aMtgo !== bMtgo) return aMtgo ? 1 : -1;
   return releaseRank(b).localeCompare(releaseRank(a));
 }
 
@@ -154,7 +160,11 @@ function SetOverflow({
   activeCode: string;
   onChange: (code: string) => void;
 }) {
-  const options: FilterOption[] = sets.map((s) => ({ value: s.code, label: s.name }));
+  const options: FilterOption[] = sets.map((s) => ({
+    value: s.code,
+    label: s.name,
+    section: isMtgoFlashbackCode(s.code) ? MTGO_SECTION : undefined,
+  }));
   const renderOption = (option: FilterOption) => {
     const set = sets.find((s) => s.code === option.value);
     return (

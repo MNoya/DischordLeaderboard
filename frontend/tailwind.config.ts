@@ -10,6 +10,7 @@ import type { Config } from "tailwindcss";
 
 const config: Config = {
   darkMode: "class",
+  future: { hoverOnlyWhenSupported: true },
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
@@ -34,6 +35,7 @@ const config: Config = {
         cyan: "#00e5ff",
         magenta: "#ff2cdf",
         blue: "#4aa8ff",
+        indigo: "#6d6cf5",
         purple: "#a98eff",
         orange: "#ff9d42",
         pink: "#ff79c6",

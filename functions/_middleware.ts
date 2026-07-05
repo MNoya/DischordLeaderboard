@@ -17,6 +17,7 @@ import {
   PUBLIC_SUPABASE_PUBLISHABLE_KEY,
 } from "../frontend/src/data/public-supabase-config";
 import { SITE_NAME as SITE, TITLE_SEPARATOR, TIER_LIST_PREVIEW_SETS } from "../frontend/src/data/constants";
+import { mtgoSetName } from "../frontend/src/data/mtgoSets";
 import { P0P1_SET_CODE } from "../frontend/src/data/p0p1Slots";
 import { categoryFromSlug } from "../frontend/src/data/episodes";
 
@@ -35,7 +36,11 @@ const LEADERBOARD_DESCRIPTION =
   "Check ranks and trophies from the community. /join on Discord to share your drafts and climb the leaderboard";
 const HOME_DESCRIPTION = "Weekly episodes, set reviews, strategy and community events. Join the Discord and climb the leaderboard.";
 
-type ImageIntent = { kind: "url"; url: string } | { kind: "setSymbol"; code: string } | null;
+type ImageIntent =
+  | { kind: "url"; url: string }
+  | { kind: "setSymbol"; code: string }
+  | { kind: "avatarProxy"; slug: string }
+  | null;
 
 type RouteMeta = {
   ogTitle: string;
@@ -97,7 +102,7 @@ const fetchSetName = async (code: string): Promise<string> => {
   } catch {
     // fall through
   }
-  return TIER_LIST_PREVIEW_SETS[code]?.name ?? code;
+  return TIER_LIST_PREVIEW_SETS[code]?.name ?? mtgoSetName(code);
 };
 
 // Episodes span sets that never reached the leaderboard, so resolve their display name
@@ -115,31 +120,25 @@ const fetchEpisodeSetName = async (code: string): Promise<string | null> => {
   return null;
 };
 
-type PlayerCard = { name: string; avatarUrl: string | null };
-
-const fetchPlayer = async (slug: string): Promise<PlayerCard> => {
+const fetchPlayerName = async (slug: string): Promise<string> => {
   try {
-    const resp = await restGet(
-      `public_leaderboard?slug=eq.${encodeURIComponent(slug)}&select=display_name,avatar_url&limit=1`,
-    );
+    const resp = await restGet(`public_leaderboard?slug=eq.${encodeURIComponent(slug)}&select=display_name&limit=1`);
     if (resp.ok) {
-      const rows = (await resp.json()) as Array<{ display_name: string; avatar_url: string | null }>;
-      if (rows[0]?.display_name) {
-        return { name: rows[0].display_name, avatarUrl: rows[0].avatar_url ?? null };
-      }
+      const rows = (await resp.json()) as Array<{ display_name: string }>;
+      if (rows[0]?.display_name) return rows[0].display_name;
     }
   } catch {
     // fall through to the slug
   }
-  return { name: slugToName(slug), avatarUrl: null };
+  return slugToName(slug);
 };
 
-const playerMeta = (player: PlayerCard): RouteMeta => ({
-  ogTitle: `${player.name} · Player Profile`,
-  tabTitle: `${player.name}${TITLE_SEPARATOR}${SITE}`,
+const playerMeta = (name: string, slug: string): RouteMeta => ({
+  ogTitle: `${name}'s Profile`,
+  tabTitle: `${name}${TITLE_SEPARATOR}${SITE}`,
   siteName: SITE,
-  description: `Check ${player.name}'s drafts & stats on the leaderboard.`,
-  image: player.avatarUrl ? { kind: "url", url: player.avatarUrl } : null,
+  description: `View ${name}'s drafts on the Limited Level-Ups community website`,
+  image: { kind: "avatarProxy", slug },
 });
 
 const resolveMeta = async (pathname: string): Promise<RouteMeta> => {
@@ -149,6 +148,10 @@ const resolveMeta = async (pathname: string): Promise<RouteMeta> => {
   }
   const [section, ...rest] = segments;
 
+  if (section === "player" && rest[0]) {
+    return playerMeta(await fetchPlayerName(rest[0]), rest[0]);
+  }
+
   if (section === "leaderboard") {
     if (rest.length === 0) {
       return page("Leaderboard", LEADERBOARD_DESCRIPTION);
@@ -157,11 +160,11 @@ const resolveMeta = async (pathname: string): Promise<RouteMeta> => {
       return page("About", "Learn how the community leaderboard works.");
     }
     if (rest[0] === "player" && rest[1]) {
-      return playerMeta(await fetchPlayer(rest[1]));
+      return playerMeta(await fetchPlayerName(rest[1]), rest[1]);
     }
     const setCode = rest[0].toUpperCase();
     if (rest[1] === "player" && rest[2]) {
-      return playerMeta(await fetchPlayer(rest[2]));
+      return playerMeta(await fetchPlayerName(rest[2]), rest[2]);
     }
     // CUBE is a word, not an acronym, and its seasons are virtual CUBE-<SET> codes;
     // render "Cube" / "Cube SOS" but resolve the symbol/name from the base CUBE set.
@@ -198,7 +201,7 @@ const resolveMeta = async (pathname: string): Promise<RouteMeta> => {
     return page("Pod Drafts", "Check community pod draft results and standings.");
   }
 
-  if (section === "p0p1" || section === "p0p1-v1") {
+  if (section === "p0p1") {
     return page(
       "P0P1 Challenge",
       "Pick a team of eight cards you think will perform best from the upcoming set.",
@@ -307,13 +310,14 @@ const META_CRAWLER_THUMB_SIZE = 245;
 
 // Meta crawlers (WhatsApp, FB) flatten transparency to white and lose white-on-transparent set symbols; serve the opaque logo, keep opaque avatars
 const metaCrawlerImage = (image: ImageIntent, origin: string): ImageIntent => {
-  if (image !== null && image.kind === "url") return image;
+  if (image !== null && (image.kind === "url" || image.kind === "avatarProxy")) return image;
   return { kind: "url", url: `${origin}/llu-logo.png` };
 };
 
 const resolveImageUrl = async (image: ImageIntent, origin: string, assets: Fetcher): Promise<string | null> => {
   if (image === null) return null;
   if (image.kind === "url") return image.url;
+  if (image.kind === "avatarProxy") return `${origin}/api/avatar/${encodeURIComponent(image.slug)}.png`;
   const candidate = `${origin}/set-symbols/${image.code.toLowerCase()}.png`;
   try {
     const resp = await assets.fetch(candidate);
