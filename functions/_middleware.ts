@@ -201,7 +201,7 @@ const resolveMeta = async (pathname: string): Promise<RouteMeta> => {
     return page("Pod Drafts", "Check community pod draft results and standings.");
   }
 
-  if (section === "p0p1" || section === "p0p1-v1") {
+  if (section === "p0p1") {
     return page(
       "P0P1 Challenge",
       "Pick a team of eight cards you think will perform best from the upcoming set.",
