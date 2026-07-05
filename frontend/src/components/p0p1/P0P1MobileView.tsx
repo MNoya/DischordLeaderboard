@@ -563,11 +563,19 @@ function CountdownStacked({
   }
 
   if (phase === "final") {
-    return <span className="text-green text-[13px] whitespace-nowrap">Results are in</span>;
+    return (
+      <div className="flex flex-col items-end leading-tight whitespace-nowrap shrink-0">
+        <span className="text-green text-[13px]">Showing results</span>
+      </div>
+    );
   }
 
   if (phase === "finalizing") {
-    return <span className="text-green text-[13px] whitespace-nowrap">Tallying final results</span>;
+    return (
+      <div className="flex flex-col items-end leading-tight whitespace-nowrap shrink-0">
+        <span className="text-green text-[13px]">Finalizing results</span>
+      </div>
+    );
   }
 
   if (scoringDate) {
@@ -589,5 +597,10 @@ function CountdownStacked({
     }
   }
 
-  return <span className="text-muted text-[13px] whitespace-nowrap">Entries have closed</span>;
+  return (
+    <div className="flex flex-col items-end leading-tight whitespace-nowrap shrink-0">
+      <span className="text-muted text-[11px] tracking-[0.04em]">Entries</span>
+      <span className="text-muted text-[13px]">have closed</span>
+    </div>
+  );
 }

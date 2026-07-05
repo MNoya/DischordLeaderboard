@@ -54,7 +54,7 @@ export function P0P1Countdown({
   if (phase === "final") {
     return (
       <span className="text-green" style={{ fontSize: size }}>
-        Results are in
+        Showing results
       </span>
     );
   }
@@ -62,7 +62,7 @@ export function P0P1Countdown({
   if (phase === "finalizing") {
     return (
       <span className="text-green" style={{ fontSize: size }}>
-        Tallying final results
+        Finalizing results
       </span>
     );
   }
