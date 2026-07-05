@@ -1939,7 +1939,7 @@ function PlayerTile({
     <button
       onClick={onClick}
       className={cn(
-        "flex h-full w-full flex-col items-center justify-center gap-1.5 rounded-lg px-2 transition-colors",
+        "flex h-full w-full min-w-0 flex-col items-center justify-center gap-1.5 rounded-lg px-2 transition-colors",
         active ? "bg-white/[0.06]" : "hover:bg-white/[0.04]",
       )}
     >
