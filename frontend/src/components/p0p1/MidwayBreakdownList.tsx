@@ -3,7 +3,7 @@ import { BreakdownList } from "./BreakdownList";
 import type { BreakdownRow } from "./BreakdownList";
 import { SLOTS } from "../../data/p0p1Slots";
 import { GIH_SAMPLE_FLOOR } from "../../data/p0p1Results";
-import type { CardRating } from "../../data/p0p1Results";
+import type { CardRating, GihwrBounds } from "../../data/p0p1Results";
 import type { Card, P0P1PickStat, SlotKey } from "../../types/p0p1";
 
 export function MidwayBreakdownList({
@@ -12,12 +12,14 @@ export function MidwayBreakdownList({
   ratingsByName,
   yourCardBySlot,
   pickStats,
+  bounds,
 }: {
   cards: Card[];
   cardsByName: Map<string, Card>;
   ratingsByName: Map<string, CardRating>;
   yourCardBySlot: Map<SlotKey, string>;
   pickStats: P0P1PickStat[];
+  bounds: GihwrBounds;
 }) {
   const pickedBySlot = useMemo(() => {
     const map = new Map<SlotKey, Set<string>>();
@@ -52,22 +54,8 @@ export function MidwayBreakdownList({
     );
   }, [cards, ratingsByName, yourCardBySlot, pickedBySlot]);
 
-  const { gihwrMin, gihwrMax } = useMemo(() => {
-    let min = Infinity;
-    let max = -Infinity;
-    for (const rows of rawBySlot.values()) {
-      for (const row of rows) {
-        if (row.gihwr !== null) {
-          if (row.gihwr < min) min = row.gihwr;
-          if (row.gihwr > max) max = row.gihwr;
-        }
-      }
-    }
-    return { gihwrMin: min === Infinity ? 0 : min, gihwrMax: max === -Infinity ? 0 : max };
-  }, [rawBySlot]);
-
   const bySlot = useMemo(() => {
-    const span = gihwrMax - gihwrMin;
+    const span = bounds.max - bounds.min;
     return new Map(
       [...rawBySlot.entries()].map(([slotKey, rows]) => {
         const breakdownRows: BreakdownRow[] = rows.map((row) => ({
@@ -77,7 +65,7 @@ export function MidwayBreakdownList({
           fillPct:
             row.gihwr !== null
               ? span > 0
-                ? Math.max(((row.gihwr - gihwrMin) / span) * 100, 3)
+                ? Math.max(((row.gihwr - bounds.min) / span) * 100, 3)
                 : 100
               : 0,
           value: (
@@ -89,7 +77,7 @@ export function MidwayBreakdownList({
         return [slotKey, breakdownRows] as const;
       }),
     );
-  }, [rawBySlot, gihwrMin, gihwrMax, cardsByName]);
+  }, [rawBySlot, bounds, cardsByName]);
 
   return <BreakdownList title="GIHWR BREAKDOWN" bySlot={bySlot} />;
 }

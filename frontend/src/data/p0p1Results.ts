@@ -34,6 +34,26 @@ export interface TeamResult {
 // Cards with fewer than this many GIH games are excluded from scoring and team-building
 export const GIH_SAMPLE_FLOOR = 500;
 
+export interface GihwrBounds {
+  min: number;
+  max: number;
+}
+
+export function gihwrBounds(
+  pickStats: P0P1PickStat[],
+  ratingsByName: Map<string, CardRating>,
+): GihwrBounds {
+  let min = Infinity;
+  let max = -Infinity;
+  for (const stat of pickStats) {
+    const r = ratingsByName.get(stat.cardName);
+    if (!r || r.gih < GIH_SAMPLE_FLOOR || r.gihwr === null) continue;
+    if (r.gihwr < min) min = r.gihwr;
+    if (r.gihwr > max) max = r.gihwr;
+  }
+  return { min: min === Infinity ? 0 : min, max: max === -Infinity ? 0 : max };
+}
+
 export function buildRatingsByName(snapshot: RatingsSnapshot): Map<string, CardRating> {
   return new Map(snapshot.cards.map((c) => [c.card_name, c]));
 }

@@ -12,9 +12,10 @@ import {
   bestPossibleTeam,
   mostPopularTeam,
   buildMidwaySlotVersus,
+  gihwrBounds,
   GIH_SAMPLE_FLOOR,
 } from "../../data/p0p1Results";
-import type { RatingsSnapshot, TeamPick, CardRating } from "../../data/p0p1Results";
+import type { RatingsSnapshot, TeamPick, CardRating, GihwrBounds } from "../../data/p0p1Results";
 import type { Card, P0P1PickStat, SlotKey } from "../../types/p0p1";
 import type { PickEntry } from "./CommunityGrid";
 
@@ -116,6 +117,10 @@ export function MidwayResults({
   const ratingsByName = useMemo(
     () => buildRatingsByName(ratingsSnapshot),
     [ratingsSnapshot],
+  );
+  const bounds = useMemo(
+    () => gihwrBounds(pickStats, ratingsByName),
+    [pickStats, ratingsByName],
   );
   const crowdTeam = useMemo(
     () => mostPopularTeam(pickStats, SLOTS, ratingsByName),
@@ -224,7 +229,7 @@ export function MidwayResults({
         onTileOpen={onTileOpen}
       />
 
-      <MidwayVersusModal pager={pager} />
+      <MidwayVersusModal pager={pager} bounds={bounds} />
 
       <MidwayBreakdownList
         cards={cards}
@@ -232,6 +237,7 @@ export function MidwayResults({
         ratingsByName={ratingsByName}
         yourCardBySlot={yourCardBySlot}
         pickStats={pickStats}
+        bounds={bounds}
       />
     </div>
   );
