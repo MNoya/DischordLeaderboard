@@ -47,9 +47,9 @@ const ROLE_LABEL: Record<Role, string> = {
 // Keys are role names sorted alphabetically so the lookup is order-independent
 const MERGED_LABEL: Record<string, string> = {
   "crowd+yours": "CROWD・YOURS",
-  "best+yours": "BEST・YOURS",
-  "best+crowd": "BEST・CROWD",
-  "best+crowd+yours": "BEST・CROWD・YOURS",
+  "best+yours": "BEST POSSIBLE・YOURS",
+  "best+crowd": "BEST POSSIBLE・CROWD",
+  "best+crowd+yours": "BEST POSSIBLE・CROWD・YOURS",
 };
 
 function accentFor(roles: Role[]): string {
@@ -132,7 +132,7 @@ export function MidwayVersusCard({
 }) {
   const stop = (e: MouseEvent) => e.stopPropagation();
   const columns = buildColumns(versus);
-  const maxWidth = columns.length === 1 ? 420 : columns.length === 2 ? 640 : 820;
+  const maxWidth = columns.length === 1 ? 420 : columns.length === 2 ? 820 : 1160;
 
   return (
     <VsCardShell maxWidth={maxWidth} onClick={stop}>
@@ -194,14 +194,14 @@ function ThreeColumnLayout({
 }) {
   return (
     <VsThreeColumnLayout
-      left={<GihwrCompact column={columns[0]} bounds={bounds} />}
-      middle={<GihwrCompact column={columns[1]} bounds={bounds} />}
-      right={<GihwrCompact column={columns[2]} bounds={bounds} />}
+      left={<GihwrSide column={columns[0]} bounds={bounds} tight />}
+      middle={<GihwrSide column={columns[1]} bounds={bounds} tight />}
+      right={<GihwrSide column={columns[2]} bounds={bounds} tight />}
     />
   );
 }
 
-function GihwrSide({ column, bounds }: { column: Column; bounds: GihwrBounds }) {
+function GihwrSide({ column, bounds, tight = false }: { column: Column; bounds: GihwrBounds; tight?: boolean }) {
   return (
     <VsMetricSide
       label={column.label}
@@ -213,24 +213,7 @@ function GihwrSide({ column, bounds }: { column: Column; bounds: GihwrBounds }) 
       barColor={column.accent}
       dim={column.side.gihwr === null}
       density="comfortable"
-      imageUrl={column.side.imageUrl}
-      name={column.side.name}
-    />
-  );
-}
-
-function GihwrCompact({ column, bounds }: { column: Column; bounds: GihwrBounds }) {
-  return (
-    <VsMetricSide
-      label={column.label}
-      labelColor={column.accent}
-      value={gihwrDisplay(column.side.gihwr)}
-      valueColor={column.accent}
-      caption={columnCaption(column)}
-      fillPct={barFill(column.side.gihwr, bounds)}
-      barColor={column.accent}
-      dim={column.side.gihwr === null}
-      density="compact"
+      tight={tight}
       imageUrl={column.side.imageUrl}
       name={column.side.name}
     />

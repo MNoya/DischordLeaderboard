@@ -392,14 +392,21 @@ function P0P1Badge({ active }: { active: boolean }) {
   const { user, isPastDeadline, filled, total } = useP0P1BadgeState();
 
   const pill = cn(
-    "absolute -top-1.5 -right-1.5 z-10 rounded-full border border-green px-1.5 py-0.5 text-[9px] leading-none font-sans font-bold tracking-wide",
+    "absolute -top-1.5 z-10 rounded-full border border-green px-1.5 py-0.5 text-[9px] leading-none font-sans font-bold tracking-wide",
     active ? "bg-bg text-green" : "bg-green text-bg",
   );
 
-  if (isPastDeadline) return <span className={pill}>REVIEW</span>;
-  if (!user || filled === 0) return <span className={pill}>OPEN</span>;
-  if (filled === total) return <span className={pill}>VOTED!</span>;
-  return <span className={pill}>{filled}/{total}</span>;
+  if (isPastDeadline) {
+    return (
+      <span className="absolute -top-1.5 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-full border border-[#ffc63a] bg-[#ffc63a] px-1.5 py-0.5 font-sans text-[9px] font-bold uppercase leading-none tracking-wide text-bg">
+        Prelim Data
+      </span>
+    );
+  }
+  const corner = cn(pill, "-right-1.5");
+  if (!user || filled === 0) return <span className={corner}>OPEN</span>;
+  if (filled === total) return <span className={corner}>VOTED!</span>;
+  return <span className={corner}>{filled}/{total}</span>;
 }
 
 function MobileBadgeSlot({ active }: { active: boolean }) {
@@ -410,7 +417,7 @@ function MobileBadgeSlot({ active }: { active: boolean }) {
     active ? "text-bg" : "text-green",
   );
 
-  if (isPastDeadline) return <span className={wrap}>REVIEW</span>;
+  if (isPastDeadline) return <span className={wrap}>PRELIM DATA</span>;
   if (!user || filled === 0) return <span className={wrap}>OPEN</span>;
   if (filled === total) return <span className={wrap}>VOTED!</span>;
   return <span className={wrap}>{filled}/{total}</span>;

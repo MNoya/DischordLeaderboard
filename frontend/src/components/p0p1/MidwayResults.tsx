@@ -1,8 +1,8 @@
 import { useMemo } from "react";
+import { HelpCircle } from "lucide-react";
 import { SectionLabel } from "../SectionLabel";
+import { Tooltip } from "../Tooltip";
 import { PickGrid } from "./CommunityGrid";
-import { CtaPill } from "../CtaPill";
-import { DiscordIcon } from "../BrandIcons";
 import { MidwayBreakdownList } from "./MidwayBreakdownList";
 import { useMidwayVersusPager, MidwayVersusModal } from "./MidwayVersusCard";
 import { SLOTS } from "../../data/p0p1Slots";
@@ -68,12 +68,14 @@ function yourPicksEntries(
 
 function ResultsRow({
   title,
+  titleColor = "white",
   score,
   entries,
   cardsByName,
   onTileOpen,
 }: {
   title: string;
+  titleColor?: string;
   score: number;
   entries: PickEntry[];
   cardsByName: Map<string, Card>;
@@ -82,12 +84,17 @@ function ResultsRow({
   return (
     <div>
       <div className="flex items-center justify-center gap-3 mb-2">
-        <SectionLabel size={22} color="white">
+        <SectionLabel size={22} color={titleColor}>
           {title}
         </SectionLabel>
         <span className="inline-flex items-baseline gap-[7px] rounded border border-border2 bg-surface2 px-[9px] py-1">
           <span className="font-mono tabular-nums text-[16px] font-semibold text-subtle">{score.toFixed(1)}</span>
-          <span className="font-display tracking-[0.16em] text-[11px] text-muted">GIH</span>
+          <Tooltip label="Game In Hand Win Rate" side="top">
+            <button type="button" className="inline-flex items-center gap-1 self-center cursor-help bg-transparent border-0 p-0">
+              <span className="font-display tracking-[0.16em] text-[13px] text-subtle">GIH</span>
+              <HelpCircle size={15} className="text-subtle" />
+            </button>
+          </Tooltip>
         </span>
       </div>
       <PickGrid entries={entries} cardsByName={cardsByName} onTileOpen={onTileOpen} />
@@ -179,7 +186,7 @@ export function MidwayResults({
   );
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-3 lg:gap-6">
     {showYourPicks && (
         <ResultsRow
           title="YOUR PICKS"
@@ -200,6 +207,7 @@ export function MidwayResults({
 
       <ResultsRow
         title="BEST POSSIBLE"
+        titleColor="#2ee85c"
         score={bestTeam.score}
         entries={bestEntries}
         cardsByName={cardsByName}

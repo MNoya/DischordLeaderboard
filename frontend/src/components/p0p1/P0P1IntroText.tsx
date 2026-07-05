@@ -69,13 +69,13 @@ function buildSentences(
     case "midway":
       return [
         <>{setName} season is underway.</>,
-        <>Check out the preliminary data below {formattedRange && <> from {formattedRange}</>}.</>,
+        <>Check out the <strong>preliminary data</strong> below {formattedRange && <> from {formattedRange}</>}.</>,
         <>Final results coming soon.</>
       ];
     case "finalizing":
       return [
         <>{capitalize(windowText)} of {setName} drafts are in the books.</>,
-        <>Showing preliminary data below{formattedRange && <> from {formattedRange}</>}.</>,
+        <>Showing <strong>preliminary data</strong> below{formattedRange && <> from {formattedRange}</>}.</>,
         <>Final standings coming shortly.</>,
       ];
     case "final":
