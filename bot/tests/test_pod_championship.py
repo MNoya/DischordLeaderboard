@@ -9,6 +9,7 @@ from bot.services.pod_tournament import (
     build_deck_ping,
     deck_missing_parts,
     format_reported_result,
+    format_round_announcement,
 )
 
 
@@ -90,6 +91,17 @@ def test_reported_result_uses_display_names_either_side():
 
     assert format_reported_result({**match, "winner_name": "marlo#1"}) == "Marlo wins 2-1 vs Bob"
     assert format_reported_result({**match, "winner_name": "bob#2"}) == "Bob wins 2-1 vs Marlo"
+
+
+def test_round_announcement_prefixes_the_round_label():
+    match = {
+        "a_name": "marlo#1", "b_name": "bob#2",
+        "a_display": "Marlo", "b_display": "Bob", "score": "2-0",
+        "winner_name": "marlo#1",
+    }
+
+    assert format_round_announcement(1, match) == "[Round 1] Marlo wins 2-0 vs Bob"
+    assert format_round_announcement(3, match) == "[Round 3] Marlo wins 2-0 vs Bob"
 
 
 def _standings(*names: str) -> list:

@@ -516,26 +516,42 @@ def test_get_participant_deck_state_signals_not_in_pod(session):
     assert color is None
 
 
-def test_participant_dm_info_returns_linked_player_data(session):
+def test_participant_dm_info_prefers_server_nickname_and_session_handle(session):
     event_id, _ = _seed_pod_for_deck_color_tests(session)
-    # Simulate Alice joining Draftmancer under a specific handle (the session-specific name)
     participant = session.execute(
         select(PodDraftParticipant)
         .where(PodDraftParticipant.event_id == event_id, PodDraftParticipant.display_name == "Alice")
     ).scalar_one()
     participant.draftmancer_name = "Alice#1234"
-    # Also set a different Player.arena_name to confirm the DM info uses the Draftmancer handle,
-    # not the player's primary alias
+    participant.display_name = "Alice#1234"
     player = session.execute(select(Player).where(Player.discord_id == "42")).scalar_one()
+    player.display_name = "AliceServerNick"
     player.arena_name = "AliceMain#9999"
     session.flush()
 
     info = participant_dm_info(session, event_id)
-    assert "alice" in info
+
     alice = info["alice"]
     assert alice.discord_id == "42"
-    assert alice.display_name == "Alice"
+    assert alice.display_name == "AliceServerNick"
     assert alice.arena_name == "Alice#1234"
+
+
+def test_participant_dm_info_strips_arena_suffix_from_unlinked_fallback(session):
+    event_id, _ = _seed_pod_for_deck_color_tests(session)
+    bob = session.execute(
+        select(PodDraftParticipant)
+        .where(PodDraftParticipant.event_id == event_id, PodDraftParticipant.display_name == "Bob")
+    ).scalar_one()
+    bob.player_id = None
+    bob.draftmancer_name = "Bob#4242"
+    bob.display_name = "Bob#4242"
+    session.flush()
+
+    info = participant_dm_info(session, event_id)
+
+    assert info["bob"].discord_id is None
+    assert info["bob"].display_name == "Bob"
 
 
 def test_set_participant_deck_colors_overwrites_on_resubmit(session):

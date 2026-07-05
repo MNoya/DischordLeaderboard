@@ -961,6 +961,11 @@ def list_champions(session: Session, set_code: str | None = None) -> list[dict]:
 def participant_dm_info(session: Session, event_id: str) -> dict[str, ParticipantDmInfo]:
     """Map normalized draftmancer_name → ParticipantDmInfo for every participant in the event.
 
+    display_name prefers Player.display_name (the resolved Discord server nickname) over the
+    participant row's display_name, which can carry a stale Arena-style handle. Pod DMs have no
+    guild context, so the opponent line renders this name as text rather than a `<@id>` mention —
+    a mention would resolve to the global username instead of the LLU server nickname.
+
     arena_name sources from PodDraftParticipant.draftmancer_name — the handle the player actually
     set in the Draftmancer client for THIS session. For multi-account users this can differ from
     Player.arena_name (their stored display primary); the opponent DM should report the session-
@@ -971,18 +976,20 @@ def participant_dm_info(session: Session, event_id: str) -> dict[str, Participan
             PodDraftParticipant.id,
             PodDraftParticipant.draftmancer_name,
             PodDraftParticipant.display_name,
+            Player.display_name,
             Player.discord_id,
         )
         .outerjoin(Player, Player.id == PodDraftParticipant.player_id)
         .where(PodDraftParticipant.event_id == event_id)
     ).all()
     info: dict[str, ParticipantDmInfo] = {}
-    for participant_id, dm_name, display_name, discord_id in rows:
-        key = normalize_player_name(dm_name) if dm_name else normalize_player_name(display_name)
+    for participant_id, dm_name, participant_dn, player_dn, discord_id in rows:
+        key = normalize_player_name(dm_name) if dm_name else normalize_player_name(participant_dn)
+        raw = player_dn or participant_dn
         info[key] = ParticipantDmInfo(
             participant_id=participant_id,
             discord_id=discord_id,
-            display_name=display_name,
+            display_name=strip_arena_suffix(raw) if raw else raw,
             arena_name=dm_name,
         )
     return info

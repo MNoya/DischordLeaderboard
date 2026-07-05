@@ -402,9 +402,9 @@ def build_pairing_dm_embed(
 ) -> discord.Embed:
     """Single source of truth for round-start + pairings-updated DMs.
 
-    `opponent_label` is the pre-formatted opponent string — `<@id>` mention in production,
-    or `**Bold Name**` for testlobby (no real Discord ID). When `match_state` carries a winner,
-    a status line ('✅ You won 2-1' / '❌ You lost 2-0' / '🚫 Not played') is appended; the line's
+    `opponent_label` is the pre-formatted opponent string — see `_opponent_dm_label`. When
+    `match_state` carries a winner, a status line ('✅ You won 2-1' / '❌ You lost 2-0' /
+    '🚫 Not played') is appended; the line's
     perspective is set by `viewer_is_a` (True if the recipient is player_a in the match).
     """
     short = _short_event_name(event_name)
@@ -442,6 +442,14 @@ def build_pairing_dm_embed(
     )
 
 
+def _opponent_dm_label(opponent, fallback_key: str) -> str:
+    """Opponent name for a pod DM. DMs have no guild context, so the server nickname is rendered as
+    text — a `<@id>` mention would resolve to the opponent's global username instead. `display_name`
+    already carries the resolved LLU nickname (see `participant_dm_info`)."""
+    name = opponent.display_name if opponent else fallback_key
+    return f"**{name}**"
+
+
 async def _send_pairing_dm(
     bot_client,
     dm_info: dict,
@@ -459,10 +467,7 @@ async def _send_pairing_dm(
     if recipient is None or not recipient.discord_id:
         return
     opponent = dm_info.get(opponent_key)
-    opp_label = (
-        f"<@{opponent.discord_id}>" if opponent and opponent.discord_id
-        else f"**{opponent.display_name if opponent else opponent_key}**"
-    )
+    opp_label = _opponent_dm_label(opponent, opponent_key)
     opp_arena = opponent.arena_name if opponent else None
     viewer_is_a = None
     if match_state:
@@ -1235,12 +1240,12 @@ async def _handle_result_submission(interaction: discord.Interaction, value: str
         is_edit=bool(result.get("was_reported") and result.get("winner_changed")),
         result_phrase=format_result_change(result["a_name"], result["b_name"], winner_name, score),
     )
+    newly_reported = not result.get("was_reported") or result.get("winner_changed")
+    if match_state is not None and match_was_played(match_state) and newly_reported:
+        asyncio.create_task(_announce_round_result(
+            interaction.client, event_id, format_round_announcement(round_num, match_state),
+        ))
     if round_num >= TOTAL_ROUNDS:
-        newly_reported = not result.get("was_reported") or result.get("winner_changed")
-        if match_state is not None and match_was_played(match_state) and newly_reported:
-            asyncio.create_task(_announce_round_result(
-                interaction.client, event_id, format_reported_result(match_state),
-            ))
         asyncio.create_task(_send_final_submit_deck_dms_for_match(
             interaction.client, event_id, result["a_name"], result["b_name"],
         ))
@@ -1279,10 +1284,7 @@ def _build_dm_match_view(
         match_state["b_name"] if viewer_is_a else match_state["a_name"]
     )
     opponent = dm_info.get(opp_key)
-    opp_label = (
-        f"<@{opponent.discord_id}>" if opponent and opponent.discord_id
-        else f"**{opponent.display_name if opponent else opp_key}**"
-    )
+    opp_label = _opponent_dm_label(opponent, opp_key)
     embed = build_pairing_dm_embed(
         round_num=round_num,
         opponent_label=opp_label,
@@ -1441,20 +1443,20 @@ def _commit_result(match_id: str, winner_name: str, score: str):
 
 
 async def _announce_round_result(bot_client, event_id: str, phrase: str) -> None:
-    """Post a single reported result to the pod thread for immediate feedback, e.g. 'Marlo wins
-    2-1 vs Bob'. Best-effort — a missing thread or send failure is logged, not raised."""
+    """Post a single reported result to the pod thread for immediate feedback, e.g. '[Round 2] Marlo
+    wins 2-1 vs Bob'. Best-effort — a missing thread or send failure is logged, not raised."""
     thread_id = await asyncio.to_thread(_load_event_thread_id_sync, event_id)
     if thread_id is None:
         return
     try:
         thread = bot_client.get_channel(int(thread_id)) or await bot_client.fetch_channel(int(thread_id))
     except discord.HTTPException:
-        log.info(f"[R3-RESULT] could not fetch thread event={event_id}", exc_info=True)
+        log.info(f"[ROUND-RESULT] could not fetch thread event={event_id}", exc_info=True)
         return
     try:
         await thread.send(phrase, allowed_mentions=discord.AllowedMentions.none())
     except discord.HTTPException:
-        log.warning(f"[R3-RESULT] announce failed event={event_id}", exc_info=True)
+        log.warning(f"[ROUND-RESULT] announce failed event={event_id}", exc_info=True)
 
 
 def _load_event_thread_id_sync(event_id: str) -> str | None:
@@ -2421,10 +2423,7 @@ async def _dm_changed_opponents(
         if info is None or not info.discord_id:
             continue
         opp_info = dm_info.get(normalize_player_name(new_opp))
-        opp_label = (
-            f"<@{opp_info.discord_id}>" if opp_info and opp_info.discord_id
-            else f"**{opp_info.display_name if opp_info else new_opp}**"
-        )
+        opp_label = _opponent_dm_label(opp_info, new_opp)
         opp_arena = opp_info.arena_name if opp_info else None
         embed = build_pairing_dm_embed(
             round_num=round_num,
@@ -3200,6 +3199,11 @@ def format_reported_result(m: dict) -> str:
     else:
         winner_disp, loser_disp = b_disp, a_disp
     return f"{winner_disp} wins {m['score']} vs {loser_disp}"
+
+
+def format_round_announcement(round_num: int, m: dict) -> str:
+    """The live per-result thread announcement, round-labelled: '[Round 2] Marlo wins 2-1 vs Bob'."""
+    return f"[Round {round_num}] {format_reported_result(m)}"
 
 
 def _match_line(m: dict, *, seat_label: str | None = None, show_arena: bool = False) -> str:
