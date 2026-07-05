@@ -27,6 +27,7 @@ import {
 import { mergeSelfReportedTrophies, type SelfReportedTrophyTally } from "./selfReported";
 import { baseSetCode, colorsOf, CUBE_BASE, isCubeCode, isCubeSeasonCode, isSoup } from "./utils";
 import { formatsForBucket } from "./format-buckets";
+import { IDENTITY_VIEWS } from "./constants";
 import { FORMAT_LABEL_GROUPS, FORMAT_RAW_GROUPS, MULTI, OTHER } from "./filters";
 import type {
   ColorsLeaderboardRow,
@@ -1005,11 +1006,6 @@ export async function fetchPlayerSlugByDiscordId(discordId: string): Promise<str
   if (error) throw error;
   return (data as { slug?: string } | null)?.slug ?? null;
 }
-
-// public_player is 17lands-stats-gated, so manual and pod-only players never appear in it. Fall
-// back to any set's self-reported or pod row — both carry the same name + avatar — so a profile's
-// identity resolves for every player type, even on a set where they have no events.
-const IDENTITY_VIEWS = ["public_player", "public_self_reported_events", "public_pod_scoring"] as const;
 
 export async function fetchPlayerIdentity(slug: string): Promise<PlayerIdentity | null> {
   for (const view of IDENTITY_VIEWS) {

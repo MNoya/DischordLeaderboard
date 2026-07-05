@@ -11,6 +11,11 @@ export const TITLE_SEPARATOR = " | ";
 // LLU community Discord guild
 export const DISCORD_GUILD_ID = "775371722065051658";
 
+// Player identity (slug/name/avatar) lives across these views because public_player is
+// 17lands-stats-gated; pod-only and self-reported players only appear in the later ones.
+// Ordered by priority — first hit wins. Walked by fetchPlayerIdentity and the avatar proxy.
+export const IDENTITY_VIEWS = ["public_player", "public_self_reported_events", "public_pod_scoring"] as const;
+
 // 17Lands tier-list ids per set, taken from a tier list's share link
 // (https://www.17lands.com/tier_list/<uid>). Add one as each set rotates in.
 export const TIER_LIST_UIDS: Record<string, string> = {

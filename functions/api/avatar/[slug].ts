@@ -5,27 +5,30 @@ import {
   PUBLIC_SUPABASE_URL,
   PUBLIC_SUPABASE_PUBLISHABLE_KEY,
 } from "../../../frontend/src/data/public-supabase-config";
+import { IDENTITY_VIEWS } from "../../../frontend/src/data/constants";
 
 const upsizeAvatar = (url: string): string => url.replace(/([?&]size=)\d+/, "$1512");
 
 const fetchAvatarUrl = async (slug: string): Promise<string | null> => {
-  try {
-    const resp = await fetch(
-      `${PUBLIC_SUPABASE_URL}/rest/v1/public_leaderboard?slug=eq.${encodeURIComponent(slug)}&select=avatar_url&limit=1`,
-      {
-        headers: {
-          apikey: PUBLIC_SUPABASE_PUBLISHABLE_KEY,
-          authorization: `Bearer ${PUBLIC_SUPABASE_PUBLISHABLE_KEY}`,
+  for (const view of IDENTITY_VIEWS) {
+    try {
+      const resp = await fetch(
+        `${PUBLIC_SUPABASE_URL}/rest/v1/${view}?slug=eq.${encodeURIComponent(slug)}&select=avatar_url&limit=1`,
+        {
+          headers: {
+            apikey: PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+            authorization: `Bearer ${PUBLIC_SUPABASE_PUBLISHABLE_KEY}`,
+          },
+          cf: { cacheTtl: 600, cacheEverything: true },
         },
-        cf: { cacheTtl: 600, cacheEverything: true },
-      },
-    );
-    if (resp.ok) {
-      const rows = (await resp.json()) as Array<{ avatar_url: string | null }>;
-      if (rows[0]?.avatar_url) return upsizeAvatar(rows[0].avatar_url);
+      );
+      if (resp.ok) {
+        const rows = (await resp.json()) as Array<{ avatar_url: string | null }>;
+        if (rows[0]?.avatar_url) return upsizeAvatar(rows[0].avatar_url);
+      }
+    } catch {
+      // try the next view, then fall through to the logo
     }
-  } catch {
-    // fall through to the logo
   }
   return null;
 };
