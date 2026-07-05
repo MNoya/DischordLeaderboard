@@ -136,9 +136,6 @@ export function MidwayResults({
   const yourScore = showYourPicks
     ? scoreBallot(picksBySlot as Map<SlotKey, string>, ratingsByName)
     : null;
-  const dateCaption = ratingsSnapshot.dateRange
-    ? formatDateEnd(ratingsSnapshot.dateRange.end)
-    : null;
 
   const { setCode } = ratingsSnapshot;
 
@@ -183,13 +180,7 @@ export function MidwayResults({
 
   return (
     <div className="flex flex-col gap-8">
-      {dateCaption && (
-        <p className="text-center text-dim font-mono text-[11px] tracking-widest uppercase">
-          17lands data through {dateCaption} · midway snapshot
-        </p>
-      )}
-
-      {showYourPicks && (
+    {showYourPicks && (
         <ResultsRow
           title="YOUR PICKS"
           score={yourScore!}
