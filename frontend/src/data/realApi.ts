@@ -1006,21 +1006,30 @@ export async function fetchPlayerSlugByDiscordId(discordId: string): Promise<str
   return (data as { slug?: string } | null)?.slug ?? null;
 }
 
+// public_player is 17lands-stats-gated, so manual and pod-only players never appear in it. Fall
+// back to any set's self-reported or pod row — both carry the same name + avatar — so a profile's
+// identity resolves for every player type, even on a set where they have no events.
+const IDENTITY_VIEWS = ["public_player", "public_self_reported_events", "public_pod_scoring"] as const;
+
 export async function fetchPlayerIdentity(slug: string): Promise<PlayerIdentity | null> {
-  const { data, error } = await client()
-    .from("public_player")
-    .select("slug, display_name, avatar_url")
-    .eq("slug", slug)
-    .limit(1)
-    .maybeSingle();
-  if (error) throw error;
-  if (!data) return null;
-  const row = data as Record<string, unknown>;
-  return {
-    slug: row.slug as string,
-    displayName: row.display_name as string,
-    avatarUrl: (row.avatar_url as string | null) ?? null,
-  };
+  for (const view of IDENTITY_VIEWS) {
+    const { data, error } = await client()
+      .from(view)
+      .select("slug, display_name, avatar_url")
+      .eq("slug", slug)
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    if (data) {
+      const row = data as Record<string, unknown>;
+      return {
+        slug: row.slug as string,
+        displayName: row.display_name as string,
+        avatarUrl: (row.avatar_url as string | null) ?? null,
+      };
+    }
+  }
+  return null;
 }
 
 // ─── public_player_draft_events ────────────────────────────────────────────
