@@ -79,5 +79,5 @@ export function MidwayBreakdownList({
     );
   }, [rawBySlot, bounds, cardsByName]);
 
-  return <BreakdownList title="GIH WR BREAKDOWN" bySlot={bySlot} />;
+  return <BreakdownList title="GIH WINRATE BREAKDOWN" bySlot={bySlot} />;
 }

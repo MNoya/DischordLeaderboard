@@ -398,9 +398,7 @@ function P0P1Badge({ active }: { active: boolean }) {
 
   if (isPastDeadline) {
     return (
-      <span className="absolute -top-1.5 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-full border border-[#ffc63a] bg-[#ffc63a] px-1.5 py-0.5 font-sans text-[9px] font-bold uppercase leading-none tracking-wide text-bg">
-        Prelim Data
-      </span>
+      <span className={cn(pill, "left-1/2 -translate-x-1/2 whitespace-nowrap")}>PRELIM DATA</span>
     );
   }
   const corner = cn(pill, "-right-1.5");

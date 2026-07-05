@@ -210,7 +210,6 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
                   cardsByName={cardsByName}
                   picksBySlot={picksBySlot}
                   user={user}
-                  signIn={signIn}
                   hasParticipated={hasParticipated}
                 />
               ) : null

@@ -7,6 +7,7 @@ export type P0P1DevPreset =
   | "closedComplete"
   | "closedDidNotVote"
   | "midwayScoring"
+  | "midwayDidNotVote"
   | "finalizing"
   | "finalScoring";
 
@@ -16,6 +17,7 @@ export const P0P1_DEV_PRESETS: { value: P0P1DevPreset; label: string }[] = [
   { value: "closedComplete", label: "Closed · complete entry" },
   { value: "closedDidNotVote", label: "Closed · logged in, didn't vote" },
   { value: "midwayScoring", label: "Midway · complete entry" },
+  { value: "midwayDidNotVote", label: "Midway · didn't vote" },
   { value: "finalizing", label: "Finalizing · complete entry" },
   { value: "finalScoring", label: "Final · complete entry" },
 ];

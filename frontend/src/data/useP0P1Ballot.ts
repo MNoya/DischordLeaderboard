@@ -206,6 +206,7 @@ function applyDevUser(authUser: AuthUser | null, preset: P0P1DevPreset): AuthUse
     preset === "closedComplete" ||
     preset === "closedDidNotVote" ||
     preset === "midwayScoring" ||
+    preset === "midwayDidNotVote" ||
     preset === "finalizing" ||
     preset === "finalScoring"
   ) return authUser ?? FAKE_DEV_USER;
@@ -217,7 +218,9 @@ function applyDevPicks(
   pickStats: P0P1PickStat[] | undefined,
   preset: P0P1DevPreset,
 ): Map<string, string> {
-  if (preset === "closedLoggedOut" || preset === "closedDidNotVote") return new Map();
+  if (preset === "closedLoggedOut" || preset === "closedDidNotVote" || preset === "midwayDidNotVote") {
+    return new Map();
+  }
   if (
     preset === "closedComplete" ||
     preset === "midwayScoring" ||
@@ -247,7 +250,7 @@ function deriveP0P1Phase(
   dataPresent: boolean,
   devPreset: P0P1DevPreset,
 ): P0P1Phase {
-  if (devPreset === "midwayScoring") return "midway";
+  if (devPreset === "midwayScoring" || devPreset === "midwayDidNotVote") return "midway";
   if (devPreset === "finalizing") return "finalizing";
   if (devPreset === "finalScoring") return "final";
   if (

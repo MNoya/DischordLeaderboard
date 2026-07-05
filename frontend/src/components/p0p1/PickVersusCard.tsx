@@ -203,7 +203,7 @@ export function VsMetricSide({
   const labelClass = solo
     ? "shrink-0 whitespace-nowrap font-display text-[13px] leading-none tracking-[0.14em] lg:text-[16px]"
     : tight
-      ? "order-1 whitespace-nowrap font-display text-[10px] leading-none tracking-[0.08em] lg:order-none lg:shrink-0 lg:text-[16px]"
+      ? "order-1 whitespace-nowrap font-display text-[12px] leading-none tracking-[0.08em] lg:order-none lg:shrink-0 lg:text-[16px]"
       : "order-1 truncate font-display text-[13px] leading-none tracking-[0.14em] lg:order-none lg:shrink-0 lg:whitespace-nowrap lg:text-[16px]";
   const imageClass = `mx-auto max-h-[58vh] w-auto rounded-[10px] ${solo ? "max-w-[200px] lg:max-w-full" : "max-w-full"}`;
 
