@@ -590,7 +590,8 @@ function CountdownStacked({
           <span className="text-green text-[13px]">
             {showHours
               ? pluralizeUnit(days * 24 + hours, "hour")
-              : `${pluralizeUnit(days, "day")}, ${pluralizeUnit(hours, "hour")}`}
+              : pluralizeUnit(days, "day")
+            }
           </span>
         </div>
       );

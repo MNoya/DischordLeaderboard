@@ -79,7 +79,8 @@ export function P0P1Countdown({
           <span className="text-green">
             {showHours
               ? pluralizeUnit(days * 24 + hours, "hour")
-              : `${pluralizeUnit(days, "day")}, ${pluralizeUnit(hours, "hour")}`}
+              : pluralizeUnit(days, "day")
+            }
           </span>
         </span>
       );
