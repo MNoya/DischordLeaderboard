@@ -150,6 +150,10 @@ const resolveMeta = async (pathname: string): Promise<RouteMeta> => {
   }
   const [section, ...rest] = segments;
 
+  if (section === "player" && rest[0]) {
+    return playerMeta(await fetchPlayer(rest[0]));
+  }
+
   if (section === "leaderboard") {
     if (rest.length === 0) {
       return page("Leaderboard", LEADERBOARD_DESCRIPTION);

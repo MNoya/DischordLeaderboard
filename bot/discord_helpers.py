@@ -103,8 +103,8 @@ def display_width(s: str) -> int:
 
 def player_url(slug: str, set_code: str | None = None) -> str:
     """Public site URL for a player's page, set-scoped when set_code is given."""
-    base = settings.leaderboard_url
-    return f"{base}/{set_code}/player/{slug}" if set_code else f"{base}/player/{slug}"
+    base = settings.player_base_url
+    return f"{base}/{slug}/{set_code}" if set_code else f"{base}/{slug}"
 
 
 async def resolve_display_name(bot: "commands.Bot", user: "discord.User") -> str:

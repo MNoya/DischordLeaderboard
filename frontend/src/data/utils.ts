@@ -317,12 +317,15 @@ export function cubeSeasonLabel(code: string): string | null {
 // The leaderboard is a lowercase section; set codes stay uppercase under it (/leaderboard/SOS).
 export const LEADERBOARD_BASE = "/leaderboard";
 
+// Player profiles live at their own top-level section, set-scoped as /player/<slug>/<SET>.
+export const PLAYER_BASE = "/player";
+
 export function leaderboardPath(setCode?: string): string {
   return setCode ? `${LEADERBOARD_BASE}/${setCode}` : LEADERBOARD_BASE;
 }
 
 export function playerPath(slug: string, setCode: string): string {
-  return `${LEADERBOARD_BASE}/${setCode}/player/${slug}`;
+  return `${PLAYER_BASE}/${slug}/${setCode}`;
 }
 
 // Query string for a profile link: keeps the format/colors filter, drops the leaderboard-only sort

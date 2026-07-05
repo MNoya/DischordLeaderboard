@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     def leaderboard_url(self) -> str:
         return f"{self.public_site_url.rstrip('/')}/leaderboard"
 
+    @property
+    def player_base_url(self) -> str:
+        return f"{self.public_site_url.rstrip('/')}/player"
+
     scribe_cache_bust: bool = False
     format_schedule_enabled: bool = True
 

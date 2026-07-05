@@ -36,7 +36,7 @@ import { Tooltip } from "../components/Tooltip";
 import { useAvailableFormats, useColorChips, useDraftEvents, useLeaderboard, usePlayerIdentity, usePlayerProfile, useSets } from "../data/hooks";
 import { withMtgoSets } from "../data/mtgoSets";
 import { aggregate as scoreAggregate, computeScore, type ScoringStatRow } from "../data/scoring";
-import { canonicalSetCode, colorsOf, eventDate, eventDisplayLabel, fmtShortDate, formatTag, isCubeCode, isFlashbackEvent, isSoup, LEADERBOARD_BASE, lastUpdated, lcqCashPrize, leaderboardPath, mainColors, playerPath, prettyFormat, winPct } from "../data/utils";
+import { canonicalSetCode, colorsOf, eventDate, eventDisplayLabel, fmtShortDate, formatTag, isCubeCode, isFlashbackEvent, isSoup, lastUpdated, lcqCashPrize, leaderboardPath, mainColors, PLAYER_BASE, playerPath, prettyFormat, winPct } from "../data/utils";
 import { ACTIVE_SET_CODE } from "../data/constants";
 import {
   colorsDisplayName,
@@ -144,7 +144,7 @@ export function PlayerPage() {
     if (!params.setCode) return;
     if (setCode === liveSetCode) {
       navigate(
-        { pathname: `${LEADERBOARD_BASE}/player/${slug}`, search: topSearchParams.toString() },
+        { pathname: `${PLAYER_BASE}/${slug}`, search: topSearchParams.toString() },
         { replace: true },
       );
     } else if (setCode !== params.setCode) {

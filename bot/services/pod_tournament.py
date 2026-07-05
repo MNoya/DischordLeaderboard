@@ -21,7 +21,7 @@ from sqlalchemy import delete, func, select, update
 
 from bot import emojis
 from bot.config import settings
-from bot.discord_helpers import NBSP, display_width, first_image_url
+from bot.discord_helpers import NBSP, display_width, first_image_url, player_url
 from bot.slug import slugify
 from bot.database import SessionLocal
 from bot.models import Player as DbPlayer, PodDraftEvent, PodDraftMatch, PodDraftParticipant
@@ -368,10 +368,7 @@ def _build_standings_row(
     data = deck_data.get(key)
     medal = _RANK_MEDALS.get(s.rank) if show_medal else None
     prefix = f"{s.rank}. {medal} " if medal else f"{s.rank}. "
-    rendered = (
-        f"[{name}]({leaderboard_url}/player/{slug})"
-        if slug and leaderboard_url else name
-    )
+    rendered = f"[{name}]({player_url(slug)})" if slug and leaderboard_url else name
     color_glyph = _format_deck_color_emojis(player_colors.get(key))
     color_suffix = f"  {color_glyph}" if color_glyph else ""
     log_suffix = ""

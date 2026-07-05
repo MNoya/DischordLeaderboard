@@ -16,7 +16,7 @@ const NAV: Array<{ label: string; badge?: (props: { active: boolean }) => JSX.El
   { label: "P0 P1", badge: P0P1Badge, to: "/p0p1", match: (p) => p.startsWith("/p0p1") },
   { label: "EPISODES", to: "/episodes", match: (p) => p.startsWith("/episodes") },
   { label: "TIER LIST", to: "/tier-list", match: (p) => p.startsWith("/tier-list") },
-  { label: "LEADERBOARD", to: "/leaderboard", match: (p) => p === "/leaderboard" || p.startsWith("/leaderboard/") },
+  { label: "LEADERBOARD", to: "/leaderboard", match: (p) => p === "/leaderboard" || p.startsWith("/leaderboard/") || p.startsWith("/player/") },
   { label: "POD DRAFTS", to: "/pods", match: (p) => p.startsWith("/pods") },
   { label: "COMMUNITY", to: "/community", match: (p) => p.startsWith("/community") },
 ];
@@ -263,7 +263,7 @@ function DesktopAuth() {
         <div className="absolute right-0 top-full mt-2 w-56 bg-surface border border-border2 rounded-lg shadow-xl shadow-black/40 overflow-hidden z-50 animate-fadeUpIn">
           {profileSlug && (
             <Link
-              to={`/leaderboard/player/${profileSlug}`}
+              to={`/player/${profileSlug}`}
               onClick={() => setOpen(false)}
               className="flex items-center gap-2.5 px-3 py-2.5 font-display text-[15px] tracking-[0.14em] no-underline text-subtle hover:bg-surface2 hover:text-green transition-colors"
             >
@@ -320,7 +320,7 @@ function MobileMenu({
         {includeAuth && !loading && user && (
           profileSlug ? (
             <Link
-              to={`/leaderboard/player/${profileSlug}`}
+              to={`/player/${profileSlug}`}
               onClick={onClose}
               role="menuitem"
               className="flex items-center gap-3 px-5 min-h-[54px] no-underline font-display text-[17px] tracking-[0.14em] border-b border-border transition-colors text-text bg-transparent hover:bg-surface"

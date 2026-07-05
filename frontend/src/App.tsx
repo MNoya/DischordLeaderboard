@@ -1,5 +1,6 @@
 import { useEffect } from "react";
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, useParams, useLocation } from "react-router-dom";
+import { PLAYER_BASE } from "./data/utils";
 import { Provider as TooltipProvider } from "@radix-ui/react-tooltip";
 import { ScoringModalHost } from "./components/ScoringModal";
 import { DocumentTitle } from "./components/DocumentTitle";
@@ -20,12 +21,13 @@ import { preloadGuildLogos } from "./data/guild-art";
 // Browser routes. The leaderboard is one section of the site, mounted at the
 // lowercase /leaderboard; set codes stay uppercase under it.
 //
-//   /                          → redirect to /leaderboard
-//   /leaderboard               → leaderboard for the active set
-//   /leaderboard/SOS           → leaderboard for SOS
-//   /leaderboard/SOS/player/x  → player profile (set-scoped)
-//   /leaderboard/player/x      → player profile, defaults to active set
+//   /                → redirect to /leaderboard
+//   /leaderboard     → leaderboard for the active set
+//   /leaderboard/SOS → leaderboard for SOS
+//   /player/x        → player profile, defaults to active set
+//   /player/x/SOS    → player profile (set-scoped)
 //
+// Legacy /leaderboard/[SOS/]player/x links redirect to the new /player paths.
 // Archetype scoping happens via the inline picker on the leaderboard page,
 // not as a separate route. Set codes are 2–4 uppercase letters.
 
@@ -44,9 +46,12 @@ export function App() {
 
       <Route path="/leaderboard" element={<LeaderboardPage />} />
       <Route path="/leaderboard/about" element={<AboutPage />} />
-      <Route path="/leaderboard/player/:slug" element={<PlayerPage />} />
       <Route path="/leaderboard/:setCode" element={<LeaderboardPage />} />
-      <Route path="/leaderboard/:setCode/player/:slug" element={<PlayerPage />} />
+
+      <Route path="/player/:slug" element={<PlayerPage />} />
+      <Route path="/player/:slug/:setCode" element={<PlayerPage />} />
+      <Route path="/leaderboard/player/:slug" element={<LegacyPlayerRedirect />} />
+      <Route path="/leaderboard/:setCode/player/:slug" element={<LegacyPlayerRedirect />} />
 
       <Route path="/about" element={<Navigate to="/leaderboard/about" replace />} />
       <Route path="/players" element={<Navigate to="/leaderboard" replace />} />
@@ -74,3 +79,10 @@ export function App() {
     </TooltipProvider>
   );
 }
+
+const LegacyPlayerRedirect = () => {
+  const { slug, setCode } = useParams<{ slug: string; setCode?: string }>();
+  const { search } = useLocation();
+  const pathname = setCode ? `${PLAYER_BASE}/${slug}/${setCode}` : `${PLAYER_BASE}/${slug}`;
+  return <Navigate to={{ pathname, search }} replace />;
+};
