@@ -55,6 +55,7 @@ export function P0P1MobileView({ ballot }: { ballot: Ballot }) {
     setEditingSlotKey,
     selectAndClose,
     phase,
+    ratingsSnapshot,
     p0p1Sets,
   } = ballot;
 
@@ -80,7 +81,7 @@ export function P0P1MobileView({ ballot }: { ballot: Ballot }) {
       <AppHeader subtitle="P0 P1 Challenge" subtitleShort="P0 P1" />
 
       <main className={`flex-1 flex flex-col w-full px-4 pt-4 ${loginBarVisible ? "pb-20" : "pb-4"}`}>
-        <MobileIntro sets={p0p1Sets} phase={phase} />
+        <MobileIntro sets={p0p1Sets} phase={phase} dateRange={ratingsSnapshot?.dateRange} />
         {dataReady ? (
           <>
             {!isPastDeadline && (
@@ -164,7 +165,7 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
       <AppHeader subtitle="P0 P1 Challenge" subtitleShort="P0 P1" />
 
       <main className={`flex-1 flex flex-col w-full px-3 pt-3 ${loginBarVisible ? "pb-24" : "pb-4"}`}>
-        <MobileIntro sets={p0p1Sets} phase={phase} />
+        <MobileIntro sets={p0p1Sets} phase={phase} dateRange={ratingsSnapshot?.dateRange} />
         {dataReady ? (
           <>
             {!isPastDeadline && (
@@ -411,9 +412,11 @@ function MobileLoginBar({ show, signIn, text }: { show: boolean; signIn: () => v
 function MobileIntro({
   sets,
   phase,
+  dateRange,
 }: {
   sets: SetSummary[] | undefined;
   phase: P0P1Phase;
+  dateRange?: { start: string; end: string } | null;
 }) {
   const [open, setOpen] = useState(true);
   const isPastDeadline = phase !== "voting";
@@ -450,7 +453,7 @@ function MobileIntro({
       </button>
       {open && (
         <p className="text-subtle text-[13.5px] leading-[1.5]">
-          <P0P1IntroText isPastDeadline={isPastDeadline} />
+          <P0P1IntroText phase={phase} dateRange={dateRange} />
         </p>
       )}
     </section>

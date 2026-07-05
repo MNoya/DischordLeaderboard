@@ -103,7 +103,7 @@ export function P0P1Page() {
   return (
     <div className="bg-bg text-text min-h-screen flex flex-col animate-fadeIn">
       <AppHeader subtitle="P0 P1 Challenge" subtitleShort="P0 P1" />
-      <P0P1Hero cta={heroCta} belowIntro={belowIntro} phase={phase} />
+      <P0P1Hero cta={heroCta} belowIntro={belowIntro} phase={phase} dateRange={ratingsSnapshot?.dateRange} />
 
       <main className="flex-1 px-10 pb-5 pt-5">
         {!isPastDeadline &&

@@ -10,18 +10,20 @@ import {
   P0P1_VOTING_DEADLINE as VOTING_DEADLINE,
   P0P1_SCORING_DATE as SCORING_DATE,
 } from "../../data/p0p1Slots";
-import type { P0P1Phase } from "../../data/p0p1Results";
+import type { P0P1Phase, RatingsSnapshot } from "../../data/p0p1Results";
 
 export function P0P1Hero({
   cta,
   innerRef,
   belowIntro,
   phase,
+  dateRange,
 }: {
   cta: ReactNode;
   innerRef?: Ref<HTMLDivElement>;
   belowIntro?: ReactNode;
   phase: P0P1Phase;
+  dateRange?: RatingsSnapshot["dateRange"];
 }) {
   const isPastDeadline = phase !== "voting";
   return (
@@ -46,7 +48,7 @@ export function P0P1Hero({
       </div>
       <div className="flex-1 min-w-0 self-stretch flex flex-col items-center justify-center gap-y-3">
         <p className="max-w-[580px] text-center text-subtle text-[14px] leading-[1.55]">
-          <P0P1IntroText isPastDeadline={isPastDeadline} multiline />
+          <P0P1IntroText phase={phase} dateRange={dateRange} multiline />
         </p>
         {belowIntro}
       </div>
