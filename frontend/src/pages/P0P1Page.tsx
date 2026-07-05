@@ -9,7 +9,6 @@ import { SlotPip, SLOT_ACCENT } from "../components/p0p1/slotVisuals";
 import { P0P1ProgressBar } from "../components/p0p1/ProgressBar";
 import { ClearAll } from "../components/p0p1/ClearAll";
 import { P0P1Hero } from "../components/p0p1/P0P1Hero";
-import { FinalizingBanner } from "../components/p0p1/FinalizingBanner";
 import { AutoSaveBadge } from "../components/p0p1/AutoSaveBadge";
 import { P0P1MobileSelector } from "../components/p0p1/P0P1MobileView";
 import { GoToTopButton } from "../components/GoToTopButton";
@@ -117,8 +116,6 @@ export function P0P1Page() {
           ) : (
             <RosterStripSkeleton />
           ))}
-
-        {phase === "finalizing" && <FinalizingBanner showingMidway={showMidway} />}
 
         {showMidway ? (
           resultsDataReady && ratingsSnapshot && cards && pickStats ? (

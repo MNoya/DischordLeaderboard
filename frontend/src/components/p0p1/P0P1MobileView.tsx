@@ -18,7 +18,6 @@ import { GoToTopButton } from "../GoToTopButton";
 import { SiteFooter } from "../SiteFooter";
 import { ChevronDown } from "../Icons";
 import { MidwayResults } from "./MidwayResults";
-import { FinalizingBanner } from "./FinalizingBanner";
 import type { useP0P1Ballot } from "../../data/useP0P1Ballot";
 import type { P0P1Phase } from "../../data/p0p1Results";
 import {
@@ -201,8 +200,6 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
                 </div>
               </div>
             )}
-
-            {phase === "finalizing" && <FinalizingBanner showingMidway={showMidway} />}
 
             {showMidway ? (
               resultsDataReady && ratingsSnapshot && cards && pickStats ? (
