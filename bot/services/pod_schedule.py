@@ -37,7 +37,7 @@ MONDAY_KIND_SEASON_OVER = "season_over"
 
 # User-facing copy
 
-MSG_SCHEDULE_HEADER = "📅 {set_code} Pod Drafts this week:"
+MSG_SCHEDULE_HEADER = "🗓️ {set_code} Pod Drafts {set_emoji} Week {week}"
 
 MSG_MONDAY_DRAFT_INTRO = "Weekly schedule draft — paste it as-is, tweak it first, or press a button:"
 
@@ -220,9 +220,15 @@ def monday_kind(monday: date) -> tuple[str, UpcomingRelease | None]:
 
 
 def week_index_for(set_code: str, monday: date) -> int:
+    """Zero-based count of weeks since the set opened, aligned to the Monday of its release week.
+
+    A mid-week release still counts its whole opening week as week 0, so the Monday after a Tuesday
+    drop advances to week 1 — the human "Week N" the community uses is this index plus one.
+    """
     for s in ALL_SETS:
         if s.code == set_code:
-            return max(0, (monday - s.start_date).days // 7)
+            start_monday = s.start_date - timedelta(days=s.start_date.weekday())
+            return max(0, (monday - start_monday).days // 7)
     return monday.isocalendar().week
 
 
@@ -255,8 +261,10 @@ def compose_schedule_message(reference: datetime, set_code: str, count: int = le
         )
     if kind == MONDAY_KIND_SEASON_OVER:
         return MSG_SEASON_OVER.format(set_code=set_code, next_name=release.name, unix=release_unix(release))
-    blurb = monday_blurb(set_code, week_index_for(set_code, first_monday))
-    header = MSG_SCHEDULE_HEADER.format(set_code=set_code)
+    week_index = week_index_for(set_code, first_monday)
+    blurb = monday_blurb(set_code, week_index)
+    set_emoji = emojis.get(set_code.lower()) or emojis.get(set_code)
+    header = MSG_SCHEDULE_HEADER.format(set_code=set_code, set_emoji=set_emoji, week=week_index + 1)
     slot_lines = []
     for start in slots:
         if monday_kind(monday_of(start))[0] != MONDAY_KIND_NORMAL:

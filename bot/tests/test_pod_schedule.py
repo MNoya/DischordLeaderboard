@@ -140,9 +140,11 @@ def test_monday_kind(monday, expected_kind, expected_code):
         assert release.code == expected_code
 
 
-def test_week_index_counts_weeks_since_set_start():
-    assert week_index_for("SOS", date(2026, 4, 27)) == 0
-    assert week_index_for("SOS", date(2026, 6, 8)) == 6
+def test_week_index_counts_weeks_from_the_release_week_monday():
+    assert week_index_for("MSH", date(2026, 6, 22)) == 0
+    assert week_index_for("MSH", date(2026, 6, 29)) == 1
+    assert week_index_for("MSH", date(2026, 7, 6)) == 2
+    assert week_index_for("SOS", date(2026, 6, 8)) == 7
 
 
 def test_week_index_for_unknown_set_falls_back_to_iso_week():
