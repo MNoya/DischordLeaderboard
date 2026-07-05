@@ -431,19 +431,30 @@ class PodDraft(commands.Cog):
         name="pod-champion",
         description=desc.POD_CHAMPION,
     )
-    @app_commands.describe(event="Pod-draft event to announce")
+    @app_commands.describe(event="Pod-draft event to announce; defaults to the current thread")
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
-    async def pod_champion(self, interaction: discord.Interaction, event: str) -> None:
+    async def pod_champion(self, interaction: discord.Interaction, event: str | None = None) -> None:
         if not await self.bot.is_owner(interaction.user):
             await interaction.response.send_message(MSG_ADMIN_ONLY, ephemeral=True)
             return
         await interaction.response.defer(thinking=False)
 
-        event_id = await asyncio.to_thread(load_event_id_by_name_sync, event)
-        if event_id is None:
-            await interaction.followup.send(f"No pod-draft event named `{event}`.", ephemeral=True)
-            return
+        if event:
+            event_id = await asyncio.to_thread(load_event_id_by_name_sync, event)
+            if event_id is None:
+                await interaction.followup.send(f"No pod-draft event named `{event}`.", ephemeral=True)
+                return
+        else:
+            channel = interaction.channel
+            thread_id = str(channel.id) if channel is not None else None
+            event_id = await asyncio.to_thread(load_event_id_by_thread_sync, thread_id) if thread_id else None
+            if event_id is None:
+                await interaction.followup.send(
+                    "Run this inside a pod-draft thread, or pass an `event` to announce a specific pod.",
+                    ephemeral=True,
+                )
+                return
 
         view = await build_champion_announcement_view_for_event(
             event_id, guild_id=interaction.guild_id,
