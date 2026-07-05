@@ -31,7 +31,6 @@ import { cleanPodEventName, fmtRange, playerPath, podDiscordName, stripDiscrimin
 import { ACTIVE_SET_CODE } from "../data/constants";
 import { podDraftMessageLink } from "../data/site";
 import {
-  useLeaderboard,
   usePodDraftArtifact,
   usePodEventMatches,
   usePodEventParticipants,
@@ -173,11 +172,6 @@ export function PodDraftsPage({ setCode }: { setCode?: string } = {}) {
 
   const { data: events } = usePodEvents(activeSet);
   const { data: leaderboard } = usePodLeaderboard(activeSet);
-  const { data: profileBoard } = useLeaderboard(activeSet);
-  const linkableSlugs = useMemo(
-    () => new Set((profileBoard ?? []).map((r) => r.slug)),
-    [profileBoard],
-  );
   const setMeta = availableSets.find((s) => s.code === activeSet);
 
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT_NOSCORE);
@@ -262,9 +256,7 @@ export function PodDraftsPage({ setCode }: { setCode?: string } = {}) {
               sort={sort}
               onSort={onSort}
               emptyMessage={`No player stats yet for ${activeSet}.`}
-              playerHref={(row) =>
-                linkableSlugs.has(row.slug) ? playerPath(row.slug, activeSet) : null
-              }
+              playerHref={(row) => playerPath(row.slug, activeSet)}
             />
           </section>
 
@@ -682,11 +674,6 @@ const STANDINGS_LIMIT = 4;
 
 function EventStandings({ event }: { event: PodEventSummary }) {
   const { data: rows, isLoading } = usePodEventParticipants(event.eventId);
-  const { data: profileBoard } = useLeaderboard(event.setCode);
-  const linkableSlugs = useMemo(
-    () => new Set((profileBoard ?? []).map((r) => r.slug)),
-    [profileBoard],
-  );
   const [deckTarget, setDeckTarget] = useState<PodEventParticipantRow | null>(null);
   const { data: draftArtifact } = usePodDraftArtifact(event.eventId);
   const deckTargetMainboard = useMemo(
@@ -718,11 +705,7 @@ function EventStandings({ event }: { event: PodEventSummary }) {
                 <StandingRow
                   key={`${p.eventId}-${p.displayName}`}
                   p={p}
-                  profileHref={
-                    p.playerSlug && linkableSlugs.has(p.playerSlug)
-                      ? playerPath(p.playerSlug, event.setCode)
-                      : null
-                  }
+                  profileHref={p.playerSlug ? playerPath(p.playerSlug, event.setCode) : null}
                   logHref={draftArtifact ? `/pods/${event.slug}/${p.playerSlug ?? p.seatIndex}` : null}
                   onShowDeck={p.deckScreenshotUrl ? () => setDeckTarget(p) : undefined}
                 />

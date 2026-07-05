@@ -27,7 +27,6 @@ interface Props {
   setCode: string;
   eventSlug: string;
   hasDraftLog: boolean;
-  linkableSlugs: Set<string>;
   onRoundHover?: (opponentSeatIndex: number | null, round: number | null, outcome: RoundOutcome | null) => void;
   onShowDeck: (p: PodSeat, tab?: DeckTab) => void;
   isMock?: boolean;
@@ -41,7 +40,6 @@ export function PlayerSeatPanel({
   setCode,
   eventSlug,
   hasDraftLog,
-  linkableSlugs,
   onRoundHover,
   onShowDeck,
   isMock = false,
@@ -52,7 +50,7 @@ export function PlayerSeatPanel({
     .sort((a, b) => a.round - b.round);
 
   const profileHref = (slug: string | null | undefined): string | null =>
-    slug && linkableSlugs.has(slug) ? playerPath(slug, setCode) : null;
+    slug ? playerPath(slug, setCode) : null;
 
   const draftLogHref = hasDraftLog
     ? `/pods/${eventSlug}/${participant.playerSlug ?? participant.seatIndex}`

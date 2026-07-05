@@ -21,7 +21,6 @@ interface Props {
   setCode: string;
   eventSlug: string;
   hasDraftLog: boolean;
-  linkableSlugs: Set<string>;
   formatLabel?: string | null;
   isMock?: boolean;
 }
@@ -137,7 +136,6 @@ export function MobileSeatStack({
   setCode,
   eventSlug,
   hasDraftLog,
-  linkableSlugs,
   formatLabel,
   isMock = false,
 }: Props) {
@@ -175,7 +173,6 @@ export function MobileSeatStack({
                 setCode={setCode}
                 eventSlug={eventSlug}
                 hasDraftLog={hasDraftLog}
-                linkableSlugs={linkableSlugs}
                 onShowDeck={onShowDeck}
                 isMock={isMock}
               />
