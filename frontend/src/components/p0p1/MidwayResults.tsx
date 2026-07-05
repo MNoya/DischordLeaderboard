@@ -190,20 +190,6 @@ export function MidwayResults({
         />
       )}
 
-      {loggedOut && (
-        <div className="flex justify-center">
-          <button
-            type="button"
-            onClick={signIn}
-            className="bg-transparent border-0 cursor-pointer p-0"
-          >
-            <CtaPill size="lg" icon={<DiscordIcon size={19} />}>
-              LOG IN TO VIEW YOUR PICKS
-            </CtaPill>
-          </button>
-        </div>
-      )}
-
       <ResultsRow
         title="CROWD TEAM"
         score={crowdTeam.score}
