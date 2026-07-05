@@ -913,10 +913,7 @@ async def advance_to_round(manager: "PodDraftManager", round_num: int) -> None:
     """Compute pairings for round_num via pod_swiss, persist pending rows, post pairings + views."""
     players = manager.tournament_players
     prior = await asyncio.to_thread(_load_matches, manager.event_id)
-    if round_num == 1:
-        await asyncio.to_thread(manager.persist_seat_indexes_from_log)
-    if round_num == 2:
-        await asyncio.to_thread(manager.persist_decklists_from_log)
+    await persist_round_entry_artifacts(manager, round_num)
     seats = await asyncio.to_thread(_load_seat_indexes, manager.event_id)
     if round_num == 1 and manager.pairing_mode != "random":
         seats = await _recover_round1_seats(manager, players, seats)
@@ -967,6 +964,16 @@ async def advance_to_round(manager: "PodDraftManager", round_num: int) -> None:
         if round_num == 1:
             asyncio.create_task(_send_submit_deck_dms(manager.bot, manager.event_id))
         await _attach_round_link(manager, round_num - 1)
+
+
+async def persist_round_entry_artifacts(manager: "PodDraftManager", round_num: int) -> None:
+    """Round-entry snapshots that must fire once regardless of pairing mode: freeze seating from the
+    draft log as round 1 opens, freeze the post-deckbuild decklists as round 2 opens once round 1 has
+    settled the decks. Bracket and Swiss advancement both call this so neither path can skip it."""
+    if round_num == 1:
+        await asyncio.to_thread(manager.persist_seat_indexes_from_log)
+    elif round_num == 2:
+        await asyncio.to_thread(manager.persist_decklists_from_log)
 
 
 def _round_nav_link(manager, round_num: int) -> tuple[str | None, str | None]:
@@ -3573,6 +3580,7 @@ async def bracket_advance(manager, source_round: int) -> None:
         manager.round_messages[target] = target_msg
         await _pin_round_message(target_msg, target)
         await _attach_round_link(manager, source_round)
+        await persist_round_entry_artifacts(manager, target)
     else:
         try:
             await target_msg.edit(content=None, embed=embed, view=view)

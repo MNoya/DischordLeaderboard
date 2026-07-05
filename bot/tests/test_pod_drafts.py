@@ -658,6 +658,32 @@ def test_persist_decklists_from_log_writes_when_log_present_else_skips():
     assert len(persisted) == 1
 
 
+def test_persist_round_entry_artifacts_dispatches_seats_then_decklists_by_round():
+    import asyncio
+
+    from bot.services.pod_tournament import persist_round_entry_artifacts
+
+    class _StubManager:
+        def __init__(self):
+            self.calls = []
+
+        def persist_seat_indexes_from_log(self):
+            self.calls.append("seats")
+
+        def persist_decklists_from_log(self):
+            self.calls.append("decks")
+
+    round1, round2, round3 = _StubManager(), _StubManager(), _StubManager()
+
+    asyncio.run(persist_round_entry_artifacts(round1, 1))
+    asyncio.run(persist_round_entry_artifacts(round2, 2))
+    asyncio.run(persist_round_entry_artifacts(round3, 3))
+
+    assert round1.calls == ["seats"]
+    assert round2.calls == ["decks"]
+    assert round3.calls == []
+
+
 @pytest.mark.parametrize(
     "current_round, championship_posted, existing_url, existing_caption, new_caption, captured",
     [
