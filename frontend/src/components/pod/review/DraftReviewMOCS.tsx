@@ -5,8 +5,8 @@ import { cn } from "../../../lib/utils";
 import { Pips } from "../../ManaPips";
 import { Tooltip } from "../../Tooltip";
 import { ArrowRight, GoSidebarCollapse, TbCards } from "../../Icons";
-import { CardImage, CardImageMapProvider, CardPreviewProvider, ReviewSetProvider, StackColumn } from "./ReviewCard";
-import { resolvedCardImage, useCardImages } from "../../../data/cardImages";
+import { CardImage, CardPreviewProvider, ReviewSetProvider, StackColumn } from "./ReviewCard";
+import { cardImageSources } from "../../../data/cardImages";
 import { highlightEventLabel } from "../EventLabel";
 import { AAvatar } from "../../Brand";
 import { DeckScreenshotModal, type DeckLike } from "../DeckScreenshotModal";
@@ -57,11 +57,6 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, initialPack =
   const seatInfoMap = useMemo(() => new Map((seatInfo ?? []).map((s) => [s.seatIndex, s])), [seatInfo]);
 
   const views = useMemo(() => reconstructDraft(artifact), [artifact]);
-  const imageItems = useMemo(
-    () => artifact.cards.map((card) => ({ name: card.n, set: card.s ?? artifact.set })),
-    [artifact],
-  );
-  const cardImages = useCardImages(imageItems);
   const seats = useMemo(
     () =>
       artifact.seats.map((name, i) => {
@@ -191,12 +186,12 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, initialPack =
     }
     for (const idx of views[seat][next.pack][next.pick].booster) {
       const card = artifact.cards[idx];
-      const url = resolvedCardImage(cardImages, card.n, card.s ?? artifact.set);
+      const url = cardImageSources(card.n, card.s ?? artifact.set)[0];
       if (url) {
         new Image().src = url;
       }
     }
-  }, [views, seat, pack, pick, artifact, cardImages]);
+  }, [views, seat, pack, pick, artifact]);
 
   const view = views[seat][pack][pick];
   const boosterCards = view.booster.map((idx) => artifact.cards[idx]);
@@ -254,7 +249,6 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, initialPack =
 
   return (
     <ReviewSetProvider value={artifact.set}>
-    <CardImageMapProvider value={cardImages}>
     <CardPreviewProvider setCode={meta.setCode}>
     <div className="fixed inset-0 z-50 flex select-none flex-col bg-bg text-text">
       <MobileTopBar
@@ -403,7 +397,6 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, initialPack =
       )}
     </div>
     </CardPreviewProvider>
-    </CardImageMapProvider>
     </ReviewSetProvider>
   );
 }

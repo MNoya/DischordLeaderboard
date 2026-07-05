@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
 import { cn } from "../../../lib/utils";
-import { cardImageSources, type CardImages } from "../../../data/cardImages";
+import { cardImageSources } from "../../../data/cardImages";
 import {
   resolveTierList,
   tierColor,
@@ -17,16 +17,10 @@ import type { ArtifactCard } from "../../../types/leaderboard";
 const ReviewSetContext = createContext<string | null>(null);
 export const ReviewSetProvider = ReviewSetContext.Provider;
 
-// Default-printing CDN URLs keyed by name+set, resolved in bulk by DraftReviewMOCS.
-const CardImageMapContext = createContext<CardImages>({ images: new Map(), settled: false });
-export const CardImageMapProvider = CardImageMapContext.Provider;
-export const useCardImageMap = () => useContext(CardImageMapContext);
-
 function useCardImageSources(card: ArtifactCard): string[] {
   const reviewSet = useContext(ReviewSetContext);
-  const cardImages = useCardImageMap();
   const set = card.s ?? reviewSet;
-  return useMemo(() => cardImageSources(cardImages, card.n, set), [cardImages, card.n, set]);
+  return useMemo(() => cardImageSources(card.n, set), [card.n, set]);
 }
 
 // Walk the src candidates: start at the first, and on load error advance to the next. Resetting when the
@@ -47,14 +41,7 @@ export function CardImage({ card, className }: { card: ArtifactCard; className?:
       }
     : undefined;
   if (!src) {
-    return (
-      <div
-        onContextMenu={onContextMenu}
-        className={cn("flex aspect-[488/680] items-start bg-surface2 p-2", className)}
-      >
-        <span className="font-body text-[11px] leading-tight text-subtle">{card.n}</span>
-      </div>
-    );
+    return <div onContextMenu={onContextMenu} className={cn("aspect-[488/680] bg-surface2", className)} />;
   }
   return (
     <img
