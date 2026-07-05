@@ -36,7 +36,7 @@ const LEADERBOARD_DESCRIPTION =
   "Check ranks and trophies from the community. /join on Discord to share your drafts and climb the leaderboard";
 const HOME_DESCRIPTION = "Weekly episodes, set reviews, strategy and community events. Join the Discord and climb the leaderboard.";
 
-type ImageIntent = { kind: "url"; url: string } | { kind: "setSymbol"; code: string } | null;
+type ImageIntent = { kind: "url"; url: string } | { kind: "setSymbol"; code: string } | { kind: "logo" } | null;
 
 type RouteMeta = {
   ogTitle: string;
@@ -118,6 +118,12 @@ const fetchEpisodeSetName = async (code: string): Promise<string | null> => {
 
 type PlayerCard = { name: string; avatarUrl: string | null };
 
+// Stored Discord avatars come sized for the site's 128px slot; embeds want a larger thumbnail.
+const upsizeAvatar = (url: string | null): string | null => {
+  if (!url) return null;
+  return url.replace(/([?&]size=)\d+/, "$1512");
+};
+
 const fetchPlayer = async (slug: string): Promise<PlayerCard> => {
   try {
     const resp = await restGet(
@@ -126,7 +132,7 @@ const fetchPlayer = async (slug: string): Promise<PlayerCard> => {
     if (resp.ok) {
       const rows = (await resp.json()) as Array<{ display_name: string; avatar_url: string | null }>;
       if (rows[0]?.display_name) {
-        return { name: rows[0].display_name, avatarUrl: rows[0].avatar_url ?? null };
+        return { name: rows[0].display_name, avatarUrl: upsizeAvatar(rows[0].avatar_url) };
       }
     }
   } catch {
@@ -136,11 +142,11 @@ const fetchPlayer = async (slug: string): Promise<PlayerCard> => {
 };
 
 const playerMeta = (player: PlayerCard): RouteMeta => ({
-  ogTitle: `${player.name} · Player Profile`,
+  ogTitle: `${player.name}'s Profile`,
   tabTitle: `${player.name}${TITLE_SEPARATOR}${SITE}`,
   siteName: SITE,
-  description: `Check ${player.name}'s drafts & stats on the leaderboard.`,
-  image: player.avatarUrl ? { kind: "url", url: player.avatarUrl } : null,
+  description: `View ${player.name}'s drafts on the Limited Level-Ups community website`,
+  image: player.avatarUrl ? { kind: "url", url: player.avatarUrl } : { kind: "logo" },
 });
 
 const resolveMeta = async (pathname: string): Promise<RouteMeta> => {
@@ -319,6 +325,7 @@ const metaCrawlerImage = (image: ImageIntent, origin: string): ImageIntent => {
 const resolveImageUrl = async (image: ImageIntent, origin: string, assets: Fetcher): Promise<string | null> => {
   if (image === null) return null;
   if (image.kind === "url") return image.url;
+  if (image.kind === "logo") return `${origin}/llu-logo-transparent.png`;
   const candidate = `${origin}/set-symbols/${image.code.toLowerCase()}.png`;
   try {
     const resp = await assets.fetch(candidate);
