@@ -14,7 +14,7 @@ export const CHAMFER = "polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%)"
 const GREEN = "#2ee85c";
 const CELL_ORDER: Record<PickState, number> = { fav: 0, pack: 1, rogue: 2 };
 const CAT_COLOR: Record<PickState, string> = {
-  fav: "#2ee85c",
+  fav: GREEN,
   pack: "#4aa8ff",
   rogue: "#a98eff",
 };
