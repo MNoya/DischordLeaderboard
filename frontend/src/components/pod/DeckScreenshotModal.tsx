@@ -7,8 +7,8 @@ import { ChamferedButton } from "../ChamferedButton";
 import { Pips } from "../ManaPips";
 import { Record } from "../Record";
 import { cn } from "../../lib/utils";
-import { StackColumn, useFallbackImage } from "./review/ReviewCard";
-import { cardImageSources } from "../../data/cardImages";
+import { CardImageMapProvider, StackColumn, useCardImageMapContext, useFallbackImage } from "./review/ReviewCard";
+import { cardImageSources, useCardImageMap } from "../../data/cardImages";
 import { useIsMobile } from "../../lib/use-is-mobile";
 import { useResolvedDeckUrl } from "../../data/refresh-deck-url";
 import type { Mainboard } from "../../types/leaderboard";
@@ -390,6 +390,12 @@ function byColorThenName(a: DeckCard, b: DeckCard): number {
 
 function DecklistView({ mainboard }: { mainboard: Mainboard }) {
   const [showSide, setShowSide] = useState(true);
+  const imageItems = useMemo(
+    () =>
+      [...mainboard.cards, ...mainboard.sideboard].map((c) => ({ name: c.name, set: c.set ?? mainboard.set })),
+    [mainboard],
+  );
+  const cardImages = useCardImageMap(imageItems);
   const { mvPiles, lands, side } = useMemo(() => {
     const landCards: DeckCard[] = [];
     const byCmc = new Map<number, DeckCard[]>();
@@ -418,6 +424,7 @@ function DecklistView({ mainboard }: { mainboard: Mainboard }) {
   const hasSide = side.length > 0;
 
   return (
+    <CardImageMapProvider value={cardImages}>
     <div className="relative h-full flex min-h-0">
       <div className="relative flex-1 min-w-0 overflow-auto themed-scrollbar px-4 md:px-5 py-5">
         <div className="flex gap-2 md:gap-3 items-start">
@@ -456,6 +463,7 @@ function DecklistView({ mainboard }: { mainboard: Mainboard }) {
         </aside>
       )}
     </div>
+    </CardImageMapProvider>
   );
 }
 
@@ -482,8 +490,9 @@ function Pile({ cards, deckSet }: { cards: DeckCard[]; deckSet: string | null })
 }
 
 function PileCard({ card, deckSet }: { card: DeckCard; deckSet: string | null }) {
+  const imageMap = useCardImageMapContext();
   const set = card.set ?? deckSet;
-  const sources = useMemo(() => cardImageSources(card.name, set), [card.name, set]);
+  const sources = useMemo(() => cardImageSources(card.name, set, imageMap), [card.name, set, imageMap]);
   const { src, onError } = useFallbackImage(sources);
   const count = card.count ?? 1;
   return (

@@ -6,7 +6,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   return {
     base: "/",
-    plugins: [react(), youtubeDevApi(env.YOUTUBE_API_KEY)],
+    plugins: [react(), youtubeDevApi(env.YOUTUBE_API_KEY), cardImagesDevApi()],
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "./src"),
@@ -28,6 +28,92 @@ export default defineConfig(({ mode }) => {
     },
   };
 });
+
+// Dev-only stand-in for functions/api/card-images.ts, which serves the same map in production (mirrors
+// that logic, the same way the youtube dev/prod endpoints do).
+const CHUNK = 75;
+const COLLECTION_URL = "https://api.scryfall.com/cards/collection";
+
+function cardImagesDevApi(): Plugin {
+  return {
+    name: "card-images-dev-api",
+    configureServer(server) {
+      server.middlewares.use("/api/card-images", async (req, res) => {
+        res.setHeader("content-type", "application/json");
+        if (req.method !== "POST") {
+          res.statusCode = 405;
+          res.end("{}");
+          return;
+        }
+        try {
+          const chunks: Buffer[] = [];
+          for await (const chunk of req) {
+            chunks.push(chunk as Buffer);
+          }
+          const body = JSON.parse(Buffer.concat(chunks).toString() || "{}");
+          res.end(JSON.stringify(await resolveCardImages(body)));
+        } catch {
+          res.statusCode = 502;
+          res.end("{}");
+        }
+      });
+    },
+  };
+}
+
+function frontFaceName(name: string): string {
+  const separator = name.indexOf("//");
+  return (separator === -1 ? name : name.slice(0, separator)).trim();
+}
+
+async function fetchChunkWithRetry(chunk: { name: string; set: string }[], attempt = 0): Promise<Response> {
+  try {
+    const res = await fetch(COLLECTION_URL, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json", "user-agent": "LimitedLevelUps/1.0" },
+      body: JSON.stringify({ identifiers: chunk }),
+    });
+    if (res.status === 429 && attempt < 4) {
+      await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+      return fetchChunkWithRetry(chunk, attempt + 1);
+    }
+    return res;
+  } catch (error) {
+    if (attempt < 4) {
+      await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+      return fetchChunkWithRetry(chunk, attempt + 1);
+    }
+    throw error;
+  }
+}
+
+async function resolveCardImages(body: { identifiers?: { name?: unknown; set?: unknown }[] }): Promise<Record<string, string>> {
+  const byKey = new Map<string, { name: string; set: string }>();
+  for (const item of Array.isArray(body?.identifiers) ? body.identifiers : []) {
+    if (typeof item?.name !== "string" || typeof item?.set !== "string") {
+      continue;
+    }
+    const name = frontFaceName(item.name);
+    const set = item.set.toLowerCase();
+    byKey.set(`${set}|${name.toLowerCase()}`, { name, set });
+  }
+  const identifiers = Array.from(byKey.values());
+  const map: Record<string, string> = {};
+  for (let i = 0; i < identifiers.length; i += CHUNK) {
+    const res = await fetchChunkWithRetry(identifiers.slice(i, i + CHUNK));
+    if (!res.ok) {
+      continue;
+    }
+    const page = (await res.json()) as { data?: any[] };
+    for (const card of page.data ?? []) {
+      const image = card.image_uris?.normal ?? card.card_faces?.[0]?.image_uris?.normal ?? null;
+      if (image) {
+        map[`${card.set.toLowerCase()}|${frontFaceName(card.name).toLowerCase()}`] = image;
+      }
+    }
+  }
+  return map;
+}
 
 const CHANNEL_HANDLE = "limitedlevel-ups";
 const YOUTUBE_API = "https://www.googleapis.com/youtube/v3";

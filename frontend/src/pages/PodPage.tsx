@@ -20,6 +20,7 @@ import {
   usePodEvents,
 } from "../data/hooks";
 import { resolveDeck } from "../data/draft-artifact";
+import { useCardImageMap } from "../data/cardImages";
 import { cleanPodEventName, podDiscordName, podSeatName } from "../data/utils";
 import type {
   PodEventParticipantRow,
@@ -111,6 +112,12 @@ export function PodPage() {
   const eventId = event?.eventId;
   const { data: participantRows, isLoading: participantsLoading } = usePodEventParticipants(eventId);
   const { data: draftArtifact } = usePodDraftArtifact(eventId);
+  // Warm the card-image map for the whole draft so the review's first pick paints instantly on entry.
+  const warmImageItems = useMemo(
+    () => (draftArtifact ? draftArtifact.cards.map((c) => ({ name: c.n, set: c.s ?? draftArtifact.set })) : []),
+    [draftArtifact],
+  );
+  useCardImageMap(warmImageItems);
   const deckTargetMainboard = useMemo(
     () => (draftArtifact && deckTarget ? resolveDeck(draftArtifact, deckTarget.seatIndex) : null),
     [draftArtifact, deckTarget],

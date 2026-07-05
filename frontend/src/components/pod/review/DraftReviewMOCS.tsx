@@ -5,8 +5,8 @@ import { cn } from "../../../lib/utils";
 import { Pips } from "../../ManaPips";
 import { Tooltip } from "../../Tooltip";
 import { ArrowRight, GoSidebarCollapse, TbCards } from "../../Icons";
-import { CardImage, CardPreviewProvider, ReviewSetProvider, StackColumn } from "./ReviewCard";
-import { cardImageSources } from "../../../data/cardImages";
+import { CardImage, CardImageMapProvider, CardPreviewProvider, ReviewSetProvider, StackColumn } from "./ReviewCard";
+import { cardImageSources, useCardImageMap } from "../../../data/cardImages";
 import { highlightEventLabel } from "../EventLabel";
 import { AAvatar } from "../../Brand";
 import { DeckScreenshotModal, type DeckLike } from "../DeckScreenshotModal";
@@ -57,6 +57,11 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, initialPack =
   const seatInfoMap = useMemo(() => new Map((seatInfo ?? []).map((s) => [s.seatIndex, s])), [seatInfo]);
 
   const views = useMemo(() => reconstructDraft(artifact), [artifact]);
+  const imageItems = useMemo(
+    () => artifact.cards.map((card) => ({ name: card.n, set: card.s ?? artifact.set })),
+    [artifact],
+  );
+  const cardImages = useCardImageMap(imageItems);
   const seats = useMemo(
     () =>
       artifact.seats.map((name, i) => {
@@ -186,12 +191,12 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, initialPack =
     }
     for (const idx of views[seat][next.pack][next.pick].booster) {
       const card = artifact.cards[idx];
-      const url = cardImageSources(card.n, card.s ?? artifact.set)[0];
+      const url = cardImageSources(card.n, card.s ?? artifact.set, cardImages)[0];
       if (url) {
         new Image().src = url;
       }
     }
-  }, [views, seat, pack, pick, artifact]);
+  }, [views, seat, pack, pick, artifact, cardImages]);
 
   const view = views[seat][pack][pick];
   const boosterCards = view.booster.map((idx) => artifact.cards[idx]);
@@ -249,6 +254,7 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, initialPack =
 
   return (
     <ReviewSetProvider value={artifact.set}>
+    <CardImageMapProvider value={cardImages}>
     <CardPreviewProvider setCode={meta.setCode}>
     <div className="fixed inset-0 z-50 flex select-none flex-col bg-bg text-text">
       <MobileTopBar
@@ -397,6 +403,7 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, initialPack =
       )}
     </div>
     </CardPreviewProvider>
+    </CardImageMapProvider>
     </ReviewSetProvider>
   );
 }
@@ -460,6 +467,24 @@ interface Pile {
   lastInSide: boolean;
 }
 
+// Custom formats (peasant cube, etc.) have no per-set art, so fall back to the generic cube icon.
+function SetSymbol({ src, className }: { src: string; className?: string }) {
+  return (
+    <img
+      src={src}
+      alt=""
+      className={className}
+      onError={(e) => {
+        const img = e.currentTarget;
+        if (img.dataset.fallback !== "1") {
+          img.dataset.fallback = "1";
+          img.src = "/set-symbols/cube.png";
+        }
+      }}
+    />
+  );
+}
+
 // Mobile-only slim bar: the left and right neighbors stay anchored to their physical sides; the arrow
 // between them points the way cards pass and flips for the right-to-left packs. Tapping a neighbor
 // switches seats so you can walk the table.
@@ -496,7 +521,7 @@ function MobileTopBar({
   const backContent = (
     <>
       <ChevronIcon dir="left" />
-      <img src={setSymbol} alt="" className="h-5 w-5" />
+      <SetSymbol src={setSymbol} className="h-5 w-5" />
       <span className="max-w-[84px] truncate font-display text-[13px] tracking-[0.04em]">
         {highlightEventLabel(eventTitle)}
       </span>
@@ -622,7 +647,7 @@ function Header({
           aria-label="Back to pod"
         >
           <ChevronIcon dir="left" />
-          <img src={setSymbol} alt="" className="h-7 w-7 shrink-0" />
+          <SetSymbol src={setSymbol} className="h-7 w-7 shrink-0" />
           <span className="truncate font-display text-[19px] tracking-[0.08em]">
             {highlightEventLabel(eventTitle)}
           </span>
@@ -634,7 +659,7 @@ function Header({
           aria-label="Back to pod"
         >
           <ChevronIcon dir="left" />
-          <img src={setSymbol} alt="" className="h-7 w-7 shrink-0" />
+          <SetSymbol src={setSymbol} className="h-7 w-7 shrink-0" />
           <span className="truncate font-display text-[19px] tracking-[0.08em]">
             {highlightEventLabel(eventTitle)}
           </span>

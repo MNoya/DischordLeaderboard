@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
 import { cn } from "../../../lib/utils";
-import { cardImageSources } from "../../../data/cardImages";
+import { cardImageSources, type CardImages } from "../../../data/cardImages";
 import {
   resolveTierList,
   tierColor,
@@ -17,10 +17,16 @@ import type { ArtifactCard } from "../../../types/leaderboard";
 const ReviewSetContext = createContext<string | null>(null);
 export const ReviewSetProvider = ReviewSetContext.Provider;
 
+// The set image maps + ready flag, resolved in bulk by the viewer.
+const CardImageMapContext = createContext<CardImages>({ images: new Map(), ready: false });
+export const CardImageMapProvider = CardImageMapContext.Provider;
+export const useCardImageMapContext = () => useContext(CardImageMapContext);
+
 function useCardImageSources(card: ArtifactCard): string[] {
   const reviewSet = useContext(ReviewSetContext);
+  const cardImages = useCardImageMapContext();
   const set = card.s ?? reviewSet;
-  return useMemo(() => cardImageSources(card.n, set), [card.n, set]);
+  return useMemo(() => cardImageSources(card.n, set, cardImages), [card.n, set, cardImages]);
 }
 
 // Walk the src candidates: start at the first, and on load error advance to the next. Resetting when the
