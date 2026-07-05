@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
 import { cn } from "../../../lib/utils";
+import { cardImageSources, type CardImages } from "../../../data/cardImages";
 import {
   resolveTierList,
   tierColor,
@@ -11,35 +12,34 @@ import {
 } from "../../../data/tierList";
 import type { ArtifactCard } from "../../../types/leaderboard";
 
-// The draft's main set, a fallback for cards that carry no recorded set. Each card records its own
-// set (e.g. `soa` Mystical Archive within an SOS draft); resolving by name against that set yields
-// the base printing rather than the recorded collector number, which can be an alternate-art variant.
+// The draft's main set, a fallback for cards that carry no recorded set of their own (e.g. `soa`
+// Mystical Archive within an SOS draft).
 const ReviewSetContext = createContext<string | null>(null);
 export const ReviewSetProvider = ReviewSetContext.Provider;
 
-function scryfallNamedUrl(name: string, set?: string): string {
-  const setParam = set ? `&set=${set.toLowerCase()}` : "";
-  return `https://api.scryfall.com/cards/named?exact=${encodeURIComponent(name)}${setParam}&format=image&version=normal`;
+// Default-printing CDN URLs keyed by name+set, resolved in bulk by DraftReviewMOCS.
+const CardImageMapContext = createContext<CardImages>({ images: new Map(), settled: false });
+export const CardImageMapProvider = CardImageMapContext.Provider;
+export const useCardImageMap = () => useContext(CardImageMapContext);
+
+function useCardImageSources(card: ArtifactCard): string[] {
+  const reviewSet = useContext(ReviewSetContext);
+  const cardImages = useCardImageMap();
+  const set = card.s ?? reviewSet;
+  return useMemo(() => cardImageSources(cardImages, card.n, set), [cardImages, card.n, set]);
 }
 
-function scryfallNumberUrl(set: string, cn: string): string {
-  return `https://api.scryfall.com/cards/${set.toLowerCase()}/${encodeURIComponent(cn)}?format=image&version=normal`;
-}
-
-export function cardImageSources(card: ArtifactCard, reviewSet: string | null): string[] {
-  const cardSet = card.s ?? reviewSet ?? null;
-  const inSet = card.n && cardSet ? scryfallNamedUrl(card.n, cardSet) : null;
-  const recorded = card.s && card.cn ? scryfallNumberUrl(card.s, card.cn) : null;
-  const anyPrinting = card.n ? scryfallNamedUrl(card.n) : null;
-  return [inSet, recorded, anyPrinting].filter((s): s is string => s != null);
+// Walk the src candidates: start at the first, and on load error advance to the next. Resetting when the
+// candidate list changes re-tries from the top for a re-keyed card.
+export function useFallbackImage(sources: string[]): { src: string | null; onError: () => void } {
+  const [index, setIndex] = useState(0);
+  useEffect(() => setIndex(0), [sources]);
+  return { src: sources[index] ?? null, onError: () => setIndex((i) => i + 1) };
 }
 
 export function CardImage({ card, className }: { card: ArtifactCard; className?: string }) {
-  const reviewSet = useContext(ReviewSetContext);
   const openPreview = useContext(CardPreviewContext);
-  const sources = cardImageSources(card, reviewSet);
-  const [sourceIndex, setSourceIndex] = useState(0);
-  const src = sources[sourceIndex] ?? null;
+  const { src, onError } = useFallbackImage(useCardImageSources(card));
   const onContextMenu = openPreview
     ? (e: React.MouseEvent) => {
         e.preventDefault();
@@ -63,7 +63,7 @@ export function CardImage({ card, className }: { card: ArtifactCard; className?:
       alt={card.n ?? ""}
       loading="lazy"
       draggable={false}
-      onError={() => setSourceIndex((i) => i + 1)}
+      onError={onError}
       onContextMenu={onContextMenu}
       className={cn("block aspect-[488/680] w-full object-cover", className)}
     />
@@ -202,10 +202,7 @@ function useReviewGrades(setCode: string): Map<string, TierCard> {
 }
 
 function CardPreviewOverlay({ card, grade }: { card: ArtifactCard; grade: TierCard | undefined }) {
-  const reviewSet = useContext(ReviewSetContext);
-  const sources = cardImageSources(card, reviewSet);
-  const [sourceIndex, setSourceIndex] = useState(0);
-  const src = sources[sourceIndex] ?? null;
+  const { src, onError } = useFallbackImage(useCardImageSources(card));
   return (
     <div className="pointer-events-none fixed right-10 top-1/2 z-[70] -translate-y-1/2">
       <div className="relative" style={{ animation: "card-preview-in-right 180ms ease-out" }}>
@@ -215,7 +212,7 @@ function CardPreviewOverlay({ card, grade }: { card: ArtifactCard; grade: TierCa
             src={src}
             alt={card.n ?? ""}
             draggable={false}
-            onError={() => setSourceIndex((i) => i + 1)}
+            onError={onError}
             className="h-[54vh] max-h-[500px] w-auto rounded-xl shadow-2xl outline outline-1 -outline-offset-1 outline-white/20"
           />
         ) : (
