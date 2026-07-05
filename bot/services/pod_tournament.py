@@ -1249,8 +1249,9 @@ async def _handle_result_submission(interaction: discord.Interaction, value: str
     )
     newly_reported = not result.get("was_reported") or result.get("winner_changed")
     if match_state is not None and match_was_played(match_state) and newly_reported:
+        pairings_url = _resolve_pairings_url(event_id, round_num)
         asyncio.create_task(_announce_round_result(
-            interaction.client, event_id, format_round_announcement(round_num, match_state),
+            interaction.client, event_id, format_round_announcement(round_num, match_state, pairings_url),
         ))
     if round_num >= TOTAL_ROUNDS:
         asyncio.create_task(_send_final_submit_deck_dms_for_match(
@@ -1654,8 +1655,6 @@ async def finalize_tournament(manager: "PodDraftManager") -> None:
             session.commit()
     await asyncio.to_thread(_do_write)
 
-    # The standings embed was already posted (and live-edited) by _post_or_update_live_standings
-    # once the trophy matches resolved. Final pass to make sure it reflects the very last result.
     await _post_or_update_live_standings(manager)
 
     if hasattr(manager, "share_draft_log"):
@@ -2980,14 +2979,13 @@ async def reconcile_unannounced_championships(bot) -> None:
 
 
 async def _post_or_update_live_standings(manager) -> None:
-    """Post or edit the standings embed as R3 results land. A "No Match Played" drop never triggers it on its own."""
+    """Post the Final Standings embed once every R3 match is reported, then edit it on later
+    corrections or deck-color submissions. It never posts mid-round — the website is the live view."""
     event_id = manager.event_id
     match_states = await asyncio.to_thread(_load_round_states, event_id, TOTAL_ROUNDS)
     if not match_states:
         return
     mark_trophy_match(match_states, TOTAL_ROUNDS)
-    if not any(match_was_played(m) for m in match_states) and not manager.finalized:
-        return
 
     trophy = [m for m in match_states if m.get("is_trophy_match")]
     champion_locked = bool(trophy) and all(m.get("winner_name") for m in trophy)
@@ -2997,6 +2995,9 @@ async def _post_or_update_live_standings(manager) -> None:
         )
     else:
         pending_count = sum(1 for m in match_states if not m.get("winner_name"))
+
+    if pending_count > 0 and manager.standings_message is None:
+        return
 
     prior = await asyncio.to_thread(_load_matches, event_id)
     standings = pod_swiss.compute_standings(manager.tournament_players, prior)
@@ -3208,9 +3209,11 @@ def format_reported_result(m: dict) -> str:
     return f"{winner_disp} wins {m['score']} vs {loser_disp}"
 
 
-def format_round_announcement(round_num: int, m: dict) -> str:
-    """The live per-result thread announcement, round-labelled: '[Round 2] Marlo wins 2-1 vs Bob'."""
-    return f"[Round {round_num}] {format_reported_result(m)}"
+def format_round_announcement(round_num: int, m: dict, pairings_url: str | None = None) -> str:
+    """The per-result thread announcement, round-labelled: '**[Round 2]** Marlo wins 2-1 vs Bob'. The
+    label links back to that round's pairings embed when its jump URL is known."""
+    label = f"[Round {round_num}]({pairings_url})" if pairings_url else f"[Round {round_num}]"
+    return f"**{label}** {format_reported_result(m)}"
 
 
 def _match_line(m: dict, *, seat_label: str | None = None, show_arena: bool = False) -> str:
