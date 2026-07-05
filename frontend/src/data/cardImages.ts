@@ -61,8 +61,34 @@ export function cardImageSources(
 }
 
 // Populated default-printing CDN URLs, shared across every viewer so revisiting a draft or opening a
-// deck reuses what earlier views already resolved.
-const cdnCache = new Map<string, string>();
+// deck reuses what earlier views already resolved. Persisted to localStorage so a page reload renders
+// from cache instantly instead of re-hitting Scryfall (and re-risking a rate-limit blank).
+const CACHE_STORAGE_KEY = "llu.cardImages.v1";
+const cdnCache = loadPersistedCache();
+
+function loadPersistedCache(): Map<string, string> {
+  if (typeof window === "undefined") {
+    return new Map();
+  }
+  try {
+    const raw = window.localStorage.getItem(CACHE_STORAGE_KEY);
+    const entries = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+    return new Map(Object.entries(entries));
+  } catch {
+    return new Map();
+  }
+}
+
+function persistCache(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(CACHE_STORAGE_KEY, JSON.stringify(Object.fromEntries(cdnCache)));
+  } catch {
+    // Storage full or unavailable; the in-memory cache still serves this session.
+  }
+}
 
 export function useCardImages(items: CardImageItem[]): CardImages {
   const [images, setImages] = useState<Map<string, string>>(() => new Map(cdnCache));
@@ -126,18 +152,27 @@ function resolveCardImages(identifiers: ScryfallIdentifier[]): Promise<void> {
     for (let i = 0; i < identifiers.length; i += COLLECTION_LIMIT) {
       await fetchCollectionChunk(identifiers.slice(i, i + COLLECTION_LIMIT));
     }
+    persistCache();
   };
   queue = queue.then(run, run);
   return queue;
 }
 
-async function fetchCollectionChunk(identifiers: ScryfallIdentifier[]): Promise<void> {
+const RETRY_LIMIT = 3;
+const RETRY_BASE_MS = 600;
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function fetchCollectionChunk(identifiers: ScryfallIdentifier[], attempt = 0): Promise<void> {
   try {
     const res = await fetch(COLLECTION_ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ identifiers }),
     });
+    if (res.status === 429 && attempt < RETRY_LIMIT) {
+      await delay(RETRY_BASE_MS * (attempt + 1));
+      return fetchCollectionChunk(identifiers, attempt + 1);
+    }
     if (!res.ok) {
       return;
     }
