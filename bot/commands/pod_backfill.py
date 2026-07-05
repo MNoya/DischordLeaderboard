@@ -320,7 +320,7 @@ async def _scrape_thread(thread) -> tuple[list[ScrapedMessage], dict[str, discor
             author_id=str(message.author.id),
             author_display=message.author.display_name,
             author_is_bot=message.author.bot,
-            content=message.content or "",
+            content=message.clean_content or "",
             image_url=first_image_url(message),
             txt_attachments=tuple(txts),
             created_at=message.created_at,
