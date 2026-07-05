@@ -46,7 +46,7 @@ import {
 } from "../data/hooks";
 import { isMtgoFlashbackCode, mtgoSetName, withMtgoSets, MTGO_BLOCK_GLYPHS } from "../data/mtgoSets";
 import { useAuth } from "../auth/useAuth";
-import { baseSetCode, canonicalSetCode, colorsOf, CUBE_BASE, CUBE_LIFETIME, cubeSeasonLabel, eventDate, fmtRange, fmtShortDate, isCubeCode, isCubeSeasonCode, isSoup, lastUpdated, leaderboardPath, playerPath, prettyFormat, relativeTime, sumEvents, weekOfSet, winPct } from "../data/utils";
+import { baseSetCode, canonicalSetCode, colorsOf, CUBE_BASE, CUBE_LIFETIME, cubeSeasonLabel, eventDate, fmtRange, fmtShortDate, isCubeCode, isCubeSeasonCode, isSoup, lastUpdated, leaderboardPath, playerPath, profileSearch, prettyFormat, relativeTime, sumEvents, weekOfSet, winPct } from "../data/utils";
 import { CubeSeasonSelector } from "../components/CubeSeasonSelector";
 import { colorsDisplayName, FORMAT_LABEL_GROUPS, FORMAT_OPTIONS, matchesFormatFilter, MULTI, OTHER } from "../data/filters";
 import { FMT_COLORS, FMT_DEFAULT_COLOR, renderFormatOption, shortFormat } from "../data/format-display";
@@ -430,13 +430,12 @@ function Desktop({
           onSort={onSort}
           onRowPrefetch={(r) => prefetchPlayer(r.slug, profileSet)}
           highlightSlug={mySlug}
+          playerHref={(r) => playerHrefFor(r, profileSet, searchParams)}
+          rowExpandable={(r) => r.events > 0}
           renderExpanded={(r) => (
             <DesktopExpandedRow
               row={r}
-              to={{
-                pathname: playerPath(r.slug, profileSet),
-                search: searchParams.toString(),
-              }}
+              to={playerHrefFor(r, profileSet, searchParams)}
               activeFormat={filters.format}
               activeColors={filters.colors}
               otherCombos={otherCombos}
@@ -821,13 +820,12 @@ function Mobile({
         onRowPrefetch={(r) => prefetchPlayer(r.slug, profileSet)}
         highlightSlug={mySlug}
         stickyTop={chromeHeight}
+        playerHref={(r) => playerHrefFor(r, profileSet, searchParams)}
+        rowExpandable={(r) => r.events > 0}
         renderExpanded={(r) => (
           <MobileExpandedRow
             row={r}
-            to={{
-              pathname: playerPath(r.slug, profileSet),
-              search: searchParams.toString(),
-            }}
+            to={playerHrefFor(r, profileSet, searchParams)}
             activeFormat={filters.format}
             activeColors={filters.colors}
             otherCombos={otherCombos}
@@ -862,6 +860,12 @@ function useDelayedExpandedData(slug: string, setCode: string) {
 }
 
 type PlayerLinkTo = string | { pathname: string; search: string };
+
+function playerHrefFor(row: LeaderboardTableRow, setCode: string, params: URLSearchParams): string {
+  const qs = profileSearch(params);
+  const path = playerPath(row.slug, setCode);
+  return qs ? `${path}?${qs}` : path;
+}
 
 function DesktopExpandedRow({
   row,

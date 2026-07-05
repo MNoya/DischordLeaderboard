@@ -15,7 +15,7 @@ import { FilterDropdown, type FilterOption } from "./FilterDropdown";
 import { useAllRecentTrophies, useColorsSummary, useFormatScopedTrophies, useRecentTrophies } from "../data/hooks";
 import { lcqDraft2Earnings } from "../data/scoring";
 import { formatsForBucket } from "../data/format-buckets";
-import { colorsOf, isCubeCode, isSoup, mainColors, playerPath, relativeTime } from "../data/utils";
+import { colorsOf, isCubeCode, isSoup, mainColors, playerPath, profileSearch, relativeTime } from "../data/utils";
 import { FMT_COLORS, FMT_DEFAULT_COLOR, shortFormat } from "../data/format-display";
 import { colorsDisplayName, MULTI, OTHER } from "../data/filters";
 import type { ColorsSummary, RecentTrophy } from "../types/leaderboard";
@@ -448,7 +448,7 @@ function useInsightsData(
 ) {
   const linkSetCode = playerSetCode ?? setCode;
   const cube = isCubeCode(setCode);
-  const qs = searchParams?.toString() ?? "";
+  const qs = profileSearch(searchParams);
   const colorsScoped = colors !== "ALL";
   const formatScoped = !colorsScoped && format !== "ALL";
   const rankScoped = rank !== "ALL";

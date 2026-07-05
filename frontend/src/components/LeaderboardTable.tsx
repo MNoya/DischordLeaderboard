@@ -79,6 +79,7 @@ export function sortRows<T extends LeaderboardTableRow>(
     const as = a.score ?? 0;
     const bs = b.score ?? 0;
     if (as !== bs) return bs - as;
+    if (as === 0 && a.trophies !== b.trophies) return b.trophies - a.trophies;
     return a.rank - b.rank;
   });
 }
@@ -110,6 +111,7 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
   sort,
   onSort,
   playerHref,
+  rowExpandable,
   onRowPrefetch,
   highlightSlug,
   stickyTop = 0,
@@ -125,6 +127,8 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
   sort?: SortState;
   onSort?: (key: SortKey) => void;
   playerHref?: (row: T) => string | null;
+  /** When it returns false, the row links to the player instead of expanding (nothing to show). */
+  rowExpandable?: (row: T) => boolean;
   /** Fired on row hover/focus to warm that player's cache on intent. */
   onRowPrefetch?: (row: T) => void;
   /** Slug of the signed-in viewer's own row, rendered with an accent highlight. */
@@ -153,8 +157,8 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
       return;
     }
     const observer = new IntersectionObserver(
-      ([entry]) => setMyRowVisible(entry.intersectionRatio >= 0.999),
-      { rootMargin: `${-(stickyTop + 56)}px 0px 0px 0px`, threshold: [0, 1] },
+      ([entry]) => setMyRowVisible(entry.isIntersecting),
+      { rootMargin: `${-stickyTop}px 0px 0px 0px`, threshold: 0 },
     );
     observer.observe(myRowEl);
     return () => observer.disconnect();
@@ -180,7 +184,7 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
         />
         {rows.map((r) => {
           const open = openSlug === r.slug;
-          const clickable = !!renderExpanded;
+          const expandable = !!renderExpanded && (rowExpandable?.(r) ?? true);
           const href = playerHref?.(r) ?? null;
           const mine = !!highlightSlug && r.slug === highlightSlug;
           return (
@@ -193,7 +197,7 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
                 "transition-colors",
                 isMobile && "border-b border-border",
                 open ? "bg-surface2" : isMobile ? "bg-transparent" : "bg-surface",
-                (clickable || href) && !isMobile && "hover:bg-surface2",
+                (expandable || href) && !isMobile && "hover:bg-surface2",
                 mine && !open && "bg-green/[0.07]",
                 mine && "shadow-[inset_3px_0_0_0_#2ee85c,inset_-3px_0_0_0_#2ee85c]",
               )}
@@ -203,17 +207,17 @@ export function LeaderboardTable<T extends LeaderboardTableRow>({
                   row={r}
                   mode={mode}
                   href={href}
-                  onToggle={clickable ? () => setOpenSlug(open ? null : r.slug) : undefined}
+                  onToggle={expandable ? () => setOpenSlug(open ? null : r.slug) : undefined}
                 />
               ) : (
                 <DesktopRow
                   row={r}
                   mode={mode}
                   href={href}
-                  onToggle={clickable ? () => setOpenSlug(open ? null : r.slug) : undefined}
+                  onToggle={expandable ? () => setOpenSlug(open ? null : r.slug) : undefined}
                 />
               )}
-              {renderExpanded && (
+              {renderExpanded && expandable && (
                 <div
                   className={cn(
                     "grid transition-[grid-template-rows] duration-200 ease-out",
@@ -402,6 +406,10 @@ function ScoringSortHeader({
 
 // ─── Row variants ──────────────────────────────────────────────────────────
 
+const rankLabel = (rank: number): string => (rank > 0 ? String(rank) : "—");
+
+const EmptyStat = () => <span className="mono text-right text-[13px] text-dim">—</span>;
+
 function DesktopRow({
   row,
   mode,
@@ -417,14 +425,28 @@ function DesktopRow({
   const rowLinked = !!href && !onToggle;
   const body = (
     <>
-      <span className="mono text-[13px] text-muted text-center">{row.rank}</span>
+      <span className="mono text-[13px] text-muted text-center">{rankLabel(row.rank)}</span>
       <PlayerCell row={row} avatarSize={30} nameSize={18} linked={rowLinked} />
       {mode === "lcq" && <EarningsCell earnings={row.earnings ?? 0} />}
       <TrophyCell trophies={row.trophies} compact={false} large={mode === "pod"} />
-      <span className="mono text-right text-[13px] text-muted">{row.events}</span>
-      <Record className="mono text-right text-[13px]" wins={row.wins} losses={row.losses} />
-      <span className="mono text-right text-[13px] text-muted">{winPct(row.wins, row.losses)}%</span>
-      {(mode === "points" || mode === "lcq") && <ScoreCell score={row.score ?? 0} large />}
+      {row.events > 0 ? (
+        <span className="mono text-right text-[13px] text-muted">{row.events}</span>
+      ) : (
+        <EmptyStat />
+      )}
+      {row.events > 0 ? (
+        <Record className="mono text-right text-[13px]" wins={row.wins} losses={row.losses} />
+      ) : (
+        <EmptyStat />
+      )}
+      {row.events > 0 ? (
+        <span className="mono text-right text-[13px] text-muted">{winPct(row.wins, row.losses)}%</span>
+      ) : (
+        <EmptyStat />
+      )}
+      {(mode === "points" || mode === "lcq") && (
+        <ScoreCell score={row.score ?? 0} large unranked={row.rank === 0} />
+      )}
       {mode === "direct" && <BoxesCell boxes={row.boxes ?? 0} large />}
     </>
   );
@@ -468,15 +490,18 @@ function MobileRow({
   const rowLinked = !!href && !onToggle;
   const body = (
     <>
-      <span className="mono text-[12px] text-muted text-center">{row.rank}</span>
+      <span className="mono text-[12px] text-muted text-center">{rankLabel(row.rank)}</span>
       <PlayerCell row={row} avatarSize={26} nameSize={17} linked={rowLinked} />
       {mode === "lcq" && <EarningsCell earnings={row.earnings ?? 0} compact />}
       <TrophyCell trophies={row.trophies} compact large={mode === "pod"} />
-      {(mode === "points" || mode === "lcq") && (
-        <span className="font-display text-right text-[18px] tracking-[0.02em] tabular-nums leading-none">
-          {fmtPts(row.score ?? 0)}
-        </span>
-      )}
+      {(mode === "points" || mode === "lcq") &&
+        (row.rank === 0 ? (
+          <span className="mono text-right text-[13px] text-dim">—</span>
+        ) : (
+          <span className="font-display text-right text-[18px] tracking-[0.02em] tabular-nums leading-none">
+            {fmtPts(row.score ?? 0)}
+          </span>
+        ))}
       {mode === "pod" && (
         <>
           <span className="mono text-right text-[13px] text-muted tabular-nums">{row.events}</span>
@@ -581,7 +606,10 @@ function TrophyCell({
   );
 }
 
-function ScoreCell({ score, large }: { score: number; large?: boolean }) {
+function ScoreCell({ score, large, unranked }: { score: number; large?: boolean; unranked?: boolean }) {
+  if (unranked) {
+    return <span className="mono text-right text-[13px] text-dim">—</span>;
+  }
   return (
     <div
       className={cn(

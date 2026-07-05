@@ -45,6 +45,8 @@ import {
 
 import { setsFixture } from "./fixtures/sets";
 import { leaderboardSosFixture } from "./fixtures/leaderboard-sos";
+import { selfReportedTrophiesSosFixture } from "./fixtures/self-reported-sos";
+import { mergeSelfReportedTrophies } from "./selfReported";
 import { MTGO_TROPHY_FIXTURE } from "./fixtures/mtgo-trophies";
 import { archetypeSosWrFixture } from "./fixtures/archetype-sos-wr";
 import {
@@ -113,7 +115,9 @@ export const fetchFormatColorsLeaderboard = (
 // Format filter is applied client-side over the cached rows in the hook layer
 // (per spec §7), so this fetcher returns the full set unfiltered.
 export const fetchLeaderboard = (setCode: string): Promise<LeaderboardRow[]> => {
-  if (setCode === "SOS") return wait(leaderboardSosFixture);
+  if (setCode === "SOS") {
+    return wait(mergeSelfReportedTrophies(leaderboardSosFixture, selfReportedTrophiesSosFixture, "SOS"));
+  }
   // Other sets are scheduled placeholders with no player data yet.
   return wait([]);
 };

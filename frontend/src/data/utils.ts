@@ -324,3 +324,11 @@ export function leaderboardPath(setCode?: string): string {
 export function playerPath(slug: string, setCode: string): string {
   return `${LEADERBOARD_BASE}/${setCode}/player/${slug}`;
 }
+
+// Query string for a profile link: keeps the format/colors filter, drops the leaderboard-only sort
+export function profileSearch(params: URLSearchParams | undefined): string {
+  const search = new URLSearchParams(params);
+  search.delete("sort");
+  search.delete("dir");
+  return search.toString();
+}

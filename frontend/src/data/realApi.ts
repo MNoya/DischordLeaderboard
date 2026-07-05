@@ -24,6 +24,7 @@ import {
   type GroupTotals,
   type ScoringStatRow,
 } from "./scoring";
+import { mergeSelfReportedTrophies, type SelfReportedTrophyTally } from "./selfReported";
 import { baseSetCode, colorsOf, CUBE_BASE, isCubeCode, isCubeSeasonCode, isSoup } from "./utils";
 import { formatsForBucket } from "./format-buckets";
 import { FORMAT_LABEL_GROUPS, FORMAT_RAW_GROUPS, MULTI, OTHER } from "./filters";
@@ -179,7 +180,7 @@ export async function fetchAvailableFormats(setCode: string): Promise<string[]> 
 
 export async function fetchLeaderboard(setCode: string): Promise<LeaderboardRow[]> {
   if (isCubeSeasonCode(setCode)) return fetchCubeSeasonLeaderboard(setCode);
-  const [leaderboard, breakdown, pod] = await Promise.all([
+  const [leaderboard, breakdown, pod, selfReported] = await Promise.all([
     client()
       .from("public_leaderboard")
       .select("slug, display_name, avatar_url, trophies, events, wins, losses, last_calculated_at")
@@ -192,10 +193,15 @@ export async function fetchLeaderboard(setCode: string): Promise<LeaderboardRow[
       .from("public_pod_scoring")
       .select("slug, display_name, avatar_url, trophies, wins_2_1, leaderboard_opt_in")
       .eq("set_code", setCode),
+    client()
+      .from("public_self_reported_events")
+      .select("slug, display_name, avatar_url, is_trophy")
+      .eq("set_code", setCode),
   ]);
   if (leaderboard.error) throw leaderboard.error;
   if (breakdown.error) throw breakdown.error;
   if (pod.error) throw pod.error;
+  if (selfReported.error) throw selfReported.error;
 
   // 17lands score: group every breakdown row per slug, then aggregate (confidence is aggregate)
   const groupsBySlug = new Map<string, GroupTotals[]>();
@@ -262,12 +268,27 @@ export async function fetchLeaderboard(setCode: string): Promise<LeaderboardRow[
     }
   }
 
-  return [...bySlug.values()]
-    .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      return a.displayName.localeCompare(b.displayName);
-    })
-    .map((r, i) => ({ ...r, rank: i + 1 }));
+  // Self-reported trophies (paper/MTGO runs logged via /trophy). Zero score: they lift the trophy
+  // count only, and a self-report-only player enters the board the way pod-only players do.
+  const tallyBySlug = new Map<string, SelfReportedTrophyTally>();
+  for (const raw of selfReported.data ?? []) {
+    const r = raw as Record<string, unknown>;
+    if (r.is_trophy !== true) continue;
+    const slug = r.slug as string;
+    const existing = tallyBySlug.get(slug);
+    if (existing) {
+      existing.trophies += 1;
+    } else {
+      tallyBySlug.set(slug, {
+        slug,
+        displayName: (r.display_name as string) ?? slug,
+        avatarUrl: (r.avatar_url ?? null) as string | null,
+        trophies: 1,
+      });
+    }
+  }
+
+  return mergeSelfReportedTrophies([...bySlug.values()], [...tallyBySlug.values()], setCode);
 }
 
 // MTGO flashback board: self-reported results aggregated per player. These sets have no scored
