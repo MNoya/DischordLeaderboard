@@ -186,7 +186,7 @@ export function MidwayBallotScorecard({
 
         <div className="flex items-baseline gap-1.5">
           <span className="font-display leading-none" style={{ fontSize: 24, color: GREEN }}>{aligned}</span>
-          <span className="font-body text-[12px] leading-none" style={{ color: GREEN }}>MATCH BEST POSSIBLE</span>
+          <span className="font-body text-[12px] leading-none" style={{ color: GREEN }}>BEST-IN-SLOT</span>
         </div>
 
         <div className="flex gap-1 -ml-[5px]" aria-hidden>
@@ -202,8 +202,8 @@ export function MidwayBallotScorecard({
 function MidwayBallotLegend() {
   return (
     <div className="text-left leading-snug">
-      <span className="font-semibold" style={{ color: GREEN }}>Best Possible</span>{" "}
-      <span className="text-subtle">— the highest win-rate legal team according to 17lands data</span>
+      <span className="font-semibold" style={{ color: GREEN }}>Best-in-slot</span>{" "}
+      <span className="text-subtle">— the top card for a given slot based on GIH win rate</span>
     </div>
   );
 }
