@@ -217,9 +217,9 @@ function TeamRow({
         </div>
       )}
 
-      <div className="mb-2 hidden items-center lg:grid lg:grid-cols-[1fr_auto_1fr] lg:gap-5">
+      <div className="mb-2 hidden items-baseline lg:grid lg:grid-cols-[1fr_auto_1fr] lg:gap-5">
         <div className="lg:col-start-2">{labelEl}</div>
-        <div className="flex items-center gap-4 lg:col-start-3 lg:justify-self-start">
+        <div className="flex items-baseline gap-4 lg:col-start-3 lg:justify-self-start">
           {scoreEl}
           {toggleEl}
         </div>
