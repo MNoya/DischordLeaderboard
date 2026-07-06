@@ -36,7 +36,7 @@ from bot.services.pod_drafts import parse_caption_record
 from bot.services.pod_thread_backfill import parse_caption_colors
 from bot.services.pod_tournament import TROPHY_HYPE_HISTORY_LIMIT
 from bot.services.self_reported_events import get_or_create_player, is_trophy_record, upsert_event
-from bot.sets import ALL_SETS, active_set_code, parse_caption_set_code
+from bot.sets import active_set_code, parse_caption_set_code, released_sets
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +44,10 @@ logger = logging.getLogger(__name__)
 PLATFORM_CHOICES: tuple[tuple[str, str], ...] = (
     ("MTGO", "mtgo"),
     ("MTGA", "mtga"),
+    ("xMage", "xmage"),
     ("Paper", "cardboard"),
 )
+FORMAT_CHOICES: tuple[str, ...] = ("Premier", "Traditional", "Single Elim")
 WRITE_IN_EMOJI = "manax"
 WRITE_IN = "__write_in__"
 SET_SELECT_LIMIT = 23
@@ -80,6 +82,7 @@ class TrophyDraft:
     colors: str | None
     is_trophy: bool
     platform: str | None = None
+    format: str | None = None
     already_logged: bool = False
     on_behalf: bool = False
 
@@ -163,6 +166,7 @@ def _render_embed(draft: TrophyDraft) -> discord.Embed:
     embed.add_field(name="Trophy", value="Yes" if draft.is_trophy else "No", inline=True)
     embed.add_field(name="Colors", value=color_label(draft.colors) if draft.colors else "None", inline=True)
     embed.add_field(name="Platform", value=draft.platform or "*not set*", inline=True)
+    embed.add_field(name="Format", value=draft.format or "*not set*", inline=True)
     if draft.caption:
         embed.add_field(name="Caption", value=draft.caption, inline=False)
     whose_post = f"{draft.display_name}'s post" if draft.on_behalf else "your post"
@@ -187,6 +191,7 @@ class TrophyConfirmView(ui.View):
         self.add_item(_SetSelect(self.draft))
         self.add_item(_ColorSelect(self.draft))
         self.add_item(_PlatformSelect(self.draft))
+        self.add_item(_FormatSelect(self.draft))
         self.add_item(_RecordButton(self.draft.record))
         self.add_item(_TrophyToggleButton(self.draft.is_trophy))
         self.add_item(_ConfirmButton(disabled=not self.draft.can_confirm))
@@ -202,8 +207,10 @@ class TrophyConfirmView(ui.View):
 
 class _SetSelect(ui.Select):
     def __init__(self, draft: TrophyDraft) -> None:
-        recent = list(reversed(ALL_SETS))[:SET_SELECT_LIMIT]
-        options: list[discord.SelectOption] = []
+        recent = released_sets()[:SET_SELECT_LIMIT]
+        options: list[discord.SelectOption] = [
+            discord.SelectOption(label="Other (write-in)", value=WRITE_IN, emoji=emojis.get_emoji(WRITE_IN_EMOJI))
+        ]
         if draft.set_code not in {s.code for s in recent}:
             options.append(discord.SelectOption(label=draft.set_code, value=draft.set_code, default=True))
         options.extend(
@@ -211,9 +218,6 @@ class _SetSelect(ui.Select):
                 label=s.code, description=s.name[:100], value=s.code, default=(draft.set_code == s.code)
             )
             for s in recent
-        )
-        options.append(
-            discord.SelectOption(label="Other (write-in)", value=WRITE_IN, emoji=emojis.get_emoji(WRITE_IN_EMOJI))
         )
         super().__init__(placeholder="Set", options=options, min_values=1, max_values=1)
 
@@ -284,6 +288,32 @@ class _PlatformSelect(ui.Select):
         await view.rerender(interaction)
 
 
+class _FormatSelect(ui.Select):
+    def __init__(self, draft: TrophyDraft) -> None:
+        is_write_in = draft.format is not None and draft.format not in FORMAT_CHOICES
+        options = [
+            discord.SelectOption(label=label, value=label, default=(draft.format == label))
+            for label in FORMAT_CHOICES
+        ]
+        options.append(
+            discord.SelectOption(
+                label=f"Other ({draft.format})" if is_write_in else "Other (write-in)",
+                value=WRITE_IN,
+                emoji=emojis.get_emoji(WRITE_IN_EMOJI),
+                default=is_write_in,
+            )
+        )
+        super().__init__(placeholder="Format", options=options, min_values=1, max_values=1)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view: TrophyConfirmView = self.view
+        if self.values[0] == WRITE_IN:
+            await interaction.response.send_modal(_FormatWriteInModal(view))
+            return
+        view.draft.format = self.values[0]
+        await view.rerender(interaction)
+
+
 class _RecordButton(ui.Button):
     def __init__(self, record: str | None) -> None:
         super().__init__(
@@ -333,6 +363,7 @@ class _ConfirmButton(ui.Button):
                 is_trophy=draft.is_trophy,
                 colors=draft.colors,
                 platform=draft.platform,
+                format=draft.format,
                 caption=draft.caption,
                 screenshot_url=strip_cdn_dims(draft.image_url) if draft.image_url else None,
                 source_channel_id=draft.source_channel_id,
@@ -351,11 +382,11 @@ class _ConfirmButton(ui.Button):
         colors = color_label(draft.colors) if draft.colors else "no colors"
         oversight = (
             f"{emoji} **{draft.display_name}** (`{draft.discord_username}`) saved "
-            f"**{draft.record}** · {colors} · {draft.platform} · {draft.set_code} — "
+            f"**{draft.record}** · {colors} · {draft.platform} · {draft.format} · {draft.set_code} — "
             f"[post]({draft.source_url})"
         )
         await bot_log.get(interaction.client).post_plain(oversight)
-        await _mark_post_logged(view.message, draft.set_code)
+        await _mark_post_logged(view.message, draft.set_code, draft.platform)
         whose_profile = f"{draft.display_name}'s profile" if draft.on_behalf else "your profile"
         done = discord.Embed(
             title="🏆 Trophy saved" if draft.is_trophy else "📋 Deck saved",
@@ -382,6 +413,18 @@ class _PlatformWriteInModal(ui.Modal, title="Platform"):
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         self._view.draft.platform = self.platform.value.strip()
+        await self._view.rerender(interaction)
+
+
+class _FormatWriteInModal(ui.Modal, title="Format"):
+    format = ui.TextInput(label="Format", placeholder="e.g. Chaos Draft, Cube", max_length=40, required=True)
+
+    def __init__(self, view: TrophyConfirmView) -> None:
+        super().__init__()
+        self._view = view
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        self._view.draft.format = self.format.value.strip()
         await self._view.rerender(interaction)
 
 
@@ -455,6 +498,12 @@ class _SetWriteInModal(ui.Modal, title="Set"):
         await self._view.rerender(interaction)
 
 
+def _default_format(record: str | None) -> str:
+    """A 7-win run reads Premier, anything shorter Traditional; single elim needs an explicit pick."""
+    wins = int(record.split("-")[0]) if record and RECORD_RE.match(record) else 0
+    return "Premier" if wins >= 7 else "Traditional"
+
+
 async def _present_trophy_draft(
     bot: commands.Bot, interaction: discord.Interaction, message: discord.Message
 ) -> None:
@@ -478,6 +527,7 @@ async def _present_trophy_draft(
         record=record,
         colors=parse_caption_colors(caption),
         is_trophy=is_trophy_record(record),
+        format=_default_format(record),
         already_logged=any(reaction.me for reaction in message.reactions),
         on_behalf=str(author.id) != str(interaction.user.id),
     )
@@ -503,9 +553,21 @@ async def save_trophy_menu(interaction: discord.Interaction, message: discord.Me
     await _present_trophy_draft(interaction.client, interaction, message)
 
 
-async def _mark_post_logged(message: discord.Message, set_code: str) -> None:
-    """React to the trophy-hype post with the set's emoji (🏆 when it has none), marking it logged."""
-    emoji = emojis.get_emoji(set_code.lower()) or emojis.get_emoji(set_code) or "🏆"
+def _platform_emoji(platform: str | None) -> discord.Emoji | None:
+    for label, name in PLATFORM_CHOICES:
+        if label == platform:
+            return emojis.get_emoji(name)
+    return None
+
+
+async def _mark_post_logged(message: discord.Message, set_code: str, platform: str | None) -> None:
+    """React to the trophy-hype post to mark it logged: the set's emoji, else the platform's, else 🏆."""
+    emoji = (
+        emojis.get_emoji(set_code.lower())
+        or emojis.get_emoji(set_code)
+        or _platform_emoji(platform)
+        or "🏆"
+    )
     try:
         await message.add_reaction(emoji)
     except discord.HTTPException:

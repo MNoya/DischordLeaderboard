@@ -45,5 +45,6 @@ export const adaptSelfReportedEvent = (row: SnakeRow): SelfReportedEvent => {
   const camel = camelify<SelfReportedEvent>(row);
   camel.colors = camel.colors ?? "";
   camel.isTrophy = camel.isTrophy ?? true;
+  camel.format = camel.format ?? null;
   return camel;
 };

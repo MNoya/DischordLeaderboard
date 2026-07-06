@@ -81,6 +81,7 @@ def upsert_event(
     is_trophy: bool,
     colors: str | None,
     platform: str,
+    format: str | None,
     caption: str | None,
     screenshot_url: str | None,
     source_channel_id: str,
@@ -103,6 +104,7 @@ def upsert_event(
     event.is_trophy = is_trophy
     event.colors = colors
     event.platform = platform
+    event.format = format
     event.caption = caption
     event.screenshot_url = screenshot_url
     if reported_at is not None:

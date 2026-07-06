@@ -254,6 +254,7 @@ export const fetchPlayerProfile = (
     events: headline.events,
     wins: headline.wins,
     losses: headline.losses,
+    linked17lands: true,
     lastCalculatedAt: headline.lastCalculatedAt,
     formatBreakdown: breakdown,
     selfReportedEvents: [],

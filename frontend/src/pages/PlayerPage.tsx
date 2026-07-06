@@ -353,7 +353,7 @@ function NoSetData({
   identity: PlayerIdentity | null;
 }) {
   const setSwitcher = sets ? (
-    <SetCodeDropdown sets={sets} activeCode={setCode} onChange={onChangeSet} size={isMobile ? "sm" : "md"} />
+    <SetCodeDropdown sets={sets} activeCode={setCode} onChange={onChangeSet} size={isMobile ? "sm" : "md"} chamfer={!isMobile} />
   ) : (
     <span className="text-[22px]">{setCode}</span>
   );
@@ -752,7 +752,7 @@ function Desktop({
           <div className="shrink-0">
             <h1
               className="font-display tracking-[0.03em] m-0 whitespace-nowrap pl-[5px]"
-              style={{ fontSize: 64, lineHeight: 0.95 }}
+              style={{ fontSize: "clamp(38px, 3.6vw, 64px)", lineHeight: 0.95 }}
             >
               {profile.displayName.toUpperCase()}
             </h1>
@@ -767,7 +767,7 @@ function Desktop({
           </div>
           <div className="ml-auto flex items-stretch gap-4 min-w-0">
             <ManualTrophiesBlock trophies={profile.selfReportedEvents} />
-            {profile.events > 0 && (
+            {profile.linked17lands && profile.events > 0 && (
               <StatStrip
                 stats={stats}
                 wp={wp}
@@ -819,7 +819,8 @@ function Desktop({
 // trophy for the deck-screenshot modal; never counted toward the scored stat strip.
 type LogEntry = PlayerDraftEvent & { trophy?: SelfReportedEvent };
 
-// MTGO 3-win runs read as Traditional, MTGA 7-win runs as Premier — derived from the record alone.
+// Fallback label for trophies logged before the format field existed: a 7-win run reads Premier,
+// anything shorter Traditional. Rows with a stored format use that instead.
 function trophyFormatLabel(record: string): string {
   const wins = Number(record.split("-")[0]) || 0;
   return wins >= 7 ? "Premier Draft" : "Trad Draft";
@@ -831,8 +832,8 @@ function selfTrophyToEntry(trophy: SelfReportedEvent, fallbackSet: string): LogE
     slug: "",
     setCode: trophy.setCode || fallbackSet,
     eventId: `selftrophy-${trophy.sourceMessageId}`,
-    // The platform doubles as the format value so the format dropdown can filter to it; the row's
-    // visible label still comes from trophyFormatLabel(record).
+    // The platform doubles as the filterable format value so the format dropdown can filter to it;
+    // the row's visible label comes from trophy.format (or the record-derived fallback).
     format: trophy.platform,
     expansion: trophy.setCode || fallbackSet,
     wins: Number(w) || 0,
@@ -1553,7 +1554,9 @@ function EventLogRow({
   const rowExternal = !isPod && !!href;
   const linkClass = (rowInternal || rowExternal || trophy) ? "group cursor-pointer transition-colors hover:bg-surface2 no-underline text-inherit" : "";
   const podWithoutDeck = isPod && !e.colors;
-  const formatLabel = trophy ? trophyFormatLabel(trophy.record).toUpperCase() : eventDisplayLabel(e).toUpperCase();
+  const formatLabel = trophy
+    ? (trophy.format ?? trophyFormatLabel(trophy.record)).toUpperCase()
+    : eventDisplayLabel(e).toUpperCase();
   const tag = isPod || trophy ? null : formatTag(e.format, e.expansion);
   const cashPrize = lcqCashPrize(e);
   const recordColor = cashPrize ? "#ff8c3a" : e.isTrophy ? "#2ee85c" : "#e6ecf5";
@@ -1963,10 +1966,7 @@ function Mobile({
           <div className="flex-1 min-w-0 ml-3 relative flex items-center min-h-[84px]">
             <h1
               className="font-display tracking-[0.03em] m-0 pl-[5px] line-clamp-2 break-words"
-              style={{
-                fontSize: "clamp(20px, 7vw, 44px)",
-                lineHeight: 0.95,
-              }}
+              style={{ fontSize: "clamp(20px, 7vw, 44px)", lineHeight: 0.95 }}
             >
               {profile.displayName.toUpperCase()}
             </h1>
@@ -1983,14 +1983,14 @@ function Mobile({
               </span>
             )}
             {sets ? (
-              <SetCodeDropdown sets={sets} activeCode={profile.setCode} onChange={onChangeSet} size="sm" />
+              <SetCodeDropdown sets={sets} activeCode={profile.setCode} onChange={onChangeSet} size="sm" chamfer={false} />
             ) : (
               <span className="text-[18px]">{profile.setCode}</span>
             )}
           </div>
         </div>
 
-        {profile.events > 0 && (
+        {profile.linked17lands && profile.events > 0 && (
         <div className={cn("mt-[18px] grid gap-[5px]", ranked ? "grid-cols-5" : "grid-cols-4")}>
           <StatChip
             label={profile.selfReportedEvents.some((e) => e.isTrophy) ? "17L TROPHIES" : "TROPHIES"}

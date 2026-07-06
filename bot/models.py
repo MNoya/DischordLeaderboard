@@ -337,6 +337,8 @@ class SelfReportedEvent(Base):
     # WUBRG-normalized (uppercase main, lowercase splash); null when the player left it unknown
     colors            = Column(String, nullable=True)
     platform          = Column(String, nullable=False)
+    # Player-declared draft format; nullable so rows logged before the field existed still persist
+    format            = Column(String, nullable=True)
     # The player's original post text, kept as a memory to show alongside the deck on their profile
     caption           = Column(Text, nullable=True)
     # Discord CDN attachment URL (dim-stripped), refreshed browser-side via the message ref when its

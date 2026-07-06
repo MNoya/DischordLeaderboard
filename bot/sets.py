@@ -121,6 +121,13 @@ def active_set_code(when: datetime | None = None) -> str:
     return (released or ALL_SETS[-1]).code
 
 
+def released_sets(when: datetime | None = None) -> tuple[SetSeed, ...]:
+    """Sets whose Arena release instant has passed, newest first."""
+    now = when or datetime.now(timezone.utc)
+    released = [seed for seed in ALL_SETS if release_instant(seed.start_date) <= now]
+    return tuple(reversed(released))
+
+
 def upcoming_sets(when: datetime | None = None) -> tuple[SetSeed, ...]:
     """Registered sets that rotate in after the active one — not yet the leaderboard set, but
     draftable for pod/mock previews. Empty once the active set is the newest entry."""

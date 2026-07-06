@@ -80,7 +80,7 @@ def test_upsert_resolves_set_id_from_code(session):
 
     event = upsert_event(
         session, player_id=player.id, set_code="SOS", record="3-0", is_trophy=True, colors="WR",
-        platform="MTGO", caption="finally hit it", screenshot_url="https://cdn/x.png",
+        platform="MTGO", format="Traditional", caption="finally hit it", screenshot_url="https://cdn/x.png",
         source_channel_id="c1", source_message_id="m1", source_url="u1",
     )
 
@@ -94,7 +94,7 @@ def test_upsert_persists_is_trophy_flag(session):
 
     event = upsert_event(
         session, player_id=player.id, set_code="SOS", record="2-1", is_trophy=False, colors="WR",
-        platform="MTGO", caption=None, screenshot_url=None,
+        platform="MTGO", format="Traditional", caption=None, screenshot_url=None,
         source_channel_id="c1", source_message_id="m1", source_url="u1",
     )
 
@@ -104,7 +104,7 @@ def test_upsert_persists_is_trophy_flag(session):
 def test_upsert_is_idempotent_per_message(session):
     player = _seed_player(session)
     kwargs = dict(
-        player_id=player.id, set_code="SOS", caption=None, screenshot_url=None,
+        player_id=player.id, set_code="SOS", format=None, caption=None, screenshot_url=None,
         source_channel_id="c1", source_message_id="m1", source_url="u1",
     )
 
@@ -121,12 +121,12 @@ def test_upsert_distinct_messages_create_distinct_rows(session):
 
     upsert_event(
         session, player_id=player.id, set_code="SOS", record="3-0", is_trophy=True, colors=None,
-        platform="Paper", caption=None, screenshot_url=None,
+        platform="Paper", format="Single Elim", caption=None, screenshot_url=None,
         source_channel_id="c1", source_message_id="m1", source_url="u1",
     )
     upsert_event(
         session, player_id=player.id, set_code="SOS", record="3-1", is_trophy=False, colors=None,
-        platform="Paper", caption=None, screenshot_url=None,
+        platform="Paper", format="Traditional", caption=None, screenshot_url=None,
         source_channel_id="c1", source_message_id="m2", source_url="u2",
     )
 
@@ -139,7 +139,7 @@ def test_upsert_timestamps_with_supplied_event_time(session):
 
     event = upsert_event(
         session, player_id=player.id, set_code="SOS", record="3-0", is_trophy=True, colors=None,
-        platform="MTGO", caption=None, screenshot_url=None, reported_at=posted,
+        platform="MTGO", format="Traditional", caption=None, screenshot_url=None, reported_at=posted,
         source_channel_id="c1", source_message_id="m1", source_url="u1",
     )
 
@@ -151,7 +151,7 @@ def test_upsert_unknown_set_code_leaves_set_id_null(session):
 
     event = upsert_event(
         session, player_id=player.id, set_code="ZZZ", record="3-0", is_trophy=True, colors=None,
-        platform="MTGA", caption=None, screenshot_url=None,
+        platform="MTGA", format="Premier", caption=None, screenshot_url=None,
         source_channel_id="c1", source_message_id="m9", source_url="u9",
     )
 

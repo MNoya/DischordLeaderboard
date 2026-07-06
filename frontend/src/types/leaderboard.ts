@@ -271,6 +271,8 @@ export interface SelfReportedEvent {
   isTrophy: boolean;
   colors: string;
   platform: string;
+  // Player-declared draft format; null on rows logged before the field existed
+  format: string | null;
   // The player's original post text, kept as a keepsake shown with the deck
   caption: string | null;
   // Discord CDN URL; refreshed browser-side via the message ref when its signed expiry lapses
@@ -306,6 +308,7 @@ export interface PlayerProfile {
   events: number;
   wins: number;
   losses: number;
+  linked17lands: boolean;
   lastCalculatedAt?: string | null; // when this player's data was last pulled from 17lands
   formatBreakdown: PlayerFormatBreakdown[];
   selfReportedEvents: SelfReportedEvent[];

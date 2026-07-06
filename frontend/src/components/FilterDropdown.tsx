@@ -66,7 +66,7 @@ export function FilterDropdown({
     if (!open || !mobileCentered) {
       return;
     }
-    const rect = triggerRef.current?.getBoundingClientRect();
+    const rect = (triggerRef.current ?? ref.current)?.getBoundingClientRect();
     if (rect) {
       setMenuTop(rect.bottom + 4);
     }

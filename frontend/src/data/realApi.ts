@@ -951,6 +951,7 @@ export async function fetchPlayerProfile(
     events: headline.events,
     wins: headline.wins,
     losses: headline.losses,
+    linked17lands: Boolean(headlineResp.data),
     lastCalculatedAt: headline.lastCalculatedAt || undefined,
     formatBreakdown: breakdown,
     selfReportedEvents: trophyRows.map((r) => adaptSelfReportedEvent(r)),

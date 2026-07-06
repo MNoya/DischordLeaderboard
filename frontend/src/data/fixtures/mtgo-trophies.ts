@@ -15,6 +15,7 @@ const deck = (setCode: string, colors: string, record: string, reportedAt: strin
   isTrophy: isTrophyRecord(record),
   colors,
   platform: "MTGO",
+  format: null,
   caption: null,
   screenshotUrl: null,
   sourceChannelId: "0",
