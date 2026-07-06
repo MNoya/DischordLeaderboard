@@ -8,7 +8,7 @@ import { Pips } from "../ManaPips";
 import { Record } from "../Record";
 import { cn } from "../../lib/utils";
 import { CardImageMapProvider, StackColumn, useCardImageMapContext, useFallbackImage } from "./review/ReviewCard";
-import { cardImageSources, useCardImageMap } from "../../data/cardImages";
+import { cardImageSources, useCardImageMap, type CardImages } from "../../data/cardImages";
 import { useIsMobile } from "../../lib/use-is-mobile";
 import { useResolvedDeckUrl } from "../../data/refresh-deck-url";
 import type { Mainboard } from "../../types/leaderboard";
@@ -37,12 +37,14 @@ interface Props {
   breakdownHref?: string;
   hideDraftLog?: boolean;
   draftLogHref?: string | null;
+  // A whole-draft image map warmed upstream; when passed the Card Pool reuses it instead of re-fetching its subset
+  cardImages?: CardImages;
   onClose: () => void;
   onPrev?: () => void;
   onNext?: () => void;
 }
 
-export function DeckScreenshotModal({ participant, initialTab = "screenshot", breakdownHref, hideDraftLog = false, draftLogHref, onClose, onPrev, onNext }: Props) {
+export function DeckScreenshotModal({ participant, initialTab = "screenshot", breakdownHref, hideDraftLog = false, draftLogHref, cardImages, onClose, onPrev, onNext }: Props) {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
 
@@ -137,7 +139,7 @@ export function DeckScreenshotModal({ participant, initialTab = "screenshot", br
         <div className="flex-1 min-h-0 overflow-hidden">
           <div key={deckKey} className="h-full animate-fadeIn">
           {effectiveTab === "decklist" && participant.mainboard ? (
-            <DecklistView mainboard={participant.mainboard} />
+            <DecklistView mainboard={participant.mainboard} warmedImages={cardImages} />
           ) : showSkeleton ? (
             <div className="h-full p-4 md:p-5">
               <div className="w-full h-full bg-surface2 animate-pulse" />
@@ -388,14 +390,15 @@ function byColorThenName(a: DeckCard, b: DeckCard): number {
   return colorSortKey(a.colors ?? []) - colorSortKey(b.colors ?? []) || a.name.localeCompare(b.name);
 }
 
-function DecklistView({ mainboard }: { mainboard: Mainboard }) {
+function DecklistView({ mainboard, warmedImages }: { mainboard: Mainboard; warmedImages?: CardImages }) {
   const [showSide, setShowSide] = useState(true);
   const imageItems = useMemo(
     () =>
-      [...mainboard.cards, ...mainboard.sideboard].map((c) => ({ name: c.name, set: c.set ?? mainboard.set })),
-    [mainboard],
+      warmedImages ? [] : [...mainboard.cards, ...mainboard.sideboard].map((c) => ({ name: c.name, set: c.set ?? mainboard.set })),
+    [mainboard, warmedImages],
   );
-  const cardImages = useCardImageMap(imageItems);
+  const ownImages = useCardImageMap(imageItems);
+  const cardImages = warmedImages ?? ownImages;
   const { mvPiles, lands, side } = useMemo(() => {
     const landCards: DeckCard[] = [];
     const byCmc = new Map<number, DeckCard[]>();
@@ -507,10 +510,12 @@ function PileCard({ card, deckSet }: { card: DeckCard; deckSet: string | null })
           className="block w-full h-auto"
           draggable={false}
         />
-      ) : (
+      ) : imageMap.ready ? (
         <div className="w-full aspect-[488/680] bg-surface2 flex items-start p-2">
           <span className="font-body text-subtle leading-tight" style={{ fontSize: 12 }}>{card.name}</span>
         </div>
+      ) : (
+        <div className="w-full aspect-[488/680] bg-surface2 animate-pulse" />
       )}
       {count > 1 && <CountBadge n={count} onStrip={false} />}
     </>

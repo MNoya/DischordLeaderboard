@@ -117,7 +117,7 @@ export function PodPage() {
     () => (draftArtifact ? draftArtifact.cards.map((c) => ({ name: c.n, set: c.s ?? draftArtifact.set })) : []),
     [draftArtifact],
   );
-  useCardImageMap(warmImageItems);
+  const warmedImages = useCardImageMap(warmImageItems);
   const deckTargetMainboard = useMemo(
     () => (draftArtifact && deckTarget ? resolveDeck(draftArtifact, deckTarget.seatIndex) : null),
     [draftArtifact, deckTarget],
@@ -369,6 +369,7 @@ export function PodPage() {
             }}
             initialTab={deckInitialTab}
             draftLogHref={deckLogHref}
+            cardImages={warmedImages}
             onClose={() => setDeckTarget(null)}
             onPrev={() => cycleDeck(-1)}
             onNext={() => cycleDeck(1)}

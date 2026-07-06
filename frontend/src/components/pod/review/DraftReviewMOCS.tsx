@@ -396,6 +396,7 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, initialPack =
         <DeckScreenshotModal
           participant={deckPopup}
           hideDraftLog
+          cardImages={cardImages}
           onClose={() => setDeckPopupSeat(null)}
           onPrev={() => setDeckPopupSeat((s) => (s == null ? s : (s - 1 + N) % N))}
           onNext={() => setDeckPopupSeat((s) => (s == null ? s : (s + 1) % N))}
