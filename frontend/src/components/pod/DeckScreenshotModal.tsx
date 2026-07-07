@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Link, useNavigate } from "react-router-dom";
 import { ChevronLeft, ChevronRight, X, ZoomIn, ZoomOut } from "lucide-react";
-import { ArrowRight, GiRoundTable, ImageIcon, LuScrollText, TbCards } from "../Icons";
+import { ArrowRight, GiRoundTable, ImageIcon, LuScrollText, SiDiscord, TbCards } from "../Icons";
 import { ChamferedButton } from "../ChamferedButton";
 import { Pips } from "../ManaPips";
 import { Record } from "../Record";
@@ -22,6 +22,8 @@ export interface DeckLike {
   deckColors: string | null;
   deckScreenshotUrl: string | null;
   deckScreenshotCaption?: string | null;
+  // Original public post that created a self-reported deck; surfaced as a "View on Discord" link
+  deckSourceUrl?: string | null;
   mainboard?: Mainboard | null;
   record?: string | null;
   // Self-reported trophies refresh their Discord CDN screenshot by message ref instead of pod event
@@ -59,7 +61,8 @@ export function DeckScreenshotModal({ participant, initialTab = "screenshot", br
     hasScreenshot && hasDecklist ? tab : hasDecklist ? "decklist" : "screenshot";
   const showPanelToggle = hasScreenshot && hasDecklist;
   const showDraftLogTab = !hideDraftLog;
-  const showTabBar = showPanelToggle || showDraftLogTab || !!onPrev || !!onNext;
+  const hasTabs = showPanelToggle || showDraftLogTab;
+  const showTabBar = hasTabs || !!onPrev || !!onNext;
 
   const { url: resolvedUrl, resolving: isResolving } = useResolvedDeckUrl(participant);
   const [imgLoaded, setImgLoaded] = useState(false);
@@ -223,22 +226,49 @@ export function DeckScreenshotModal({ participant, initialTab = "screenshot", br
             </div>
           </Link>
         )}
-        {participant.deckScreenshotCaption && (
-          <div
+        {participant.deckSourceUrl ? (
+          <a
+            href={participant.deckSourceUrl}
+            target="_blank"
+            rel="noreferrer"
             className={cn(
-              "pl-9 pr-5 py-4 text-muted text-[15px] font-body italic leading-snug border-t border-border shrink-0 bg-surface",
+              "group flex items-center gap-3 px-4 py-3 lg:gap-4 lg:pl-9 lg:pr-5 lg:py-4 border-t border-border shrink-0 bg-surface no-underline hover:bg-green/5 transition-colors",
               breakdownHref && "lg:hidden",
             )}
           >
-            {participant.deckScreenshotCaption}
-          </div>
+            {participant.deckScreenshotCaption ? (
+              <span className="min-w-0 flex-1 text-muted text-[15px] font-body italic leading-snug">
+                {participant.deckScreenshotCaption}
+              </span>
+            ) : (
+              <span className="flex-1" />
+            )}
+            <span className="shrink-0 inline-flex items-center gap-2 text-muted group-hover:text-text font-display tracking-[0.14em] text-[13px] transition-colors">
+              <span className="hidden lg:inline">VIEW ON DISCORD</span>
+              <SiDiscord size={18} />
+            </span>
+          </a>
+        ) : (
+          participant.deckScreenshotCaption && (
+            <div
+              className={cn(
+                "px-4 py-3 lg:pl-9 lg:pr-5 lg:py-4 text-muted text-[15px] font-body italic leading-snug border-t border-border shrink-0 bg-surface",
+                breakdownHref && "lg:hidden",
+              )}
+            >
+              {participant.deckScreenshotCaption}
+            </div>
+          )
         )}
       </div>
       <div className="flex-1 min-h-0 w-full max-w-[1400px] flex flex-col items-center justify-center gap-10 px-4 md:px-0">
         {showTabBar && (
         <div
           onClick={(e) => e.stopPropagation()}
-          className="shrink-0 w-full lg:w-auto flex items-center justify-between gap-2 lg:gap-4 rounded-2xl bg-surface border border-border shadow-lg px-3 py-2 lg:px-4"
+          className={cn(
+            "shrink-0 w-full lg:w-auto flex items-center justify-between gap-2 lg:gap-4",
+            hasTabs && "rounded-2xl bg-surface border border-border shadow-lg px-3 py-2 lg:px-4",
+          )}
         >
           {onPrev ? <PanelChevron side="left" onClick={onPrev} /> : <span className="w-10 shrink-0" />}
           <div className="flex items-center gap-1.5">

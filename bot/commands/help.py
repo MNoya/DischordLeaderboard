@@ -19,9 +19,10 @@ HELP_TITLE = "❔ Commands"
 # (section_label, [(command, description), ...])
 HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
     ("🏆 Leaderboard", [
+        ("/join", desc.JOIN),
         ("/leaderboard", desc.LEADERBOARD),
         ("/stats", desc.STATS),
-        ("/join", desc.JOIN),
+        ("/trophy", desc.TROPHY_HELP),
         ("/opt-out", desc.OPT_OUT),
         ("/retire", desc.RETIRE),
         ("/exile", desc.EXILE),

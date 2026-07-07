@@ -510,7 +510,7 @@ async def _present_trophy_draft(
     """Parse a resolved post into a TrophyDraft and open the confirm view. Shared by the /trophy
     slash command and the Record Event message context menu."""
     author = message.author
-    caption = (message.content or "").strip() or None
+    caption = (message.clean_content or "").strip() or None
     record = parse_caption_record(caption) or "3-0"
     draft = TrophyDraft(
         discord_id=str(author.id),

@@ -810,7 +810,15 @@ function Desktop({
         confidenceOverride={formatFilter !== "ALL" ? fullConfidence : undefined}
         anchorRef={pointsBtnRef}
       />
-      {shotTrophy && <TrophyDeckModal trophy={shotTrophy} displayName={profile.displayName} onClose={() => setShotTrophy(null)} />}
+      {shotTrophy && (
+        <TrophyDeckModal
+          trophy={shotTrophy}
+          trophies={profile.selfReportedEvents}
+          displayName={profile.displayName}
+          onSelect={setShotTrophy}
+          onClose={() => setShotTrophy(null)}
+        />
+      )}
     </div>
   );
 }
@@ -865,13 +873,20 @@ function mergeTrophyRows(
 
 function TrophyDeckModal({
   trophy,
+  trophies,
   displayName,
+  onSelect,
   onClose,
 }: {
   trophy: SelfReportedEvent;
+  trophies: SelfReportedEvent[];
   displayName: string;
+  onSelect: (trophy: SelfReportedEvent) => void;
   onClose: () => void;
 }) {
+  const index = trophies.findIndex((t) => t.sourceMessageId === trophy.sourceMessageId);
+  const prev = index > 0 ? trophies[index - 1] : null;
+  const next = index >= 0 && index < trophies.length - 1 ? trophies[index + 1] : null;
   return (
     <DeckScreenshotModal
       participant={{
@@ -879,6 +894,7 @@ function TrophyDeckModal({
         deckColors: trophy.colors,
         deckScreenshotUrl: trophy.screenshotUrl,
         deckScreenshotCaption: trophy.caption,
+        deckSourceUrl: trophy.sourceUrl,
         record: trophy.record,
         screenshotChannelId: trophy.sourceChannelId,
         screenshotMessageId: trophy.sourceMessageId,
@@ -886,6 +902,8 @@ function TrophyDeckModal({
       }}
       hideDraftLog
       onClose={onClose}
+      onPrev={prev ? () => onSelect(prev) : undefined}
+      onNext={next ? () => onSelect(next) : undefined}
     />
   );
 }
@@ -2092,7 +2110,15 @@ function Mobile({
         confidenceOverride={formatFilter !== "ALL" ? fullConfidence : undefined}
         anchorRef={pointsBtnRef}
       />
-      {shotTrophy && <TrophyDeckModal trophy={shotTrophy} displayName={profile.displayName} onClose={() => setShotTrophy(null)} />}
+      {shotTrophy && (
+        <TrophyDeckModal
+          trophy={shotTrophy}
+          trophies={profile.selfReportedEvents}
+          displayName={profile.displayName}
+          onSelect={setShotTrophy}
+          onClose={() => setShotTrophy(null)}
+        />
+      )}
     </div>
   );
 }
