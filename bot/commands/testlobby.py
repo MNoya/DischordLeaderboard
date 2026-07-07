@@ -36,6 +36,7 @@ from bot.services.pod_pairing_select import DEFAULT_PAIRING_MODE, pairing_label
 from bot.services.pod_seating_select import seating_mode_label
 from bot.services.player_stats import rank_players_for_set
 from bot.commands.pod_draft import build_seeding_image_message_from_names, post_manual_seating_table, post_table
+from bot.commands.pod_split import build_split_view
 from bot.commands.test_group import register_test_fallback
 from bot.services.pod_format_select import FormatSelectView
 from bot.services.pod_settings_view import PodSettingsView
@@ -196,6 +197,52 @@ def _seed_live_test_event_sync(
     return event_id, session_id
 
 
+# Fictional pre-claims so a single real click by the invoker crosses the split threshold and
+# materializes the overflow table. Negative ids mark fixtures so the ping block renders them as
+# plain names rather than trying to mention a real user.
+_SPLIT_PRESEED = [(-1, "Ava"), (-2, "Bram"), (-3, "Cara"), (-4, "Dex"), (-5, "Eli")]
+
+
+def _split_test_base_name() -> str:
+    return f"{active_set_code()} Split Test"
+
+
+def _seed_split_source_sync(channel_id: int) -> str:
+    """Seed a stand-in 'Table 1' source pod so `!test split` has a real event to clone. Returns its id."""
+    now = datetime.now(timezone.utc)
+    event_id = str(uuid4())
+    with SessionLocal() as session:
+        session.add(PodDraftEvent(
+            id=event_id,
+            event_date=now.date(),
+            event_time=now,
+            set_code=active_set_code(),
+            name=_split_test_base_name(),
+            draftmancer_session=f"TESTSPLIT-{channel_id}",
+            discord_thread_id=str(channel_id),
+            sesh_message_id=None,
+            socket_status=_LIVE_TEST_STATUS,
+            pairing_mode=DEFAULT_PAIRING_MODE,
+        ))
+        session.commit()
+    return event_id
+
+
+def _purge_split_family_sync(base_name: str) -> list[tuple[str, str]]:
+    """Delete the source pod and every table split off it. Returns (event_id, thread_id) so the caller
+    can evict managers and remove the created threads."""
+    with SessionLocal() as session:
+        rows = session.execute(
+            select(PodDraftEvent.id, PodDraftEvent.discord_thread_id)
+            .where(PodDraftEvent.name.ilike(f"{base_name}%"))
+        ).all()
+        ids = [row[0] for row in rows]
+        if ids:
+            session.execute(delete(PodDraftEvent).where(PodDraftEvent.id.in_(ids)))
+            session.commit()
+    return [(row[0], row[1]) for row in rows]
+
+
 def _purge_live_test_pods_sync(channel_id: int) -> list[str]:
     """Delete prior live-test events for this channel (cascades to participants + matches). Returns
     the purged event ids so the caller can evict their managers."""
@@ -327,6 +374,38 @@ async def _start_live_test_lobby(ctx) -> None:
     await ctx.send(f"🧪 Connected to Draftmancer `{session_id}`.")
 
 
+async def _start_test_split(ctx) -> None:
+    """Drive the real `/pod-split` flow: seed a source pod, then post the prod claim card preseeded to
+    one below threshold so the invoker's single click materializes the overflow table (real thread +
+    Draftmancer lobby + tournament manager). Local DB only."""
+    if await _refuse_if_prod(ctx):
+        return
+    purged = await asyncio.to_thread(_purge_split_family_sync, _split_test_base_name())
+    for old_id, old_thread in purged:
+        mgr = ACTIVE_POD_MANAGERS.get(old_id)
+        if mgr is not None:
+            for task in (mgr.grace_task, mgr.championship_task):
+                if task is not None and not task.done():
+                    task.cancel()
+            await mgr.disconnect_safely()
+        if old_thread and old_thread != str(ctx.channel.id):
+            thread = ctx.bot.get_channel(int(old_thread))
+            if thread is not None:
+                try:
+                    await thread.delete()
+                except discord.HTTPException:
+                    pass
+    source_id = await asyncio.to_thread(_seed_split_source_sync, ctx.channel.id)
+    preseed = _SPLIT_PRESEED[: max(0, settings.pod_split_open_threshold - 1)]
+    log.info(f"[testlobby] split preview seeded source={source_id} preseed={len(preseed)}")
+    lobby_channel = ctx.channel.parent if isinstance(ctx.channel, discord.Thread) else ctx.channel
+    view = await build_split_view(ctx.bot, source_id, lobby_channel=lobby_channel, preseeded_claims=preseed)
+    if view is None:
+        await ctx.send("could not seed the split source event")
+        return
+    view.claim_message = await ctx.send(embed=view.render_embed(), view=view)
+
+
 async def _test_submit_deck_color(interaction: discord.Interaction, color: str) -> None:
     _TEST_DECK_COLORS[interaction.user.id] = color
     log.info(f"testlobby deck color saved: user={interaction.user.id} color={color}")
@@ -451,7 +530,7 @@ _LINKED_EIGHT: list[tuple[str, str]] = [
 _VALID_STATES = (
     "empty", "partial", "linked", "unlinked", "ready", "notready", "cancelled", "superseded",
     "drafting", "complete", "submit", "podbracket", "podswiss", "podrandom", "podlobby", "format",
-    "seeding", "trophyhype", "round1", "round2", "round3", "voicelink", "review",
+    "seeding", "trophyhype", "round1", "round2", "round3", "voicelink", "review", "split",
 )
 
 _LIVE_POD_MODES = {"podbracket": "bracket", "podswiss": "swiss", "podrandom": "random"}
@@ -641,6 +720,10 @@ async def setup(bot: commands.Bot) -> None:
 
         if state == "podlobby":
             await _start_live_test_lobby(ctx)
+            return
+
+        if state == "split":
+            await _start_test_split(ctx)
             return
 
         if state == "seeding":

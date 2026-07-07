@@ -406,6 +406,87 @@ def record_mock_event(
     return event
 
 
+_TABLE_SUFFIX_RE = re.compile(r"\s+Table\s+\d+\s*$", re.IGNORECASE)
+
+
+def split_base_name(name: str) -> str:
+    """The event name with any trailing ` Table N` stripped, so splitting a Table 2 still bases new
+    tables on the original pod name rather than nesting `... Table 2 Table 3`."""
+    return _TABLE_SUFFIX_RE.sub("", name).strip()
+
+
+def next_table_index(session: Session, base_name: str) -> int:
+    """Next free table number for `base_name`; the original pod is table 1, so the first split is 2."""
+    names = session.execute(
+        select(PodDraftEvent.name).where(PodDraftEvent.name.ilike(f"{base_name} Table %"))
+    ).scalars().all()
+    highest = 1
+    for name in names:
+        match = re.search(r"Table\s+(\d+)\s*$", name or "", re.IGNORECASE)
+        if match:
+            highest = max(highest, int(match.group(1)))
+    return highest + 1
+
+
+def build_split_session(session: Session, source_session_id: str, table_index: int) -> str:
+    """`<source session>-T<index>`, suffixing A/B/… on collision so re-creates never share a lobby."""
+    base = f"{source_session_id}-T{table_index}"
+    taken = set(session.execute(
+        select(PodDraftEvent.draftmancer_session).where(PodDraftEvent.draftmancer_session.like(f"{base}%"))
+    ).scalars().all())
+    if base not in taken:
+        return base
+    for i in range(26):
+        candidate = f"{base}-{chr(ord('A') + i)}"
+        if candidate not in taken:
+            return candidate
+    n = 27
+    while f"{base}-{n}" in taken:
+        n += 1
+    return f"{base}-{n}"
+
+
+def record_split_event(session: Session, *, source_event_id: str) -> PodDraftEvent:
+    """Insert a kind='tournament' overflow table cloned from `source_event_id` — same set, format,
+    pairings, seating, and event date, but its own Draftmancer session and no sesh RSVP. The roster
+    arrives from the new lobby. `discord_thread_id` is a placeholder the caller overwrites once the
+    thread exists (as record_mock_event does)."""
+    source = session.get(PodDraftEvent, source_event_id)
+    if source is None:
+        raise ValueError(f"source pod event {source_event_id} not found")
+    base_name = split_base_name(source.name)
+    table_index = next_table_index(session, base_name)
+    session_id = build_split_session(session, source.draftmancer_session, table_index)
+    event = PodDraftEvent(
+        event_date=source.event_date,
+        event_time=datetime.now(timezone.utc),
+        set_id=source.set_id,
+        set_code=source.set_code,
+        format_label=source.format_label,
+        name=f"{base_name} Table {table_index}",
+        draftmancer_session=session_id,
+        discord_thread_id="pending",
+        sesh_message_id=None,
+        socket_status="pending",
+        kind="tournament",
+        pairing_mode=source.pairing_mode,
+        seating_mode=source.seating_mode,
+    )
+    session.add(event)
+    session.flush()
+    return event
+
+
+def preview_split_target_sync(source_event_id: str) -> tuple[str, int] | None:
+    """(base name, next table index) for the split claim card, or None when the source is gone."""
+    with SessionLocal() as session:
+        source = session.get(PodDraftEvent, source_event_id)
+        if source is None:
+            return None
+        base = split_base_name(source.name)
+        return base, next_table_index(session, base)
+
+
 def draftmancer_url_for(session_id: str) -> str:
     """Compose the player-facing session URL from current settings at send time, so a host change
     reaches already-recorded events instead of fossilizing in the row."""

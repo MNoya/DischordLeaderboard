@@ -266,18 +266,19 @@ def render(
                 inline=True,
             )
             embed.add_field(name="​", value="​", inline=True)
-        waiting_trailing = "\n​" if len(waiting_yes) > len(waiting_maybe) else ""
-        embed.add_field(
-            name=f"⌛ Waiting on ({len(waiting_yes)})",
-            value=_quote_block(waiting_yes, trailing=waiting_trailing),
-            inline=True,
-        )
-        embed.add_field(
-            name=f"🤷 Maybe ({len(waiting_maybe)})",
-            value=_quote_block(waiting_maybe),
-            inline=True,
-        )
-        embed.add_field(name="​", value="​", inline=True)
+        if rsvps_yes or rsvps_maybe:
+            waiting_trailing = "\n​" if len(waiting_yes) > len(waiting_maybe) else ""
+            embed.add_field(
+                name=f"⌛ Waiting on ({len(waiting_yes)})",
+                value=_quote_block(waiting_yes, trailing=waiting_trailing),
+                inline=True,
+            )
+            embed.add_field(
+                name=f"🤷 Maybe ({len(waiting_maybe)})",
+                value=_quote_block(waiting_maybe),
+                inline=True,
+            )
+            embed.add_field(name="​", value="​", inline=True)
 
     if spectators:
         embed.add_field(
