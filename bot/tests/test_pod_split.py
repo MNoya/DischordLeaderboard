@@ -32,6 +32,7 @@ def _seed_source(session, *, name="MSH Pod Draft #8", set_code="MSH", pairing="s
 
 
 def test_split_base_name_strips_trailing_table():
+    assert split_base_name("MSH Pod Draft #8 - Jun 8 - Table 2") == "MSH Pod Draft #8 - Jun 8"
     assert split_base_name("MSH Pod Draft #8 Table 2") == "MSH Pod Draft #8"
     assert split_base_name("MSH Pod Draft #8") == "MSH Pod Draft #8"
     assert split_base_name("SOS Pod Draft #6 - Jun 3") == "SOS Pod Draft #6 - Jun 3"
@@ -48,7 +49,7 @@ def test_record_split_event_clones_source_into_table_two(session):
 
     table_two = record_split_event(session, source_event_id=source.id)
 
-    assert table_two.name == "MSH Pod Draft #8 Table 2"
+    assert table_two.name == "MSH Pod Draft #8 - Table 2"
     assert table_two.kind == "tournament"
     assert table_two.sesh_message_id is None
     assert table_two.set_code == source.set_code
@@ -67,7 +68,7 @@ def test_second_split_advances_to_table_three(session):
     record_split_event(session, source_event_id=source.id)
     table_three = record_split_event(session, source_event_id=source.id)
 
-    assert table_three.name == "MSH Pod Draft #8 Table 3"
+    assert table_three.name == "MSH Pod Draft #8 - Table 3"
     assert table_three.draftmancer_session == "LLU-MSH-D8-T3"
 
 
@@ -77,4 +78,4 @@ def test_split_from_a_table_bases_on_the_original_pod(session):
 
     table_three = record_split_event(session, source_event_id=table_two.id)
 
-    assert table_three.name == "MSH Pod Draft #8 Table 3"
+    assert table_three.name == "MSH Pod Draft #8 - Table 3"

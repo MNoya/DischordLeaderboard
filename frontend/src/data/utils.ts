@@ -266,8 +266,11 @@ export function podSeatName(p: { draftmancerName: string | null; displayName: st
 }
 
 export function cleanPodEventName(name: string, setCode: string): string {
+  const tableMatch = name.match(/\s+(?:[-–]\s+)?Table\s+(\d+)\s*$/i);
+  const tableSuffix = tableMatch ? ` - Table ${tableMatch[1]}` : "";
+  const withoutTable = tableMatch ? name.slice(0, tableMatch.index).trim() : name;
   const escaped = setCode.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  let cleaned = name.replace(/\s+[-–]\s+.+$/, "").trim();
+  let cleaned = withoutTable.replace(/\s+[-–]\s+.+$/, "").trim();
   // Cube events lead with an organizer name and the format label; keep only what follows "Cube"
   const afterCube = cleaned.replace(/^.*\bcube\b\s*/i, "").trim();
   if (afterCube && afterCube !== cleaned) {
@@ -277,7 +280,7 @@ export function cleanPodEventName(name: string, setCode: string): string {
     .replace(new RegExp(`\\b${escaped}\\b`, "gi"), "")
     .replace(/\s{2,}/g, " ")
     .trim();
-  return withoutCode || cleaned;
+  return (withoutCode || cleaned) + tableSuffix;
 }
 
 // Set codes are uppercase in the data; URLs are case-insensitive.
