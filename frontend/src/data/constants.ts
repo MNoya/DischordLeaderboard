@@ -32,11 +32,10 @@ export const TIER_LIST_UIDS: Record<string, string> = {
   FDN: "597d29e75d704ecf9877fc0e4b2c4116",
   DSK: "edec3f514f264753bf4a46a8a2fc7d82",
   BLB: "6057e51272c94a7cb304bd511b7c3bcf",
-  OTJ: "143d2e366f3d4fcc8f308fd053c6598a",
   MH3: "1775dc0b2fed451cbc5ad4441e2ab9c3",
   WOE: "87b40a05e0974eafa368be44e1d3e0c4",
   MOM: "a7daeb6a90b246e895c8634e34734090",
-  VOW: "c12298e565ac4e2dbc9d35ce1a597c8d",
+  VOW: "ac2ca9722737412ba0c4c4c4b2e28598",
   STX: "a2753035da8646038f55b7321de1dfc9",
   PIO: "22b77386e0354d84827e732c226ebc91",
   MKM: "a5c17edddaea4680a28126dae2a5178f",
@@ -49,6 +48,7 @@ export const TIER_LIST_UIDS: Record<string, string> = {
   SNC: "8513f3fa48f140c0a4792862f530dea9",
   NEO: "0b2b04f23e104ddba3501cd009385d60",
   MID: "ef928c7c17bb4f57b09a75be5daf7df9",
+  AFR: "1d901171375f4cff9834c751667c4254",
   IKO: "db593297907e41af93eedd994e26da28",
   ELD: "30588ade239246d0ab12393d00dc801a",
   KTK: "a6346d2850ef45918508db61d057388e",
@@ -96,6 +96,10 @@ export const TIER_LIST_GRADERS: Record<
   TDM: [
     { name: "Alex", uid: "b13d129e71b8467dab4de66f770c6b10" },
     { name: "Marc", uid: "bb8970942c3d4e42bd0fe91528befada" },
+  ],
+  OTJ: [
+    { name: "Alex", uid: "df75c79fba154f21b4a8bf751b8aa0a4" },
+    { name: "Marc", uid: "317fe1336cac48c8b3a2d731a844ccbe" },
   ],
 };
 
