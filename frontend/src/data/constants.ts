@@ -38,6 +38,20 @@ export const TIER_LIST_UIDS: Record<string, string> = {
   MOM: "a7daeb6a90b246e895c8634e34734090",
   VOW: "c12298e565ac4e2dbc9d35ce1a597c8d",
   STX: "a2753035da8646038f55b7321de1dfc9",
+  PIO: "22b77386e0354d84827e732c226ebc91",
+  MKM: "a5c17edddaea4680a28126dae2a5178f",
+  LCI: "b8dad7059ff24da28da636a1c50da7e8",
+  LTR: "aa685e825b12489a83f081dec8dc308d",
+  ONE: "959517c42af04b909ddb6456904b7001",
+  BRO: "b8d4ba9d1bad49828bfa6371f6b4f09b",
+  DMU: "e12ee0b1fadc4ab7b8de4c3730878a90",
+  HBG: "d24c2d28b6aa4146912b2ca92c503fe1",
+  SNC: "8513f3fa48f140c0a4792862f530dea9",
+  NEO: "0b2b04f23e104ddba3501cd009385d60",
+  MID: "ef928c7c17bb4f57b09a75be5daf7df9",
+  IKO: "db593297907e41af93eedd994e26da28",
+  ELD: "30588ade239246d0ab12393d00dc801a",
+  KTK: "a6346d2850ef45918508db61d057388e",
 };
 
 // Per-set host graders. With a consensus list their grades join onto it by card name and
