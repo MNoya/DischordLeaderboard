@@ -41,7 +41,7 @@ const P0P1_PICK_SENTENCE = "Pick a team of eight cards you think will perform be
 const p0p1Description = (): string => {
   const now = Date.now();
   if (now <= P0P1_VOTING_DEADLINE.getTime()) return P0P1_PICK_SENTENCE;
-  if (now < P0P1_SCORING_DATE.getTime()) return `${P0P1_PICK_SENTENCE} Preliminary standings now available!`;
+  if (now < P0P1_SCORING_DATE.getTime()) return `${P0P1_PICK_SENTENCE} Preliminary data now available!`;
   return `${P0P1_PICK_SENTENCE} Final standings now available!`;
 };
 
