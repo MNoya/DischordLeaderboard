@@ -33,10 +33,14 @@ def incremental_pairings(
     """Return the *new* pairings to add to target_round given the completed earlier-round matches.
 
     A player is ready for target_round once they've finished exactly target_round-1 matches and
-    aren't already paired into target_round. Ready players are grouped by record and paired
-    earliest-finisher-first, skipping rematches. Leftover players wait for a non-rematch partner to
-    become ready. When source_round_complete and only a rematch pairing remains, it's forced so the
-    bracket never stalls. `completed` must be in chronological (report) order.
+    aren't already paired into target_round. Ready players are grouped by record. A record group is
+    held while (a) a still-playing player could still land in it and (b) two players who already met
+    could both land in it — pairing early there risks stranding those two into a forced rematch once
+    everyone else is spoken for. Groups with no such risk (every round-2 group, the 2-0 Trophy Match)
+    pair the instant they can. A held group pairs once it's safe, via a rematch-free matching that only
+    falls back to a rematch when source_round_complete and no rematch-free matching exists — so the
+    bracket resolves without ever manufacturing an avoidable rematch. `completed` must be in
+    chronological (report) order.
     """
     expected_prior = target_round - 1
     ids = {p.id for p in players}
@@ -63,8 +67,26 @@ def incremental_pairings(
         groups.setdefault((wins[pid], losses[pid]), []).append(pid)
 
     played = {frozenset((m.player_a_id, m.player_b_id)) for m in completed}
+
+    def can_reach(pid: str, record: tuple[int, int]) -> bool:
+        need_w, need_l = record[0] - wins[pid], record[1] - losses[pid]
+        return need_w >= 0 and need_l >= 0 and need_w + need_l == expected_prior - (wins[pid] + losses[pid])
+
+    still_playing = [pid for pid in ids if wins[pid] + losses[pid] < expected_prior]
+
+    def group_may_still_grow(record: tuple[int, int]) -> bool:
+        return any(can_reach(pid, record) for pid in still_playing)
+
+    def rematch_possible(record: tuple[int, int]) -> bool:
+        return any(
+            can_reach(x, record) and can_reach(y, record)
+            for x, y in (tuple(pair) for pair in played)
+        )
+
     new_pairings: list[tuple[str, str]] = []
     for record in sorted(groups, key=lambda r: (-r[0], r[1])):
+        if group_may_still_grow(record) and rematch_possible(record):
+            continue
         new_pairings.extend(_pair_group(groups[record], played, force=source_round_complete))
     return new_pairings
 
@@ -132,23 +154,35 @@ def padding_slots(
 def _pair_group(
     pool: list[str], played: set[frozenset[str]], *, force: bool,
 ) -> list[tuple[str, str]]:
-    """Greedily pair an earliest-first ordered same-record pool, skipping rematches. Players with no
-    non-rematch partner wait; when `force`, leftover waiters are paired anyway so the bracket can't
-    stall on a final forced rematch."""
-    remaining = list(pool)
-    pairs: list[tuple[str, str]] = []
-    waiting: list[str] = []
-    while remaining:
-        a = remaining.pop(0)
-        partner_idx = next(
-            (i for i, b in enumerate(remaining) if frozenset((a, b)) not in played),
-            None,
-        )
-        if partner_idx is None:
-            waiting.append(a)
+    """Pair an earliest-first ordered same-record pool with a rematch-free matching. Backtracks so
+    that whenever any rematch-free matching of the pool exists it is found — greedy first-fit could
+    strand a later pair into a rematch that a different early choice would have avoided. An odd player
+    out waits for the next arrival. Only when `force` and no rematch-free matching exists does it fall
+    back to pairing the leftovers anyway, so the bracket can't stall on a genuinely unavoidable
+    rematch."""
+    matching = _rematch_free_matching(pool, played)
+    if matching is not None:
+        return matching
+    if not force:
+        return []
+    return [(pool[i], pool[i + 1]) for i in range(0, len(pool) - 1, 2)]
+
+
+def _rematch_free_matching(
+    pool: list[str], played: set[frozenset[str]],
+) -> list[tuple[str, str]] | None:
+    """A perfect matching of pool reusing no prior pairing, or None if none exists (including an odd
+    pool). Pairs the earliest-ready player first so pairing order stays stable."""
+    if not pool:
+        return []
+    if len(pool) % 2 != 0:
+        return None
+    a = pool[0]
+    for i in range(1, len(pool)):
+        b = pool[i]
+        if frozenset((a, b)) in played:
             continue
-        pairs.append((a, remaining.pop(partner_idx)))
-    if force:
-        for i in range(0, len(waiting) - 1, 2):
-            pairs.append((waiting[i], waiting[i + 1]))
-    return pairs
+        rest = _rematch_free_matching(pool[1:i] + pool[i + 1:], played)
+        if rest is not None:
+            return [(a, b)] + rest
+    return None

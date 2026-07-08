@@ -8,11 +8,11 @@ import {
   hasActiveFilters,
   inclusionRank,
   isCardFilteredOut,
+  tierColor,
   TIER_ORDER,
   TREND_COLOR,
-  TREND_GLYPH,
   TREND_LABEL,
-  trendSteps,
+  trendGlyphStack,
   useTierList,
   type Grader,
   type TierCard,
@@ -53,15 +53,6 @@ const columnOf = (color: string) => (color === "L" ? "C" : color);
 function columnPipClass(code: string): string {
   if (code === "M") return "ms ms-multicolor ms-duo ms-duo-color ms-grad";
   return `ms ms-cost ms-${COLUMN_MS[code]}`;
-}
-
-// Green (top) → red (bottom) accent down the grade column; SB/TBD stay neutral.
-const MAIN_TIERS = TIER_ORDER.filter((t) => t !== "SB" && t !== "TBD");
-function tierColor(tier: string): string {
-  const i = MAIN_TIERS.indexOf(tier);
-  if (i === -1) return "#4a5260";
-  const hue = Math.round(130 - (130 * i) / (MAIN_TIERS.length - 1));
-  return `hsl(${hue}, 62%, 47%)`;
 }
 
 // When a set has no consensus list, the grid is built from grader lists alone: the popup
@@ -161,7 +152,7 @@ function TierGridSkeleton({
                   <div className="w-[44px] shrink-0 flex items-center justify-center">
                     <span className="h-4 w-4 rounded-full bg-surface2 animate-pulse" />
                   </div>
-                  <div className="grid min-w-0 flex-1 grid-cols-1 min-[450px]:grid-cols-2 gap-1 p-1">
+                  <div className="grid min-w-0 flex-1 grid-cols-1 min-[450px]:grid-cols-2 gap-1 px-1 py-2">
                     {Array.from({ length: skeletonBarCount(row, col) + 1 }).map(
                       (_, i) => (
                         <SkeletonBar key={i} />
@@ -184,7 +175,7 @@ function TierGridSkeleton({
   } as const;
 
   return (
-    <div className="border-x border-b border-border bg-surface">
+    <div className="border-x border-b border-border bg-bg">
       <div
         className="grid"
         style={{ gridTemplateColumns: "48px repeat(7, minmax(0, 1fr))" }}
@@ -199,11 +190,15 @@ function TierGridSkeleton({
             <span className="h-4 w-4 rounded-full bg-surface2 animate-pulse" />
           </div>
         ))}
-
+      </div>
+      <div
+        className="grid"
+        style={{ gridTemplateColumns: "48px repeat(7, minmax(0, 1fr))", rowGap: 2 }}
+      >
         {SKELETON_TIERS.map((tier, row) => (
           <Fragment key={tier}>
             <div
-              className="border-b border-l-4 border-border bg-bg flex items-center justify-center font-display text-[20px] leading-none text-muted"
+              className="border-l-4 border-border bg-bg flex items-center justify-center font-display text-[20px] leading-none text-muted"
               style={{ borderLeftColor: tierColor(tier) }}
             >
               {tier}
@@ -211,7 +206,7 @@ function TierGridSkeleton({
             {COLUMN_CODES.map((code, col) => (
               <div
                 key={code}
-                className="border-b border-border p-1 flex flex-col gap-1 min-h-[26px]"
+                className="bg-surface p-1 flex flex-col gap-1 min-h-[26px]"
               >
                 {Array.from({ length: skeletonBarCount(row, col) }).map((_, i) => (
                   <SkeletonBar key={i} />
@@ -266,7 +261,7 @@ function DesktopGrid({
   );
 
   return (
-    <div className="border-x border-b border-border bg-surface">
+    <div className="border-x border-b border-border bg-bg">
       <div
         className="grid"
         style={{ gridTemplateColumns: "48px repeat(7, minmax(0, 1fr))" }}
@@ -296,11 +291,15 @@ function DesktopGrid({
             />
           </div>
         ))}
-
+      </div>
+      <div
+        className="grid"
+        style={{ gridTemplateColumns: "48px repeat(7, minmax(0, 1fr))", rowGap: 2 }}
+      >
         {tiers.map((tier) => (
           <Fragment key={tier}>
             <div
-              className="border-b border-l-4 border-border bg-bg flex items-center justify-center font-display text-[20px] leading-none text-text"
+              className="border-l-4 border-border bg-bg flex items-center justify-center font-display text-[20px] leading-none text-text"
               style={{ borderLeftColor: tierColor(tier) }}
             >
               {tier}
@@ -310,7 +309,7 @@ function DesktopGrid({
               return (
                 <div
                   key={code}
-                  className="border-b border-border p-1 flex flex-col gap-1 min-h-[26px]"
+                  className="bg-surface px-1 py-2 flex flex-col gap-1 min-h-[26px]"
                 >
                   {bucket
                     .filter((card) => !isCardFilteredOut(card, filters))
@@ -379,7 +378,7 @@ function MobileTiers({
                     aria-label={COLUMN_NAMES[code]}
                   />
                 </div>
-                <div className="grid min-w-0 flex-1 grid-cols-1 min-[450px]:grid-cols-2 gap-1 p-1">
+                <div className="grid min-w-0 flex-1 grid-cols-1 min-[450px]:grid-cols-2 gap-1 px-1 py-2">
                   {(byKey.get(`${code}|${tier}`) ?? [])
                     .filter((card) => !isCardFilteredOut(card, filters))
                     .map((card) => (
@@ -602,12 +601,6 @@ function CardBar({
         )}
     </div>
   );
-}
-
-function trendGlyphStack(card: TierCard): string[] {
-  if (!card.trend) return [];
-  const char = TREND_GLYPH[card.trend];
-  return Array.from({ length: Math.min(trendSteps(card), 3) }, () => char);
 }
 
 function GradesPanel({ card }: { card: TierCard }) {

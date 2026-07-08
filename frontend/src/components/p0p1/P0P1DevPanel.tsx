@@ -35,7 +35,7 @@ function DevPanelBody() {
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="rounded-full border border-green bg-black px-3 py-2 text-[12px] tracking-wide text-green shadow-lg"
+        className="mb-2 mr-1 rounded-full border border-green bg-black px-4 py-2.5 text-[12px] tracking-wide text-green shadow-lg"
       >
         DEV {preset === "live" ? "" : `· ${labelFor(preset)}`}
       </button>

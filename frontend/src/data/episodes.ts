@@ -61,7 +61,6 @@ export interface Episode {
   durationSeconds: number;
   image: string;
   category: EpisodeCategory;
-  summary: string;
   youtubeId?: string;
   videoUrl?: string;
   setCode?: string | null;
@@ -97,7 +96,6 @@ export async function fetchEpisodes(): Promise<Episode[]> {
       durationSeconds,
       image: tagHref(item, "itunes:image"),
       category: inferCategory(rawTitle),
-      summary: stripHtml(tagText(item, "itunes:summary") || text(item, "description")),
       isShort: false,
     };
   });
@@ -201,10 +199,6 @@ export function formatPublished(pubDate: string): string {
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-function stripHtml(value: string): string {
-  return value.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
-}
-
 function text(scope: Element | Document, tag: string): string {
   return scope.querySelector(tag)?.textContent?.trim() ?? "";
 }
@@ -223,7 +217,6 @@ export interface DbEpisodeRow {
   number: number | null;
   title: string;
   link: string;
-  summary: string | null;
   image: string | null;
   published_at: string;
   duration_seconds: number;
@@ -252,7 +245,6 @@ export function adaptDbEpisode(row: DbEpisodeRow): Episode {
     durationSeconds: row.duration_seconds,
     image: row.image ?? "",
     category: categoryFor(row.title, row.category),
-    summary: row.summary ?? "",
     youtubeId: row.youtube_id ?? undefined,
     videoUrl: row.youtube_id ? `https://www.youtube.com/watch?v=${row.youtube_id}` : undefined,
     setCode: row.set_code,

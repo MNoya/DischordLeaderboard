@@ -1,8 +1,8 @@
 """/pod-backfill — reconstruct a pod-draft event from its Discord thread.
 
 Pipeline: scrape the thread (seats, records, decks, DraftLog) → gaps-first confirmation wizard →
-idempotent writes in one transaction → post-process (DraftLog ingest, MagicProTools, replay
-backfill, optional announcement). Matches come from the DB or the match editor — replay-based
+idempotent writes in one transaction → post-process (DraftLog ingest, replay backfill, optional
+announcement). Matches come from the DB or the match editor — replay-based
 pairing inference proved unreliable and was removed.
 See spec/pod-backfill-handoff.md.
 """
@@ -40,7 +40,7 @@ from bot.services.pod_drafts import (
     search_event_names_sync,
     upsert_participant,
 )
-from bot.services.pod_log_ingest import ingest_draft_log_sync, log_user_names, submit_log_to_mpt
+from bot.services.pod_log_ingest import ingest_draft_log_sync, log_user_names
 from bot.services.pod_replays import persist_replays_sync
 from bot.services.pod_thread_backfill import (
     PLACEHOLDER_SCORE,
@@ -320,7 +320,7 @@ async def _scrape_thread(thread) -> tuple[list[ScrapedMessage], dict[str, discor
             author_id=str(message.author.id),
             author_display=message.author.display_name,
             author_is_bot=message.author.bot,
-            content=message.content or "",
+            content=message.clean_content or "",
             image_url=first_image_url(message),
             txt_attachments=tuple(txts),
             created_at=message.created_at,
@@ -769,9 +769,6 @@ async def run_backfill(bot: commands.Bot, ws: Workspace) -> discord.Embed:
         else:
             lines.append(f"DraftLog ingested: {ingest.seats} seats, {ingest.renamed} renamed, "
                          f"{ingest.stored_bytes:,} bytes")
-            mpt = await submit_log_to_mpt(ws.event_id, ws.draft_log)
-            if mpt is not None:
-                lines.append(f"MagicProTools: {mpt.submitted} submitted, {mpt.failed} failed")
 
     if ws.replays_skipped:
         lines.append(f"Replays: skipped — event is older than {REPLAY_HORIZON.days} days")

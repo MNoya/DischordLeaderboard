@@ -16,7 +16,7 @@ import { PostVotingStats } from "../components/p0p1/PostVotingStats";
 import { MidwayResults } from "../components/p0p1/MidwayResults";
 import { FinalResults } from "../components/p0p1/FinalResults";
 import { P0P1DevPanel } from "../components/p0p1/P0P1DevPanel";
-import { P0P1BallotScorecard, CHAMFER } from "../components/p0p1/P0P1BallotScorecard";
+import { P0P1BallotScorecard, MidwayBallotScorecard, CHAMFER } from "../components/p0p1/P0P1BallotScorecard";
 import { PickGrid } from "../components/p0p1/CommunityGrid";
 import { useIsMobile } from "../lib/use-is-mobile";
 import { useP0P1Ballot } from "../data/useP0P1Ballot";
@@ -31,6 +31,8 @@ export function P0P1Page() {
     cards,
     cardsByName,
     dataReady,
+    resultsDataReady,
+    midwayDataReady,
     user,
     authLoading,
     signIn,
@@ -48,7 +50,7 @@ export function P0P1Page() {
     activeSlotKey,
     activeSlot,
     selectAdvance,
-    resultsPhase,
+    phase,
     ratingsSnapshot,
     ballots,
   } = ballot;
@@ -74,9 +76,14 @@ export function P0P1Page() {
     </button>
   );
 
+  const showMidway = phase === "midway" || (phase === "finalizing" && midwayDataReady);
   const ballotScorecard =
     user && isPastDeadline && isComplete && pickStats && pickStats.length > 0 ? (
-      <P0P1BallotScorecard pickStats={pickStats} picksBySlot={picksBySlot} />
+      (phase === "midway" || phase === "finalizing") && resultsDataReady && ratingsSnapshot && cards ? (
+        <MidwayBallotScorecard ratingsSnapshot={ratingsSnapshot} cards={cards} picksBySlot={picksBySlot} />
+      ) : (
+        <P0P1BallotScorecard pickStats={pickStats} picksBySlot={picksBySlot} />
+      )
     ) : null;
   const didNotVoteCard = didNotVote ? <DidNotVoteCard /> : null;
   const heroCta =
@@ -97,7 +104,7 @@ export function P0P1Page() {
   return (
     <div className="bg-bg text-text min-h-screen flex flex-col animate-fadeIn">
       <AppHeader subtitle="P0 P1 Challenge" subtitleShort="P0 P1" />
-      <P0P1Hero cta={heroCta} belowIntro={belowIntro} isPastDeadline={isPastDeadline} />
+      <P0P1Hero cta={heroCta} belowIntro={belowIntro} phase={phase} dateRange={ratingsSnapshot?.dateRange} />
 
       <main className="flex-1 px-10 pb-5 pt-5">
         {!isPastDeadline &&
@@ -112,8 +119,22 @@ export function P0P1Page() {
             <RosterStripSkeleton />
           ))}
 
-        {isPastDeadline ? (
-          resultsPhase === "final" && ratingsSnapshot && cards && pickStats && ballots ? (
+        {showMidway ? (
+          resultsDataReady && ratingsSnapshot && cards && pickStats ? (
+            <MidwayResults
+              ratingsSnapshot={ratingsSnapshot}
+              pickStats={pickStats}
+              cards={cards}
+              cardsByName={cardsByName}
+              picksBySlot={picksBySlot}
+              user={user}
+              hasParticipated={hasParticipated}
+            />
+          ) : (
+            <CardGridSkeleton />
+          )
+        ) : phase === "final" ? (
+          resultsDataReady && ratingsSnapshot && cards && pickStats && ballots ? (
             <FinalResults
               ratingsSnapshot={ratingsSnapshot}
               pickStats={pickStats}
@@ -125,52 +146,43 @@ export function P0P1Page() {
               signIn={signIn}
               hasParticipated={hasParticipated}
             />
-          ) : resultsPhase === "midway" && ratingsSnapshot && cards && pickStats ? (
-            <MidwayResults
-              ratingsSnapshot={ratingsSnapshot}
+          ) : (
+            <CardGridSkeleton />
+          )
+        ) : phase === "postVoting" || phase === "finalizing" ? (
+          pickStats && pickStats.length > 0 && (
+            <PostVotingStats
               pickStats={pickStats}
-              cards={cards}
               cardsByName={cardsByName}
               picksBySlot={picksBySlot}
-              user={user}
-              signIn={signIn}
-              hasParticipated={hasParticipated}
-            />
-          ) : (
-            pickStats && pickStats.length > 0 && (
-              <PostVotingStats
-                pickStats={pickStats}
-                cardsByName={cardsByName}
-                picksBySlot={picksBySlot}
-                yourPicks={
-                  isCompleteEntrant ? (
-                    <div>
-                      <div className="relative flex items-baseline justify-center gap-2 mb-2">
-                        <SectionLabel size={22} className="text-white">YOUR PICKS</SectionLabel>
-                      </div>
-                      <PickGrid
-                        cardsByName={cardsByName}
-                        picksBySlot={picksBySlot}
-                        entries={SLOTS.map((slot) => {
-                          const cardName = picksBySlot.get(slot.key);
-                          const slotStats = groupedStats?.get(slot.key) ?? [];
-                          const yourStat = cardName ? slotStats.find((s) => s.cardName === cardName) : undefined;
-                          const extremes = findExtremes(slotStats);
-                          const cls = yourStat ? classifyYourPick(yourStat, extremes.most, extremes.least) : undefined;
-                          return {
-                            slotKey: slot.key,
-                            label: slot.label,
-                            stats: yourStat ? [yourStat] : [],
-                            slotStats,
-                            badge: cls?.state === "rogue" ? cls.qualifier : undefined,
-                          };
-                        })}
-                      />
+              yourPicks={
+                isCompleteEntrant ? (
+                  <div>
+                    <div className="relative flex items-baseline justify-center gap-2 mb-2">
+                      <SectionLabel size={22} className="text-white">YOUR PICKS</SectionLabel>
                     </div>
-                  ) : null
-                }
-              />
-            )
+                    <PickGrid
+                      cardsByName={cardsByName}
+                      picksBySlot={picksBySlot}
+                      entries={SLOTS.map((slot) => {
+                        const cardName = picksBySlot.get(slot.key);
+                        const slotStats = groupedStats?.get(slot.key) ?? [];
+                        const yourStat = cardName ? slotStats.find((s) => s.cardName === cardName) : undefined;
+                        const extremes = findExtremes(slotStats);
+                        const cls = yourStat ? classifyYourPick(yourStat, extremes.most, extremes.least) : undefined;
+                        return {
+                          slotKey: slot.key,
+                          label: slot.label,
+                          stats: yourStat ? [yourStat] : [],
+                          slotStats,
+                          badge: cls?.state === "rogue" ? cls.qualifier : undefined,
+                        };
+                      })}
+                    />
+                  </div>
+                ) : null
+              }
+            />
           )
         ) : (
           <div className="mt-4">

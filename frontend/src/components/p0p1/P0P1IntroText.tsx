@@ -5,6 +5,7 @@ import {
   P0P1_SCORING_DATE,
   SLOTS,
 } from "../../data/p0p1Slots";
+import type { P0P1Phase } from "../../data/p0p1Results";
 
 const SEVENTEEN_LANDS_URL = "https://www.17lands.com/card_data";
 
@@ -22,24 +23,19 @@ const winRateLink = (
 );
 
 export function P0P1IntroText({
-  isPastDeadline,
+  phase,
+  dateRange,
   multiline = false,
 }: {
-  isPastDeadline?: boolean;
+  phase: P0P1Phase;
+  dateRange?: { start: string; end: string } | null;
   multiline?: boolean;
 }) {
   const cardCount = spellOut(SLOTS.length);
   const windowText = describeDuration(P0P1_SCORING_DATE.getTime() - P0P1_VOTING_DEADLINE.getTime());
+  const formattedRange = dateRange ? formatDateRange(dateRange.start, dateRange.end) : null;
 
-  const sentences: ReactNode[] = isPastDeadline
-    ? [
-        <>Participants have put in their predictions for {setName}.</>,
-        <>Check out the most popular picks below, then come back once they're ranked by {winRateLink}, {windowText} after release.</>,
-      ]
-    : [
-        <>Put together a team of {cardCount} cards from {setName}.</>,
-        <>{capitalize(windowText)} after release, teams are ranked by their total {winRateLink}.</>,
-      ];
+  const sentences: ReactNode[] = buildSentences(phase, cardCount, windowText, formattedRange);
 
   return (
     <>
@@ -51,6 +47,43 @@ export function P0P1IntroText({
       ))}
     </>
   );
+}
+
+function buildSentences(
+  phase: P0P1Phase,
+  cardCount: string,
+  windowText: string,
+  formattedRange: string | null,
+): ReactNode[] {
+  switch (phase) {
+    case "voting":
+      return [
+        <>Put together a team of {cardCount} cards from {setName}.</>,
+        <>{capitalize(windowText)} after release, teams are ranked by their total {winRateLink}.</>,
+      ];
+    case "postVoting":
+      return [
+        <>Participants have put in their predictions for {setName}.</>,
+        <>Check out the most popular picks below, then come back once they're ranked by {winRateLink}, {windowText} after release.</>,
+      ];
+    case "midway":
+      return [
+        <>{setName} season is underway.</>,
+        <>Check out the <strong>preliminary data</strong> below {formattedRange && <> from {formattedRange}</>}.</>,
+        <>Final results coming soon.</>
+      ];
+    case "finalizing":
+      return [
+        <>{capitalize(windowText)} of {setName} drafts are in the books.</>,
+        <>Showing <strong>preliminary data</strong> below{formattedRange && <> from {formattedRange}</>}.</>,
+        <>Final standings coming shortly.</>,
+      ];
+    case "final":
+      return [
+        <>After {windowText} of {setName}, the dust has settled.</>,
+        <>Check out the final standings, based on 17Lands data{formattedRange && <> from {formattedRange}</>}.</>,
+      ];
+  }
 }
 
 const NUMBER_WORDS = [
@@ -73,4 +106,11 @@ function describeDuration(ms: number): string {
     return `${spellOut(weeks)} ${weeks === 1 ? "week" : "weeks"}`;
   }
   return `${spellOut(days)} ${days === 1 ? "day" : "days"}`;
+}
+
+function formatDateRange(start: string, end: string): string {
+  const s = new Date(start + "T00:00:00");
+  const e = new Date(end + "T00:00:00");
+  const fmt = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return `${fmt(s)} – ${fmt(e)}`;
 }

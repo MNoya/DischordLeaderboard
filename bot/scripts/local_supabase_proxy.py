@@ -16,6 +16,7 @@ from sqlalchemy import create_engine, text
 log = logging.getLogger(__name__)
 
 _ALLOWED_VIEWS = {
+    "public_colors_summary",
     "public_cube_seasons",
     "public_cube_season_breakdown",
     "public_cube_season_events",
@@ -33,6 +34,7 @@ _ALLOWED_VIEWS = {
     "public_pod_draft_replays",
     "public_pod_scoring",
     "public_recent_trophies",
+    "public_self_reported_events",
     "public_sets",
 }
 

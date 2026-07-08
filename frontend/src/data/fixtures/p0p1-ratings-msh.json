@@ -3,1678 +3,1678 @@
   "phase": "midway",
   "dateRange": {
     "start": "2026-06-23",
-    "end": "2026-06-27"
+    "end": "2026-07-07"
   },
   "cards": [
     {
       "card_name": "Agent 13, Sharon Carter",
-      "gihwr": 0.60408,
-      "gih": 5109
+      "gihwr": 0.5939,
+      "gih": 16318
     },
     {
       "card_name": "Agent Maria Hill",
-      "gihwr": 0.60826,
-      "gih": 4513
+      "gihwr": 0.60128,
+      "gih": 14015
     },
     {
       "card_name": "Agent of Atlas",
-      "gihwr": 0.56717,
-      "gih": 6750
+      "gihwr": 0.56478,
+      "gih": 21073
     },
     {
       "card_name": "Agent Phil Coulson",
-      "gihwr": 0.6642,
-      "gih": 2091
+      "gihwr": 0.64274,
+      "gih": 6323
     },
     {
       "card_name": "Agents of S.H.I.E.L.D.",
-      "gihwr": 0.56671,
-      "gih": 4903
+      "gihwr": 0.56195,
+      "gih": 17698
     },
     {
       "card_name": "Avengers Assemble!",
-      "gihwr": 0.64206,
-      "gih": 932
+      "gihwr": 0.65137,
+      "gih": 3030
     },
     {
       "card_name": "Borough Backup",
-      "gihwr": 0.59517,
-      "gih": 10501
+      "gihwr": 0.58798,
+      "gih": 35841
     },
     {
       "card_name": "Brave Brawler",
-      "gihwr": 0.59465,
-      "gih": 9961
+      "gihwr": 0.58736,
+      "gih": 34379
     },
     {
       "card_name": "Captain America, Super-Soldier",
-      "gihwr": 0.60421,
-      "gih": 888
+      "gihwr": 0.6166,
+      "gih": 2885
     },
     {
       "card_name": "Captain America, Wings of Freedom",
-      "gihwr": 0.6265,
-      "gih": 1999
+      "gihwr": 0.62588,
+      "gih": 6266
     },
     {
       "card_name": "Captain Marvel, Earth's Protector",
-      "gihwr": 0.71681,
-      "gih": 1122
+      "gihwr": 0.69257,
+      "gih": 3394
     },
     {
       "card_name": "Captain Mar-Vell, Space-Born",
-      "gihwr": 0.55957,
-      "gih": 2490
+      "gihwr": 0.54526,
+      "gih": 6888
     },
     {
       "card_name": "Colleen Wing, Street Samurai",
-      "gihwr": 0.55323,
-      "gih": 2500
+      "gihwr": 0.55736,
+      "gih": 6841
     },
     {
       "card_name": "Crowd of True Believers",
-      "gihwr": 0.56143,
-      "gih": 2198
+      "gihwr": 0.56737,
+      "gih": 9609
     },
     {
       "card_name": "Helicarrier Strike",
-      "gihwr": 0.58443,
-      "gih": 9593
+      "gihwr": 0.57748,
+      "gih": 31013
     },
     {
       "card_name": "Hero in Training",
-      "gihwr": 0.62502,
-      "gih": 14877
+      "gihwr": 0.61795,
+      "gih": 48715
     },
     {
       "card_name": "Invisible Woman, Sue Storm",
-      "gihwr": 0.45966,
-      "gih": 1039
+      "gihwr": 0.466,
+      "gih": 2471
     },
     {
       "card_name": "Jennifer Walters",
-      "gihwr": 0.64938,
-      "gih": 953
+      "gihwr": 0.65469,
+      "gih": 3076
     },
     {
       "card_name": "Kree Commandos",
-      "gihwr": 0.52732,
-      "gih": 1893
+      "gihwr": 0.51687,
+      "gih": 4973
     },
     {
       "card_name": "Luke Cage, Power Man",
-      "gihwr": 0.53396,
-      "gih": 1450
+      "gihwr": 0.51739,
+      "gih": 3403
     },
     {
       "card_name": "The Mind Stone",
-      "gihwr": 0.56972,
-      "gih": 721
+      "gihwr": 0.56595,
+      "gih": 2180
     },
     {
       "card_name": "Mockingbird, Ace Agent",
-      "gihwr": 0.50683,
-      "gih": 1390
+      "gihwr": 0.50783,
+      "gih": 3383
     },
     {
       "card_name": "Monica Rambeau",
-      "gihwr": 0.64663,
-      "gih": 1008
+      "gihwr": 0.63502,
+      "gih": 2992
     },
     {
       "card_name": "Murdock's Crusade",
-      "gihwr": 0.61327,
-      "gih": 9777
+      "gihwr": 0.60695,
+      "gih": 35576
     },
     {
       "card_name": "Nick Fury, Agent of S.H.I.E.L.D.",
-      "gihwr": 0.58561,
-      "gih": 1033
+      "gihwr": 0.58144,
+      "gih": 3420
     },
     {
       "card_name": "Night Nurse, Healer of Heroes",
-      "gihwr": 0.59299,
-      "gih": 5029
+      "gihwr": 0.58725,
+      "gih": 15226
     },
     {
       "card_name": "Okoye, Dora Milaje Leader",
-      "gihwr": 0.59909,
-      "gih": 4809
+      "gihwr": 0.58991,
+      "gih": 14304
     },
     {
       "card_name": "Origin of the Avengers",
-      "gihwr": 0.58216,
-      "gih": 1660
+      "gihwr": 0.58335,
+      "gih": 5001
     },
     {
       "card_name": "Panther Pounce",
-      "gihwr": 0.5446,
-      "gih": 3313
+      "gihwr": 0.54335,
+      "gih": 8408
     },
     {
       "card_name": "Patriot, Shield Wielder",
-      "gihwr": 0.59329,
-      "gih": 4832
+      "gihwr": 0.58231,
+      "gih": 14291
     },
     {
       "card_name": "Political Triumph",
-      "gihwr": 0.6119,
-      "gih": 3085
+      "gihwr": 0.60622,
+      "gih": 12731
     },
     {
       "card_name": "Quake, Agent of S.H.I.E.L.D.",
-      "gihwr": 0.56908,
-      "gih": 2870
+      "gihwr": 0.55921,
+      "gih": 8113
     },
     {
       "card_name": "Raft Security Officer",
-      "gihwr": 0.59772,
-      "gih": 9645
+      "gihwr": 0.58314,
+      "gih": 36071
     },
     {
       "card_name": "Red Guardian, Super-Soldier",
-      "gihwr": 0.59364,
-      "gih": 4142
+      "gihwr": 0.59803,
+      "gih": 13807
     },
     {
       "card_name": "The Sentry, Golden Guardian",
-      "gihwr": 0.54946,
-      "gih": 1530
+      "gihwr": 0.53556,
+      "gih": 3858
     },
     {
       "card_name": "S.H.I.E.L.D. Spy Kit",
-      "gihwr": 0.60038,
-      "gih": 5040
+      "gihwr": 0.5883,
+      "gih": 26002
     },
     {
       "card_name": "Super Villain Lockup",
-      "gihwr": 0.57813,
-      "gih": 3775
+      "gihwr": 0.57132,
+      "gih": 11359
     },
     {
       "card_name": "Super-Soldier Serum",
-      "gihwr": 0.55717,
-      "gih": 827
+      "gihwr": 0.54191,
+      "gih": 2287
     },
     {
       "card_name": "Take Up the Shield",
-      "gihwr": 0.59747,
-      "gih": 9817
+      "gihwr": 0.59477,
+      "gih": 32344
     },
     {
       "card_name": "Wakandan Drone Flock",
-      "gihwr": 0.58848,
-      "gih": 4944
+      "gihwr": 0.58013,
+      "gih": 22886
     },
     {
       "card_name": "Web Up",
-      "gihwr": 0.6113,
-      "gih": 12712
+      "gihwr": 0.60395,
+      "gih": 39931
     },
     {
       "card_name": "White Widow, Free Agent",
-      "gihwr": 0.57262,
-      "gih": 4186
+      "gihwr": 0.56372,
+      "gih": 11377
     },
     {
       "card_name": "Aerial Doombot",
-      "gihwr": 0.5731,
-      "gih": 7040
+      "gihwr": 0.57791,
+      "gih": 25214
     },
     {
       "card_name": "A.I.M. Scientists",
-      "gihwr": 0.58171,
-      "gih": 8216
+      "gihwr": 0.57264,
+      "gih": 26228
     },
     {
       "card_name": "Atlantean Cavalry",
-      "gihwr": 0.53703,
-      "gih": 3171
+      "gihwr": 0.53087,
+      "gih": 8416
     },
     {
       "card_name": "Atlantis Attacks",
-      "gihwr": 0.58,
-      "gih": 10417
+      "gihwr": 0.57211,
+      "gih": 29604
     },
     {
       "card_name": "Attuma, Atlantean Warlord",
-      "gihwr": 0.56026,
-      "gih": 2222
+      "gihwr": 0.5512,
+      "gih": 6597
     },
     {
       "card_name": "Bold Biochemist",
-      "gihwr": 0.5882,
-      "gih": 8897
+      "gihwr": 0.58112,
+      "gih": 32421
     },
     {
       "card_name": "Bruce Banner",
-      "gihwr": 0.62878,
-      "gih": 844
+      "gihwr": 0.61179,
+      "gih": 2793
     },
     {
       "card_name": "Depower",
-      "gihwr": 0.57349,
-      "gih": 6659
+      "gihwr": 0.56652,
+      "gih": 17199
     },
     {
       "card_name": "Echo, Perceptive Prodigy",
-      "gihwr": 0.55644,
-      "gih": 2660
+      "gihwr": 0.53668,
+      "gih": 7709
     },
     {
       "card_name": "Falcon, Winged Wonder",
-      "gihwr": 0.61076,
-      "gih": 5291
+      "gihwr": 0.60582,
+      "gih": 16860
     },
     {
       "card_name": "Falcon's Wing Harness",
-      "gihwr": 0.58656,
-      "gih": 3369
+      "gihwr": 0.57883,
+      "gih": 10457
     },
     {
       "card_name": "Frozen in Ice",
-      "gihwr": 0.5917,
-      "gih": 12325
+      "gihwr": 0.57971,
+      "gih": 36371
     },
     {
       "card_name": "Futurist Forge",
-      "gihwr": 0.58747,
-      "gih": 8181
+      "gihwr": 0.58392,
+      "gih": 26057
     },
     {
       "card_name": "Giant-Sized Flying Ant",
-      "gihwr": 0.58014,
-      "gih": 3384
+      "gihwr": 0.58344,
+      "gih": 18559
     },
     {
       "card_name": "Hydraulic Helper",
-      "gihwr": 0.55894,
-      "gih": 3802
+      "gihwr": 0.55124,
+      "gih": 10857
     },
     {
       "card_name": "I Am Iron Man",
-      "gihwr": 0.56692,
-      "gih": 4941
+      "gihwr": 0.56093,
+      "gih": 12688
     },
     {
       "card_name": "Iron Lad, Diverging Destiny",
-      "gihwr": 0.55163,
-      "gih": 2798
+      "gihwr": 0.54986,
+      "gih": 7968
     },
     {
       "card_name": "Ironheart, Clever Champion",
-      "gihwr": 0.53516,
-      "gih": 1014
+      "gihwr": 0.52427,
+      "gih": 2729
     },
     {
       "card_name": "Justice, Vance Astrovik",
-      "gihwr": 0.65028,
-      "gih": 6673
+      "gihwr": 0.63863,
+      "gih": 20257
     },
     {
       "card_name": "Kang the Conqueror",
-      "gihwr": 0.60284,
-      "gih": 989
+      "gihwr": 0.61514,
+      "gih": 3044
     },
     {
       "card_name": "Kid Loki",
-      "gihwr": 0.54328,
-      "gih": 2623
+      "gihwr": 0.54499,
+      "gih": 6731
     },
     {
       "card_name": "Leader, Super-Genius",
-      "gihwr": 0.68091,
-      "gih": 2580
+      "gihwr": 0.68115,
+      "gih": 7734
     },
     {
       "card_name": "Loki, God of Mischief",
-      "gihwr": 0.58043,
-      "gih": 1812
+      "gihwr": 0.5873,
+      "gih": 5532
     },
     {
       "card_name": "Mister Fantastic, Reed Richards",
-      "gihwr": 0.53648,
-      "gih": 1722
+      "gihwr": 0.53046,
+      "gih": 4433
     },
     {
       "card_name": "Ms. Marvel, Kamala Khan",
-      "gihwr": 0.5703,
-      "gih": 1011
+      "gihwr": 0.55528,
+      "gih": 2761
     },
     {
       "card_name": "Multiversal Incursion",
-      "gihwr": 0.52032,
-      "gih": 629
-    },
-    {
-      "card_name": "Namor the Sub-Mariner",
-      "gihwr": 0.54866,
-      "gih": 662
-    },
-    {
-      "card_name": "Pym Particles",
-      "gihwr": 0.52327,
-      "gih": 1477
-    },
-    {
-      "card_name": "Rewrite History",
-      "gihwr": 0.49625,
-      "gih": 1086
-    },
-    {
-      "card_name": "Secret Invasion",
-      "gihwr": 0.59825,
-      "gih": 2017
-    },
-    {
-      "card_name": "S.H.I.E.L.D. Deployment Drone",
-      "gihwr": 0.60837,
-      "gih": 15547
-    },
-    {
-      "card_name": "S.H.I.E.L.D. Flying Car",
-      "gihwr": 0.59037,
-      "gih": 2227
-    },
-    {
-      "card_name": "Shuri, Wakandan Inventor",
-      "gihwr": 0.56164,
-      "gih": 2489
-    },
-    {
-      "card_name": "Stature, Size Shifter",
-      "gihwr": 0.60868,
-      "gih": 4038
-    },
-    {
-      "card_name": "Super Intelligence",
-      "gihwr": 0.53673,
-      "gih": 1413
-    },
-    {
-      "card_name": "Super Suit",
-      "gihwr": 0.54894,
-      "gih": 2488
-    },
-    {
-      "card_name": "Thirst for Knowledge",
-      "gihwr": 0.50939,
-      "gih": 1454
-    },
-    {
-      "card_name": "Tony Stark",
-      "gihwr": 0.61119,
-      "gih": 927
-    },
-    {
-      "card_name": "Trickster's Stratagem",
-      "gihwr": 0.61963,
-      "gih": 14898
-    },
-    {
-      "card_name": "We Say Thee Nay!",
-      "gihwr": 0.60509,
-      "gih": 13310
-    },
-    {
-      "card_name": "Wiccan, Rising Magician",
-      "gihwr": 0.5745,
-      "gih": 3112
-    },
-    {
-      "card_name": "The Wondrous Wasp",
-      "gihwr": 0.65109,
-      "gih": 2208
-    },
-    {
-      "card_name": "Agents of HYDRA",
-      "gihwr": 0.52265,
-      "gih": 5274
-    },
-    {
-      "card_name": "Arnim Zola, Bio-Fanatic",
-      "gihwr": 0.50541,
-      "gih": 2481
-    },
-    {
-      "card_name": "Baron Helmut Zemo",
-      "gihwr": 0.50621,
-      "gih": 651
-    },
-    {
-      "card_name": "Baron Strucker, HYDRA Overlord",
-      "gihwr": 0.55751,
-      "gih": 3260
-    },
-    {
-      "card_name": "Black Widow, Super Spy",
-      "gihwr": 0.59468,
-      "gih": 790
-    },
-    {
-      "card_name": "Construct a Cosmic Cube",
-      "gihwr": 0.49789,
-      "gih": 1021
-    },
-    {
-      "card_name": "Crossbones, Malicious Mercenary",
-      "gihwr": 0.5282,
-      "gih": 2588
-    },
-    {
-      "card_name": "Cruel Alliance",
-      "gihwr": 0.58952,
-      "gih": 11458
-    },
-    {
-      "card_name": "Dark Deed",
-      "gihwr": 0.59551,
-      "gih": 4593
-    },
-    {
-      "card_name": "Decoy Ploy",
-      "gihwr": 0.4937,
-      "gih": 2655
-    },
-    {
-      "card_name": "Doctor Doom",
-      "gihwr": 0.66024,
-      "gih": 961
-    },
-    {
-      "card_name": "Doom Reigns Supreme",
-      "gihwr": 0.53818,
-      "gih": 1099
-    },
-    {
-      "card_name": "Elektra, Daughter of the Hand",
-      "gihwr": 0.62533,
-      "gih": 1818
-    },
-    {
-      "card_name": "Grim Reaper, Lethal Legionnaire",
-      "gihwr": 0.51885,
-      "gih": 1633
-    },
-    {
-      "card_name": "Hour of Defeat",
-      "gihwr": 0.57197,
-      "gih": 10061
-    },
-    {
-      "card_name": "HYDRA Infiltration",
-      "gihwr": 0.56054,
-      "gih": 2261
-    },
-    {
-      "card_name": "HYDRA Troopers",
-      "gihwr": 0.52533,
-      "gih": 5929
-    },
-    {
-      "card_name": "Kingpin's Enforcers",
-      "gihwr": 0.53394,
-      "gih": 4014
-    },
-    {
-      "card_name": "Klaw, Sonic Subjugator",
-      "gihwr": 0.57484,
-      "gih": 4328
-    },
-    {
-      "card_name": "Madame Masque",
-      "gihwr": 0.582,
-      "gih": 4851
-    },
-    {
-      "card_name": "The Masters of Evil",
-      "gihwr": 0.53167,
-      "gih": 3056
-    },
-    {
-      "card_name": "M.O.D.O.K.",
-      "gihwr": 0.64291,
-      "gih": 924
-    },
-    {
-      "card_name": "Moonstone, Harsh Mistress",
-      "gihwr": 0.52659,
-      "gih": 2227
-    },
-    {
-      "card_name": "Ninja of the Hand",
-      "gihwr": 0.54817,
-      "gih": 4524
-    },
-    {
-      "card_name": "Project Deathlok Soldier",
-      "gihwr": 0.5277,
-      "gih": 2520
-    },
-    {
-      "card_name": "Red Room Recruit",
-      "gihwr": 0.55467,
-      "gih": 9480
-    },
-    {
-      "card_name": "Robot Domination",
-      "gihwr": 0.48878,
-      "gih": 2243
-    },
-    {
-      "card_name": "Ronin, Shadow Stalker",
-      "gihwr": 0.55129,
-      "gih": 1029
-    },
-    {
-      "card_name": "Roxxon Brutes",
-      "gihwr": 0.54489,
-      "gih": 6503
-    },
-    {
-      "card_name": "Stolen Stark Tech",
-      "gihwr": 0.54646,
-      "gih": 3166
-    },
-    {
-      "card_name": "Super-Skrull",
-      "gihwr": 0.60074,
-      "gih": 1861
-    },
-    {
-      "card_name": "Swordsman, Sharp Scoundrel",
-      "gihwr": 0.54368,
-      "gih": 1746
-    },
-    {
-      "card_name": "Thunderbolts Conspiracy",
-      "gihwr": 0.515,
-      "gih": 909
-    },
-    {
-      "card_name": "Too Evil to Stay Dead",
-      "gihwr": 0.50548,
-      "gih": 1372
-    },
-    {
-      "card_name": "Unliving Legionnaire",
-      "gihwr": 0.52719,
-      "gih": 2984
-    },
-    {
-      "card_name": "Visions of Villainy",
-      "gihwr": 0.52745,
-      "gih": 6409
-    },
-    {
-      "card_name": "Whiplash, Vengeful Engineer",
-      "gihwr": 0.5539,
-      "gih": 1572
-    },
-    {
-      "card_name": "Widow's Bite",
-      "gihwr": 0.55891,
-      "gih": 8739
-    },
-    {
-      "card_name": "Yellowjacket, Heartless Marauder",
-      "gihwr": 0.56439,
-      "gih": 3284
-    },
-    {
-      "card_name": "Avengers Disassembled",
-      "gihwr": 0.55438,
-      "gih": 706
-    },
-    {
-      "card_name": "Blazing Crescendo",
-      "gihwr": 0.51047,
-      "gih": 2091
-    },
-    {
-      "card_name": "Crimson Operative",
-      "gihwr": 0.54863,
-      "gih": 5457
-    },
-    {
-      "card_name": "Death to Our Enemies",
-      "gihwr": 0.47002,
-      "gih": 936
-    },
-    {
-      "card_name": "Evil's Thrall",
-      "gihwr": 0.51282,
-      "gih": 546
-    },
-    {
-      "card_name": "Fin Fang Foom",
-      "gihwr": 0.54118,
-      "gih": 1050
-    },
-    {
-      "card_name": "Hawkeye, Master Marksman",
-      "gihwr": 0.58715,
-      "gih": 1345
-    },
-    {
-      "card_name": "Hawkeye, Young Avenger",
-      "gihwr": 0.53655,
-      "gih": 1641
-    },
-    {
-      "card_name": "Hawkeye's Bow",
-      "gihwr": 0.54435,
-      "gih": 1555
-    },
-    {
-      "card_name": "Hex Magic",
-      "gihwr": 0.45424,
-      "gih": 351
-    },
-    {
-      "card_name": "Hire a Crew",
-      "gihwr": 0.4687,
-      "gih": 702
-    },
-    {
-      "card_name": "HULK SMASH!",
-      "gihwr": 0.55542,
-      "gih": 5420
-    },
-    {
-      "card_name": "Human Torch, Johnny Storm",
-      "gihwr": 0.53562,
-      "gih": 1602
-    },
-    {
-      "card_name": "HYDRA Assault Robot",
-      "gihwr": 0.52947,
-      "gih": 5172
-    },
-    {
-      "card_name": "Iron Fist, Living Weapon",
-      "gihwr": 0.49515,
-      "gih": 1013
-    },
-    {
-      "card_name": "Jessica Jones, Private Eye",
-      "gihwr": 0.58602,
-      "gih": 2924
-    },
-    {
-      "card_name": "K'un-Lun Warrior",
-      "gihwr": 0.52074,
-      "gih": 3070
-    },
-    {
-      "card_name": "Kree Sentinel",
-      "gihwr": 0.53567,
-      "gih": 5366
-    },
-    {
-      "card_name": "Lightning Strike",
-      "gihwr": 0.5579,
-      "gih": 7953
-    },
-    {
-      "card_name": "Loki Laufeyson",
-      "gihwr": 0.52122,
-      "gih": 2493
-    },
-    {
-      "card_name": "Machinesmith Automaton",
-      "gihwr": 0.51694,
-      "gih": 3370
-    },
-    {
-      "card_name": "Misty Knight, Hero for Hire",
-      "gihwr": 0.53591,
-      "gih": 2042
-    },
-    {
-      "card_name": "Mj\u00f6lnir, Hammer of Thor",
-      "gihwr": 0.61187,
-      "gih": 775
-    },
-    {
-      "card_name": "Photon Blast Barrage",
-      "gihwr": 0.56494,
-      "gih": 2929
-    },
-    {
-      "card_name": "Quicksilver, Brash Blur",
-      "gihwr": 0.50471,
-      "gih": 418
-    },
-    {
-      "card_name": "Red Hulk",
-      "gihwr": 0.53223,
-      "gih": 1786
-    },
-    {
-      "card_name": "Repulsor Blast",
-      "gihwr": 0.524,
-      "gih": 6284
-    },
-    {
-      "card_name": "The Scarlet Witch",
-      "gihwr": null,
-      "gih": 255
-    },
-    {
-      "card_name": "Speed, Young Avenger",
-      "gihwr": 0.53357,
-      "gih": 1116
-    },
-    {
-      "card_name": "Stark Industries Executive",
-      "gihwr": 0.52462,
-      "gih": 3553
-    },
-    {
-      "card_name": "Super Speed",
-      "gihwr": 0.49047,
-      "gih": 573
-    },
-    {
-      "card_name": "Team Tactics",
-      "gihwr": 0.50029,
-      "gih": 1033
-    },
-    {
-      "card_name": "Thor, God of Thunder",
-      "gihwr": 0.6247,
-      "gih": 763
-    },
-    {
-      "card_name": "Truck Toss",
-      "gihwr": 0.53398,
-      "gih": 2645
-    },
-    {
-      "card_name": "Vision of Love",
-      "gihwr": 0.49449,
-      "gih": 1739
-    },
-    {
-      "card_name": "Volcanic Villain",
-      "gihwr": 0.47715,
-      "gih": 1101
-    },
-    {
-      "card_name": "Wonder Man, Hollywood Hero",
-      "gihwr": 0.51648,
-      "gih": 1225
-    },
-    {
-      "card_name": "Ant-Man's Army",
-      "gihwr": 0.56885,
-      "gih": 5825
-    },
-    {
-      "card_name": "Call Damage Control",
-      "gihwr": 0.50958,
-      "gih": 1298
-    },
-    {
-      "card_name": "Claim the Kingdom",
-      "gihwr": 0.50556,
-      "gih": 1524
-    },
-    {
-      "card_name": "Doc Samson, Super Psychiatrist",
-      "gihwr": 0.52956,
-      "gih": 1636
-    },
-    {
-      "card_name": "Earth's Mightiest Heroes",
-      "gihwr": 0.59484,
-      "gih": 614
-    },
-    {
-      "card_name": "Epic Fight",
-      "gihwr": 0.57161,
-      "gih": 1457
-    },
-    {
-      "card_name": "Giant Growth",
-      "gihwr": 0.54959,
-      "gih": 2205
-    },
-    {
-      "card_name": "Go Nuts!",
-      "gihwr": 0.58609,
-      "gih": 8597
-    },
-    {
-      "card_name": "Guerrilla Gorilla",
-      "gihwr": 0.5664,
-      "gih": 4423
-    },
-    {
-      "card_name": "Hellcat, Undying Vigilante",
-      "gihwr": 0.57234,
-      "gih": 2174
-    },
-    {
-      "card_name": "Hercules, Prince of Power",
-      "gihwr": 0.54756,
-      "gih": 2379
-    },
-    {
-      "card_name": "Heroic Feast",
-      "gihwr": 0.54688,
-      "gih": 554
-    },
-    {
-      "card_name": "Hulkling, Burgeoning Bruiser",
-      "gihwr": 0.53158,
-      "gih": 1755
-    },
-    {
-      "card_name": "Ka-Zar of the Savage Land",
-      "gihwr": 0.6095,
-      "gih": 4501
-    },
-    {
-      "card_name": "Knight of Wundagore",
-      "gihwr": 0.53568,
-      "gih": 4739
-    },
-    {
-      "card_name": "Mister Hyde, Monster Within",
-      "gihwr": 0.55015,
-      "gih": 2682
-    },
-    {
-      "card_name": "Mole Man, Moloid Master",
-      "gihwr": 0.56391,
-      "gih": 876
-    },
-    {
-      "card_name": "Pet Avengers",
-      "gihwr": 0.57373,
-      "gih": 5774
-    },
-    {
-      "card_name": "Powerful Broker",
-      "gihwr": 0.51917,
-      "gih": 1992
-    },
-    {
-      "card_name": "Punishing Punch",
-      "gihwr": 0.59904,
-      "gih": 4035
-    },
-    {
-      "card_name": "Rapid Rescue",
-      "gihwr": 0.57379,
-      "gih": 1683
-    },
-    {
-      "card_name": "Reptil, Dinomorpher",
-      "gihwr": 0.55028,
-      "gih": 1015
-    },
-    {
-      "card_name": "Restorative Technique",
-      "gihwr": 0.52638,
-      "gih": 2284
-    },
-    {
-      "card_name": "Rick Jones, Destined Sidekick",
-      "gihwr": 0.56303,
-      "gih": 591
-    },
-    {
-      "card_name": "Savage Land Dinosaur",
-      "gihwr": 0.54903,
-      "gih": 6117
-    },
-    {
-      "card_name": "Serpent Specialist",
-      "gihwr": 0.56037,
-      "gih": 5171
-    },
-    {
-      "card_name": "Shang-Chi, Master of Kung Fu",
-      "gihwr": 0.54442,
-      "gih": 515
-    },
-    {
-      "card_name": "She-Hulk, Jade Defender",
-      "gihwr": 0.60671,
-      "gih": 3555
-    },
-    {
-      "card_name": "Super Strength",
-      "gihwr": 0.51098,
-      "gih": 550
-    },
-    {
-      "card_name": "The Thing, Ben Grimm",
-      "gihwr": 0.54828,
-      "gih": 2054
-    },
-    {
-      "card_name": "Tigra, Feline Fury",
-      "gihwr": 0.54931,
-      "gih": 1526
-    },
-    {
-      "card_name": "Training Regimen",
-      "gihwr": 0.53058,
-      "gih": 1711
-    },
-    {
-      "card_name": "The Unbeatable Squirrel Girl",
-      "gihwr": 0.60765,
-      "gih": 1539
-    },
-    {
-      "card_name": "Undercover Skrull",
-      "gihwr": 0.59445,
-      "gih": 9220
-    },
-    {
-      "card_name": "Wakandan Royal Guard",
-      "gihwr": 0.55161,
-      "gih": 4267
-    },
-    {
-      "card_name": "White Tiger, Ava Ayala",
-      "gihwr": 0.57427,
-      "gih": 3745
-    },
-    {
-      "card_name": "World War Hulk",
-      "gihwr": 0.53333,
-      "gih": 922
-    },
-    {
-      "card_name": "Abomination, Terrifying Titan",
-      "gihwr": 0.56952,
-      "gih": 2910
-    },
-    {
-      "card_name": "Absorbing Man",
-      "gihwr": 0.61219,
-      "gih": 1292
-    },
-    {
-      "card_name": "Alien Invasion",
-      "gihwr": 0.51306,
-      "gih": 959
-    },
-    {
-      "card_name": "Ant-Man, Colony Commander",
-      "gihwr": 0.53043,
-      "gih": 1915
-    },
-    {
-      "card_name": "Ares, God of War",
-      "gihwr": 0.55681,
-      "gih": 1075
-    },
-    {
-      "card_name": "Armor Wars",
-      "gihwr": 0.48923,
-      "gih": 577
-    },
-    {
-      "card_name": "The Astonishing Ant-Man",
-      "gihwr": 0.58235,
-      "gih": 1106
-    },
-    {
-      "card_name": "Avengers: Under Siege",
-      "gihwr": 0.63854,
-      "gih": 1521
-    },
-    {
-      "card_name": "Beast, Erudite Aerialist",
-      "gihwr": 0.51594,
-      "gih": 1636
-    },
-    {
-      "card_name": "Black Panther, Vanguard",
-      "gihwr": 0.57652,
-      "gih": 3432
-    },
-    {
-      "card_name": "Black Widow, Double Agent",
-      "gihwr": 0.5596,
-      "gih": 2367
-    },
-    {
-      "card_name": "Bullseye, Death Dealer",
-      "gihwr": 0.53621,
-      "gih": 2924
-    },
-    {
-      "card_name": "Captain America, Living Legend",
-      "gihwr": 0.59368,
-      "gih": 4258
-    },
-    {
-      "card_name": "Cloak and Dagger, Entwined",
-      "gihwr": 0.62671,
-      "gih": 1457
-    },
-    {
-      "card_name": "The Coming of Galactus",
-      "gihwr": 0.63676,
-      "gih": 872
-    },
-    {
-      "card_name": "Daredevil, Man Without Fear",
-      "gihwr": 0.60072,
-      "gih": 1527
-    },
-    {
-      "card_name": "Ghost, Spectral Saboteur",
-      "gihwr": 0.53267,
-      "gih": 1544
-    },
-    {
-      "card_name": "Hulk, Gamma Goliath",
-      "gihwr": 0.54914,
-      "gih": 1889
-    },
-    {
-      "card_name": "Iron Man, Master of Machines",
-      "gihwr": 0.55813,
-      "gih": 2483
-    },
-    {
-      "card_name": "Kang, Temporal Tyrant",
-      "gihwr": 0.55308,
-      "gih": 3173
-    },
-    {
-      "card_name": "Killmonger, Scourge of Wakanda",
-      "gihwr": 0.61608,
-      "gih": 3808
-    },
-    {
-      "card_name": "King T'Challa",
-      "gihwr": 0.62931,
-      "gih": 1072
-    },
-    {
-      "card_name": "The Kingpin of Crime",
-      "gihwr": 0.56861,
-      "gih": 1221
-    },
-    {
-      "card_name": "Madame Hydra",
-      "gihwr": 0.48457,
-      "gih": 2235
-    },
-    {
-      "card_name": "The Mighty Thor, Jane Foster",
-      "gihwr": 0.63097,
-      "gih": 2061
-    },
-    {
-      "card_name": "Moon Girl and Devil Dinosaur",
-      "gihwr": 0.55102,
-      "gih": 1233
-    },
-    {
-      "card_name": "The Ruinous Wrecking Crew",
-      "gihwr": 0.60833,
-      "gih": 1440
-    },
-    {
-      "card_name": "Scientist Supreme of A.I.M.",
-      "gihwr": 0.52126,
-      "gih": 618
-    },
-    {
-      "card_name": "The Serpent Society",
-      "gihwr": 0.54924,
-      "gih": 746
-    },
-    {
-      "card_name": "Speedball, New Warrior",
-      "gihwr": 0.50971,
-      "gih": 1529
-    },
-    {
-      "card_name": "Spider-Man, To the Rescue",
-      "gihwr": 0.5644,
-      "gih": 3508
-    },
-    {
-      "card_name": "Spider-Woman, Secret Agent",
-      "gihwr": 0.59991,
-      "gih": 5366
-    },
-    {
-      "card_name": "Storm, Windrider",
-      "gihwr": 0.62572,
+      "gihwr": 0.51225,
       "gih": 1599
     },
     {
+      "card_name": "Namor the Sub-Mariner",
+      "gihwr": 0.56193,
+      "gih": 1847
+    },
+    {
+      "card_name": "Pym Particles",
+      "gihwr": 0.52308,
+      "gih": 3696
+    },
+    {
+      "card_name": "Rewrite History",
+      "gihwr": 0.48189,
+      "gih": 2126
+    },
+    {
+      "card_name": "Secret Invasion",
+      "gihwr": 0.59794,
+      "gih": 6050
+    },
+    {
+      "card_name": "S.H.I.E.L.D. Deployment Drone",
+      "gihwr": 0.60213,
+      "gih": 47103
+    },
+    {
+      "card_name": "S.H.I.E.L.D. Flying Car",
+      "gihwr": 0.59613,
+      "gih": 6645
+    },
+    {
+      "card_name": "Shuri, Wakandan Inventor",
+      "gihwr": 0.55224,
+      "gih": 6921
+    },
+    {
+      "card_name": "Stature, Size Shifter",
+      "gihwr": 0.59924,
+      "gih": 15250
+    },
+    {
+      "card_name": "Super Intelligence",
+      "gihwr": 0.52857,
+      "gih": 3958
+    },
+    {
+      "card_name": "Super Suit",
+      "gihwr": 0.55095,
+      "gih": 7471
+    },
+    {
+      "card_name": "Thirst for Knowledge",
+      "gihwr": 0.51489,
+      "gih": 3387
+    },
+    {
+      "card_name": "Tony Stark",
+      "gihwr": 0.60579,
+      "gih": 2566
+    },
+    {
+      "card_name": "Trickster's Stratagem",
+      "gihwr": 0.61208,
+      "gih": 47864
+    },
+    {
+      "card_name": "We Say Thee Nay!",
+      "gihwr": 0.59956,
+      "gih": 40443
+    },
+    {
+      "card_name": "Wiccan, Rising Magician",
+      "gihwr": 0.56064,
+      "gih": 9803
+    },
+    {
+      "card_name": "The Wondrous Wasp",
+      "gihwr": 0.6335,
+      "gih": 6906
+    },
+    {
+      "card_name": "Agents of HYDRA",
+      "gihwr": 0.52553,
+      "gih": 13066
+    },
+    {
+      "card_name": "Arnim Zola, Bio-Fanatic",
+      "gihwr": 0.50393,
+      "gih": 6023
+    },
+    {
+      "card_name": "Baron Helmut Zemo",
+      "gihwr": 0.51111,
+      "gih": 1569
+    },
+    {
+      "card_name": "Baron Strucker, HYDRA Overlord",
+      "gihwr": 0.56579,
+      "gih": 8971
+    },
+    {
+      "card_name": "Black Widow, Super Spy",
+      "gihwr": 0.58464,
+      "gih": 2223
+    },
+    {
+      "card_name": "Construct a Cosmic Cube",
+      "gihwr": 0.48482,
+      "gih": 2540
+    },
+    {
+      "card_name": "Crossbones, Malicious Mercenary",
+      "gihwr": 0.52978,
+      "gih": 6757
+    },
+    {
+      "card_name": "Cruel Alliance",
+      "gihwr": 0.59564,
+      "gih": 32063
+    },
+    {
+      "card_name": "Dark Deed",
+      "gihwr": 0.60048,
+      "gih": 12479
+    },
+    {
+      "card_name": "Decoy Ploy",
+      "gihwr": 0.51385,
+      "gih": 6695
+    },
+    {
+      "card_name": "Doctor Doom",
+      "gihwr": 0.65883,
+      "gih": 2893
+    },
+    {
+      "card_name": "Doom Reigns Supreme",
+      "gihwr": 0.53426,
+      "gih": 2722
+    },
+    {
+      "card_name": "Elektra, Daughter of the Hand",
+      "gihwr": 0.63592,
+      "gih": 5321
+    },
+    {
+      "card_name": "Grim Reaper, Lethal Legionnaire",
+      "gihwr": 0.52032,
+      "gih": 4017
+    },
+    {
+      "card_name": "Hour of Defeat",
+      "gihwr": 0.57065,
+      "gih": 26798
+    },
+    {
+      "card_name": "HYDRA Infiltration",
+      "gihwr": 0.56841,
+      "gih": 7850
+    },
+    {
+      "card_name": "HYDRA Troopers",
+      "gihwr": 0.53159,
+      "gih": 13729
+    },
+    {
+      "card_name": "Kingpin's Enforcers",
+      "gihwr": 0.53991,
+      "gih": 10375
+    },
+    {
+      "card_name": "Klaw, Sonic Subjugator",
+      "gihwr": 0.57007,
+      "gih": 11658
+    },
+    {
+      "card_name": "Madame Masque",
+      "gihwr": 0.58834,
+      "gih": 12733
+    },
+    {
+      "card_name": "The Masters of Evil",
+      "gihwr": 0.53721,
+      "gih": 7710
+    },
+    {
+      "card_name": "M.O.D.O.K.",
+      "gihwr": 0.63534,
+      "gih": 2745
+    },
+    {
+      "card_name": "Moonstone, Harsh Mistress",
+      "gihwr": 0.51873,
+      "gih": 5103
+    },
+    {
+      "card_name": "Ninja of the Hand",
+      "gihwr": 0.54981,
+      "gih": 12993
+    },
+    {
+      "card_name": "Project Deathlok Soldier",
+      "gihwr": 0.52356,
+      "gih": 6170
+    },
+    {
+      "card_name": "Red Room Recruit",
+      "gihwr": 0.55291,
+      "gih": 24449
+    },
+    {
+      "card_name": "Robot Domination",
+      "gihwr": 0.48221,
+      "gih": 4503
+    },
+    {
+      "card_name": "Ronin, Shadow Stalker",
+      "gihwr": 0.5575,
+      "gih": 2983
+    },
+    {
+      "card_name": "Roxxon Brutes",
+      "gihwr": 0.54183,
+      "gih": 17792
+    },
+    {
+      "card_name": "Stolen Stark Tech",
+      "gihwr": 0.55211,
+      "gih": 9762
+    },
+    {
+      "card_name": "Super-Skrull",
+      "gihwr": 0.59911,
+      "gih": 5262
+    },
+    {
+      "card_name": "Swordsman, Sharp Scoundrel",
+      "gihwr": 0.5558,
+      "gih": 4873
+    },
+    {
+      "card_name": "Thunderbolts Conspiracy",
+      "gihwr": 0.49851,
+      "gih": 2085
+    },
+    {
+      "card_name": "Too Evil to Stay Dead",
+      "gihwr": 0.51696,
+      "gih": 3402
+    },
+    {
+      "card_name": "Unliving Legionnaire",
+      "gihwr": 0.53636,
+      "gih": 7600
+    },
+    {
+      "card_name": "Visions of Villainy",
+      "gihwr": 0.53434,
+      "gih": 15637
+    },
+    {
+      "card_name": "Whiplash, Vengeful Engineer",
+      "gihwr": 0.56459,
+      "gih": 4494
+    },
+    {
+      "card_name": "Widow's Bite",
+      "gihwr": 0.56338,
+      "gih": 22860
+    },
+    {
+      "card_name": "Yellowjacket, Heartless Marauder",
+      "gihwr": 0.55722,
+      "gih": 8591
+    },
+    {
+      "card_name": "Avengers Disassembled",
+      "gihwr": 0.54361,
+      "gih": 2023
+    },
+    {
+      "card_name": "Blazing Crescendo",
+      "gihwr": 0.52317,
+      "gih": 4775
+    },
+    {
+      "card_name": "Crimson Operative",
+      "gihwr": 0.54351,
+      "gih": 14502
+    },
+    {
+      "card_name": "Death to Our Enemies",
+      "gihwr": 0.47289,
+      "gih": 2089
+    },
+    {
+      "card_name": "Evil's Thrall",
+      "gihwr": 0.51159,
+      "gih": 1097
+    },
+    {
+      "card_name": "Fin Fang Foom",
+      "gihwr": 0.53923,
+      "gih": 2750
+    },
+    {
+      "card_name": "Hawkeye, Master Marksman",
+      "gihwr": 0.59417,
+      "gih": 3669
+    },
+    {
+      "card_name": "Hawkeye, Young Avenger",
+      "gihwr": 0.51909,
+      "gih": 4578
+    },
+    {
+      "card_name": "Hawkeye's Bow",
+      "gihwr": 0.53526,
+      "gih": 4389
+    },
+    {
+      "card_name": "Hex Magic",
+      "gihwr": 0.45572,
+      "gih": 698
+    },
+    {
+      "card_name": "Hire a Crew",
+      "gihwr": 0.45976,
+      "gih": 1354
+    },
+    {
+      "card_name": "HULK SMASH!",
+      "gihwr": 0.54893,
+      "gih": 14817
+    },
+    {
+      "card_name": "Human Torch, Johnny Storm",
+      "gihwr": 0.52669,
+      "gih": 4065
+    },
+    {
+      "card_name": "HYDRA Assault Robot",
+      "gihwr": 0.5288,
+      "gih": 13151
+    },
+    {
+      "card_name": "Iron Fist, Living Weapon",
+      "gihwr": 0.49498,
+      "gih": 2302
+    },
+    {
+      "card_name": "Jessica Jones, Private Eye",
+      "gihwr": 0.57786,
+      "gih": 9502
+    },
+    {
+      "card_name": "K'un-Lun Warrior",
+      "gihwr": 0.51926,
+      "gih": 7417
+    },
+    {
+      "card_name": "Kree Sentinel",
+      "gihwr": 0.5361,
+      "gih": 14013
+    },
+    {
+      "card_name": "Lightning Strike",
+      "gihwr": 0.55316,
+      "gih": 20462
+    },
+    {
+      "card_name": "Loki Laufeyson",
+      "gihwr": 0.52798,
+      "gih": 6457
+    },
+    {
+      "card_name": "Machinesmith Automaton",
+      "gihwr": 0.50977,
+      "gih": 7858
+    },
+    {
+      "card_name": "Misty Knight, Hero for Hire",
+      "gihwr": 0.53209,
+      "gih": 4857
+    },
+    {
+      "card_name": "Mj\u00f6lnir, Hammer of Thor",
+      "gihwr": 0.59775,
+      "gih": 2100
+    },
+    {
+      "card_name": "Photon Blast Barrage",
+      "gihwr": 0.55824,
+      "gih": 7781
+    },
+    {
+      "card_name": "Quicksilver, Brash Blur",
+      "gihwr": 0.50409,
+      "gih": 880
+    },
+    {
+      "card_name": "Red Hulk",
+      "gihwr": 0.5289,
+      "gih": 4398
+    },
+    {
+      "card_name": "Repulsor Blast",
+      "gihwr": 0.51863,
+      "gih": 15520
+    },
+    {
+      "card_name": "The Scarlet Witch",
+      "gihwr": 0.48551,
+      "gih": 580
+    },
+    {
+      "card_name": "Speed, Young Avenger",
+      "gihwr": 0.5334,
+      "gih": 2755
+    },
+    {
+      "card_name": "Stark Industries Executive",
+      "gihwr": 0.5107,
+      "gih": 8872
+    },
+    {
+      "card_name": "Super Speed",
+      "gihwr": 0.48102,
+      "gih": 1062
+    },
+    {
+      "card_name": "Team Tactics",
+      "gihwr": 0.49949,
+      "gih": 2328
+    },
+    {
+      "card_name": "Thor, God of Thunder",
+      "gihwr": 0.62132,
+      "gih": 2181
+    },
+    {
+      "card_name": "Truck Toss",
+      "gihwr": 0.52585,
+      "gih": 6347
+    },
+    {
+      "card_name": "Vision of Love",
+      "gihwr": 0.49212,
+      "gih": 3795
+    },
+    {
+      "card_name": "Volcanic Villain",
+      "gihwr": 0.49315,
+      "gih": 2393
+    },
+    {
+      "card_name": "Wonder Man, Hollywood Hero",
+      "gihwr": 0.5059,
+      "gih": 2942
+    },
+    {
+      "card_name": "Ant-Man's Army",
+      "gihwr": 0.56956,
+      "gih": 18709
+    },
+    {
+      "card_name": "Call Damage Control",
+      "gihwr": 0.5189,
+      "gih": 3417
+    },
+    {
+      "card_name": "Claim the Kingdom",
+      "gihwr": 0.51251,
+      "gih": 3855
+    },
+    {
+      "card_name": "Doc Samson, Super Psychiatrist",
+      "gihwr": 0.53343,
+      "gih": 4275
+    },
+    {
+      "card_name": "Earth's Mightiest Heroes",
+      "gihwr": 0.59222,
+      "gih": 2013
+    },
+    {
+      "card_name": "Epic Fight",
+      "gihwr": 0.58706,
+      "gih": 4103
+    },
+    {
+      "card_name": "Giant Growth",
+      "gihwr": 0.54988,
+      "gih": 5986
+    },
+    {
+      "card_name": "Go Nuts!",
+      "gihwr": 0.58187,
+      "gih": 26407
+    },
+    {
+      "card_name": "Guerrilla Gorilla",
+      "gihwr": 0.56354,
+      "gih": 14606
+    },
+    {
+      "card_name": "Hellcat, Undying Vigilante",
+      "gihwr": 0.56709,
+      "gih": 6302
+    },
+    {
+      "card_name": "Hercules, Prince of Power",
+      "gihwr": 0.55075,
+      "gih": 6409
+    },
+    {
+      "card_name": "Heroic Feast",
+      "gihwr": 0.5395,
+      "gih": 1709
+    },
+    {
+      "card_name": "Hulkling, Burgeoning Bruiser",
+      "gihwr": 0.5362,
+      "gih": 4560
+    },
+    {
+      "card_name": "Ka-Zar of the Savage Land",
+      "gihwr": 0.61224,
+      "gih": 13538
+    },
+    {
+      "card_name": "Knight of Wundagore",
+      "gihwr": 0.52681,
+      "gih": 12574
+    },
+    {
+      "card_name": "Mister Hyde, Monster Within",
+      "gihwr": 0.55596,
+      "gih": 7175
+    },
+    {
+      "card_name": "Mole Man, Moloid Master",
+      "gihwr": 0.54878,
+      "gih": 2376
+    },
+    {
+      "card_name": "Pet Avengers",
+      "gihwr": 0.57517,
+      "gih": 19043
+    },
+    {
+      "card_name": "Powerful Broker",
+      "gihwr": 0.51054,
+      "gih": 4643
+    },
+    {
+      "card_name": "Punishing Punch",
+      "gihwr": 0.60056,
+      "gih": 11951
+    },
+    {
+      "card_name": "Rapid Rescue",
+      "gihwr": 0.58186,
+      "gih": 6148
+    },
+    {
+      "card_name": "Reptil, Dinomorpher",
+      "gihwr": 0.56468,
+      "gih": 3351
+    },
+    {
+      "card_name": "Restorative Technique",
+      "gihwr": 0.52412,
+      "gih": 5887
+    },
+    {
+      "card_name": "Rick Jones, Destined Sidekick",
+      "gihwr": 0.54139,
+      "gih": 1448
+    },
+    {
+      "card_name": "Savage Land Dinosaur",
+      "gihwr": 0.55474,
+      "gih": 17439
+    },
+    {
+      "card_name": "Serpent Specialist",
+      "gihwr": 0.56185,
+      "gih": 15220
+    },
+    {
+      "card_name": "Shang-Chi, Master of Kung Fu",
+      "gihwr": 0.5396,
+      "gih": 1338
+    },
+    {
+      "card_name": "She-Hulk, Jade Defender",
+      "gihwr": 0.6059,
+      "gih": 11189
+    },
+    {
+      "card_name": "Super Strength",
+      "gihwr": 0.50122,
+      "gih": 1268
+    },
+    {
+      "card_name": "The Thing, Ben Grimm",
+      "gihwr": 0.53585,
+      "gih": 5047
+    },
+    {
+      "card_name": "Tigra, Feline Fury",
+      "gihwr": 0.53927,
+      "gih": 4186
+    },
+    {
+      "card_name": "Training Regimen",
+      "gihwr": 0.52388,
+      "gih": 4171
+    },
+    {
+      "card_name": "The Unbeatable Squirrel Girl",
+      "gihwr": 0.60071,
+      "gih": 4553
+    },
+    {
+      "card_name": "Undercover Skrull",
+      "gihwr": 0.5942,
+      "gih": 27647
+    },
+    {
+      "card_name": "Wakandan Royal Guard",
+      "gihwr": 0.55648,
+      "gih": 12190
+    },
+    {
+      "card_name": "White Tiger, Ava Ayala",
+      "gihwr": 0.57511,
+      "gih": 10630
+    },
+    {
+      "card_name": "World War Hulk",
+      "gihwr": 0.5361,
+      "gih": 2192
+    },
+    {
+      "card_name": "Abomination, Terrifying Titan",
+      "gihwr": 0.56705,
+      "gih": 8127
+    },
+    {
+      "card_name": "Absorbing Man",
+      "gihwr": 0.60228,
+      "gih": 4149
+    },
+    {
+      "card_name": "Alien Invasion",
+      "gihwr": 0.50609,
+      "gih": 2388
+    },
+    {
+      "card_name": "Ant-Man, Colony Commander",
+      "gihwr": 0.53782,
+      "gih": 5243
+    },
+    {
+      "card_name": "Ares, God of War",
+      "gihwr": 0.56418,
+      "gih": 2855
+    },
+    {
+      "card_name": "Armor Wars",
+      "gihwr": 0.48338,
+      "gih": 1267
+    },
+    {
+      "card_name": "The Astonishing Ant-Man",
+      "gihwr": 0.57346,
+      "gih": 3354
+    },
+    {
+      "card_name": "Avengers: Under Siege",
+      "gihwr": 0.63848,
+      "gih": 4375
+    },
+    {
+      "card_name": "Beast, Erudite Aerialist",
+      "gihwr": 0.50728,
+      "gih": 4142
+    },
+    {
+      "card_name": "Black Panther, Vanguard",
+      "gihwr": 0.56004,
+      "gih": 9125
+    },
+    {
+      "card_name": "Black Widow, Double Agent",
+      "gihwr": 0.56456,
+      "gih": 7242
+    },
+    {
+      "card_name": "Bullseye, Death Dealer",
+      "gihwr": 0.53606,
+      "gih": 7138
+    },
+    {
+      "card_name": "Captain America, Living Legend",
+      "gihwr": 0.58698,
+      "gih": 13629
+    },
+    {
+      "card_name": "Cloak and Dagger, Entwined",
+      "gihwr": 0.62314,
+      "gih": 5001
+    },
+    {
+      "card_name": "The Coming of Galactus",
+      "gihwr": 0.62997,
+      "gih": 2421
+    },
+    {
+      "card_name": "Daredevil, Man Without Fear",
+      "gihwr": 0.57994,
+      "gih": 4681
+    },
+    {
+      "card_name": "Ghost, Spectral Saboteur",
+      "gihwr": 0.52446,
+      "gih": 4044
+    },
+    {
+      "card_name": "Hulk, Gamma Goliath",
+      "gihwr": 0.55238,
+      "gih": 4935
+    },
+    {
+      "card_name": "Iron Man, Master of Machines",
+      "gihwr": 0.55062,
+      "gih": 6420
+    },
+    {
+      "card_name": "Kang, Temporal Tyrant",
+      "gihwr": 0.55312,
+      "gih": 7898
+    },
+    {
+      "card_name": "Killmonger, Scourge of Wakanda",
+      "gihwr": 0.60851,
+      "gih": 11124
+    },
+    {
+      "card_name": "King T'Challa",
+      "gihwr": 0.61825,
+      "gih": 3374
+    },
+    {
+      "card_name": "The Kingpin of Crime",
+      "gihwr": 0.56921,
+      "gih": 3557
+    },
+    {
+      "card_name": "Madame Hydra",
+      "gihwr": 0.49011,
+      "gih": 5715
+    },
+    {
+      "card_name": "The Mighty Thor, Jane Foster",
+      "gihwr": 0.61283,
+      "gih": 6656
+    },
+    {
+      "card_name": "Moon Girl and Devil Dinosaur",
+      "gihwr": 0.54251,
+      "gih": 3214
+    },
+    {
+      "card_name": "The Ruinous Wrecking Crew",
+      "gihwr": 0.61724,
+      "gih": 4262
+    },
+    {
+      "card_name": "Scientist Supreme of A.I.M.",
+      "gihwr": 0.5194,
+      "gih": 1458
+    },
+    {
+      "card_name": "The Serpent Society",
+      "gihwr": 0.57155,
+      "gih": 2192
+    },
+    {
+      "card_name": "Speedball, New Warrior",
+      "gihwr": 0.5018,
+      "gih": 3551
+    },
+    {
+      "card_name": "Spider-Man, To the Rescue",
+      "gihwr": 0.55575,
+      "gih": 9931
+    },
+    {
+      "card_name": "Spider-Woman, Secret Agent",
+      "gihwr": 0.59701,
+      "gih": 16512
+    },
+    {
+      "card_name": "Storm, Windrider",
+      "gihwr": 0.60789,
+      "gih": 5068
+    },
+    {
       "card_name": "The Super Hero Civil War",
-      "gihwr": 0.70947,
-      "gih": 2160
+      "gihwr": 0.7001,
+      "gih": 6877
     },
     {
       "card_name": "Taskmaster, Mercenary Mimic",
-      "gihwr": 0.55527,
-      "gih": 1241
+      "gihwr": 0.55046,
+      "gih": 3207
     },
     {
       "card_name": "Thanos, the Mad Titan",
-      "gihwr": 0.57905,
-      "gih": 323
+      "gihwr": 0.56811,
+      "gih": 999
     },
     {
       "card_name": "Thor Odinson",
-      "gihwr": 0.53119,
-      "gih": 1774
+      "gihwr": 0.51471,
+      "gih": 4710
     },
     {
       "card_name": "Titania, Rugged Rumbler",
-      "gihwr": 0.56213,
-      "gih": 2659
+      "gihwr": 0.56538,
+      "gih": 7515
     },
     {
       "card_name": "U.S.Agent, John Walker",
-      "gihwr": 0.58357,
-      "gih": 4521
+      "gihwr": 0.57838,
+      "gih": 13188
     },
     {
       "card_name": "Vision Quest",
-      "gihwr": 0.63255,
-      "gih": 1421
+      "gihwr": 0.61828,
+      "gih": 4893
     },
     {
       "card_name": "War Machine, Legacy of Iron",
-      "gihwr": 0.53223,
-      "gih": 2379
+      "gihwr": 0.52194,
+      "gih": 6506
     },
     {
       "card_name": "Winter Soldier, Icy Assassin",
-      "gihwr": 0.61572,
-      "gih": 934
+      "gihwr": 0.59699,
+      "gih": 2976
     },
     {
       "card_name": "Wolverine, Fierce Fighter",
-      "gihwr": 0.62681,
-      "gih": 1352
+      "gihwr": 0.63644,
+      "gih": 4354
     },
     {
       "card_name": "Worlds Within Worlds",
       "gihwr": null,
-      "gih": 44
+      "gih": 89
     },
     {
       "card_name": "A.I.M. Synthoids",
-      "gihwr": 0.53345,
-      "gih": 4404
+      "gihwr": 0.52562,
+      "gih": 10981
     },
     {
       "card_name": "Arc Reactor",
-      "gihwr": null,
-      "gih": 161
+      "gihwr": 0.42243,
+      "gih": 331
     },
     {
       "card_name": "Captain America's Shield",
-      "gihwr": 0.58565,
-      "gih": 1510
+      "gihwr": 0.58061,
+      "gih": 4837
     },
     {
       "card_name": "Cosmic Cube",
-      "gihwr": 0.59987,
-      "gih": 950
+      "gihwr": 0.61428,
+      "gih": 2856
     },
     {
       "card_name": "Dependable Quinjet",
-      "gihwr": 0.54088,
-      "gih": 3097
+      "gihwr": 0.54036,
+      "gih": 8023
     },
     {
       "card_name": "H.E.R.B.I.E. Scout Unit",
-      "gihwr": 0.58484,
-      "gih": 10643
+      "gihwr": 0.58296,
+      "gih": 35905
     },
     {
       "card_name": "Iron Man Armor",
-      "gihwr": 0.58085,
-      "gih": 974
+      "gihwr": 0.58602,
+      "gih": 2781
     },
     {
       "card_name": "S.H.I.E.L.D. Helicarrier",
-      "gihwr": 0.55142,
-      "gih": 1013
+      "gihwr": 0.55812,
+      "gih": 2509
     },
     {
       "card_name": "Super-Adaptoid",
-      "gihwr": 0.58228,
-      "gih": 1721
+      "gihwr": 0.57248,
+      "gih": 4585
     },
     {
       "card_name": "The Ten Rings",
-      "gihwr": null,
-      "gih": 139
+      "gihwr": 0.47568,
+      "gih": 361
     },
     {
       "card_name": "Ultron, Artificial Malevolence",
-      "gihwr": 0.56155,
-      "gih": 662
+      "gihwr": 0.53533,
+      "gih": 1810
     },
     {
       "card_name": "Ultron Drone",
-      "gihwr": 0.54027,
-      "gih": 3212
+      "gihwr": 0.53609,
+      "gih": 8246
     },
     {
       "card_name": "Vibranium Energy Daggers",
-      "gihwr": 0.52011,
-      "gih": 1063
+      "gihwr": 0.50337,
+      "gih": 2712
     },
     {
       "card_name": "The Vision",
-      "gihwr": 0.60837,
-      "gih": 2160
+      "gihwr": 0.59924,
+      "gih": 6263
     },
     {
       "card_name": "Viv Vision, Teen Synthezoid",
-      "gihwr": 0.53861,
-      "gih": 2160
+      "gihwr": 0.53727,
+      "gih": 6044
     },
     {
       "card_name": "A.I.M. Labs",
-      "gihwr": 0.56403,
-      "gih": 4109
+      "gihwr": 0.5621,
+      "gih": 11181
     },
     {
       "card_name": "Asgardian Citadel",
-      "gihwr": 0.57464,
-      "gih": 3232
+      "gihwr": 0.56615,
+      "gih": 9357
     },
     {
       "card_name": "Avengers Hangar",
-      "gihwr": 0.59957,
-      "gih": 4921
+      "gihwr": 0.58016,
+      "gih": 15807
     },
     {
       "card_name": "Avengers Tower",
-      "gihwr": 0.61164,
-      "gih": 3919
+      "gihwr": 0.60574,
+      "gih": 13266
     },
     {
       "card_name": "Baxter Building",
-      "gihwr": 0.58332,
-      "gih": 3695
+      "gihwr": 0.57777,
+      "gih": 12254
     },
     {
       "card_name": "Birnin Zana Plaza",
-      "gihwr": 0.57444,
-      "gih": 3567
+      "gihwr": 0.56986,
+      "gih": 10648
     },
     {
       "card_name": "Castle Doom",
-      "gihwr": 0.5468,
-      "gih": 760
+      "gihwr": 0.53083,
+      "gih": 2016
     },
     {
       "card_name": "Dark Fortress",
-      "gihwr": 0.53502,
-      "gih": 937
+      "gihwr": 0.54638,
+      "gih": 2562
     },
     {
       "card_name": "Fisk Tower",
-      "gihwr": 0.55485,
-      "gih": 3450
+      "gihwr": 0.55718,
+      "gih": 9988
     },
     {
       "card_name": "Gathering Place",
-      "gihwr": 0.55951,
-      "gih": 997
+      "gihwr": 0.56259,
+      "gih": 3095
     },
     {
       "card_name": "Gleaming Bastion",
-      "gihwr": 0.58023,
-      "gih": 1344
+      "gihwr": 0.57618,
+      "gih": 4502
     },
     {
       "card_name": "Hell's Kitchen",
-      "gihwr": 0.54355,
-      "gih": 3204
+      "gihwr": 0.5491,
+      "gih": 8633
     },
     {
       "card_name": "Hidden Lair",
-      "gihwr": 0.57639,
-      "gih": 1174
+      "gihwr": 0.56322,
+      "gih": 3149
     },
     {
       "card_name": "Los Diablos Missile Base",
-      "gihwr": 0.5532,
-      "gih": 3013
+      "gihwr": 0.55926,
+      "gih": 8282
     },
     {
       "card_name": "Pym Technologies",
-      "gihwr": 0.56739,
-      "gih": 3577
+      "gihwr": 0.56786,
+      "gih": 10581
     },
     {
       "card_name": "Stark Industries",
-      "gihwr": 0.56128,
-      "gih": 3591
+      "gihwr": 0.56397,
+      "gih": 10549
     },
     {
       "card_name": "Subterranean Cavern",
-      "gihwr": 0.55186,
-      "gih": 3267
+      "gihwr": 0.56661,
+      "gih": 9445
     },
     {
       "card_name": "Surveillance Room",
-      "gihwr": 0.57441,
-      "gih": 9494
+      "gihwr": 0.56755,
+      "gih": 28027
     },
     {
       "card_name": "Training Compound",
-      "gihwr": 0.54346,
-      "gih": 893
+      "gihwr": 0.55493,
+      "gih": 2432
     },
     {
       "card_name": "Villainous Hideout",
-      "gihwr": 0.57546,
-      "gih": 3075
+      "gihwr": 0.57786,
+      "gih": 8726
     },
     {
       "card_name": "Archangel of Thune",
       "gihwr": null,
-      "gih": 52
+      "gih": 199
     },
     {
       "card_name": "Concerted Effort",
       "gihwr": null,
-      "gih": 3
+      "gih": 36
     },
     {
       "card_name": "Don't Move",
       "gihwr": null,
-      "gih": 42
+      "gih": 128
     },
     {
       "card_name": "Ephemerate",
       "gihwr": null,
-      "gih": 38
+      "gih": 100
     },
     {
       "card_name": "Final Showdown",
       "gihwr": null,
-      "gih": 56
+      "gih": 217
     },
     {
       "card_name": "Light of Promise",
       "gihwr": null,
-      "gih": 1
+      "gih": 6
     },
     {
       "card_name": "Path to Exile",
       "gihwr": null,
-      "gih": 63
+      "gih": 207
     },
     {
       "card_name": "Return to the Ranks",
       "gihwr": null,
-      "gih": 9
+      "gih": 25
     },
     {
       "card_name": "Righteous Fury",
       "gihwr": null,
-      "gih": 27
+      "gih": 99
     },
     {
       "card_name": "Steelshaper's Gift",
       "gihwr": null,
-      "gih": 1
+      "gih": 10
     },
     {
       "card_name": "Teferi's Protection",
       "gihwr": null,
-      "gih": 13
+      "gih": 67
     },
     {
       "card_name": "Counterspell",
       "gihwr": null,
-      "gih": 59
+      "gih": 213
     },
     {
       "card_name": "Cyberdrive Awakener",
       "gihwr": null,
-      "gih": 49
+      "gih": 113
     },
     {
       "card_name": "Dig Through Time",
       "gihwr": null,
-      "gih": 53
+      "gih": 135
     },
     {
       "card_name": "Harbinger of the Seas",
       "gihwr": null,
-      "gih": 1
+      "gih": 6
     },
     {
       "card_name": "Lord of Atlantis",
       "gihwr": null,
-      "gih": 24
+      "gih": 37
     },
     {
       "card_name": "Mechanized Production",
       "gihwr": null,
-      "gih": 20
+      "gih": 59
     },
     {
       "card_name": "Narset's Reversal",
       "gihwr": null,
-      "gih": 17
+      "gih": 43
     },
     {
       "card_name": "Reconnaissance Mission",
       "gihwr": null,
-      "gih": 40
+      "gih": 96
     },
     {
       "card_name": "Show and Tell",
       "gihwr": null,
-      "gih": 4
+      "gih": 5
     },
     {
       "card_name": "Simulacrum Synthesizer",
       "gihwr": null,
-      "gih": 59
+      "gih": 132
     },
     {
       "card_name": "Three Steps Ahead",
       "gihwr": null,
-      "gih": 86
+      "gih": 246
     },
     {
       "card_name": "Dauthi Voidwalker",
       "gihwr": null,
-      "gih": 65
+      "gih": 205
     },
     {
       "card_name": "Deadly Dispute",
       "gihwr": null,
-      "gih": 41
+      "gih": 131
     },
     {
       "card_name": "Extinction Event",
       "gihwr": null,
-      "gih": 66
+      "gih": 203
     },
     {
       "card_name": "Final Act",
       "gihwr": null,
-      "gih": 30
+      "gih": 105
     },
     {
       "card_name": "Massacre Girl",
       "gihwr": null,
-      "gih": 61
+      "gih": 168
     },
     {
       "card_name": "No Mercy",
       "gihwr": null,
-      "gih": 20
+      "gih": 89
     },
     {
       "card_name": "Chaos Warp",
       "gihwr": null,
-      "gih": 7
+      "gih": 31
     },
     {
       "card_name": "Fiery Emancipation",
       "gihwr": null,
-      "gih": 19
+      "gih": 45
     },
     {
       "card_name": "Fury of the Horde",
       "gihwr": null,
-      "gih": 5
+      "gih": 16
     },
     {
       "card_name": "Monstrous Rage",
       "gihwr": null,
-      "gih": 33
+      "gih": 91
     },
     {
       "card_name": "Seize the Day",
       "gihwr": null,
-      "gih": 12
+      "gih": 23
     },
     {
       "card_name": "Bedlam",
       "gihwr": null,
-      "gih": 3
+      "gih": 8
     },
     {
       "card_name": "Beast Within",
       "gihwr": null,
-      "gih": 5
+      "gih": 24
     },
     {
       "card_name": "Defense of the Heart",
       "gihwr": null,
-      "gih": 35
+      "gih": 58
     },
     {
       "card_name": "Force of Vigor",
       "gihwr": null,
-      "gih": 6
+      "gih": 24
     },
     {
       "card_name": "Heroic Intervention",
       "gihwr": null,
-      "gih": 75
+      "gih": 220
     },
     {
       "card_name": "Primal Vigor",
       "gihwr": null,
-      "gih": 6
+      "gih": 22
     },
     {
       "card_name": "Rancor",
       "gihwr": null,
-      "gih": 48
+      "gih": 137
     },
     {
       "card_name": "Steely Resolve",
       "gihwr": null,
-      "gih": 12
+      "gih": 31
     },
     {
       "card_name": "Unnatural Growth",
       "gihwr": null,
-      "gih": 29
+      "gih": 64
     },
     {
       "card_name": "Anthem of Champions",
       "gihwr": null,
-      "gih": 58
+      "gih": 139
     },
     {
       "card_name": "Aurelia, the Warleader",
       "gihwr": null,
-      "gih": 36
+      "gih": 89
     },
     {
       "card_name": "Black Panther, Wakandan King",
       "gihwr": null,
-      "gih": 59
+      "gih": 168
     },
     {
       "card_name": "Captain America, First Avenger",
       "gihwr": null,
-      "gih": 25
+      "gih": 63
     },
     {
       "card_name": "Escape to the Wilds",
       "gihwr": null,
-      "gih": 49
+      "gih": 119
     },
     {
       "card_name": "Fight to the Death",
       "gihwr": null,
-      "gih": 9
+      "gih": 14
     },
     {
       "card_name": "Iron Man, Titan of Innovation",
       "gihwr": null,
-      "gih": 41
+      "gih": 138
     },
     {
       "card_name": "Privileged Position",
       "gihwr": null,
-      "gih": 6
+      "gih": 27
     },
     {
       "card_name": "Ravenous Tyrannosaurus",
       "gihwr": null,
-      "gih": 67
+      "gih": 184
     },
     {
       "card_name": "Storm, Force of Nature",
       "gihwr": null,
-      "gih": 28
+      "gih": 81
     },
     {
       "card_name": "Sundering Growth",
       "gihwr": null,
-      "gih": 14
+      "gih": 42
     },
     {
       "card_name": "Warleader's Call",
       "gihwr": null,
-      "gih": 43
+      "gih": 155
     },
     {
       "card_name": "Wolverine, Best There Is",
       "gihwr": null,
-      "gih": 42
+      "gih": 100
     },
     {
       "card_name": "Horn of Greed",
       "gihwr": null,
-      "gih": 3
+      "gih": 7
     },
     {
       "card_name": "Roaming Throne",
       "gihwr": null,
-      "gih": 51
+      "gih": 177
     },
     {
       "card_name": "Sword of Fire and Ice",
       "gihwr": null,
-      "gih": 82
+      "gih": 270
     }
   ]
 }

@@ -75,6 +75,40 @@ def test_rematch_is_held_then_forced_when_source_complete():
     assert pairset(forced) == {frozenset({"p0", "p1"})}  # forced so the bracket can't stall
 
 
+def test_round3_holds_one_one_group_until_no_avoidable_rematch():
+    # p0 and p1 met in R1; both go W-L / L-W and land at 1-1. The other two 1-1 players (p5, p6)
+    # finish R2 first, so a greedy pairer would lock p5-p6 and strand p0-p1 into their R1 rematch.
+    # The group must wait, then pair rematch-free.
+    roster = players(8)
+    r1 = [  # winners p0 p2 p4 p6, losers p1 p3 p5 p7
+        match(1, "p0", "p1", "p0"), match(1, "p2", "p3", "p2"),
+        match(1, "p4", "p5", "p4"), match(1, "p6", "p7", "p6"),
+    ]
+    r2_in_report_order = [  # winners' bracket p0/p2 & p4/p6, losers' bracket p1/p3 & p5/p7
+        match(2, "p5", "p7", "p5"),  # p5 → 1-1, ready first
+        match(2, "p4", "p6", "p4"),  # p6 → 1-1
+        match(2, "p2", "p0", "p2"),  # p0 → 1-1 (its R1 win now offset by an R2 loss)
+        match(2, "p1", "p3", "p1"),  # p1 → 1-1, ready last (completes R2)
+    ]
+
+    completed = list(r1)
+    accumulated: list = []
+    for i, result in enumerate(r2_in_report_order):
+        completed.append(result)
+        source_complete = i == len(r2_in_report_order) - 1
+        new = pod_bracket.incremental_pairings(
+            roster, completed, accumulated, 3, source_round_complete=source_complete,
+        )
+        accumulated += new
+
+    one_one = {"p0", "p1", "p5", "p6"}
+    one_one_pairs = [p for p in accumulated if set(p) <= one_one]
+
+    assert frozenset({"p0", "p1"}) not in pairset(accumulated)  # never the R1 rematch
+    assert len(one_one_pairs) == 2
+    assert {pid for pair in one_one_pairs for pid in pair} == one_one
+
+
 # --- padding_slots --------------------------------------------------------
 
 def test_padding_all_unknown_before_any_result():
@@ -142,3 +176,9 @@ def test_format_result_change_cleared_names_both_without_score():
     assert "Arcyl" in phrase
     assert "Bramblewick" in phrase
     assert not any(ch.isdigit() for ch in phrase)
+
+
+def test_format_result_change_drops_arena_ids_from_both_players():
+    phrase = format_result_change("Arcyl#48087", "Bramblewick#13488", "Arcyl#48087", "2-0")
+
+    assert phrase == "Arcyl wins 2-0 vs Bramblewick"

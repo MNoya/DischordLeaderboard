@@ -75,6 +75,17 @@ export const TIER_ORDER = [
   "SB",
   "TBD",
 ];
+// Green (top) → red (bottom) accent down the grade column; SB/TBD and unknowns stay neutral.
+const MAIN_TIERS = TIER_ORDER.filter((t) => t !== "SB" && t !== "TBD");
+export function tierColor(tier: string): string {
+  const i = MAIN_TIERS.indexOf(tier);
+  if (i === -1) {
+    return "#4a5260";
+  }
+  const hue = Math.round(130 - (130 * i) / (MAIN_TIERS.length - 1));
+  return `hsl(${hue}, 62%, 47%)`;
+}
+
 export const COLOR_CODES = ["W", "U", "B", "R", "G", "M", "C", "L"];
 export const COLOR_NAMES = [
   "White",
@@ -124,6 +135,15 @@ export function trendSteps(card: TierCard): number {
   const to = TIER_ORDER.indexOf(card.tier);
   if (from === -1 || to === -1) return 1;
   return Math.max(1, Math.abs(to - from));
+}
+
+// One glyph per grade step moved since the set review, capped at 3.
+export function trendGlyphStack(card: TierCard): string[] {
+  if (!card.trend) {
+    return [];
+  }
+  const char = TREND_GLYPH[card.trend];
+  return Array.from({ length: Math.min(trendSteps(card), 3) }, () => char);
 }
 
 // Filterable type groups — some card types collapse into one toggle (subtypes are ignored)

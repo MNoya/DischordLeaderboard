@@ -5,23 +5,29 @@ bot/tasks/format_schedule_post.py; the rendering builders are reused from bot/co
 
 Each pinned schedule is one filtered /event-scribe view living in a community channel (matched by a
 name substring). A channel can host more than one: the quick-or-flashback channel carries a separate
-Quick Draft pin and Flashback pin. Limited Competitive events route to the newest set's channel,
-which moves with each rotation.
+Quick Draft pin and Flashback pin. Limited Competitive events route to the latest set's channel — the
+newest-created channel in the MTG Strategy category — which a rotation re-creates as the newest, so
+routing follows the set with no name match or config edit.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import bot.services.mtgscribe as mtgscribe
-from bot.sets import ALL_SETS
+from bot.sets import ALL_SETS, SetSeed, active_set_code
 
 OPEN_TZ = ZoneInfo("America/Los_Angeles")
+EVENT_DAY_TZ = ZoneInfo("America/New_York")
 ANNOUNCE_WINDOWS: tuple[time, ...] = (time(6, 0), time(8, 0), time(14, 0))
 DEDUP_LOOKBACK = timedelta(hours=24)
 
 PERMANENT_CUBE_CODE = "CUBE"
+LATEST_SET_CATEGORY = "MTG Strategy"
+FORMAT_ARCHIVE_CATEGORY = "Format Archive"
+SET_NAME_STOPWORDS = frozenset({"a", "an", "and", "at", "in", "of", "the"})
 
 
 ANNOUNCE_NONE = "none"
@@ -35,7 +41,11 @@ class SchedulePin:
     selects its formats (empty → the whole active set, the set channel) and ``scope_label`` is its title
     scope (``None`` → the active set's name). ``announce_filters`` selects which start-today events get a
     callout — independent of the pin, so the set channel shows the full set but announces competitive
-    only, and an announce-only channel (cube) keeps no pin at all."""
+    only, and an announce-only channel (cube) keeps no pin at all. Routing is by ``channel_name``
+    substring, except the set pin leaves it ``None`` and sets ``category`` to follow the newest-created
+    channel there — the latest set's channel, which a rotation re-creates without a config edit.
+    Pins are human-seeded and the bot only keeps them fresh; ``auto_pin`` would have it post and pin the
+    schedule itself when none exists, off for every pin today and reserved for when that's wanted."""
     key: str
     channel_name: str | None
     pin_filters: tuple[str, ...]
@@ -43,6 +53,8 @@ class SchedulePin:
     announce: str = ANNOUNCE_ROTATION
     announce_filters: tuple[str, ...] = ()
     maintain_pin: bool = True
+    category: str | None = None
+    auto_pin: bool = False
 
 
 SCHEDULE_PINS: tuple[SchedulePin, ...] = (
@@ -52,16 +64,23 @@ SCHEDULE_PINS: tuple[SchedulePin, ...] = (
     ),
     SchedulePin("cube", "cube-talk", (), None, ANNOUNCE_ROTATION, ("cube",), maintain_pin=False),
     SchedulePin("sealed", "sealed-discussion", ("sealed",), "Sealed", ANNOUNCE_NONE),
-    SchedulePin("set", None, (), None, ANNOUNCE_COMPETITIVE, ("competitive",)),
+    SchedulePin("set", None, (), None, ANNOUNCE_COMPETITIVE, ("competitive",), category=LATEST_SET_CATEGORY),
 )
 
 
-def channel_name_for(pin: SchedulePin) -> str:
-    """The channel-name fragment a pin routes to. The competitive pin leaves it unset and follows the
-    newest registered set, so the channel moves with each rotation without a config edit."""
-    if pin.channel_name is not None:
-        return pin.channel_name
-    return slugify(newest_set().name)
+def latest_channel_in_category(channels, category_name: str):
+    """The most recently created channel in ``category_name`` — the latest set's channel, which a
+    rotation re-creates as the newest there, so routing follows the set with no name match. ``None``
+    when the category holds no channel."""
+    in_category = [channel for channel in channels
+                   if channel.category is not None and channel.category.name == category_name]
+    if not in_category:
+        return None
+    newest = in_category[0]
+    for channel in in_category[1:]:
+        if channel.created_at > newest.created_at:
+            newest = channel
+    return newest
 
 
 def newest_set():
@@ -73,8 +92,102 @@ def newest_set():
     return newest
 
 
-def slugify(name: str) -> str:
-    return name.lower().replace(":", "").replace(" ", "-")
+def channel_words(name: str) -> set[str]:
+    return set(re.findall(r"[a-z0-9]+", name.lower()))
+
+
+def significant_set_words(set_name: str) -> set[str]:
+    return channel_words(set_name) - SET_NAME_STOPWORDS
+
+
+def channel_matches_set(channel_name: str, set_name: str) -> bool:
+    """Whether a discussion channel belongs to a set, by word overlap in either direction so a full
+    channel name matches its set ("marvel-super-heroes" ↔ "Marvel Super Heroes") and a shortened one
+    still resolves ("strixhaven" ↔ "Strixhaven: School of Mages"). Deliberately conservative — a
+    channel matching no set is left alone."""
+    channel = channel_words(channel_name)
+    set_words = significant_set_words(set_name)
+    if not channel or not set_words:
+        return False
+    return set_words <= channel or channel <= set_words
+
+
+def active_set_seed(when: datetime | None = None) -> SetSeed:
+    code = active_set_code(when)
+    for seed in ALL_SETS:
+        if seed.code == code:
+            return seed
+    return ALL_SETS[-1]
+
+
+def archive_candidates(text_channels, when: datetime | None = None) -> list:
+    """MTG Strategy channels belonging to sets older than the active one — what a rotation leaves
+    behind for the Format Archive. The upcoming set's mod-created channel and the permanent strategy
+    channels match no stale set, so they stay put."""
+    active = active_set_seed(when)
+    stale_sets = [seed for seed in ALL_SETS
+                  if seed.code != PERMANENT_CUBE_CODE and seed.start_date < active.start_date]
+    candidates = []
+    for channel in text_channels:
+        if channel.category is None or channel.category.name != LATEST_SET_CATEGORY:
+            continue
+        if channel_matches_set(channel.name, active.name):
+            continue
+        if any(channel_matches_set(channel.name, seed.name) for seed in stale_sets):
+            candidates.append(channel)
+    return candidates
+
+
+def channel_for_set(channels, seed: SetSeed, category: str = LATEST_SET_CATEGORY):
+    """The discussion channel for a set within ``category``, matched by name — MTG Strategy for the live
+    set, Format Archive for one that rotated out. ``None`` when none matches."""
+    for channel in channels:
+        if channel.category is None or channel.category.name != category:
+            continue
+        if channel_matches_set(channel.name, seed.name):
+            return channel
+    return None
+
+
+def set_before(seed: SetSeed) -> SetSeed | None:
+    """The set that rotated out just before ``seed`` — the newest-started set whose start precedes it,
+    excluding the permanent cube. ``None`` when ``seed`` is the earliest."""
+    previous: SetSeed | None = None
+    for candidate in ALL_SETS:
+        if candidate.code == PERMANENT_CUBE_CODE or candidate.start_date >= seed.start_date:
+            continue
+        if previous is None or candidate.start_date > previous.start_date:
+            previous = candidate
+    return previous
+
+
+def awards_eve_set(when: datetime | None = None) -> SetSeed | None:
+    """The outgoing set to run a send-off ceremony for — the active set — when a new set releases the
+    next day, else ``None``. Awards run the day before a rotation, so this returns a set only on that
+    eve. The date is read in Eastern, the release clock, so ``8 AM`` Pacific still resolves to the same
+    calendar day as the noon-ET flip it precedes."""
+    now = when or datetime.now(timezone.utc)
+    tomorrow = (now.astimezone(EVENT_DAY_TZ) + timedelta(days=1)).date()
+    for seed in ALL_SETS:
+        if seed.code != PERMANENT_CUBE_CODE and seed.start_date == tomorrow:
+            return active_set_seed(now)
+    return None
+
+
+def set_seed_for_channel(channel_name: str, when: datetime | None = None) -> SetSeed | None:
+    """The stale set a to-be-archived channel belongs to — the outgoing set whose send-off standings
+    the channel should carry before it moves. Matches the same stale seeds ``archive_candidates`` uses,
+    newest-started first so an overlapping range resolves to the later set. ``None`` when none match."""
+    active = active_set_seed(when)
+    matched: SetSeed | None = None
+    for seed in ALL_SETS:
+        if seed.code == PERMANENT_CUBE_CODE or seed.start_date >= active.start_date:
+            continue
+        if not channel_matches_set(channel_name, seed.name):
+            continue
+        if matched is None or seed.start_date > matched.start_date:
+            matched = seed
+    return matched
 
 
 def previous_window_start(now: datetime) -> datetime:
@@ -95,8 +208,26 @@ def previous_window_start(now: datetime) -> datetime:
 
 
 def newly_opened(groups: list[mtgscribe.EventGroup], since: datetime, now: datetime) -> list:
-    """Groups that opened in ``(since, now]`` — events that went live since the previous window."""
-    return [group for group in groups if since < group.start <= now]
+    """Groups whose go-live falls in ``(since, now]`` — events that opened since the previous window,
+    timed by ``effective_start`` so a midnight-ET placeholder announces at its real morning open."""
+    return [group for group in groups if since < effective_start(group) <= now]
+
+
+def effective_start(group: mtgscribe.EventGroup) -> datetime:
+    """The go-live used to time a group's announcement. Scribe stamps multi-day competitive events
+    (Qualifier Weekend, ACQ) at midnight ET — a whole-day placeholder, not a queue-open time — which
+    sits the evening before in the Americas and would fire a window early. Normalize those to the first
+    announce window that day (6 AM Pacific), the same open the Play-Ins carry. Other groups keep their
+    start verbatim."""
+    if group.competitive and _is_event_day_midnight(group.start):
+        event_day = group.start.astimezone(EVENT_DAY_TZ).date()
+        return datetime.combine(event_day, ANNOUNCE_WINDOWS[0], tzinfo=OPEN_TZ)
+    return group.start
+
+
+def _is_event_day_midnight(moment: datetime) -> bool:
+    local = moment.astimezone(EVENT_DAY_TZ)
+    return local.hour == 0 and local.minute == 0
 
 
 def next_rotation(groups: list[mtgscribe.EventGroup], current: mtgscribe.EventGroup):

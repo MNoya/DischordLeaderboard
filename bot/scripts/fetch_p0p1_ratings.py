@@ -4,7 +4,8 @@ Usage:
     python -m bot.scripts.fetch_p0p1_ratings --set-code MSH [--phase midway|final] [--end-date YYYY-MM-DD]
 
 Writes frontend/src/data/fixtures/p0p1-ratings-{set_code_lower}.json. Commit the result
-and redeploy to flip the contest into midway or final phase.
+and redeploy to flip the contest into midway or final phase. dateRange is display-only
+(the 17lands query itself is bounded by --time-period, not by these dates).
 """
 from __future__ import annotations
 
@@ -30,7 +31,13 @@ def main() -> None:
     parser.add_argument(
         "--end-date",
         default=date.today().isoformat(),
-        help="End date of the 17lands data window (default: today)",
+        help="End date shown in the fixture's display-only dateRange (default: today)",
+    )
+    parser.add_argument(
+        "--time-period",
+        choices=["ALL_TIME", "LAST_TWO_WEEKS"],
+        default="ALL_TIME",
+        help="17lands query window (default: ALL_TIME)",
     )
     args = parser.parse_args()
 
@@ -44,8 +51,8 @@ def main() -> None:
     output = FIXTURES_DIR / f"p0p1-ratings-{set_code.lower()}.json"
 
     client = SeventeenLandsClient()
-    print(f"Fetching {set_code} {FORMAT} card ratings from 17lands...")
-    raw = client.fetch_card_ratings(set_code, FORMAT)
+    print(f"Fetching {set_code} {FORMAT} card ratings from 17lands ({args.time_period})...")
+    raw = client.fetch_card_ratings(set_code, FORMAT, time_period=args.time_period)
     print(f"Received {len(raw)} card rows")
 
     cards = []

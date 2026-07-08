@@ -21,6 +21,7 @@ export function SetFilterDropdown({
   searchPlaceholder = "Search sets or codes…",
   className,
   triggerClassName,
+  subtext,
 }: {
   label?: string;
   value: string;
@@ -32,15 +33,21 @@ export function SetFilterDropdown({
   searchPlaceholder?: string;
   className?: string;
   triggerClassName?: string;
+  subtext?: string;
 }) {
   const byValue = new Map(options.map((option) => [option.value, option]));
   const glyphFor = (code: string) => byValue.get(code)?.glyphCode ?? code;
 
   const renderValue = (option: FilterOption) =>
     option.value ? (
-      <span className="flex items-center gap-2 truncate">
-        <SetGlyph code={glyphFor(option.value)} size={20} />
-        {option.value}
+      <span className="flex w-full items-center gap-2 min-w-0">
+        <SetGlyph code={glyphFor(option.value)} size={20} className="text-white shrink-0" />
+        <span className="truncate">{option.value}</span>
+        {subtext && (
+          <span className="ml-auto shrink-0 pl-2 mono text-[9px] tracking-normal text-muted whitespace-nowrap">
+            {subtext}
+          </span>
+        )}
       </span>
     ) : (
       option.label

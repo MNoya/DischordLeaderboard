@@ -1,7 +1,7 @@
 // The frontend's single source of truth for values the backend owns elsewhere — keep them in sync when they change.
 
 // Active set fallback when the live set isn't yet known from the network
-export const ACTIVE_SET_CODE = "SOS";
+export const ACTIVE_SET_CODE = "MSH";
 
 // Site name and the title separator. functions/_middleware.ts imports these too, so the
 // browser tab (set by DocumentTitle) and the link-unfurl title render the exact same string.
@@ -10,6 +10,11 @@ export const TITLE_SEPARATOR = " | ";
 
 // LLU community Discord guild
 export const DISCORD_GUILD_ID = "775371722065051658";
+
+// Player identity (slug/name/avatar) lives across these views because public_player is
+// 17lands-stats-gated; pod-only and self-reported players only appear in the later ones.
+// Ordered by priority — first hit wins. Walked by fetchPlayerIdentity and the avatar proxy.
+export const IDENTITY_VIEWS = ["public_player", "public_self_reported_events", "public_pod_scoring"] as const;
 
 // 17Lands tier-list ids per set, taken from a tier list's share link
 // (https://www.17lands.com/tier_list/<uid>). Add one as each set rotates in.

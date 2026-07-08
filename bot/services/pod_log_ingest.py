@@ -2,9 +2,7 @@
 
 Packs the log into the compact artifact build_compact emits, stores it on
 pod_draft_events.draft_log (JSONB) and pod_draft_events.draft_log_gz, reconciles
-pod_draft_participants.draftmancer_name to the canonical Draftmancer userName, applies seat indexes,
-and (when MPT_API_KEY is set) submits each non-bot seat to MagicProTools, stashing the URL on
-pod_draft_participants.draft_log_url.
+pod_draft_participants.draftmancer_name to the canonical Draftmancer userName, and applies seat indexes.
 
 Idempotent — re-ingesting overwrites the stored log and re-aligns names from the same log. Shared by
 the CLI script (bot.scripts.ingest_pod_draft_log) and /pod-backfill.
@@ -18,11 +16,9 @@ from dataclasses import dataclass
 
 from sqlalchemy import select
 
-from bot.config import settings
 from bot.database import SessionLocal
 from bot.models import Player, PodDraftEvent, PodDraftParticipant
 from bot.scripts.draftmancer_log import build_compact
-from bot.services.magicprotools import submit_to_api
 from bot.services.pod_draft_manager import apply_seat_indexes
 
 
@@ -40,19 +36,6 @@ class IngestSummary:
     stored_bytes: int
     renames: tuple[str, ...]
     arena_fixes: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class MptSummary:
-    results: tuple[tuple[str, str | None], ...]
-
-    @property
-    def submitted(self) -> int:
-        return sum(1 for _, url in self.results if url)
-
-    @property
-    def failed(self) -> int:
-        return sum(1 for _, url in self.results if not url)
 
 
 def log_user_names(draft_log: dict) -> list[str]:
@@ -120,38 +103,6 @@ def ingest_draft_log_sync(event_id: str, draft_log: dict) -> IngestSummary | Non
         arena_fixed=arena_fixed, unmatched=(), stored_bytes=stored_bytes,
         renames=tuple(renames), arena_fixes=tuple(arena_fixes),
     )
-
-
-async def submit_log_to_mpt(event_id: str, draft_log: dict) -> MptSummary | None:
-    """Submit each non-bot seat to MagicProTools and stash the URL on its participant row. Returns
-    None when MPT_API_KEY isn't configured."""
-    if settings.mpt_api_key is None:
-        return None
-    seats = [
-        (uid, ud) for uid, ud in draft_log["users"].items()
-        if isinstance(ud, dict)
-        and ud.get("userName") and not ud.get("isBot")
-    ]
-    results: list[tuple[str, str | None]] = []
-    for user_id, user_data in seats:
-        user_name = user_data["userName"]
-        url = await submit_to_api(user_id, draft_log)
-        if url:
-            with SessionLocal() as session:
-                rows = session.execute(
-                    select(PodDraftParticipant).where(
-                        PodDraftParticipant.event_id == event_id,
-                        PodDraftParticipant.draftmancer_name == user_name,
-                    )
-                ).scalars().all()
-                if not rows:
-                    log.warning(f"MPT URL for {user_name!r} discarded — no participant row in event {event_id}")
-                    url = None
-                for row in rows:
-                    row.draft_log_url = url
-                session.commit()
-        results.append((user_name, url))
-    return MptSummary(results=tuple(results))
 
 
 def _arena_name_needs_fix(current: str | None, log_name: str) -> bool:

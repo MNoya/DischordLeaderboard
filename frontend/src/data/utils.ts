@@ -109,15 +109,12 @@ export function weekOfSet(set: SetSummary | undefined, today: Date = new Date())
   return `WEEK ${elapsedWeeks} OF ${totalWeeks}`;
 }
 
-// Most-recent `lastCalculatedAt` across rows, rendered as a relative-time
-// string ("5M AGO", "2H AGO", "NOW") for the "UPDATED" badge.
-export function lastUpdated(rows: ReadonlyArray<{ lastCalculatedAt: string }> | undefined): string {
-  if (!rows || rows.length === 0) return "—";
-  const latest = rows.reduce(
-    (m, r) => (r.lastCalculatedAt > m ? r.lastCalculatedAt : m),
-    rows[0].lastCalculatedAt
-  );
-  const rel = relativeTime(latest);
+// Renders an ISO timestamp as a relative-time string ("5M AGO", "2H AGO", "NOW")
+// for the "UPDATED" badge. Driven by the set's full-refresh tick, not a per-player
+// max — a single join no longer makes the board read as freshly updated.
+export function lastUpdated(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const rel = relativeTime(iso);
   return rel === "now" ? "NOW" : `${rel.toUpperCase()} AGO`;
 }
 
@@ -254,7 +251,7 @@ export function lcqCashPrize(event: { format: string; wins: number; losses: numb
 }
 
 export function stripDiscriminator(name: string): string {
-  return name.replace(/#\d+$/, "");
+  return name.replace(/#\d+/, "").trim();
 }
 
 export function podDiscordName(p: {
@@ -270,13 +267,17 @@ export function podSeatName(p: { draftmancerName: string | null; displayName: st
 
 export function cleanPodEventName(name: string, setCode: string): string {
   const escaped = setCode.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const cleaned = name
-    .replace(new RegExp(`^${escaped}\\s+`, "i"), "")
-    .replace(/\s+-\s+.+$/, "")
-    .trim();
+  let cleaned = name.replace(/\s+[-–]\s+.+$/, "").trim();
   // Cube events lead with an organizer name and the format label; keep only what follows "Cube"
   const afterCube = cleaned.replace(/^.*\bcube\b\s*/i, "").trim();
-  return afterCube || cleaned;
+  if (afterCube && afterCube !== cleaned) {
+    cleaned = afterCube;
+  }
+  const withoutCode = cleaned
+    .replace(new RegExp(`\\b${escaped}\\b`, "gi"), "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  return withoutCode || cleaned;
 }
 
 // Set codes are uppercase in the data; URLs are case-insensitive.
@@ -316,10 +317,21 @@ export function cubeSeasonLabel(code: string): string | null {
 // The leaderboard is a lowercase section; set codes stay uppercase under it (/leaderboard/SOS).
 export const LEADERBOARD_BASE = "/leaderboard";
 
+// Player profiles live at their own top-level section, set-scoped as /player/<slug>/<SET>.
+export const PLAYER_BASE = "/player";
+
 export function leaderboardPath(setCode?: string): string {
   return setCode ? `${LEADERBOARD_BASE}/${setCode}` : LEADERBOARD_BASE;
 }
 
 export function playerPath(slug: string, setCode: string): string {
-  return `${LEADERBOARD_BASE}/${setCode}/player/${slug}`;
+  return `${PLAYER_BASE}/${slug}/${setCode}`;
+}
+
+// Query string for a profile link: keeps the format/colors filter, drops the leaderboard-only sort
+export function profileSearch(params: URLSearchParams | undefined): string {
+  const search = new URLSearchParams(params);
+  search.delete("sort");
+  search.delete("dir");
+  return search.toString();
 }

@@ -5,6 +5,7 @@ import {
   ChevronDown as LR_ChevronDown,
   ChevronLeft as LR_ChevronLeft,
   ChevronRight as LR_ChevronRight,
+  ChevronsRight as LR_ChevronsRight,
   Clock as LR_Clock,
   ExternalLink as LR_ExternalLink,
   Globe as LR_Globe,
@@ -19,6 +20,7 @@ import { MdPause as R_MdPause } from "react-icons/md";
 import { TbCards as R_TbCards } from "react-icons/tb";
 import { LuScrollText as R_LuScrollText } from "react-icons/lu";
 import { GiRoundTable as R_GiRoundTable } from "react-icons/gi";
+import { GoSidebarCollapse as R_GoSidebarCollapse } from "react-icons/go";
 import {
   BsAsterisk as R_BsAsterisk,
   BsPaletteFill as R_BsPaletteFill,
@@ -49,6 +51,7 @@ export const ArrowUp = withShrink(LR_ArrowUp);
 export const ChevronDown = withShrink(LR_ChevronDown);
 export const ChevronLeft = withShrink(LR_ChevronLeft);
 export const ChevronRight = withShrink(LR_ChevronRight);
+export const ChevronsRight = withShrink(LR_ChevronsRight);
 export const Clock = withShrink(LR_Clock);
 export const ExternalLink = withShrink(LR_ExternalLink);
 export const Globe = withShrink(LR_Globe);
@@ -77,6 +80,7 @@ export function Play({ size = 24, className, ...rest }: { size?: number } & Reac
 export const TbCards = withShrink(R_TbCards);
 export const LuScrollText = withShrink(R_LuScrollText);
 export const GiRoundTable = withShrink(R_GiRoundTable);
+export const GoSidebarCollapse = withShrink(R_GoSidebarCollapse);
 export const BsAsterisk = withShrink(R_BsAsterisk);
 export const BsPaletteFill = withShrink(R_BsPaletteFill);
 export const SiDiscord = withShrink(R_SiDiscord);

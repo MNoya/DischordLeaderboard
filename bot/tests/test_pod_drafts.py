@@ -20,7 +20,6 @@ from bot.services.pod_drafts import (
     record_event,
     record_match,
     set_participant_deck_colors,
-    set_participant_review_choice,
     update_event_time_if_changed,
     upsert_participant,
 )
@@ -499,7 +498,7 @@ def test_set_participant_deck_colors_saves(session):
     _seed_pod_for_deck_color_tests(session)
     ok = set_participant_deck_colors(session, "thread-42", "42", "WU")
     assert ok is True
-    in_pod, color, _ = get_participant_deck_state(session, "thread-42", "42")
+    in_pod, color = get_participant_deck_state(session, "thread-42", "42")
     assert in_pod is True
     assert color == "WU"
 
@@ -512,76 +511,55 @@ def test_set_participant_deck_colors_rejects_non_participant(session):
 
 def test_get_participant_deck_state_signals_not_in_pod(session):
     _seed_pod_for_deck_color_tests(session)
-    in_pod, color, wants_review = get_participant_deck_state(session, "thread-42", "99")
+    in_pod, color = get_participant_deck_state(session, "thread-42", "99")
     assert in_pod is False
     assert color is None
-    assert wants_review is None
 
 
-def test_participant_dm_info_returns_linked_player_data(session):
+def test_participant_dm_info_prefers_server_nickname_and_session_handle(session):
     event_id, _ = _seed_pod_for_deck_color_tests(session)
-    # Simulate Alice joining Draftmancer under a specific handle (the session-specific name)
     participant = session.execute(
         select(PodDraftParticipant)
         .where(PodDraftParticipant.event_id == event_id, PodDraftParticipant.display_name == "Alice")
     ).scalar_one()
     participant.draftmancer_name = "Alice#1234"
-    # Also set a different Player.arena_name to confirm the DM info uses the Draftmancer handle,
-    # not the player's primary alias
+    participant.display_name = "Alice#1234"
     player = session.execute(select(Player).where(Player.discord_id == "42")).scalar_one()
+    player.display_name = "AliceServerNick"
     player.arena_name = "AliceMain#9999"
     session.flush()
 
     info = participant_dm_info(session, event_id)
-    assert "alice" in info
+
     alice = info["alice"]
     assert alice.discord_id == "42"
-    assert alice.display_name == "Alice"
+    assert alice.display_name == "AliceServerNick"
     assert alice.arena_name == "Alice#1234"
+
+
+def test_participant_dm_info_strips_arena_suffix_from_unlinked_fallback(session):
+    event_id, _ = _seed_pod_for_deck_color_tests(session)
+    bob = session.execute(
+        select(PodDraftParticipant)
+        .where(PodDraftParticipant.event_id == event_id, PodDraftParticipant.display_name == "Bob")
+    ).scalar_one()
+    bob.player_id = None
+    bob.draftmancer_name = "Bob#4242"
+    bob.display_name = "Bob#4242"
+    session.flush()
+
+    info = participant_dm_info(session, event_id)
+
+    assert info["bob"].discord_id is None
+    assert info["bob"].display_name == "Bob"
 
 
 def test_set_participant_deck_colors_overwrites_on_resubmit(session):
     _seed_pod_for_deck_color_tests(session)
     set_participant_deck_colors(session, "thread-42", "42", "WU")
     set_participant_deck_colors(session, "thread-42", "42", "URg")
-    _, color, _ = get_participant_deck_state(session, "thread-42", "42")
+    _, color = get_participant_deck_state(session, "thread-42", "42")
     assert color == "URg"
-
-
-def test_get_participant_deck_state_defaults_review_to_none(session):
-    _seed_pod_for_deck_color_tests(session)
-    in_pod, _, wants_review = get_participant_deck_state(session, "thread-42", "42")
-    assert in_pod is True
-    assert wants_review is None
-
-
-def test_set_participant_review_choice_saves(session):
-    _seed_pod_for_deck_color_tests(session)
-    assert set_participant_review_choice(session, "thread-42", "42", True) is True
-    _, _, wants_review = get_participant_deck_state(session, "thread-42", "42")
-    assert wants_review is True
-
-
-def test_set_participant_review_choice_toggles(session):
-    _seed_pod_for_deck_color_tests(session)
-    set_participant_review_choice(session, "thread-42", "42", True)
-    set_participant_review_choice(session, "thread-42", "42", False)
-    _, _, wants_review = get_participant_deck_state(session, "thread-42", "42")
-    assert wants_review is False
-
-
-def test_set_participant_review_choice_independent_of_colors(session):
-    _seed_pod_for_deck_color_tests(session)
-    set_participant_deck_colors(session, "thread-42", "42", "WU")
-    set_participant_review_choice(session, "thread-42", "42", True)
-    _, color, wants_review = get_participant_deck_state(session, "thread-42", "42")
-    assert color == "WU"
-    assert wants_review is True
-
-
-def test_set_participant_review_choice_rejects_non_participant(session):
-    _seed_pod_for_deck_color_tests(session)
-    assert set_participant_review_choice(session, "thread-42", "99", True) is False
 
 
 def _draft_log_payload():
@@ -630,6 +608,80 @@ def test_build_compact_decklist_ids_absent_from_card_table_are_dropped():
     compact = build_compact(payload)
 
     assert compact["decks"][0]["main"] == [0, 2]
+
+
+def _share_decklist_manager():
+    from bot.services.pod_draft_manager import PodDraftManager
+
+    mgr = PodDraftManager(object(), "evt", "sid", 123, "SOS", 8)
+    mgr.draft_logs = {"Alice#1": _draft_log_payload()}
+    return mgr
+
+
+def test_share_decklist_patches_seat_in_memory():
+    import asyncio
+
+    mgr = _share_decklist_manager()
+
+    asyncio.run(mgr._on_share_decklist({"userID": "u2", "decklist": {"main": ["d"], "side": []}}))
+
+    assert mgr.draft_logs["Alice#1"]["users"]["u2"]["decklist"] == {"main": ["d"], "side": []}
+
+
+def test_share_decklist_ignored_for_mock_hashes_only_and_unknown_seat():
+    import asyncio
+
+    for kind, payload in [
+        ("mock", {"userID": "u1", "decklist": {"main": ["a"], "side": []}}),
+        ("tournament", {"userID": "u1", "decklist": {"hashes": {"main": 42}}}),
+        ("tournament", {"userID": "ghost", "decklist": {"main": ["a"], "side": []}}),
+    ]:
+        mgr = _share_decklist_manager()
+        mgr.kind = kind
+        original = mgr.draft_logs["Alice#1"]["users"]["u1"]["decklist"].copy()
+
+        asyncio.run(mgr._on_share_decklist(payload))
+
+        assert mgr.draft_logs["Alice#1"]["users"]["u1"]["decklist"] == original
+
+
+def test_persist_decklists_from_log_writes_when_log_present_else_skips():
+    mgr = _share_decklist_manager()
+    persisted: list[dict] = []
+    mgr._persist_draft_log_gz = lambda payload: persisted.append(payload)
+
+    assert mgr.persist_decklists_from_log() is True
+    assert len(persisted) == 1
+
+    mgr.draft_logs = {}
+    assert mgr.persist_decklists_from_log() is False
+    assert len(persisted) == 1
+
+
+def test_persist_round_entry_artifacts_dispatches_seats_then_decklists_by_round():
+    import asyncio
+
+    from bot.services.pod_tournament import persist_round_entry_artifacts
+
+    class _StubManager:
+        def __init__(self):
+            self.calls = []
+
+        def persist_seat_indexes_from_log(self):
+            self.calls.append("seats")
+
+        def persist_decklists_from_log(self):
+            self.calls.append("decks")
+
+    round1, round2, round3 = _StubManager(), _StubManager(), _StubManager()
+
+    asyncio.run(persist_round_entry_artifacts(round1, 1))
+    asyncio.run(persist_round_entry_artifacts(round2, 2))
+    asyncio.run(persist_round_entry_artifacts(round3, 3))
+
+    assert round1.calls == ["seats"]
+    assert round2.calls == ["decks"]
+    assert round3.calls == []
 
 
 @pytest.mark.parametrize(

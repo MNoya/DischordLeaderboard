@@ -14,6 +14,7 @@ import type {
   LeaderboardRow,
   PlayerDraftEvent,
   PlayerFormatBreakdown,
+  SelfReportedEvent,
   SetSummary,
 } from "../types/leaderboard";
 
@@ -40,3 +41,10 @@ export const adaptFormatBreakdown = (row: SnakeRow): PlayerFormatBreakdown => {
 };
 export const adaptDraftEvent = (row: SnakeRow): PlayerDraftEvent =>
   camelify(row);
+export const adaptSelfReportedEvent = (row: SnakeRow): SelfReportedEvent => {
+  const camel = camelify<SelfReportedEvent>(row);
+  camel.colors = camel.colors ?? "";
+  camel.isTrophy = camel.isTrophy ?? true;
+  camel.format = camel.format ?? null;
+  return camel;
+};

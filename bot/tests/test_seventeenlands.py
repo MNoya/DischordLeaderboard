@@ -195,6 +195,51 @@ def test_fetch_drafts_handles_null_drafts():
 
 
 @responses.activate
+def test_fetch_card_ratings_defaults_to_all_time():
+    responses.add(
+        responses.GET,
+        f"{DEFAULT_BASE_URL}/api/card_data",
+        json={"copyright": "(c) 17Lands", "notes": "", "data": [{"name": "Bolt", "ever_drawn_win_rate": 0.55}]},
+        status=200,
+    )
+
+    cards = _client().fetch_card_ratings("MSH")
+
+    request = responses.calls[0].request
+    assert "event_type=PremierDraft" in request.url
+    assert "time_period=ALL_TIME" in request.url
+    assert cards == [{"name": "Bolt", "ever_drawn_win_rate": 0.55}]
+
+
+@responses.activate
+def test_fetch_card_ratings_forwards_time_period():
+    responses.add(
+        responses.GET,
+        f"{DEFAULT_BASE_URL}/api/card_data",
+        json={"copyright": "(c) 17Lands", "notes": "", "data": [{"name": "Bolt", "ever_drawn_win_rate": 0.55}]},
+        status=200,
+    )
+
+    _client().fetch_card_ratings("MSH", time_period="LAST_TWO_WEEKS")
+
+    request = responses.calls[0].request
+    assert "time_period=LAST_TWO_WEEKS" in request.url
+
+
+@responses.activate
+def test_fetch_card_ratings_rejects_response_without_data_field():
+    responses.add(
+        responses.GET,
+        f"{DEFAULT_BASE_URL}/api/card_data",
+        json=[{"name": "Bolt"}],
+        status=200,
+    )
+
+    with pytest.raises(ValueError, match="missing list 'data' field"):
+        _client().fetch_card_ratings("MSH")
+
+
+@responses.activate
 def test_verify_token_true_for_200_with_drafts_key():
     responses.add(
         responses.GET,

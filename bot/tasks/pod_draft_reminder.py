@@ -5,9 +5,11 @@ best-effort basis, and posts the Draftmancer link in the event thread
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
 from collections.abc import Sequence
+from datetime import datetime, timedelta, timezone
 
 import discord
 from discord.ext import commands
@@ -22,6 +24,7 @@ from bot.services.sesh_parser import parse_sesh_embed
 
 
 REMINDER_LEAD_MIN = 10
+ROSTER_REMINDER_LEAD_MIN = 60
 
 
 log = logging.getLogger(__name__)
@@ -109,6 +112,67 @@ async def fire_reminder(event_id: str, *, early: bool = False) -> None:
     )
 
 
+def schedule_roster_reminder(scheduler, event_id: str, event_time: datetime) -> None:
+    """Arm the early roster reminder. A past lead time is skipped, not caught up — a heads-up that lands
+    minutes before start is noise, and the T-10 lobby reminder already covers the imminent case."""
+    now = datetime.now(timezone.utc)
+    run_at = event_time - timedelta(minutes=ROSTER_REMINDER_LEAD_MIN)
+    job_id = f"pod-roster-{event_id}"
+    if run_at <= now:
+        with contextlib.suppress(Exception):
+            scheduler.remove_job(job_id)
+        return
+    scheduler.add_job(
+        fire_roster_reminder,
+        "date",
+        run_date=run_at,
+        args=[event_id],
+        id=job_id,
+        replace_existing=True,
+    )
+    log.info(f"scheduled roster reminder for event {event_id} at {run_at.isoformat()}")
+
+
+async def fire_roster_reminder(event_id: str) -> None:
+    """Early courtesy reminder posted in the event thread with the confirmed and maybe rosters.
+
+    Leaves socket_status untouched so the authoritative T-10 lobby reminder still fires and the startup
+    sweep still re-arms both on a restart.
+    """
+    if _bot is None:
+        log.error(f"fire_roster_reminder for {event_id}: bot reference is not initialised")
+        return
+
+    with SessionLocal() as session:
+        event = session.get(PodDraftEvent, event_id)
+        if event is None:
+            log.warning(f"fire_roster_reminder: pod_draft_event {event_id} not found")
+            return
+        if event.socket_status != "pending":
+            log.info(f"fire_roster_reminder: event {event_id} is {event.socket_status}; skipping")
+            return
+        thread_id = int(event.discord_thread_id)
+        sesh_message_id = int(event.sesh_message_id)
+        event_time = event.event_time
+        event_name = event.name
+
+    if event_time <= datetime.now(timezone.utc):
+        log.info(f"fire_roster_reminder: event {event_id} already started; skipping")
+        return
+
+    thread = await _fetch_thread(thread_id)
+    if thread is None:
+        log.warning(f"fire_roster_reminder: could not fetch thread {thread_id}")
+        return
+
+    yes, maybe = await _refetch_attendees(sesh_message_id)
+    embed = build_roster_embed(event_name, event_time, yes, maybe)
+    try:
+        await thread.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+    except discord.HTTPException:
+        log.warning(f"fire_roster_reminder: could not post in thread {thread_id}", exc_info=True)
+
+
 async def _fetch_thread(thread_id: int) -> discord.Thread | None:
     try:
         channel = await _bot.fetch_channel(thread_id)
@@ -177,6 +241,25 @@ async def _member_from_mention(guild: discord.Guild | None, token: str) -> disco
         return await guild.fetch_member(user_id)
     except discord.HTTPException:
         return None
+
+
+def build_roster_embed(
+    event_name: str, event_time: datetime, yes: list[str], maybe: list[str],
+) -> discord.Embed:
+    unix = int(event_time.timestamp())
+    embed = discord.Embed(
+        title="🔔 Pod Draft starting soon",
+        description=f"**{event_name}** begins <t:{unix}:R>",
+        color=discord.Color.green(),
+    )
+    embed.add_field(
+        name=f"✅ Yes ({len(yes)})",
+        value="\n".join(yes) if yes else "None yet",
+        inline=True,
+    )
+    if maybe:
+        embed.add_field(name=f"🤷 Maybe ({len(maybe)})", value="\n".join(maybe), inline=True)
+    return embed
 
 
 async def _resolve_mentions(guild: discord.Guild | None, attendees: list[str]) -> str:

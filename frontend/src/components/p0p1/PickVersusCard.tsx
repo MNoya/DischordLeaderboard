@@ -137,6 +137,7 @@ export function VsMetricSide({
   dim = false,
   density,
   solo = false,
+  tight = false,
   imageUrl,
   name,
 }: {
@@ -152,6 +153,8 @@ export function VsMetricSide({
   /** Only meaningful for density="comfortable". Forces an always-row header
    *  and constrains image width on mobile (the agreed/solo card case). */
   solo?: boolean;
+  /** Shrinks the mobile label so it fits a narrow column without truncating (3-column case). */
+  tight?: boolean;
   imageUrl?: string;
   name: string;
 }) {
@@ -199,7 +202,9 @@ export function VsMetricSide({
     : "order-2 flex items-baseline gap-1.5 lg:order-none";
   const labelClass = solo
     ? "shrink-0 whitespace-nowrap font-display text-[13px] leading-none tracking-[0.14em] lg:text-[16px]"
-    : "order-1 truncate font-display text-[13px] leading-none tracking-[0.14em] lg:order-none lg:shrink-0 lg:whitespace-nowrap lg:text-[16px]";
+    : tight
+      ? "order-1 whitespace-nowrap font-display text-[12px] leading-none tracking-[0.08em] lg:order-none lg:shrink-0 lg:text-[16px]"
+      : "order-1 truncate font-display text-[13px] leading-none tracking-[0.14em] lg:order-none lg:shrink-0 lg:whitespace-nowrap lg:text-[16px]";
   const imageClass = `mx-auto max-h-[58vh] w-auto rounded-[10px] ${solo ? "max-w-[200px] lg:max-w-full" : "max-w-full"}`;
 
   return (

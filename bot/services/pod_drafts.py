@@ -21,6 +21,7 @@ from bot.models import (
     PodDraftParticipant,
 )
 from bot.services import pod_format
+from bot.slug import disambiguate_slug, slugify
 
 
 log = logging.getLogger(__name__)
@@ -122,10 +123,87 @@ def normalize_player_name(name: str) -> str:
     return _ARENA_ID_RE.sub("", name.replace("\\", "")).lower()
 
 
+_ARENA_TOKEN_RE = re.compile(r"\s*#[0-9?]+(?=$|\s|\))")
+
+
+def strip_arena_suffix(name: str) -> str:
+    """Display name with the MTG Arena `#12345` discriminator removed, case preserved. For surfaces that
+    show the friendly name (standings, reported results) rather than the pre-match Arena reference.
+    Handles a trailing suffix (`Alice#48087`) and one embedded before a nickname (`Alias#13488 (Bob)`)."""
+    stripped = _ARENA_TOKEN_RE.sub("", name).strip()
+    return stripped or name
+
+
+def has_arena_suffix(name: str) -> bool:
+    return bool(name and _ARENA_TOKEN_RE.search(name))
+
+
 def name_token_match(norm: str, field: str) -> bool:
     """True when norm appears as a standalone word token of field, e.g. `wonderland`
     in `Alice (Wonderland)`."""
     return len(norm) >= 3 and norm in _NAME_TOKEN_RE.split(field.lower())
+
+
+_FUZZY_MIN_LEN = 5
+_SUGGEST_MAX_EDITS = 2
+
+
+def within_one_edit(a: str, b: str) -> bool:
+    """True when `a` and `b` are within a single insertion, deletion, or substitution
+    (Levenshtein distance ≤ 1). Catches the off-by-one Arena handle typo `jineteroj0` vs `jineterojo`."""
+    if a == b:
+        return True
+    if abs(len(a) - len(b)) > 1:
+        return False
+    if len(a) == len(b):
+        return sum(1 for x, y in zip(a, b) if x != y) == 1
+    shorter, longer = (a, b) if len(a) < len(b) else (b, a)
+    i = j = 0
+    edited = False
+    while i < len(shorter) and j < len(longer):
+        if shorter[i] == longer[j]:
+            i += 1
+            j += 1
+        elif edited:
+            return False
+        else:
+            edited = True
+            j += 1
+    return True
+
+
+def levenshtein(a: str, b: str) -> int:
+    """Edit distance between two strings; a transposition counts as two edits."""
+    if a == b:
+        return 0
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cost = 0 if ca == cb else 1
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost))
+        prev = cur
+    return prev[-1]
+
+
+def suggest_lobby_name(declared: str, live_names: Sequence[str]) -> str | None:
+    """Closest live Draftmancer name to `declared` within a few edits, for a did-you-mean hint
+    when /link-arena resolves to no seat in any active lobby. Catches transpositions like
+    `sytlish`→`stylish` that within_one_edit rejects."""
+    norm = normalize_player_name(declared)
+    if len(norm) < _FUZZY_MIN_LEN:
+        return None
+    best_name = None
+    best_dist = _SUGGEST_MAX_EDITS + 1
+    for name in live_names:
+        candidate = normalize_player_name(name)
+        if len(candidate) < _FUZZY_MIN_LEN:
+            continue
+        dist = levenshtein(norm, candidate)
+        if dist < best_dist:
+            best_dist = dist
+            best_name = name
+    return best_name if best_dist <= _SUGGEST_MAX_EDITS else None
 
 
 def _normalized_column(col):
@@ -199,7 +277,95 @@ def player_for_name(session: Session, name: str) -> Player | None:
             if name_token_match(norm, field):
                 return p
 
+    if len(norm) >= _FUZZY_MIN_LEN:
+        near: list[Player] = []
+        for p in candidates:
+            for alias in (p.arena_aliases or []):
+                if len(alias) >= _FUZZY_MIN_LEN and within_one_edit(norm, alias):
+                    near.append(p)
+                    break
+        if len(near) == 1:
+            return near[0]
+
     return None
+
+
+def lobby_match_status(declared: str, player_id: str, live_names: Sequence[str]) -> tuple[bool, str | None]:
+    """Whether a live lobby seat now resolves to `player_id`, plus a did-you-mean name when it doesn't.
+
+    Mirrors the lobby-card classifier: matched is True exactly when some Draftmancer name in
+    `live_names` resolves via player_for_name to the just-linked player. When unmatched, the second
+    element is the closest live name to `declared` (or None), surfaced as a /link-arena typo hint."""
+    with SessionLocal() as session:
+        for name in live_names:
+            player = player_for_name(session, name)
+            if player is not None and player.id == player_id:
+                return True, None
+    return False, suggest_lobby_name(declared, live_names)
+
+
+def attach_arena_alias(
+    session: Session,
+    *,
+    discord_id: str,
+    discord_username: str,
+    display_name: str,
+    avatar_hash: str | None,
+    arena_name: str,
+    overwrite: bool = False,
+) -> tuple[str | None, str | None]:
+    """Find-or-create the active player for `discord_id` and bind `arena_name` as a normalized alias.
+
+    Returns (player_id, collision_player_id). On a clean link collision_player_id is None; when the
+    alias already belongs to a different active player, player_id is None and collision_player_id
+    names the owner. Shared by /link-arena and the lobby claim-seat button so the two never drift.
+
+    Player.arena_name only ever holds a full ArenaID#12345 handle — a bare Draftmancer nickname is
+    stored as an alias only, so it can't shadow the real handle in pairing displays. `overwrite` is
+    the explicit /link-arena path: the user is declaring their handle, so it replaces whatever is
+    stored.
+    """
+    normalized = normalize_player_name(arena_name)
+
+    collision = session.execute(
+        select(Player).where(
+            Player.active.is_(True),
+            Player.discord_id != discord_id,
+            normalized == any_(Player.arena_aliases),
+        ).limit(1)
+    ).scalar_one_or_none()
+    if collision is not None:
+        return None, collision.id
+
+    player = session.execute(
+        select(Player).where(Player.discord_id == discord_id)
+    ).scalar_one_or_none()
+    if player is None:
+        taken_slugs = set(session.execute(select(Player.slug)).scalars().all())
+        player = Player(
+            slug=disambiguate_slug(slugify(display_name), taken_slugs),
+            discord_id=discord_id,
+            discord_username=discord_username,
+            display_name=display_name,
+            avatar_hash=avatar_hash,
+            arena_name=arena_name if full_arena_handle(arena_name) else None,
+            arena_aliases=[normalized],
+            active=True,
+            leaderboard_opt_in=False,
+        )
+        session.add(player)
+    else:
+        if overwrite or (full_arena_handle(arena_name) and not full_arena_handle(player.arena_name)):
+            player.arena_name = arena_name
+        if normalized not in player.arena_aliases:
+            player.arena_aliases = [*player.arena_aliases, normalized]
+    session.flush()
+    return player.id, None
+
+
+def full_arena_handle(name: str | None) -> bool:
+    """Whether `name` is a complete ArenaID#12345 handle rather than a bare Draftmancer nickname."""
+    return "#" in (name or "")
 
 
 def build_mock_session(session: Session, set_code: str) -> tuple[str, int]:
@@ -238,6 +404,87 @@ def record_mock_event(
     session.add(event)
     session.flush()
     return event
+
+
+_TABLE_SUFFIX_RE = re.compile(r"\s+Table\s+\d+\s*$", re.IGNORECASE)
+
+
+def split_base_name(name: str) -> str:
+    """The event name with any trailing ` Table N` stripped, so splitting a Table 2 still bases new
+    tables on the original pod name rather than nesting `... Table 2 Table 3`."""
+    return _TABLE_SUFFIX_RE.sub("", name).strip()
+
+
+def next_table_index(session: Session, base_name: str) -> int:
+    """Next free table number for `base_name`; the original pod is table 1, so the first split is 2."""
+    names = session.execute(
+        select(PodDraftEvent.name).where(PodDraftEvent.name.ilike(f"{base_name} Table %"))
+    ).scalars().all()
+    highest = 1
+    for name in names:
+        match = re.search(r"Table\s+(\d+)\s*$", name or "", re.IGNORECASE)
+        if match:
+            highest = max(highest, int(match.group(1)))
+    return highest + 1
+
+
+def build_split_session(session: Session, source_session_id: str, table_index: int) -> str:
+    """`<source session>-T<index>`, suffixing A/B/… on collision so re-creates never share a lobby."""
+    base = f"{source_session_id}-T{table_index}"
+    taken = set(session.execute(
+        select(PodDraftEvent.draftmancer_session).where(PodDraftEvent.draftmancer_session.like(f"{base}%"))
+    ).scalars().all())
+    if base not in taken:
+        return base
+    for i in range(26):
+        candidate = f"{base}-{chr(ord('A') + i)}"
+        if candidate not in taken:
+            return candidate
+    n = 27
+    while f"{base}-{n}" in taken:
+        n += 1
+    return f"{base}-{n}"
+
+
+def record_split_event(session: Session, *, source_event_id: str) -> PodDraftEvent:
+    """Insert a kind='tournament' overflow table cloned from `source_event_id` — same set, format,
+    pairings, seating, and event date, but its own Draftmancer session and no sesh RSVP. The roster
+    arrives from the new lobby. `discord_thread_id` is a placeholder the caller overwrites once the
+    thread exists (as record_mock_event does)."""
+    source = session.get(PodDraftEvent, source_event_id)
+    if source is None:
+        raise ValueError(f"source pod event {source_event_id} not found")
+    base_name = split_base_name(source.name)
+    table_index = next_table_index(session, base_name)
+    session_id = build_split_session(session, source.draftmancer_session, table_index)
+    event = PodDraftEvent(
+        event_date=source.event_date,
+        event_time=datetime.now(timezone.utc),
+        set_id=source.set_id,
+        set_code=source.set_code,
+        format_label=source.format_label,
+        name=f"{base_name} Table {table_index}",
+        draftmancer_session=session_id,
+        discord_thread_id="pending",
+        sesh_message_id=None,
+        socket_status="pending",
+        kind="tournament",
+        pairing_mode=source.pairing_mode,
+        seating_mode=source.seating_mode,
+    )
+    session.add(event)
+    session.flush()
+    return event
+
+
+def preview_split_target_sync(source_event_id: str) -> tuple[str, int] | None:
+    """(base name, next table index) for the split claim card, or None when the source is gone."""
+    with SessionLocal() as session:
+        source = session.get(PodDraftEvent, source_event_id)
+        if source is None:
+            return None
+        base = split_base_name(source.name)
+        return base, next_table_index(session, base)
 
 
 def draftmancer_url_for(session_id: str) -> str:
@@ -709,15 +956,14 @@ def participants_with_discord_for_event(session: Session, event_id: str) -> list
         select(
             PodDraftParticipant.id,
             PodDraftParticipant.deck_colors,
-            PodDraftParticipant.wants_draft_review,
             Player.discord_id,
         )
         .join(Player, Player.id == PodDraftParticipant.player_id)
         .where(PodDraftParticipant.event_id == event_id)
     ).all()
     return [
-        {"participant_id": pid, "deck_colors": dc, "wants_draft_review": wr, "discord_id": did}
-        for pid, dc, wr, did in rows
+        {"participant_id": pid, "deck_colors": dc, "discord_id": did}
+        for pid, dc, did in rows
         if did
     ]
 
@@ -788,7 +1034,6 @@ def list_champions(session: Session, set_code: str | None = None) -> list[dict]:
             "champion_draftmancer_name": participant.draftmancer_name,
             "player_slug": player.slug if player else None,
             "discord_id": player.discord_id if player else None,
-            "draft_log_url": participant.draft_log_url,
         }
         for event, participant, player in rows
     ]
@@ -796,6 +1041,11 @@ def list_champions(session: Session, set_code: str | None = None) -> list[dict]:
 
 def participant_dm_info(session: Session, event_id: str) -> dict[str, ParticipantDmInfo]:
     """Map normalized draftmancer_name → ParticipantDmInfo for every participant in the event.
+
+    display_name prefers Player.display_name (the resolved Discord server nickname) over the
+    participant row's display_name, which can carry a stale Arena-style handle. Pod DMs have no
+    guild context, so the opponent line renders this name as text rather than a `<@id>` mention —
+    a mention would resolve to the global username instead of the LLU server nickname.
 
     arena_name sources from PodDraftParticipant.draftmancer_name — the handle the player actually
     set in the Draftmancer client for THIS session. For multi-account users this can differ from
@@ -807,18 +1057,20 @@ def participant_dm_info(session: Session, event_id: str) -> dict[str, Participan
             PodDraftParticipant.id,
             PodDraftParticipant.draftmancer_name,
             PodDraftParticipant.display_name,
+            Player.display_name,
             Player.discord_id,
         )
         .outerjoin(Player, Player.id == PodDraftParticipant.player_id)
         .where(PodDraftParticipant.event_id == event_id)
     ).all()
     info: dict[str, ParticipantDmInfo] = {}
-    for participant_id, dm_name, display_name, discord_id in rows:
-        key = normalize_player_name(dm_name) if dm_name else normalize_player_name(display_name)
+    for participant_id, dm_name, participant_dn, player_dn, discord_id in rows:
+        key = normalize_player_name(dm_name) if dm_name else normalize_player_name(participant_dn)
+        raw = player_dn or participant_dn
         info[key] = ParticipantDmInfo(
             participant_id=participant_id,
             discord_id=discord_id,
-            display_name=display_name,
+            display_name=strip_arena_suffix(raw) if raw else raw,
             arena_name=dm_name,
         )
     return info
@@ -944,10 +1196,10 @@ def get_participant_deck_state(
     session: Session,
     discord_thread_id: str,
     discord_id: str,
-) -> tuple[bool, str | None, bool | None]:
-    """Return (is_participant, deck_colors, wants_draft_review). is_participant=False short-circuits the gate."""
+) -> tuple[bool, str | None]:
+    """Return (is_participant, deck_colors). is_participant=False short-circuits the gate."""
     row = session.execute(
-        select(PodDraftParticipant.deck_colors, PodDraftParticipant.wants_draft_review)
+        select(PodDraftParticipant.deck_colors)
         .join(Player, Player.id == PodDraftParticipant.player_id)
         .join(PodDraftEvent, PodDraftEvent.id == PodDraftParticipant.event_id)
         .where(
@@ -956,32 +1208,8 @@ def get_participant_deck_state(
         )
     ).first()
     if row is None:
-        return False, None, None
-    colors, wants_review = row
-    return True, colors, wants_review
-
-
-def set_participant_review_choice(
-    session: Session,
-    discord_thread_id: str,
-    discord_id: str,
-    wants_review: bool,
-) -> bool:
-    """Save wants_draft_review on the (event, player) participant row. Returns False if the user isn't in this pod."""
-    participant = session.execute(
-        select(PodDraftParticipant)
-        .join(Player, Player.id == PodDraftParticipant.player_id)
-        .join(PodDraftEvent, PodDraftEvent.id == PodDraftParticipant.event_id)
-        .where(
-            PodDraftEvent.discord_thread_id == discord_thread_id,
-            Player.discord_id == discord_id,
-        )
-    ).scalar_one_or_none()
-    if participant is None:
-        return False
-    participant.wants_draft_review = wants_review
-    session.flush()
-    return True
+        return False, None
+    return True, row[0]
 
 
 

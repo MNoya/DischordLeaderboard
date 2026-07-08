@@ -1,7 +1,7 @@
 """Add public_p0p1_ballots view
 
 Revision ID: g8h9i0j1k2l3
-Revises: f7g8h9i0j1k2
+Revises: f3a5c7e9b2d4
 Create Date: 2026-06-27
 
 Every voter's (slot, card_name) rows for the P0P1 contest, with a display
@@ -22,7 +22,7 @@ from alembic import op
 
 
 revision: str = "g8h9i0j1k2l3"
-down_revision: Union[str, None] = "f7g8h9i0j1k2"
+down_revision: Union[str, None] = "f3a5c7e9b2d4"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

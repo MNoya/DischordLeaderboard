@@ -16,6 +16,7 @@ import {
   bestPossibleTeam,
   mostPopularTeam,
   buildMidwaySlotVersus,
+  gihwrBounds,
   groupBallotRows,
   rankBallots,
   slotRankGaps,
@@ -674,16 +675,13 @@ export function FinalResults({
     [picksBySlot, crowdTeam, bestTeam, ratingsByName, cardsByName, showYourPicks],
   );
   const pager = useMidwayVersusPager(versusList);
+  const bounds = useMemo(() => gihwrBounds(pickStats, ratingsByName), [pickStats, ratingsByName]);
 
   const onTileOpen = (slotKey: SlotKey) => {
     const idx = SLOTS.findIndex((s) => s.key === slotKey);
     if (idx !== -1) pager.open(idx);
   };
 
-  const crowdCardBySlot = useMemo(
-    () => new Map(crowdTeam.picks.map((p) => [p.slot, p.cardName])) as Map<SlotKey, string>,
-    [crowdTeam.picks],
-  );
   const yourCardBySlot = useMemo(
     () => (showYourPicks ? (picksBySlot as Map<SlotKey, string>) : new Map<SlotKey, string>()),
     [showYourPicks, picksBySlot],
@@ -873,7 +871,7 @@ export function FinalResults({
             <PickGrid entries={bestEntries} cardsByName={cardsByName} onTileOpen={onTileOpen} />
           </div>
 
-          <MidwayVersusModal pager={pager} />
+          <MidwayVersusModal pager={pager} bounds={bounds} />
         </div>
       )}
 
@@ -884,7 +882,8 @@ export function FinalResults({
           cardsByName={cardsByName}
           ratingsByName={ratingsByName}
           yourCardBySlot={yourCardBySlot}
-          crowdCardBySlot={crowdCardBySlot}
+          pickStats={pickStats}
+          bounds={bounds}
         />
       )}
     </div>

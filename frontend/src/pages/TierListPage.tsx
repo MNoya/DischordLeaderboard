@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { AppHeader } from "../components/AppHeader";
+import { ExternalLink } from "../components/Icons";
 import { setGlyphCode } from "../components/Brand";
 import { TierFilterBar } from "../components/TierFilterBar";
 import { TierGrid } from "../components/TierGrid";
@@ -44,7 +45,7 @@ export function TierListPage() {
   const current = setCode?.toUpperCase() ?? tierListSets[0]?.code ?? liveSet;
   const pickSet = (code: string) => navigate(`/tier-list/${code}`);
   const setMeta = tierListSets.find((s) => s.code === current);
-  const { graders, comparison, effectiveUid } = resolveTierList(current);
+  const { uid, graders, comparison, effectiveUid } = resolveTierList(current);
   const glyphCode = setMeta ? setGlyphCode(setMeta) : current;
 
   const { data: tierData, lastUpdated } = useTierList(effectiveUid);
@@ -204,18 +205,50 @@ export function TierListPage() {
           </div>
         )}
 
-        <div className="pt-2 text-right">
+        <div className="flex items-center justify-between gap-3 pt-2">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            {graders.length > 0 && (
+              <div className="flex items-center gap-x-2">
+                <span className="mono text-[10px] md:text-[12px] text-muted">Set Reviews:</span>
+                <div className="flex items-center gap-x-3.5">
+                  {graders.map((grader) => (
+                    <SourceLink key={grader.uid} uid={grader.uid} label={`${grader.name}'s`} />
+                  ))}
+                </div>
+              </div>
+            )}
+            {uid && (
+              <div className="flex items-center gap-x-2">
+                <span className="mono text-[10px] md:text-[12px] text-muted">Live:</span>
+                <SourceLink uid={uid} label="LLU" />
+              </div>
+            )}
+          </div>
           <a
             href={`https://www.17lands.com/tier_list/${effectiveUid ?? ""}`}
             target="_blank"
             rel="noreferrer"
-            className="mono text-[10px] md:text-[12px] text-muted hover:text-green transition-colors no-underline"
+            className="mono text-[10px] md:text-[12px] text-muted hover:text-green transition-colors no-underline whitespace-nowrap"
           >
             Powered by 17Lands
           </a>
         </div>
       </main>
     </div>
+  );
+}
+
+function SourceLink({ uid, label }: { uid: string; label: string }) {
+  return (
+    <a
+      href={`https://www.17lands.com/tier_list/${uid}`}
+      target="_blank"
+      rel="noreferrer"
+      className="mono flex items-center gap-1 text-[10px] md:text-[12px] text-muted hover:text-green transition-colors no-underline"
+    >
+      {label}
+      <ExternalLink size={11} />
+    </a>
   );
 }
 

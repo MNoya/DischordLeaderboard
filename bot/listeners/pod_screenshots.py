@@ -54,7 +54,7 @@ class PodScreenshotListener(commands.Cog):
 
         thread_id = str(message.channel.id)
         discord_id = str(message.author.id)
-        caption = (message.content or "").strip() or None
+        caption = (message.clean_content or "").strip() or None
 
         event_id = await asyncio.to_thread(_capture_sync, thread_id, discord_id, image_url, caption)
         if event_id is None:

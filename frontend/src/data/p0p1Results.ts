@@ -4,7 +4,7 @@
 import type { Card, P0P1BallotRow, P0P1PickStat, SlotKey } from "../types/p0p1";
 import type { SlotDefinition } from "../types/p0p1";
 
-export type ResultsPhase = "none" | "midway" | "final";
+export type P0P1Phase = "voting" | "postVoting" | "midway" | "finalizing" | "final";
 
 export interface CardRating {
   card_name: string;
@@ -33,6 +33,26 @@ export interface TeamResult {
 
 // Cards with fewer than this many GIH games are excluded from scoring and team-building
 export const GIH_SAMPLE_FLOOR = 500;
+
+export interface GihwrBounds {
+  min: number;
+  max: number;
+}
+
+export function gihwrBounds(
+  pickStats: P0P1PickStat[],
+  ratingsByName: Map<string, CardRating>,
+): GihwrBounds {
+  let min = Infinity;
+  let max = -Infinity;
+  for (const stat of pickStats) {
+    const r = ratingsByName.get(stat.cardName);
+    if (!r || r.gih < GIH_SAMPLE_FLOOR || r.gihwr === null) continue;
+    if (r.gihwr < min) min = r.gihwr;
+    if (r.gihwr > max) max = r.gihwr;
+  }
+  return { min: min === Infinity ? 0 : min, max: max === -Infinity ? 0 : max };
+}
 
 export function buildRatingsByName(snapshot: RatingsSnapshot): Map<string, CardRating> {
   return new Map(snapshot.cards.map((c) => [c.card_name, c]));
@@ -220,7 +240,7 @@ export function groupBallotRows(
   return Array.from(byId.values());
 }
 
-// ── Rank all ballots by summed GIHWR (descending). ────────────────────────── Partial ballots sink naturally.
+// Rank all ballots by summed GIHWR (descending). Partial ballots sink naturally.
 // Returns the same ballots array with rank and percentile attached.
 export interface RankedBallot {
   ballotId: number;

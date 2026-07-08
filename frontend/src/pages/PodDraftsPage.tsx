@@ -31,8 +31,8 @@ import { cleanPodEventName, fmtRange, playerPath, podDiscordName, stripDiscrimin
 import { ACTIVE_SET_CODE } from "../data/constants";
 import { podDraftMessageLink } from "../data/site";
 import {
-  useLeaderboard,
   usePodDraftArtifact,
+  usePodEventMatches,
   usePodEventParticipants,
   usePodEvents,
   usePodLeaderboard,
@@ -172,11 +172,6 @@ export function PodDraftsPage({ setCode }: { setCode?: string } = {}) {
 
   const { data: events } = usePodEvents(activeSet);
   const { data: leaderboard } = usePodLeaderboard(activeSet);
-  const { data: profileBoard } = useLeaderboard(activeSet);
-  const linkableSlugs = useMemo(
-    () => new Set((profileBoard ?? []).map((r) => r.slug)),
-    [profileBoard],
-  );
   const setMeta = availableSets.find((s) => s.code === activeSet);
 
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT_NOSCORE);
@@ -261,9 +256,7 @@ export function PodDraftsPage({ setCode }: { setCode?: string } = {}) {
               sort={sort}
               onSort={onSort}
               emptyMessage={`No player stats yet for ${activeSet}.`}
-              playerHref={(row) =>
-                linkableSlugs.has(row.slug) ? playerPath(row.slug, activeSet) : null
-              }
+              playerHref={(row) => playerPath(row.slug, activeSet)}
             />
           </section>
 
@@ -291,10 +284,16 @@ export function PodDraftsPage({ setCode }: { setCode?: string } = {}) {
                     )}
                   </>
                 )}
-                {mock.length > 0 && <MockDraftsBlock events={mock} />}
+                {!isMobile && mock.length > 0 && <MockDraftsBlock events={mock} />}
               </>
             )}
           </section>
+
+          {isMobile && mock.length > 0 && (
+            <section className="order-3">
+              <MockDraftsBlock events={mock} />
+            </section>
+          )}
         </div>
       </main>
 
@@ -421,7 +420,7 @@ function MockEventRow({ event, index }: { event: PodEventSummary; index: number 
       </div>
       <div className="flex items-center pr-3 md:pr-4 pl-2 shrink-0 self-center gap-3">
         <span className="hidden lg:inline text-muted text-[13px] font-body">{BREAKDOWN_CAPTION}</span>
-        <ChamferedButton>
+        <ChamferedButton className="!pt-[11px] !pb-[3px]">
           <span className="inline-flex items-center gap-2">
             <GiRoundTable size={30} className="-my-[6px]" />
             VIEW BREAKDOWN
@@ -593,6 +592,15 @@ function EventRowBody({ event, nowMs }: { event: PodEventSummary; nowMs: number 
   const startMs = new Date(event.eventTime).getTime();
   const inProgress = !hasChamp && startMs <= nowMs;
   const isUpcoming = !hasChamp && startMs > nowMs;
+  const { data: matches } = usePodEventMatches(inProgress ? event.eventId : undefined);
+  const currentRound = useMemo(() => {
+    if (!matches || matches.length === 0) return null;
+    let latest = 1;
+    for (const m of matches) {
+      if (m.round > latest) latest = m.round;
+    }
+    return Math.min(latest, event.totalRounds);
+  }, [matches, event.totalRounds]);
   return (
     <div
       className={cn(
@@ -629,12 +637,13 @@ function EventRowBody({ event, nowMs }: { event: PodEventSummary; nowMs: number 
         </div>
       )}
       {inProgress && (
-        <span
-          className="font-display text-muted tracking-[0.18em] shrink-0"
-          style={{ fontSize: 10 }}
+        <div
+          className="flex items-center gap-2.5 shrink-0 font-display tracking-[0.18em]"
+          style={{ fontSize: 13 }}
         >
-          IN PROGRESS
-        </span>
+          {currentRound != null && <span className="text-text">ROUND {currentRound}</span>}
+          <span className="text-muted">IN PROGRESS</span>
+        </div>
       )}
       <div className="hidden lg:block flex-1" />
     </div>
@@ -661,16 +670,10 @@ const STANDING_COLS_CLASS =
   "[grid-template-columns:28px_1fr_60px_50px_38px] " +
   "lg:[grid-template-columns:44px_1fr_80px_70px_150px]";
 
-const MOBILE_STANDINGS_LIMIT = 4;
+const STANDINGS_LIMIT = 4;
 
 function EventStandings({ event }: { event: PodEventSummary }) {
-  const isMobile = useIsMobile(1024);
   const { data: rows, isLoading } = usePodEventParticipants(event.eventId);
-  const { data: profileBoard } = useLeaderboard(event.setCode);
-  const linkableSlugs = useMemo(
-    () => new Set((profileBoard ?? []).map((r) => r.slug)),
-    [profileBoard],
-  );
   const [deckTarget, setDeckTarget] = useState<PodEventParticipantRow | null>(null);
   const { data: draftArtifact } = usePodDraftArtifact(event.eventId);
   const deckTargetMainboard = useMemo(
@@ -684,7 +687,8 @@ function EventStandings({ event }: { event: PodEventSummary }) {
     if (!rows) return [];
     return [...rows].sort((a, b) => (a.placement ?? 99) - (b.placement ?? 99));
   }, [rows]);
-  const visible = isMobile ? sorted.slice(0, MOBILE_STANDINGS_LIMIT) : sorted;
+  const visible = sorted.slice(0, STANDINGS_LIMIT);
+  const hiddenCount = sorted.length - visible.length;
   const cycleDeck = (direction: number) => {
     if (!deckTarget || visible.length === 0) return;
     const index = visible.indexOf(deckTarget);
@@ -696,32 +700,38 @@ function EventStandings({ event }: { event: PodEventSummary }) {
       <div className="border-t border-dashed border-border2">
         <div className="flex flex-col gap-[1px] pb-[1px] bg-bg">
           {isLoading
-            ? Array.from({ length: 8 }).map((_, i) => <StandingRowSkeleton key={i} />)
+            ? Array.from({ length: STANDINGS_LIMIT }).map((_, i) => <StandingRowSkeleton key={i} />)
             : visible.map((p) => (
                 <StandingRow
                   key={`${p.eventId}-${p.displayName}`}
                   p={p}
-                  profileHref={
-                    p.playerSlug && linkableSlugs.has(p.playerSlug)
-                      ? playerPath(p.playerSlug, event.setCode)
-                      : null
-                  }
+                  profileHref={p.playerSlug ? playerPath(p.playerSlug, event.setCode) : null}
+                  logHref={draftArtifact ? `/pods/${event.slug}/${p.playerSlug ?? p.seatIndex}` : null}
                   onShowDeck={p.deckScreenshotUrl ? () => setDeckTarget(p) : undefined}
                 />
               ))}
         </div>
         <Link to={`/pods/${event.slug}`} className="block no-underline">
-          <div className="flex justify-end items-center gap-4 px-3 md:px-4 py-3 bg-surface hover:bg-green/5 transition-colors cursor-pointer">
-            <span className="text-muted text-[13px] font-body">
-              {BREAKDOWN_CAPTION}
-            </span>
-            <ChamferedButton>
-              <span className="inline-flex items-center gap-2">
-                <GiRoundTable size={30} className="-my-[6px]" />
-                VIEW BREAKDOWN
-                 <ArrowRight size={14} />
+          <div className="flex justify-between items-center gap-4 pl-2 pr-3 md:pr-4 py-3 bg-surface hover:bg-green/5 transition-colors cursor-pointer">
+            {hiddenCount > 0 ? (
+              <span className="font-display text-muted tracking-[0.14em] leading-none pl-10 lg:pl-16 whitespace-nowrap" style={{ fontSize: 14 }}>
+                +{hiddenCount} MORE {hiddenCount === 1 ? "PLAYER" : "PLAYERS"}
               </span>
-            </ChamferedButton>
+            ) : (
+              <span />
+            )}
+            <div className="flex items-center gap-4">
+              <span className="hidden lg:inline text-muted text-[13px] font-body">
+                {BREAKDOWN_CAPTION}
+              </span>
+              <ChamferedButton className="!pt-[11px] !pb-[3px]">
+                <span className="inline-flex items-center gap-2 whitespace-nowrap">
+                  <GiRoundTable size={30} className="-my-[6px]" />
+                  VIEW BREAKDOWN
+                  <ArrowRight size={14} />
+                </span>
+              </ChamferedButton>
+            </div>
           </div>
         </Link>
       </div>
@@ -736,8 +746,10 @@ function EventStandings({ event }: { event: PodEventSummary }) {
             deckScreenshotCaption: deckTarget.deckScreenshotCaption,
             mainboard: deckTargetMainboard,
             record: deckTarget.record,
-            draftLogUrl: deckTarget.draftLogUrl,
           }}
+          draftLogHref={
+            draftArtifact ? `/pods/${event.slug}/${deckTarget.playerSlug ?? deckTarget.seatIndex}` : null
+          }
           breakdownHref={`/pods/${event.slug}?player=${encodeURIComponent(podDiscordName(deckTarget))}`}
           onClose={() => setDeckTarget(null)}
           onPrev={() => cycleDeck(-1)}
@@ -751,21 +763,24 @@ function EventStandings({ event }: { event: PodEventSummary }) {
 function StandingRow({
   p,
   profileHref,
+  logHref,
   onShowDeck,
 }: {
   p: PodEventParticipantRow;
   profileHref?: string | null;
+  logHref?: string | null;
   onShowDeck?: () => void;
 }) {
+  const navigate = useNavigate();
   const wins = p.record ? Number(p.record.split("-")[0] || 0) : 0;
   const losses = p.record ? Number(p.record.split("-")[1] || 0) : 0;
   const name = podDiscordName(p);
   const hasDeck = !!onShowDeck;
-  const draftLogUrl = !hasDeck ? p.draftLogUrl : null;
-  const interactive = hasDeck || !!draftLogUrl;
+  const draftLog = !hasDeck ? (logHref ?? null) : null;
+  const interactive = hasDeck || !!draftLog;
   const handleRowClick = () => {
     if (onShowDeck) onShowDeck();
-    else if (draftLogUrl) window.open(draftLogUrl, "_blank", "noopener,noreferrer");
+    else if (draftLog) navigate(draftLog);
   };
   return (
     <div
@@ -830,11 +845,9 @@ function StandingRow({
           </span>
           <TbCards size={17} aria-hidden="true" className="transition-colors" />
         </button>
-      ) : draftLogUrl ? (
-        <a
-          href={draftLogUrl}
-          target="_blank"
-          rel="noreferrer noopener"
+      ) : draftLog ? (
+        <Link
+          to={draftLog}
           onClick={(e) => e.stopPropagation()}
           className="group/action inline-flex items-center justify-center gap-2 bg-bg border border-border text-text hover:border-green/60 hover:bg-green/10 hover:text-green group-hover/row:border-green/60 group-hover/row:bg-green/10 group-hover/row:text-green peer-hover/name:!border-border peer-hover/name:!bg-bg peer-hover/name:!text-text transition-colors px-1.5 lg:px-3 no-underline whitespace-nowrap"
           style={{ height: 34 }}
@@ -846,7 +859,7 @@ function StandingRow({
             DRAFT LOG
           </span>
           <LuScrollText size={16} aria-hidden="true" className="transition-colors" />
-        </a>
+        </Link>
       ) : (
         <span />
       )}
@@ -1042,9 +1055,9 @@ function SetHero({
             {setMeta?.name?.toUpperCase() ?? ""}
           </span>
         </div>
-        <div className="mono text-[11px] text-muted mt-1">
-          {setMeta && fmtRange(setMeta.startDate, setMeta.endDate)}
-          {week && ` · ${week}`}
+        <div className="mono text-[11px] text-muted mt-1 flex justify-between gap-4">
+          {setMeta && <span>{fmtRange(setMeta.startDate, setMeta.endDate)}</span>}
+          {week && <span>{week}</span>}
         </div>
       </div>
       <div className="flex-1" />

@@ -10,18 +10,22 @@ import {
   P0P1_VOTING_DEADLINE as VOTING_DEADLINE,
   P0P1_SCORING_DATE as SCORING_DATE,
 } from "../../data/p0p1Slots";
+import type { P0P1Phase, RatingsSnapshot } from "../../data/p0p1Results";
 
 export function P0P1Hero({
   cta,
   innerRef,
   belowIntro,
-  isPastDeadline,
+  phase,
+  dateRange,
 }: {
   cta: ReactNode;
   innerRef?: Ref<HTMLDivElement>;
   belowIntro?: ReactNode;
-  isPastDeadline?: boolean;
+  phase: P0P1Phase;
+  dateRange?: RatingsSnapshot["dateRange"];
 }) {
+  const isPastDeadline = phase !== "voting";
   return (
     <div ref={innerRef} className="sticky top-0 z-30 px-10 py-5 border-b border-border bg-surface flex flex-wrap items-center gap-x-8 gap-y-3">
       <SetGlyph code={SET_CODE} size={84} />
@@ -34,7 +38,7 @@ export function P0P1Hero({
           <span className="font-display text-[22px] text-muted tracking-[0.06em]">{P0P1_SET_NAME.toUpperCase()}</span>
         </div>
         <div className="mono text-[11px] mt-1">
-          <P0P1Countdown deadline={VOTING_DEADLINE} scoringDate={SCORING_DATE} size={11} pastDeadline={isPastDeadline} />
+          <P0P1Countdown deadline={VOTING_DEADLINE} scoringDate={SCORING_DATE} size={11} phase={phase} />
         </div>
         {isPastDeadline && (
           <div className="w-full mt-2">
@@ -44,7 +48,7 @@ export function P0P1Hero({
       </div>
       <div className="flex-1 min-w-0 self-stretch flex flex-col items-center justify-center gap-y-3">
         <p className="max-w-[580px] text-center text-subtle text-[14px] leading-[1.55]">
-          <P0P1IntroText isPastDeadline={isPastDeadline} multiline />
+          <P0P1IntroText phase={phase} dateRange={dateRange} multiline />
         </p>
         {belowIntro}
       </div>

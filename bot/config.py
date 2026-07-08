@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     discord_guild_id: int | None = None
     discord_admin_role_id: int | None = None
     discord_botlog_channel_id: int | None = None
+    feedback_channel_id: int = 1504825374188507156
     public_site_url: str = "https://limitedlevelups.com"
     auto_refresh_enabled: bool = True
 
@@ -29,15 +30,21 @@ class Settings(BaseSettings):
     def leaderboard_url(self) -> str:
         return f"{self.public_site_url.rstrip('/')}/leaderboard"
 
+    @property
+    def player_base_url(self) -> str:
+        return f"{self.public_site_url.rstrip('/')}/player"
+
     scribe_cache_bust: bool = False
     format_schedule_enabled: bool = True
 
     pod_draft_channel_id: int = 1028072146645295125
     pod_draft_target_players: int = 8
+    pod_draft_voice_channel_name: str = "Pod General"
     pod_schedule_enabled: bool = True
     pod_draft_session_prefix: str = "LLU"
     pod_draft_max_players: int = 10
     pod_draft_min_ready_players: int = 6
+    pod_split_open_threshold: int = 6
     pod_draft_pick_timer: int = 60
     pod_draft_bots: int = 0
     pod_draft_fallback_tz: str = "America/New_York"
@@ -46,7 +53,6 @@ class Settings(BaseSettings):
     sesh_bot_id: int = 616754792965865495
     draftmancer_ws_url: str = f"wss://{DRAFTMANCER_HOST}"
     draftmancer_web_url: str = f"https://{DRAFTMANCER_HOST}"
-    mpt_api_key: SecretStr | None = None
 
     youtube_api_key: SecretStr | None = None
     youtube_channel_handle: str = "limitedlevel-ups"

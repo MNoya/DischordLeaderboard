@@ -13,6 +13,7 @@ a real ``end_date`` is filled in when a successor set is added. Keep an anticipa
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -79,7 +80,18 @@ ALL_SETS: tuple[SetSeed, ...] = (
     SetSeed("TMT", "Teenage Mutant Ninja Turtles", date(2026, 3, 3), date(2026, 4, 20)),
     SetSeed("SOS", "Secrets of Strixhaven", date(2026, 4, 21), date(2026, 6, 22)),
     SetSeed("MSH", "Marvel Super Heroes", date(2026, 6, 23), date(2026, 8, 10)),
+    SetSeed("HOB", "The Hobbit", date(2026, 8, 11), date(2026, 9, 28)),
+    SetSeed("FRA", "Reality Fracture", date(2026, 9, 29), date(2026, 11, 9)),
+    SetSeed("TRE", "Star Trek", date(2026, 11, 10), date(2027, 1, 4)),
 )
+
+# MTGO-only flashback drafts, never on Arena; kept out of ALL_SETS so they never rotate or score
+MTGO_FLASHBACK_SETS: dict[str, str] = {
+    "IPA": "Invasion Block",
+    "USG": "Urza Block",
+    "MH1": "Modern Horizons",
+    "MH2": "Modern Horizons 2",
+}
 
 
 def active_set_code(when: datetime | None = None) -> str:
@@ -109,6 +121,13 @@ def active_set_code(when: datetime | None = None) -> str:
     return (released or ALL_SETS[-1]).code
 
 
+def released_sets(when: datetime | None = None) -> tuple[SetSeed, ...]:
+    """Sets whose Arena release instant has passed, newest first."""
+    now = when or datetime.now(timezone.utc)
+    released = [seed for seed in ALL_SETS if release_instant(seed.start_date) <= now]
+    return tuple(reversed(released))
+
+
 def upcoming_sets(when: datetime | None = None) -> tuple[SetSeed, ...]:
     """Registered sets that rotate in after the active one — not yet the leaderboard set, but
     draftable for pod/mock previews. Empty once the active set is the newest entry."""
@@ -121,6 +140,10 @@ def upcoming_sets(when: datetime | None = None) -> tuple[SetSeed, ...]:
 
 def is_known_set(code: str) -> bool:
     return any(s.code == code.upper() for s in ALL_SETS)
+
+
+def is_mtgo_flashback_code(code: str) -> bool:
+    return code.upper() in MTGO_FLASHBACK_SETS
 
 
 @dataclass(frozen=True)
@@ -149,6 +172,7 @@ COLLECTOR_BOOSTER_WINDOWS: tuple[CollectorBoosterWindow, ...] = (
     CollectorBoosterWindow("ECL", date(2026, 1, 30), date(2026, 2, 1)),
     CollectorBoosterWindow("TMT", date(2026, 3, 13), date(2026, 3, 15)),
     CollectorBoosterWindow("SOS", date(2026, 4, 30), date(2026, 5, 4)),
+    CollectorBoosterWindow("MSH", date(2026, 6, 30), date(2026, 7, 6)),
 )
 
 # Windows widen by a day each side so a draft finished just before/after the
@@ -194,4 +218,30 @@ def set_name_for(code: str) -> str:
     for s in ALL_SETS:
         if s.code == upper:
             return s.name
-    return upper
+    return MTGO_FLASHBACK_SETS.get(upper, upper)
+
+
+def parse_caption_set_code(caption: str | None) -> str | None:
+    """Set code named in a trophy caption, matching known codes and set names — e.g.
+    'MH1 flashback 3-0' -> 'MH1', "Urza's Saga trophy" -> 'USG'. Codes match only as
+    uppercase-written tokens so ordinary words don't resolve to a code; names match
+    case-insensitively, longest first. Returns None when nothing matches, letting the
+    caller fall back to the active set."""
+    if not caption:
+        return None
+
+    codes = {s.code for s in ALL_SETS} | set(MTGO_FLASHBACK_SETS)
+    for token in re.findall(r"[A-Za-z0-9]+", caption):
+        if token.isupper() and token in codes:
+            return token
+
+    names = {s.name.lower(): s.code for s in ALL_SETS}
+    names.update({name.lower(): code for code, name in MTGO_FLASHBACK_SETS.items()})
+    for name, code in list(names.items()):
+        base = re.sub(r"\s+(block|draft)$", "", name)
+        names.setdefault(base, code)
+    lowered = caption.lower()
+    for name in sorted(names, key=len, reverse=True):
+        if re.search(rf"\b{re.escape(name)}\b", lowered):
+            return names[name]
+    return None

@@ -29,6 +29,7 @@ import type {
   PodSetCode,
   RecentTrophy,
   SetSummary,
+  TrophyLeaderboardRow,
 } from "../types/leaderboard";
 import type { Card, P0P1BallotRow, P0P1Pick, P0P1PickStat, SlotKey } from "../types/p0p1";
 import type { Episode } from "./episodes";
@@ -44,6 +45,9 @@ import {
 
 import { setsFixture } from "./fixtures/sets";
 import { leaderboardSosFixture } from "./fixtures/leaderboard-sos";
+import { selfReportedTrophiesSosFixture } from "./fixtures/self-reported-sos";
+import { mergeSelfReportedTrophies } from "./selfReported";
+import { MTGO_TROPHY_FIXTURE } from "./fixtures/mtgo-trophies";
 import { archetypeSosWrFixture } from "./fixtures/archetype-sos-wr";
 import {
   chonceDraftEvents,
@@ -96,6 +100,8 @@ export const fetchCubeSeasons = (): Promise<CubeSeason[]> => wait([]);
 
 export const fetchDbEpisodes = (): Promise<Episode[]> => wait([]);
 
+export const fetchRecentDbEpisodes = (_limit = 8): Promise<Episode[]> => wait([]);
+
 export const fetchAvailableFormats = (_setCode: string): Promise<string[]> =>
   wait(["Premier", "Trad", "Sealed", "Quick", "LCQ Draft 1", "LCQ Draft 2"]);
 
@@ -109,10 +115,15 @@ export const fetchFormatColorsLeaderboard = (
 // Format filter is applied client-side over the cached rows in the hook layer
 // (per spec §7), so this fetcher returns the full set unfiltered.
 export const fetchLeaderboard = (setCode: string): Promise<LeaderboardRow[]> => {
-  if (setCode === "SOS") return wait(leaderboardSosFixture);
+  if (setCode === "SOS") {
+    return wait(mergeSelfReportedTrophies(leaderboardSosFixture, selfReportedTrophiesSosFixture, "SOS"));
+  }
   // Other sets are scheduled placeholders with no player data yet.
   return wait([]);
 };
+
+export const fetchTrophyLeaderboard = (setCode: string): Promise<TrophyLeaderboardRow[]> =>
+  wait(MTGO_TROPHY_FIXTURE[setCode.toUpperCase()] ?? []);
 
 // ─── colors summary (fixture-side) ──────────────────────────────────────────
 // Aggregates color combos from the curated player draft events. Only the 5
@@ -243,7 +254,10 @@ export const fetchPlayerProfile = (
     events: headline.events,
     wins: headline.wins,
     losses: headline.losses,
+    linked17lands: true,
+    lastCalculatedAt: headline.lastCalculatedAt,
     formatBreakdown: breakdown,
+    selfReportedEvents: [],
   });
 };
 
@@ -291,6 +305,10 @@ export const fetchFormatRecentTrophies = (
   return wait(_allTrophiesFor(setCode).filter((t) => matchesFormatFilter(t.format, format)));
 };
 
+export const fetchAllRecentTrophies = (setCode: string): Promise<RecentTrophy[]> => {
+  return wait(_allTrophiesFor(setCode));
+};
+
 function _allTrophiesFor(setCode: string): RecentTrophy[] {
   if (setCode !== "SOS") return [];
   const out: RecentTrophy[] = [];
@@ -309,6 +327,7 @@ function _allTrophiesFor(setCode: string): RecentTrophy[] {
         wins: e.wins,
         losses: e.losses,
         finishedAt: e.finishedAt,
+        endRank: e.endRank ?? null,
       });
     }
   }

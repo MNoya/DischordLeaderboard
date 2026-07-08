@@ -11,6 +11,18 @@ const MAX_PAGES = 10;
 const API = "https://www.googleapis.com/youtube/v3";
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
+  // ?recent returns just the newest page for the homepage hero; the bare path returns the full archive
+  const url = new URL(context.request.url);
+  const recent = url.searchParams.has("recent");
+
+  // Edge-cache the function's own response, not just upstream fetches, so visitors don't each re-run the crawl
+  const cache = caches.default;
+  const cacheKey = new Request(`${url.origin}/api/youtube${recent ? "?recent" : ""}`);
+  const hit = await cache.match(cacheKey);
+  if (hit) {
+    return hit;
+  }
+
   const key = context.env.YOUTUBE_API_KEY;
   if (!key) {
     return new Response("Missing YOUTUBE_API_KEY", { status: 500 });
@@ -21,15 +33,17 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     return new Response("Could not resolve uploads playlist", { status: 502 });
   }
 
-  const videos = await fetchPlaylist(uploads, key);
+  const videos = await fetchPlaylist(uploads, key, recent ? 1 : MAX_PAGES);
   await attachDurations(videos, key);
-  return new Response(JSON.stringify({ videos }), {
+  const response = new Response(JSON.stringify({ videos }), {
     status: 200,
     headers: {
       "content-type": "application/json",
       "cache-control": "public, max-age=3600",
     },
   });
+  context.waitUntil(cache.put(cacheKey, response.clone()));
+  return response;
 };
 
 async function resolveUploadsPlaylist(key: string): Promise<string | null> {
@@ -42,10 +56,10 @@ async function resolveUploadsPlaylist(key: string): Promise<string | null> {
   return json.items?.[0]?.contentDetails?.relatedPlaylists?.uploads ?? null;
 }
 
-async function fetchPlaylist(playlistId: string, key: string): Promise<NormalizedVideo[]> {
+async function fetchPlaylist(playlistId: string, key: string, maxPages: number): Promise<NormalizedVideo[]> {
   const videos: NormalizedVideo[] = [];
   let pageToken = "";
-  for (let page = 0; page < MAX_PAGES; page += 1) {
+  for (let page = 0; page < maxPages; page += 1) {
     const url =
       `${API}/playlistItems?part=snippet&maxResults=50&playlistId=${playlistId}&key=${key}` +
       (pageToken ? `&pageToken=${pageToken}` : "");

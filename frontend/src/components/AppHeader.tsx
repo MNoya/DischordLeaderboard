@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { ChevronDown, LogOut } from "lucide-react";
+import { ChevronDown, LogOut, User } from "lucide-react";
 import { DiscordIcon } from "./BrandIcons";
 import { ALogo, AWordmark } from "./Brand";
 import { cn } from "../lib/utils";
@@ -8,6 +8,7 @@ import { useIsMobile } from "../lib/use-is-mobile";
 import { useAuth } from "../auth/useAuth";
 import { useP0P1Picks, usePlayerSlugByDiscordId } from "../data/hooks";
 import { P0P1_SET_CODE, P0P1_VOTING_DEADLINE, SLOTS } from "../data/p0p1Slots";
+import { p0p1Now } from "../data/p0p1DevState";
 
 // Top-of-page chrome shared across the whole community site. The brand mark is
 // the Home link; each section is a nav tab.
@@ -16,7 +17,7 @@ const NAV: Array<{ label: string; badge?: (props: { active: boolean }) => JSX.El
   { label: "P0 P1", badge: P0P1Badge, to: "/p0p1", match: (p) => p.startsWith("/p0p1") },
   { label: "EPISODES", to: "/episodes", match: (p) => p.startsWith("/episodes") },
   { label: "TIER LIST", to: "/tier-list", match: (p) => p.startsWith("/tier-list") },
-  { label: "LEADERBOARD", to: "/leaderboard", match: (p) => p === "/leaderboard" || p.startsWith("/leaderboard/") },
+  { label: "LEADERBOARD", to: "/leaderboard", match: (p) => p === "/leaderboard" || p.startsWith("/leaderboard/") || p.startsWith("/player/") },
   { label: "POD DRAFTS", to: "/pods", match: (p) => p.startsWith("/pods") },
   { label: "COMMUNITY", to: "/community", match: (p) => p.startsWith("/community") },
 ];
@@ -260,29 +261,24 @@ function DesktopAuth() {
         <ChevronDown size={16} className={cn("text-muted transition-transform", open && "rotate-180")} />
       </button>
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-60 bg-surface border border-border2 rounded-lg shadow-xl shadow-black/40 overflow-hidden z-50 animate-fadeUpIn">
-          {profileSlug ? (
+        <div className="absolute right-0 top-full mt-2 w-56 bg-surface border border-border2 rounded-lg shadow-xl shadow-black/40 overflow-hidden z-50 animate-fadeUpIn">
+          {profileSlug && (
             <Link
-              to={`/leaderboard/player/${profileSlug}`}
+              to={`/player/${profileSlug}`}
               onClick={() => setOpen(false)}
-              className="flex items-center gap-2.5 px-3 py-3 border-b border-border no-underline hover:bg-surface2 transition-colors"
+              className="flex items-center gap-2.5 px-3 py-2.5 font-display text-[15px] tracking-[0.14em] no-underline text-subtle hover:bg-surface2 hover:text-green transition-colors"
             >
-              {avatar("w-8 h-8", "text-sm")}
-              <span className="text-text text-sm font-medium truncate">{user.username}</span>
+              <User size={16} />
+              MY PROFILE
             </Link>
-          ) : (
-            <div className="flex items-center gap-2.5 px-3 py-3 border-b border-border">
-              {avatar("w-8 h-8", "text-sm")}
-              <span className="text-text text-sm font-medium truncate">{user.username}</span>
-            </div>
           )}
           <button
             type="button"
             onClick={() => { signOut(); setOpen(false); }}
-            className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-subtle hover:bg-surface2 hover:text-text cursor-pointer bg-transparent border-none transition-colors"
+            className="w-full flex items-center gap-2.5 px-3 py-2.5 font-display text-[15px] tracking-[0.14em] text-subtle hover:bg-surface2 hover:text-green cursor-pointer bg-transparent border-none transition-colors"
           >
             <LogOut size={16} />
-            Log out
+            LOG OUT
           </button>
         </div>
       )}
@@ -304,16 +300,12 @@ function MobileMenu({
   const { user, loading, signIn, signOut } = useAuth();
   const { data: profileSlug } = usePlayerSlugByDiscordId(user?.discordId);
 
-  const userRow = user && (
-    <>
-      {user.avatarUrl ? (
-        <img src={user.avatarUrl} alt="" className="w-6 h-6 rounded-full" />
-      ) : (
-        <div className="w-6 h-6 rounded-full bg-surface" />
-      )}
-      <span className="text-text text-sm truncate">{user.username}</span>
-    </>
-  );
+  const avatarEl = user &&
+    (user.avatarUrl ? (
+      <img src={user.avatarUrl} alt="" className="w-6 h-6 rounded-full" />
+    ) : (
+      <div className="w-6 h-6 rounded-full bg-surface" />
+    ));
 
   return (
     <>
@@ -329,15 +321,19 @@ function MobileMenu({
         {includeAuth && !loading && user && (
           profileSlug ? (
             <Link
-              to={`/leaderboard/player/${profileSlug}`}
+              to={`/player/${profileSlug}`}
               onClick={onClose}
               role="menuitem"
-              className="flex items-center gap-3 px-5 min-h-[54px] border-b border-border no-underline hover:bg-surface transition-colors"
+              className="flex items-center gap-3 px-5 min-h-[54px] no-underline font-display text-[17px] tracking-[0.14em] border-b border-border transition-colors text-text bg-transparent hover:bg-surface"
             >
-              {userRow}
+              {avatarEl}
+              MY PROFILE
             </Link>
           ) : (
-            <div className="flex items-center gap-3 px-5 min-h-[54px] border-b border-border">{userRow}</div>
+            <div className="flex items-center gap-3 px-5 min-h-[54px] border-b border-border">
+              {avatarEl}
+              <span className="text-text text-sm truncate">{user.username}</span>
+            </div>
           )
         )}
         {items.map((n) => {
@@ -387,7 +383,7 @@ function MobileMenu({
 function useP0P1BadgeState() {
   const { user } = useAuth();
   const { data: picks } = useP0P1Picks(user ? P0P1_SET_CODE : undefined);
-  const isPastDeadline = new Date() > P0P1_VOTING_DEADLINE;
+  const isPastDeadline = p0p1Now() > P0P1_VOTING_DEADLINE.getTime();
   const filled = user ? (picks?.length ?? 0) : 0;
   return { user, isPastDeadline, filled, total: SLOTS.length };
 }
@@ -396,14 +392,19 @@ function P0P1Badge({ active }: { active: boolean }) {
   const { user, isPastDeadline, filled, total } = useP0P1BadgeState();
 
   const pill = cn(
-    "absolute -top-1.5 -right-1.5 z-10 rounded-full border border-green px-1.5 py-0.5 text-[9px] leading-none font-sans font-bold tracking-wide",
+    "absolute -top-1.5 z-10 rounded-full border border-green px-1.5 py-0.5 text-[9px] leading-none font-sans font-bold tracking-wide",
     active ? "bg-bg text-green" : "bg-green text-bg",
   );
 
-  if (isPastDeadline) return <span className={pill}>REVIEW</span>;
-  if (!user || filled === 0) return <span className={pill}>OPEN</span>;
-  if (filled === total) return <span className={pill}>VOTED!</span>;
-  return <span className={pill}>{filled}/{total}</span>;
+  if (isPastDeadline) {
+    return (
+      <span className={cn(pill, "left-1/2 -translate-x-1/2 whitespace-nowrap")}>PRELIM DATA</span>
+    );
+  }
+  const corner = cn(pill, "-right-1.5");
+  if (!user || filled === 0) return <span className={corner}>OPEN</span>;
+  if (filled === total) return <span className={corner}>VOTED!</span>;
+  return <span className={corner}>{filled}/{total}</span>;
 }
 
 function MobileBadgeSlot({ active }: { active: boolean }) {
@@ -414,7 +415,7 @@ function MobileBadgeSlot({ active }: { active: boolean }) {
     active ? "text-bg" : "text-green",
   );
 
-  if (isPastDeadline) return <span className={wrap}>REVIEW</span>;
+  if (isPastDeadline) return <span className={wrap}>PRELIM DATA</span>;
   if (!user || filled === 0) return <span className={wrap}>OPEN</span>;
   if (filled === total) return <span className={wrap}>VOTED!</span>;
   return <span className={wrap}>{filled}/{total}</span>;

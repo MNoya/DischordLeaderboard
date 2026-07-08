@@ -95,6 +95,34 @@ def test_round1_without_seats_drops_seat_annotation():
     assert "(1v" not in embed.description
 
 
+def test_round1_shows_arena_only_when_name_matches():
+    states = [_seated("Aria", "Bryn", 1, 5, a_arena="Aria#08011", b_arena="Bryn#22222")]
+    desc = _norm(round_embed(1, states).description)
+    assert "`Aria#08011`" in desc
+    assert "(Aria)" not in desc
+
+
+def test_round1_appends_discord_name_when_it_diverges():
+    states = [_seated("Marlo", "Aria", 1, 5, a_arena="driftwood#49190", b_arena="Aria#08011")]
+    desc = _norm(round_embed(1, states).description)
+    assert "`driftwood#49190` (Marlo)" in desc
+    assert "`Aria#08011`" in desc
+    assert "(Aria)" not in desc
+
+
+def test_round1_omits_arena_when_unknown():
+    states = [_seated("Aria", "Bryn", 1, 5, a_arena=None, b_arena=None)]
+    desc = _norm(round_embed(1, states).description)
+    assert "Aria vs Bryn (1v5)" in desc
+
+
+def test_later_rounds_also_annotate_arena():
+    states = [_ms("Aria", "Caedmon", "1-0", "1-0", a_arena="Aria#11111", b_arena="Caedmon#33333")]
+    desc = _norm(round_embed(2, states).description)
+    assert "`Aria#11111`" in desc
+    assert "`Caedmon#33333`" in desc
+
+
 def test_reported_and_skipped_lines_drop_the_pending_marker():
     states = [
         _ms("Aria", "Caedmon", "1-0", "1-0", winner_name="Aria", score="2-1"),
@@ -122,8 +150,8 @@ def _ms(a: str, b: str, a_record: str = "0-0", b_record: str = "0-0", **extra) -
     return state
 
 
-def _seated(a: str, b: str, a_seat: int, b_seat: int) -> dict:
-    return _ms(a, b, a_seat=a_seat, b_seat=b_seat)
+def _seated(a: str, b: str, a_seat: int, b_seat: int, **extra) -> dict:
+    return _ms(a, b, a_seat=a_seat, b_seat=b_seat, **extra)
 
 
 def _kinds(groups) -> list[str]:

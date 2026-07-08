@@ -1,0 +1,23 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "NIXPACKS",
+    "watchPatterns": [
+      "bot/services/**",
+      "bot/scripts/refresh_periodic.py",
+      "bot/scoring.py",
+      "bot/sets.py",
+      "bot/models.py",
+      "bot/config.py",
+      "bot/database.py",
+      "bot/commands/messages.py",
+      "scoring_buckets.json",
+      "requirements.txt",
+      "railway.cron.json"
+    ]
+  },
+  "deploy": {
+    "startCommand": "python -u -m bot.scripts.refresh_periodic",
+    "restartPolicyType": "NEVER"
+  }
+}

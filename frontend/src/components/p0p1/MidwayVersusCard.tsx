@@ -9,19 +9,18 @@ import {
   useVersusPager,
   VersusModal,
 } from "./PickVersusCard";
-import type { MidwaySlotVersus, MidwayVersusSide } from "../../data/p0p1Results";
+import type { MidwaySlotVersus, MidwayVersusSide, GihwrBounds } from "../../data/p0p1Results";
 import type { SlotKey } from "../../types/p0p1";
 
 const GREEN = "#2ee85c";
 const GOLD = "#ffc63a";
 const TEXT = "#e6ecf5";
 
-const BAR_MIN = 0.45;
-const BAR_MAX = 0.70;
-
-function barFill(gihwr: number | null): number {
+function barFill(gihwr: number | null, bounds: GihwrBounds): number {
   if (gihwr === null) return 0;
-  return Math.max(4, Math.min(100, ((gihwr - BAR_MIN) / (BAR_MAX - BAR_MIN)) * 100));
+  const span = bounds.max - bounds.min;
+  if (span <= 0) return 100;
+  return Math.max(4, Math.min(100, ((gihwr - bounds.min) / span) * 100));
 }
 
 function gihwrDisplay(gihwr: number | null): string {
@@ -41,26 +40,24 @@ interface Column {
 
 const ROLE_LABEL: Record<Role, string> = {
   yours: "YOUR PICK",
-  crowd: "CROWD PICK",
-  best: "BEST PICK",
+  crowd: "CROWD FAVORITE",
+  best: "BEST POSSIBLE",
 };
 
 // Keys are role names sorted alphabetically so the lookup is order-independent
 const MERGED_LABEL: Record<string, string> = {
-  "crowd+yours": "CROWD/YOUR PICK",
-  "best+yours": "BEST PICK",
-  "best+crowd": "BEST PICK",
-  "best+crowd+yours": "BEST PICK",
+  "crowd+yours": "CROWD・YOURS",
+  "best+yours": "BEST POSSIBLE・YOURS",
+  "best+crowd": "BEST POSSIBLE・CROWD",
+  "best+crowd+yours": "BEST POSSIBLE・CROWD・YOURS",
 };
 
 function accentFor(roles: Role[]): string {
-  if (roles.includes("best")) return GOLD;
-  if (roles.includes("crowd")) return GREEN;
+  if (roles.includes("best") && roles.includes("yours")) return GREEN;
   return TEXT;
 }
 
 function buildColumns(versus: MidwaySlotVersus): Column[] {
-  // crowd and best first, yours last → YOUR PICK is always the rightmost column
   const present: Array<{ role: Role; side: MidwayVersusSide }> = [];
   present.push({ role: "crowd", side: versus.crowd });
   present.push({ role: "best", side: versus.best });
@@ -74,6 +71,15 @@ function buildColumns(versus: MidwaySlotVersus): Column[] {
       grouped.set(side.name, { roles: [], side });
     }
     grouped.get(side.name)!.roles.push(role);
+  }
+
+  // Ensure the column containing "yours" is always rightmost
+  if (versus.yours) {
+    const idx = order.indexOf(versus.yours.name);
+    if (idx !== -1) {
+      order.splice(idx, 1);
+      order.push(versus.yours.name);
+    }
   }
 
   return order.map((name) => {
@@ -95,14 +101,16 @@ export function useMidwayVersusPager(list: MidwaySlotVersus[]) {
 
 export function MidwayVersusModal({
   pager,
+  bounds,
 }: {
   pager: ReturnType<typeof useMidwayVersusPager>;
+  bounds: GihwrBounds;
 }) {
   return (
     <VersusModal
       pager={pager}
       padding="p-4"
-      renderCard={(versus, nav) => <MidwayVersusCard versus={versus} {...nav} />}
+      renderCard={(versus, nav) => <MidwayVersusCard versus={versus} bounds={bounds} {...nav} />}
     />
   );
 }
@@ -114,26 +122,28 @@ export function MidwayVersusCard({
   onPrev,
   onNext,
   paged = false,
+  bounds,
 }: {
   versus: MidwaySlotVersus;
   onPrev?: () => void;
   onNext?: () => void;
   paged?: boolean;
+  bounds: GihwrBounds;
 }) {
   const stop = (e: MouseEvent) => e.stopPropagation();
   const columns = buildColumns(versus);
-  const maxWidth = columns.length === 1 ? 420 : columns.length === 2 ? 640 : 820;
+  const maxWidth = columns.length === 1 ? 420 : columns.length === 2 ? 820 : 1160;
 
   return (
     <VsCardShell maxWidth={maxWidth} onClick={stop}>
       <div className="overflow-y-auto flex-1 min-h-0 px-2 pt-2 lg:px-4">
         <VsCategoryHeader slotKey={versus.slotKey as SlotKey} slotLabel={versus.slotLabel} />
         {columns.length === 1 ? (
-          <SoloLayout column={columns[0]} />
+          <SoloLayout column={columns[0]} bounds={bounds} />
         ) : columns.length === 2 ? (
-          <TwoColumnLayout columns={columns as [Column, Column]} />
+          <TwoColumnLayout columns={columns as [Column, Column]} bounds={bounds} />
         ) : (
-          <ThreeColumnLayout columns={columns as [Column, Column, Column]} />
+          <ThreeColumnLayout columns={columns as [Column, Column, Column]} bounds={bounds} />
         )}
       </div>
       <PagerNav onPrev={onPrev} onNext={onNext} paged={paged} prevLabel="Prev Slot" nextLabel="Next Slot" />
@@ -147,7 +157,7 @@ function columnCaption(column: Column): string {
   return `GIH`;
 }
 
-function SoloLayout({ column }: { column: Column }) {
+function SoloLayout({ column, bounds }: { column: Column; bounds: GihwrBounds }) {
   return (
     <VsMetricSide
       label={column.label}
@@ -155,7 +165,7 @@ function SoloLayout({ column }: { column: Column }) {
       value={gihwrDisplay(column.side.gihwr)}
       valueColor={column.accent}
       caption={columnCaption(column)}
-      fillPct={barFill(column.side.gihwr)}
+      fillPct={barFill(column.side.gihwr, bounds)}
       barColor={column.accent}
       dim={column.side.gihwr === null}
       density="comfortable"
@@ -166,26 +176,32 @@ function SoloLayout({ column }: { column: Column }) {
   );
 }
 
-function TwoColumnLayout({ columns }: { columns: [Column, Column] }) {
+function TwoColumnLayout({ columns, bounds }: { columns: [Column, Column]; bounds: GihwrBounds }) {
   return (
     <VsTwoColumnLayout
-      left={<GihwrSide column={columns[0]} />}
-      right={<GihwrSide column={columns[1]} />}
+      left={<GihwrSide column={columns[0]} bounds={bounds} />}
+      right={<GihwrSide column={columns[1]} bounds={bounds} />}
     />
   );
 }
 
-function ThreeColumnLayout({ columns }: { columns: [Column, Column, Column] }) {
+function ThreeColumnLayout({
+  columns,
+  bounds,
+}: {
+  columns: [Column, Column, Column];
+  bounds: GihwrBounds;
+}) {
   return (
     <VsThreeColumnLayout
-      left={<GihwrCompact column={columns[0]} />}
-      middle={<GihwrCompact column={columns[1]} />}
-      right={<GihwrCompact column={columns[2]} />}
+      left={<GihwrSide column={columns[0]} bounds={bounds} tight />}
+      middle={<GihwrSide column={columns[1]} bounds={bounds} tight />}
+      right={<GihwrSide column={columns[2]} bounds={bounds} tight />}
     />
   );
 }
 
-function GihwrSide({ column }: { column: Column }) {
+function GihwrSide({ column, bounds, tight = false }: { column: Column; bounds: GihwrBounds; tight?: boolean }) {
   return (
     <VsMetricSide
       label={column.label}
@@ -193,28 +209,11 @@ function GihwrSide({ column }: { column: Column }) {
       value={gihwrDisplay(column.side.gihwr)}
       valueColor={column.accent}
       caption={columnCaption(column)}
-      fillPct={barFill(column.side.gihwr)}
+      fillPct={barFill(column.side.gihwr, bounds)}
       barColor={column.accent}
       dim={column.side.gihwr === null}
       density="comfortable"
-      imageUrl={column.side.imageUrl}
-      name={column.side.name}
-    />
-  );
-}
-
-function GihwrCompact({ column }: { column: Column }) {
-  return (
-    <VsMetricSide
-      label={column.label}
-      labelColor={column.accent}
-      value={gihwrDisplay(column.side.gihwr)}
-      valueColor={column.accent}
-      caption={columnCaption(column)}
-      fillPct={barFill(column.side.gihwr)}
-      barColor={column.accent}
-      dim={column.side.gihwr === null}
-      density="compact"
+      tight={tight}
       imageUrl={column.side.imageUrl}
       name={column.side.name}
     />

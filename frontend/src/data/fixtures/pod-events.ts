@@ -17,7 +17,6 @@ function participantToRow(p: PodParticipant): PodEventParticipantRow {
     placement: p.placement ?? null,
     record: p.record,
     deckColors: p.deckColors,
-    draftLogUrl: p.draftLogUrl,
     deckScreenshotUrl: p.deckScreenshotUrl,
     deckScreenshotCaption: p.deckScreenshotCaption,
     playerSlug: p.slug,
@@ -226,6 +225,17 @@ export const podDraftArtifactFixture: Record<string, PodDraftArtifact> = {
   },
 };
 
+const inProgressMatches: PodEventMatchRow[] = [
+  { round: 1, playerAName: "Noya", playerBName: "Elfandor", winnerName: "Noya", score: "2-1" },
+  { round: 1, playerAName: "WaveofShadow", playerBName: "flutterdev", winnerName: "WaveofShadow", score: "2-0" },
+  { round: 1, playerAName: "Oophies", playerBName: "adoodwithgood", winnerName: "Oophies", score: "2-1" },
+  { round: 1, playerAName: "samp", playerBName: "Lark", winnerName: "samp", score: "2-0" },
+  { round: 2, playerAName: "WaveofShadow", playerBName: "Noya", winnerName: "WaveofShadow", score: "2-1" },
+  { round: 2, playerAName: "samp", playerBName: "Oophies", winnerName: null, score: null },
+  { round: 2, playerAName: "Elfandor", playerBName: "flutterdev", winnerName: null, score: null },
+  { round: 2, playerAName: "adoodwithgood", playerBName: "Lark", winnerName: null, score: null },
+].map((m) => ({ ...m, eventId: "mock-sos-4", eventName: "SOS Pod Draft #4", reportedAt: null }));
+
 export const podEventMatchesFixture: PodEventMatchRow[] = [
   ...podSos3Fixture.matches.map((m) => ({
     eventId: m.eventId,
@@ -238,6 +248,7 @@ export const podEventMatchesFixture: PodEventMatchRow[] = [
     reportedAt: m.reportedAt,
   })),
   ...peasantMatches,
+  ...inProgressMatches,
 ];
 
 export const podEventReplaysFixture: PodEventReplayRow[] = podSos3Fixture.replays.map((r) => ({
