@@ -171,6 +171,7 @@ export function PlayerPage() {
   const sibling: SiblingNav = { setCode, prevSlug, nextSlug };
 
   const topQs = topSearchParams.toString();
+  const deckModalOpen = topSearchParams.has("deck");
 
   const onChangeSet = (newCode: string) => {
     navigate({ pathname: playerPath(slug, newCode), search: topQs });
@@ -179,6 +180,7 @@ export function PlayerPage() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      if (deckModalOpen) return;
       const t = e.target;
       if (t instanceof HTMLElement) {
         if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable) return;
@@ -193,7 +195,7 @@ export function PlayerPage() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [prevSlug, nextSlug, setCode, navigate, topQs]);
+  }, [prevSlug, nextSlug, setCode, navigate, topQs, deckModalOpen]);
 
   if (error) {
     return (
@@ -885,8 +887,9 @@ function TrophyDeckModal({
   onClose: () => void;
 }) {
   const index = trophies.findIndex((t) => t.sourceMessageId === trophy.sourceMessageId);
-  const prev = index > 0 ? trophies[index - 1] : null;
-  const next = index >= 0 && index < trophies.length - 1 ? trophies[index + 1] : null;
+  const canCycle = trophies.length > 1;
+  const prev = canCycle ? trophies[(index - 1 + trophies.length) % trophies.length] : null;
+  const next = canCycle ? trophies[(index + 1) % trophies.length] : null;
   return (
     <DeckScreenshotModal
       participant={{
