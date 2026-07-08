@@ -69,7 +69,9 @@ Run:
 ```
 
 This overwrites `frontend/src/data/fixtures/p0p1-ratings-<code>.json` with a fresh 17lands
-pull bounded to `[set release date, end date]`.
+pull. The pull itself uses `time_period=ALL_TIME` (the script's default — always correct here
+since the set's Arena release is the natural start of "all time" for a fresh set); `--end-date`
+only feeds the fixture's display `dateRange`, not the query.
 
 ### 5. Sanity checks (abort on any failure, do not proceed to step 6)
 
@@ -96,10 +98,13 @@ Never run `git commit` or `git push` as part of this skill.
 
 ## Notes
 
-- `fetch_p0p1_ratings` takes `--set-code` (not `--set`), `--phase midway|final`, and
-  `--end-date YYYY-MM-DD` (defaults to today if omitted — always pass it explicitly here).
-- `dateRange` is the literal 17lands `start_date`/`end_date` query window now (not
-  decorative) — the sanity check on `dateRange.start` catches a wrong `--set-code`.
+- `fetch_p0p1_ratings` takes `--set-code` (not `--set`), `--phase midway|final`,
+  `--end-date YYYY-MM-DD` (defaults to today if omitted — always pass it explicitly here), and
+  `--time-period ALL_TIME|LAST_TWO_WEEKS` (defaults to `ALL_TIME`; leave it alone here).
+- `dateRange` is display-only — it drives the "ratings from X to Y" intro copy, not the 17lands
+  query (17lands takes a `time_period` enum now, not a date range). The sanity check on
+  `dateRange.start` still catches a wrong `--set-code`, since it's still derived from
+  `bot/sets.py`.
 - The script is a straight overwrite; there's no need to delete the old fixture first.
 - If `DATABASE_URL`-dependent steps aren't involved here — this skill never touches the
   database, only the static fixture JSON and a public, unauthenticated 17lands endpoint.
