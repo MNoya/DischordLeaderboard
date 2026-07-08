@@ -13,6 +13,7 @@ import {
 import { P0P1_SET_CODE as SET_CODE, P0P1_VOTING_DEADLINE as VOTING_DEADLINE, P0P1_SCORING_DATE as SCORING_DATE, SLOTS } from "./p0p1Slots";
 import { useLocalP0P1Picks, setLocalPick, clearLocalPicks, getLocalPicks } from "./localPicks";
 import { p0p1DevEnabled, p0p1Now, useP0P1DevPreset, type P0P1DevPreset } from "./p0p1DevState";
+import { syntheticBallotsFromStats } from "./p0p1DevBallots";
 import type { AuthUser } from "../auth/AuthContext";
 import type { Card, P0P1BallotRow, P0P1PickStat, SlotKey } from "../types/p0p1";
 import type { P0P1Phase, RatingsSnapshot } from "./p0p1Results";
@@ -115,7 +116,14 @@ export function useP0P1Ballot() {
   const midwayDataReady = resultsDataReady && ratingsSnapshot?.phase === "midway";
   const phase = deriveP0P1Phase(isPastDeadline, isPastScoringDate, ratingsSnapshot, resultsDataReady, devViewPreset);
 
-  const { data: ballots } = useP0P1Ballots(SET_CODE, phase === "final");
+  const devFinal = devActive && phase === "final";
+  const { data: fetchedBallots } = useP0P1Ballots(SET_CODE, phase === "final" && !devFinal);
+  // In dev presets, synthesize ballots from the live pick stats instead of
+  // fetching — the public_p0p1_ballots view may not exist yet in the target DB
+  const ballots = useMemo<P0P1BallotRow[] | undefined>(() => {
+    if (!devFinal) return fetchedBallots;
+    return pickStats ? syntheticBallotsFromStats(pickStats, SET_CODE) : undefined;
+  }, [devFinal, fetchedBallots, pickStats]);
 
   // In dev results presets, append a ballot row for the viewer so findUserBallot
   // always resolves regardless of which picks the viewer has selected.
