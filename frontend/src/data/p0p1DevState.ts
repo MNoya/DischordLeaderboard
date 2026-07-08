@@ -5,13 +5,21 @@ export type P0P1DevPreset =
   | "live"
   | "closedLoggedOut"
   | "closedComplete"
-  | "closedDidNotVote";
+  | "closedDidNotVote"
+  | "midwayScoring"
+  | "midwayDidNotVote"
+  | "finalizing"
+  | "finalScoring";
 
 export const P0P1_DEV_PRESETS: { value: P0P1DevPreset; label: string }[] = [
   { value: "live", label: "Live" },
   { value: "closedLoggedOut", label: "Closed · logged out" },
   { value: "closedComplete", label: "Closed · complete entry" },
   { value: "closedDidNotVote", label: "Closed · logged in, didn't vote" },
+  { value: "midwayScoring", label: "Midway · complete entry" },
+  { value: "midwayDidNotVote", label: "Midway · didn't vote" },
+  { value: "finalizing", label: "Finalizing · complete entry" },
+  { value: "finalScoring", label: "Final · complete entry" },
 ];
 
 export const p0p1DevEnabled = import.meta.env.DEV && typeof window !== "undefined";
@@ -44,10 +52,12 @@ export function useP0P1DevPreset(): P0P1DevPreset {
 }
 
 const DEV_RESULTS_REMAINING_MS = (20 * 24 + 1) * 60 * 60 * 1000;
+const DEV_PAST_SCORING_MS = 60 * 60 * 1000;
 
 export function p0p1Now(): number {
-  if (p0p1DevEnabled && current !== "live") {
-    return P0P1_SCORING_DATE.getTime() - DEV_RESULTS_REMAINING_MS;
+  if (!p0p1DevEnabled || current === "live") return Date.now();
+  if (current === "finalizing" || current === "finalScoring") {
+    return P0P1_SCORING_DATE.getTime() + DEV_PAST_SCORING_MS;
   }
-  return Date.now();
+  return P0P1_SCORING_DATE.getTime() - DEV_RESULTS_REMAINING_MS;
 }

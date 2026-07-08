@@ -1,17 +1,20 @@
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import { HelpCircle } from "lucide-react";
 import { Tooltip } from "../Tooltip";
 import { groupBySlot, findExtremes, classifyYourPick } from "../../data/p0p1Stats";
 import { SLOTS } from "../../data/p0p1Slots";
-import type { P0P1PickStat } from "../../types/p0p1";
+import { buildRatingsByName, bestPossibleTeam } from "../../data/p0p1Results";
+import type { RatingsSnapshot } from "../../data/p0p1Results";
+import type { Card, P0P1PickStat, SlotKey } from "../../types/p0p1";
 
 type PickState = "fav" | "pack" | "rogue";
 type ScoredPick = { state: PickState; cardName: string; pickCount: number };
 
 export const CHAMFER = "polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%)";
+const GREEN = "#2ee85c";
 const CELL_ORDER: Record<PickState, number> = { fav: 0, pack: 1, rogue: 2 };
 const CAT_COLOR: Record<PickState, string> = {
-  fav: "#2ee85c",
+  fav: GREEN,
   pack: "#4aa8ff",
   rogue: "#a98eff",
 };
@@ -140,4 +143,67 @@ function rarityPrefix(pickCount: number): string {
     return "Only you and 1 other picked";
   }
   return `Only you and ${others} others picked`;
+}
+
+// ── Midway variant ─────────────────────────────────────────────────────────────
+
+export function MidwayBallotScorecard({
+  ratingsSnapshot,
+  cards,
+  picksBySlot,
+}: {
+  ratingsSnapshot: RatingsSnapshot;
+  cards: Card[];
+  picksBySlot: Map<string, string>;
+}) {
+  const aligned = useMemo(() => {
+    const ratingsByName = buildRatingsByName(ratingsSnapshot);
+    const best = bestPossibleTeam(cards, SLOTS, ratingsByName);
+    const bestBySlot = new Map(best.picks.map((p) => [p.slot, p.cardName]));
+    let count = 0;
+    for (const slot of SLOTS) {
+      const your = picksBySlot.get(slot.key);
+      const bestCard = bestBySlot.get(slot.key as SlotKey);
+      if (your && bestCard && your === bestCard) count++;
+    }
+    return count;
+  }, [ratingsSnapshot, cards, picksBySlot]);
+
+  const segments = Array.from({ length: SLOTS.length }, (_, i) => i < aligned);
+
+  return (
+    <div className="inline-block animate-fadeUpIn" style={{ clipPath: CHAMFER, background: "#3b4458", padding: 1 }}>
+      <div className="bg-surface2 w-[clamp(280px,22vw,340px)] px-5 py-2.5 flex flex-col gap-2" style={{ clipPath: CHAMFER }}>
+        <Tooltip label={<MidwayBallotLegend />} side="bottom" align="start" hideArrow className="max-w-[320px]">
+          <button
+            type="button"
+            className="group inline-flex items-center gap-1.5 self-start cursor-help bg-transparent border-0 p-0"
+          >
+            <HelpCircle size={15} strokeWidth={2} className="text-white transition-colors" />
+            <span className="font-display text-white" style={{ fontSize: 15, letterSpacing: "0.22em" }}>YOUR BALLOT</span>
+          </button>
+        </Tooltip>
+
+        <div className="flex items-baseline gap-1.5">
+          <span className="font-display leading-none" style={{ fontSize: 24, color: GREEN }}>{aligned}</span>
+          <span className="font-body text-[12px] leading-none" style={{ color: GREEN }}>BEST POSSIBLE PICKS</span>
+        </div>
+
+        <div className="flex gap-1 -ml-[5px]" aria-hidden>
+          {segments.map((hit, i) => (
+            <div key={i} className="h-2.5 flex-1 rounded-[1px]" style={{ background: hit ? GREEN : "#3b4458" }} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MidwayBallotLegend() {
+  return (
+    <div className="text-left leading-snug">
+      <span className="font-semibold" style={{ color: GREEN }}>Best possible picks</span>{" "}
+      <span className="text-subtle">— the top card for a given slot based on GIH win rate</span>
+    </div>
+  );
 }

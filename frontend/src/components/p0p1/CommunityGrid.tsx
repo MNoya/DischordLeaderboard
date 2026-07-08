@@ -39,6 +39,8 @@ export type PickEntry = {
   stats: P0P1PickStat[];
   slotStats?: P0P1PickStat[];
   badge?: string;
+  // When set, overrides the pick% badge with this string (e.g. a GIHWR label)
+  pctLabel?: string;
 };
 
 function PickRow({
@@ -68,29 +70,37 @@ export function PickGrid({
   entries,
   cardsByName,
   picksBySlot,
+  onTileOpen,
 }: {
   entries: PickEntry[];
   cardsByName: Map<string, Card>;
   picksBySlot?: Map<string, string>;
+  // When set, every tile calls this instead of the internal pick%-versus pager
+  onTileOpen?: (slotKey: SlotKey) => void;
 }) {
   const versusList: PickVersus[] = [];
   const pagerIndexBySlot = new Map<SlotKey, number>();
-  for (const entry of entries) {
-    const yourPick = picksBySlot?.get(entry.slotKey);
-    const versus = entry.slotStats && yourPick
-      ? buildPickVersus(entry.slotStats, yourPick, cardsByName, entry.slotKey, entry.label)
-      : null;
-    if (versus) {
-      pagerIndexBySlot.set(entry.slotKey, versusList.length);
-      versusList.push(versus);
+  if (!onTileOpen) {
+    for (const entry of entries) {
+      const yourPick = picksBySlot?.get(entry.slotKey);
+      const versus = entry.slotStats && yourPick
+        ? buildPickVersus(entry.slotStats, yourPick, cardsByName, entry.slotKey, entry.label)
+        : null;
+      if (versus) {
+        pagerIndexBySlot.set(entry.slotKey, versusList.length);
+        versusList.push(versus);
+      }
     }
   }
   const pager = usePickVersusPager(versusList);
 
   return (
     <div className="grid grid-cols-4 lg:grid-cols-8 gap-2">
-      {entries.map(({ slotKey, label, stats, badge }) => {
+      {entries.map(({ slotKey, label, stats, badge, pctLabel }) => {
         const pagerIndex = pagerIndexBySlot.get(slotKey);
+        const onOpen = onTileOpen
+          ? () => onTileOpen(slotKey)
+          : pagerIndex !== undefined ? () => pager.open(pagerIndex) : undefined;
         return (
           <PickTile
             key={slotKey}
@@ -98,12 +108,13 @@ export function PickGrid({
             label={label}
             stats={stats}
             badge={badge}
+            pctLabel={pctLabel}
             cardsByName={cardsByName}
-            onOpenVersus={pagerIndex === undefined ? undefined : () => pager.open(pagerIndex)}
+            onOpenVersus={onOpen}
           />
         );
       })}
-      <PickVersusModal pager={pager} />
+      {!onTileOpen && <PickVersusModal pager={pager} />}
     </div>
   );
 }
@@ -115,6 +126,7 @@ function PickTile({
   cardsByName,
   onOpenVersus,
   badge,
+  pctLabel,
 }: {
   slotKey: SlotKey;
   label: string;
@@ -122,6 +134,7 @@ function PickTile({
   cardsByName: Map<string, Card>;
   onOpenVersus?: () => void;
   badge?: string;
+  pctLabel?: string;
 }) {
   const [modalOpen, setModalOpen] = useState(false);
   const hasStats = stats.length > 0;
@@ -131,7 +144,9 @@ function PickTile({
 
   let art;
   if (!card) {
-    art = <SlotPip slotKey={slotKey} size={48} />;
+    art = onOpenVersus
+      ? <button type="button" onClick={onOpenVersus} className="w-full h-full cursor-pointer p-0 border-0 bg-transparent flex items-center justify-center"><SlotPip slotKey={slotKey} size={48} /></button>
+      : <SlotPip slotKey={slotKey} size={48} />;
   } else if (onOpenVersus) {
     art = (
       <button type="button" onClick={onOpenVersus} className="w-full h-full cursor-pointer p-0 border-0 bg-transparent">
@@ -169,7 +184,7 @@ function PickTile({
           )}
           {hasStats && (
             <span className="absolute bottom-1 right-1 text-[11px] lg:text-[13px] font-mono tabular-nums font-semibold px-1 rounded-sm bg-bg/85">
-              {pickPctLabel(stats[0].pickPct)}
+              {pctLabel ?? pickPctLabel(stats[0].pickPct)}
             </span>
           )}
         </div>

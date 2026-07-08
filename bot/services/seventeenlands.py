@@ -246,6 +246,30 @@ class SeventeenLandsClient:
         logger.warning(f"17lands user_game_list timed out after {retries + 1} attempts for token tail …{token[-4:]}")
         return []
 
+    def fetch_card_ratings(
+        self,
+        expansion: str,
+        event_type: str = "PremierDraft",
+        time_period: str = "ALL_TIME",
+    ) -> list[dict]:
+        """Return card rating records from the public 17lands card ratings endpoint.
+
+        No token required. Raises requests.HTTPError on non-2xx, ValueError on
+        malformed response.
+        """
+        url = f"{self.base_url}/api/card_data"
+        params = {"expansion": expansion, "event_type": event_type, "time_period": time_period}
+        self.limiter.wait()
+        resp = self.session.get(url, params=params, timeout=self.timeout_s)
+        resp.raise_for_status()
+        try:
+            body = resp.json()
+        except ValueError as e:
+            raise ValueError(f"17lands card_ratings response was not valid JSON: {e}") from e
+        if not isinstance(body, dict) or not isinstance(body.get("data"), list):
+            raise ValueError(f"17lands card_ratings response missing list 'data' field: {type(body)}")
+        return body["data"]
+
     def verify_token(self, token: str) -> bool:
         """Return True if 17lands recognizes the token.
 

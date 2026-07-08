@@ -437,6 +437,8 @@ export const fetchPodSetCodes = (): Promise<PodSetCode[]> => wait(podSetCodesFix
 // --- P0P1 contest ---
 
 import { cardsMshFixture } from "./fixtures/cards-msh";
+import type { RatingsSnapshot } from "./p0p1Results";
+import { GIH_SAMPLE_FLOOR } from "./p0p1Results";
 
 const P0P1_SLOT_KEYS: SlotKey[] = [
   "white_common", "blue_common", "black_common", "red_common",
@@ -571,6 +573,29 @@ const syntheticPicks = buildSyntheticPicks(syntheticPickStats);
 for (const pick of syntheticPicks) {
   p0p1Picks.set(pick.slot, pick);
 }
+
+function generateSyntheticRatings(): RatingsSnapshot {
+  // Seed separately from pick stats so ratings are independent
+  let seed = 137;
+  const rng = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  const cards = cardsMshFixture.map((c) => ({
+    card_name: c.name,
+    // Realistic GIHWR range: 44%–65%
+    gihwr: 0.44 + rng() * 0.21,
+    gih: Math.floor(GIH_SAMPLE_FLOOR + rng() * 8000),
+  }));
+  return {
+    setCode: "MSH",
+    phase: "midway",
+    dateRange: { start: "2026-06-23", end: "2026-07-07" },
+    cards,
+  };
+}
+
+const syntheticRatings = generateSyntheticRatings();
+
+export const fetchP0P1Ratings = (_setCode: string): Promise<RatingsSnapshot> =>
+  wait(syntheticRatings);
 
 export const initialAuthUser = {
   id: "mock-user-id",

@@ -18,7 +18,7 @@ import {
 } from "../frontend/src/data/public-supabase-config";
 import { SITE_NAME as SITE, TITLE_SEPARATOR, TIER_LIST_PREVIEW_SETS } from "../frontend/src/data/constants";
 import { mtgoSetName } from "../frontend/src/data/mtgoSets";
-import { P0P1_SET_CODE } from "../frontend/src/data/p0p1Slots";
+import { P0P1_SET_CODE, P0P1_VOTING_DEADLINE, P0P1_SCORING_DATE } from "../frontend/src/data/p0p1Slots";
 import { categoryFromSlug } from "../frontend/src/data/episodes";
 
 const EPISODE_CATEGORY_DESCRIPTIONS: Record<string, string> = {
@@ -35,6 +35,15 @@ const EPISODE_CATEGORY_DESCRIPTIONS: Record<string, string> = {
 const LEADERBOARD_DESCRIPTION =
   "Check ranks and trophies from the community. /join on Discord to share your drafts and climb the leaderboard";
 const HOME_DESCRIPTION = "Weekly episodes, set reviews, strategy and community events. Join the Discord and climb the leaderboard.";
+
+const P0P1_PICK_SENTENCE = "Pick a team of eight cards you think will perform best from the upcoming set.";
+
+const p0p1Description = (): string => {
+  const now = Date.now();
+  if (now <= P0P1_VOTING_DEADLINE.getTime()) return P0P1_PICK_SENTENCE;
+  if (now < P0P1_SCORING_DATE.getTime()) return `${P0P1_PICK_SENTENCE} Preliminary standings now available!`;
+  return `${P0P1_PICK_SENTENCE} Final standings now available!`;
+};
 
 type ImageIntent =
   | { kind: "url"; url: string }
@@ -202,11 +211,7 @@ const resolveMeta = async (pathname: string): Promise<RouteMeta> => {
   }
 
   if (section === "p0p1") {
-    return page(
-      "P0P1 Challenge",
-      "Pick a team of eight cards you think will perform best from the upcoming set.",
-      { kind: "setSymbol", code: P0P1_SET_CODE },
-    );
+    return page("P0P1 Challenge", p0p1Description(), { kind: "setSymbol", code: P0P1_SET_CODE });
   }
   if (section === "episodes") {
     const slug = rest[0];
