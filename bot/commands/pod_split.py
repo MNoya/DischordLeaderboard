@@ -122,7 +122,7 @@ class Table2ClaimView(discord.ui.View):
         self.add_item(self._join_button)
 
     def render_embed(self) -> discord.Embed:
-        name = f"{self.source_name} Table {self.table_index}"
+        name = f"{self.source_name} - Table {self.table_index}"
         open_now = self.materialized and self.thread is not None
         if open_now:
             title = MSG_SPLIT_CREATED.format(name=name)

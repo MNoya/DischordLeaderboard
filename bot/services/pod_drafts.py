@@ -406,19 +406,19 @@ def record_mock_event(
     return event
 
 
-_TABLE_SUFFIX_RE = re.compile(r"\s+Table\s+\d+\s*$", re.IGNORECASE)
+_TABLE_SUFFIX_RE = re.compile(r"\s+(?:[-–]\s+)?Table\s+\d+\s*$", re.IGNORECASE)
 
 
 def split_base_name(name: str) -> str:
-    """The event name with any trailing ` Table N` stripped, so splitting a Table 2 still bases new
-    tables on the original pod name rather than nesting `... Table 2 Table 3`."""
+    """The event name with any trailing ` - Table N` stripped, so splitting a Table 2 still bases new
+    tables on the original pod name rather than nesting `... Table 2 - Table 3`."""
     return _TABLE_SUFFIX_RE.sub("", name).strip()
 
 
 def next_table_index(session: Session, base_name: str) -> int:
     """Next free table number for `base_name`; the original pod is table 1, so the first split is 2."""
     names = session.execute(
-        select(PodDraftEvent.name).where(PodDraftEvent.name.ilike(f"{base_name} Table %"))
+        select(PodDraftEvent.name).where(PodDraftEvent.name.ilike(f"{base_name}%Table %"))
     ).scalars().all()
     highest = 1
     for name in names:
@@ -463,7 +463,7 @@ def record_split_event(session: Session, *, source_event_id: str) -> PodDraftEve
         set_id=source.set_id,
         set_code=source.set_code,
         format_label=source.format_label,
-        name=f"{base_name} Table {table_index}",
+        name=f"{base_name} - Table {table_index}",
         draftmancer_session=session_id,
         discord_thread_id="pending",
         sesh_message_id=None,
