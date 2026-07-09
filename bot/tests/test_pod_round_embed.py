@@ -9,6 +9,8 @@ from bot.services.pod_tournament import (
     TROPHY,
     WINNERS,
     _ROUND_TITLE_RE,
+    MatchResultSelect,
+    RoundResultsView,
     _round_header,
     mark_trophy_match,
     round_embed,
@@ -67,6 +69,28 @@ def test_final_round_splits_trophy_middle_last_chance():
     assert _kinds(groups) == [TROPHY, MIDDLE, LAST_CHANCE]
     assert [len(ms) for _, ms in groups] == [1, 2, 1]
     assert _pairs(groups[0][1]) == {frozenset(("Aria", "Esk"))}
+
+
+# --- dropdown order matches the embed ---
+
+def test_round_results_view_orders_dropdowns_like_the_embed():
+    states = [  # interleaved by record, as incremental bracket creation produces
+        _ms("Noya", "Bram", "1-0", "1-0"),
+        _ms("Eli", "Fern", "0-1", "0-1"),
+        _ms("Gus", "Hana", "1-0", "1-0"),
+        _ms("Cara", "Dex", "0-1", "0-1"),
+    ]
+
+    view = RoundResultsView(states, round_num=2)
+
+    dropdown_ids = [
+        child.options[0].value.split("|")[0]
+        for child in view.children
+        if isinstance(child, MatchResultSelect)
+    ]
+    embed_ids = [m["match_id"] for _, group in round_groups(2, states) for m in group]
+    assert dropdown_ids == embed_ids
+    assert dropdown_ids == ["Noya-Bram", "Gus-Hana", "Eli-Fern", "Cara-Dex"]
 
 
 # --- rendering ---

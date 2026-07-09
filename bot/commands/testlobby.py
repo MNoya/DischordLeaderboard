@@ -21,6 +21,7 @@ from bot.database import SessionLocal
 from bot.models import MagicSet, Player, PodDraftEvent, PodDraftParticipant
 from bot.services.lobby_embed import (
     LobbyReadyButtonView,
+    build_drafting_view,
     register_force_start_preview,
     register_settings_preview,
     render as render_lobby_embed,
@@ -591,14 +592,18 @@ def _build(state: str) -> tuple[discord.Embed, discord.ui.View | None]:
         spectators=_SPECTATORS,
         **_preview_settings_labels(),
     )
-    view: discord.ui.View | None = (
-        None if state in ("drafting", "complete")
-        else LobbyReadyButtonView(
+    spectate_url = f"{_DRAFTMANCER_URL}&spectate=preview"
+    if state == "drafting":
+        view: discord.ui.View | None = build_drafting_view(spectate_url)
+    elif state == "complete":
+        view = None
+    else:
+        view = LobbyReadyButtonView(
             draftmancer_url=_DRAFTMANCER_URL,
             ready_disabled=(render_state == "ready"),
             show_force_start=(render_state == "unlinked"),
+            spectate_url=spectate_url,
         )
-    )
     return embed, view
 
 

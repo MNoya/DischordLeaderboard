@@ -37,6 +37,7 @@ from bot.scripts.draftmancer_log import build_compact
 from bot.services import bot_log as bot_log_mod
 from bot.services.lobby_embed import (
     LobbyReadyButtonView,
+    build_drafting_view,
     render as render_lobby_embed,
     render_ready_check_progress,
 )
@@ -701,15 +702,17 @@ class PodDraftManager:
                 **self._settings_labels(),
             )
             self._maybe_schedule_lobby_full_prompt(classified)
-            view = (
-                None if state in ("drafting", "complete")
-                else LobbyReadyButtonView(
+            if state == "drafting":
+                view = build_drafting_view(self.spectate_url)
+            elif state == "complete":
+                view = None
+            else:
+                view = LobbyReadyButtonView(
                     draftmancer_url=self.draftmancer_url,
                     ready_disabled=(state == "ready"),
                     show_force_start=(state == "unlinked"),
                     spectate_url=self.spectate_url,
                 )
-            )
             suppress_empty_reconnect = self.reconnect and not classified
             if (
                 self.lobby_status_message is None and self.reconnect and classified
@@ -754,7 +757,9 @@ class PodDraftManager:
                 total_count=self.last_ready_summary[1] if self.last_ready_summary else None,
                 **self._settings_labels(),
             )
-            if state in ("drafting", "complete", "notready"):
+            if state == "drafting":
+                progress_view = build_drafting_view(self.spectate_url)
+            elif state in ("complete", "notready"):
                 progress_view = None
             else:
                 progress_view = LobbyReadyButtonView(

@@ -736,9 +736,23 @@ def upsert_participant(
             candidate = player_for_name(session, display_name)
         if candidate is not None:
             found.player_id = candidate.id
+            _adopt_session_arena_handle(candidate, draftmancer_name)
 
     session.flush()
     return found
+
+
+def _adopt_session_arena_handle(player: Player, draftmancer_name: str | None) -> None:
+    """Record the Draftmancer session handle on a matched Player that lacks one. Players who joined
+    through 17lands carry no Arena handle (17lands exposes none), so their first pod — played under a
+    full ArenaID#12345 name — is where we learn it. A handle already stored is never overwritten."""
+    if not full_arena_handle(draftmancer_name):
+        return
+    if not full_arena_handle(player.arena_name):
+        player.arena_name = draftmancer_name
+    normalized = normalize_player_name(draftmancer_name)
+    if normalized and normalized not in player.arena_aliases:
+        player.arena_aliases = [*player.arena_aliases, normalized]
 
 
 def add_pairing(
@@ -923,6 +937,12 @@ def submit_deck_dm_for_participant(session: Session, participant_id: str) -> Pod
             PodDraftDmMessage.kind == DM_KIND_SUBMIT_DECK,
         )
     ).scalar_one_or_none()
+
+
+def delete_submit_deck_dm(session: Session, participant_id: str) -> None:
+    row = submit_deck_dm_for_participant(session, participant_id)
+    if row is not None:
+        session.delete(row)
 
 
 def final_submit_deck_dm_for_participant(

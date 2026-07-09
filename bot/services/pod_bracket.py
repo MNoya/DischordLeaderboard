@@ -67,28 +67,53 @@ def incremental_pairings(
         groups.setdefault((wins[pid], losses[pid]), []).append(pid)
 
     played = {frozenset((m.player_a_id, m.player_b_id)) for m in completed}
+    held = held_records(players, completed, target_round)
+
+    new_pairings: list[tuple[str, str]] = []
+    for record in sorted(groups, key=lambda r: (-r[0], r[1])):
+        if record in held:
+            continue
+        new_pairings.extend(_pair_group(groups[record], played, force=source_round_complete))
+    return new_pairings
+
+
+def held_records(
+    players: list[Player], completed: list[MatchOutcome], target_round: int,
+) -> set[tuple[int, int]]:
+    """Record groups the bracket must hold rather than pair now: a still-playing player could still
+    land in the group AND two players who already met could both land in it, so pairing now risks
+    stranding them into a forced rematch. Shared by `incremental_pairings` (which skips a held group)
+    and `padding_slots` (which shows it without naming a provisional opponent) so the preview and the
+    lock can never disagree — the divergence that let a preview name a pairing the lock then moved."""
+    expected_prior = target_round - 1
+    ids = {p.id for p in players}
+    wins = {pid: 0 for pid in ids}
+    losses = {pid: 0 for pid in ids}
+    for m in completed:
+        if m.player_a_id not in ids or m.player_b_id not in ids:
+            continue
+        wins[m.winner_id] += 1
+        losses[m.loser_id] += 1
+    played = {frozenset((m.player_a_id, m.player_b_id)) for m in completed}
+    still_playing = [pid for pid in ids if wins[pid] + losses[pid] < expected_prior]
 
     def can_reach(pid: str, record: tuple[int, int]) -> bool:
         need_w, need_l = record[0] - wins[pid], record[1] - losses[pid]
         return need_w >= 0 and need_l >= 0 and need_w + need_l == expected_prior - (wins[pid] + losses[pid])
 
-    still_playing = [pid for pid in ids if wins[pid] + losses[pid] < expected_prior]
-
-    def group_may_still_grow(record: tuple[int, int]) -> bool:
-        return any(can_reach(pid, record) for pid in still_playing)
-
-    def rematch_possible(record: tuple[int, int]) -> bool:
-        return any(
+    ready_records = {
+        (wins[pid], losses[pid]) for pid in ids if wins[pid] + losses[pid] == expected_prior
+    }
+    held: set[tuple[int, int]] = set()
+    for record in ready_records:
+        may_grow = any(can_reach(pid, record) for pid in still_playing)
+        rematch = any(
             can_reach(x, record) and can_reach(y, record)
             for x, y in (tuple(pair) for pair in played)
         )
-
-    new_pairings: list[tuple[str, str]] = []
-    for record in sorted(groups, key=lambda r: (-r[0], r[1])):
-        if group_may_still_grow(record) and rematch_possible(record):
-            continue
-        new_pairings.extend(_pair_group(groups[record], played, force=source_round_complete))
-    return new_pairings
+        if may_grow and rematch:
+            held.add(record)
+    return held
 
 
 ROUND_RECORD_BUCKETS: dict[int, tuple[tuple[tuple[int, int], int], ...]] = {
@@ -111,8 +136,10 @@ def padding_slots(
     `real_records` is the start-of-round (wins, losses) of each real match already created;
     `paired_names` are the players already in one. A player who has finished the prior round but
     isn't paired yet is named into a slot (earliest-ready first) so a partly-known match reads
-    'Alice vs 1-0'; slots with no known side stay anonymous. Returns one (record, name_a, name_b) per
-    missing match, best record first; name_* is None when that side is still unknown."""
+    'Alice vs 1-0'; slots with no known side stay anonymous. A record group the bracket is still
+    holding (see `held_records`) stays fully anonymous even when players are waiting in it — naming a
+    provisional opponent there is what let players start a match the lock later moved. Returns one
+    (record, name_a, name_b) per missing match, best record first; name_* is None when unknown."""
     buckets = ROUND_RECORD_BUCKETS.get(round_num)
     if not buckets:
         return []
@@ -141,10 +168,14 @@ def padding_slots(
     for pid in waiting:
         queues.setdefault((wins[pid], losses[pid]), []).append(pid)
 
+    held = held_records(players, completed, round_num)
     out: list[tuple[tuple[int, int], str | None, str | None]] = []
     for rec, expected in buckets:
         queue = queues.get(rec, [])
         for _ in range(max(expected - have.get(rec, 0), 0)):
+            if rec in held:
+                out.append((rec, None, None))
+                continue
             a = queue.pop(0) if queue else None
             b = queue.pop(0) if queue else None
             out.append((rec, a, b))

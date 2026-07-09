@@ -30,7 +30,7 @@ from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_deck_color import (
     PAIR_EMOJI_NAME,
     SAVED_MSG,
-    LiveDeckColorSelectView,
+    DeckColorSelectView,
     NotInPodError,
     OrganizerCallback,
     SubmitDeckButton,
@@ -53,6 +53,7 @@ from bot.services.pod_drafts import (
     add_pairing,
     capture_deck_screenshot,
     caption_has_record_pattern,
+    delete_submit_deck_dm,
     dm_messages_for_match,
     dm_messages_for_round,
     final_submit_deck_dm_for_participant,
@@ -624,9 +625,9 @@ def build_live_submit_deck_button() -> SubmitDeckButton:
     return SubmitDeckButton(live_deck_color_submit, live_deck_state_lookup, _dispatch_organizer_deck_override)
 
 
-def build_live_deck_color_select_view(current_value: str | None = None) -> LiveDeckColorSelectView:
+def build_live_deck_color_select_view(current_value: str | None = None) -> DeckColorSelectView:
     """Direct-dropdown variant for DMs — the select is visible on the message itself."""
-    return LiveDeckColorSelectView(live_deck_color_submit, current_value=current_value)
+    return DeckColorSelectView(live_deck_color_submit, current_value=current_value, persistent=True)
 
 
 def _build_submit_deck_dm_embed(deck_colors: str | None) -> discord.Embed:
@@ -686,8 +687,9 @@ def build_final_submit_deck_dm_embed(deck_colors: str | None) -> discord.Embed:
 async def _send_final_submit_deck_dms_for_match(
     bot_client, event_id: str, a_name: str, b_name: str,
 ) -> None:
-    """After an R3 match is reported: DM both players a fresh Submit Deck prompt. Idempotent per
-    participant — if the opponent later re-reports, the second call no-ops for already-DMed players."""
+    """After an R3 match is reported: re-ask for deck colors only from players who never saved them,
+    deleting their stale Round-1 dropdown DM so a single prompt survives. Players who already picked a
+    color are left alone. Idempotent per participant — a re-report no-ops for already-DMed players."""
     dm_info = await asyncio.to_thread(_load_dm_info_sync, event_id)
     seat_keys = (normalize_player_name(a_name), normalize_player_name(b_name))
     for seat_key in seat_keys:
@@ -700,6 +702,9 @@ async def _send_final_submit_deck_dms_for_match(
         deck_colors = await asyncio.to_thread(
             _load_participant_deck_state_sync, event_id, info.discord_id,
         )
+        if deck_colors is not None:
+            continue
+        await _delete_submit_deck_dm(bot_client, info.participant_id)
         embed = build_final_submit_deck_dm_embed(deck_colors)
         view = build_live_deck_color_select_view(deck_colors)
         msg = None
@@ -793,6 +798,26 @@ async def _edit_submit_deck_dm(
         )
     except discord.HTTPException:
         log.warning(f"refresh_submit_deck_dm: could not edit DM {dm_row.dm_message_id}", exc_info=True)
+
+
+async def _delete_submit_deck_dm(bot_client, participant_id: str) -> None:
+    row = await asyncio.to_thread(_load_submit_deck_dm_sync, participant_id)
+    if row is None:
+        return
+    try:
+        channel = bot_client.get_channel(int(row.dm_channel_id)) \
+            or await bot_client.fetch_channel(int(row.dm_channel_id))
+        msg = await channel.fetch_message(int(row.dm_message_id))
+        await msg.delete()
+    except discord.HTTPException:
+        log.warning(f"delete_submit_deck_dm: could not delete DM {row.dm_message_id}", exc_info=True)
+    await asyncio.to_thread(_delete_submit_deck_dm_row_sync, participant_id)
+
+
+def _delete_submit_deck_dm_row_sync(participant_id: str) -> None:
+    with SessionLocal() as session:
+        delete_submit_deck_dm(session, participant_id)
+        session.commit()
 
 
 def _load_participant_id_sync(event_id: str, discord_id: str) -> str | None:
@@ -947,7 +972,7 @@ async def advance_to_round(manager: "PodDraftManager", round_num: int) -> None:
     if round_num == 1 and seats and manager.pairing_mode != "random":
         _attach_seats(match_states, seats)
     embed = round_embed(round_num, match_states)
-    view = RoundResultsView(match_states)
+    view = RoundResultsView(match_states, round_num=round_num)
     posted: discord.Message | None = None
     try:
         posted = await thread.send(embed=embed, view=view)
@@ -1004,7 +1029,7 @@ async def _attach_round_link(manager: "PodDraftManager", round_num: int) -> None
         render_round_states, manager.event_id, round_num, bracket=manager.pairing_mode == "bracket",
     )
     try:
-        await msg.edit(view=RoundResultsView(states, link_url=url, link_label=label))
+        await msg.edit(view=RoundResultsView(states, round_num=round_num, link_url=url, link_label=label))
     except discord.HTTPException:
         log.warning(f"could not attach nav link to round {round_num}", exc_info=True)
 
@@ -1024,7 +1049,7 @@ async def refresh_round_pairing_messages(manager) -> None:
         try:
             await msg.edit(
                 embed=round_embed(round_num, states),
-                view=RoundResultsView(states, link_url=url, link_label=label),
+                view=RoundResultsView(states, round_num=round_num, link_url=url, link_label=label),
             )
         except discord.HTTPException:
             log.warning(f"could not refresh round {round_num} pairings after arena link", exc_info=True)
@@ -1090,12 +1115,18 @@ class RoundResultsView(ui.View):
 
     When `link_url` is provided AND there's an ActionRow free, a link button labelled `link_label`
     is appended so players can jump to the next round's message or the standings.
+
+    `round_num` orders the dropdowns through the same `round_groups` the embed groups by, so a
+    dropdown's position always matches its line in the embed body. Omitted for single-match DM views
+    and the persistent template, where order is moot.
     """
 
-    def __init__(self, match_states: list[dict] | None = None, *,
+    def __init__(self, match_states: list[dict] | None = None, *, round_num: int | None = None,
                  link_url: str | None = None, link_label: str | None = None):
         super().__init__(timeout=None)
         if match_states:
+            if round_num is not None:
+                match_states = [m for _, group in round_groups(round_num, match_states) for m in group]
             next_row = 0
             for slot, m in enumerate(match_states):
                 if m.get("locked"):
@@ -1198,7 +1229,7 @@ async def _handle_result_submission(interaction: discord.Interaction, value: str
                 await interaction.edit_original_response(
                     content=None,
                     embed=round_embed(round_num, match_states),
-                    view=RoundResultsView(match_states, link_url=url, link_label=label),
+                    view=RoundResultsView(match_states, round_num=round_num, link_url=url, link_label=label),
                 )
         except Exception:
             log.warning("could not edit interaction message after clear", exc_info=True)
@@ -1229,7 +1260,7 @@ async def _handle_result_submission(interaction: discord.Interaction, value: str
             await interaction.edit_original_response(
                 content=None,
                 embed=round_embed(round_num, match_states),
-                view=RoundResultsView(match_states, link_url=url, link_label=label),
+                view=RoundResultsView(match_states, round_num=round_num, link_url=url, link_label=label),
             )
     except Exception:
         log.warning("could not edit interaction message", exc_info=True)
@@ -1239,17 +1270,18 @@ async def _handle_result_submission(interaction: discord.Interaction, value: str
         exclude_channel_id=str(interaction.channel.id) if interaction.channel else None,
     ))
 
+    newly_reported = not result.get("was_reported") or result.get("winner_changed")
+    if match_state is not None and match_was_played(match_state) and newly_reported:
+        pairings_url = _resolve_pairings_url(event_id, round_num)
+        await _announce_round_result(
+            interaction.client, event_id, format_round_announcement(round_num, match_state, pairings_url),
+        )
+
     await _maybe_advance(
         interaction.client, event_id, round_num,
         is_edit=bool(result.get("was_reported") and result.get("winner_changed")),
         result_phrase=format_result_change(result["a_name"], result["b_name"], winner_name, score),
     )
-    newly_reported = not result.get("was_reported") or result.get("winner_changed")
-    if match_state is not None and match_was_played(match_state) and newly_reported:
-        pairings_url = _resolve_pairings_url(event_id, round_num)
-        asyncio.create_task(_announce_round_result(
-            interaction.client, event_id, format_round_announcement(round_num, match_state, pairings_url),
-        ))
     if round_num >= TOTAL_ROUNDS:
         asyncio.create_task(_send_final_submit_deck_dms_for_match(
             interaction.client, event_id, result["a_name"], result["b_name"],
@@ -1354,7 +1386,7 @@ async def _propagate_match_to_other_surfaces(
         await thread_msg.edit(
             content=None,
             embed=round_embed(round_num, match_states),
-            view=RoundResultsView(match_states, link_url=url, link_label=label),
+            view=RoundResultsView(match_states, round_num=round_num, link_url=url, link_label=label),
         )
     except discord.HTTPException:
         log.warning(f"propagate: could not edit thread message {thread_msg.id}", exc_info=True)
@@ -1698,13 +1730,23 @@ def _load_participant_displays(event_id: str) -> dict[str, dict]:
     for dm, participant_dn, player_dn, slug, arena in rows:
         raw = player_dn or participant_dn
         display = strip_arena_suffix(raw) if raw else raw
-        arena_ref = arena or (raw if raw and has_arena_suffix(raw) else None)
+        arena_ref = arena or _first_arena_handle(dm, participant_dn)
         info = {"display_name": display, "slug": slug, "arena": arena_ref}
         if dm:
             out[normalize_player_name(dm)] = info
         if participant_dn:
             out.setdefault(normalize_player_name(participant_dn), info)
     return out
+
+
+def _first_arena_handle(*names: str | None) -> str | None:
+    """First name carrying an Arena '#1234' suffix. The Draftmancer session handle stands in when a
+    linked Player has no recorded arena_name, so the pairing still leads with a findable handle instead
+    of dropping to the bare Discord name."""
+    for name in names:
+        if name and has_arena_suffix(name):
+            return name
+    return None
 
 
 async def _resolve_discord_mention(event_id: str, draftmancer_name: str) -> str | None:
@@ -1857,14 +1899,14 @@ def _review_seat_label(seat: dict) -> str:
 
 def build_draft_review_message(voice_url: str | None) -> str:
     """Message content above the table embed: the react/join prompt. Who started the review comes from
-    Discord's own '/pod-review' command attribution. The bare voice URL renders as a channel chip and
-    unfurls the native Join Voice card below the table."""
-    return f"{REVIEW_REACT_PROMPT}. Join {voice_url} !" if voice_url else f"{REVIEW_REACT_PROMPT}."
+    Discord's own '/pod-review' command attribution."""
+    if voice_url is None:
+        return f"{REVIEW_REACT_PROMPT}."
+    return f"{REVIEW_REACT_PROMPT} and join {voice_url}"
 
 
 def pod_voice_channel_url(guild: discord.Guild | None) -> str | None:
-    """Bare jump URL for the pod voice channel — in message content Discord renders it as a channel chip
-    and unfurls the Join Voice card. None when the channel is absent."""
+    """Bare jump URL for the pod voice channel. None when the channel is absent."""
     if guild is None:
         return None
     channel = discord.utils.get(guild.voice_channels, name=settings.pod_draft_voice_channel_name)
@@ -2100,12 +2142,12 @@ def build_champion_embed(
     pending_count: int = 0,
     deck_data: dict[str, "ParticipantDeckData"] | None = None,
     event_has_log: bool = False,
-    include_submit_cta: bool = True,
+    include_signoff: bool = True,
 ) -> discord.Embed:
     """Thread-side standings embed. `player_colors` adds a mana-emoji glyph after each player's record.
     `event_has_log` appends an inline Draft Log link per row pointing at the in-site reviewer when the
-    event has a captured draft log. `include_submit_cta` controls the trailing Submit-Deck CTA; the
-    /pod-standings command sets it to False since it posts a snapshot, not a call to action."""
+    event has a captured draft log. `include_signoff` controls the trailing thank-you line; the
+    /pod-standings command sets it to False since it posts a bare snapshot."""
     displays = displays or {}
     player_colors = player_colors or {}
     deck_data = deck_data or {}
@@ -2125,10 +2167,9 @@ def build_champion_embed(
     header = f"**{_standings_header_text(pending_count)}**"
 
     description = f"{header}\n" + "\n".join(lines)
-    if include_submit_cta:
+    if include_signoff:
         chordo_love = emojis.get("chordo_love")
-        submit_cta = f"**🎨 Share a screenshot and comment on your deck below**\n{chordo_love} Thank you for playing!"
-        description += f"\n\n{submit_cta}"
+        description += f"\n\n{chordo_love} Thank you for playing!"
 
     return discord.Embed(
         title=title,
@@ -2174,7 +2215,7 @@ async def build_standings_embed_for_event(event_id: str) -> discord.Embed | None
         pending_count=pending_count,
         deck_data=deck_data,
         event_has_log=event_has_log,
-        include_submit_cta=False,
+        include_signoff=False,
     )
 
 
@@ -2267,7 +2308,7 @@ async def _locked_round_view(manager, round_num: int):
         if m.get("winner_name"):
             m["locked"] = True
     url, label = _round_nav_link(manager, round_num)
-    return RoundResultsView(states, link_url=url, link_label=label)
+    return RoundResultsView(states, round_num=round_num, link_url=url, link_label=label)
 
 
 async def _grace_expire(manager, round_num: int) -> None:
@@ -2348,7 +2389,7 @@ async def _regenerate_next_round(manager, next_round: int) -> None:
     mark_trophy_match(match_states, next_round)
     embed = round_embed(next_round, match_states)
     url, label = _round_nav_link(manager, next_round)
-    view = RoundResultsView(match_states, link_url=url, link_label=label)
+    view = RoundResultsView(match_states, round_num=next_round, link_url=url, link_label=label)
 
     posted = manager.round_messages.get(next_round)
     if posted is not None:
@@ -3024,7 +3065,7 @@ async def _post_or_update_live_standings(manager) -> None:
             if adopted is not None:
                 manager.standings_message = adopted
             else:
-                view = build_live_submit_deck_view()
+                view = ui.View(timeout=None)
                 view.add_item(build_replays_link_button(event_name))
                 try:
                     manager.standings_message = await thread.send(embed=embed, view=view)
@@ -3416,7 +3457,9 @@ def _load_pod_player_names(event_id: str) -> list[str]:
 def bracket_placeholder_states(event_id: str, round_num: int, real: list[dict] | None = None) -> list[dict]:
     """Waiting-match states padding a bracket round to its full fixed slate, so the round always
     renders the same number of dropdowns. A known waiting player is named ('Alice vs 1-0'); a slot
-    with no known side reads 'Pending Round N'. `real` is this round's reportable matches."""
+    with no known side reads 'waiting on Round N' in the embed (the record comes from the group
+    header) and '1-1 Match waiting on Round N' in the dropdown (no header there). `real` is this
+    round's reportable matches."""
     if round_num < 2:
         return []
     if real is None:
@@ -3438,8 +3481,8 @@ def bracket_placeholder_states(event_id: str, round_num: int, real: list[dict] |
         elif a:
             label = dropdown_label = f"{disp(a)} vs {rec}"
         else:
-            label = ""
-            dropdown_label = f"{rec} Match"
+            label = f"waiting on Round {round_num - 1}"
+            dropdown_label = f"{rec} Match waiting on Round {round_num - 1}"
         out.append({
             "placeholder": True,
             "label": label,
@@ -3531,11 +3574,15 @@ def bracket_edit_blocked(match_id: str) -> bool:
     return downstream > 0
 
 
-async def bracket_advance(manager, source_round: int) -> None:
+async def bracket_advance(manager, source_round: int, *, announce_fill: bool = True) -> None:
     """Fast-advance: after a result in source_round, append whatever target-round pairings the new
     records now allow and grow the target round's message in place. Posts the target round the first
     time it has a real pairing — never an all-placeholder slate. The 2-0 trophy match opens the
-    moment both 2-0 players exist. Re-pair-on-edit (the Swiss grace regenerate) isn't supported."""
+    moment both 2-0 players exist. Re-pair-on-edit (the Swiss grace regenerate) isn't supported.
+
+    When later matches lock into an already-posted round, a thread note names them so the other-half
+    fill reads as an event rather than the message silently changing. `announce_fill` is False during
+    the edit-driven regenerate, which posts its own corrected-pairings note."""
     if source_round >= TOTAL_ROUNDS:
         return
     event_id = manager.event_id
@@ -3558,6 +3605,7 @@ async def bracket_advance(manager, source_round: int) -> None:
         manager.current_round = max(manager.current_round, target)
 
     target_msg = manager.round_messages.get(target)
+    was_posted = target_msg is not None
     if target_msg is None and not new_rows and not existing:
         return
 
@@ -3566,7 +3614,7 @@ async def bracket_advance(manager, source_round: int) -> None:
         return
     embed = round_embed(target, display)
     url, label = _round_nav_link(manager, target)
-    view = RoundResultsView(display, link_url=url, link_label=label)
+    view = RoundResultsView(display, round_num=target, link_url=url, link_label=label)
 
     if target_msg is None:
         thread = await manager._fetch_thread()
@@ -3589,6 +3637,29 @@ async def bracket_advance(manager, source_round: int) -> None:
 
     if new_rows:
         await _dm_round_pairings(manager.bot, event_id, target, new_rows, target_msg.jump_url)
+        if was_posted and announce_fill:
+            await _announce_bracket_fill(manager, target, new_rows, target_msg.jump_url)
+
+
+def bracket_fill_notice(round_num: int, new_rows: list[tuple[str, str, str]], url: str | None) -> str:
+    """Thread note when the fast bracket fills previously-pending slots in an already-posted round, so
+    the other-half matches read as newly set rather than the message changing silently."""
+    matchups = ", ".join(f"{strip_arena_suffix(a)} vs {strip_arena_suffix(b)}" for _, a, b in new_rows)
+    link = f"[Round {round_num} pairings]({url})" if url else f"Round {round_num} pairings"
+    return f"⚔️ {link} set: {matchups} {emojis.get('manat')}".rstrip()
+
+
+async def _announce_bracket_fill(manager, round_num: int, new_rows: list[tuple[str, str, str]], url: str) -> None:
+    thread = await manager._fetch_thread()
+    if thread is None:
+        return
+    try:
+        await thread.send(
+            bracket_fill_notice(round_num, new_rows, url),
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+    except discord.HTTPException:
+        log.warning(f"could not post bracket fill note event={manager.event_id} round={round_num}", exc_info=True)
 
 
 async def _bracket_maybe_advance(manager, round_num: int, is_edit: bool = False,
@@ -3621,7 +3692,7 @@ async def _relock_prior_rounds(manager, current_round: int) -> None:
         display = await asyncio.to_thread(load_bracket_round_states, manager.event_id, r)
         url, label = _round_nav_link(manager, r)
         try:
-            await msg.edit(view=RoundResultsView(display, link_url=url, link_label=label))
+            await msg.edit(view=RoundResultsView(display, round_num=r, link_url=url, link_label=label))
         except discord.HTTPException:
             log.warning(f"could not relock round {r}", exc_info=True)
 
@@ -3657,7 +3728,7 @@ async def bracket_regenerate_downstream(manager, edited_round: int, result_phras
     for r in range(edited_round + 1, TOTAL_ROUNDS + 1):
         await asyncio.to_thread(_delete_round_rows, event_id, r)
     for src in range(edited_round, TOTAL_ROUNDS):
-        await bracket_advance(manager, src)
+        await bracket_advance(manager, src, announce_fill=False)
 
     changed_rounds = []
     for r in range(edited_round + 1, TOTAL_ROUNDS + 1):

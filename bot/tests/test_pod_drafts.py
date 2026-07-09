@@ -308,6 +308,19 @@ def test_upsert_participant_backfills_player_id(session):
     assert row.player_id is not None
 
 
+def test_upsert_participant_adopts_arena_handle_for_player_without_one(session):
+    _seed_set(session)
+    event = record_event(session, _parsed_event(attendees=("Bigmits",)))
+    player = _seed_player(session, discord_id="333", username="bigmits", display_name="Bigmits")
+    assert player.arena_name is None
+
+    upsert_participant(session, event.id, display_name="Bigmits", draftmancer_name="Bigmits#91757")
+
+    session.refresh(player)
+    assert player.arena_name == "Bigmits#91757"
+    assert "bigmits" in player.arena_aliases
+
+
 def test_record_match_is_idempotent(session):
     _seed_set(session)
     event = record_event(session, _parsed_event())
