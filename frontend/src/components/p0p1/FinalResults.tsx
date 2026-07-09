@@ -7,7 +7,7 @@ import { CtaPill } from "../CtaPill";
 import { DiscordIcon } from "../BrandIcons";
 import { MidwayBreakdownList } from "./MidwayBreakdownList";
 import { useMidwayVersusPager, MidwayVersusModal } from "./MidwayVersusCard";
-import { breakdownStripAccent } from "./slotVisuals";
+import { breakdownStripAccent, SLOT_ACCENT } from "./slotVisuals";
 import { CHAMFER } from "./P0P1BallotScorecard";
 import { SLOTS } from "../../data/p0p1Slots";
 import {
@@ -359,6 +359,270 @@ function YourResultCard({
   );
 }
 
+// ── Champion spotlight ──────────────────────────────────────────────────────────
+
+function WinningBallotTile({
+  slotKey,
+  label,
+  cardName,
+  card,
+}: {
+  slotKey: SlotKey;
+  label: string;
+  cardName: string | null;
+  card: Card | undefined;
+}) {
+  const [touchOpen, setTouchOpen] = useState(false);
+  const accent = SLOT_ACCENT[slotKey];
+
+  return (
+    <div className="group/wtile relative min-w-0">
+      <div
+        className="flex flex-col border border-t-0 border-border2 bg-surface overflow-hidden cursor-pointer"
+        onTouchStart={(e) => {
+          e.stopPropagation();
+          setTouchOpen((o) => !o);
+        }}
+      >
+        <div className="h-[3px] w-full shrink-0" style={{ background: accent }} />
+        <div className="relative aspect-square bg-surface2 overflow-hidden">
+          {card ? (
+            <img src={card.imageArtCrop} alt={card.name} className="w-full h-full object-cover" />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-muted text-[10px] px-1 text-center">
+              {cardName ?? "—"}
+            </div>
+          )}
+        </div>
+        <div className="px-1 py-1 min-w-0">
+          <span className="text-subtle text-[9px] lg:text-[10px] truncate block" title={cardName ?? label}>
+            {cardName ?? "—"}
+          </span>
+        </div>
+      </div>
+
+      {card && (
+        <>
+          <div className="absolute bottom-[calc(100%+7px)] left-1/2 -translate-x-1/2 z-50 pointer-events-none opacity-0 group-hover/wtile:opacity-100 transition-opacity duration-100 hidden lg:block">
+            <img src={card.imageNormal} alt={card.name} className="w-[160px] rounded-sm border border-border2 shadow-xl" />
+          </div>
+          {touchOpen && (
+            <div className="absolute bottom-[calc(100%+7px)] left-1/2 -translate-x-1/2 z-50 pointer-events-none lg:hidden">
+              <img src={card.imageNormal} alt={card.name} className="w-[160px] rounded-sm border border-border2 shadow-xl" />
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function ChampionCard({
+  ballot,
+  total,
+  isSelf,
+  cardsByName,
+}: {
+  ballot: RankedBallot;
+  total: number;
+  isSelf: boolean;
+  cardsByName: Map<string, Card>;
+}) {
+  const topPct = Math.max(1, Math.round((ballot.rank / total) * 100));
+
+  const tiles = useMemo(
+    () =>
+      SLOTS.map((slot) => {
+        const cardName = ballot.picks.get(slot.key) ?? null;
+        const card = cardName ? cardsByName.get(cardName) : undefined;
+        return { slotKey: slot.key, label: slot.label, cardName, card };
+      }),
+    [ballot, cardsByName],
+  );
+
+  return (
+    <div
+      className="animate-fadeUpIn w-full"
+      style={{
+        clipPath: CHAMFER,
+        padding: 1,
+        background: "linear-gradient(120deg, #ffc63a, #ffc63a55 35%, #3b4458 65%, #ffc63a44)",
+        filter: "drop-shadow(0 0 28px #ffc63a2e)",
+      }}
+    >
+      <div
+        className="relative overflow-hidden bg-surface2 px-4 sm:px-6 pt-4 sm:pt-5 pb-4 sm:pb-5"
+        style={{
+          clipPath: CHAMFER,
+          backgroundImage: "radial-gradient(120% 140% at 8% 0%, #ffc63a1c, transparent 45%)",
+        }}
+      >
+        <div
+          className="absolute -top-8 sm:-top-11 right-1 font-display leading-none pointer-events-none select-none"
+          style={{ fontSize: "clamp(140px,32vw,230px)", color: "#ffc63a12" }}
+        >
+          1
+        </div>
+
+        <div className="relative flex flex-wrap items-center gap-3 sm:gap-4">
+          {ballot.avatarUrl ? (
+            <img
+              src={ballot.avatarUrl}
+              alt={ballot.name}
+              className="w-14 h-14 sm:w-16 sm:h-16 rounded-full shrink-0 object-cover"
+              style={{ boxShadow: "0 0 0 2px #1d2330, 0 0 0 4px #ffc63a, 0 0 24px #ffc63a66" }}
+            />
+          ) : (
+            <div
+              className="w-14 h-14 sm:w-16 sm:h-16 rounded-full shrink-0 bg-surface flex items-center justify-center text-[20px] sm:text-[24px] text-muted font-mono"
+              style={{ boxShadow: "0 0 0 2px #1d2330, 0 0 0 4px #ffc63a, 0 0 24px #ffc63a66" }}
+            >
+              ?
+            </div>
+          )}
+
+          <div className="flex-1 min-w-0">
+            <div className="font-display tracking-[0.2em] sm:tracking-[0.22em] text-[13px] sm:text-[15px] text-gold">
+              🥇 CHAMPION
+            </div>
+            <div className="text-[19px] sm:text-[26px] font-semibold leading-tight truncate">
+              {ballot.name}
+              {isSelf && (
+                <span className="ml-2 text-[10px] font-normal text-subtle font-display tracking-widest align-middle">
+                  YOU
+                </span>
+              )}
+            </div>
+            <div className="text-[11px] sm:text-[12.5px] text-muted mt-0.5">
+              Top {topPct}% of {total} ballots
+            </div>
+          </div>
+
+          <div className="hidden lg:block text-right shrink-0">
+            <div
+              className="font-mono tabular-nums text-[52px] font-bold leading-none text-gold"
+              style={{ textShadow: "0 0 56px #ffc63ab0, 0 0 18px #ffc63a50" }}
+            >
+              {ballot.score.toFixed(1)}
+            </div>
+            <div className="font-display tracking-[0.2em] text-[12px] text-muted mt-1">FINAL SCORE</div>
+          </div>
+        </div>
+
+        <div className="lg:hidden mt-3 flex items-baseline gap-2.5">
+          <div
+            className="font-mono tabular-nums text-[40px] font-bold leading-none text-gold"
+            style={{ textShadow: "0 0 56px #ffc63ab0, 0 0 18px #ffc63a50" }}
+          >
+            {ballot.score.toFixed(1)}
+          </div>
+          <div className="font-display tracking-[0.2em] text-[11px] text-muted">FINAL SCORE</div>
+        </div>
+
+        <div className="font-display tracking-[0.2em] text-[11px] sm:text-[12px] text-muted mt-4 mb-1.5">
+          THE WINNING BALLOT
+        </div>
+        <div className="grid grid-cols-4 lg:grid-cols-8 gap-1.5">
+          {tiles.map((t) => (
+            <WinningBallotTile key={t.slotKey} {...t} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const MEDAL_ROW_STYLE: Record<2 | 3, { color: string; label: string; tint: string }> = {
+  2: { color: "#c0c8d6", label: "2ND", tint: "linear-gradient(90deg, #c0c8d612, transparent 55%)" },
+  3: { color: "#c87941", label: "3RD", tint: "linear-gradient(90deg, #c8794112, transparent 55%)" },
+};
+
+function MedalRow({
+  ballot,
+  setCode,
+  isSelf,
+  cardsByName,
+  ratingsByName,
+}: {
+  ballot: RankedBallot;
+  setCode: string;
+  isSelf: boolean;
+  cardsByName: Map<string, Card>;
+  ratingsByName: Map<string, CardRating>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const entries = useMemo(
+    () => (expanded ? ballotToEntries(ballot, setCode, ratingsByName) : []),
+    [expanded, ballot, setCode, ratingsByName],
+  );
+  const medal = MEDAL_ROW_STYLE[ballot.rank as 2 | 3];
+
+  return (
+    <div
+      className={`border-b border-border2 last:border-b-0 ${isSelf ? "bg-white/[0.04]" : ""}`}
+      style={{ boxShadow: `inset 3px 0 0 ${medal.color}`, backgroundImage: isSelf ? undefined : medal.tint }}
+    >
+      <button
+        type="button"
+        onClick={() => setExpanded((e) => !e)}
+        className="w-full flex items-center gap-2 lg:gap-3 px-3 lg:px-4 py-2.5 lg:py-3 text-left cursor-pointer bg-transparent border-0"
+      >
+        <span
+          className="w-7 lg:w-8 shrink-0 text-right font-display tracking-[0.06em] text-[15px] lg:text-[17px]"
+          style={{ color: medal.color }}
+        >
+          {medal.label}
+        </span>
+
+        {ballot.avatarUrl ? (
+          <img
+            src={ballot.avatarUrl}
+            alt={ballot.name}
+            className="w-6 h-6 lg:w-7 lg:h-7 rounded-full shrink-0 object-cover"
+            style={{ boxShadow: `0 0 0 1.5px ${medal.color}` }}
+          />
+        ) : (
+          <div
+            className="w-6 h-6 lg:w-7 lg:h-7 rounded-full shrink-0 bg-surface flex items-center justify-center text-[10px] lg:text-[11px] text-muted font-mono"
+            style={{ boxShadow: `0 0 0 1.5px ${medal.color}` }}
+          >
+            ?
+          </div>
+        )}
+
+        <span
+          className={`flex-1 min-w-0 lg:flex-none lg:w-[150px] lg:shrink-0 text-[14px] lg:text-[15px] truncate ${isSelf ? "text-white font-semibold" : "text-text"}`}
+        >
+          {ballot.name}
+          {isSelf && (
+            <span className="ml-2 text-[10px] font-normal text-subtle font-display tracking-widest">YOU</span>
+          )}
+        </span>
+
+        <span className="hidden lg:block flex-1" />
+
+        <span
+          className="font-mono tabular-nums text-[13px] lg:text-[14px] font-semibold shrink-0"
+          style={{ color: medal.color }}
+        >
+          {ballot.score.toFixed(1)}
+        </span>
+
+        <ChevronDown
+          size={14}
+          className={`shrink-0 text-muted transition-transform duration-150 ${expanded ? "rotate-180" : ""}`}
+        />
+      </button>
+
+      {expanded && (
+        <div className="px-3 lg:px-4 pb-4 pt-1">
+          <PickGrid entries={entries} cardsByName={cardsByName} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Leaderboard ───────────────────────────────────────────────────────────────
 
 function LeaderboardRow({
@@ -451,6 +715,7 @@ function Leaderboard({
   ratingsByName,
   mode = "full",
   onSeeAll,
+  spotlight = false,
 }: {
   rankedBallots: RankedBallot[];
   setCode: string;
@@ -459,10 +724,12 @@ function Leaderboard({
   ratingsByName: Map<string, CardRating>;
   mode?: "peek" | "full";
   onSeeAll?: () => void;
+  spotlight?: boolean;
 }) {
   const maxScore = rankedBallots[0]?.score ?? 1;
   const isPeek = mode === "peek";
   const hasMore = rankedBallots.length > COLLAPSED_COUNT;
+  const useSpotlight = spotlight && isPeek;
 
   const visible = useMemo(() => {
     if (!isPeek || !hasMore) return rankedBallots;
@@ -478,22 +745,44 @@ function Leaderboard({
     return peek;
   }, [isPeek, hasMore, rankedBallots, userBallotId]);
 
+  const champion = useSpotlight ? visible.find((b) => b.rank === 1) ?? null : null;
+  const rows = champion ? visible.filter((b) => b.ballotId !== champion.ballotId) : visible;
+
   return (
     <div className="flex flex-col gap-3">
+      {champion && (
+        <ChampionCard
+          ballot={champion}
+          total={rankedBallots.length}
+          isSelf={champion.ballotId === userBallotId}
+          cardsByName={cardsByName}
+        />
+      )}
       <div>
         <div className="relative">
           <div className="border-t border-border2 bg-surface2">
-            {visible.map((ballot) => (
-              <LeaderboardRow
-                key={ballot.ballotId}
-                ballot={ballot}
-                setCode={setCode}
-                isSelf={ballot.ballotId === userBallotId}
-                maxScore={maxScore}
-                cardsByName={cardsByName}
-                ratingsByName={ratingsByName}
-              />
-            ))}
+            {rows.map((ballot) =>
+              useSpotlight && (ballot.rank === 2 || ballot.rank === 3) ? (
+                <MedalRow
+                  key={ballot.ballotId}
+                  ballot={ballot}
+                  setCode={setCode}
+                  isSelf={ballot.ballotId === userBallotId}
+                  cardsByName={cardsByName}
+                  ratingsByName={ratingsByName}
+                />
+              ) : (
+                <LeaderboardRow
+                  key={ballot.ballotId}
+                  ballot={ballot}
+                  setCode={setCode}
+                  isSelf={ballot.ballotId === userBallotId}
+                  maxScore={maxScore}
+                  cardsByName={cardsByName}
+                  ratingsByName={ratingsByName}
+                />
+              ),
+            )}
           </div>
           {/* Peek fade — only when in peek mode and there are hidden rows */}
           {isPeek && hasMore && (
@@ -816,6 +1105,7 @@ export function FinalResults({
                 ratingsByName={ratingsByName}
                 mode="peek"
                 onSeeAll={() => goToTab("results")}
+                spotlight
               />
             </div>
           )}
