@@ -272,72 +272,187 @@ export function rankBallots(
   return scored;
 }
 
-export interface SlotRankGap {
+// ── Highlights feed ─────────────────────────────────────────────────────────
+// Trap / Sleeper / Prophet awards selected by GIHWR effect size; see
+// spec/p0p1-results.md → Highlights. Sleeper and Prophet popularity uses team
+// share (fraction of all ballots playing the card in any slot — wildcard slots
+// overlap the color slots); the Trap keeps within-slot share, its cost is slot-local.
+
+export const TRAP_SHORTFALL_FLOOR = 0.02;
+export const SLEEPER_TEAM_SHARE_CEIL = 0.05;
+export const PROPHET_TEAM_SHARE_CEIL = 0.2;
+
+export interface HighlightVoter {
+  name: string;
+  avatarUrl: string | null;
+}
+
+interface HighlightBase {
   slot: SlotKey;
   slotLabel: string;
   cardName: string;
-  popularityRank: number;
-  gihwrRank: number;
-  gap: number;
-  kind: "overrated" | "underrated";
+  gihwr: number;
+  // within-category normalized drama, (0, 1]; the feed is ordered by this
+  drama: number;
 }
 
-// Per-slot rank gap for the highlights reel.
-// Overrated: high popularity rank, low GIHWR rank (everyone took it; it underperforms).
-// Underrated: low popularity rank, high GIHWR rank (nobody took it; it's secretly strong).
-// Returns top highlights sorted by |gap| descending.
-export function slotRankGaps(
+export interface TrapHighlight extends HighlightBase {
+  kind: "trap";
+  pickCount: number;
+  pickShare: number;
+  slotBestName: string;
+  slotBestGihwr: number;
+}
+
+export interface SleeperHighlight extends HighlightBase {
+  kind: "sleeper";
+  teamCount: number;
+  teamShare: number;
+  crowdFavName: string;
+  crowdFavGihwr: number;
+}
+
+export interface ProphetHighlight extends HighlightBase {
+  kind: "prophet";
+  teamShare: number;
+  voters: HighlightVoter[];
+}
+
+export type Highlight = TrapHighlight | SleeperHighlight | ProphetHighlight;
+
+// Top highlights across all slots: the best Trap, Sleeper, and Prophet are
+// guaranteed a slot (quota), the rest fill by drama normalized within category.
+export function highlightsFeed(
   pickStats: P0P1PickStat[],
+  ballots: P0P1BallotRow[],
+  cards: Card[],
   slots: SlotDefinition[],
   ratingsByName: Map<string, CardRating>,
-  topN = 3,
-): SlotRankGap[] {
-  const slotLabelMap = new Map(slots.map((s) => [s.key, s.label]));
-  const bySlot = new Map<SlotKey, P0P1PickStat[]>();
+  feedSize = 5,
+): Highlight[] {
+  const rated = (name: string): number | null => {
+    const r = ratingsByName.get(name);
+    return r && r.gih >= GIH_SAMPLE_FLOOR && r.gihwr !== null ? r.gihwr : null;
+  };
+
+  const voterIds = new Set(ballots.map((b) => b.ballotId));
+  const voterCount = voterIds.size;
+  if (voterCount === 0) return [];
+  const teamCount = new Map<string, number>();
+  for (const b of ballots) teamCount.set(b.cardName, (teamCount.get(b.cardName) ?? 0) + 1);
+  const teamShare = (name: string) => (teamCount.get(name) ?? 0) / voterCount;
+
+  const statsBySlot = new Map<SlotKey, P0P1PickStat[]>();
   for (const stat of pickStats) {
-    const arr = bySlot.get(stat.slot) ?? [];
+    const arr = statsBySlot.get(stat.slot) ?? [];
     arr.push(stat);
-    bySlot.set(stat.slot, arr);
+    statsBySlot.set(stat.slot, arr);
   }
 
-  const gaps: SlotRankGap[] = [];
+  const emptyPicked = new Set<string>();
+  const traps: TrapHighlight[] = [];
+  const sleepers: SleeperHighlight[] = [];
+  const prophets: ProphetHighlight[] = [];
 
-  for (const [slotKey, stats] of bySlot) {
-    // Sort by popularity to get popularity ranks
-    const byPop = [...stats].sort((a, b) => b.pickCount - a.pickCount);
-    // Sort by GIHWR to get GIHWR ranks (among above-floor cards only)
-    const byGihwr = [...stats]
-      .filter((s) => {
-        const r = ratingsByName.get(s.cardName);
-        return r && r.gih >= GIH_SAMPLE_FLOOR && r.gihwr !== null;
-      })
-      .sort((a, b) => {
-        const ra = ratingsByName.get(a.cardName)!.gihwr!;
-        const rb = ratingsByName.get(b.cardName)!.gihwr!;
-        return rb - ra;
+  for (const slot of slots) {
+    const pool = cards
+      .filter((c) => slot.filter(c, emptyPicked))
+      .flatMap((c) => {
+        const gihwr = rated(c.name);
+        return gihwr === null ? [] : [{ name: c.name, gihwr }];
       });
+    if (pool.length === 0) continue;
+    const best = pool.reduce((a, b) => (b.gihwr > a.gihwr ? b : a));
 
-    for (let popIdx = 0; popIdx < byPop.length; popIdx++) {
-      const stat = byPop[popIdx];
-      const rating = ratingsByName.get(stat.cardName);
-      if (!rating || rating.gih < GIH_SAMPLE_FLOOR || rating.gihwr === null) continue;
-      const gihwrIdx = byGihwr.findIndex((s) => s.cardName === stat.cardName);
-      if (gihwrIdx === -1) continue;
-      const gap = popIdx - gihwrIdx; // positive = overrated, negative = underrated
-      if (gap === 0) continue;
-      gaps.push({
-        slot: slotKey,
-        slotLabel: slotLabelMap.get(slotKey) ?? slotKey,
+    const stats = statsBySlot.get(slot.key) ?? [];
+    const slotVotes = stats.reduce((sum, s) => sum + s.pickCount, 0);
+
+    for (const stat of stats) {
+      const gihwr = rated(stat.cardName);
+      if (gihwr === null || slotVotes === 0) continue;
+      if (best.gihwr - gihwr < TRAP_SHORTFALL_FLOOR) continue;
+      const pickShare = stat.pickCount / slotVotes;
+      traps.push({
+        kind: "trap",
+        slot: slot.key,
+        slotLabel: slot.label,
         cardName: stat.cardName,
-        popularityRank: popIdx + 1,
-        gihwrRank: gihwrIdx + 1,
-        gap,
-        kind: gap > 0 ? "overrated" : "underrated",
+        gihwr,
+        drama: pickShare * (best.gihwr - gihwr),
+        pickCount: stat.pickCount,
+        pickShare,
+        slotBestName: best.name,
+        slotBestGihwr: best.gihwr,
       });
+    }
+
+    const crowdFavStat = stats.reduce(
+      (a, b) => (b.pickCount > (a?.pickCount ?? 0) ? b : a),
+      null as P0P1PickStat | null,
+    );
+    const crowdFavGihwr = crowdFavStat ? rated(crowdFavStat.cardName) : null;
+    if (crowdFavStat && crowdFavGihwr !== null) {
+      for (const c of pool) {
+        if (teamShare(c.name) > SLEEPER_TEAM_SHARE_CEIL) continue;
+        if (c.gihwr <= crowdFavGihwr) continue;
+        sleepers.push({
+          kind: "sleeper",
+          slot: slot.key,
+          slotLabel: slot.label,
+          cardName: c.name,
+          gihwr: c.gihwr,
+          drama: c.gihwr - crowdFavGihwr,
+          teamCount: teamCount.get(c.name) ?? 0,
+          teamShare: teamShare(c.name),
+          crowdFavName: crowdFavStat.cardName,
+          crowdFavGihwr,
+        });
+      }
+    }
+
+    if (teamShare(best.name) <= PROPHET_TEAM_SHARE_CEIL) {
+      const voters = ballots
+        .filter((b) => b.slot === slot.key && b.cardName === best.name)
+        .map((b) => ({ name: b.name, avatarUrl: b.avatarUrl }));
+      if (voters.length > 0) {
+        prophets.push({
+          kind: "prophet",
+          slot: slot.key,
+          slotLabel: slot.label,
+          cardName: best.name,
+          gihwr: best.gihwr,
+          drama: 1 - teamShare(best.name),
+          teamShare: teamShare(best.name),
+          voters,
+        });
+      }
     }
   }
 
-  return gaps
-    .sort((a, b) => Math.abs(b.gap) - Math.abs(a.gap))
-    .slice(0, topN);
+  // A card qualifying in multiple slots (wildcard overlap) keeps its strongest instance
+  const dedupe = <T extends Highlight>(entries: T[]): T[] => {
+    const byCard = new Map<string, T>();
+    for (const e of entries) {
+      const cur = byCard.get(e.cardName);
+      if (!cur || e.drama > cur.drama) byCard.set(e.cardName, e);
+    }
+    return Array.from(byCard.values()).sort((a, b) => b.drama - a.drama);
+  };
+
+  const categories: Highlight[][] = [dedupe(traps), dedupe(sleepers), dedupe(prophets)];
+  for (const entries of categories) {
+    const max = entries[0]?.drama ?? 1;
+    for (const e of entries) e.drama = e.drama / max;
+  }
+
+  const feed: Highlight[] = categories.flatMap((entries) => entries.slice(0, 1));
+  const rest = categories
+    .flatMap((entries) => entries.slice(1))
+    .sort((a, b) => b.drama - a.drama);
+  for (const e of rest) {
+    if (feed.length >= feedSize) break;
+    feed.push(e);
+  }
+
+  return feed.sort((a, b) => b.drama - a.drama).slice(0, feedSize);
 }

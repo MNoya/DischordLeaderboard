@@ -19,7 +19,7 @@ import {
   gihwrBounds,
   groupBallotRows,
   rankBallots,
-  slotRankGaps,
+  highlightsFeed,
   GIH_SAMPLE_FLOOR,
 } from "../../data/p0p1Results";
 import type {
@@ -27,7 +27,7 @@ import type {
   TeamPick,
   CardRating,
   RankedBallot,
-  SlotRankGap,
+  Highlight,
 } from "../../data/p0p1Results";
 import type { Card, P0P1BallotRow, P0P1PickStat, SlotKey } from "../../types/p0p1";
 import type { PickEntry } from "./CommunityGrid";
@@ -918,20 +918,46 @@ function Leaderboard({
 
 // ── Highlights reel ───────────────────────────────────────────────────────────
 
+const HIGHLIGHT_ACCENT: Record<Highlight["kind"], string> = {
+  trap: "#ff6b6b",
+  sleeper: "#2ee85c",
+  prophet: "#ffc63a",
+};
+
+const HIGHLIGHT_LABEL: Record<Highlight["kind"], string> = {
+  trap: "THE TRAP",
+  sleeper: "THE SLEEPER",
+  prophet: "THE PROPHET",
+};
+
+function pctLabel(share: number): string {
+  return `${(share * 100).toFixed(share < 0.1 ? 1 : 0)}%`;
+}
+
+function ppLabel(delta: number): string {
+  return `${(delta * 100).toFixed(1)}pp`;
+}
+
+function highlightCaption(h: Highlight): string {
+  switch (h.kind) {
+    case "trap":
+      return `${pctLabel(h.pickShare)} picked it · −${ppLabel(h.slotBestGihwr - h.gihwr)} vs ${h.slotBestName}`;
+    case "sleeper":
+      return `on ${pctLabel(h.teamShare)} of teams · +${ppLabel(h.gihwr - h.crowdFavGihwr)} vs ${h.crowdFavName}`;
+    case "prophet":
+      return `called the slot's best card · on ${pctLabel(h.teamShare)} of teams`;
+  }
+}
+
 function HighlightTile({
-  gap,
+  highlight,
   cardsByName,
 }: {
-  gap: SlotRankGap;
+  highlight: Highlight;
   cardsByName: Map<string, Card>;
 }) {
-  const card = cardsByName.get(gap.cardName);
-  const isOverrated = gap.kind === "overrated";
-  const accent = isOverrated ? "#ff6b6b" : "#2ee85c";
-  const label = isOverrated ? "OVERRATED" : "UNDERRATED";
-  const rankText = isOverrated
-    ? `#${gap.popularityRank} popular → #${gap.gihwrRank} GIH WR`
-    : `#${gap.gihwrRank} GIH WR → #${gap.popularityRank} popular`;
+  const card = cardsByName.get(highlight.cardName);
+  const accent = HIGHLIGHT_ACCENT[highlight.kind];
 
   return (
     <div className="flex flex-col items-center gap-1.5">
@@ -939,7 +965,7 @@ function HighlightTile({
         className="inline-block font-display tracking-[0.14em] uppercase text-[11px] leading-none px-2 py-1 rounded-sm"
         style={{ background: `${accent}22`, color: accent }}
       >
-        {label}
+        {HIGHLIGHT_LABEL[highlight.kind]}
       </div>
 
       {card ? (
@@ -951,16 +977,31 @@ function HighlightTile({
           />
           <div className="absolute inset-x-0 bottom-0 bg-black/60 px-1.5 py-1">
             <div className="text-white text-[11px] font-semibold leading-snug truncate">{card.name}</div>
-            <div className="text-dim text-[10px] font-mono">{gap.slotLabel}</div>
+            <div className="text-dim text-[10px] font-mono">{highlight.slotLabel}</div>
           </div>
         </div>
       ) : (
         <div className="w-[120px] h-[120px] bg-surface2 border border-border2 rounded flex items-center justify-center text-[13px] text-muted">
-          {gap.cardName}
+          {highlight.cardName}
         </div>
       )}
 
-      <p className="text-[11px] text-dim text-center font-mono max-w-[130px]">{rankText}</p>
+      <p className="text-[11px] text-dim text-center font-mono max-w-[150px]">
+        {highlightCaption(highlight)}
+      </p>
+
+      {highlight.kind === "prophet" && (
+        <div className="flex flex-col items-center gap-0.5 max-w-[150px]">
+          {highlight.voters.map((v) => (
+            <div key={v.name} className="flex items-center gap-1.5 min-w-0">
+              {v.avatarUrl && (
+                <img src={v.avatarUrl} alt="" className="w-4 h-4 rounded-full shrink-0" />
+              )}
+              <span className="text-[11px] text-white truncate">{v.name}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -969,7 +1010,7 @@ function HighlightsReel({
   highlights,
   cardsByName,
 }: {
-  highlights: SlotRankGap[];
+  highlights: Highlight[];
   cardsByName: Map<string, Card>;
 }) {
   if (highlights.length === 0) return null;
@@ -980,8 +1021,8 @@ function HighlightsReel({
         <SectionLabel size={22} className="text-white">HIGHLIGHTS</SectionLabel>
       </div>
       <div className="flex flex-wrap justify-center gap-6">
-        {highlights.map((gap) => (
-          <HighlightTile key={`${gap.slot}-${gap.cardName}`} gap={gap} cardsByName={cardsByName} />
+        {highlights.map((h) => (
+          <HighlightTile key={`${h.kind}-${h.slot}-${h.cardName}`} highlight={h} cardsByName={cardsByName} />
         ))}
       </div>
     </div>
@@ -1031,8 +1072,8 @@ export function FinalResults({
     return rankBallots(grouped, ratingsByName);
   }, [ballots, ratingsByName]);
   const highlights = useMemo(
-    () => slotRankGaps(pickStats, SLOTS, ratingsByName, HIGHLIGHTS_COUNT),
-    [pickStats, ratingsByName],
+    () => highlightsFeed(pickStats, ballots, cards, SLOTS, ratingsByName, HIGHLIGHTS_COUNT),
+    [pickStats, ballots, cards, ratingsByName],
   );
 
   const showYourPicks = Boolean(user) && hasParticipated;

@@ -57,14 +57,23 @@ Extends the existing 2-way `PickVersusCard` modal to three columns, now keyed on
 - **Best-possible team** and **most-popular team** are **legal ballots** — they respect the contest's no-duplicate-card-across-slots constraint (a small constrained assignment over the slots, not a per-slot argmax). They are real, attainable ballots, not an unreachable upper bound.
 - Note the distinction: the per-slot comparison's "best pick" is the slot-local best card, which may differ from the card the best-possible _team_ uses for that slot (because the team optimizes across slots under the uniqueness constraint). These are two different "best" numbers by design and must be presented so the difference doesn't read as a bug.
 
-### Highlights — per-slot rank gap (final only)
+### Highlights — award feed (final only)
 
-Within each slot, rank cards by pick-popularity and independently by GIHWR.
+A top-5 mixed feed of three named award types (replaces the earlier generic per-slot rank-gap pair):
 
-- **Overrated**: popular but low winrate-rank (everyone took it, it underperforms).
-- **Underrated**: ignored but high winrate-rank (nobody took it, it's secretly strong).
+- **The Trap** — a card many voters picked that underperformed the best card available in its slot.
+- **The Sleeper** — a card almost nobody (possibly nobody) picked that outperformed the slot's crowd favorite. Computed over each slot's full **eligible pool** (all cards the slot filter admits), not just picked cards — `public_p0p1_pick_stats` omits zero-vote cards, so the pool comes from the card fixture + slot filters.
+- **The Prophet** — the voter(s) who picked a slot's best-performing card when few others did. The only voter-named highlight; personal callouts are **positive-only** — negative stories stay at the card level, never at the person.
 
-Surface the top few across all slots (sorted by gap magnitude).
+Feed selection is **quota-then-fill**: the single best Trap, Sleeper, and Prophet are guaranteed a slot; the remaining 2 slots are filled by the next-most-dramatic entries from any category, using drama scores normalized within each category. The feed is ordered by drama, not category.
+
+Selection metric was chosen empirically by prototyping both candidates against the real MSH data (rank-gap vs GIHWR effect-size): rank-gap over the full pool labels 0–1-vote cards as "traps" and its magnitudes are tie-noise among the 1-vote tail, while effect-size surfaces coherent stories. **Effect-size drives selection**; rank numbers may still appear as caption flavor:
+
+Because the wildcard slots overlap the color slots, within-slot pick share understates how "seen" a card was (a card can be one slot's crowd favorite and another's phantom sleeper). Popularity therefore uses **team share** — the fraction of all ballots that included the card in any slot (well-defined because the uniqueness constraint means a card appears at most once per ballot) — everywhere except the Trap, whose cost is inherently slot-local:
+
+- Trap drama = within-slot pick share × (slot best GIHWR − card GIHWR), with a hard eligibility floor of ≥ 2pp shortfall — a heavily-picked card that's still near the slot best (e.g. the slot's #2) is the crowd being right, not a trap
+- Sleeper drama = card GIHWR − crowd favorite GIHWR, among pool cards with team share ≤ 5% (zero votes included); a card qualifying in multiple slots is deduped to its strongest instance
+- Prophet drama = 1 − team share of the slot-best card, with a hard eligibility floor of team share ≤ 20% (a slot whose best card was broadly played yields no prophet); ties → co-prophets share the tile
 
 ## Data approach
 
