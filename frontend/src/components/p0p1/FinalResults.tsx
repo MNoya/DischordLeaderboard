@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
 import { SectionLabel } from "../SectionLabel";
@@ -639,6 +639,7 @@ function LeaderboardRow({
   maxScore,
   cardsByName,
   ratingsByName,
+  rowRef,
 }: {
   ballot: RankedBallot;
   setCode: string;
@@ -646,6 +647,7 @@ function LeaderboardRow({
   maxScore: number;
   cardsByName: Map<string, Card>;
   ratingsByName: Map<string, CardRating>;
+  rowRef?: (el: HTMLDivElement | null) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const entries = useMemo(
@@ -654,7 +656,7 @@ function LeaderboardRow({
   );
 
   return (
-    <div className={`border-b border-border2 last:border-b-0 ${isSelf ? "bg-white/[0.04]" : ""}`}>
+    <div ref={rowRef} className={`border-b border-border2 last:border-b-0 ${isSelf ? "bg-white/[0.04]" : ""}`}>
       <button
         type="button"
         onClick={() => setExpanded((e) => !e)}
@@ -712,6 +714,70 @@ function LeaderboardRow({
   );
 }
 
+// The signed-in viewer's own standing, pinned to the top of the standings while their
+// real row is scrolled out of view. Mirrors FloatingOwnRow in LeaderboardTable.tsx.
+function FloatingSelfRow({
+  ballot,
+  setCode,
+  maxScore,
+  cardsByName,
+  ratingsByName,
+  hidden,
+  stickyTop,
+  onScrollToRow,
+}: {
+  ballot: RankedBallot | undefined;
+  setCode: string;
+  maxScore: number;
+  cardsByName: Map<string, Card>;
+  ratingsByName: Map<string, CardRating>;
+  hidden: boolean;
+  stickyTop: number;
+  onScrollToRow: () => void;
+}) {
+  if (!ballot || hidden) return null;
+  return (
+    <div className="sticky z-[5] border-b border-border2 bg-surface2" style={{ top: stickyTop }}>
+      <div
+        onClick={onScrollToRow}
+        className="flex items-center gap-2 lg:gap-3 px-3 lg:px-4 py-2.5 lg:py-3 cursor-pointer bg-white/[0.04]"
+      >
+        <span className="w-7 lg:w-8 shrink-0 text-right font-mono tabular-nums text-[12px] lg:text-[13px] text-muted">
+          #{ballot.rank}
+        </span>
+
+        {ballot.avatarUrl ? (
+          <img
+            src={ballot.avatarUrl}
+            alt={ballot.name}
+            className="w-6 h-6 lg:w-7 lg:h-7 rounded-full shrink-0 object-cover"
+          />
+        ) : (
+          <div className="w-6 h-6 lg:w-7 lg:h-7 rounded-full shrink-0 bg-surface flex items-center justify-center text-[10px] lg:text-[11px] text-muted font-mono">
+            ?
+          </div>
+        )}
+
+        <span className="flex-1 min-w-0 lg:flex-none lg:w-[150px] lg:shrink-0 text-[14px] lg:text-[15px] truncate text-white font-semibold">
+          {ballot.name}
+          <span className="ml-2 text-[10px] font-normal text-subtle font-display tracking-widest">YOU</span>
+        </span>
+
+        <ContributionBar
+          ballot={ballot}
+          maxScore={maxScore}
+          ratingsByName={ratingsByName}
+          cardsByName={cardsByName}
+        />
+
+        <span className="font-mono tabular-nums text-[13px] lg:text-[14px] text-subtle shrink-0">
+          {ballot.score.toFixed(1)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 const COLLAPSED_COUNT = 3;
 
 function Leaderboard({
@@ -723,6 +789,7 @@ function Leaderboard({
   mode = "full",
   onSeeAll,
   spotlight = false,
+  stickyTop = 0,
 }: {
   rankedBallots: RankedBallot[];
   setCode: string;
@@ -732,11 +799,28 @@ function Leaderboard({
   mode?: "peek" | "full";
   onSeeAll?: () => void;
   spotlight?: boolean;
+  /** Viewport offset (px) below which the floating self-row pins — clears sticky page chrome. */
+  stickyTop?: number;
 }) {
   const maxScore = rankedBallots[0]?.score ?? 1;
   const isPeek = mode === "peek";
   const hasMore = rankedBallots.length > COLLAPSED_COUNT;
   const useSpotlight = spotlight && isPeek;
+
+  const [selfRowEl, setSelfRowEl] = useState<HTMLDivElement | null>(null);
+  const [selfRowVisible, setSelfRowVisible] = useState(true);
+  useEffect(() => {
+    if (!selfRowEl) {
+      setSelfRowVisible(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => setSelfRowVisible(entry.isIntersecting),
+      { rootMargin: `${-stickyTop}px 0px 0px 0px`, threshold: 0 },
+    );
+    observer.observe(selfRowEl);
+    return () => observer.disconnect();
+  }, [selfRowEl, stickyTop]);
 
   const visible = useMemo(() => {
     if (!isPeek || !hasMore) return rankedBallots;
@@ -768,6 +852,18 @@ function Leaderboard({
       <div>
         <div className="relative">
           <div className="border-t border-border2 bg-surface2">
+            {mode === "full" && (
+              <FloatingSelfRow
+                ballot={rankedBallots.find((b) => b.ballotId === userBallotId)}
+                setCode={setCode}
+                maxScore={maxScore}
+                cardsByName={cardsByName}
+                ratingsByName={ratingsByName}
+                hidden={selfRowVisible}
+                stickyTop={stickyTop}
+                onScrollToRow={() => selfRowEl?.scrollIntoView({ behavior: "smooth", block: "center" })}
+              />
+            )}
             {rows.map((ballot) =>
               useSpotlight && (ballot.rank === 2 || ballot.rank === 3) ? (
                 <MedalRow
@@ -788,6 +884,7 @@ function Leaderboard({
                   maxScore={maxScore}
                   cardsByName={cardsByName}
                   ratingsByName={ratingsByName}
+                  rowRef={ballot.ballotId === userBallotId ? setSelfRowEl : undefined}
                 />
               ),
             )}
@@ -897,6 +994,7 @@ export function FinalResults({
   user,
   signIn,
   hasParticipated,
+  stickyTop = 0,
 }: {
   ratingsSnapshot: RatingsSnapshot;
   pickStats: P0P1PickStat[];
@@ -907,6 +1005,8 @@ export function FinalResults({
   user: object | null;
   signIn: () => void;
   hasParticipated: boolean;
+  /** Viewport offset (px) below which the FULL RESULTS floating self-row pins — clears sticky page chrome. */
+  stickyTop?: number;
 }) {
   const ratingsByName = useMemo(
     () => buildRatingsByName(ratingsSnapshot),
@@ -1136,6 +1236,7 @@ export function FinalResults({
                 cardsByName={cardsByName}
                 ratingsByName={ratingsByName}
                 mode="full"
+                stickyTop={stickyTop}
               />
             </div>
           )}

@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { AppHeader } from "../components/AppHeader";
 import { Crossfade } from "../components/Crossfade";
 import { CtaPill } from "../components/CtaPill";
@@ -55,6 +56,17 @@ export function P0P1Page() {
     ballots,
   } = ballot;
   const isDesktop = !useIsMobile(1024);
+  const heroRef = useRef<HTMLDivElement>(null);
+  const [heroHeight, setHeroHeight] = useState(0);
+  useEffect(() => {
+    const el = heroRef.current;
+    if (!el) return;
+    const measure = () => setHeroHeight(el.getBoundingClientRect().height);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
   const isCompleteEntrant = isPastDeadline && Boolean(user) && isComplete;
   const didNotVote = isPastDeadline && Boolean(user) && !isComplete;
   const groupedStats = hasParticipated && pickStats ? groupBySlot(pickStats) : undefined;
@@ -104,7 +116,7 @@ export function P0P1Page() {
   return (
     <div className="bg-bg text-text min-h-screen flex flex-col animate-fadeIn">
       <AppHeader subtitle="P0 P1 Challenge" subtitleShort="P0 P1" />
-      <P0P1Hero cta={heroCta} belowIntro={belowIntro} phase={phase} dateRange={ratingsSnapshot?.dateRange} />
+      <P0P1Hero innerRef={heroRef} cta={heroCta} belowIntro={belowIntro} phase={phase} dateRange={ratingsSnapshot?.dateRange} />
 
       <main className="flex-1 px-10 pb-5 pt-5">
         {!isPastDeadline &&
@@ -145,6 +157,7 @@ export function P0P1Page() {
               user={user}
               signIn={signIn}
               hasParticipated={hasParticipated}
+              stickyTop={heroHeight}
             />
           ) : (
             <CardGridSkeleton />
