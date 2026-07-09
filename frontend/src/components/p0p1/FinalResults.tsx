@@ -561,8 +561,11 @@ function MedalRow({
 
   return (
     <div
-      className={`border-b border-border2 last:border-b-0 ${isSelf ? "bg-white/[0.04]" : ""}`}
-      style={{ boxShadow: `inset 3px 0 0 ${medal.color}`, backgroundImage: isSelf ? undefined : medal.tint }}
+      className={`border-b border-border2 last:border-b-0 ${isSelf ? "bg-green/[0.07]" : ""}`}
+      style={{
+        boxShadow: `inset 3px 0 0 ${isSelf ? "#2ee85c" : medal.color}`,
+        backgroundImage: isSelf ? undefined : medal.tint,
+      }}
     >
       <button
         type="button"
@@ -656,7 +659,10 @@ function LeaderboardRow({
   );
 
   return (
-    <div ref={rowRef} className={`border-b border-border2 last:border-b-0 ${isSelf ? "bg-white/[0.04]" : ""}`}>
+    <div
+      ref={rowRef}
+      className={`border-b border-border2 last:border-b-0 ${isSelf ? "bg-green/[0.07] shadow-[inset_3px_0_0_0_#2ee85c]" : ""}`}
+    >
       <button
         type="button"
         onClick={() => setExpanded((e) => !e)}
@@ -740,7 +746,7 @@ function FloatingSelfRow({
     <div className="sticky z-20 border-b border-border2 bg-surface2" style={{ top: stickyTop }}>
       <div
         onClick={onScrollToRow}
-        className="flex items-center gap-2 lg:gap-3 px-3 lg:px-4 py-2.5 lg:py-3 cursor-pointer bg-white/[0.04]"
+        className="flex items-center gap-2 lg:gap-3 px-3 lg:px-4 py-2.5 lg:py-3 cursor-pointer bg-green/[0.07] shadow-[inset_3px_0_0_0_#2ee85c]"
       >
         <span className="w-7 lg:w-8 shrink-0 text-right font-mono tabular-nums text-[12px] lg:text-[13px] text-muted">
           #{ballot.rank}
