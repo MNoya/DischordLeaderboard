@@ -737,7 +737,7 @@ function FloatingSelfRow({
 }) {
   if (!ballot || hidden) return null;
   return (
-    <div className="sticky z-[5] border-b border-border2 bg-surface2" style={{ top: stickyTop }}>
+    <div className="sticky z-20 border-b border-border2 bg-surface2" style={{ top: stickyTop }}>
       <div
         onClick={onScrollToRow}
         className="flex items-center gap-2 lg:gap-3 px-3 lg:px-4 py-2.5 lg:py-3 cursor-pointer bg-white/[0.04]"
