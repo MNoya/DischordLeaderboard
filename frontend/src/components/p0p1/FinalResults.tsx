@@ -541,12 +541,14 @@ function MedalRow({
   ballot,
   setCode,
   isSelf,
+  maxScore,
   cardsByName,
   ratingsByName,
 }: {
   ballot: RankedBallot;
   setCode: string;
   isSelf: boolean;
+  maxScore: number;
   cardsByName: Map<string, Card>;
   ratingsByName: Map<string, CardRating>;
 }) {
@@ -599,7 +601,12 @@ function MedalRow({
           )}
         </span>
 
-        <span className="hidden lg:block flex-1" />
+        <ContributionBar
+          ballot={ballot}
+          maxScore={maxScore}
+          ratingsByName={ratingsByName}
+          cardsByName={cardsByName}
+        />
 
         <span
           className="font-mono tabular-nums text-[13px] lg:text-[14px] font-semibold shrink-0"
@@ -768,6 +775,7 @@ function Leaderboard({
                   ballot={ballot}
                   setCode={setCode}
                   isSelf={ballot.ballotId === userBallotId}
+                  maxScore={maxScore}
                   cardsByName={cardsByName}
                   ratingsByName={ratingsByName}
                 />
