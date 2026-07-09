@@ -33,7 +33,12 @@ from bot.services.ping_roles import auto_grant_spec_for_event, build_grant_embed
 from bot.services.pod_roles import find_role, grant_role, resolve_member
 from bot.services.sesh_parser import ParsedSeshFields, parse_sesh_embed
 from bot.sets import active_set_code
-from bot.tasks.pod_draft_reminder import REMINDER_LEAD_MIN, fire_reminder, schedule_roster_reminder
+from bot.tasks.pod_draft_reminder import (
+    REMINDER_LEAD_MIN,
+    fire_reminder,
+    refresh_roster_reminder,
+    schedule_roster_reminder,
+)
 from bot.tasks.pod_underfill import refresh_underfill_nudge, schedule_underfill_checks
 
 
@@ -96,6 +101,11 @@ class SeshListener(commands.Cog):
             await refresh_underfill_nudge(self.bot, str(message.id), len(fields.attendees))
         except Exception:
             log.exception(f"underfill nudge refresh failed for message {message.id}")
+
+        try:
+            await refresh_roster_reminder(self.bot, str(message.id))
+        except Exception:
+            log.exception(f"roster reminder refresh failed for message {message.id}")
 
         try:
             thread = await self._resolve_thread(message.guild, str(message.id))

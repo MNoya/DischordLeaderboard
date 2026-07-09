@@ -39,7 +39,10 @@ class PodGuide(commands.Cog):
     @app_commands.allowed_installs(guilds=True, users=False)
     async def pod_guide(self, interaction: discord.Interaction) -> None:
         is_owner = await self.bot.is_owner(interaction.user)
-        will_pin = is_owner and in_pod_coordination(interaction.channel)
+        in_channel_not_thread = in_pod_coordination(interaction.channel) and not isinstance(
+            interaction.channel, discord.Thread
+        )
+        will_pin = is_owner and in_channel_not_thread
         audit.event("pod_guide_invoked", user_id=str(interaction.user.id), pinned=will_pin)
         mention = self._resolve_pod_drafters_mention(interaction.guild)
         if will_pin:

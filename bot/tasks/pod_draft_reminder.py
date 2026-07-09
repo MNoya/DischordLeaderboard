@@ -5,6 +5,7 @@ best-effort basis, and posts the Draftmancer link in the event thread
 """
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 import re
@@ -13,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 
 import discord
 from discord.ext import commands
+from sqlalchemy import select
 
 from bot import emojis
 from bot.config import settings
@@ -25,6 +27,8 @@ from bot.services.sesh_parser import parse_sesh_embed
 
 REMINDER_LEAD_MIN = 10
 ROSTER_REMINDER_LEAD_MIN = 60
+ROSTER_EMBED_TITLE = "🔔 Pod Draft starting soon"
+ROSTER_SEARCH_LIMIT = 50
 
 
 log = logging.getLogger(__name__)
@@ -173,6 +177,58 @@ async def fire_roster_reminder(event_id: str) -> None:
         log.warning(f"fire_roster_reminder: could not post in thread {thread_id}", exc_info=True)
 
 
+async def refresh_roster_reminder(bot: commands.Bot, sesh_message_id: str) -> None:
+    """Re-render the posted roster reminder in place when RSVPs change.
+
+    No-op until fire_roster_reminder has posted the reminder — this only ever edits an existing
+    message, never creates one — and once the lobby reminder fires and flips the event past 'pending'.
+    """
+    loaded = await asyncio.to_thread(_load_event_for_roster, str(sesh_message_id))
+    if loaded is None:
+        return
+    thread_id, event_time, event_name, status = loaded
+    if status != "pending":
+        return
+
+    thread = await _fetch_thread(thread_id)
+    if thread is None:
+        return
+    reminder = await _find_roster_reminder(thread)
+    if reminder is None:
+        return
+
+    yes, maybe = await _refetch_attendees(int(sesh_message_id))
+    embed = build_roster_embed(event_name, event_time, yes, maybe)
+    try:
+        await reminder.edit(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+    except discord.HTTPException:
+        log.warning(f"refresh_roster_reminder: could not edit reminder {reminder.id}", exc_info=True)
+
+
+def _load_event_for_roster(sesh_message_id: str) -> tuple[int, datetime, str, str] | None:
+    with SessionLocal() as session:
+        event = session.execute(
+            select(PodDraftEvent).where(PodDraftEvent.sesh_message_id == sesh_message_id)
+        ).scalar_one_or_none()
+        if event is None:
+            return None
+        return int(event.discord_thread_id), event.event_time, event.name, event.socket_status
+
+
+async def _find_roster_reminder(thread: discord.Thread) -> discord.Message | None:
+    """The bot's own roster reminder in a thread, located by its embed title."""
+    try:
+        async for message in thread.history(limit=ROSTER_SEARCH_LIMIT):
+            if message.author.id != _bot.user.id:
+                continue
+            for embed in message.embeds:
+                if embed.title == ROSTER_EMBED_TITLE:
+                    return message
+    except discord.HTTPException:
+        log.warning(f"could not scan thread {thread.id} for the roster reminder", exc_info=True)
+    return None
+
+
 async def _fetch_thread(thread_id: int) -> discord.Thread | None:
     try:
         channel = await _bot.fetch_channel(thread_id)
@@ -248,7 +304,7 @@ def build_roster_embed(
 ) -> discord.Embed:
     unix = int(event_time.timestamp())
     embed = discord.Embed(
-        title="🔔 Pod Draft starting soon",
+        title=ROSTER_EMBED_TITLE,
         description=f"**{event_name}** begins <t:{unix}:R>",
         color=discord.Color.green(),
     )

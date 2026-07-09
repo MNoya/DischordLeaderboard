@@ -203,6 +203,7 @@ class PodDraftManager:
         self.grace_task = None
         self.grace_round: int | None = None
         self.champion_announced = False
+        self.trophy_hype_posted = False
         self.champion_announcement_message = None
         self.champion_discord_ids: set[str] = set()
         self.championship_task: asyncio.Task | None = None

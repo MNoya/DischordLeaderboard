@@ -2528,6 +2528,15 @@ def incomplete_top_decks(standings, deck_data) -> list[str]:
     ]
 
 
+def incomplete_champion_decks(champions, deck_data) -> list[str]:
+    """Champion (zero-loss) names still missing colors or a screenshot. Empty list clears the
+    #trophy-hype card to post. Unlike incomplete_top_decks, 2-1 finishers never hold it up."""
+    return [
+        s.player_name for s in champions
+        if not deck_complete(deck_data.get(normalize_player_name(s.player_name)))
+    ]
+
+
 async def _ping_missing_deck_participants(manager) -> None:
     """At R3 end, post a single deck-chase ping split by audience: top finishers gating the
     championship post get the urgent block, everyone else the pod-page nudge. Skips silently once
@@ -2612,7 +2621,11 @@ async def maybe_post_championship(manager, *, force: bool = False) -> None:
     """Post the one-time pod-draft-coordination announcement (ComponentsV2 screenshot gallery) to the
     thread's parent channel. Fires once the top finishers (ANNOUNCEMENT_TOP_N, or the whole pod if
     smaller) all have colors and a screenshot, or when forced by the deadline. Posts once, never edits.
+
+    The champion-only #trophy-hype card posts separately, once the champions' decks are complete —
+    see maybe_post_trophy_hype.
     """
+    await maybe_post_trophy_hype(manager, force=force)
     if manager.champion_announced:
         return
     event_id = manager.event_id
@@ -2692,14 +2705,48 @@ async def maybe_post_championship(manager, *, force: bool = False) -> None:
         return
     await _send_champion_thread_ping(manager, champions, player_colors)
     await _react_trophy_on_champion_screenshots(manager, deck_data, dm_info)
-    await _post_trophy_hype(
-        event_id, getattr(target, "guild", None), thread_id, champions,
-        event_name=event_name, displays=displays,
-        player_colors=player_colors, deck_data=deck_data, dm_info=dm_info,
-    )
     if not force and manager.championship_task is not None and not manager.championship_task.done():
         manager.championship_task.cancel()
     await manager.disconnect_safely()
+
+
+async def maybe_post_trophy_hype(manager, *, force: bool = False) -> None:
+    """Post the champion-only #trophy-hype card once every champion's deck is complete. It waits only
+    on the champions, not on the parent-channel announcement's top-N finishers. Fires once per event;
+    the in-memory flag guards the live path and a channel scan for the card's own recap link guards a
+    restart re-post. Force (deadline, backfill) sends with whatever champion decks have landed."""
+    if manager.trophy_hype_posted:
+        return
+    if not manager.finalized:
+        return
+    event_id = manager.event_id
+    resolved = await _resolve_announcement_standings(event_id)
+    if resolved is None:
+        return
+    standings, _ = resolved
+    champions = [s for s in standings if s.losses == 0] or [standings[0]]
+    deck_data = await asyncio.to_thread(_load_event_deck_data_sync, event_id)
+    incomplete = incomplete_champion_decks(champions, deck_data)
+    if incomplete and not force:
+        log.info(
+            f"[FINALIZE] trophy_hype.skip event={event_id} reason=awaiting_champion_decks "
+            f"missing={incomplete}"
+        )
+        return
+    target = await _resolve_announcement_target(manager)
+    guild = getattr(target, "guild", None)
+    thread_id = int(manager.thread_id) if isinstance(manager.thread_id, (int, str)) else None
+    displays = await asyncio.to_thread(_load_participant_displays, event_id)
+    dm_info = await asyncio.to_thread(_load_dm_info_sync, event_id)
+    event_name = await asyncio.to_thread(load_event_name_sync, event_id)
+    manager.trophy_hype_posted = True
+    posted = await _post_trophy_hype(
+        event_id, guild, thread_id, champions,
+        event_name=event_name, displays=displays,
+        player_colors=_colors_only(deck_data), deck_data=deck_data, dm_info=dm_info,
+    )
+    if not posted:
+        manager.trophy_hype_posted = False
 
 
 SCREENSHOT_BACKFILL_HISTORY_LIMIT = 200
@@ -2836,13 +2883,20 @@ async def _post_trophy_hype(
     player_colors: dict[str, str | None],
     deck_data: dict[str, "ParticipantDeckData"],
     dm_info: dict,
-) -> None:
+) -> bool:
+    """Send the champion hype card. Returns True when handled (sent, or skipped because the card is
+    already in the channel / every champion self-posted); False on a recoverable miss (no channel,
+    send error) so a later trigger retries."""
     channel = _find_trophy_hype_channel(guild)
     if channel is None:
         log.info(f"[FINALIZE] trophy_hype.skip event={event_id} reason=no_channel")
-        return
+        return False
     started_at = await asyncio.to_thread(_load_event_started_at_sync, event_id)
-    self_post_authors = await _trophy_hype_image_authors(channel, started_at)
+    recap_url = pod_page_url(event_name)
+    self_post_authors, already_posted = await _scan_trophy_hype_channel(channel, started_at, recap_url)
+    if already_posted:
+        log.info(f"[FINALIZE] trophy_hype.skip event={event_id} reason=already_in_channel")
+        return True
     remaining = []
     for standing in champions:
         info = dm_info.get(normalize_player_name(standing.player_name))
@@ -2856,7 +2910,7 @@ async def _post_trophy_hype(
         remaining.append(standing)
     if not remaining:
         log.info(f"[FINALIZE] trophy_hype.skip event={event_id} reason=champions_already_posted")
-        return
+        return True
     hype_view = build_trophy_hype_view(
         remaining, event_name=event_name, displays=displays,
         player_colors=player_colors, deck_data=deck_data,
@@ -2865,8 +2919,10 @@ async def _post_trophy_hype(
     try:
         await channel.send(view=hype_view)
         log.info(f"[FINALIZE] trophy_hype.posted event={event_id} channel={channel.id}")
+        return True
     except Exception:
         log.warning(f"[FINALIZE] trophy_hype.post_error event={event_id}", exc_info=True)
+        return False
 
 
 def _find_trophy_hype_channel(guild: discord.Guild | None) -> discord.TextChannel | None:
@@ -2875,17 +2931,35 @@ def _find_trophy_hype_channel(guild: discord.Guild | None) -> discord.TextChanne
     return guild.get_channel(TROPHY_HYPE_CHANNEL_ID)
 
 
-async def _trophy_hype_image_authors(channel: discord.TextChannel, after) -> set[str]:
-    """Discord ids of everyone who posted an image in the hype channel since the event started, so a
-    champion who already shared their own trophy shot doesn't get a duplicate bot post."""
+async def _scan_trophy_hype_channel(channel: discord.TextChannel, after, recap_url: str):
+    """One pass over the hype channel since the event started, returning (image-poster discord ids,
+    card-already-posted). The image posters let a champion who shared their own shot skip a duplicate
+    bot post; the flag — any message carrying this event's Draft Recap link — makes the bot's own
+    post idempotent across a restart, since only this card links to that pod page."""
     authors: set[str] = set()
+    already_posted = False
     try:
         async for message in channel.history(limit=TROPHY_HYPE_HISTORY_LIMIT, after=after):
             if message.attachments or message.embeds:
                 authors.add(str(message.author.id))
+            if not already_posted and recap_url in _component_link_urls(message.components):
+                already_posted = True
     except Exception:
         log.warning("could not scan trophy hype channel history", exc_info=True)
-    return authors
+    return authors, already_posted
+
+
+def _component_link_urls(components) -> list[str]:
+    """Every link URL reachable in a message's component tree, walking nested containers/rows."""
+    urls = []
+    for component in components:
+        url = getattr(component, "url", None)
+        if url:
+            urls.append(url)
+        children = getattr(component, "children", None)
+        if children:
+            urls.extend(_component_link_urls(children))
+    return urls
 
 
 class _RecoveryManager:
@@ -2899,6 +2973,7 @@ class _RecoveryManager:
         self.tournament_players = tournament_players
         self.finalized = True
         self.champion_announced = False
+        self.trophy_hype_posted = False
         self.champion_discord_ids: set[str] = set()
         self.champion_announcement_message = None
         self.championship_task = None
@@ -3641,21 +3716,27 @@ async def bracket_advance(manager, source_round: int, *, announce_fill: bool = T
             await _announce_bracket_fill(manager, target, new_rows, target_msg.jump_url)
 
 
-def bracket_fill_notice(round_num: int, new_rows: list[tuple[str, str, str]], url: str | None) -> str:
+def bracket_fill_notice(round_num: int, matchups: list[tuple[str, str]], url: str | None) -> str:
     """Thread note when the fast bracket fills previously-pending slots in an already-posted round, so
     the other-half matches read as newly set rather than the message changing silently."""
-    matchups = ", ".join(f"{strip_arena_suffix(a)} vs {strip_arena_suffix(b)}" for _, a, b in new_rows)
-    link = f"[Round {round_num} pairings]({url})" if url else f"Round {round_num} pairings"
-    return f"⚔️ {link} set: {matchups} {emojis.get('manat')}".rstrip()
+    pairings = ", ".join(f"{a} vs {b}" for a, b in matchups)
+    link = f"[Round {round_num} Pairings]({url})" if url else f"Round {round_num} Pairings"
+    return f"**{link}** {pairings}"
 
 
 async def _announce_bracket_fill(manager, round_num: int, new_rows: list[tuple[str, str, str]], url: str) -> None:
     thread = await manager._fetch_thread()
     if thread is None:
         return
+    displays = await asyncio.to_thread(_load_participant_displays, manager.event_id)
+
+    def disp(name: str) -> str:
+        return displays.get(normalize_player_name(name), {}).get("display_name") or strip_arena_suffix(name)
+
+    matchups = [(disp(a), disp(b)) for _, a, b in new_rows]
     try:
         await thread.send(
-            bracket_fill_notice(round_num, new_rows, url),
+            bracket_fill_notice(round_num, matchups, url),
             allowed_mentions=discord.AllowedMentions.none(),
         )
     except discord.HTTPException:

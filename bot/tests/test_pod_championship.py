@@ -4,6 +4,7 @@ from bot.services.pod_tournament import (
     ANNOUNCEMENT_TOP_N,
     ParticipantDeckData,
     deck_complete,
+    incomplete_champion_decks,
     incomplete_top_decks,
     normalize_player_name,
     build_deck_ping,
@@ -45,6 +46,15 @@ def test_championship_requires_all_when_pod_smaller_than_top_n():
     assert len(standings) < ANNOUNCEMENT_TOP_N
     deck_data = _complete_decks("Aria", "Bryn")
     assert incomplete_top_decks(standings, deck_data) == ["Caedmon"]
+
+
+def test_trophy_hype_waits_on_champions_only():
+    champions = _standings("Aria", "Bryn")
+    deck_data = _complete_decks("Aria")
+    deck_data[normalize_player_name("Bryn")] = _deck("WU", None)
+    deck_data[normalize_player_name("Caedmon")] = _deck(None, None)
+
+    assert incomplete_champion_decks(champions, deck_data) == ["Bryn"]
 
 
 def test_deck_missing_parts_reports_each_gap():
