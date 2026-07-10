@@ -532,7 +532,8 @@ function ChampionCard({
   );
 }
 
-const MEDAL_ROW_STYLE: Record<2 | 3, { color: string; label: string; tint: string }> = {
+const MEDAL_ROW_STYLE: Record<1 | 2 | 3, { color: string; label: string; tint: string }> = {
+  1: { color: "#ffc63a", label: "1ST", tint: "linear-gradient(90deg, #ffc63a12, transparent 55%)" },
   2: { color: "#c0c8d6", label: "2ND", tint: "linear-gradient(90deg, #c0c8d612, transparent 55%)" },
   3: { color: "#c87941", label: "3RD", tint: "linear-gradient(90deg, #c8794112, transparent 55%)" },
 };
@@ -544,6 +545,7 @@ function MedalRow({
   maxScore,
   cardsByName,
   ratingsByName,
+  rowRef,
 }: {
   ballot: RankedBallot;
   setCode: string;
@@ -551,16 +553,18 @@ function MedalRow({
   maxScore: number;
   cardsByName: Map<string, Card>;
   ratingsByName: Map<string, CardRating>;
+  rowRef?: (el: HTMLDivElement | null) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const entries = useMemo(
     () => (expanded ? ballotToEntries(ballot, setCode, ratingsByName) : []),
     [expanded, ballot, setCode, ratingsByName],
   );
-  const medal = MEDAL_ROW_STYLE[ballot.rank as 2 | 3];
+  const medal = MEDAL_ROW_STYLE[ballot.rank as 1 | 2 | 3];
 
   return (
     <div
+      ref={rowRef}
       className={`border-b border-border2 last:border-b-0 ${isSelf ? "bg-green/[0.07]" : ""}`}
       style={{
         boxShadow: `inset 3px 0 0 ${isSelf ? "#2ee85c" : medal.color}`,
@@ -871,7 +875,7 @@ function Leaderboard({
               />
             )}
             {rows.map((ballot) =>
-              useSpotlight && (ballot.rank === 2 || ballot.rank === 3) ? (
+              ballot.rank <= 3 ? (
                 <MedalRow
                   key={ballot.ballotId}
                   ballot={ballot}
@@ -880,6 +884,7 @@ function Leaderboard({
                   maxScore={maxScore}
                   cardsByName={cardsByName}
                   ratingsByName={ratingsByName}
+                  rowRef={ballot.ballotId === userBallotId ? setSelfRowEl : undefined}
                 />
               ) : (
                 <LeaderboardRow
