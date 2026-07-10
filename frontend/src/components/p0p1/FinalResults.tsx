@@ -28,6 +28,8 @@ import type {
   CardRating,
   RankedBallot,
   Highlight,
+  TrapHighlight,
+  SleeperHighlight,
 } from "../../data/p0p1Results";
 import type { Card, P0P1BallotRow, P0P1PickStat, SlotKey } from "../../types/p0p1";
 import type { PickEntry } from "./CommunityGrid";
@@ -924,111 +926,229 @@ function Leaderboard({
 // ── Highlights reel ───────────────────────────────────────────────────────────
 
 const HIGHLIGHT_ACCENT: Record<Highlight["kind"], string> = {
-  trap: "#ff6b6b",
+  trap: "#ff5e5e",
   sleeper: "#2ee85c",
   prophet: "#ffc63a",
 };
 
-const HIGHLIGHT_LABEL: Record<Highlight["kind"], string> = {
+const HIGHLIGHT_STAMP: Record<Highlight["kind"], string> = {
   trap: "THE TRAP",
   sleeper: "THE SLEEPER",
   prophet: "THE PROPHET",
 };
 
-function pctLabel(share: number): string {
-  return `${(share * 100).toFixed(share < 0.1 ? 1 : 0)}%`;
+const HIGHLIGHT_STAT_LABEL: Record<"trap" | "sleeper", string> = {
+  trap: "BEHIND THE BEST PICK",
+  sleeper: "OVER THE CROWD FAVORITE",
+};
+
+const NUMBER_WORDS = ["zero", "one", "two", "three", "four", "five"] as const;
+
+function ppStat(h: TrapHighlight | SleeperHighlight): string {
+  const delta =
+    h.kind === "trap" ? h.gihwr - h.slotBestGihwr : h.gihwr - h.crowdFavGihwr;
+  const sign = delta < 0 ? "−" : "+";
+  return `${sign}${Math.abs(delta * 100).toFixed(1)}`;
 }
 
-function ppLabel(delta: number): string {
-  return `${(delta * 100).toFixed(1)}pp`;
-}
-
-function highlightCaption(h: Highlight): string {
-  switch (h.kind) {
-    case "trap":
-      return `${pctLabel(h.pickShare)} picked it · −${ppLabel(h.slotBestGihwr - h.gihwr)} vs ${h.slotBestName}`;
-    case "sleeper":
-      return `on ${pctLabel(h.teamShare)} of teams · +${ppLabel(h.gihwr - h.crowdFavGihwr)} vs ${h.crowdFavName}`;
-    case "prophet":
-      return `called the slot's best card · on ${pctLabel(h.teamShare)} of teams`;
+function highlightStory(h: TrapHighlight | SleeperHighlight, ballotCount: number) {
+  if (h.kind === "trap") {
+    return (
+      <>
+        <b className="text-subtle font-medium">{h.pickCount} ballots</b> took the
+        bait — {h.slotBestName} won more games.
+      </>
+    );
   }
+  if (h.teamCount === 0) {
+    return (
+      <>
+        <b className="text-subtle font-medium">Nobody</b> played it — and it beat
+        the crowd's pick anyway.
+      </>
+    );
+  }
+  return (
+    <>
+      On <b className="text-subtle font-medium">{h.teamCount} {h.teamCount === 1 ? "team" : "teams"}</b> out
+      of {ballotCount} — and it beat the crowd's pick anyway.
+    </>
+  );
+}
+
+function SprocketRail() {
+  return (
+    <div
+      className="h-2"
+      style={{
+        backgroundImage: "radial-gradient(circle at 4px 4px, #2a3142 2.6px, transparent 3px)",
+        backgroundSize: "22px 8px",
+        backgroundRepeat: "repeat-x",
+      }}
+    />
+  );
 }
 
 function HighlightTile({
   highlight,
+  index,
+  ballotCount,
   cardsByName,
 }: {
   highlight: Highlight;
+  index: number;
+  ballotCount: number;
   cardsByName: Map<string, Card>;
 }) {
   const card = cardsByName.get(highlight.cardName);
   const accent = HIGHLIGHT_ACCENT[highlight.kind];
+  const isProphet = highlight.kind === "prophet";
 
   return (
-    <div className="flex flex-col items-center gap-1.5">
+    <article
+      className="group w-full sm:w-[206px] motion-safe:animate-fadeUpIn"
+      style={{
+        clipPath: CHAMFER,
+        padding: 1,
+        background: `linear-gradient(165deg, ${accent} 0%, color-mix(in srgb, ${accent} 28%, #3b4458) 30%, #3b4458 70%, color-mix(in srgb, ${accent} 22%, #3b4458) 100%)`,
+        animationDelay: `${index * 80}ms`,
+        ...(isProphet ? { filter: "drop-shadow(0 0 22px #ffc63a26)" } : null),
+      }}
+    >
       <div
-        className="inline-block font-display tracking-[0.14em] uppercase text-[11px] leading-none px-2 py-1 rounded-sm"
-        style={{ background: `${accent}22`, color: accent }}
+        className="relative overflow-hidden flex flex-col bg-surface2 min-h-[150px] sm:min-h-0 sm:h-[348px]"
+        style={{ clipPath: CHAMFER }}
       >
-        {HIGHLIGHT_LABEL[highlight.kind]}
-      </div>
-
-      {card ? (
-        <div className="relative w-[120px] h-[120px] rounded overflow-hidden">
-          <img
-            src={card.imageArtCrop}
-            alt={card.name}
-            className="w-full h-full object-cover"
+        <div className="absolute inset-y-0 left-0 w-[132px] sm:inset-x-0 sm:bottom-auto sm:w-full sm:h-[176px]">
+          {card && (
+            <img
+              src={card.imageArtCrop}
+              alt={`${highlight.cardName} art`}
+              className="w-full h-full object-cover saturate-[0.72] contrast-[1.02] group-hover:saturate-100 transition-[filter] duration-[250ms]"
+            />
+          )}
+          <div
+            className="absolute inset-0 sm:hidden"
+            style={{
+              background: `linear-gradient(to bottom, color-mix(in srgb, ${accent} 14%, transparent) 0%, transparent 45%), linear-gradient(to right, transparent 25%, #1d2330 96%)`,
+            }}
           />
-          <div className="absolute inset-x-0 bottom-0 bg-black/60 px-1.5 py-1">
-            <div className="text-white text-[11px] font-semibold leading-snug truncate">{card.name}</div>
-            <div className="text-dim text-[10px] font-mono">{highlight.slotLabel}</div>
+          <div
+            className="absolute inset-0 hidden sm:block"
+            style={{
+              background: `linear-gradient(to bottom, color-mix(in srgb, ${accent} 14%, transparent) 0%, transparent 38%), linear-gradient(to bottom, transparent 30%, #1d2330 96%)`,
+            }}
+          />
+        </div>
+
+        <div className="relative flex-1 flex flex-col ml-[104px] pt-3 pr-4 pb-3.5 sm:ml-0 sm:mt-[124px] sm:pt-0 sm:px-4 sm:pb-4">
+          <div className="flex items-center justify-between">
+            <span
+              className="font-display text-[15px] tracking-[0.2em] [text-shadow:0_1px_8px_#0009]"
+              style={{ color: accent }}
+            >
+              {HIGHLIGHT_STAMP[highlight.kind]}
+            </span>
+            <span className="font-mono text-[10px] text-dim">Nº {index + 1}</span>
           </div>
-        </div>
-      ) : (
-        <div className="w-[120px] h-[120px] bg-surface2 border border-border2 rounded flex items-center justify-center text-[13px] text-muted">
-          {highlight.cardName}
-        </div>
-      )}
 
-      <p className="text-[11px] text-dim text-center font-mono max-w-[150px]">
-        {highlightCaption(highlight)}
-      </p>
+          {isProphet ? (
+            <>
+              <div className="font-display text-[11px] tracking-[0.2em] text-muted mt-2">
+                CALLED THE SLOT'S BEST CARD
+              </div>
+              <div className="flex flex-row flex-wrap gap-x-3 gap-y-1.5 mt-2 sm:flex-col sm:gap-1.5">
+                {highlight.voters.map((v) => (
+                  <div key={v.name} className="flex items-center gap-2 min-w-0">
+                    {v.avatarUrl ? (
+                      <img
+                        src={v.avatarUrl}
+                        alt=""
+                        className="w-[22px] h-[22px] rounded-full shrink-0 [box-shadow:0_0_0_1.5px_#1d2330,0_0_0_2.5px_#ffc63a]"
+                      />
+                    ) : (
+                      <span className="w-[22px] h-[22px] rounded-full shrink-0 bg-surface flex items-center justify-center font-mono text-[10px] text-gold [box-shadow:0_0_0_1.5px_#1d2330,0_0_0_2.5px_#ffc63a]">
+                        {v.name.replace(/^\W+/, "").charAt(0).toUpperCase()}
+                      </span>
+                    )}
+                    <span className="text-[12.5px] text-text truncate">{v.name}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <>
+              <div
+                className="font-mono font-bold tabular-nums leading-none mt-2 sm:mt-1.5 text-[30px] sm:text-[38px]"
+                style={{
+                  color: accent,
+                  textShadow: `0 0 34px color-mix(in srgb, ${accent} 45%, transparent)`,
+                }}
+              >
+                {ppStat(highlight)}
+                <span className="text-[15px] sm:text-[18px]">pp</span>
+              </div>
+              <div className="font-display text-[11px] tracking-[0.2em] text-muted mt-1">
+                {HIGHLIGHT_STAT_LABEL[highlight.kind]}
+              </div>
+            </>
+          )}
 
-      {highlight.kind === "prophet" && (
-        <div className="flex flex-col items-center gap-0.5 max-w-[150px]">
-          {highlight.voters.map((v) => (
-            <div key={v.name} className="flex items-center gap-1.5 min-w-0">
-              {v.avatarUrl && (
-                <img src={v.avatarUrl} alt="" className="w-4 h-4 rounded-full shrink-0" />
-              )}
-              <span className="text-[11px] text-white truncate">{v.name}</span>
-            </div>
-          ))}
+          <div className="font-semibold text-[15.5px] leading-tight mt-2 sm:mt-2.5">
+            {highlight.cardName}
+          </div>
+          <div className="font-mono text-[10px] text-dim mt-0.5 truncate">
+            {highlight.slotLabel} · {gihwrLabel(highlight.gihwr)} GIH WR
+          </div>
+
+          {!isProphet && (
+            <p className="text-[12px] leading-[1.45] text-muted mt-auto pt-2.5">
+              {highlightStory(highlight, ballotCount)}
+            </p>
+          )}
         </div>
-      )}
-    </div>
+      </div>
+    </article>
   );
 }
 
 function HighlightsReel({
   highlights,
+  ballotCount,
   cardsByName,
 }: {
   highlights: Highlight[];
+  ballotCount: number;
   cardsByName: Map<string, Card>;
 }) {
   if (highlights.length === 0) return null;
+  const countWord = NUMBER_WORDS[highlights.length] ?? String(highlights.length);
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col">
       <div className="flex justify-center">
         <SectionLabel size={22} className="text-white">HIGHLIGHTS</SectionLabel>
       </div>
-      <div className="flex flex-wrap justify-center gap-6">
-        {highlights.map((h) => (
-          <HighlightTile key={`${h.kind}-${h.slot}-${h.cardName}`} highlight={h} cardsByName={cardsByName} />
-        ))}
+      <p className="text-center text-[12.5px] text-muted mt-1.5">
+        The {countWord} stories of the contest, told by{" "}
+        <b className="text-subtle font-medium">{ballotCount} ballots</b> and four
+        weeks of games.
+      </p>
+
+      <div className="mt-5">
+        <SprocketRail />
+        <div className="flex flex-col sm:flex-row sm:flex-wrap sm:justify-center gap-3.5 px-1 py-3.5 sm:px-3">
+          {highlights.map((h, i) => (
+            <HighlightTile
+              key={`${h.kind}-${h.slot}-${h.cardName}`}
+              highlight={h}
+              index={i}
+              ballotCount={ballotCount}
+              cardsByName={cardsByName}
+            />
+          ))}
+        </div>
+        <SprocketRail />
       </div>
     </div>
   );
@@ -1271,7 +1391,11 @@ export function FinalResults({
           )}
 
           {/* Highlights reel */}
-          <HighlightsReel highlights={highlights} cardsByName={cardsByName} />
+          <HighlightsReel
+            highlights={highlights}
+            ballotCount={rankedBallots.length}
+            cardsByName={cardsByName}
+          />
         </div>
       )}
 
