@@ -11,6 +11,7 @@ from bot.services.pod_tournament import (
     deck_missing_parts,
     format_reported_result,
     format_round_announcement,
+    tally_match_records,
 )
 
 
@@ -91,6 +92,22 @@ def test_deck_ping_drops_championship_header_once_post_is_clear():
 
 def test_deck_ping_is_empty_when_nobody_owes_anything():
     assert build_deck_ping(([], []), ([], []), "https://limitedlevelups.com/pods/pod-7") == ""
+
+
+def test_tally_match_records_shows_partial_wl_before_finalize():
+    rows = [
+        ("Alice#1", "Bob#2", "Alice#1"),
+        ("Alice#1", "Cara#3", "Alice#1"),
+        ("Bob#2", "Cara#3", None),          # R3 not yet reported
+        ("Dez#4", "Eve#5", "(skipped)"),    # no match played
+    ]
+
+    records = tally_match_records(rows)
+
+    assert records["alice"] == "2-0"
+    assert records["bob"] == "0-1"          # partial: one loss so far, R3 pending
+    assert records["cara"] == "0-1"
+    assert "dez" not in records and "eve" not in records
 
 
 def test_reported_result_uses_display_names_either_side():

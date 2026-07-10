@@ -199,6 +199,7 @@ class PodDraftManager:
         self._last_seating_signature: tuple[str, ...] | None = None
         self.standings_message = None
         self._standings_post_lock = asyncio.Lock()
+        self._advance_lock = asyncio.Lock()
         self.round_messages: dict[int, "discord.Message"] = {}
         self.grace_task = None
         self.grace_round: int | None = None

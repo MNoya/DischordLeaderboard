@@ -228,6 +228,10 @@ def players_for_names(session: Session, names: Sequence[str]) -> list[tuple[str,
 def player_for_name(session: Session, name: str) -> Player | None:
     """Resolve a Draftmancer/Discord name to a Player.
 
+    Active players win; a retired or exiled player is matched only as a fallback, so pod
+    attribution keeps recognizing someone who has since left the board without a stale row
+    shadowing an active player who reused the same handle.
+
     Matching tiers (first hit wins):
       1. Exact match against any arena_aliases entry (normalized).
       2. Longest-prefix match against arena_aliases.
@@ -238,18 +242,19 @@ def player_for_name(session: Session, name: str) -> Player | None:
     norm = normalize_player_name(name)
     if not norm:
         return None
+    return _match_player(session, norm, Player.active.is_(True)) \
+        or _match_player(session, norm, Player.active.is_(False))
 
+
+def _match_player(session: Session, norm: str, active_filter) -> Player | None:
+    """Run the matching tiers over the player subset selected by `active_filter`."""
     found = session.execute(
-        select(Player)
-        .where(Player.active.is_(True), norm == any_(Player.arena_aliases))
-        .limit(1)
+        select(Player).where(active_filter, norm == any_(Player.arena_aliases)).limit(1)
     ).scalar_one_or_none()
     if found is not None:
         return found
 
-    candidates = session.execute(
-        select(Player).where(Player.active.is_(True))
-    ).scalars().all()
+    candidates = session.execute(select(Player).where(active_filter)).scalars().all()
 
     best: tuple[Player, str] | None = None
     for p in candidates:
@@ -261,13 +266,11 @@ def player_for_name(session: Session, name: str) -> Player | None:
         return best[0]
 
     found = session.execute(
-        select(Player)
-        .where(
-            Player.active.is_(True),
+        select(Player).where(
+            active_filter,
             (_normalized_column(Player.display_name) == norm)
             | (_normalized_column(Player.discord_username) == norm),
-        )
-        .limit(1)
+        ).limit(1)
     ).scalar_one_or_none()
     if found is not None:
         return found

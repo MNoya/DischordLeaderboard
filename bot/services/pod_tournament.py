@@ -13,11 +13,12 @@ import logging
 import re
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple, Sequence
 
 import discord
 from discord import ui
 from sqlalchemy import delete, func, select, update
+from sqlalchemy.orm import Session
 
 from bot import emojis
 from bot.config import settings
@@ -1581,14 +1582,35 @@ async def _maybe_advance(bot_client, event_id: str, round_num: int, is_edit: boo
     First time a round completes → advance to N+1 (or for R3 start the finalize grace).
     Edit during the grace window → regenerate N+1 (or refresh standings for R3) and reset the timer.
     Once the grace timer expires → lock the round-N view and (for R3) finalize.
+
+    Held under the manager's advance lock so two results landing at once can't both read the next
+    round as unposted and each send it — the source of the duplicated pairings message.
     """
     manager = ACTIVE_POD_MANAGERS.get(event_id)
+    if manager is None:
+        pending_remaining = await asyncio.to_thread(_count_pending_in_round, event_id, round_num)
+        if pending_remaining > 0:
+            log.info(
+                f"[FINALIZE] maybe_advance.pending event={event_id} round={round_num} "
+                f"pending_remaining={pending_remaining} decision=wait"
+            )
+            return
+        log.warning(
+            f"[FINALIZE] maybe_advance.no_manager event={event_id} round={round_num} decision=bail"
+        )
+        return
 
-    if manager is not None and manager.pairing_mode == "bracket":
+    async with manager._advance_lock:
+        await _advance_locked(manager, event_id, round_num, is_edit, result_phrase)
+
+
+async def _advance_locked(manager, event_id: str, round_num: int, is_edit: bool,
+                          result_phrase: str | None) -> None:
+    if manager.pairing_mode == "bracket":
         await _bracket_maybe_advance(manager, round_num, is_edit, result_phrase)
         return
 
-    if round_num == TOTAL_ROUNDS and manager is not None:
+    if round_num == TOTAL_ROUNDS:
         await _post_or_update_live_standings(manager)
 
     pending_remaining = await asyncio.to_thread(_count_pending_in_round, event_id, round_num)
@@ -1596,12 +1618,6 @@ async def _maybe_advance(bot_client, event_id: str, round_num: int, is_edit: boo
         log.info(
             f"[FINALIZE] maybe_advance.pending event={event_id} round={round_num} "
             f"pending_remaining={pending_remaining} decision=wait"
-        )
-        return
-
-    if manager is None:
-        log.warning(
-            f"[FINALIZE] maybe_advance.no_manager event={event_id} round={round_num} decision=bail"
         )
         return
 
@@ -1928,17 +1944,48 @@ def _load_review_roster_sync(event_id: str) -> list[dict]:
             .outerjoin(DbPlayer, DbPlayer.id == PodDraftParticipant.player_id)
             .where(PodDraftParticipant.event_id == event_id)
         ).all()
+        live_records = _live_records_from_matches(session, event_id)
     roster: list[dict] = []
     for seat_index, dm_name, part_display, colors, record, player_display, slug in rows:
+        key = normalize_player_name(dm_name or part_display or "")
         roster.append({
             "seat_index": seat_index,
             "name": player_display or part_display or dm_name or "?",
             "colors": colors,
-            "result": record or "—",
+            "result": live_records.get(key) or record or "—",
             "slug": slug,
         })
     roster.sort(key=lambda r: (r["seat_index"] is None, r["seat_index"] or 0))
     return roster
+
+
+def _live_records_from_matches(session: Session, event_id: str) -> dict[str, str]:
+    """Per-player W-L over the reported matches, keyed by normalized name. Lets the review table show
+    partial standings before finalize writes each participant's `record` — one outstanding match no
+    longer blanks the whole column."""
+    rows = session.execute(
+        select(PodDraftMatch.player_a_name, PodDraftMatch.player_b_name, PodDraftMatch.winner_name)
+        .where(PodDraftMatch.event_id == event_id)
+    ).all()
+    return tally_match_records(rows)
+
+
+def tally_match_records(rows: Sequence[tuple[str, str, str | None]]) -> dict[str, str]:
+    """Normalized-name → "W-L" over (player_a, player_b, winner) rows. Unplayed and skipped matches
+    count toward neither side."""
+    wins: dict[str, int] = {}
+    losses: dict[str, int] = {}
+    for a_name, b_name, winner_name in rows:
+        if not winner_name or winner_name == SKIPPED_SENTINEL:
+            continue
+        a, b, w = (normalize_player_name(a_name), normalize_player_name(b_name),
+                   normalize_player_name(winner_name))
+        winner, loser = (a, b) if w == a else (b, a) if w == b else (None, None)
+        if winner is None:
+            continue
+        wins[winner] = wins.get(winner, 0) + 1
+        losses[loser] = losses.get(loser, 0) + 1
+    return {key: f"{wins.get(key, 0)}-{losses.get(key, 0)}" for key in set(wins) | set(losses)}
 
 
 def _format_champion_title(names_with_colors: list[tuple[str, str | None]], short_event: str) -> str:
@@ -2711,13 +2758,13 @@ async def maybe_post_championship(manager, *, force: bool = False) -> None:
 
 
 async def maybe_post_trophy_hype(manager, *, force: bool = False) -> None:
-    """Post the champion-only #trophy-hype card once every champion's deck is complete. It waits only
-    on the champions, not on the parent-channel announcement's top-N finishers. Fires once per event;
-    the in-memory flag guards the live path and a channel scan for the card's own recap link guards a
-    restart re-post. Force (deadline, backfill) sends with whatever champion decks have landed."""
+    """Post the champion-only #trophy-hype card as soon as the champion is decided and their deck is
+    complete — the trophy match settling is enough, so a still-open 1-1 or last-chance match no longer
+    holds the card back until the whole round finalizes. `_resolve_announcement_standings` returns None
+    until the trophy match has a winner, so this never fires on a mid-tournament leader. Fires once per
+    event; the in-memory flag guards the live path and a channel scan for the card's own recap link
+    guards a restart re-post. Force (deadline, backfill) sends with whatever champion decks have landed."""
     if manager.trophy_hype_posted:
-        return
-    if not manager.finalized:
         return
     event_id = manager.event_id
     resolved = await _resolve_announcement_standings(event_id)

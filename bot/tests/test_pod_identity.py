@@ -150,9 +150,26 @@ def test_returns_none_when_no_match(session):
     assert player_for_name(session, "ghost#1234") is None
 
 
-def test_ignores_inactive_players(session):
-    _seed_player(session, discord_id="7", username="retired", display_name="Retired", active=False)
-    assert player_for_name(session, "retired") is None
+def test_matches_inactive_player_as_fallback(session):
+    _seed_player(session, discord_id="7", username="retired", display_name="Retired",
+                 arena_name="retired#4242", active=False)
+
+    found = player_for_name(session, "retired#4242")
+
+    assert found is not None
+    assert found.discord_id == "7"
+
+
+def test_active_player_wins_over_inactive_sharing_handle(session):
+    _seed_player(session, discord_id="70", username="oldowner", display_name="Old Owner",
+                 arena_name="sharedhandle#111", active=False)
+    _seed_player(session, discord_id="71", username="newowner", display_name="New Owner",
+                 arena_name="sharedhandle#222", active=True)
+
+    found = player_for_name(session, "sharedhandle#333")
+
+    assert found is not None
+    assert found.discord_id == "71"
 
 
 def test_display_name_wins_over_discord_username_when_both_match(session):
