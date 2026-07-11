@@ -593,6 +593,8 @@ async def live_deck_color_submit(interaction: discord.Interaction, color: str) -
     if manager is not None:
         await _post_or_update_live_standings(manager)
         await maybe_post_championship(manager)
+    else:
+        await refresh_standings_for_event(interaction.client, event_id, thread_id)
     asyncio.create_task(_refresh_submit_deck_dm(interaction.client, event_id, discord_id))
 
 
@@ -3081,8 +3083,9 @@ def _component_link_urls(components) -> list[str]:
 
 
 class _RecoveryManager:
-    """Manager-less stand-in so maybe_post_championship can post after a restart, when the live
-    PodDraftManager is gone. Exposes only what maybe_post_championship reads; backed by the DB row."""
+    """Manager-less stand-in so maybe_post_championship and _post_or_update_live_standings can run after
+    a restart or post-finalize eviction, when the live PodDraftManager is gone. Exposes only what those
+    read; backed by the DB row."""
 
     def __init__(self, bot, event_id: str, thread_id: int, tournament_players: list) -> None:
         self.bot = bot
@@ -3095,6 +3098,10 @@ class _RecoveryManager:
         self.champion_discord_ids: set[str] = set()
         self.champion_announcement_message = None
         self.championship_task = None
+        self.pairing_mode = "swiss"
+        self.standings_message = None
+        self._standings_post_lock = asyncio.Lock()
+        self.round_messages: dict = {}
 
     async def _fetch_thread(self):
         try:
@@ -3195,6 +3202,19 @@ async def post_championship_for_event(bot, event_id: str, thread_id: str | int) 
     shim = _RecoveryManager(bot, event_id, int(thread_id), players)
     await maybe_post_championship(shim, force=True)
     return shim.champion_announced
+
+
+async def refresh_standings_for_event(bot, event_id: str, thread_id: str | int) -> None:
+    """Re-render the pinned Final Standings embed for a finalized event with no live manager, so a late
+    deck-color submission still surfaces on the posted standings. Finalize evicts the manager, yet its
+    deck-ping invites exactly these late submits. Adopts the pinned message via _post_or_update_live_standings;
+    no-op if the roster can't be loaded."""
+    players = await asyncio.to_thread(_load_tournament_players_sync, event_id)
+    if len(players) < 2:
+        return
+    shim = _RecoveryManager(bot, event_id, int(thread_id), players)
+    shim.pairing_mode = await asyncio.to_thread(load_event_pairing_mode_sync, event_id) or "swiss"
+    await _post_or_update_live_standings(shim)
 
 
 async def reconcile_unannounced_championships(bot) -> None:
