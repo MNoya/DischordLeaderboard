@@ -3566,17 +3566,13 @@ DECK_IMAGE_NOTICE = f"🚨{NBSP}{NBSP}Change your MTGA deck image before you pla
 
 
 def _round_notice_lines(round_num: int, match_states: list[dict]) -> list[str]:
-    """Trailing call-outs under a round's pairings: the report prompt whenever a real match still needs
-    a result, plus the P1P1 deck-image warning on round 1 only. Empty once nothing is actionable, so a
-    completed round drops the prompts. Fast Bracket waiting slots explain themselves in the embed body
-    (each shows 'waiting on Round N'), so no footer is added for them."""
+    """Report prompt + P1P1 deck-image warning, round 1 only, while a real match is still unreported."""
+    if round_num != 1:
+        return []
     reportable = any(not m.get("placeholder") and not m.get("winner_name") for m in match_states)
-    notices: list[str] = []
-    if reportable:
-        notices.append(REPORT_NOTICE)
-        if round_num == 1:
-            notices.append(DECK_IMAGE_NOTICE)
-    return ["", *notices] if notices else []
+    if not reportable:
+        return []
+    return ["", REPORT_NOTICE, DECK_IMAGE_NOTICE]
 
 
 def round_groups(round_num: int, match_states: list[dict]) -> list[tuple[str, list[dict]]]:

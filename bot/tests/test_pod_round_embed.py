@@ -161,12 +161,13 @@ def test_reported_and_skipped_lines_drop_the_pending_marker():
     assert "⚔️" not in skipped
 
 
-def test_report_notice_shows_while_a_match_is_unreported_and_drops_when_complete():
-    pending = [_ms("Aria", "Caedmon", "1-0", "1-0")]
-    done = [_ms("Aria", "Caedmon", "1-0", "1-0", winner_name="Aria", score="2-0")]
+def test_report_notice_is_round_one_only_and_drops_when_complete():
+    pending = [_ms("Aria", "Caedmon")]
+    done = [_ms("Aria", "Caedmon", winner_name="Aria", score="2-0")]
 
-    assert "Report your result" in round_embed(2, pending).description
-    assert "Report your result" not in round_embed(2, done).description
+    assert "Report your result" in round_embed(1, pending).description
+    assert "Report your result" not in round_embed(1, done).description
+    assert "Report your result" not in round_embed(2, pending).description
 
 
 def test_deck_image_notice_is_round_one_only():
