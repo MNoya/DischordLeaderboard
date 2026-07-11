@@ -470,6 +470,25 @@ def test_pod_summary_trophy_from_pod_win_without_3_0(session):
     assert summary["SOS"].wins_2_1 == 0   # not also a 2-1 finish
 
 
+def test_pod_summary_team_finishes_score_by_record_only(session):
+    _seed_set(session, "SOS")
+    player = _seed_player(session, discord_id="779", username="teamer", display_name="Teamer")
+
+    e1 = record_event(session, _parsed_event(set_code="SOS", event_date=date(2026, 5, 6), attendees=("Teamer",)))
+    finalize_champion(session, e1.id, [
+        FinalStanding("Teamer", placement=None, record="2-1", eliminated_round=None),
+    ])
+    e2 = record_event(session, _parsed_event(set_code="SOS", event_date=date(2026, 5, 20), attendees=("Teamer",)))
+    finalize_champion(session, e2.id, [
+        FinalStanding("Teamer", placement=None, record="3-0", eliminated_round=None),
+    ])
+
+    summary = pod_summary_by_set_for_player(session, player.id)
+    assert summary["SOS"].events == 2      # placement-less finishes still count
+    assert summary["SOS"].trophies == 1    # the 3-0, on record alone
+    assert summary["SOS"].wins_2_1 == 1    # a 2-1 without placement stays a 2-1
+
+
 def test_pod_summary_empty_for_unknown_player(session):
     assert pod_summary_by_set_for_player(session, "ghost") == {}
 

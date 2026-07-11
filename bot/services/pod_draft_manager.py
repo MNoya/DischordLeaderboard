@@ -46,6 +46,8 @@ from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_pairing_select import pairing_label
 from bot.services.pod_seating_select import seating_mode_label
 from bot.services.pod_drafts import (
+    BOT_USER_NAME,
+    apply_seat_indexes,
     attach_arena_alias,
     full_arena_handle,
     normalize_player_name,
@@ -60,6 +62,7 @@ from bot.services.pod_drafts import (
     seed_event_participants,
     update_event_format,
 )
+from bot.services.pod_team_flow import assign_teams_at_draft_start, post_team_reveal
 from bot.services.pod_tournament import (
     persist_pairing_mode,
     persist_seating_mode,
@@ -76,7 +79,6 @@ log = logging.getLogger(__name__)
 _BACKOFF_BASE_S = 1.0
 _BACKOFF_MAX_S = 30.0
 _BACKOFF_MAX_RETRIES = 8
-_BOT_USER_NAME = "DisChordBot"
 LOBBY_REHYDRATE_WINDOW = timedelta(hours=12)
 _READY_TIMEOUT_S = 90
 _READY_DEBOUNCE_S = 2.0
@@ -85,7 +87,6 @@ _LOBBY_HALF_THRESHOLD = _LOBBY_FULL_THRESHOLD // 2
 _LOBBY_FULL_PROMPT_DELAY_S = 10
 _RESTART_SETTLE_S = 2.5
 _RESTART_READY_MIN_PLAYERS = 2
-_AI_BOT_NAME_RE = re.compile(r"^Bot #\d+$")
 
 _SEEDING_REFRESH_HOOK = None
 _SEEDING_REPOST_HOOK = None
@@ -194,8 +195,10 @@ class PodDraftManager:
         self.finalized = False
         self.tournament_roster: list[str] = []  # draftmancer userNames, set on endDraft
         self.tournament_players: list = []       # pod_swiss.Player list, set by pod_tournament.start_tournament
-        self.pairing_mode = "swiss"              # 'swiss', 'bracket', or 'random'; resolved in start_tournament
+        self.pairing_mode = "swiss"              # 'swiss', 'bracket', 'random', or 'team'; resolved in start_tournament
         self.seating_mode = "random"             # 'random', 'manual', or 'leaderboard'; hydrated on connect
+        self.team_map: dict[str, str] | None = None  # draftmancer_name -> 'A'/'B' for team drafts
+        self.team_board_messages: list["discord.Message"] = []
         self._last_seating_signature: tuple[str, ...] | None = None
         self.standings_message = None
         self._standings_post_lock = asyncio.Lock()
@@ -222,13 +225,13 @@ class PodDraftManager:
 
     @property
     def _connect_user_id(self) -> str:
-        return f"{_BOT_USER_NAME}-{self.session_id}"
+        return f"{BOT_USER_NAME}-{self.session_id}"
 
     @property
     def _connect_url(self) -> str:
         return (
             f"{settings.draftmancer_ws_url}/?"
-            f"userID={self._connect_user_id}&sessionID={self.session_id}&userName={_BOT_USER_NAME}"
+            f"userID={self._connect_user_id}&sessionID={self.session_id}&userName={BOT_USER_NAME}"
         )
 
     async def connect(self) -> bool:
@@ -318,7 +321,7 @@ class PodDraftManager:
         self.last_ready_summary = None
         if self.bot_user_id is None:
             for u in self.session_users:
-                if u.get("userName") == _BOT_USER_NAME:
+                if u.get("userName") == BOT_USER_NAME:
                     self.bot_user_id = u.get("userID")
                     log.info(f"found bot userID={self.bot_user_id} for {self.session_id}")
                     if not self.owner_claimed:
@@ -352,7 +355,7 @@ class PodDraftManager:
         self.spectator_names = [s.get("userName") for s in rows if s.get("userName")]
         self.spectator_targets = [
             (s.get("userID"), s.get("userName")) for s in rows
-            if s.get("userID") and s.get("userName") != _BOT_USER_NAME
+            if s.get("userID") and s.get("userName") != BOT_USER_NAME
         ]
 
     async def _on_update_user(self, payload) -> None:
@@ -410,10 +413,12 @@ class PodDraftManager:
         await self.sio.emit("setColorBalance", False)
         await self.sio.emit("setPersonalLogs", True)
         await self.sio.emit("setDraftLogRecipients", self._draft_log_recipients)
+        team_draft = self.pairing_mode == "team"
+        await self.sio.emit("teamDraft", team_draft)
         log.info(
             f"[LIFECYCLE] session_settings_applied event={self.event_id} set={self.set_code} "
             f"max_players={settings.pod_draft_max_players} pick_timer={settings.pod_draft_pick_timer} "
-            f"bots={settings.pod_draft_bots} log_recipients={self._draft_log_recipients}"
+            f"bots={settings.pod_draft_bots} log_recipients={self._draft_log_recipients} team_draft={team_draft}"
         )
 
     @property
@@ -620,7 +625,7 @@ class PodDraftManager:
         """Session users that count as players: excludes the bot and anyone spectating."""
         return [
             u for u in self.session_users
-            if u.get("userName") and u.get("userName") != _BOT_USER_NAME
+            if u.get("userName") and u.get("userName") != BOT_USER_NAME
             and u.get("userID") not in self.spectator_user_ids
         ]
 
@@ -1174,6 +1179,9 @@ class PodDraftManager:
         return None
 
     async def _start_draft(self) -> None:
+        if settings.pod_draft_bots == 0 and len(self.player_session_users()) % 2 != 0:
+            await self._refuse_odd_roster_start()
+            return
         await self._reapply_seating_if_set()
         result = await self._emit_with_ack("startDraft")
         log.info(f"[DRAFT] start_ack event={self.event_id} ack={result!r}")
@@ -1202,13 +1210,36 @@ class PodDraftManager:
         self._schedule_end_watchdog()
         await self._retire_lobby_full_prompt()
         await asyncio.to_thread(self._seed_participants_at_draft_start)
+        if self.pairing_mode == "team":
+            await assign_teams_at_draft_start(self)
         await self.refresh_lobby_now()
         thread = await self._fetch_thread()
         if thread is not None:
-            try:
-                await thread.send(content="**🎉 Draft started!**")
-            except Exception:
-                log.warning("[DRAFT] started.thread_post_error", exc_info=True)
+            if self.pairing_mode == "team":
+                await post_team_reveal(self, thread)
+            else:
+                try:
+                    await thread.send(content="**🎉 Draft started!**")
+                except Exception:
+                    log.warning("[DRAFT] started.thread_post_error", exc_info=True)
+
+    async def _refuse_odd_roster_start(self) -> None:
+        """Block startDraft on an odd roster: every pairing mode needs an even table, and a ready check
+        can complete after someone leaves. Refusing before the emit keeps the lobby open instead of
+        stranding a fully drafted pod at the endDraft pairing error. Skipped when Draftmancer bots fill
+        seats (dev solo drafts) — the endDraft check still guards pairings there."""
+        count = len(self.player_session_users())
+        log.warning(f"[DRAFT] start_refused_odd_roster event={self.event_id} players={count}")
+        thread = await self._fetch_thread()
+        if thread is None:
+            return
+        try:
+            await thread.send(
+                f"⚠️ Pairings need an even number of players, but {count} are seated. "
+                "The draft won't start until the roster is evened out."
+            )
+        except Exception:
+            log.warning("[DRAFT] start_refused.thread_post_error", exc_info=True)
 
     def _seed_participants_at_draft_start(self) -> None:
         """Insert pod_draft_participants for every non-bot Draftmancer userName now that the draft
@@ -1388,16 +1419,32 @@ class PodDraftManager:
     async def apply_seating_mode(self) -> None:
         """Push the current seating_mode to the live table. Leaderboard recomputes the seeded order
         from the present lobby; random asserts the shuffle flag; manual is driven by the Seat Order
-        button + the pre-startDraft re-assert, so nothing is pushed here. Pre-draft only."""
+        button + the pre-startDraft re-assert, so nothing is pushed here. Pre-draft only.
+
+        Random under team mode is the exception: Draftmancer's own start-time shuffle would hide the
+        final order until after startDraft, but team assignment needs it at the start — so the bot
+        shuffles and pushes the order itself."""
         if not self.sio.connected or self.drafting or self.draft_complete:
             return
         if self.seating_mode == "leaderboard":
             await self._apply_leaderboard_seating()
         elif self.seating_mode == "random":
+            if self.pairing_mode == "team":
+                await self._apply_shuffled_seating()
+                return
             try:
                 await self.sio.emit("setRandomizeSeatingOrder", True)
             except Exception:
                 log.exception(f"[SEATING] randomize_emit_failed event={self.event_id}")
+
+    async def _apply_shuffled_seating(self) -> None:
+        names = [u.get("userName") for u in self.player_session_users() if u.get("userID")]
+        if len(names) < 2:
+            return
+        random.shuffle(names)
+        err = await self.set_seating_order(names)
+        if err is not None:
+            log.info(f"[SEATING] shuffle_skipped event={self.event_id} reason={err!r}")
 
     async def _apply_leaderboard_seating(self) -> None:
         """Compute the seeded ring from the present lobby and emit setSeating. Idempotent: skips the
@@ -1424,20 +1471,33 @@ class PodDraftManager:
             log.exception(f"[SEATING] leaderboard_emit_failed event={self.event_id}")
             return
         self._last_seating_signature = user_id_order
+        self.desired_seating = list(ordered_names)
         log.info(f"[SEATING] leaderboard_applied event={self.event_id} order={ordered_names}")
 
     async def _reapply_seating_if_set(self) -> None:
         """Re-assert seating right before startDraft so late joins/leaves can't leave a stale order in
-        place. Leaderboard recomputes from the final roster; random re-asserts the shuffle; manual
-        re-emits the organizer's frozen order. Best-effort: skipped (logged) on lobby mismatch."""
+        place. Leaderboard recomputes from the final roster; random re-asserts the shuffle (or, under
+        team mode, reshuffles and pushes the final roster); manual re-emits the organizer's frozen
+        order. A team pod whose manual order was never set pushes the lobby order, so the seating is
+        always known at startDraft. Best-effort: skipped (logged) on lobby mismatch."""
         if self.seating_mode in ("leaderboard", "random"):
             await self.apply_seating_mode()
             return
         if not self.desired_seating:
+            if self.pairing_mode == "team":
+                await self._push_lobby_order_seating()
             return
         err = await self.set_seating_order(self.desired_seating)
         if err is not None:
             log.info(f"[SEATING] reapply_skipped event={self.event_id} reason={err!r}")
+
+    async def _push_lobby_order_seating(self) -> None:
+        names = [u.get("userName") for u in self.player_session_users() if u.get("userID")]
+        if len(names) < 2:
+            return
+        err = await self.set_seating_order(names)
+        if err is not None:
+            log.info(f"[SEATING] lobby_order_push_skipped event={self.event_id} reason={err!r}")
 
     async def _emit_with_ack(self, event: str, *args, timeout_s: float = 5.0):
         """Emit a socket.io event and wait for the server's ack callback."""
@@ -1576,33 +1636,6 @@ class PodDraftManager:
             tag="DRAFT",
         )
 
-def apply_seat_indexes(session, event_id: str, seats: list[str]) -> None:
-    if not seats:
-        return
-    rows = session.execute(
-        select(PodDraftParticipant).where(PodDraftParticipant.event_id == event_id)
-    ).scalars().all()
-    by_dm: dict[str, PodDraftParticipant] = {}
-    by_display: dict[str, PodDraftParticipant] = {}
-    for row in rows:
-        if row.draftmancer_name:
-            by_dm[normalize_player_name(row.draftmancer_name)] = row
-        if row.display_name:
-            by_display[normalize_player_name(row.display_name)] = row
-    matched = 0
-    for i, name in enumerate(seats):
-        if not name or name == _BOT_USER_NAME or _AI_BOT_NAME_RE.match(name):
-            continue
-        key = normalize_player_name(name)
-        row = by_dm.get(key) or by_display.get(key)
-        if row is None:
-            log.info(f"seat_index: no participant matching {name!r} in {event_id}")
-            continue
-        row.seat_index = i
-        matched += 1
-    log.info(f"seat_index: applied to {matched}/{len(seats)} seats for {event_id}")
-
-
 def _is_ready_state(state) -> bool:
     """Draftmancer sends setReady(userID, state) where state can be 0/1 or 'Ready'/'NotReady'."""
     if isinstance(state, bool):
@@ -1695,7 +1728,7 @@ def _persist_format(event_id: str, code: str) -> bool:
 async def set_event_pairing_mode(event_id: str, mode: str) -> str | None:
     """Set a pod's pairing mode by event id; updates the live manager when one exists and persists.
     Locked once the tournament has started. Returns an error string or None."""
-    if mode not in ("swiss", "bracket", "random"):
+    if mode not in ("swiss", "bracket", "random", "team"):
         return "Unknown pairing mode."
     manager = ACTIVE_POD_MANAGERS.get(event_id)
     if manager is not None:

@@ -37,12 +37,22 @@ from bot.services.pod_pairing_select import DEFAULT_PAIRING_MODE, pairing_label
 from bot.services.pod_seating_select import seating_mode_label
 from bot.services.player_stats import rank_players_for_set
 from bot.commands.pod_draft import build_seeding_image_message_from_names, post_manual_seating_table, post_table
-from bot.commands.pod_split import build_split_view
+from bot.commands.pod_table import build_table_view
 from bot.commands.test_group import register_test_fallback
 from bot.services.pod_format_select import FormatSelectView
 from bot.services.pod_settings_view import PodSettingsView
 from bot.services.pod_drafts import normalize_player_name
+from bot.services import pod_team
 from bot.services.pod_swiss import Standing
+from bot.services.pod_team_board import (
+    TeamBoardData,
+    TeamBoardMember,
+    build_board_data,
+    build_team_board_views,
+    team_summary_embed,
+)
+from bot.services.pod_team_flow import build_team_final_embed, build_team_reveal_embed
+from bot.services.pod_team_showcase import build_team_championship_view, format_team_trophy_title
 from bot.services.pod_tournament import (
     REVIEW_EMOJI,
     ParticipantDeckData,
@@ -66,8 +76,10 @@ _INVOKER_SEAT = "Noya"
 # Module-level scratch store for the SubmitDeck POC; cleared on bot restart.
 _TEST_DECK_COLORS: dict[int, str] = {}
 
-# Fictional 8-player roster for the live-seeded tournament path (`podbracket` / `podswiss` / `round1`).
-_LIVE_TEST_ROSTER = ["Ava", "Bram", "Cara", "Dex", "Eli", "Fern", "Gus", "Hana"]
+# Fictional roster for the live-seeded tournament path (`podbracket` / `podswiss` / `round1`);
+# most paths use the first 8, `podteam <count>` can seat up to all 10.
+_LIVE_TEST_ROSTER = ["Ava", "Bram", "Cara", "Dex", "Eli", "Fern", "Gus", "Hana", "Iris", "Juno"]
+_LIVE_TEST_POD_SIZES = ("6", "8", "10")
 _LIVE_TEST_STATUS = "test"
 
 # Arena handles for the fictional roster so the live round embeds exercise the real Round 1 arena
@@ -81,6 +93,8 @@ _LIVE_TEST_ARENA = {
     "Fern": "Fern#10006",
     "Gus": "Gus#10007",
     "Hana": "Hana#10008",
+    "Iris": "Iris#10009",
+    "Juno": "Juno#10010",
 }
 
 
@@ -198,18 +212,18 @@ def _seed_live_test_event_sync(
     return event_id, session_id
 
 
-# Fictional pre-claims so a single real click by the invoker crosses the split threshold and
+# Fictional pre-claims so a single real click by the invoker crosses the table threshold and
 # materializes the overflow table. Negative ids mark fixtures so the ping block renders them as
 # plain names rather than trying to mention a real user.
-_SPLIT_PRESEED = [(-1, "Ava"), (-2, "Bram"), (-3, "Cara"), (-4, "Dex"), (-5, "Eli")]
+_TABLE_PRESEED = [(-1, "Ava"), (-2, "Bram"), (-3, "Cara"), (-4, "Dex"), (-5, "Eli")]
 
 
-def _split_test_base_name() -> str:
+def _table_test_base_name() -> str:
     return f"{active_set_code()} Split Test"
 
 
-def _seed_split_source_sync(channel_id: int) -> str:
-    """Seed a stand-in 'Table 1' source pod so `!test split` has a real event to clone. Returns its id."""
+def _seed_table_source_sync(channel_id: int) -> str:
+    """Seed a stand-in 'Table 1' source pod so `!test table` has a real event to clone. Returns its id."""
     now = datetime.now(timezone.utc)
     event_id = str(uuid4())
     with SessionLocal() as session:
@@ -218,7 +232,7 @@ def _seed_split_source_sync(channel_id: int) -> str:
             event_date=now.date(),
             event_time=now,
             set_code=active_set_code(),
-            name=_split_test_base_name(),
+            name=_table_test_base_name(),
             draftmancer_session=f"TESTSPLIT-{channel_id}",
             discord_thread_id=str(channel_id),
             sesh_message_id=None,
@@ -229,8 +243,8 @@ def _seed_split_source_sync(channel_id: int) -> str:
     return event_id
 
 
-def _purge_split_family_sync(base_name: str) -> list[tuple[str, str]]:
-    """Delete the source pod and every table split off it. Returns (event_id, thread_id) so the caller
+def _purge_table_family_sync(base_name: str) -> list[tuple[str, str]]:
+    """Delete the source pod and every table opened off it. Returns (event_id, thread_id) so the caller
     can evict managers and remove the created threads."""
     with SessionLocal() as session:
         rows = session.execute(
@@ -335,7 +349,7 @@ async def _post_test_seeding(ctx, count: int = 8) -> None:
     await post_table(ctx.bot, ctx.channel, file, embed)
 
 
-async def _start_live_test_pod(ctx, mode: str) -> None:
+async def _start_live_test_pod(ctx, mode: str, count: int = 8) -> None:
     """Seed a real event + socket-less manager and hand off to the prod start_tournament, so the
     posted result dropdowns drive the real _handle_result_submission. Seat 1 is the invoker so they
     receive the real pairing / deck DMs. Local DB only."""
@@ -343,7 +357,7 @@ async def _start_live_test_pod(ctx, mode: str) -> None:
         return
     await _purge_and_reset_test(ctx)
     channel_id = ctx.channel.id
-    roster = [ctx.author.display_name] + _LIVE_TEST_ROSTER[1:]
+    roster = [ctx.author.display_name] + _LIVE_TEST_ROSTER[1:count]
     event_id, session_id = await asyncio.to_thread(
         _seed_live_test_event_sync, channel_id, mode, roster, ctx.author.id,
     )
@@ -366,7 +380,7 @@ async def _start_live_test_lobby(ctx) -> None:
     url = f"{settings.draftmancer_web_url}/?session={session_id}"
     log.info(f"[testlobby] live lobby connecting event={event_id} session={session_id}")
     manager = await start_manager(
-        ctx.bot, event_id, session_id, channel_id, active_set_code(), len(_LIVE_TEST_ROSTER),
+        ctx.bot, event_id, session_id, channel_id, active_set_code(), 8,
         event_name="Testlobby Live Pod", draftmancer_url=url,
     )
     if manager is None:
@@ -375,13 +389,13 @@ async def _start_live_test_lobby(ctx) -> None:
     await ctx.send(f"🧪 Connected to Draftmancer `{session_id}`.")
 
 
-async def _start_test_split(ctx) -> None:
-    """Drive the real `/pod-split` flow: seed a source pod, then post the prod claim card preseeded to
+async def _start_test_table(ctx) -> None:
+    """Drive the real `/pod-table` flow: seed a source pod, then post the prod claim card preseeded to
     one below threshold so the invoker's single click materializes the overflow table (real thread +
     Draftmancer lobby + tournament manager). Local DB only."""
     if await _refuse_if_prod(ctx):
         return
-    purged = await asyncio.to_thread(_purge_split_family_sync, _split_test_base_name())
+    purged = await asyncio.to_thread(_purge_table_family_sync, _table_test_base_name())
     for old_id, old_thread in purged:
         mgr = ACTIVE_POD_MANAGERS.get(old_id)
         if mgr is not None:
@@ -396,15 +410,16 @@ async def _start_test_split(ctx) -> None:
                     await thread.delete()
                 except discord.HTTPException:
                     pass
-    source_id = await asyncio.to_thread(_seed_split_source_sync, ctx.channel.id)
-    preseed = _SPLIT_PRESEED[: max(0, settings.pod_split_open_threshold - 1)]
-    log.info(f"[testlobby] split preview seeded source={source_id} preseed={len(preseed)}")
+    source_id = await asyncio.to_thread(_seed_table_source_sync, ctx.channel.id)
+    preseed = _TABLE_PRESEED[: max(0, settings.pod_table_open_threshold - 1)]
+    log.info(f"[testlobby] table preview seeded source={source_id} preseed={len(preseed)}")
     lobby_channel = ctx.channel.parent if isinstance(ctx.channel, discord.Thread) else ctx.channel
-    view = await build_split_view(ctx.bot, source_id, lobby_channel=lobby_channel, preseeded_claims=preseed)
+    view = await build_table_view(ctx.bot, source_id, lobby_channel=lobby_channel, preseeded_claims=preseed)
     if view is None:
-        await ctx.send("could not seed the split source event")
+        await ctx.send("could not seed the table source event")
         return
     view.claim_message = await ctx.send(embed=view.render_embed(), view=view)
+    await view.activate()
 
 
 async def _test_submit_deck_color(interaction: discord.Interaction, color: str) -> None:
@@ -430,8 +445,124 @@ def _review_preview_roster() -> list[dict]:
             "seat_index": i, "name": name, "colors": colors[i % len(colors)],
             "result": records[i % len(records)], "slug": slugify(name),
         }
-        for i, name in enumerate(_LIVE_TEST_ROSTER)
+        for i, name in enumerate(_LIVE_TEST_ROSTER[:8])
     ]
+
+
+# Fictional roster shaped like production: long parentheticals, a u/ handle, an initialism, short handles.
+# Arena handles diverge from the Discord display, mirroring how few players match across the two.
+_TEAM1 = ["Thistledown (Maramir)", "SilverbackGorilla", "mo"]
+_TEAM2 = ["u/Longpost_Enjoyer", "C. Vulgaris", "yo"]
+_TEAM_ARENA = {
+    "Thistledown (Maramir)": "quickfox#41922",
+    "SilverbackGorilla": "sbg#00071",
+    "mo": "melodious#88123",
+    "u/Longpost_Enjoyer": "postman#55010",
+    "C. Vulgaris": "chard#64000",
+    "yo": "yolanda#12001",
+}
+
+
+def _team_preview_rosters() -> dict[str, list[TeamBoardMember]]:
+    return {
+        pod_team.TEAM_A: [TeamBoardMember(n, _TEAM_ARENA[n]) for n in _TEAM1],
+        pod_team.TEAM_B: [TeamBoardMember(n, _TEAM_ARENA[n]) for n in _TEAM2],
+    }
+
+
+def _team_preview_board_data() -> TeamBoardData:
+    """Fixture TeamBoardData for the no-DB board snapshot, rendered through the prod board builder so
+    the preview can't drift from the live layout. One pre-reported match shows the recolored button;
+    Blue at 0 shows the no-Wins header. Match ids are fake, so the Report buttons are inert."""
+    seat_order = [name for pair in zip(_TEAM1, _TEAM2) for name in pair]
+    teams = pod_team.assign_teams(seat_order)
+    team_rows = [(name, teams[name]) for name in seat_order]
+    displays = {
+        normalize_player_name(name): {"display_name": name, "arena": _TEAM_ARENA[name]}
+        for name in seat_order
+    }
+    matches = []
+    for round_num in (1, 2, 3):
+        for a, b in pod_team.pair_round(_TEAM1, _TEAM2, round_num):
+            matches.append({
+                "match_id": f"team-preview-{len(matches) + 1}", "round": round_num,
+                "a_name": a, "b_name": b, "winner_name": None, "score": None,
+            })
+    matches[0].update(winner_name=matches[0]["a_name"], score="2-0")
+    return build_board_data("team-preview", team_rows, matches, displays, finalized=False)
+
+
+_TEAM_PREVIEW_RECORDS = [(3, 0), (2, 1), (1, 2), (3, 0), (0, 3), (0, 3)]
+_TEAM_PREVIEW_COLORS = ["WU", "BR", "WBg", "UG", "RG", "WB"]
+_TEAM_PREVIEW_CAPTIONS = [
+    "fliers win games", "rakdos did rakdos things", None,
+    "undefeated on the losing side", None, "never drew the bomb",
+]
+
+
+def _team_standings_preview_embed() -> discord.Embed:
+    """Fixture final standings through the prod builder: Green wins 6-3, one personal 3-0 trophy,
+    deck colors on every row."""
+    names = _TEAM1 + _TEAM2
+    teams = {**{n: pod_team.TEAM_A for n in _TEAM1}, **{n: pod_team.TEAM_B for n in _TEAM2}}
+    standings = [
+        Standing(rank=i + 1, player_id=n, player_name=n, wins=w, losses=losses,
+                 omw_pct=0.0, gw_pct=0.0, ogw_pct=0.0)
+        for i, (n, (w, losses)) in enumerate(zip(names, _TEAM_PREVIEW_RECORDS))
+    ]
+    displays = {normalize_player_name(n): {"display_name": n} for n in names}
+    player_colors = {
+        normalize_player_name(n): colors for n, colors in zip(names, _TEAM_PREVIEW_COLORS)
+    }
+    return build_team_final_embed(
+        standings, teams, event_name="MSH Pod Draft #4 - July 1", displays=displays,
+        pending_count=0, player_colors=player_colors,
+    )
+
+
+def _team_preview_showcase_parts():
+    names = _TEAM1 + _TEAM2
+    teams = {**{n: pod_team.TEAM_A for n in _TEAM1}, **{n: pod_team.TEAM_B for n in _TEAM2}}
+    standings = [
+        Standing(rank=i + 1, player_id=n, player_name=n, wins=w, losses=losses,
+                 omw_pct=0.0, gw_pct=0.0, ogw_pct=0.0)
+        for i, (n, (w, losses)) in enumerate(zip(names, _TEAM_PREVIEW_RECORDS))
+    ]
+    displays = {normalize_player_name(n): {"display_name": n} for n in names}
+    player_colors = {
+        normalize_player_name(n): colors for n, colors in zip(names, _TEAM_PREVIEW_COLORS)
+    }
+    deck_data = {
+        normalize_player_name(n): ParticipantDeckData(
+            colors=colors, screenshot_url=_TEST_DECK_SCREENSHOT_URL, screenshot_caption=caption,
+        )
+        for n, colors, caption in zip(names, _TEAM_PREVIEW_COLORS, _TEAM_PREVIEW_CAPTIONS)
+    }
+    return standings, teams, displays, player_colors, deck_data
+
+
+def _team_championship_preview_view() -> discord.ui.LayoutView:
+    """Fixture team championship card through the prod builder: Green wins 6-3, both galleries."""
+    standings, teams, displays, player_colors, deck_data = _team_preview_showcase_parts()
+    return build_team_championship_view(
+        standings, teams, event_name="MSH Pod Draft #4 - July 1", displays=displays,
+        player_colors=player_colors, deck_data=deck_data,
+    )
+
+
+def _team_trophy_hype_preview_view() -> discord.ui.LayoutView:
+    """Fixture team 3-0 hype card: two 3-0s (one per team) so the divider shows."""
+    standings, teams, displays, player_colors, deck_data = _team_preview_showcase_parts()
+    hyped = [
+        Standing(rank=i + 1, player_id=n, player_name=n, wins=3, losses=0,
+                 omw_pct=0.0, gw_pct=0.0, ogw_pct=0.0)
+        for i, n in enumerate((_TEAM1[0], _TEAM2[0]))
+    ]
+    return build_trophy_hype_view(
+        hyped, event_name="MSH Pod Draft #4 - July 1", displays=displays,
+        player_colors=player_colors, deck_data=deck_data,
+        format_title=format_team_trophy_title,
+    )
 
 
 _TEST_DECK_SCREENSHOT_URL = "https://placehold.co/1280x720/2b2d31/ffffff/png?text=Deck+Screenshot"
@@ -530,11 +661,14 @@ _LINKED_EIGHT: list[tuple[str, str]] = [
 ]
 _VALID_STATES = (
     "empty", "partial", "linked", "unlinked", "ready", "notready", "cancelled", "superseded",
-    "drafting", "complete", "submit", "podbracket", "podswiss", "podrandom", "podlobby", "format",
-    "seeding", "trophyhype", "round1", "round2", "round3", "voicelink", "review", "split",
+    "drafting", "complete", "submit", "podbracket", "podswiss", "podrandom", "podteam", "podlobby",
+    "format", "seeding", "trophyhype", "round1", "round2", "round3", "voicelink", "review", "table",
+    "teamreveal", "teams", "teamstandings", "teamchamp", "teamhype",
 )
 
-_LIVE_POD_MODES = {"podbracket": "bracket", "podswiss": "swiss", "podrandom": "random"}
+_LIVE_POD_MODES = {
+    "podbracket": "bracket", "podswiss": "swiss", "podrandom": "random", "podteam": "team",
+}
 
 _LAST_MESSAGE: dict[int, discord.Message] = {}
 _LAST_PROGRESS_MESSAGES: dict[int, list[discord.Message]] = {}
@@ -703,8 +837,16 @@ async def setup(bot: commands.Bot) -> None:
         """Owner-only. Render the pod-draft lobby embed in this channel.
 
         `state` ∈ empty | partial | linked | unlinked | ready | notready | cancelled | superseded |
-        drafting | complete | submit | podbracket | podswiss | podrandom | podlobby | format |
-        seeding | trophyhype | round1 | round2 | round3 | voicelink.
+        drafting | complete | submit | podbracket | podswiss | podrandom | podteam | podlobby |
+        format | seeding | trophyhype | round1 | round2 | round3 | voicelink.
+        `podteam [6|8|10]` seeds a real team draft at that player count (default 6; seat 1 = you,
+        Green Team) — posts the team summary embed + live board with working report buttons and
+        opens the two private team threads off this channel.
+        `teamreveal` shows the single team-reveal embed posted at draft start.
+        `teamstandings` shows the pinned final standings embed for a finished team draft.
+        `teamchamp` shows the two-gallery team championship card; `teamhype` the combined 3-0 hype card.
+        `teams` is the no-DB snapshot of the Components V2 team board (team headers + all three rounds,
+        one row per match); its Report buttons are inert — use `podteam` to drive reports.
         `ready` shows the active ready-check card; clicking its Force Start button previews the ephemeral
         confirm dialog (no live pod needed). `round1`/`round2`/`round3` are no-DB snapshots of each round
         embed (`round1 random` for the random-pairing header).
@@ -720,15 +862,20 @@ async def setup(bot: commands.Bot) -> None:
             return
 
         if state in _LIVE_POD_MODES:
-            await _start_live_test_pod(ctx, _LIVE_POD_MODES[state])
+            if extra and extra not in _LIVE_TEST_POD_SIZES:
+                await ctx.send(f"player count must be one of: {', '.join(_LIVE_TEST_POD_SIZES)}")
+                return
+            mode = _LIVE_POD_MODES[state]
+            default_count = 6 if mode == "team" else 8
+            await _start_live_test_pod(ctx, mode, int(extra) if extra else default_count)
             return
 
         if state == "podlobby":
             await _start_live_test_lobby(ctx)
             return
 
-        if state == "split":
-            await _start_test_split(ctx)
+        if state == "table":
+            await _start_test_table(ctx)
             return
 
         if state == "seeding":
@@ -741,6 +888,29 @@ async def setup(bot: commands.Bot) -> None:
 
         if state == "trophyhype":
             await ctx.send(view=_trophy_hype_preview())
+            return
+
+        if state == "teamreveal":
+            await ctx.send(embed=build_team_reveal_embed(_team_preview_rosters()))
+            return
+
+        if state == "teamstandings":
+            await ctx.send(embed=_team_standings_preview_embed())
+            return
+
+        if state == "teamchamp":
+            await ctx.send(view=_team_championship_preview_view())
+            return
+
+        if state == "teamhype":
+            await ctx.send(view=_team_trophy_hype_preview_view())
+            return
+
+        if state == "teams":
+            preview_data = _team_preview_board_data()
+            await ctx.send(embed=team_summary_embed(preview_data))
+            for view in build_team_board_views(preview_data):
+                await ctx.send(view=view)
             return
 
         if state == "round1":

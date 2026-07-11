@@ -15,6 +15,7 @@ PAIRING_MODES = (
     ("swiss", "Swiss Tournament", "Three rounds, each paired after the previous fully finishes."),
     ("bracket", "Fast Bracket", "Pairs players the moment two reach the same record. 8p only"),
     ("random", "Random", "Round 1 randomized ignoring seats. Later rounds by record."),
+    ("team", "Team Draft", "Two teams by seat, cross-team round robin."),
 )
 DEFAULT_PAIRING_MODE = "bracket"
 SELECT_PLACEHOLDER = "Choose pairing mode"

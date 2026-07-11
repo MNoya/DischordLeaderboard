@@ -35,7 +35,7 @@ from bot.commands.pod_draft import setup as setup_pod_draft
 from bot.commands.pod_guide import setup as setup_pod_guide
 from bot.commands.roles import RolesView, setup as setup_roles
 from bot.commands.pod_schedule import setup as setup_pod_schedule
-from bot.commands.pod_split import setup as setup_pod_split
+from bot.commands.pod_table import setup as setup_pod_table
 from bot.commands.preview_season_awards import setup as setup_preview_season_awards
 from bot.commands.save_resource import setup as setup_save_resource
 from bot.commands.set_awards import setup as setup_set_awards
@@ -64,6 +64,7 @@ from bot.models import LeaderboardMessage, Player, PodDraftEvent
 from bot.services.bot_log import BotLog
 from bot.services.lobby_embed import LobbyReadyButtonView
 from bot.services.pod_draft_manager import rehydrate_active_lobbies
+from bot.services.pod_team_board import TeamReportButton
 from bot.services.pod_tournament import (
     reconcile_unannounced_championships,
     register_persistent_views as register_pod_views,
@@ -201,7 +202,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_mock_draft(bot)
         await setup_pod_backfill(bot)
         await setup_pod_schedule(bot)
-        await setup_pod_split(bot)
+        await setup_pod_table(bot)
         await setup_preview_season_awards(bot)
         await setup_set_awards(bot)
         await setup_sesh_listener(bot)
@@ -219,6 +220,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_testchampionship(bot)
         reschedule_pending_events(bot)
         register_pod_views(bot)
+        bot.add_dynamic_items(TeamReportButton)
         _log_startup_summary()
         bot.tree.copy_global_to(guild=guild)
 

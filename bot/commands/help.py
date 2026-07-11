@@ -56,7 +56,7 @@ POD_HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         ("/link-arena", desc.LINK_ARENA),
     ]),
     ("⚙️ Admin", [
-        ("/pod-split", desc.POD_SPLIT.removeprefix("[Admin] ")),
+        ("/pod-table", desc.POD_TABLE.removeprefix("[Admin] ")),
         ("/pod-restart", desc.POD_RESTART.removeprefix("[Admin] ")),
         ("/pod-champion", desc.POD_CHAMPION.removeprefix("[Admin] ")),
         ("/pod-backfill", desc.POD_BACKFILL.removeprefix("[Admin] ")),

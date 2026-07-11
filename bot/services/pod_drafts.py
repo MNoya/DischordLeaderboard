@@ -33,6 +33,9 @@ DM_KIND_SUBMIT_DECK_FINAL = "submit_deck_final"
 
 FINALIZED_STATUSES = ("draft_done", "complete")
 
+BOT_USER_NAME = "DisChordBot"
+AI_BOT_NAME_RE = re.compile(r"^Bot #\d+$")
+
 
 @dataclass(frozen=True)
 class ParticipantDmInfo:
@@ -58,9 +61,10 @@ class ParsedSeshEvent:
 
 @dataclass(frozen=True)
 class FinalStanding:
-    """One participant's outcome at champion finalization."""
+    """One participant's outcome at champion finalization. Team pods carry no placement — a team
+    draft has no individual champion, so their trophies stay record-only."""
     draftmancer_name: str
-    placement: int
+    placement: int | None
     record: str
     eliminated_round: int | None
 
@@ -412,14 +416,14 @@ def record_mock_event(
 _TABLE_SUFFIX_RE = re.compile(r"\s+(?:[-–]\s+)?Table\s+\d+\s*$", re.IGNORECASE)
 
 
-def split_base_name(name: str) -> str:
-    """The event name with any trailing ` - Table N` stripped, so splitting a Table 2 still bases new
-    tables on the original pod name rather than nesting `... Table 2 - Table 3`."""
+def table_base_name(name: str) -> str:
+    """The event name with any trailing ` - Table N` stripped, so opening a table off a Table 2 still
+    bases new tables on the original pod name rather than nesting `... Table 2 - Table 3`."""
     return _TABLE_SUFFIX_RE.sub("", name).strip()
 
 
 def next_table_index(session: Session, base_name: str) -> int:
-    """Next free table number for `base_name`; the original pod is table 1, so the first split is 2."""
+    """Next free table number for `base_name`; the original pod is table 1, so the first new table is 2."""
     names = session.execute(
         select(PodDraftEvent.name).where(PodDraftEvent.name.ilike(f"{base_name}%Table %"))
     ).scalars().all()
@@ -431,7 +435,7 @@ def next_table_index(session: Session, base_name: str) -> int:
     return highest + 1
 
 
-def build_split_session(session: Session, source_session_id: str, table_index: int) -> str:
+def build_table_session(session: Session, source_session_id: str, table_index: int) -> str:
     """`<source session>-T<index>`, suffixing A/B/… on collision so re-creates never share a lobby."""
     base = f"{source_session_id}-T{table_index}"
     taken = set(session.execute(
@@ -449,17 +453,17 @@ def build_split_session(session: Session, source_session_id: str, table_index: i
     return f"{base}-{n}"
 
 
-def record_split_event(session: Session, *, source_event_id: str) -> PodDraftEvent:
-    """Insert a kind='tournament' overflow table cloned from `source_event_id` — same set, format,
+def record_table_event(session: Session, *, source_event_id: str) -> PodDraftEvent:
+    """Insert a kind='tournament' table cloned from `source_event_id` — same set, format,
     pairings, seating, and event date, but its own Draftmancer session and no sesh RSVP. The roster
     arrives from the new lobby. `discord_thread_id` is a placeholder the caller overwrites once the
     thread exists (as record_mock_event does)."""
     source = session.get(PodDraftEvent, source_event_id)
     if source is None:
         raise ValueError(f"source pod event {source_event_id} not found")
-    base_name = split_base_name(source.name)
+    base_name = table_base_name(source.name)
     table_index = next_table_index(session, base_name)
-    session_id = build_split_session(session, source.draftmancer_session, table_index)
+    session_id = build_table_session(session, source.draftmancer_session, table_index)
     event = PodDraftEvent(
         event_date=source.event_date,
         event_time=datetime.now(timezone.utc),
@@ -480,13 +484,13 @@ def record_split_event(session: Session, *, source_event_id: str) -> PodDraftEve
     return event
 
 
-def preview_split_target_sync(source_event_id: str) -> tuple[str, int] | None:
-    """(base name, next table index) for the split claim card, or None when the source is gone."""
+def preview_table_target_sync(source_event_id: str) -> tuple[str, int] | None:
+    """(base name, next table index) for the table claim card, or None when the source is gone."""
     with SessionLocal() as session:
         source = session.get(PodDraftEvent, source_event_id)
         if source is None:
             return None
-        base = split_base_name(source.name)
+        base = table_base_name(source.name)
         return base, next_table_index(session, base)
 
 
@@ -676,6 +680,33 @@ def seed_event_participants(session: Session, event_id: str, roster: list[str]) 
     duplicated."""
     for name in roster:
         upsert_participant(session, event_id, display_name=name, draftmancer_name=name)
+
+
+def apply_seat_indexes(session: Session, event_id: str, seats: list[str]) -> None:
+    if not seats:
+        return
+    rows = session.execute(
+        select(PodDraftParticipant).where(PodDraftParticipant.event_id == event_id)
+    ).scalars().all()
+    by_dm: dict[str, PodDraftParticipant] = {}
+    by_display: dict[str, PodDraftParticipant] = {}
+    for row in rows:
+        if row.draftmancer_name:
+            by_dm[normalize_player_name(row.draftmancer_name)] = row
+        if row.display_name:
+            by_display[normalize_player_name(row.display_name)] = row
+    matched = 0
+    for i, name in enumerate(seats):
+        if not name or name == BOT_USER_NAME or AI_BOT_NAME_RE.match(name):
+            continue
+        key = normalize_player_name(name)
+        row = by_dm.get(key) or by_display.get(key)
+        if row is None:
+            log.info(f"seat_index: no participant matching {name!r} in {event_id}")
+            continue
+        row.seat_index = i
+        matched += 1
+    log.info(f"seat_index: applied to {matched}/{len(seats)} seats for {event_id}")
 
 
 def _add_attendee(session: Session, event_id: str, display_name: str) -> PodDraftParticipant:
@@ -1240,7 +1271,8 @@ def get_participant_deck_state(
 class PodSetSummary(NamedTuple):
     """A player's pod results for one set. ``trophies`` counts a 3-0 record OR a pod win
     (placement 1) — multiple per large pod, and a small pod's 2-1 winner still earns one.
-    A 2-1 that won the pod is a trophy, not a ``wins_2_1``."""
+    A 2-1 that won the pod is a trophy, not a ``wins_2_1``. Team pods write no placement,
+    so their trophies come from 3-0 records alone."""
     events: int
     wins: int
     losses: int
@@ -1258,7 +1290,7 @@ def pod_scoring_counts(session: Session, set_code: str) -> dict[str, tuple[int, 
         .where(
             PodDraftEvent.set_code == set_code,
             Player.active.is_(True),
-            PodDraftParticipant.placement.isnot(None),
+            PodDraftParticipant.record.isnot(None),
         )
     ).all()
     by_player: dict[str, list[tuple[str | None, int | None]]] = {}
@@ -1275,7 +1307,7 @@ def pod_summary_by_set_for_player(session: Session, player_id: str) -> dict[str,
         .join(PodDraftParticipant, PodDraftParticipant.event_id == PodDraftEvent.id)
         .where(
             PodDraftParticipant.player_id == player_id,
-            PodDraftParticipant.placement.isnot(None),
+            PodDraftParticipant.record.isnot(None),
         )
     ).all()
     by_set: dict[str, list[tuple[str | None, int | None]]] = {}

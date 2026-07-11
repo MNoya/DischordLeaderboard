@@ -107,7 +107,7 @@ class SubmitDeckButton(ui.Button):
         on_organizer: OrganizerCallback | None = None,
     ) -> None:
         super().__init__(
-            label="Submit Deck",
+            label="Submit Colors",
             style=discord.ButtonStyle.primary,
             custom_id="poddecksubmit",
             emoji="🎨",

@@ -72,7 +72,7 @@ def test_deck_ping_is_action_forward_split_by_audience():
     assert text == (
         "Championship post is waiting on a few decks 🏆\n"
         "Please post your deck screenshot <@1> <@3>\n"
-        "Register your deck colors with the button below <@1> <@2> <@3>\n"
+        "Submit your deck colors with the button below <@1> <@2> <@3>\n"
         "\n"
         "Draft Recap at [limitedlevelups.com/pods/pod-7]"
         "(https://limitedlevelups.com/pods/pod-7) 🎨"

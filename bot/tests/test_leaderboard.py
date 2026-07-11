@@ -129,8 +129,12 @@ def test_leaderboard_excludes_opted_out_players_with_pod_points(session):
     pod_only = _seed_player(session, "Cara", "3", "c")
     _seed_stats(session, a, s, trophies=2, events=4)
     pod = _seed_pod_event(session, s.code, "SOS Pod 1")
-    session.add(PodDraftParticipant(event_id=pod.id, player_id=opted_out.id, display_name="Bob", placement=1))
-    session.add(PodDraftParticipant(event_id=pod.id, player_id=pod_only.id, display_name="Cara", placement=1))
+    session.add(PodDraftParticipant(
+        event_id=pod.id, player_id=opted_out.id, display_name="Bob", placement=1, record="3-0",
+    ))
+    session.add(PodDraftParticipant(
+        event_id=pod.id, player_id=pod_only.id, display_name="Cara", placement=1, record="3-0",
+    ))
     session.commit()
 
     data = process_leaderboard(session, viewer_discord_id=None, top_n=3)
@@ -683,8 +687,12 @@ def test_peasant_board_filters_to_peasant_pods(session):
     bob = _seed_player(session, "Bob", "2", "b")
     peasant = _seed_pod_event(session, "PEASANT", "Peasant Cube Draft 1")
     sos_pod = _seed_pod_event(session, "SOS", "SOS Pod 1")
-    session.add(PodDraftParticipant(event_id=peasant.id, player_id=alice.id, display_name="Alice", placement=1))
-    session.add(PodDraftParticipant(event_id=sos_pod.id, player_id=bob.id, display_name="Bob", placement=1))
+    session.add(PodDraftParticipant(
+        event_id=peasant.id, player_id=alice.id, display_name="Alice", placement=1, record="3-0",
+    ))
+    session.add(PodDraftParticipant(
+        event_id=sos_pod.id, player_id=bob.id, display_name="Bob", placement=1, record="3-0",
+    ))
     session.commit()
 
     data = process_leaderboard_for_peasant(session, viewer_discord_id=None)

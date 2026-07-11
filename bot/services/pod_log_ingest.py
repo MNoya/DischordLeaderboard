@@ -19,7 +19,7 @@ from sqlalchemy import select
 from bot.database import SessionLocal
 from bot.models import Player, PodDraftEvent, PodDraftParticipant
 from bot.scripts.draftmancer_log import build_compact
-from bot.services.pod_draft_manager import apply_seat_indexes
+from bot.services.pod_drafts import apply_seat_indexes
 
 
 log = logging.getLogger(__name__)
