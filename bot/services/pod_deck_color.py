@@ -64,7 +64,7 @@ OTHER_VALUE = "__other__"
 
 NOT_IN_POD_MSG = "You are not registered as a player in this pod"
 
-SAVED_MSG = "Deck Color saved. Adjust or dismiss below"
+SAVED_MSG = "Deck Color saved!"
 
 
 def color_label(code: str) -> str:

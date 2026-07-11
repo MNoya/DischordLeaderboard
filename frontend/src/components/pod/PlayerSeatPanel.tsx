@@ -618,7 +618,6 @@ function GamesGrid({
     );
   }
   const gameCount = Math.max(playerGames.length, opponentGames.length);
-  const playerDurations = computeGameDurationsMin(playerGames);
 
   return (
     <div className="px-4 md:px-5 xl:px-8 pb-4 flex flex-col gap-2">
@@ -634,7 +633,7 @@ function GamesGrid({
               hideOpponent ? "grid-cols-1" : "grid-cols-[1fr_auto] gap-2",
             )}
           >
-            <PlayerReplayCell row={pg} durationMin={pg ? playerDurations[i] : null} />
+            <PlayerReplayCell row={pg} />
             {!hideOpponent && <OpponentReplayCell row={og} />}
           </div>
         );
@@ -643,13 +642,7 @@ function GamesGrid({
   );
 }
 
-function PlayerReplayCell({
-  row,
-  durationMin,
-}: {
-  row: PodEventReplayRow | null;
-  durationMin: number | null | undefined;
-}) {
+function PlayerReplayCell({ row }: { row: PodEventReplayRow | null }) {
   const isMobile = useIsCompact();
   if (!row) {
     return (
@@ -674,10 +667,7 @@ function PlayerReplayCell({
       rel="noreferrer noopener"
       onClick={(e) => e.stopPropagation()}
       style={{ height: 38 }}
-      className={cn(
-        "group grid items-center gap-3 bg-bg border border-border hover:border-green/60 hover:bg-green/10 transition-colors px-3 no-underline",
-        isMobile ? "grid-cols-[auto_1fr_auto_auto]" : "grid-cols-[auto_1fr_auto_auto_auto]",
-      )}
+      className="group grid grid-cols-[auto_1fr_auto_auto] items-center gap-3 bg-bg border border-border hover:border-green/60 hover:bg-green/10 transition-colors px-3 no-underline"
     >
       <span
         className={cn("font-display tabular-nums leading-none", row.won ? "text-green" : "text-red")}
@@ -691,11 +681,6 @@ function PlayerReplayCell({
           <span className="text-dim ml-2">{row.onPlay ? "Play" : "Draw"}</span>
         )}
       </span>
-      {!isMobile && (
-        <span className="text-dim font-mono tabular-nums leading-none" style={{ fontSize: 12 }}>
-          {durationMin != null ? `${durationMin} min` : ""}
-        </span>
-      )}
       <span
         className="font-display tracking-[0.16em] text-text group-hover:text-green transition-colors leading-none whitespace-nowrap"
         style={{ fontSize: 14 }}
@@ -763,17 +748,6 @@ function findOpponentPov(playerGame: PodEventReplayRow, opponentGames: PodEventR
     if (Math.abs(rTime - playerTime) <= 2 * 60_000) return r;
   }
   return null;
-}
-
-function computeGameDurationsMin(games: PodEventReplayRow[]): (number | null)[] {
-  if (games.length === 0) return [];
-  return games.map((g, i) => {
-    if (i === 0) return null;
-    const prevTime = new Date(games[i - 1].gameTime).getTime();
-    const thisTime = new Date(g.gameTime).getTime();
-    const min = Math.max(0, Math.round((thisTime - prevTime) / 60_000));
-    return min > 0 ? min : null;
-  });
 }
 
 function computeMatchDurationMin(

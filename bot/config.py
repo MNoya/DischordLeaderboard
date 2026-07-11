@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     format_schedule_enabled: bool = True
 
     pod_draft_channel_id: int = 1028072146645295125
+    pod_draft_chat_channel_name: str = "pod-draft-chat"
     pod_draft_target_players: int = 8
     pod_draft_voice_channel_name: str = "Pod General"
     pod_schedule_enabled: bool = True

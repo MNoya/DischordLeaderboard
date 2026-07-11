@@ -2061,7 +2061,7 @@ def build_champion_announcement_view(
         display = info.get("display_name") or s.player_name
         champs_named.append((display, player_colors.get(key)))
 
-    # Fall back to crowning rank 1 when nobody finished undefeated; tiebreakers below explain it
+    # Fall back to crowning rank 1 when nobody finished undefeated
     if not champs_named and standings:
         top = standings[0]
         key = normalize_player_name(top.player_name)
@@ -2124,26 +2124,6 @@ def build_champion_announcement_view(
     if runners_up_items:
         container.add_item(ui.MediaGallery(*runners_up_items))
 
-    champion = standings[0] if standings else None
-    if champion is not None and champion.losses > 0:
-        tied = [s for s in standings if s.wins == champion.wins]
-        if len(tied) > 1:
-            name_col = max(
-                len(displays.get(normalize_player_name(s.player_name), {}).get("display_name") or s.player_name)
-                for s in tied
-            )
-            rows = ["```"]
-            for s in tied:
-                key = normalize_player_name(s.player_name)
-                info = displays.get(key, {})
-                name = info.get("display_name") or s.player_name
-                rows.append(f"{s.rank}. {name:<{name_col}}  {s.omw_pct:.3f}")
-            rows.append("```")
-            container.add_item(ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small))
-            container.add_item(ui.TextDisplay(
-                "**Tiebreakers** — opponents' match-win %\n" + "\n".join(rows)
-            ))
-
     view.add_item(container)
 
     actions = ui.ActionRow()
@@ -2189,12 +2169,15 @@ def build_champion_embed(
     pending_count: int = 0,
     deck_data: dict[str, "ParticipantDeckData"] | None = None,
     event_has_log: bool = False,
+    match_states: list[dict] | None = None,
     include_signoff: bool = True,
 ) -> discord.Embed:
     """Thread-side standings embed. `player_colors` adds a mana-emoji glyph after each player's record.
     `event_has_log` appends an inline Draft Log link per row pointing at the in-site reviewer when the
-    event has a captured draft log. `include_signoff` controls the trailing thank-you line; the
-    /pod-standings command sets it to False since it posts a bare snapshot."""
+    event has a captured draft log. `match_states` (final, trophy-marked) drives the tiebreaker table,
+    shown only once the pod is complete and a placement was actually decided on tiebreakers.
+    `include_signoff` controls the trailing thank-you line; the /pod-standings command sets it to False
+    since it posts a bare snapshot."""
     displays = displays or {}
     player_colors = player_colors or {}
     deck_data = deck_data or {}
@@ -2214,6 +2197,10 @@ def build_champion_embed(
     header = f"**{_standings_header_text(pending_count)}**"
 
     description = f"{header}\n" + "\n".join(lines)
+    if pending_count == 0 and match_states:
+        tiebreakers = _build_tiebreaker_block(standings, match_states, displays)
+        if tiebreakers:
+            description += f"\n{tiebreakers}"
     if include_signoff:
         chordo_love = emojis.get("chordo_love")
         description += f"\n\n{chordo_love} Thank you for playing!"
@@ -2223,6 +2210,68 @@ def build_champion_embed(
         description=description,
         color=discord.Color.green(),
     )
+
+
+def _trophy_match_loser_rank(standings, match_states) -> int | None:
+    """Final rank of the player who lost a trophy match, or None when no trophy match has a winner yet."""
+    if not match_states:
+        return None
+    rank_by_key = {normalize_player_name(s.player_name): s.rank for s in standings}
+    for m in match_states:
+        if not m.get("is_trophy_match"):
+            continue
+        winner = m.get("winner_name")
+        if not winner or winner == SKIPPED_SENTINEL:
+            continue
+        if normalize_player_name(winner) == normalize_player_name(m.get("a_name") or ""):
+            loser = m.get("b_name")
+        else:
+            loser = m.get("a_name")
+        rank = rank_by_key.get(normalize_player_name(loser or ""))
+        if rank is not None:
+            return rank
+    return None
+
+
+def _contested_win_counts(standings, match_states) -> set[int]:
+    """Win-count groups whose internal order the standings settled on tiebreakers: the top group when
+    the champion took a loss, and the trophy-match loser's group when they placed below second."""
+    contested: set[int] = set()
+    champion = standings[0] if standings else None
+    if champion is not None and champion.losses > 0:
+        contested.add(champion.wins)
+    loser_rank = _trophy_match_loser_rank(standings, match_states)
+    if loser_rank is not None and loser_rank != 2:
+        for s in standings:
+            if s.rank == loser_rank:
+                contested.add(s.wins)
+                break
+    return contested
+
+
+def _build_tiebreaker_block(standings, match_states, displays) -> str | None:
+    """Monospace OMW%/GW%/OGW% table for the tie groups that decided a contested placement, or None
+    when every placement fell straight out of match record."""
+    contested = _contested_win_counts(standings, match_states)
+    if not contested:
+        return None
+    displays = displays or {}
+
+    def _name(s) -> str:
+        return displays.get(normalize_player_name(s.player_name), {}).get("display_name") or s.player_name
+
+    rows = [s for s in standings if s.wins in contested]
+    if len(rows) < 2:
+        return None
+    name_col = max(len(_name(s)) for s in rows)
+    lines = ["```", f"{'#':<2} {'Player':<{name_col}}  OMW   GW  OGW"]
+    for s in rows:
+        lines.append(
+            f"{s.rank:<2} {_name(s):<{name_col}}  "
+            f"{s.omw_pct * 100:>3.0f}  {s.gw_pct * 100:>3.0f}  {s.ogw_pct * 100:>3.0f}"
+        )
+    lines.append("```")
+    return "**Tiebreakers**\n" + "\n".join(lines)
 
 
 async def build_standings_embed_for_event(event_id: str) -> discord.Embed | None:
@@ -2262,6 +2311,7 @@ async def build_standings_embed_for_event(event_id: str) -> discord.Embed | None
         pending_count=pending_count,
         deck_data=deck_data,
         event_has_log=event_has_log,
+        match_states=match_states,
         include_signoff=False,
     )
 
@@ -2551,6 +2601,27 @@ async def _resolve_announcement_target(manager):
     return parent or thread
 
 
+def _channel_matching_name(guild, name_fragment: str):
+    """First text channel in guild whose name contains name_fragment, case-insensitively."""
+    fragment = name_fragment.lower()
+    for channel in guild.text_channels:
+        if fragment in channel.name.lower():
+            return channel
+    return None
+
+
+async def _resolve_chat_target(manager):
+    """Channel for the pod championship announcement: the dedicated pod-draft-chat channel when it
+    exists, else the thread's parent (coordination) channel as before."""
+    parent = await _resolve_announcement_target(manager)
+    guild = getattr(parent, "guild", None)
+    if guild is not None:
+        chat = _channel_matching_name(guild, settings.pod_draft_chat_channel_name)
+        if chat is not None:
+            return chat
+    return parent
+
+
 def deck_complete(data: "ParticipantDeckData | None") -> bool:
     """A participant's deck is share-complete once both colors and a screenshot are on record."""
     return bool(data and data.colors and data.screenshot_url)
@@ -2708,7 +2779,7 @@ async def maybe_post_championship(manager, *, force: bool = False) -> None:
 
     if manager.champion_announced:
         return
-    target = await _resolve_announcement_target(manager)
+    target = await _resolve_chat_target(manager)
     if target is None:
         log.info(f"[FINALIZE] champion.skip event={event_id} reason=no_target")
         return
@@ -3176,6 +3247,7 @@ async def _post_or_update_live_standings(manager) -> None:
         pending_count=pending_count,
         deck_data=deck_data,
         event_has_log=event_has_log,
+        match_states=match_states,
     )
 
     async with manager._standings_post_lock:
