@@ -65,6 +65,7 @@ from bot.services.bot_log import BotLog
 from bot.services.lobby_embed import LobbyReadyButtonView
 from bot.services.pod_draft_manager import rehydrate_active_lobbies
 from bot.services.pod_team_board import TeamReportButton
+from bot.services.pod_team_vote import TeamVoteButton
 from bot.services.pod_tournament import (
     reconcile_unannounced_championships,
     register_persistent_views as register_pod_views,
@@ -221,6 +222,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         reschedule_pending_events(bot)
         register_pod_views(bot)
         bot.add_dynamic_items(TeamReportButton)
+        bot.add_dynamic_items(TeamVoteButton)
         _log_startup_summary()
         bot.tree.copy_global_to(guild=guild)
 

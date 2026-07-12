@@ -20,6 +20,7 @@ from bot import emojis
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.models import PodDraftEvent
+from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_draft_manager import start_manager
 from bot.services.pod_drafts import draftmancer_url_for
 from bot.services.sesh_parser import parse_sesh_embed
@@ -175,6 +176,37 @@ async def fire_roster_reminder(event_id: str) -> None:
         await thread.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
     except discord.HTTPException:
         log.warning(f"fire_roster_reminder: could not post in thread {thread_id}", exc_info=True)
+
+
+def schedule_team_vote_offer(scheduler, event_id: str, event_time: datetime) -> None:
+    """Arm the at-start Team-Draft offer check. A past start time is skipped — the offer only makes sense
+    while the lobby is still gathering at o'clock."""
+    now = datetime.now(timezone.utc)
+    job_id = f"pod-teamvote-{event_id}"
+    if event_time <= now:
+        with contextlib.suppress(Exception):
+            scheduler.remove_job(job_id)
+        return
+    scheduler.add_job(
+        fire_team_vote_offer, "date", run_date=event_time,
+        args=[event_id], id=job_id, replace_existing=True,
+    )
+    log.info(f"scheduled team-vote offer for event {event_id} at {event_time.isoformat()}")
+
+
+async def fire_team_vote_offer(event_id: str) -> None:
+    """At the scheduled start time, offer Team Draft when the lobby settled small and even (four to six
+    players). The manager is already live from the T-10 lobby reminder; a full, odd, or empty lobby is
+    left alone, and offer_team_vote no-ops if the pod already started or is already a team draft."""
+    manager = ACTIVE_POD_MANAGERS.get(event_id)
+    if manager is None:
+        log.info(f"fire_team_vote_offer: no live manager for {event_id}; skipping")
+        return
+    count = len(manager.player_session_users())
+    if 4 <= count <= 6 and count % 2 == 0:
+        await manager.offer_team_vote(count)
+    else:
+        log.info(f"fire_team_vote_offer: event {event_id} lobby={count} not eligible; skipping")
 
 
 async def refresh_roster_reminder(bot: commands.Bot, sesh_message_id: str) -> None:

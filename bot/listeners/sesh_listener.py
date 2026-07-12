@@ -38,6 +38,7 @@ from bot.tasks.pod_draft_reminder import (
     fire_reminder,
     refresh_roster_reminder,
     schedule_roster_reminder,
+    schedule_team_vote_offer,
 )
 from bot.tasks.pod_underfill import refresh_underfill_nudge, schedule_underfill_checks
 
@@ -303,6 +304,7 @@ class SeshListener(commands.Cog):
         )
         log.info(f"scheduled pod-draft reminder for event {event_id} at {run_at.isoformat()}")
         schedule_roster_reminder(scheduler, event_id, event_time)
+        schedule_team_vote_offer(scheduler, event_id, event_time)
 
     def _schedule_underfill(self, event_id: str, event_time: datetime, created_at: datetime) -> None:
         scheduler = getattr(self.bot, "pod_scheduler", None)
@@ -415,6 +417,7 @@ def reschedule_pending_events(bot: commands.Bot) -> None:
             )
             schedule_underfill_checks(scheduler, event.id, event.event_time, event.created_at)
             schedule_roster_reminder(scheduler, event.id, event.event_time)
+            schedule_team_vote_offer(scheduler, event.id, event.event_time)
             rearmed += 1
     if rearmed:
         log.info(f"startup sweep re-armed {rearmed} pending pod-draft reminder(s)")

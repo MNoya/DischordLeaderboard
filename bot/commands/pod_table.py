@@ -36,6 +36,7 @@ from bot.commands.messages import (
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.models import PodDraftEvent
+from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_draft_manager import start_manager
 from bot.services.pod_drafts import (
     draftmancer_url_for,
@@ -94,6 +95,9 @@ async def materialize_table(
         event_name=event_name, draftmancer_url=draftmancer_url,
     )
     log.info(f"pod-table: materialized {event_name} event={event_id} session={session_id} joined={len(claims)}")
+    manager = ACTIVE_POD_MANAGERS.get(event_id)
+    if manager is not None:
+        manager.arm_team_vote_offer(len(claims))
     return thread
 
 
