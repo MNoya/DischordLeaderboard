@@ -24,7 +24,7 @@ from bot.commands.event_scribe import (
     schedule_title_marker,
     select_groups,
 )
-from bot.commands.guide import SYNC_CURRENT, sync_channel
+from bot.commands.guide import SYNC_CURRENT, sync_channel, sync_set_tracking_todo
 from bot.commands.leaderboard import build_set_send_off_embeds
 from bot.config import settings
 from bot.database import SessionLocal
@@ -154,6 +154,9 @@ async def _rotate_set_channels(guild: discord.Guild) -> None:
     status, detail = await sync_channel(guild, OVERVIEW_PAGE.channel, (OVERVIEW_PAGE,))
     if status != SYNC_CURRENT:
         log.info(f"format-schedule: channel-overview sync: {detail}")
+    todo_status, todo_line = await sync_set_tracking_todo(guild, _bot.http)
+    if todo_status != SYNC_CURRENT:
+        log.info(f"format-schedule: latest-channel To-Do: {todo_line}")
 
 
 def _admin_channel(guild: discord.Guild) -> discord.TextChannel | None:

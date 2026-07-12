@@ -18,9 +18,16 @@ import logging
 import discord
 from discord import ui
 from discord.ext import commands
+from discord.http import Route
 
 from bot import audit
 from bot.config import settings
+from bot.services.format_schedule import (
+    LATEST_SET_CATEGORY,
+    active_set_seed,
+    channel_for_set,
+    set_tracking_todo_index,
+)
 from bot.services.pod_schedule import POD_DRAFTERS_ROLE_NAME
 from bot.services.server_guide import GuideContent, GuidePage, find_channel, pages_by_channel, render_page
 
@@ -75,6 +82,38 @@ async def sync_channel(guild: discord.Guild, channel_name: str,
     except discord.HTTPException:
         log.warning(f"guide: sync failed for #{channel.name}", exc_info=True)
         return SYNC_FAILED, f"⚠️ {channel.mention}: sync failed, see logs"
+
+
+async def sync_set_tracking_todo(guild: discord.Guild, http) -> tuple[str, str]:
+    """Repoint the 'See what people are discussing' Server Guide To-Do at the active set's channel:
+    (status, human-readable result line). The Server Guide (``new-member-welcome``) isn't wrapped by
+    discord.py, so this is a raw REST call needing Manage Server; a missing permission or a guild
+    without the feature reports and moves on rather than failing the sync."""
+    route = Route("GET", "/guilds/{guild_id}/new-member-welcome", guild_id=guild.id)
+    try:
+        welcome = await http.request(route)
+    except discord.HTTPException:
+        return SYNC_FAILED, "⚠️ Latest channel: Server Guide unavailable (needs Manage Server)"
+    actions = welcome.get("new_member_actions") or []
+    index = set_tracking_todo_index(actions, guild.channels)
+    if index is None:
+        return SYNC_NO_CHANNEL, "⚠️ Latest channel: no set-tracking action found"
+    seed = active_set_seed()
+    target = channel_for_set(guild.channels, seed, LATEST_SET_CATEGORY)
+    if target is None:
+        return SYNC_NO_CHANNEL, f"⚠️ Latest channel: no channel for the active set ({seed.code})"
+    if str(actions[index].get("channel_id")) == str(target.id):
+        return SYNC_CURRENT, f"✅ Latest channel points to {target.mention}"
+    updated = [dict(action) for action in actions]
+    updated[index]["channel_id"] = str(target.id)
+    body = {"enabled": welcome["enabled"], "welcome_message": welcome["welcome_message"],
+            "new_member_actions": updated}
+    try:
+        await http.request(Route("PATCH", "/guilds/{guild_id}/new-member-welcome", guild_id=guild.id), json=body)
+    except discord.HTTPException:
+        log.warning("guide: could not update the latest-channel To-Do", exc_info=True)
+        return SYNC_FAILED, "⚠️ Latest channel: update failed (needs Manage Server)"
+    return SYNC_UPDATED, f"🔄 Latest channel → {target.mention}"
 
 
 def _build_view(content: GuideContent, show_title: bool = True) -> ui.LayoutView:
@@ -266,7 +305,9 @@ async def setup(bot: commands.Bot) -> None:
             return
         groups = pages_by_channel()
         results = [await sync_channel(guild, channel, pages) for channel, pages in groups]
+        todo_status, todo_line = await sync_set_tracking_todo(guild, bot.http)
         audit.event("guide_sync", user_id=str(ctx.author.id),
-                    results={channel: status for (channel, _), (status, _) in zip(groups, results)})
+                    results={channel: status for (channel, _), (status, _) in zip(groups, results)},
+                    set_tracking_todo=todo_status)
         lines = "\n".join(line for _, line in results)
-        await ctx.send(f"Synced <id:guide>\n{lines}")
+        await ctx.send(f"Synced <id:guide>\n{lines}\n{todo_line}")

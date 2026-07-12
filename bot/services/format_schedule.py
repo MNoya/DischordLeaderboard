@@ -149,6 +149,21 @@ def channel_for_set(channels, seed: SetSeed, category: str = LATEST_SET_CATEGORY
     return None
 
 
+def set_tracking_todo_index(actions, channels) -> int | None:
+    """Index of the Server Guide 'New Member To-Do' that follows the live set — the action whose linked
+    channel matches a registered set by name, so it re-targets on renames without depending on the
+    To-Do's copy. ``None`` when no action points at a set channel."""
+    by_id = {str(channel.id): channel for channel in channels}
+    registered = [seed for seed in ALL_SETS if seed.code != PERMANENT_CUBE_CODE]
+    for index, action in enumerate(actions):
+        channel = by_id.get(str(action.get("channel_id")))
+        if channel is None:
+            continue
+        if any(channel_matches_set(channel.name, seed.name) for seed in registered):
+            return index
+    return None
+
+
 def set_before(seed: SetSeed) -> SetSeed | None:
     """The set that rotated out just before ``seed`` — the newest-started set whose start precedes it,
     excluding the permanent cube. ``None`` when ``seed`` is the earliest."""
