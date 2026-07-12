@@ -197,16 +197,13 @@ def schedule_team_vote_offer(scheduler, event_id: str, event_time: datetime) -> 
 async def fire_team_vote_offer(event_id: str) -> None:
     """At the scheduled start time, offer Team Draft when the lobby settled small and even (four to six
     players). The manager is already live from the T-10 lobby reminder; a full, odd, or empty lobby is
-    left alone, and offer_team_vote no-ops if the pod already started or is already a team draft."""
+    left alone until a later join makes it eligible, and offer_team_vote no-ops if the pod already
+    started or is already a team draft."""
     manager = ACTIVE_POD_MANAGERS.get(event_id)
     if manager is None:
         log.info(f"fire_team_vote_offer: no live manager for {event_id}; skipping")
         return
-    count = len(manager.player_session_users())
-    if 4 <= count <= 6 and count % 2 == 0:
-        await manager.offer_team_vote(count)
-    else:
-        log.info(f"fire_team_vote_offer: event {event_id} lobby={count} not eligible; skipping")
+    await manager.offer_team_vote_if_eligible()
 
 
 async def refresh_roster_reminder(bot: commands.Bot, sesh_message_id: str) -> None:

@@ -1,7 +1,6 @@
 """`/pod-guide` — the pinned Pod Draft walkthrough, sourced from bot/pod-draft-guide.md."""
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 
 import discord
@@ -10,10 +9,7 @@ from discord.ext import commands
 
 from bot import audit, emojis
 from bot.commands import descriptions as desc
-from bot.discord_helpers import in_pod_coordination
 from bot.services.pod_schedule import POD_DRAFTERS_ROLE_NAME
-
-log = logging.getLogger(__name__)
 
 GUIDE_PATH = Path(__file__).resolve().parents[1] / "pod-draft-guide.md"
 GUIDE_MARKER = "Pod Draft Guide"
@@ -39,27 +35,13 @@ class PodGuide(commands.Cog):
     @app_commands.allowed_installs(guilds=True, users=False)
     async def pod_guide(self, interaction: discord.Interaction) -> None:
         is_owner = await self.bot.is_owner(interaction.user)
-        in_channel_not_thread = in_pod_coordination(interaction.channel) and not isinstance(
-            interaction.channel, discord.Thread
-        )
-        will_pin = is_owner and in_channel_not_thread
-        audit.event("pod_guide_invoked", user_id=str(interaction.user.id), pinned=will_pin)
+        audit.event("pod_guide_invoked", user_id=str(interaction.user.id))
         mention = self._resolve_pod_drafters_mention(interaction.guild)
-        if will_pin:
-            await interaction.response.defer()
-            await self._remove_existing_pins(interaction.channel)
-            embed = discord.Embed(description=render_pod_guide_embed_body(mention), color=discord.Color.green())
-            message = await interaction.followup.send(
-                embed=embed, allowed_mentions=discord.AllowedMentions.none(), wait=True
-            )
-            await self._pin(message)
-            await self._react_love(message)
-        else:
-            await interaction.response.send_message(
-                embed=discord.Embed(description=render_pod_guide_embed_body(mention), color=discord.Color.green()),
-                allowed_mentions=discord.AllowedMentions.none(),
-                ephemeral=(interaction.guild is not None and not is_owner),
-            )
+        await interaction.response.send_message(
+            embed=discord.Embed(description=render_pod_guide_embed_body(mention), color=discord.Color.green()),
+            allowed_mentions=discord.AllowedMentions.none(),
+            ephemeral=(interaction.guild is not None and not is_owner),
+        )
 
     def _resolve_pod_drafters_mention(self, guild: discord.Guild | None) -> str:
         role = discord.utils.get(guild.roles, name=POD_DRAFTERS_ROLE_NAME) if guild is not None else None
@@ -69,41 +51,6 @@ class PodGuide(commands.Cog):
                 if role is not None:
                     break
         return role.mention if role is not None else f"@{POD_DRAFTERS_ROLE_NAME}"
-
-    async def _pin(self, message: discord.Message) -> None:
-        try:
-            await message.pin()
-        except discord.HTTPException:
-            log.warning("could not pin the pod guide", exc_info=True)
-
-    async def _react_love(self, message: discord.Message) -> None:
-        love = emojis.get_emoji("chordo_love")
-        if love is None:
-            return
-        try:
-            await message.add_reaction(love)
-        except discord.HTTPException:
-            log.warning("could not react to the pod guide", exc_info=True)
-
-    async def _remove_existing_pins(self, channel: discord.abc.Messageable | None) -> None:
-        if channel is None:
-            return
-        try:
-            pins = await channel.pins()
-        except discord.HTTPException:
-            log.warning("could not read pins while refreshing the pod guide", exc_info=True)
-            return
-        for message in pins:
-            if message.author == self.bot.user and self._is_pod_guide(message):
-                try:
-                    await message.delete()
-                except discord.HTTPException:
-                    log.warning("could not remove a stale pod guide pin", exc_info=True)
-
-    def _is_pod_guide(self, message: discord.Message) -> bool:
-        if GUIDE_MARKER in message.content:
-            return True
-        return any(GUIDE_MARKER in (embed.description or "") for embed in message.embeds)
 
 
 async def setup(bot: commands.Bot) -> None:

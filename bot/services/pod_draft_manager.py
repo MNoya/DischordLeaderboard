@@ -62,6 +62,7 @@ from bot.services.pod_drafts import (
     finalize_mock_event,
     load_event_pairing_mode_sync,
     load_event_seating_mode_sync,
+    load_event_time_sync,
     name_token_match,
     player_for_name,
     seed_event_participants,
@@ -210,6 +211,7 @@ class PodDraftManager:
         self.team_vote_offered = False
         self.team_vote_pending_size: int | None = None
         self.team_vote_size = 0
+        self.scheduled_start: datetime | None = None
         self._team_vote_lock = asyncio.Lock()
         self._last_seating_signature: tuple[str, ...] | None = None
         self.standings_message = None
@@ -752,7 +754,9 @@ class PodDraftManager:
             )
             self._maybe_schedule_lobby_full_prompt(classified)
             await self._maybe_offer_armed_team_vote()
-            if self.team_vote_message is not None and len(self.player_session_users()) > 6:
+            await self._maybe_offer_team_vote_after_start()
+            outgrew_vote = len(self.player_session_users()) > max(6, self.team_vote_size)
+            if self.team_vote_message is not None and outgrew_vote:
                 await self._retire_team_vote_offer()
             if state == "drafting":
                 view = build_drafting_view(self.spectate_url)
@@ -1474,6 +1478,48 @@ class PodDraftManager:
         if len(self.player_session_users()) >= self.team_vote_pending_size:
             await self.offer_team_vote(self.team_vote_pending_size)
 
+    def _auto_team_vote_size(self) -> int | None:
+        """The lobby's team-vote size when it is currently auto-offer eligible (four to six players,
+        even), else None. The manual /pod-team path allows any even pod and does not use this."""
+        count = len(self.player_session_users())
+        if 4 <= count <= 6 and count % 2 == 0:
+            return count
+        return None
+
+    async def offer_team_vote_if_eligible(self) -> None:
+        """Offer the vote when the lobby sits at an auto-eligible size right now. Shared by the start-time
+        tick and the post-start lobby watcher; offer_team_vote's own guards keep it to a single card."""
+        size = self._auto_team_vote_size()
+        if size is not None:
+            await self.offer_team_vote(size)
+
+    async def _maybe_offer_team_vote_after_start(self) -> None:
+        """Once the scheduled start has passed, offer Team Draft the moment the lobby settles at an
+        eligible size — catching a sixth player who arrives after o'clock, which the one-shot start tick
+        would otherwise miss."""
+        if self.scheduled_start is None or self.team_vote_offered or self.pairing_mode == "team":
+            return
+        if datetime.now(timezone.utc) < self.scheduled_start:
+            return
+        await self.offer_team_vote_if_eligible()
+
+    async def offer_team_vote_manual(self) -> str | None:
+        """Post the Team-Draft vote on demand from /pod-team. A proposal, not a commitment, so it takes
+        any pod of at least four and leaves the parity to settle before start — unlike the auto nudge,
+        which waits for an even lobby. Returns an error string when the pod can't take a vote right now,
+        else None."""
+        if self.pairing_mode == "team":
+            return "This pod is already a Team Draft."
+        if self.drafting or self.draft_complete:
+            return "The draft has already started."
+        if self.team_vote_offered:
+            return "A Team-Draft vote is already up in this thread."
+        count = len(self.player_session_users())
+        if count < 4:
+            return "Team Draft needs at least four players in the Draftmancer lobby."
+        await self.offer_team_vote(count)
+        return None
+
     async def offer_team_vote(self, pod_size: int) -> None:
         """Post the one-time Team-Draft vote offer for a settled small pod. The caller decides the pod is
         eligible (even, at most six); `pod_size` fixes the majority the vote needs to lock. No-op once
@@ -1820,6 +1866,7 @@ async def start_manager(
     persisted_seating = await asyncio.to_thread(load_event_seating_mode_sync, event_id)
     if persisted_seating:
         manager.seating_mode = persisted_seating
+    manager.scheduled_start = await asyncio.to_thread(load_event_time_sync, event_id)
     ACTIVE_POD_MANAGERS[event_id] = manager
     log.info(
         f"[LIFECYCLE] start_manager.registered event={event_id} sid={session_id} "

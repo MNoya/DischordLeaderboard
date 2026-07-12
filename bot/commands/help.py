@@ -45,6 +45,7 @@ POD_HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         ("/pod-pause", desc.POD_PAUSE),
         ("/pod-unpause", desc.POD_UNPAUSE),
         ("/pod-settings", desc.POD_SETTINGS),
+        ("/pod-team", desc.POD_TEAM),
         ("/pod-takeover", desc.POD_TAKEOVER),
         ("/pod-standings", desc.POD_STANDINGS),
         ("/pod-review", desc.POD_REVIEW),

@@ -651,6 +651,13 @@ def load_event_thread_id_sync(event_id: str) -> str | None:
         ).scalar_one_or_none()
 
 
+def load_event_time_sync(event_id: str) -> datetime | None:
+    with SessionLocal() as session:
+        return session.execute(
+            select(PodDraftEvent.event_time).where(PodDraftEvent.id == event_id)
+        ).scalar_one_or_none()
+
+
 def load_event_seeding_context_sync(event_id: str) -> tuple[str | None, str | None, str]:
     """(seating_mode, thread_id, name) in one query — the fields the seeding-table refresh reads on every
     fire. name falls back to 'Pod Draft', the others to None when the event is missing."""

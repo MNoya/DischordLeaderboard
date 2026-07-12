@@ -21,6 +21,7 @@ from discord.ext import commands
 from discord.http import Route
 
 from bot import audit
+from bot.commands.pod_guide import GUIDE_MARKER, render_pod_guide_embed_body
 from bot.config import settings
 from bot.services.format_schedule import (
     LATEST_SET_CATEGORY,
@@ -127,6 +128,59 @@ async def _repoint_set_tracking_todo(guild: discord.Guild, http, welcome, action
         return True
     except discord.HTTPException:
         return False
+
+
+async def sync_pod_guide(guild: discord.Guild) -> tuple[str, str]:
+    """Reconcile the pinned Pod Draft guide in the pod-draft coordination channel
+    (settings.pod_draft_channel_id, resolved by id so a rename doesn't matter) by editing the existing
+    message in place — so the now-quiet channel never gets a fresh post — and clearing any stale
+    duplicate pins: (status, human-readable result line)."""
+    channel = guild.get_channel(settings.pod_draft_channel_id)
+    if channel is None:
+        return SYNC_NO_CHANNEL, "⚠️ Pod guide: pod-draft coordination channel not found"
+    body = render_pod_guide_embed_body(_pod_drafters_mention(guild))
+    embed = discord.Embed(description=body, color=GUIDE_COLOR)
+    try:
+        existing = await _pinned_pod_guides(channel, guild.me)
+        if not existing:
+            message = await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+            await message.pin(reason="pod draft guide")
+            return SYNC_POSTED, f"✅ {channel.mention} pod guide posted"
+        primary, duplicates = existing[0], existing[1:]
+        changed = bool(duplicates)
+        for stale in duplicates:
+            await _delete_guide_message(stale, None)
+        if _embed_body(primary) != body:
+            await primary.edit(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+            changed = True
+        word = "updated" if changed else "up to date"
+        return (SYNC_UPDATED if changed else SYNC_CURRENT), f"✅ {channel.mention} pod guide {word}"
+    except discord.Forbidden:
+        return SYNC_FORBIDDEN, (f"⚠️ {channel.mention}: pod guide needs "
+                                "View Channel, Send Messages, Read Message History, Embed Links")
+    except discord.HTTPException:
+        log.warning("guide: pod guide sync failed", exc_info=True)
+        return SYNC_FAILED, f"⚠️ {channel.mention}: pod guide sync failed, see logs"
+
+
+async def _pinned_pod_guides(channel: discord.TextChannel, me: discord.Member) -> list[discord.Message]:
+    """Pinned messages this bot posted that carry the pod guide, oldest-first so the first is the
+    canonical one and the rest are stale duplicates to drop."""
+    pins = await channel.pins()
+    guides = [
+        message for message in pins
+        if message.author.id == me.id
+        and any(GUIDE_MARKER in (embed.description or "") for embed in message.embeds)
+    ]
+    guides.reverse()
+    return guides
+
+
+def _embed_body(message: discord.Message) -> str | None:
+    for embed in message.embeds:
+        if embed.description:
+            return embed.description
+    return None
 
 
 def _build_view(content: GuideContent, show_title: bool = True) -> ui.LayoutView:
@@ -318,9 +372,11 @@ async def setup(bot: commands.Bot) -> None:
             return
         groups = pages_by_channel()
         results = [await sync_channel(guild, channel, pages) for channel, pages in groups]
+        pod_status, pod_line = await sync_pod_guide(guild)
         todo_status, todo_line = await sync_set_tracking_todo(guild, bot.http)
         audit.event("guide_sync", user_id=str(ctx.author.id),
                     results={channel: status for (channel, _), (status, _) in zip(groups, results)},
+                    pod_guide=pod_status,
                     set_tracking_todo=todo_status)
         lines = "\n".join(line for _, line in results)
-        await ctx.send(f"Synced <id:guide>\n{lines}\n{todo_line}")
+        await ctx.send(f"Synced <id:guide>\n{lines}\n{pod_line}\n{todo_line}")

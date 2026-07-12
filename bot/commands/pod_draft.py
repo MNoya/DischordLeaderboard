@@ -142,6 +142,22 @@ class PodDraft(commands.Cog):
         else:
             await interaction.followup.send("Force-starting the draft, watch the thread.", ephemeral=True)
 
+    @app_commands.command(name="pod-team", description=desc.POD_TEAM)
+    @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def pod_team(self, interaction: discord.Interaction) -> None:
+        manager = _find_manager_for_thread(interaction)
+        if manager is None:
+            await interaction.response.send_message(MSG_NO_ACTIVE_POD, ephemeral=True)
+            return
+        log.info(f"pod-team: {interaction.user} offering team vote in thread {interaction.channel_id}")
+        await interaction.response.defer(ephemeral=True, thinking=False)
+        err = await manager.offer_team_vote_manual()
+        if err is not None:
+            await interaction.followup.send(f"⚠️ {err}", ephemeral=True)
+        else:
+            await interaction.followup.send("Team-Draft vote posted — check the thread.", ephemeral=True)
+
     @app_commands.command(name="pod-pause", description=desc.POD_PAUSE)
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
