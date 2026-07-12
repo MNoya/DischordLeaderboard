@@ -202,6 +202,7 @@ class PodDraftManager:
         self.tournament_players: list = []       # pod_swiss.Player list, set by pod_tournament.start_tournament
         self.pairing_mode = "swiss"              # 'swiss', 'bracket', 'random', or 'team'; resolved in start_tournament
         self.seating_mode = "random"             # 'random', 'manual', or 'leaderboard'; hydrated on connect
+        self.pick_timer = settings.pod_draft_pick_timer
         self.team_map: dict[str, str] | None = None  # draftmancer_name -> 'A'/'B' for team drafts
         self.team_board_messages: list["discord.Message"] = []
         self.team_vote_message: "discord.Message | None" = None
@@ -419,7 +420,7 @@ class PodDraftManager:
         await self._emit_format()
         await self.sio.emit("setOwnerIsPlayer", False)
         await self.sio.emit("setMaxPlayers", settings.pod_draft_max_players)
-        await self.sio.emit("setPickTimer", settings.pod_draft_pick_timer)
+        await self.sio.emit("setPickTimer", self.pick_timer)
         await self.sio.emit("setBots", settings.pod_draft_bots)
         await self.sio.emit("setColorBalance", False)
         await self.sio.emit("setPersonalLogs", True)
@@ -428,9 +429,19 @@ class PodDraftManager:
         await self.sio.emit("teamDraft", team_draft)
         log.info(
             f"[LIFECYCLE] session_settings_applied event={self.event_id} set={self.set_code} "
-            f"max_players={settings.pod_draft_max_players} pick_timer={settings.pod_draft_pick_timer} "
+            f"max_players={settings.pod_draft_max_players} pick_timer={self.pick_timer} "
             f"bots={settings.pod_draft_bots} log_recipients={self._draft_log_recipients} team_draft={team_draft}"
         )
+
+    async def apply_team_draft_setting(self) -> None:
+        """Push the teamDraft flag so Draftmancer splits and colors the sides. The full settings emit
+        only fires once at ownership claim, so a later toggle through the Settings panel or the team
+        vote needs this to reach the live table. Pre-draft only."""
+        if not self.sio.connected or self.drafting or self.draft_complete:
+            return
+        team_draft = self.pairing_mode == "team"
+        await self.sio.emit("teamDraft", team_draft)
+        log.info(f"[TEAM] team_draft_flag_pushed event={self.event_id} team_draft={team_draft}")
 
     @property
     def _draft_log_recipients(self) -> str:
@@ -502,6 +513,22 @@ class PodDraftManager:
             if err is not None:
                 return err
         await self.refresh_lobby_now()
+        return None
+
+    async def apply_pick_timer(self, seconds: int) -> str | None:
+        """Set this pod's Draftmancer pick timer. Pre-draft only — Draftmancer locks the timer once the
+        draft starts. Re-emits to the live session. Returns an error string or None."""
+        if self.drafting or self.draft_complete:
+            return "Pick timer is locked once the draft has started."
+        if not self.sio.connected:
+            return "Draftmancer session is not connected."
+        self.pick_timer = seconds
+        try:
+            await self.sio.emit("setPickTimer", seconds)
+        except Exception:
+            log.exception(f"[TIMER] emit_failed event={self.event_id} seconds={seconds}")
+            return "Could not update the pick timer."
+        log.info(f"[TIMER] pick_timer_set event={self.event_id} seconds={seconds}")
         return None
 
     async def _mark_socket_status(self, status: str) -> None:
@@ -1840,6 +1867,7 @@ async def set_event_pairing_mode(event_id: str, mode: str) -> str | None:
         if manager.current_round and manager.current_round > 0:
             return "Pairing mode is locked once the tournament has started."
         manager.pairing_mode = mode
+        await manager.apply_team_draft_setting()
     await asyncio.to_thread(persist_pairing_mode, event_id, mode)
     if manager is not None:
         await manager.refresh_lobby_now()
@@ -1870,6 +1898,15 @@ async def set_event_seating(event_id: str, ordered_user_names: list[str]) -> str
     if manager is None:
         return "No active Draftmancer session for this pod."
     return await manager.set_seating_order(ordered_user_names)
+
+
+async def set_event_pick_timer(event_id: str, seconds: int) -> str | None:
+    """Set a pod's Draftmancer pick timer by event id. Live-only — the value is not persisted, so it
+    only applies while a session is connected. Returns an error string or None."""
+    manager = ACTIVE_POD_MANAGERS.get(event_id)
+    if manager is None:
+        return "Start the Draftmancer session before setting the pick timer."
+    return await manager.apply_pick_timer(seconds)
 
 
 async def rehydrate_active_lobbies(bot) -> None:

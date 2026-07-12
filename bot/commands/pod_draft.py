@@ -21,6 +21,7 @@ from bot.services.pod_draft_manager import (
     cancel_pod_event,
     set_event_format,
     set_event_pairing_mode,
+    set_event_pick_timer,
     set_event_seating,
     set_event_seating_mode,
     set_seeding_refresh_hook,
@@ -783,13 +784,15 @@ async def delete_stale_seeding_messages(
 
 async def build_pod_settings_view(bot, event_id: str, *, is_owner: bool) -> PodSettingsView:
     """Settings panel wired for `event_id`. Shared by /pod-settings and the lobby Settings button.
-    Kick Player and Link Players appear when a Draftmancer session is live; Cancel Draft only for the
-    bot owner."""
+    Link Players appears once a Draftmancer session is live and stays through the draft so an unlinked
+    seat can be fixed mid-draft; the format/pairing/seats/pick-timer controls and Kick Player are
+    pre-draft only and drop away once drafting starts. Cancel Draft is bot-owner only."""
     current_code = await asyncio.to_thread(load_event_set_code_sync, event_id)
     current_mode = await asyncio.to_thread(load_event_pairing_mode_sync, event_id)
     current_seating = await asyncio.to_thread(load_event_seating_mode_sync, event_id)
     event_name = await asyncio.to_thread(load_event_name_sync, event_id)
     manager = ACTIVE_POD_MANAGERS.get(event_id)
+    drafting = manager is not None and (manager.drafting or manager.draft_complete)
 
     async def on_format(inter: discord.Interaction, code: str) -> str | None:
         return await set_event_format(event_id, code)
@@ -806,24 +809,32 @@ async def build_pod_settings_view(bot, event_id: str, *, is_owner: bool) -> PodS
     async def on_seated(inter: discord.Interaction, labels: list[str]) -> None:
         await post_manual_seating_table(bot, inter.channel, labels, actor_label(inter))
 
+    async def on_timer(inter: discord.Interaction, value: str) -> str | None:
+        return await set_event_pick_timer(event_id, int(value))
+
     on_seating = None
     seat_order_provider = None
     kick_targets_provider = None
     on_kick = None
+    current_timer = None
     link_targets_provider = None
     on_link = None
     if manager is not None:
-        async def on_seating(inter: discord.Interaction, ordered_user_names: list[str]) -> str | None:
-            return await set_event_seating(event_id, ordered_user_names)
-        seat_order_provider = manager.seating_lobby_order
-        kick_targets_provider = manager.kick_targets
         link_targets_provider = manager.unrecognized_lobby_names
-
-        async def on_kick(inter: discord.Interaction, user_id: str) -> str | None:
-            return await manager.kick_player(user_id)
 
         async def on_link(inter: discord.Interaction, arena_name: str, member: discord.abc.User) -> str | None:
             return await manager.link_seat(member, arena_name)
+
+        if not drafting:
+            current_timer = manager.pick_timer
+            seat_order_provider = manager.seating_lobby_order
+            kick_targets_provider = manager.kick_targets
+
+            async def on_seating(inter: discord.Interaction, ordered_user_names: list[str]) -> str | None:
+                return await set_event_seating(event_id, ordered_user_names)
+
+            async def on_kick(inter: discord.Interaction, user_id: str) -> str | None:
+                return await manager.kick_player(user_id)
 
     on_cancel = None
     if is_owner:
@@ -831,11 +842,12 @@ async def build_pod_settings_view(bot, event_id: str, *, is_owner: bool) -> PodS
             return await cancel_pod_event(event_id, actor=actor_label(inter))
 
     return PodSettingsView(
-        on_format=on_format, on_pairing=on_pairing,
+        on_format=None if drafting else on_format, on_pairing=None if drafting else on_pairing,
         current_code=current_code, current_mode=current_mode,
-        on_seating_mode=on_seating_mode, current_seating=current_seating,
+        on_seating_mode=None if drafting else on_seating_mode, current_seating=current_seating,
         on_seating=on_seating, seat_order_provider=seat_order_provider,
-        on_seating_table=on_seating_table, on_seated=on_seated,
+        on_seating_table=None if drafting else on_seating_table, on_seated=on_seated,
+        on_timer=on_timer if current_timer is not None else None, current_timer=current_timer,
         kick_targets_provider=kick_targets_provider, on_kick=on_kick,
         link_targets_provider=link_targets_provider, on_link=on_link,
         on_cancel=on_cancel, event_name=event_name,

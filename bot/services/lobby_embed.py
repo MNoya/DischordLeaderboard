@@ -190,13 +190,15 @@ async def open_settings_panel(interaction: discord.Interaction) -> None:
 
 
 def build_drafting_view(spectate_url: str | None) -> discord.ui.View | None:
-    """The lobby cards' controls once drafting starts, when Join/Ready/Settings no longer apply."""
+    """The lobby cards' controls once drafting starts: Spectate plus a Settings button so an unlinked
+    seat can still be fixed mid-draft. Settings routes through the registered LobbyReadyButtonView."""
     view = discord.ui.View(timeout=None)
+    view.add_item(SettingsButton())
     if spectate_url:
         view.add_item(discord.ui.Button(
             label="Spectate", style=discord.ButtonStyle.link, url=spectate_url, emoji="👀",
         ))
-    return view if view.children else None
+    return view
 
 
 def render(

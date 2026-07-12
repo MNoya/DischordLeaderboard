@@ -78,6 +78,40 @@ def test_end_draft_swallowed_after_restart_stop():
     assert mgr.draft_complete is False
 
 
+def test_pick_timer_sets_value_and_emits_pre_draft():
+    mgr = _manager()
+
+    err = asyncio.run(mgr.apply_pick_timer(45))
+
+    assert err is None
+    assert mgr.pick_timer == 45
+    assert mgr.sio.emitted == ["setPickTimer"]
+
+
+def test_pick_timer_rejected_once_drafting():
+    mgr = _manager()
+    mgr.drafting = True
+    before = mgr.pick_timer
+
+    err = asyncio.run(mgr.apply_pick_timer(45))
+
+    assert err is not None
+    assert mgr.pick_timer == before
+    assert mgr.sio.emitted == []
+
+
+def test_pick_timer_rejected_when_disconnected():
+    mgr = _manager()
+    mgr.sio.connected = False
+    before = mgr.pick_timer
+
+    err = asyncio.run(mgr.apply_pick_timer(45))
+
+    assert err is not None
+    assert mgr.pick_timer == before
+    assert mgr.sio.emitted == []
+
+
 def _manager() -> PodDraftManager:
     mgr = PodDraftManager(object(), "evt", "sid", 123, "SOS", 8)
     mgr.sio = _FakeSio()
