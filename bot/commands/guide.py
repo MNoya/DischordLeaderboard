@@ -86,10 +86,10 @@ async def sync_channel(guild: discord.Guild, channel_name: str,
 
 
 async def sync_set_tracking_todo(guild: discord.Guild, http) -> tuple[str, str]:
-    """Report whether the 'See what people are discussing' Server Guide To-Do points at the active set's
-    channel: (status, human-readable result line). Read-only by necessity — Discord blocks bots from
-    editing the Server Guide (``new-member-welcome`` returns "Bots cannot use this endpoint"), so a
-    drifted To-Do is flagged for a mod to repoint by hand in Server Settings → Onboarding."""
+    """Keep the 'See what people are discussing' Server Guide To-Do pointed at the active set's channel:
+    (status, human-readable result line). Discord blocks bots from editing the Server Guide today, so a
+    drift is reported for a mod to fix by hand in Server Settings → Onboarding — the write is still
+    attempted first, so the To-Do self-heals if that restriction is ever lifted."""
     route = Route("GET", "/guilds/{guild_id}/new-member-welcome", guild_id=guild.id)
     try:
         welcome = await http.request(route)
@@ -106,10 +106,27 @@ async def sync_set_tracking_todo(guild: discord.Guild, http) -> tuple[str, str]:
     current_id = str(actions[index].get("channel_id"))
     if current_id == str(target.id):
         return SYNC_CURRENT, f"✅ Latest channel points to {target.mention}"
+    if await _repoint_set_tracking_todo(guild, http, welcome, actions, index, target):
+        return SYNC_UPDATED, f"🔄 Latest channel → {target.mention}"
     current = guild.get_channel(int(current_id)) if current_id.isdigit() else None
     current_ref = current.mention if current is not None else f"`{current_id}`"
     return SYNC_STALE, (f"⚠️ Latest channel still points to {current_ref} but should be {target.mention}\n"
-                        'Update the "See what people are discussing" To-Do under Server Settings → Onboarding.')
+                        'Update the "See what people are discussing" To-Do under '
+                        "**Server Settings → Onboarding → Server Guide**.")
+
+
+async def _repoint_set_tracking_todo(guild: discord.Guild, http, welcome, actions, index, target) -> bool:
+    """Write the To-Do's new channel, ``True`` on success. Discord blocks bots from the Server Guide
+    endpoint today so this normally fails; kept so a rotation heals the To-Do on its own if that lifts."""
+    updated = [dict(action) for action in actions]
+    updated[index]["channel_id"] = str(target.id)
+    body = {"enabled": welcome["enabled"], "welcome_message": welcome["welcome_message"],
+            "new_member_actions": updated}
+    try:
+        await http.request(Route("PUT", "/guilds/{guild_id}/new-member-welcome", guild_id=guild.id), json=body)
+        return True
+    except discord.HTTPException:
+        return False
 
 
 def _build_view(content: GuideContent, show_title: bool = True) -> ui.LayoutView:
