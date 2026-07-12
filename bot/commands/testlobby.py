@@ -52,6 +52,12 @@ from bot.services.pod_team_board import (
 )
 from bot.services.pod_team_flow import build_team_final_embed
 from bot.services.pod_team_showcase import build_team_championship_view, format_team_trophy_title
+from bot.services.pod_team_vote import (
+    TEAM_VOTE_EMOJI,
+    build_team_vote_offer_embed,
+    team_vote_button_label,
+    team_vote_needed,
+)
 from bot.services.pod_tournament import (
     REVIEW_EMOJI,
     ParticipantDeckData,
@@ -557,6 +563,29 @@ def _team_trophy_hype_preview_view() -> discord.ui.LayoutView:
     )
 
 
+def _team_vote_preview() -> tuple[discord.Embed, discord.ui.View, discord.Embed, discord.ui.View]:
+    """The untouched six-player lobby card plus the Team-Draft offer as its own embed card: prompt, two
+    fictional voters, and the inert 🤝 tally button at 2 of the 4 needed."""
+    roster = list(_LINKED_EIGHT[:6])
+    lobby_embed = render_lobby_embed(
+        _THREAD_NAME, _RSVPS_YES, _RSVPS_MAYBE, roster,
+        state="linked", draftmancer_url=_DRAFTMANCER_URL, spectators=_SPECTATORS,
+        **_preview_settings_labels(),
+    )
+    lobby_view = LobbyReadyButtonView(
+        draftmancer_url=_DRAFTMANCER_URL, spectate_url=f"{_DRAFTMANCER_URL}&spectate=preview",
+    )
+    voters = [dn for _, dn in roster[:2]]
+    offer_view = discord.ui.View()
+    offer_view.add_item(discord.ui.Button(
+        emoji=TEAM_VOTE_EMOJI,
+        label=team_vote_button_label(len(voters), team_vote_needed(len(roster))),
+        style=discord.ButtonStyle.primary,
+        disabled=True,
+    ))
+    return lobby_embed, lobby_view, build_team_vote_offer_embed(voters), offer_view
+
+
 _TEST_DECK_SCREENSHOT_URL = "https://placehold.co/1280x720/2b2d31/ffffff/png?text=Deck+Screenshot"
 
 
@@ -655,7 +684,7 @@ _VALID_STATES = (
     "empty", "partial", "linked", "unlinked", "ready", "notready", "cancelled", "superseded",
     "drafting", "complete", "submit", "podbracket", "podswiss", "podrandom", "podteam", "podlobby",
     "format", "seeding", "trophyhype", "round1", "round2", "round3", "voicelink", "review", "table",
-    "teams", "teamstandings", "teamchamp", "teamhype",
+    "teams", "teamstandings", "teamchamp", "teamhype", "teamvote",
 )
 
 _LIVE_POD_MODES = {
@@ -838,6 +867,8 @@ async def setup(bot: commands.Bot) -> None:
         `teamchamp` shows the two-gallery team championship card; `teamhype` the combined 3-0 hype card.
         `teams` is the no-DB snapshot of the Components V2 team board (team headers + all three rounds,
         one row per match); its Report buttons are inert — use `podteam` to drive reports.
+        `teamvote` shows a six-player lobby card plus the Team-Draft offer as its own embed card — the
+        prompt title, two sample voters, and the inert 🤝 tally button.
         `ready` shows the active ready-check card; clicking its Force Start button previews the ephemeral
         confirm dialog (no live pod needed). `round1`/`round2`/`round3` are no-DB snapshots of each round
         embed (`round1 random` for the random-pairing header).
@@ -891,6 +922,12 @@ async def setup(bot: commands.Bot) -> None:
 
         if state == "teamhype":
             await ctx.send(view=_team_trophy_hype_preview_view())
+            return
+
+        if state == "teamvote":
+            lobby_embed, lobby_view, offer_embed, offer_view = _team_vote_preview()
+            await ctx.send(embed=lobby_embed, view=lobby_view)
+            await ctx.send(embed=offer_embed, view=offer_view)
             return
 
         if state == "teams":
