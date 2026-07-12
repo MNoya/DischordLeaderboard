@@ -1,12 +1,12 @@
 """T-24h / T-3h underfill checks fired by APScheduler date jobs, plus live RSVP-driven updates.
 
 Each check re-fetches the sesh embed's Yes list at fire time; events at or above the target stay
-silent. Short events get a silent nudge in the coordination channel — no role ping — carrying the
-signup link. The T-24h check posts the nudge; the T-3h check deletes and reposts it so it resurfaces
-near the event. While the nudge is up, sesh RSVP edits drive `refresh_underfill_nudge` to keep the
-count current; once the pod hits the target the nudge is deleted. The nudge is located by scanning
-channel history for the bot's own message carrying the signup link — nothing is persisted to the
-database.
+silent. Short events get a silent nudge in the pod-draft-chat channel — no role ping — carrying the
+signup link back to the sesh post in the coordination channel. The T-24h check posts the nudge; the
+T-3h check deletes and reposts it so it resurfaces near the event. While the nudge is up, sesh RSVP
+edits drive `refresh_underfill_nudge` to keep the count current; once the pod hits the target the
+nudge is deleted. The nudge is located by scanning channel history for the bot's own message carrying
+the signup link — nothing is persisted to the database.
 """
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ from sqlalchemy import select
 
 from bot.config import settings
 from bot.database import SessionLocal
+from bot.discord_helpers import resolve_pod_chat_channel
 from bot.models import PodDraftEvent
 from bot.services.pod_schedule import build_underfill_message
 from bot.tasks.pod_draft_reminder import fetch_sesh_rsvps
@@ -109,9 +110,9 @@ async def fire_underfill(event_id: str, hours_before: int) -> None:
     yes_count = len(rsvps[0])
     target = settings.pod_draft_target_players
 
-    channel = _bot.get_channel(settings.pod_draft_channel_id)
+    channel = resolve_pod_chat_channel(_bot)
     if channel is None:
-        log.warning(f"fire_underfill: coordination channel {settings.pod_draft_channel_id} unavailable")
+        log.warning("fire_underfill: pod-draft-chat channel unavailable")
         return
 
     jump_url = _sesh_jump_url(sesh_message_id)
@@ -147,7 +148,7 @@ async def refresh_underfill_nudge(bot: commands.Bot, sesh_message_id: str, yes_c
     if status != "pending":
         return
 
-    channel = bot.get_channel(settings.pod_draft_channel_id)
+    channel = resolve_pod_chat_channel(bot)
     if channel is None:
         return
 
@@ -181,7 +182,7 @@ async def _find_nudge(channel: discord.abc.Messageable, signup_url: str) -> disc
             if message.author.id == _bot.user.id and signup_url in message.content:
                 return message
     except discord.HTTPException:
-        log.warning("could not scan coordination channel for the underfill nudge", exc_info=True)
+        log.warning("could not scan pod-draft-chat channel for the underfill nudge", exc_info=True)
     return None
 
 

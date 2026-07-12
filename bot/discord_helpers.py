@@ -38,6 +38,31 @@ def in_pod_coordination(channel: "discord.interactions.InteractionChannel | None
         return True
     return getattr(channel, "parent_id", None) == settings.pod_draft_channel_id
 
+
+def channel_matching_name(guild: "discord.Guild", name_fragment: str) -> "discord.abc.GuildChannel | None":
+    """First text channel in guild whose name contains name_fragment, case-insensitively."""
+    fragment = name_fragment.lower()
+    for channel in guild.text_channels:
+        if fragment in channel.name.lower():
+            return channel
+    return None
+
+
+def resolve_pod_chat_channel(bot: "commands.Bot") -> "discord.abc.Messageable | None":
+    """The pod-draft-chat channel, falling back to the coordination channel when it isn't present.
+
+    Resolved by name so a mod can create the channel without a config change. The underfill nudges
+    and the weekly schedule post land here, keeping the coordination channel to signups and event
+    threads only.
+    """
+    guild_id = settings.discord_guild_id
+    guild = bot.get_guild(guild_id) if guild_id else None
+    if guild is not None:
+        chat = channel_matching_name(guild, settings.pod_draft_chat_channel_name)
+        if chat is not None:
+            return chat
+    return bot.get_channel(settings.pod_draft_channel_id)
+
 def extract_avatar_hash(user: "discord.abc.User | discord.User | discord.Member | None") -> str | None:
     """Return the Discord avatar hash for a user, or None if they use the default avatar.
 

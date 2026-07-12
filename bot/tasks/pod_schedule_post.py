@@ -19,6 +19,7 @@ from sqlalchemy import select
 
 from bot.config import settings
 from bot.database import SessionLocal
+from bot.discord_helpers import resolve_pod_chat_channel
 from bot.models import PodDraftEvent
 from bot.services.pod_schedule import (
     BTN_EMOJI_GOT_IT,
@@ -193,11 +194,11 @@ async def _respond(interaction: discord.Interaction, message: str) -> None:
 
 
 async def _post_default_if_needed(reference: datetime | None = None) -> bool:
-    channel = await _fetch_coordination_channel()
+    channel = await _fetch_schedule_channel()
     if channel is None:
         return False
     if await _schedule_already_posted(channel):
-        log.info("schedule already posted in the coordination channel; standing down")
+        log.info("schedule already posted in the pod-draft-chat channel; standing down")
         return False
 
     reference = reference or datetime.now(SCHEDULE_TZ)
@@ -244,7 +245,7 @@ async def _schedule_already_posted(channel: discord.abc.Messageable) -> bool:
             if message.author.id in poster_ids and "<t:" in message.content:
                 return True
     except discord.HTTPException:
-        log.warning("could not scan the coordination channel for an existing post", exc_info=True)
+        log.warning("could not scan the pod-draft-chat channel for an existing post", exc_info=True)
     return False
 
 
@@ -322,14 +323,14 @@ async def fire_create_command(monday_iso: str, weekday: int) -> None:
         log.warning("could not DM the per-event /create command to owner", exc_info=True)
 
 
-async def _fetch_coordination_channel() -> discord.abc.Messageable | None:
-    channel = _bot.get_channel(settings.pod_draft_channel_id)
+async def _fetch_schedule_channel() -> discord.abc.Messageable | None:
+    channel = resolve_pod_chat_channel(_bot)
     if channel is not None:
         return channel
     try:
         return await _bot.fetch_channel(settings.pod_draft_channel_id)
     except discord.HTTPException as e:
-        log.warning(f"could not fetch coordination channel {settings.pod_draft_channel_id}: {e}")
+        log.warning(f"could not fetch schedule channel {settings.pod_draft_channel_id}: {e}")
         return None
 
 

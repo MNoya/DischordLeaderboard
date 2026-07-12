@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from bot import emojis
 from bot.config import settings
-from bot.discord_helpers import NBSP, display_width, first_image_url, player_url
+from bot.discord_helpers import NBSP, channel_matching_name, display_width, first_image_url, player_url
 from bot.slug import slugify
 from bot.database import SessionLocal
 from bot.models import Player as DbPlayer, PodDraftEvent, PodDraftMatch, PodDraftParticipant
@@ -2622,22 +2622,13 @@ async def _resolve_announcement_target(manager):
     return parent or thread
 
 
-def _channel_matching_name(guild, name_fragment: str):
-    """First text channel in guild whose name contains name_fragment, case-insensitively."""
-    fragment = name_fragment.lower()
-    for channel in guild.text_channels:
-        if fragment in channel.name.lower():
-            return channel
-    return None
-
-
 async def resolve_chat_target(manager):
     """Channel for the pod championship announcement: the dedicated pod-draft-chat channel when it
     exists, else the thread's parent (coordination) channel as before."""
     parent = await _resolve_announcement_target(manager)
     guild = getattr(parent, "guild", None)
     if guild is not None:
-        chat = _channel_matching_name(guild, settings.pod_draft_chat_channel_name)
+        chat = channel_matching_name(guild, settings.pod_draft_chat_channel_name)
         if chat is not None:
             return chat
     return parent
@@ -3091,7 +3082,7 @@ async def post_trophy_hype(
 def _find_trophy_hype_channel(guild: discord.Guild | None) -> discord.TextChannel | None:
     if guild is None:
         return None
-    return _channel_matching_name(guild, settings.pod_draft_trophy_hype_channel_name)
+    return channel_matching_name(guild, settings.pod_draft_trophy_hype_channel_name)
 
 
 async def _scan_trophy_hype_channel(channel: discord.TextChannel, after, recap_url: str):
