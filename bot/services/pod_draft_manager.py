@@ -62,7 +62,7 @@ from bot.services.pod_drafts import (
     seed_event_participants,
     update_event_format,
 )
-from bot.services.pod_team_flow import assign_teams_at_draft_start, post_team_reveal
+from bot.services.pod_team_flow import assign_teams_at_draft_start, load_teams_sync
 from bot.services.pod_tournament import (
     persist_pairing_mode,
     persist_seating_mode,
@@ -694,6 +694,9 @@ class PodDraftManager:
                     u.get("userName") for u in self.session_users
                     if u.get("userID") in self.ready_users and u.get("userName")
                 }
+            teams = None
+            if self.pairing_mode == "team" and state in ("drafting", "complete"):
+                teams = self.team_map or await asyncio.to_thread(load_teams_sync, self.event_id)
             embed = render_lobby_embed(
                 title=self.event_name,
                 rsvps_yes=self.rsvps_yes,
@@ -706,6 +709,7 @@ class PodDraftManager:
                 initiated_by=self.initiated_by,
                 display_name_by_mention_id=await self._resolve_rsvp_mentions(thread.guild),
                 spectators=self.spectator_names,
+                teams=teams,
                 **self._settings_labels(),
             )
             self._maybe_schedule_lobby_full_prompt(classified)
@@ -1215,13 +1219,10 @@ class PodDraftManager:
         await self.refresh_lobby_now()
         thread = await self._fetch_thread()
         if thread is not None:
-            if self.pairing_mode == "team":
-                await post_team_reveal(self, thread)
-            else:
-                try:
-                    await thread.send(content="**🎉 Draft started!**")
-                except Exception:
-                    log.warning("[DRAFT] started.thread_post_error", exc_info=True)
+            try:
+                await thread.send(content="**🎉 Draft started!**")
+            except Exception:
+                log.warning("[DRAFT] started.thread_post_error", exc_info=True)
 
     async def _refuse_odd_roster_start(self) -> None:
         """Block startDraft on an odd roster: every pairing mode needs an even table, and a ready check

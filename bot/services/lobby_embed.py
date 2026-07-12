@@ -15,7 +15,9 @@ import discord
 from bot import emojis
 from bot.commands import descriptions as desc
 from bot.discord_helpers import command_line
-from bot.services.pod_drafts import load_event_id_by_thread_sync
+from bot.services import pod_team
+from bot.services.pod_drafts import load_event_id_by_thread_sync, normalize_player_name
+from bot.services.pod_team_board import TeamBoardMember, add_team_roster_fields
 from bot.services.pod_tournament import actor_label
 
 
@@ -213,6 +215,7 @@ def render(
     format_label: str | None = None,
     pairing_label: str | None = None,
     seating_label: str | None = None,
+    teams: dict[str, str] | None = None,
 ) -> discord.Embed:
     """Lobby embed. `title` is the thread/event name; `rsvps_yes` / `rsvps_maybe` are sesh display
     names by RSVP type; `in_session` is Draftmancer sessionUsers as (arena_name,
@@ -256,12 +259,15 @@ def render(
     _set_settings_footer(embed, format_label, pairing_label, seating_label)
 
     if in_session:
-        trailing = "\n​" if show_pending else ""
-        in_drft_label = "Players" if state == "complete" else "In Draftmancer"
-        _player_columns(
-            embed, f"✅ {in_drft_label} ({len(in_session)})", in_draftmancer,
-            trailing=trailing, spacer=show_pending,
-        )
+        if teams and state in ("drafting", "complete"):
+            _team_columns(embed, in_draftmancer, teams)
+        else:
+            trailing = "\n​" if show_pending else ""
+            in_drft_label = "Players" if state == "complete" else "In Draftmancer"
+            _player_columns(
+                embed, f"✅ {in_drft_label} ({len(in_session)})", in_draftmancer,
+                trailing=trailing, spacer=show_pending,
+            )
 
     if show_pending:
         if unrecognized:
@@ -457,6 +463,20 @@ def _player_columns(
     embed.add_field(name="​", value=(arenas or "​") + trailing, inline=True)
     if spacer:
         embed.add_field(name="​", value="​", inline=True)
+
+
+def _team_columns(
+    embed: discord.Embed, in_draftmancer: list[tuple[str, str]], teams: dict[str, str],
+) -> None:
+    """Two side-by-side team fields for a team-draft lobby, replacing the flat player list once teams
+    are assigned. Delegates to add_team_roster_fields so the columns match the board's roster header."""
+    normalized = {normalize_player_name(name): team for name, team in teams.items()}
+    rosters: dict[str, list[TeamBoardMember]] = {pod_team.TEAM_A: [], pod_team.TEAM_B: []}
+    for arena, dn in in_draftmancer:
+        team = normalized.get(normalize_player_name(arena))
+        if team in rosters:
+            rosters[team].append(TeamBoardMember(display=dn, arena=arena))
+    add_team_roster_fields(embed, rosters)
 
 
 def _rsvp_dedup_key(rsvp: str, display_name_by_mention_id: dict[int, str]) -> str:

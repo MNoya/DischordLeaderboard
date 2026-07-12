@@ -19,6 +19,7 @@ from bot.services.pod_drafts import (
     pod_summary_by_set_for_player,
     record_event,
     record_match,
+    seed_event_participants,
     set_participant_deck_colors,
     update_event_time_if_changed,
     upsert_participant,
@@ -319,6 +320,23 @@ def test_upsert_participant_adopts_arena_handle_for_player_without_one(session):
     session.refresh(player)
     assert player.arena_name == "Bigmits#91757"
     assert "bigmits" in player.arena_aliases
+
+
+def test_seed_event_participants_leaves_second_name_unlinked_when_player_already_seated(session):
+    _seed_set(session)
+    event = record_event(session, _parsed_event(attendees=()))
+    player = _seed_player(session, discord_id="555", username="noya", display_name="Noya")
+    player.arena_aliases = ["noya"]
+    session.flush()
+
+    seed_event_participants(session, event.id, ["Noya#08011", "Noya2#08011"])
+
+    rows = session.execute(
+        select(PodDraftParticipant).where(PodDraftParticipant.event_id == event.id)
+    ).scalars().all()
+    linked = [row for row in rows if row.player_id == player.id]
+    assert len(rows) == 2
+    assert len(linked) == 1
 
 
 def test_record_match_is_idempotent(session):

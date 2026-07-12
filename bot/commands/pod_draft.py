@@ -61,6 +61,7 @@ from bot.services.pod_tournament import (
     post_trophy_hype_for_event,
     refresh_round_pairing_messages,
 )
+from bot.services.pod_team_showcase import build_team_championship_view_for_event
 
 
 log = logging.getLogger(__name__)
@@ -456,9 +457,11 @@ class PodDraft(commands.Cog):
                 )
                 return
 
-        view = await build_champion_announcement_view_for_event(
-            event_id, guild_id=interaction.guild_id,
-        )
+        pairing_mode = await asyncio.to_thread(load_event_pairing_mode_sync, event_id)
+        if pairing_mode == "team":
+            view = await build_team_championship_view_for_event(event_id, guild_id=interaction.guild_id)
+        else:
+            view = await build_champion_announcement_view_for_event(event_id, guild_id=interaction.guild_id)
         if view is None:
             await interaction.followup.send(
                 "Champion announcement isn't ready — trophy match has no winner on record yet.",
@@ -468,7 +471,7 @@ class PodDraft(commands.Cog):
 
         log.info(f"pod-champion: {interaction.user} re-posted champion announcement for event_id={event_id}")
         await interaction.followup.send(view=view)
-        await post_trophy_hype_for_event(event_id, interaction.guild)
+        await post_trophy_hype_for_event(interaction.client, event_id, interaction.guild)
 
     @pod_champion.autocomplete("event")
     async def _pod_champion_event_autocomplete(

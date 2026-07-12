@@ -46,12 +46,11 @@ from bot.services import pod_team
 from bot.services.pod_swiss import Standing
 from bot.services.pod_team_board import (
     TeamBoardData,
-    TeamBoardMember,
     build_board_data,
     build_team_board_views,
     team_summary_embed,
 )
-from bot.services.pod_team_flow import build_team_final_embed, build_team_reveal_embed
+from bot.services.pod_team_flow import build_team_final_embed
 from bot.services.pod_team_showcase import build_team_championship_view, format_team_trophy_title
 from bot.services.pod_tournament import (
     REVIEW_EMOJI,
@@ -463,13 +462,6 @@ _TEAM_ARENA = {
 }
 
 
-def _team_preview_rosters() -> dict[str, list[TeamBoardMember]]:
-    return {
-        pod_team.TEAM_A: [TeamBoardMember(n, _TEAM_ARENA[n]) for n in _TEAM1],
-        pod_team.TEAM_B: [TeamBoardMember(n, _TEAM_ARENA[n]) for n in _TEAM2],
-    }
-
-
 def _team_preview_board_data() -> TeamBoardData:
     """Fixture TeamBoardData for the no-DB board snapshot, rendered through the prod board builder so
     the preview can't drift from the live layout. One pre-reported match shows the recolored button;
@@ -663,7 +655,7 @@ _VALID_STATES = (
     "empty", "partial", "linked", "unlinked", "ready", "notready", "cancelled", "superseded",
     "drafting", "complete", "submit", "podbracket", "podswiss", "podrandom", "podteam", "podlobby",
     "format", "seeding", "trophyhype", "round1", "round2", "round3", "voicelink", "review", "table",
-    "teamreveal", "teams", "teamstandings", "teamchamp", "teamhype",
+    "teams", "teamstandings", "teamchamp", "teamhype",
 )
 
 _LIVE_POD_MODES = {
@@ -842,7 +834,6 @@ async def setup(bot: commands.Bot) -> None:
         `podteam [6|8|10]` seeds a real team draft at that player count (default 6; seat 1 = you,
         Green Team) — posts the team summary embed + live board with working report buttons and
         opens the two private team threads off this channel.
-        `teamreveal` shows the single team-reveal embed posted at draft start.
         `teamstandings` shows the pinned final standings embed for a finished team draft.
         `teamchamp` shows the two-gallery team championship card; `teamhype` the combined 3-0 hype card.
         `teams` is the no-DB snapshot of the Components V2 team board (team headers + all three rounds,
@@ -888,10 +879,6 @@ async def setup(bot: commands.Bot) -> None:
 
         if state == "trophyhype":
             await ctx.send(view=_trophy_hype_preview())
-            return
-
-        if state == "teamreveal":
-            await ctx.send(embed=build_team_reveal_embed(_team_preview_rosters()))
             return
 
         if state == "teamstandings":

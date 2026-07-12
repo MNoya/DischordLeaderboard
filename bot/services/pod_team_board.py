@@ -250,13 +250,19 @@ def team_summary_embed(data: TeamBoardData) -> discord.Embed:
     classic embed because V2 has no column primitive; the running score lives on the board's
     progress bar, not here."""
     embed = discord.Embed(color=discord.Color.green())
+    add_team_roster_fields(embed, data.rosters)
+    return embed
+
+
+def add_team_roster_fields(embed: discord.Embed, rosters: dict[str, list[TeamBoardMember]]) -> None:
+    """Both team columns (name + Arena handle) as two inline fields, shared by the board's summary
+    header and the team-draft lobby card so the rosters render identically on both surfaces."""
     for team in (pod_team.TEAM_A, pod_team.TEAM_B):
         embed.add_field(
             name=f"{pod_team.team_emoji(team)} {pod_team.team_label(team)}",
-            value=team_field_value(data.rosters.get(team, [])) or "—",
+            value=team_field_value(rosters.get(team, [])) or "—",
             inline=True,
         )
-    return embed
 
 
 def team_field_value(members: list[TeamBoardMember]) -> str:

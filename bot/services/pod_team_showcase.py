@@ -44,8 +44,10 @@ from bot.services.pod_tournament import (
     load_event_deck_data_sync,
     load_event_name_sync,
     load_event_started_at_sync,
+    load_event_thread_id_sync,
     load_matches,
     load_participant_displays,
+    load_tournament_players_sync,
     mark_championship_posted_sync,
     post_trophy_hype,
     resolve_chat_target,
@@ -202,6 +204,37 @@ def build_team_championship_view(
     return view
 
 
+async def build_team_championship_view_for_event(
+    event_id: str, *, guild_id: int | None = None,
+) -> ui.LayoutView | None:
+    """Manager-free team championship card for /pod-champion re-posts. None when the pod carries no team
+    assignment or no standings yet."""
+    teams = await asyncio.to_thread(load_teams_sync, event_id)
+    if not teams:
+        return None
+    players = await asyncio.to_thread(load_tournament_players_sync, event_id)
+    prior = await asyncio.to_thread(load_matches, event_id)
+    standings = pod_swiss.compute_standings(players, prior)
+    if not standings:
+        return None
+    displays = await asyncio.to_thread(load_participant_displays, event_id)
+    deck_data = await asyncio.to_thread(load_event_deck_data_sync, event_id)
+    event_name = await asyncio.to_thread(load_event_name_sync, event_id)
+    started_at = await asyncio.to_thread(load_event_started_at_sync, event_id)
+    thread_id_str = await asyncio.to_thread(load_event_thread_id_sync, event_id)
+    thread_id = int(thread_id_str) if thread_id_str else None
+    return build_team_championship_view(
+        standings, teams,
+        event_name=event_name,
+        displays=displays,
+        player_colors=colors_only(deck_data),
+        deck_data=deck_data,
+        event_started_at=started_at,
+        guild_id=guild_id,
+        thread_id=thread_id,
+    )
+
+
 async def team_championship_deadline(manager: "PodDraftManager") -> None:
     """Hard cap: CHAMPIONSHIP_DEADLINE_SECONDS after finalize, post the showcase with whatever decks
     landed, forcing trophy-hype for the locked 3-0s the same way."""
@@ -260,7 +293,7 @@ async def maybe_post_team_trophy_hype(manager: "PodDraftManager", *, force: bool
 def format_team_trophy_title(name: str, colors: str | None, short_event: str) -> str:
     emoji_run = format_deck_color_emojis(colors)
     suffix = f" with {emoji_run}" if emoji_run else ""
-    return f"🏆 {name} goes 3-0 in {short_event}{suffix}"
+    return f"🏆 {name} 3-0s {short_event}{suffix}"
 
 
 def decided_trophy_standings(standings, rounds) -> list | None:

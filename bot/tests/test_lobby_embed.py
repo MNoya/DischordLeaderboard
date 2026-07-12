@@ -45,6 +45,37 @@ def test_unlinked_seat_counted_in_draftmancer_but_listed_separately():
     assert "Stranger#12345" in unrecognized.value
 
 
+def test_team_pod_folds_roster_into_two_team_columns_once_drafting():
+    """A team draft replaces the flat player list with Green/Blue columns once teams are assigned,
+    keying by normalized Arena name so the seat's team survives suffix/case differences."""
+    in_session = [("Ava#1", "Ava"), ("Bram#2", "Bram"), ("Cara#3", "Cara"), ("Dex#4", "Dex")]
+    teams = {"ava#1": "A", "cara#3": "A", "bram#2": "B", "dex#4": "B"}
+
+    embed = render(
+        title="Pod Draft", rsvps_yes=[], rsvps_maybe=[], in_session=in_session,
+        state="drafting", teams=teams,
+    )
+
+    green = _field(embed, "🟩")
+    blue = _field(embed, "🟦")
+    assert _field(embed, "✅") is None
+    assert "Ava" in green.value and "Cara" in green.value
+    assert "Bram" in blue.value and "Dex" in blue.value
+
+
+def test_team_pod_keeps_flat_roster_before_draft_starts():
+    """Teams aren't known until startDraft, so a team pod still shows the flat In Draftmancer list
+    through the lobby and ready-check phases."""
+    embed = render(
+        title="Pod Draft", rsvps_yes=[], rsvps_maybe=[],
+        in_session=[("Ava#1", "Ava"), ("Bram#2", "Bram")],
+        state="linked", teams={"ava#1": "A", "bram#2": "B"},
+    )
+
+    assert _field(embed, "✅ In Draftmancer") is not None
+    assert _field(embed, "🟩") is None
+
+
 def test_spectators_listed_comma_separated_when_present():
     embed = render(
         title="Pod Draft", rsvps_yes=[], rsvps_maybe=[], in_session=[],

@@ -768,12 +768,23 @@ def upsert_participant(
         candidate = player_for_name(session, draftmancer_name or display_name)
         if candidate is None and draftmancer_name:
             candidate = player_for_name(session, display_name)
+        if candidate is not None and _player_already_seated(rows, candidate.id, found):
+            candidate = None
         if candidate is not None:
             found.player_id = candidate.id
             _adopt_session_arena_handle(candidate, draftmancer_name)
 
     session.flush()
     return found
+
+
+def _player_already_seated(
+    rows: list[PodDraftParticipant], player_id, exclude: PodDraftParticipant,
+) -> bool:
+    """Whether another seat in this event already holds `player_id`. Two Draftmancer names can resolve
+    to one Player (e.g. a prefix-alias match), but uq_pod_participant_event_player allows a player a
+    single seat; the second name stays unlinked instead of crashing the tournament seed."""
+    return any(row is not exclude and row.player_id == player_id for row in rows)
 
 
 def _adopt_session_arena_handle(player: Player, draftmancer_name: str | None) -> None:

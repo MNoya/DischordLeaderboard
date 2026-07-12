@@ -1,5 +1,8 @@
+import asyncio
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
+from bot.services import pod_tournament
 from bot.services.pod_tournament import (
     ANNOUNCEMENT_TOP_N,
     ParticipantDeckData,
@@ -13,6 +16,82 @@ from bot.services.pod_tournament import (
     format_round_announcement,
     tally_match_records,
 )
+
+
+def test_reconcile_rearms_within_deck_wait_but_forces_once_it_elapses(monkeypatch):
+    """A restart still inside the deck-wait must not jump the gate: recently-finalized pods post
+    non-forced (so an incomplete winning set keeps holding) and re-arm the remaining wait, while a pod
+    whose wait already elapsed posts forced."""
+    now = datetime.now(timezone.utc)
+    within = now - timedelta(seconds=30)
+    elapsed = now - timedelta(seconds=pod_tournament.CHAMPIONSHIP_DEADLINE_SECONDS + 300)
+    monkeypatch.setattr(
+        pod_tournament, "_load_unannounced_finalized_sync",
+        lambda: [("recent", "t1", within), ("old", "t2", elapsed)],
+    )
+    posts = []
+    rearms = []
+
+    async def fake_post(bot, event_id, thread_id, *, force=True):
+        posts.append((event_id, force))
+        return True
+
+    async def fake_delayed(bot, event_id, thread_id, delay):
+        rearms.append(event_id)
+
+    monkeypatch.setattr(pod_tournament, "post_championship_for_event", fake_post)
+    monkeypatch.setattr(pod_tournament, "_delayed_championship_post", fake_delayed)
+
+    async def run():
+        await pod_tournament.reconcile_unannounced_championships(bot=None)
+        await asyncio.sleep(0)
+
+    asyncio.run(run())
+
+    assert ("recent", False) in posts
+    assert ("old", True) in posts
+    assert rearms == ["recent"]
+
+
+def test_post_trophy_hype_forwards_format_title_to_view(monkeypatch):
+    """Regression: the team 3-0 card passes a custom title formatter; post_trophy_hype must forward it
+    to the view builder rather than dropping it (it used to raise TypeError)."""
+    captured = {}
+
+    def fake_build(champions, **kwargs):
+        captured.update(kwargs)
+        return "view"
+
+    class _Channel:
+        id = 1
+
+        async def send(self, **kwargs):
+            return None
+
+    async def fake_scan(channel, after, recap_url):
+        return set(), False
+
+    monkeypatch.setattr(pod_tournament, "build_trophy_hype_view", fake_build)
+    monkeypatch.setattr(pod_tournament, "_find_trophy_hype_channel", lambda guild: _Channel())
+    monkeypatch.setattr(pod_tournament, "load_event_started_at_sync", lambda event_id: None)
+    monkeypatch.setattr(pod_tournament, "_scan_trophy_hype_channel", fake_scan)
+
+    def fmt(name, colors, short_event):
+        return f"{name} goes 3-0"
+
+    champion = SimpleNamespace(player_name="Noya", wins=3, losses=0)
+
+    async def run():
+        return await pod_tournament.post_trophy_hype(
+            "e1", object(), 123, [champion],
+            event_name="Pod", displays={}, player_colors={}, deck_data={}, dm_info={},
+            format_title=fmt,
+        )
+
+    result = asyncio.run(run())
+
+    assert result is True
+    assert captured.get("format_title") is fmt
 
 
 def test_deck_complete_requires_colors_and_screenshot():

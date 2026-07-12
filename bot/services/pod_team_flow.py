@@ -30,10 +30,8 @@ from bot.services.pod_drafts import (
 )
 from bot.services.pod_replays import capture_event_replays
 from bot.services.pod_team_board import (
-    TeamBoardMember,
     build_team_board_views,
     load_team_board_data,
-    team_field_value,
     team_summary_embed,
 )
 from bot.discord_helpers import NBSP, ZWSP, player_url
@@ -104,27 +102,6 @@ def _apply_teams(session, event_id: str, teams: dict[str, str]) -> None:
         key = normalize_player_name(row.draftmancer_name or row.display_name)
         if key in normalized:
             row.team = normalized[key]
-
-
-async def post_team_reveal(manager: "PodDraftManager", thread) -> None:
-    """The Phase 2 reveal, replacing the generic draft-started banner for team pods. Classic embed —
-    two inline fields column the teams, which Components V2 can't."""
-    data = await asyncio.to_thread(load_team_board_data, manager.event_id)
-    try:
-        await thread.send(embed=build_team_reveal_embed(data.rosters))
-    except discord.HTTPException:
-        log.warning(f"[TEAM] reveal_post_failed event={manager.event_id}", exc_info=True)
-
-
-def build_team_reveal_embed(rosters: dict[str, list[TeamBoardMember]]) -> discord.Embed:
-    embed = discord.Embed(title="🎉 Team Draft started", color=discord.Color.green())
-    for team in (pod_team.TEAM_A, pod_team.TEAM_B):
-        embed.add_field(
-            name=f"{pod_team.team_emoji(team)} {pod_team.team_label(team)}",
-            value=team_field_value(rosters.get(team, [])) or "—",
-            inline=True,
-        )
-    return embed
 
 
 async def start_team_tournament(manager: "PodDraftManager") -> None:

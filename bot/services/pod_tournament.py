@@ -113,7 +113,6 @@ POD_REPAIR_FAILED_MSG = (
     "An organizer should double-check the matchups."
 )
 ANNOUNCEMENT_TOP_N = 4  # channel-level announcement shows top performers only; thread keeps full standings
-TROPHY_HYPE_CHANNEL_ID = 775804000905461781  # 🏆-trophy-hype
 TROPHY_HYPE_HISTORY_LIMIT = 100  # messages scanned for a champion's own trophy post before the bot posts
 CHAMPIONSHIP_DEADLINE_SECONDS = 600  # hard cap from R3 end: post the announcement with whatever decks landed
 CHAMPIONSHIP_RECONCILE_WINDOW = timedelta(hours=24)  # startup sweep only revisits recently-finalized pods
@@ -648,7 +647,7 @@ def _build_submit_deck_dm_embed(deck_colors: str | None) -> discord.Embed:
     if deck_colors is not None:
         body = SAVED_MSG
     else:
-        body = "🎨 **Submit your deck colors** when you're done drafting"
+        body = "🎨 **Submit your deck colors with the dropdown below**"
     return discord.Embed(description=body)
 
 
@@ -3008,10 +3007,17 @@ def build_trophy_hype_view(
     return view
 
 
-async def post_trophy_hype_for_event(event_id: str, guild) -> None:
-    """Manager-free #trophy-hype post so /pod-champion fires the same champion card the automatic
-    finalize would, resolving champions from the announcement standings."""
+async def post_trophy_hype_for_event(bot, event_id: str, guild) -> None:
+    """Manager-free #trophy-hype post so /pod-champion fires the same hype card the automatic finalize
+    would. Team pods route to the team 3-0 card; regular pods resolve champions from the announcement
+    standings."""
     if await asyncio.to_thread(load_event_pairing_mode_sync, event_id) == "team":
+        from bot.services.pod_team_showcase import maybe_post_team_trophy_hype
+
+        players = await asyncio.to_thread(load_tournament_players_sync, event_id)
+        thread_id_str = await asyncio.to_thread(load_event_thread_id_sync, event_id)
+        shim = _RecoveryManager(bot, event_id, int(thread_id_str) if thread_id_str else 0, players, "team")
+        await maybe_post_team_trophy_hype(shim)
         return
     resolved = await _resolve_announcement_standings(event_id)
     if resolved is None:
@@ -3038,6 +3044,7 @@ async def post_trophy_hype(
     player_colors: dict[str, str | None],
     deck_data: dict[str, "ParticipantDeckData"],
     dm_info: dict,
+    format_title=None,
 ) -> bool:
     """Send the champion hype card. Returns True when handled (sent, or skipped because the card is
     already in the channel / every champion self-posted); False on a recoverable miss (no channel,
@@ -3070,6 +3077,7 @@ async def post_trophy_hype(
         remaining, event_name=event_name, displays=displays,
         player_colors=player_colors, deck_data=deck_data,
         guild_id=getattr(guild, "id", None), thread_id=thread_id,
+        format_title=format_title,
     )
     try:
         await channel.send(view=hype_view)
@@ -3083,7 +3091,7 @@ async def post_trophy_hype(
 def _find_trophy_hype_channel(guild: discord.Guild | None) -> discord.TextChannel | None:
     if guild is None:
         return None
-    return guild.get_channel(TROPHY_HYPE_CHANNEL_ID)
+    return _channel_matching_name(guild, settings.pod_draft_trophy_hype_channel_name)
 
 
 async def _scan_trophy_hype_channel(channel: discord.TextChannel, after, recap_url: str):
@@ -3151,13 +3159,17 @@ class _RecoveryManager:
         return None
 
 
-def _load_unannounced_finalized_sync() -> list[tuple[str, str]]:
+def _load_unannounced_finalized_sync() -> list[tuple[str, str, datetime]]:
     cutoff = datetime.now(timezone.utc) - CHAMPIONSHIP_RECONCILE_WINDOW
     with SessionLocal() as session:
         return [
-            (row[0], row[1])
+            (row[0], row[1], row[2])
             for row in session.execute(
-                select(PodDraftEvent.id, PodDraftEvent.discord_thread_id).where(
+                select(
+                    PodDraftEvent.id,
+                    PodDraftEvent.discord_thread_id,
+                    PodDraftEvent.finalized_at,
+                ).where(
                     PodDraftEvent.finalized_at.is_not(None),
                     PodDraftEvent.championship_posted_at.is_(None),
                     PodDraftEvent.finalized_at >= cutoff,
@@ -3232,18 +3244,22 @@ async def rehydrate_active_tournaments(bot) -> None:
         log.info(f"startup sweep rehydrated {restored} in-progress tournament(s)")
 
 
-async def post_championship_for_event(bot, event_id: str, thread_id: str | int) -> bool:
+async def post_championship_for_event(
+    bot, event_id: str, thread_id: str | int, *, force: bool = True,
+) -> bool:
     """Post the championship announcement for a finalized event with no live manager (restart sweep,
-    /pod-backfill). Idempotent via the championship_posted_at DB guard."""
+    /pod-backfill). Idempotent via the championship_posted_at DB guard. `force` posts with whatever decks
+    have landed; pass False to post only once the showcased decks are in, so a restart mid-deck-wait
+    doesn't jump the gate."""
     players = await asyncio.to_thread(load_tournament_players_sync, event_id)
     pairing_mode = await asyncio.to_thread(load_event_pairing_mode_sync, event_id)
     shim = _RecoveryManager(bot, event_id, int(thread_id), players, pairing_mode)
     if pairing_mode == "team":
         from bot.services.pod_team_showcase import maybe_post_team_championship
 
-        await maybe_post_team_championship(shim, force=True)
+        await maybe_post_team_championship(shim, force=force)
     else:
-        await maybe_post_championship(shim, force=True)
+        await maybe_post_championship(shim, force=force)
     return shim.champion_announced
 
 
@@ -3272,15 +3288,33 @@ async def refresh_standings_for_event(bot, event_id: str, thread_id: str | int) 
 
 
 async def reconcile_unannounced_championships(bot) -> None:
-    """Startup sweep: post the championship for any recently-finalized pod whose one-time announcement
-    never went out (e.g. the bot restarted between finalize and post). Idempotent via the DB guard."""
+    """Startup sweep: finish the one-time championship for any recently-finalized pod whose announcement
+    never went out (e.g. the bot restarted between finalize and post). A restart still inside the deck-wait
+    window re-arms the remaining wait rather than forcing, so the post keeps holding for the showcased
+    decks; once the wait has elapsed it posts with whatever landed. Idempotent via the DB guard."""
     rows = await asyncio.to_thread(_load_unannounced_finalized_sync)
+    now = datetime.now(timezone.utc)
     posted = 0
-    for event_id, thread_id in rows:
-        if await post_championship_for_event(bot, event_id, thread_id):
-            posted += 1
+    for event_id, thread_id, finalized_at in rows:
+        remaining = CHAMPIONSHIP_DEADLINE_SECONDS - (now - finalized_at).total_seconds()
+        if remaining <= 0:
+            if await post_championship_for_event(bot, event_id, thread_id):
+                posted += 1
+            continue
+        await post_championship_for_event(bot, event_id, thread_id, force=False)
+        asyncio.create_task(_delayed_championship_post(bot, event_id, thread_id, remaining))
     if posted:
         log.info(f"startup sweep reconciled {posted} unannounced championship(s)")
+
+
+async def _delayed_championship_post(bot, event_id: str, thread_id: str | int, delay: float) -> None:
+    """Re-armed deck-wait deadline after a restart: once the remaining wait elapses, post with whatever
+    decks landed. Idempotent via the championship_posted_at guard, so an earlier deck-driven post wins."""
+    try:
+        await asyncio.sleep(delay)
+    except asyncio.CancelledError:
+        return
+    await post_championship_for_event(bot, event_id, thread_id, force=True)
 
 
 async def _post_or_update_live_standings(manager) -> None:
