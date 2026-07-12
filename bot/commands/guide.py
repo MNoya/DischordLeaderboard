@@ -48,6 +48,7 @@ SYNC_POSTED = "posted"
 SYNC_NO_CHANNEL = "no-channel"
 SYNC_FORBIDDEN = "forbidden"
 SYNC_FAILED = "failed"
+SYNC_STALE = "stale"
 
 
 async def sync_channel(guild: discord.Guild, channel_name: str,
@@ -85,35 +86,30 @@ async def sync_channel(guild: discord.Guild, channel_name: str,
 
 
 async def sync_set_tracking_todo(guild: discord.Guild, http) -> tuple[str, str]:
-    """Repoint the 'See what people are discussing' Server Guide To-Do at the active set's channel:
-    (status, human-readable result line). The Server Guide (``new-member-welcome``) isn't wrapped by
-    discord.py, so this is a raw REST call needing Manage Server; a missing permission or a guild
-    without the feature reports and moves on rather than failing the sync."""
+    """Report whether the 'See what people are discussing' Server Guide To-Do points at the active set's
+    channel: (status, human-readable result line). Read-only by necessity — Discord blocks bots from
+    editing the Server Guide (``new-member-welcome`` returns "Bots cannot use this endpoint"), so a
+    drifted To-Do is flagged for a mod to repoint by hand in Server Settings → Onboarding."""
     route = Route("GET", "/guilds/{guild_id}/new-member-welcome", guild_id=guild.id)
     try:
         welcome = await http.request(route)
     except discord.HTTPException:
-        return SYNC_FAILED, "⚠️ Latest channel: Server Guide unavailable (needs Manage Server)"
+        return SYNC_FAILED, "⚠️ Latest channel: could not read the Server Guide"
     actions = welcome.get("new_member_actions") or []
     index = set_tracking_todo_index(actions, guild.channels)
     if index is None:
-        return SYNC_NO_CHANNEL, "⚠️ Latest channel: no set-tracking action found"
+        return SYNC_NO_CHANNEL, "⚠️ Latest channel: no set-tracking To-Do found"
     seed = active_set_seed()
     target = channel_for_set(guild.channels, seed, LATEST_SET_CATEGORY)
     if target is None:
-        return SYNC_NO_CHANNEL, f"⚠️ Latest channel: no channel for the active set ({seed.code})"
-    if str(actions[index].get("channel_id")) == str(target.id):
+        return SYNC_NO_CHANNEL, f"⚠️ Latest channel: no channel found for the active set {seed.code}"
+    current_id = str(actions[index].get("channel_id"))
+    if current_id == str(target.id):
         return SYNC_CURRENT, f"✅ Latest channel points to {target.mention}"
-    updated = [dict(action) for action in actions]
-    updated[index]["channel_id"] = str(target.id)
-    body = {"enabled": welcome["enabled"], "welcome_message": welcome["welcome_message"],
-            "new_member_actions": updated}
-    try:
-        await http.request(Route("PATCH", "/guilds/{guild_id}/new-member-welcome", guild_id=guild.id), json=body)
-    except discord.HTTPException:
-        log.warning("guide: could not update the latest-channel To-Do", exc_info=True)
-        return SYNC_FAILED, "⚠️ Latest channel: update failed (needs Manage Server)"
-    return SYNC_UPDATED, f"🔄 Latest channel → {target.mention}"
+    current = guild.get_channel(int(current_id)) if current_id.isdigit() else None
+    current_ref = current.mention if current is not None else f"`{current_id}`"
+    return SYNC_STALE, (f"⚠️ Latest channel still points to {current_ref} but should be {target.mention}\n"
+                        'Update the "See what people are discussing" To-Do under Server Settings → Onboarding.')
 
 
 def _build_view(content: GuideContent, show_title: bool = True) -> ui.LayoutView:
