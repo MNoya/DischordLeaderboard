@@ -242,19 +242,28 @@ export function FinalBallotScorecard({
     const ratingsByName = buildRatingsByName(ratingsSnapshot);
     const rankedBallots = rankBallots(groupBallotRows(ballots), ratingsByName);
     const userBallot = findUserBallot(rankedBallots, picksBySlot);
+    const completeScores = rankedBallots
+      .filter((b) => b.picks.size === SLOTS.length)
+      .map((b) => b.score);
     return {
       score: userBallot?.score ?? scoreBallot(picksBySlot as Map<SlotKey, string>, ratingsByName),
       rank: userBallot?.rank ?? null,
       total: rankedBallots.length,
       bestScore: bestPossibleTeam(cards, SLOTS, ratingsByName).score,
       crowdScore: mostPopularTeam(pickStats, SLOTS, ratingsByName).score,
+      floor: completeScores.length > 0 ? Math.min(...completeScores) : 0,
     };
   }, [ratingsSnapshot, pickStats, ballots, cards, picksBySlot]);
 
   const medal = result.rank !== null && result.rank <= 3 ? (result.rank as 1 | 2 | 3) : null;
   const accent = medal ? MEDAL_COLOR[medal] : GREEN;
-  const fillPct = result.bestScore > 0 ? Math.min(100, (result.score / result.bestScore) * 100) : 0;
-  const crowdPct = result.bestScore > 0 ? Math.min(100, (result.crowdScore / result.bestScore) * 100) : 0;
+  // Track spans lowest complete ballot → best possible; 0-based when that range collapses
+  const floor = result.bestScore > result.floor ? result.floor : 0;
+  const span = result.bestScore - floor;
+  const barPct = (value: number) =>
+    span > 0 ? Math.min(100, Math.max(0, ((value - floor) / span) * 100)) : 0;
+  const fillPct = result.score > 0 ? Math.max(3, barPct(result.score)) : 0;
+  const crowdPct = barPct(result.crowdScore);
 
   return (
     <div
@@ -309,7 +318,8 @@ function FinalBallotLegend() {
         <span className="text-subtle">— your ballot's summed <b className="font-semibold text-text">GIH win rate</b></span>
       </div>
       <div className="text-subtle">
-        The bar tracks your score toward the <b className="font-semibold text-text">best possible</b> ballot;
+        The bar spans the <b className="font-semibold text-text">lowest completed ballot</b> to
+        the <b className="font-semibold text-text">best possible</b> ballot;
         the tick marks the <b className="font-semibold text-text">crowd team</b>
       </div>
     </div>
