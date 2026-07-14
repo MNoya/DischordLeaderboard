@@ -3,14 +3,27 @@ import { HelpCircle } from "lucide-react";
 import { Tooltip } from "../Tooltip";
 import { groupBySlot, findExtremes, classifyYourPick } from "../../data/p0p1Stats";
 import { SLOTS } from "../../data/p0p1Slots";
-import { buildRatingsByName, bestPossibleTeam } from "../../data/p0p1Results";
+import {
+  buildRatingsByName,
+  bestPossibleTeam,
+  mostPopularTeam,
+  scoreBallot,
+  groupBallotRows,
+  rankBallots,
+  findUserBallot,
+} from "../../data/p0p1Results";
 import type { RatingsSnapshot } from "../../data/p0p1Results";
-import type { Card, P0P1PickStat, SlotKey } from "../../types/p0p1";
+import type { Card, P0P1BallotRow, P0P1PickStat, SlotKey } from "../../types/p0p1";
 
 type PickState = "fav" | "pack" | "rogue";
 type ScoredPick = { state: PickState; cardName: string; pickCount: number };
 
 export const CHAMFER = "polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%)";
+export const MEDAL_COLOR: Record<1 | 2 | 3, string> = {
+  1: "#ffc63a",
+  2: "#c0c8d6",
+  3: "#c87941",
+};
 const GREEN = "#2ee85c";
 const CELL_ORDER: Record<PickState, number> = { fav: 0, pack: 1, rogue: 2 };
 const CAT_COLOR: Record<PickState, string> = {
@@ -204,6 +217,101 @@ function MidwayBallotLegend() {
     <div className="text-left leading-snug">
       <span className="font-semibold" style={{ color: GREEN }}>Best possible picks</span>{" "}
       <span className="text-subtle">— the top card for a given slot based on GIH win rate</span>
+    </div>
+  );
+}
+
+// ── Final variant ──────────────────────────────────────────────────────────────
+
+const MEDAL_EMOJI: Record<1 | 2 | 3, string> = { 1: "🥇", 2: "🥈", 3: "🥉" };
+
+export function FinalBallotScorecard({
+  ratingsSnapshot,
+  pickStats,
+  ballots,
+  cards,
+  picksBySlot,
+}: {
+  ratingsSnapshot: RatingsSnapshot;
+  pickStats: P0P1PickStat[];
+  ballots: P0P1BallotRow[];
+  cards: Card[];
+  picksBySlot: Map<string, string>;
+}) {
+  const result = useMemo(() => {
+    const ratingsByName = buildRatingsByName(ratingsSnapshot);
+    const rankedBallots = rankBallots(groupBallotRows(ballots), ratingsByName);
+    const userBallot = findUserBallot(rankedBallots, picksBySlot);
+    return {
+      score: userBallot?.score ?? scoreBallot(picksBySlot as Map<SlotKey, string>, ratingsByName),
+      rank: userBallot?.rank ?? null,
+      total: rankedBallots.length,
+      bestScore: bestPossibleTeam(cards, SLOTS, ratingsByName).score,
+      crowdScore: mostPopularTeam(pickStats, SLOTS, ratingsByName).score,
+    };
+  }, [ratingsSnapshot, pickStats, ballots, cards, picksBySlot]);
+
+  const medal = result.rank !== null && result.rank <= 3 ? (result.rank as 1 | 2 | 3) : null;
+  const accent = medal ? MEDAL_COLOR[medal] : GREEN;
+  const fillPct = result.bestScore > 0 ? Math.min(100, (result.score / result.bestScore) * 100) : 0;
+  const crowdPct = result.bestScore > 0 ? Math.min(100, (result.crowdScore / result.bestScore) * 100) : 0;
+
+  return (
+    <div
+      className="inline-block animate-fadeUpIn"
+      style={{ clipPath: CHAMFER, background: medal ? `${accent}8c` : "#3b4458", padding: 1 }}
+    >
+      <div className="bg-surface2 w-[clamp(280px,22vw,340px)] px-5 py-2.5 flex flex-col gap-2" style={{ clipPath: CHAMFER }}>
+        <Tooltip label={<FinalBallotLegend />} side="bottom" align="start" hideArrow className="max-w-[320px]">
+          <button
+            type="button"
+            className="group inline-flex items-center gap-1.5 self-start cursor-help bg-transparent border-0 p-0"
+          >
+            <HelpCircle size={15} strokeWidth={2} className="text-white transition-colors" />
+            <span className="font-display text-white" style={{ fontSize: 15, letterSpacing: "0.22em" }}>YOUR BALLOT</span>
+          </button>
+        </Tooltip>
+
+        <div className="flex items-baseline justify-between">
+          <span className="flex items-baseline gap-1.5">
+            <span className="font-mono tabular-nums leading-none" style={{ fontSize: 24, color: accent }}>
+              {result.score.toFixed(1)}
+            </span>
+            <span className="font-body text-[12px] leading-none" style={{ color: accent }}>GIH WR SUM</span>
+          </span>
+          {result.rank !== null && (
+            <span
+              className={`font-mono tabular-nums text-[12px] leading-none ${medal ? "" : "text-subtle"}`}
+              style={medal ? { color: accent } : undefined}
+            >
+              {medal ? `${MEDAL_EMOJI[medal]} ` : ""}#{result.rank} of {result.total}
+            </span>
+          )}
+        </div>
+
+        <div className="h-2.5 rounded-[1px] relative -ml-[5px]" style={{ background: "#3b4458" }} aria-hidden>
+          <div
+            className="absolute top-0 left-0 h-full rounded-[1px]"
+            style={{ width: `${fillPct}%`, background: accent }}
+          />
+          <div className="absolute top-0 h-full w-px bg-white/50" style={{ left: `${crowdPct}%` }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FinalBallotLegend() {
+  return (
+    <div className="flex flex-col gap-1.5 text-left leading-snug">
+      <div>
+        <span className="font-semibold" style={{ color: GREEN }}>Score</span>{" "}
+        <span className="text-subtle">— your ballot's summed <b className="font-semibold text-text">GIH win rate</b></span>
+      </div>
+      <div className="text-subtle">
+        The bar tracks your score toward the <b className="font-semibold text-text">best possible</b> ballot;
+        the tick marks the <b className="font-semibold text-text">crowd team</b>
+      </div>
     </div>
   );
 }

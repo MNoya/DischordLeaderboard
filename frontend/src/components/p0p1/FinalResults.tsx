@@ -8,7 +8,7 @@ import { DiscordIcon } from "../BrandIcons";
 import { MidwayBreakdownList } from "./MidwayBreakdownList";
 import { useMidwayVersusPager, MidwayVersusModal } from "./MidwayVersusCard";
 import { breakdownStripAccent, SLOT_ACCENT } from "./slotVisuals";
-import { CHAMFER } from "./P0P1BallotScorecard";
+import { CHAMFER, MEDAL_COLOR } from "./P0P1BallotScorecard";
 import { SLOTS } from "../../data/p0p1Slots";
 import {
   buildRatingsByName,
@@ -19,6 +19,7 @@ import {
   gihwrBounds,
   groupBallotRows,
   rankBallots,
+  findUserBallot,
   highlightsFeed,
   GIH_SAMPLE_FLOOR,
 } from "../../data/p0p1Results";
@@ -97,22 +98,6 @@ function ballotToEntries(ballot: RankedBallot, setCode: string, ratingsByName: M
       pctLabel: gihwr !== null ? gihwrLabel(gihwr) : "—",
     };
   });
-}
-
-function findUserBallot(
-  rankedBallots: RankedBallot[],
-  picksBySlot: Map<string, string>,
-): RankedBallot | null {
-  if (picksBySlot.size === 0) return null;
-  for (const ballot of rankedBallots) {
-    if (ballot.picks.size !== picksBySlot.size) continue;
-    let match = true;
-    for (const [slot, cardName] of picksBySlot) {
-      if (ballot.picks.get(slot as SlotKey) !== cardName) { match = false; break; }
-    }
-    if (match) return ballot;
-  }
-  return null;
 }
 
 // ── Per-slot contribution bar ─────────────────────────────────────────────────
@@ -269,9 +254,9 @@ function ContributionBar({
 // ── Your result ──────────────────────────────────────────────────────────────
 
 const PODIUM: Record<number, { emoji: string; label: string; color: string }> = {
-  1: { emoji: "🥇", label: "1st place", color: "#ffc63a" },
-  2: { emoji: "🥈", label: "2nd place", color: "#c0c8d6" },
-  3: { emoji: "🥉", label: "3rd place", color: "#c87941" },
+  1: { emoji: "🥇", label: "1st place", color: MEDAL_COLOR[1] },
+  2: { emoji: "🥈", label: "2nd place", color: MEDAL_COLOR[2] },
+  3: { emoji: "🥉", label: "3rd place", color: MEDAL_COLOR[3] },
 };
 
 function YourResultCard({
@@ -535,9 +520,9 @@ function ChampionCard({
 }
 
 const MEDAL_ROW_STYLE: Record<1 | 2 | 3, { color: string; label: string; tint: string }> = {
-  1: { color: "#ffc63a", label: "1ST", tint: "linear-gradient(90deg, #ffc63a12, transparent 55%)" },
-  2: { color: "#c0c8d6", label: "2ND", tint: "linear-gradient(90deg, #c0c8d612, transparent 55%)" },
-  3: { color: "#c87941", label: "3RD", tint: "linear-gradient(90deg, #c8794112, transparent 55%)" },
+  1: { color: MEDAL_COLOR[1], label: "1ST", tint: `linear-gradient(90deg, ${MEDAL_COLOR[1]}12, transparent 55%)` },
+  2: { color: MEDAL_COLOR[2], label: "2ND", tint: `linear-gradient(90deg, ${MEDAL_COLOR[2]}12, transparent 55%)` },
+  3: { color: MEDAL_COLOR[3], label: "3RD", tint: `linear-gradient(90deg, ${MEDAL_COLOR[3]}12, transparent 55%)` },
 };
 
 function MedalRow({
@@ -1281,12 +1266,6 @@ export function FinalResults({
 
   return (
     <div className="flex flex-col gap-6">
-      {dateCaption && (
-        <p className="text-center text-dim font-mono text-[11px] tracking-widest uppercase">
-          17lands data through {dateCaption} · final results
-        </p>
-      )}
-
       {/* Sub-tab bar */}
       <div className="flex items-center gap-4">
         <div className="flex gap-1 bg-surface2 border border-border rounded-md p-1">
@@ -1305,11 +1284,6 @@ export function FinalResults({
             </button>
           ))}
         </div>
-        {rankedBallots.length > 0 && (
-          <span className="font-mono text-[11px] text-dim">
-            {rankedBallots.length} participants
-          </span>
-        )}
       </div>
 
       {/* ── OVERVIEW ─────────────────────────────────────────────────── */}

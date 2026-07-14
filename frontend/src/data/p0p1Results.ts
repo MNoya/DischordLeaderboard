@@ -272,6 +272,23 @@ export function rankBallots(
   return scored;
 }
 
+// Locate the viewer's ballot by exact slot→card match (public rows carry no user id).
+export function findUserBallot(
+  rankedBallots: RankedBallot[],
+  picksBySlot: Map<string, string>,
+): RankedBallot | null {
+  if (picksBySlot.size === 0) return null;
+  for (const ballot of rankedBallots) {
+    if (ballot.picks.size !== picksBySlot.size) continue;
+    let match = true;
+    for (const [slot, cardName] of picksBySlot) {
+      if (ballot.picks.get(slot as SlotKey) !== cardName) { match = false; break; }
+    }
+    if (match) return ballot;
+  }
+  return null;
+}
+
 // ── Highlights feed ─────────────────────────────────────────────────────────
 // Trap / Sleeper / Prophet awards selected by GIHWR effect size; see
 // spec/p0p1-results.md → Highlights. Sleeper and Prophet popularity uses team
