@@ -798,10 +798,6 @@ function Leaderboard({
               ),
             )}
           </div>
-          {/* Peek fade — only when in peek mode and there are hidden rows */}
-          {isPeek && hasMore && (
-            <div className="absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-surface2 to-transparent pointer-events-none" />
-          )}
         </div>
         {isPeek && hasMore && onSeeAll && (
           <button
