@@ -17,6 +17,7 @@ import {
   gihwrBounds,
   groupBallotRows,
   rankBallots,
+  buildStandingsList,
   findUserBallot,
   highlightsFeed,
   GIH_SAMPLE_FLOOR,
@@ -24,8 +25,10 @@ import {
 import type {
   RatingsSnapshot,
   TeamPick,
+  TeamResult,
   CardRating,
   RankedBallot,
+  SyntheticStanding,
   Highlight,
   TrapHighlight,
   SleeperHighlight,
@@ -200,7 +203,7 @@ function ContributionBar({
                 src={card.imageArtCrop}
                 alt=""
                 aria-hidden
-                className="absolute inset-0 w-full -top-1 object-cover pointer-events-none"
+                className="absolute inset-0 w-full -top-3.5 object-cover pointer-events-none"
               />
             )}
             <div className="absolute inset-0 bg-black/55 pointer-events-none" />
@@ -245,6 +248,116 @@ function ContributionBar({
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// ── Synthetic reference rows ─────────────────────────────────────────────────
+
+const SYNTHETIC_STYLE: Record<SyntheticStanding["kind"], { label: string; color: string }> = {
+  best: { label: "Best possible", color: "#3fe0d0" },
+  crowd: { label: "Crowd Picks", color: "#7aa2ff" },
+};
+
+function BestPossibleBadge() {
+  return (
+    <span
+      className="ml-2 text-[10px] font-normal font-display tracking-widest"
+      style={{ color: SYNTHETIC_STYLE.best.color }}
+    >
+      ✦ BEST POSSIBLE
+    </span>
+  );
+}
+
+function syntheticToBallot(standing: SyntheticStanding): RankedBallot {
+  const picks = new Map<SlotKey, string>();
+  for (const p of standing.team.picks) {
+    if (p.cardName) picks.set(p.slot, p.cardName);
+  }
+  return {
+    ballotId: standing.kind === "best" ? -1 : -2,
+    name: SYNTHETIC_STYLE[standing.kind].label,
+    avatarUrl: null,
+    picks,
+    score: standing.team.score,
+    rank: 0,
+    percentile: 0,
+  };
+}
+
+function SyntheticRow({
+  standing,
+  setCode,
+  maxScore,
+  cardsByName,
+  ratingsByName,
+}: {
+  standing: SyntheticStanding;
+  setCode: string;
+  maxScore: number;
+  cardsByName: Map<string, Card>;
+  ratingsByName: Map<string, CardRating>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const style = SYNTHETIC_STYLE[standing.kind];
+  const ballot = useMemo(() => syntheticToBallot(standing), [standing]);
+  const entries = useMemo(
+    () => (expanded ? teamToEntries(standing.team.picks, setCode) : []),
+    [expanded, standing, setCode],
+  );
+
+  return (
+    <div
+      className="border-b border-border2 last:border-b-0"
+      style={{
+        boxShadow: `inset 3px 0 0 ${style.color}`,
+        backgroundImage: `linear-gradient(90deg, ${style.color}0d, transparent 55%)`,
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => setExpanded((e) => !e)}
+        className="w-full flex items-center gap-2 lg:gap-3 px-3 lg:px-4 py-2.5 lg:py-3 text-left cursor-pointer bg-transparent border-0"
+      >
+        <span className="w-7 lg:w-8 shrink-0" />
+
+        <div
+          className="w-6 h-6 lg:w-7 lg:h-7 rounded-full shrink-0 bg-surface flex items-center justify-center text-[11px] lg:text-[12px]"
+          style={{ color: style.color, boxShadow: `0 0 0 1.5px ${style.color}` }}
+        >
+          ✦
+        </div>
+
+        <span className="font-display tracking-wider flex-1 min-w-0 lg:flex-none lg:w-[150px] lg:shrink-0 text-[14px] lg:text-[15px] truncate text-subtle" style={{ color: style.color }}>
+          {style.label}
+        </span>
+
+        <ContributionBar
+          ballot={ballot}
+          maxScore={maxScore}
+          ratingsByName={ratingsByName}
+          cardsByName={cardsByName}
+        />
+
+        <span
+          className="font-mono tabular-nums text-[13px] lg:text-[14px] font-semibold shrink-0"
+          style={{ color: style.color }}
+        >
+          {standing.team.score.toFixed(1)}
+        </span>
+
+        <ChevronDown
+          size={14}
+          className={`shrink-0 text-muted transition-transform duration-150 ${expanded ? "rotate-180" : ""}`}
+        />
+      </button>
+
+      {expanded && (
+        <div className="px-3 lg:px-4 pb-4 pt-1">
+          <PickGrid entries={entries} cardsByName={cardsByName} />
+        </div>
+      )}
     </div>
   );
 }
@@ -319,11 +432,13 @@ function ChampionCard({
   ballot,
   total,
   isSelf,
+  isBest,
   cardsByName,
 }: {
   ballot: RankedBallot;
   total: number;
   isSelf: boolean;
+  isBest: boolean;
   cardsByName: Map<string, Card>;
 }) {
   const topPct = Math.max(1, Math.round((ballot.rank / total) * 100));
@@ -390,6 +505,7 @@ function ChampionCard({
                   YOU
                 </span>
               )}
+              {isBest && <BestPossibleBadge />}
             </div>
             <div className="text-[11px] sm:text-[12.5px] text-muted mt-0.5">
               Top {topPct}% of {total} ballots
@@ -440,6 +556,7 @@ function MedalRow({
   ballot,
   setCode,
   isSelf,
+  isBest,
   maxScore,
   cardsByName,
   ratingsByName,
@@ -448,6 +565,7 @@ function MedalRow({
   ballot: RankedBallot;
   setCode: string;
   isSelf: boolean;
+  isBest: boolean;
   maxScore: number;
   cardsByName: Map<string, Card>;
   ratingsByName: Map<string, CardRating>;
@@ -504,6 +622,7 @@ function MedalRow({
           {isSelf && (
             <span className="ml-2 text-[10px] font-normal text-subtle font-display tracking-widest">YOU</span>
           )}
+          {isBest && <BestPossibleBadge />}
         </span>
 
         <ContributionBar
@@ -541,6 +660,7 @@ function LeaderboardRow({
   ballot,
   setCode,
   isSelf,
+  isBest,
   maxScore,
   cardsByName,
   ratingsByName,
@@ -549,6 +669,7 @@ function LeaderboardRow({
   ballot: RankedBallot;
   setCode: string;
   isSelf: boolean;
+  isBest: boolean;
   maxScore: number;
   cardsByName: Map<string, Card>;
   ratingsByName: Map<string, CardRating>;
@@ -593,6 +714,7 @@ function LeaderboardRow({
           {isSelf && (
             <span className="ml-2 text-[10px] font-normal text-subtle font-display tracking-widest">YOU</span>
           )}
+          {isBest && <BestPossibleBadge />}
         </span>
 
         {/* bar lives here in the flex row — self-stretch fills full row height */}
@@ -627,6 +749,7 @@ function LeaderboardRow({
 function FloatingSelfRow({
   ballot,
   setCode,
+  isBest,
   maxScore,
   cardsByName,
   ratingsByName,
@@ -636,6 +759,7 @@ function FloatingSelfRow({
 }: {
   ballot: RankedBallot | undefined;
   setCode: string;
+  isBest: boolean;
   maxScore: number;
   cardsByName: Map<string, Card>;
   ratingsByName: Map<string, CardRating>;
@@ -669,6 +793,7 @@ function FloatingSelfRow({
         <span className="flex-1 min-w-0 lg:flex-none lg:w-[150px] lg:shrink-0 text-[14px] lg:text-[15px] truncate text-white font-semibold">
           {ballot.name}
           <span className="ml-2 text-[10px] font-normal text-subtle font-display tracking-widest">YOU</span>
+          {isBest && <BestPossibleBadge />}
         </span>
 
         <ContributionBar
@@ -695,6 +820,8 @@ const COLLAPSED_COUNT = 3;
 
 function Leaderboard({
   rankedBallots,
+  bestTeam,
+  crowdTeam,
   setCode,
   userBallotId,
   cardsByName,
@@ -705,6 +832,8 @@ function Leaderboard({
   stickyTop = 0,
 }: {
   rankedBallots: RankedBallot[];
+  bestTeam: TeamResult;
+  crowdTeam: TeamResult;
   setCode: string;
   userBallotId: number | null;
   cardsByName: Map<string, Card>;
@@ -715,8 +844,17 @@ function Leaderboard({
   /** Viewport offset (px) below which the floating self-row pins — clears sticky page chrome. */
   stickyTop?: number;
 }) {
-  const maxScore = rankedBallots[0]?.score ?? 1;
+  const standings = useMemo(
+    () => buildStandingsList(rankedBallots, bestTeam, crowdTeam),
+    [rankedBallots, bestTeam, crowdTeam],
+  );
   const isPeek = mode === "peek";
+  const maxScore = isPeek
+    ? rankedBallots[0]?.score ?? 1
+    : standings.entries.reduce(
+        (m, e) => Math.max(m, e.kind === "ballot" ? e.ballot.score : e.standing.team.score),
+        1,
+      );
   const hasMore = rankedBallots.length > COLLAPSED_COUNT;
   const useSpotlight = spotlight && isPeek;
 
@@ -752,6 +890,14 @@ function Leaderboard({
   const champion = useSpotlight ? visible.find((b) => b.rank === 1) ?? null : null;
   const rows = champion ? visible.filter((b) => b.ballotId !== champion.ballotId) : visible;
 
+  const entries = useMemo(
+    () =>
+      isPeek
+        ? rows.map((ballot) => ({ kind: "ballot" as const, ballot }))
+        : standings.entries,
+    [isPeek, rows, standings.entries],
+  );
+
   return (
     <div className="flex flex-col gap-3">
       {champion && (
@@ -759,6 +905,7 @@ function Leaderboard({
           ballot={champion}
           total={rankedBallots.length}
           isSelf={champion.ballotId === userBallotId}
+          isBest={standings.bestAchieverIds.has(champion.ballotId)}
           cardsByName={cardsByName}
         />
       )}
@@ -769,6 +916,7 @@ function Leaderboard({
               <FloatingSelfRow
                 ballot={rankedBallots.find((b) => b.ballotId === userBallotId)}
                 setCode={setCode}
+                isBest={userBallotId !== null && standings.bestAchieverIds.has(userBallotId)}
                 maxScore={maxScore}
                 cardsByName={cardsByName}
                 ratingsByName={ratingsByName}
@@ -777,31 +925,35 @@ function Leaderboard({
                 onScrollToRow={() => selfRowEl?.scrollIntoView({ behavior: "smooth", block: "center" })}
               />
             )}
-            {rows.map((ballot) =>
-              ballot.rank <= 3 ? (
-                <MedalRow
+            {entries.map((entry) => {
+              if (entry.kind === "synthetic") {
+                return (
+                  <SyntheticRow
+                    key={`synthetic-${entry.standing.kind}`}
+                    standing={entry.standing}
+                    setCode={setCode}
+                    maxScore={maxScore}
+                    cardsByName={cardsByName}
+                    ratingsByName={ratingsByName}
+                  />
+                );
+              }
+              const { ballot } = entry;
+              const Row = ballot.rank <= 3 ? MedalRow : LeaderboardRow;
+              return (
+                <Row
                   key={ballot.ballotId}
                   ballot={ballot}
                   setCode={setCode}
                   isSelf={ballot.ballotId === userBallotId}
+                  isBest={standings.bestAchieverIds.has(ballot.ballotId)}
                   maxScore={maxScore}
                   cardsByName={cardsByName}
                   ratingsByName={ratingsByName}
                   rowRef={ballot.ballotId === userBallotId ? setSelfRowEl : undefined}
                 />
-              ) : (
-                <LeaderboardRow
-                  key={ballot.ballotId}
-                  ballot={ballot}
-                  setCode={setCode}
-                  isSelf={ballot.ballotId === userBallotId}
-                  maxScore={maxScore}
-                  cardsByName={cardsByName}
-                  ratingsByName={ratingsByName}
-                  rowRef={ballot.ballotId === userBallotId ? setSelfRowEl : undefined}
-                />
-              ),
-            )}
+              );
+            })}
           </div>
         </div>
         {isPeek && hasMore && onSeeAll && (
@@ -1118,15 +1270,6 @@ export function FinalResults({
     () => (showYourPicks ? yourPicksEntries(picksBySlot, setCode, ratingsByName) : []),
     [showYourPicks, picksBySlot, setCode, ratingsByName],
   );
-  const crowdEntries = useMemo(
-    () => teamToEntries(crowdTeam.picks, setCode),
-    [crowdTeam.picks, setCode],
-  );
-  const bestEntries = useMemo(
-    () => teamToEntries(bestTeam.picks, setCode),
-    [bestTeam.picks, setCode],
-  );
-
   const versusList = useMemo(
     () =>
       buildMidwaySlotVersus(
@@ -1217,6 +1360,8 @@ export function FinalResults({
               </div>
               <Leaderboard
                 rankedBallots={rankedBallots}
+                bestTeam={bestTeam}
+                crowdTeam={crowdTeam}
                 setCode={setCode}
                 userBallotId={userBallot?.ballotId ?? null}
                 cardsByName={cardsByName}
@@ -1245,6 +1390,8 @@ export function FinalResults({
               <SectionLabel size={16} className="text-white">STANDINGS</SectionLabel>
               <Leaderboard
                 rankedBallots={rankedBallots}
+                bestTeam={bestTeam}
+                crowdTeam={crowdTeam}
                 setCode={setCode}
                 userBallotId={userBallot?.ballotId ?? null}
                 cardsByName={cardsByName}
@@ -1268,20 +1415,6 @@ export function FinalResults({
             {showYourPicks && (
               <PickGrid entries={yourEntries} cardsByName={cardsByName} onTileOpen={onTileOpen} />
             )}
-            <div className="flex items-baseline justify-center gap-3 mb-2 mt-4">
-              <SectionLabel size={22} className="text-white">CROWD PICKS</SectionLabel>
-              <span className="font-mono tabular-nums text-[18px] text-subtle">
-                {crowdTeam.score.toFixed(1)}
-              </span>
-            </div>
-            <PickGrid entries={crowdEntries} cardsByName={cardsByName} onTileOpen={onTileOpen} />
-            <div className="flex items-baseline justify-center gap-3 mb-2 mt-4">
-              <SectionLabel size={22} className="text-white">BEST POSSIBLE</SectionLabel>
-              <span className="font-mono tabular-nums text-[18px] text-subtle">
-                {bestTeam.score.toFixed(1)}
-              </span>
-            </div>
-            <PickGrid entries={bestEntries} cardsByName={cardsByName} onTileOpen={onTileOpen} />
           </div>
 
           <MidwayVersusModal pager={pager} bounds={bounds} />

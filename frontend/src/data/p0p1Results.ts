@@ -272,6 +272,55 @@ export function rankBallots(
   return scored;
 }
 
+// Ghost rows for the reference teams, inserted into the standings at their
+// score position. The Best row is hidden when a real ballot ties its score —
+// that ballot earns the badge instead (see bestAchieverIds).
+const BEST_SCORE_EPSILON = 1e-6;
+
+export interface SyntheticStanding {
+  kind: "best" | "crowd";
+  team: TeamResult;
+}
+
+export type StandingsEntry =
+  | { kind: "ballot"; ballot: RankedBallot }
+  | { kind: "synthetic"; standing: SyntheticStanding };
+
+export interface StandingsList {
+  entries: StandingsEntry[];
+  bestAchieverIds: Set<number>;
+}
+
+export function buildStandingsList(
+  rankedBallots: RankedBallot[],
+  bestTeam: TeamResult,
+  crowdTeam: TeamResult,
+): StandingsList {
+  const bestAchieverIds = new Set(
+    rankedBallots
+      .filter((b) => Math.abs(b.score - bestTeam.score) < BEST_SCORE_EPSILON)
+      .map((b) => b.ballotId),
+  );
+
+  const entries: StandingsEntry[] = [];
+  let crowdInserted = false;
+  for (const ballot of rankedBallots) {
+    if (!crowdInserted && ballot.score < crowdTeam.score) {
+      entries.push({ kind: "synthetic", standing: { kind: "crowd", team: crowdTeam } });
+      crowdInserted = true;
+    }
+    entries.push({ kind: "ballot", ballot });
+  }
+  if (!crowdInserted) {
+    entries.push({ kind: "synthetic", standing: { kind: "crowd", team: crowdTeam } });
+  }
+  if (bestAchieverIds.size === 0) {
+    entries.unshift({ kind: "synthetic", standing: { kind: "best", team: bestTeam } });
+  }
+
+  return { entries, bestAchieverIds };
+}
+
 // Locate the viewer's ballot by exact slot→card match (public rows carry no user id).
 export function findUserBallot(
   rankedBallots: RankedBallot[],
