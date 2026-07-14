@@ -15,7 +15,7 @@
     * Add basics to your sideboard to enable land swaps after Game 1.
 
 **Tournament Play:**
-5. The bot will send your pairing for each round via Direct Message.
+5. The bot will send your pairing for each of the 3 rounds via Direct Message.
 6. Add your opponent as a friend in Arena, then **Challenge** them to a **Limited Tournament Match** (Bo3).
 7. After each match, report your result in the bot DMs.
 

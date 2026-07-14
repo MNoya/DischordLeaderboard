@@ -1,12 +1,13 @@
 """T-24h / T-3h underfill checks fired by APScheduler date jobs, plus live RSVP-driven updates.
 
-Each check re-fetches the sesh embed's Yes list at fire time; events at or above the target stay
-silent. Short events get a silent nudge in the pod-draft-chat channel — no role ping — carrying the
-signup link back to the sesh post in the coordination channel. The T-24h check posts the nudge; the
-T-3h check deletes and reposts it so it resurfaces near the event. While the nudge is up, sesh RSVP
-edits drive `refresh_underfill_nudge` to keep the count current; once the pod hits the target the
-nudge is deleted. The nudge is located by scanning channel history for the bot's own message carrying
-the signup link — nothing is persisted to the database.
+Each check re-fetches the Yes list at fire time — the sesh embed for sesh-born pods, the signal
+members for card-born pods; events at or above the target stay silent. Short events get a silent
+nudge in the pod-draft-chat channel — no role ping — carrying the signup link back to the RSVP
+message in the coordination channel. The T-24h check posts the nudge; the T-3h check deletes and
+reposts it so it resurfaces near the event. While the nudge is up, RSVP changes (sesh edits or card
+clicks) keep the count current; once the pod hits the target the nudge is deleted. The nudge is
+located by scanning channel history for the bot's own message carrying the signup link — nothing is
+persisted to the database.
 """
 from __future__ import annotations
 
@@ -22,9 +23,10 @@ from sqlalchemy import select
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.discord_helpers import resolve_pod_chat_channel
-from bot.models import PodDraftEvent
+from bot.models import PodDraftEvent, PodSignal
 from bot.services.pod_schedule import build_underfill_message
-from bot.tasks.pod_draft_reminder import fetch_sesh_rsvps
+from bot.services.pod_signals import KIND_SCHEDULED
+from bot.tasks.pod_draft_reminder import event_rsvps, fetch_sesh_rsvps
 
 
 UNDERFILL_CHECK_HOURS = (24, 3)
@@ -103,10 +105,18 @@ async def fire_underfill(event_id: str, hours_before: int) -> None:
         log.info(f"fire_underfill: event {event_id} already started; skipping")
         return
 
-    rsvps = await fetch_sesh_rsvps(_bot, sesh_message_id)
-    if rsvps is None:
-        log.info(f"fire_underfill: sesh message {sesh_message_id} gone for event {event_id}; skipping")
-        return
+    if sesh_message_id is not None:
+        rsvps = await fetch_sesh_rsvps(_bot, sesh_message_id)
+        if rsvps is None:
+            log.info(f"fire_underfill: sesh message {sesh_message_id} gone for event {event_id}; skipping")
+            return
+        jump_url = _sesh_jump_url(sesh_message_id)
+    else:
+        rsvps = await event_rsvps(event_id, None)
+        jump_url = await asyncio.to_thread(_card_jump_url, event_id)
+        if jump_url is None:
+            log.info(f"fire_underfill: no scheduled card for event {event_id}; skipping")
+            return
     yes_count = len(rsvps[0])
     target = settings.pod_draft_target_players
 
@@ -115,7 +125,6 @@ async def fire_underfill(event_id: str, hours_before: int) -> None:
         log.warning("fire_underfill: pod-draft-chat channel unavailable")
         return
 
-    jump_url = _sesh_jump_url(sesh_message_id)
     nudge = await _find_nudge(channel, jump_url)
 
     if yes_count >= target:
@@ -136,7 +145,8 @@ async def fire_underfill(event_id: str, hours_before: int) -> None:
 
 
 async def refresh_underfill_nudge(bot: commands.Bot, sesh_message_id: str, yes_count: int) -> None:
-    """Edit the live underfill nudge in place when RSVPs change; delete it once the pod hits the target.
+    """Edit the live underfill nudge in place when sesh RSVPs change; delete it once the pod hits
+    the target.
 
     No-op until a check has posted a nudge — this only ever edits or deletes an existing message, never
     creates one.
@@ -144,6 +154,23 @@ async def refresh_underfill_nudge(bot: commands.Bot, sesh_message_id: str, yes_c
     loaded = await asyncio.to_thread(_load_event_for_nudge, str(sesh_message_id))
     if loaded is None:
         return
+    await _sync_nudge(bot, loaded, _sesh_jump_url(str(sesh_message_id)), yes_count)
+
+
+async def refresh_underfill_nudge_for_event(bot: commands.Bot, event_id: str, yes_count: int) -> None:
+    """Signal-keyed twin of refresh_underfill_nudge, fed the Yes count by the RSVP card handler."""
+    loaded = await asyncio.to_thread(_load_event_by_id_for_nudge, event_id)
+    if loaded is None:
+        return
+    jump_url = await asyncio.to_thread(_card_jump_url, event_id)
+    if jump_url is None:
+        return
+    await _sync_nudge(bot, loaded, jump_url, yes_count)
+
+
+async def _sync_nudge(
+    bot: commands.Bot, loaded: tuple[str, datetime, str], jump_url: str, yes_count: int,
+) -> None:
     name, event_time, status = loaded
     if status != "pending":
         return
@@ -152,7 +179,6 @@ async def refresh_underfill_nudge(bot: commands.Bot, sesh_message_id: str, yes_c
     if channel is None:
         return
 
-    jump_url = _sesh_jump_url(str(sesh_message_id))
     nudge = await _find_nudge(channel, jump_url)
     if nudge is None:
         return
@@ -170,6 +196,14 @@ def _load_event_for_nudge(sesh_message_id: str) -> tuple[str, datetime, str] | N
         event = session.execute(
             select(PodDraftEvent).where(PodDraftEvent.sesh_message_id == sesh_message_id)
         ).scalar_one_or_none()
+        if event is None:
+            return None
+        return event.name, event.event_time, event.socket_status
+
+
+def _load_event_by_id_for_nudge(event_id: str) -> tuple[str, datetime, str] | None:
+    with SessionLocal() as session:
+        event = session.get(PodDraftEvent, event_id)
         if event is None:
             return None
         return event.name, event.event_time, event.socket_status
@@ -210,3 +244,17 @@ def _sesh_jump_url(sesh_message_id: str) -> str:
         f"https://discord.com/channels/{settings.discord_guild_id}"
         f"/{settings.pod_draft_channel_id}/{sesh_message_id}"
     )
+
+
+def _card_jump_url(event_id: str) -> str | None:
+    """Jump link to the scheduled card that created this pod, or None for a pod with no card."""
+    with SessionLocal() as session:
+        row = session.execute(
+            select(PodSignal.guild_id, PodSignal.channel_id, PodSignal.message_id).where(
+                PodSignal.event_id == event_id, PodSignal.kind == KIND_SCHEDULED
+            )
+        ).first()
+    if row is None:
+        return None
+    guild_id, channel_id, message_id = row
+    return f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"

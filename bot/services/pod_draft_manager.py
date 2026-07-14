@@ -96,6 +96,21 @@ _RESTART_READY_MIN_PLAYERS = 2
 
 _SEEDING_REFRESH_HOOK = None
 _SEEDING_REPOST_HOOK = None
+_SECOND_TABLE_HOOK = None
+
+
+def set_second_table_hook(callback) -> None:
+    """The table layer registers its second-table offer here so the manager can fire it at draft
+    start without importing the command module (which imports the manager)."""
+    global _SECOND_TABLE_HOOK
+    _SECOND_TABLE_HOOK = callback
+
+
+def notify_second_table_offer(bot, event_id: str) -> None:
+    """Fire the registered second-table offer (no-op if unset). Called once the draft starts and the
+    seated roster is locked; the offer itself decides whether enough players are left over to bother."""
+    if _SECOND_TABLE_HOOK is not None:
+        asyncio.create_task(_SECOND_TABLE_HOOK(bot, event_id))
 
 
 def set_seeding_refresh_hook(callback) -> None:
@@ -1260,6 +1275,7 @@ class PodDraftManager:
         await self._retire_lobby_full_prompt()
         await self._retire_team_vote_offer()
         await asyncio.to_thread(self._seed_participants_at_draft_start)
+        notify_second_table_offer(self.bot, self.event_id)
         if self.pairing_mode == "team":
             await assign_teams_at_draft_start(self)
         await self.refresh_lobby_now()

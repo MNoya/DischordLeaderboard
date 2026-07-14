@@ -80,6 +80,7 @@ from bot.services.refresh import refresh_active_players
 from bot.services.refresh_report import build_refresh_report, format_elapsed
 from bot.services.seventeenlands import MinIntervalLimiter, SeventeenLandsClient
 from bot.sets import active_set_code
+from bot.commands.pod_rsvp import PodRsvpView
 from bot.tasks.pod_draft_reminder import init_reminder
 from bot.tasks.pod_daily_poll import PodPollView, init_daily_poll
 from bot.services.pod_launch import init_launch, rearm_signals
@@ -242,6 +243,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         bot.add_view(RolesView())
         bot.add_view(PodPollView())
         bot.add_view(PodQueueView())
+        bot.add_view(PodRsvpView())
 
         log.info("setup_hook: cogs loaded; run `!sync` to publish slash commands to Discord")
 

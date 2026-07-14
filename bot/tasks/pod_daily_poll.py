@@ -19,10 +19,11 @@ import discord
 from discord.ext import commands
 
 from bot import emojis
-from bot.commands.messages import MSG_FIRST_POD_TIP_POLL
+from bot.commands.messages import MSG_FIRST_POD_TIP_POLL, MSG_SLOT_ROLE_GRANTED
 from bot.commands.pod_queue import queue_role_mention
+from bot.commands.pod_rsvp import post_scheduled_card, sync_card_membership
 from bot.config import settings
-from bot.discord_helpers import NBSP, ZWSP, resolve_pod_chat_channel
+from bot.discord_helpers import NBSP, ZWSP
 from bot.services import pod_launch
 from bot.services.ping_roles import display_emoji, spec_named
 from bot.services.pod_roles import find_role, grant_pod_drafters, grant_role
@@ -46,20 +47,17 @@ log = logging.getLogger(__name__)
 
 _bot: commands.Bot | None = None
 
-POLL_TITLE = "Pod Launcher"
+POLL_TITLE = "Daily Pod Launcher"
 POLL_INTRO = (
-    "- Event thread will be created as soon as each pod reaches {threshold} players.\n"
-    "- Draftmancer lobby opens {lead} minutes before the scheduled time."
+    "• Event thread will be created as soon as each pod reaches {threshold} players.\n"
+    "• Draftmancer lobby opens {lead} minutes before the scheduled time.\n"
+    "• 3 rounds of Swiss, Bo3 matches. Pairings sent by DM. New here? Run /pod-guide."
 )
 MARKER_CLOSED = "Closed"
 POLL_PING = "{mention} `/draft` to start a pod anytime, or join one below"
 MSG_POLL_INACTIVE = "This poll is no longer active."
 MSG_SLOT_CLOSED = "That slot's time already passed. Catch the next poll."
 SLOT_ROLE_BY_BUCKET = {"EARLY": EARLY_POD_ROLE_NAME, "LATE": LATE_POD_ROLE_NAME}
-POLL_ROLE_GRANTED = (
-    "{emoji} You're now on {role} and will be pinged for drafts {when}. "
-    "Run `/roles` to manage your notifications."
-)
 
 
 def init_daily_poll(bot: commands.Bot) -> None:
@@ -72,6 +70,12 @@ def init_daily_poll(bot: commands.Bot) -> None:
     log.info(f"scheduled daily pod poll at {POLL_POST_HOUR_ET:02d}:00 ET on Mon/Tue/Fri/Sun")
 
 
+def _poll_channel(bot: commands.Bot) -> "discord.abc.Messageable | None":
+    """The launcher lives in the coordination channel, not pod-draft-chat, so a busy chat can't bury
+    it. Both the post and every re-render resolve through here so they never drift apart."""
+    return bot.get_channel(settings.pod_draft_channel_id)
+
+
 async def fire_daily_poll() -> None:
     if _bot is None:
         return
@@ -82,9 +86,9 @@ async def fire_daily_poll() -> None:
         log.info(f"daily poll already posted for {today}; skipping")
         return
 
-    channel = resolve_pod_chat_channel(_bot)
+    channel = _poll_channel(_bot)
     if channel is None:
-        log.warning("fire_daily_poll: no pod-draft-chat channel resolved")
+        log.warning("fire_daily_poll: coordination channel unresolved")
         return
 
     guild = getattr(channel, "guild", None)
@@ -110,26 +114,27 @@ def poll_ping_line(guild: discord.Guild | None) -> str | None:
 
 def initial_poll_embed(signal_date: date, guild: discord.Guild | None = None) -> discord.Embed:
     rows = [
-        (bucket.key, STATUS_OPEN, 0, slot_event_time(signal_date, bucket.key), [])
+        (bucket.key, STATUS_OPEN, 0, slot_event_time(signal_date, bucket.key), [], None)
         for bucket in POLL_BUCKETS
     ]
     return build_poll_embed(rows, guild)
 
 
 def build_poll_embed(
-    rows: list[tuple[str, str, int, datetime | None, list[str]]], guild: discord.Guild | None = None,
+    rows: list[tuple[str, str, int, datetime | None, list[str], str | None]],
+    guild: discord.Guild | None = None,
 ) -> discord.Embed:
     intro = POLL_INTRO.format(
         threshold=emojis.mana_number(settings.pod_signal_fire_threshold), lead=pod_launch.REMINDER_LEAD_MIN,
     )
-    slot_times = [slot_time for _, _, _, slot_time, _ in rows if slot_time is not None]
+    slot_times = [row[3] for row in rows if row[3] is not None]
     day = slot_times[0].astimezone(SCHEDULE_TZ) if slot_times else None
     title = f"{POLL_TITLE} - {day:%b %-d}" if day else POLL_TITLE
     embed = discord.Embed(
         description=f"## {NBSP * 2}🚀 {title}\n{intro}",
         color=discord.Color.green(),
     )
-    for bucket_key, status, count, slot_time, names in rows:
+    for bucket_key, status, count, slot_time, names, thread_id in rows:
         bucket = bucket_by_key(bucket_key)
         if bucket is None:
             continue
@@ -143,9 +148,11 @@ def build_poll_embed(
         if status == STATUS_EXPIRED:
             body = MARKER_CLOSED
         elif names:
-            body = "\n".join(f"> {name}" for name in names)
+            body = "\n".join(f"> {member}" for member in names)
         else:
             body = "-"
+        if thread_id:
+            body += f"\n<#{thread_id}>"
         embed.add_field(name=ZWSP, value=f"{header}\n{body}", inline=True)
     return embed
 
@@ -193,6 +200,20 @@ class PodPollView(discord.ui.View):
         embed = build_poll_embed(rows, interaction.guild)
         await interaction.response.edit_message(embed=embed, view=self)
 
+        if (
+            result.changed
+            and result.state.status == STATUS_FIRED
+            and result.state.slot_time is not None
+            and interaction.guild is not None
+            and isinstance(interaction.user, discord.Member)
+        ):
+            event_id = await asyncio.to_thread(
+                pod_launch.scheduled_event_for_slot_sync, str(interaction.guild.id), result.state.slot_time,
+            )
+            if event_id is not None:
+                await sync_card_membership(
+                    interaction.client, event_id, interaction.user, joining=result.joined,
+                )
         if result.first_contact:
             tip = MSG_FIRST_POD_TIP_POLL.format(threshold=settings.pod_signal_fire_threshold)
             await interaction.followup.send(tip, ephemeral=True)
@@ -201,7 +222,7 @@ class PodPollView(discord.ui.View):
             granted_role = await _grant_slot_role(interaction.user, bucket_key)
             if granted_role is not None:
                 spec = spec_named(granted_role.name)
-                note = POLL_ROLE_GRANTED.format(
+                note = MSG_SLOT_ROLE_GRANTED.format(
                     emoji=display_emoji(spec) or "", role=granted_role.mention, when=spec.grant_when,
                 )
                 await interaction.followup.send(
@@ -211,16 +232,22 @@ class PodPollView(discord.ui.View):
             asyncio.create_task(self._launch_slot(interaction.client, result.state, message_id))
 
     async def _launch_slot(self, bot: commands.Bot, state, message_id: str) -> None:
+        """A fired slot graduates into a scheduled RSVP card: the signups carry over as Yes, and the
+        card gathers any Maybe / No plus late Yes right up to the lobby open. Falls back to reopening
+        the slot if the card can't be posted."""
         set_code = active_set_code()
         slot_time = state.slot_time
         name = await asyncio.to_thread(pod_launch.ondemand_event_name_sync, set_code, slot_time)
-        event_id = await pod_launch.launch_from_signal(
-            bot, state.signal_id, set_code=set_code, event_time=slot_time, name=name, open_now=False,
-        )
-        if event_id is not None:
-            return
-        await asyncio.to_thread(pod_launch.release_fire_sync, state.signal_id)
-        log.warning(f"slot fire for {state.signal_id} failed to launch; reverted to open")
+        signups = await asyncio.to_thread(pod_launch.poll_yes_members_sync, state.signal_id)
+        channel = _poll_channel(bot)
+        event_id = None
+        if isinstance(channel, discord.TextChannel):
+            event_id = await post_scheduled_card(
+                bot, channel, set_code=set_code, event_time=slot_time, name=name, preseed_yes=signups,
+            )
+        if event_id is None:
+            await asyncio.to_thread(pod_launch.release_fire_sync, state.signal_id)
+            log.warning(f"slot fire for {state.signal_id} failed to launch; reverted to open")
         rows = await asyncio.to_thread(pod_launch.poll_snapshot_sync, message_id)
         await _rerender_poll(bot, message_id, rows)
 
@@ -238,7 +265,7 @@ async def _grant_slot_role(member: discord.Member, bucket_key: str) -> discord.R
 
 
 async def _rerender_poll(bot: commands.Bot, message_id: str, rows: list) -> None:
-    channel = resolve_pod_chat_channel(bot)
+    channel = _poll_channel(bot)
     if channel is None:
         return
     embed = build_poll_embed(rows, getattr(channel, "guild", None))

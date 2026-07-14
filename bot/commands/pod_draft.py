@@ -42,6 +42,8 @@ from bot.services.pod_drafts import (
     lobby_match_status,
     search_event_names_sync,
 )
+from bot.commands.pod_rsvp import reschedule_event
+from bot.services import pod_launch
 from bot.services.player_stats import SeededAttendee, rank_ordered_names, seed_attendees, seated_ring_order
 from bot.services.pod_seating_select import SEATING_ORDER_MARKER, seating_change_message
 from bot.services.pod_seating_image import drop_unrenderable, render_octagon_png
@@ -809,6 +811,7 @@ async def build_pod_settings_view(bot, event_id: str, *, is_owner: bool) -> PodS
     event_name = await asyncio.to_thread(load_event_name_sync, event_id)
     manager = ACTIVE_POD_MANAGERS.get(event_id)
     drafting = manager is not None and (manager.drafting or manager.draft_complete)
+    scheduled = await asyncio.to_thread(pod_launch.scheduled_card_ref_sync, event_id) is not None
 
     async def on_format(inter: discord.Interaction, code: str) -> str | None:
         return await set_event_format(event_id, code)
@@ -857,6 +860,12 @@ async def build_pod_settings_view(bot, event_id: str, *, is_owner: bool) -> PodS
         async def on_cancel(inter: discord.Interaction) -> str | None:
             return await cancel_pod_event(event_id, actor=actor_label(inter))
 
+    on_reschedule = None
+    if scheduled and not drafting:
+        async def on_reschedule(inter: discord.Interaction, raw: str) -> str | None:
+            return await reschedule_event(
+                inter.client, event_id, raw, guild=inter.guild, actor_id=str(inter.user.id))
+
     return PodSettingsView(
         on_format=None if drafting else on_format, on_pairing=None if drafting else on_pairing,
         current_code=current_code, current_mode=current_mode,
@@ -866,7 +875,7 @@ async def build_pod_settings_view(bot, event_id: str, *, is_owner: bool) -> PodS
         on_timer=on_timer if current_timer is not None else None, current_timer=current_timer,
         kick_targets_provider=kick_targets_provider, on_kick=on_kick,
         link_targets_provider=link_targets_provider, on_link=on_link,
-        on_cancel=on_cancel, event_name=event_name,
+        on_cancel=on_cancel, on_reschedule=on_reschedule, event_name=event_name,
     )
 
 

@@ -1,10 +1,14 @@
-"""Monday schedule DM, owner buttons, and the fallback post — two APScheduler cron jobs.
+"""Monday schedule DM, owner buttons, the fallback post, and the weekly RSVP card sends.
 
 The owner posts the weekly schedule personally; the bot ghostwrites it. At MONDAY_DM_HOUR_ET the
-owner gets one DM: the paste-ready message in a code block, the week's Sesh /create blocks, and
-Post-it-for-me / I've-got-it / Skip buttons. At FALLBACK_POST_HOUR_ET a second cron posts the
-default version unless the week was handled — guarded by a channel scan for an already-posted
-schedule, so a manual post without a button press never double-posts.
+owner gets one DM: the paste-ready message in a code block plus Post-it-for-me / I've-got-it / Skip
+buttons. At FALLBACK_POST_HOUR_ET a second cron posts the default version unless the week was
+handled — guarded by a channel scan for an already-posted schedule, so a manual post without a
+button press never double-posts.
+
+Each weekly slot's RSVP card posts on its own date job at card_send_time, replacing the old
+DM-a-/create-to-paste flow: the bot owns the card, thread, event, and native Discord event from
+post time (bot/commands/pod_rsvp.py).
 """
 from __future__ import annotations
 
@@ -17,10 +21,12 @@ import discord
 from discord.ext import commands
 from sqlalchemy import select
 
+from bot.commands.pod_rsvp import post_scheduled_card
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.discord_helpers import resolve_pod_chat_channel
 from bot.models import PodDraftEvent
+from bot.services.pod_launch import ondemand_event_name_sync
 from bot.services.pod_schedule import (
     BTN_EMOJI_GOT_IT,
     BTN_EMOJI_POST,
@@ -28,21 +34,20 @@ from bot.services.pod_schedule import (
     BTN_GOT_IT,
     BTN_POST,
     BTN_SKIP,
-    CREATE_LEAD_HOURS,
+    CARD_LEAD_HOURS,
+    MONDAY_CARD_SEND_HOUR_ET,
     MONDAY_KIND_NORMAL,
     MONDAY_KIND_RELEASE_WEEK,
     MSG_BTN_ALREADY_POSTED,
     MSG_BTN_GOT_IT,
     MSG_BTN_POSTED,
     MSG_BTN_SKIPPED,
-    MSG_CREATE_COMMAND_LEAD,
     MSG_MONDAY_DRAFT_INTRO,
-    NA_CREATE_SEND_HOUR_ET,
     SCHEDULE_TZ,
     WEEKLY_SLOTS,
     build_create_command,
+    card_send_time,
     compose_schedule_message,
-    create_command_send_time,
     highest_event_number,
     monday_kind,
     monday_of,
@@ -56,6 +61,7 @@ from bot.sets import active_set_code
 
 MONDAY_DM_HOUR_ET = 9
 FALLBACK_POST_HOUR_ET = 12
+CARD_CATCH_UP_DELAY_S = 5
 
 STATUS_HANDLED = "handled"
 STATUS_SKIPPED = "skipped"
@@ -94,12 +100,12 @@ def init_schedule_post(bot: commands.Bot) -> None:
         id="pod-monday-fallback",
         replace_existing=True,
     )
-    arm_create_command_jobs(_current_week_monday())
-    arm_create_command_jobs(upcoming_monday())
+    arm_card_jobs(_current_week_monday())
+    arm_card_jobs(upcoming_monday())
     log.info(
         f"weekly schedule flow armed: DM Mondays {MONDAY_DM_HOUR_ET}:00, "
         f"fallback {FALLBACK_POST_HOUR_ET}:00 {SCHEDULE_TZ.key}, "
-        f"/create sends: NA Mondays {NA_CREATE_SEND_HOUR_ET}:00, EU/Sat T-{CREATE_LEAD_HOURS}h"
+        f"RSVP card sends: NA Mondays {MONDAY_CARD_SEND_HOUR_ET}:00, EU T-{CARD_LEAD_HOURS}h, Sat after Thu pod"
     )
 
 
@@ -119,7 +125,7 @@ async def fire_monday_dm() -> None:
         log.info(f"monday schedule DM sent for {monday.isoformat()}")
     except discord.HTTPException:
         log.warning("could not DM the monday schedule draft to owner", exc_info=True)
-    arm_create_command_jobs(monday)
+    arm_card_jobs(monday)
 
 
 async def build_monday_package(
@@ -261,11 +267,12 @@ async def _create_command_blocks(reference: datetime) -> list[str]:
     return blocks
 
 
-def arm_create_command_jobs(monday: date) -> None:
-    """Schedule one DM per weekly slot at event_time − 47h carrying that slot's standalone /create command.
+def arm_card_jobs(monday: date) -> None:
+    """Schedule one RSVP card post per weekly slot at its card_send_time.
 
-    No-op on boundary weeks (release/championship/season) and for slots whose lead time has passed;
-    deterministic job ids keep a restart re-arm from double-firing.
+    No-op on boundary weeks (release/championship/season); deterministic job ids keep a restart
+    re-arm from double-firing. A send missed to downtime is caught up immediately while the slot is
+    still ahead — fire_scheduled_card skips slots that already have a pod.
     """
     scheduler = getattr(_bot, "pod_scheduler", None)
     if scheduler is None:
@@ -274,53 +281,66 @@ def arm_create_command_jobs(monday: date) -> None:
         return
     now = datetime.now(timezone.utc)
     for slot in WEEKLY_SLOTS:
-        run_at = create_command_send_time(slot, monday)
-        job_id = f"pod-create-cmd-{monday.isoformat()}-{slot.weekday}"
+        run_at = card_send_time(slot, monday)
+        job_id = f"pod-rsvp-card-{monday.isoformat()}-{slot.weekday}"
         if run_at <= now:
-            with contextlib.suppress(Exception):
-                scheduler.remove_job(job_id)
-            continue
+            slot_start = datetime.combine(
+                monday + timedelta(days=slot.weekday), slot.start, tzinfo=SCHEDULE_TZ
+            )
+            if slot_start <= now:
+                with contextlib.suppress(Exception):
+                    scheduler.remove_job(job_id)
+                continue
+            run_at = now + timedelta(seconds=CARD_CATCH_UP_DELAY_S)
         scheduler.add_job(
-            fire_create_command,
+            fire_scheduled_card,
             "date",
             run_date=run_at,
             args=[monday.isoformat(), slot.weekday],
             id=job_id,
             replace_existing=True,
         )
-        log.info(f"armed /create DM for {monday.isoformat()} weekday={slot.weekday} at {run_at.isoformat()}")
+        log.info(f"armed RSVP card for {monday.isoformat()} weekday={slot.weekday} at {run_at.isoformat()}")
 
 
-async def fire_create_command(monday_iso: str, weekday: int) -> None:
+async def fire_scheduled_card(monday_iso: str, weekday: int) -> None:
+    """Post one weekly slot's RSVP card, skipping boundary weeks, started slots, and slots that
+    already have a pod — safe to fire again after a restart or catch-up."""
     if _bot is None:
-        log.error("fire_create_command: bot reference is not initialised")
+        log.error("fire_scheduled_card: bot reference is not initialised")
         return
     monday = date.fromisoformat(monday_iso)
     if monday_kind(monday)[0] != MONDAY_KIND_NORMAL:
         return
-    slot = None
-    for candidate in WEEKLY_SLOTS:
-        if candidate.weekday == weekday:
-            slot = candidate
-            break
+    slot = slot_by_weekday(weekday)
     if slot is None:
         return
-    owner = await _fetch_owner()
-    if owner is None:
+    slot_start = datetime.combine(monday + timedelta(days=slot.weekday), slot.start, tzinfo=SCHEDULE_TZ)
+    if slot_start <= datetime.now(timezone.utc):
+        log.info(f"RSVP card for {monday_iso} weekday={weekday}: slot already started; standing down")
+        return
+    _, scheduled = await asyncio.to_thread(_event_number_and_scheduled_starts)
+    if slot_instant(slot_start) in scheduled:
+        log.info(f"RSVP card for {monday_iso} weekday={weekday}: pod already exists; standing down")
         return
 
-    slot_start = datetime.combine(monday + timedelta(days=slot.weekday), slot.start, tzinfo=SCHEDULE_TZ)
-    last_number = await asyncio.to_thread(_latest_event_number)
-    command = build_create_command(
-        active_set_code(), last_number + 1, slot_start, slot.description, slot.mentions
-    )
-    lead = MSG_CREATE_COMMAND_LEAD.format(emoji=slot.emoji, day=f"{slot_start:%A} {slot_start.day}")
-    try:
-        await owner.send(lead)
-        await owner.send(f"```\n{command}\n```")
-        log.info(f"sent /create DM for {monday_iso} weekday={weekday}")
-    except discord.HTTPException:
-        log.warning("could not DM the per-event /create command to owner", exc_info=True)
+    channel = await _fetch_coordination_channel()
+    if channel is None:
+        return
+    set_code = active_set_code()
+    name = await asyncio.to_thread(ondemand_event_name_sync, set_code, slot_start)
+    await post_scheduled_card(_bot, channel, set_code=set_code, event_time=slot_start, name=name)
+
+
+async def _fetch_coordination_channel() -> discord.TextChannel | None:
+    channel = _bot.get_channel(settings.pod_draft_channel_id)
+    if channel is None:
+        try:
+            channel = await _bot.fetch_channel(settings.pod_draft_channel_id)
+        except discord.HTTPException as e:
+            log.warning(f"could not fetch coordination channel {settings.pod_draft_channel_id}: {e}")
+            return None
+    return channel if isinstance(channel, discord.TextChannel) else None
 
 
 async def _fetch_schedule_channel() -> discord.abc.Messageable | None:
@@ -343,14 +363,6 @@ async def _fetch_owner() -> discord.User | None:
     except discord.HTTPException as e:
         log.warning(f"could not fetch owner {_bot.owner_id}: {e}")
         return None
-
-
-def _latest_event_number() -> int:
-    with SessionLocal() as session:
-        names = session.execute(
-            select(PodDraftEvent.name).where(PodDraftEvent.set_code == active_set_code())
-        ).scalars()
-        return highest_event_number(names)
 
 
 def _event_number_and_scheduled_starts() -> tuple[int, set[datetime]]:

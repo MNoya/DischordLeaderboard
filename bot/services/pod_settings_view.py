@@ -48,8 +48,8 @@ def kick_notice(actor: str, name: str) -> str:
     return f"🔨 **{name}** was removed by {actor}"
 
 
-def link_notice(actor: str, member_name: str, arena_name: str) -> str:
-    return f"🔗 **{member_name}** linked to `{arena_name}` by {actor}"
+def link_notice(actor: str, member_mention: str, arena_name: str) -> str:
+    return f"🔗 {member_mention} linked to `{arena_name}` by {actor}"
 
 
 def cancel_notice(actor: str) -> str:
@@ -74,6 +74,7 @@ class PodSettingsView(ui.View):
                  link_targets_provider: LinkTargetsProvider | None = None,
                  on_link: LinkApply | None = None,
                  on_cancel: CancelApply | None = None,
+                 on_reschedule: Apply | None = None,
                  event_name: str | None = None) -> None:
         super().__init__(timeout=300)
         self.on_format = on_format
@@ -93,6 +94,7 @@ class PodSettingsView(ui.View):
         self.link_targets_provider = link_targets_provider
         self.on_link = on_link
         self.on_cancel = on_cancel
+        self.on_reschedule = on_reschedule
         self.event_name = event_name
         if on_format is not None:
             self.add_item(_FormatSetting(current_code))
@@ -110,8 +112,10 @@ class PodSettingsView(ui.View):
             self.add_item(_LinkPlayersButton(row=3))
         if kick_targets_provider is not None and on_kick is not None:
             self.add_item(_KickPlayerButton(row=3))
+        if on_reschedule is not None:
+            self.add_item(_RescheduleButton(row=4))
         if on_cancel is not None:
-            self.add_item(_CancelDraftButton(row=3))
+            self.add_item(_CancelDraftButton(row=4))
 
     async def apply(self, interaction: discord.Interaction, *, on_apply: Apply,
                     value: str, attr: str, notice: str, marker: str) -> None:
@@ -130,7 +134,7 @@ class PodSettingsView(ui.View):
             on_timer=self.on_timer, current_timer=self.current_timer,
             kick_targets_provider=self.kick_targets_provider, on_kick=self.on_kick,
             link_targets_provider=self.link_targets_provider, on_link=self.on_link,
-            on_cancel=self.on_cancel, event_name=self.event_name,
+            on_cancel=self.on_cancel, on_reschedule=self.on_reschedule, event_name=self.event_name,
         ))
         if interaction.channel is not None:
             await send_settings_notice(interaction.channel, interaction.client.user, notice, marker=marker)
@@ -222,6 +226,30 @@ class _TimerModal(ui.Modal, title="Pick timer"):
             )
             return
         await self.view._apply_pick_timer(interaction, int(raw))
+
+
+class _RescheduleButton(ui.Button):
+    def __init__(self, row: int | None = None) -> None:
+        super().__init__(label="Reschedule", emoji="🕐", style=discord.ButtonStyle.grey, row=row)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(_RescheduleModal(self.view))
+
+
+class _RescheduleModal(ui.Modal, title="Reschedule pod"):
+    new_time = ui.TextInput(label="New start (ET)", placeholder="+2h30m, 21:00, or 2026-07-18 21:00")
+
+    def __init__(self, view: PodSettingsView) -> None:
+        super().__init__()
+        self.view = view
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        err = await self.view.on_reschedule(interaction, self.new_time.value)
+        if err:
+            await interaction.followup.send(f"⚠️ {err}", ephemeral=True)
+            return
+        await interaction.followup.send("🕐 Rescheduled.", ephemeral=True)
 
 
 class _KickPlayerButton(ui.Button):
@@ -331,7 +359,8 @@ class _LinkMemberSelect(ui.UserSelect):
         )
         if interaction.channel is not None:
             await interaction.channel.send(
-                link_notice(actor_label(interaction), member.display_name, self.arena_name)
+                link_notice(actor_label(interaction), member.mention, self.arena_name),
+                allowed_mentions=discord.AllowedMentions(users=True),
             )
 
 

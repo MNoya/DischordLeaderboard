@@ -1,7 +1,8 @@
-"""T-5 minute pod-draft reminder fired by APScheduler.
+"""T-5 minute pod-draft reminder fired by APScheduler, plus the shared roster reads.
 
-Re-fetches the sesh embed for the latest attendee list, resolves Discord member mentions on a
-best-effort basis, and posts the Draftmancer link in the event thread
+Re-fetches the latest attendee list — the sesh embed for sesh-born pods, the signal members for
+card-born pods — resolves Discord member mentions on a best-effort basis, and posts the Draftmancer
+link in the event thread
 """
 from __future__ import annotations
 
@@ -19,8 +20,9 @@ from sqlalchemy import select
 from bot import emojis
 from bot.config import settings
 from bot.database import SessionLocal
-from bot.models import PodDraftEvent
+from bot.models import PodDraftEvent, PodSignal, PodSignalMember
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
+from bot.services.pod_signals import RSVP_MAYBE, RSVP_YES
 from bot.services.pod_draft_manager import start_manager
 from bot.services.pod_drafts import draftmancer_url_for
 from bot.services.sesh_parser import parse_sesh_embed
@@ -157,7 +159,7 @@ async def fire_roster_reminder(event_id: str) -> None:
             log.info(f"fire_roster_reminder: event {event_id} is {event.socket_status}; skipping")
             return
         thread_id = int(event.discord_thread_id)
-        sesh_message_id = int(event.sesh_message_id)
+        sesh_message_id = event.sesh_message_id
         event_time = event.event_time
         event_name = event.name
 
@@ -170,7 +172,7 @@ async def fire_roster_reminder(event_id: str) -> None:
         log.warning(f"fire_roster_reminder: could not fetch thread {thread_id}")
         return
 
-    yes, maybe = await _refetch_attendees(sesh_message_id)
+    yes, maybe = await event_rsvps(event_id, sesh_message_id)
     embed = build_roster_embed(event_name, event_time, yes, maybe)
     try:
         await thread.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
@@ -207,7 +209,7 @@ async def fire_team_vote_offer(event_id: str) -> None:
 
 
 async def refresh_roster_reminder(bot: commands.Bot, sesh_message_id: str) -> None:
-    """Re-render the posted roster reminder in place when RSVPs change.
+    """Re-render the posted roster reminder in place when sesh RSVPs change.
 
     No-op until fire_roster_reminder has posted the reminder — this only ever edits an existing
     message, never creates one — and once the lobby reminder fires and flips the event past 'pending'.
@@ -218,20 +220,37 @@ async def refresh_roster_reminder(bot: commands.Bot, sesh_message_id: str) -> No
     thread_id, event_time, event_name, status = loaded
     if status != "pending":
         return
+    yes, maybe = await _refetch_attendees(int(sesh_message_id))
+    await _edit_roster_reminder(thread_id, event_name, event_time, yes, maybe)
 
+
+async def refresh_roster_reminder_for_event(
+    bot: commands.Bot, event_id: str, yes: list[str], maybe: list[str],
+) -> None:
+    """Signal-keyed twin of refresh_roster_reminder, fed the rosters by the RSVP card handler."""
+    loaded = await asyncio.to_thread(_load_event_for_roster_by_id, event_id)
+    if loaded is None:
+        return
+    thread_id, event_time, event_name, status = loaded
+    if status != "pending":
+        return
+    await _edit_roster_reminder(thread_id, event_name, event_time, yes, maybe)
+
+
+async def _edit_roster_reminder(
+    thread_id: int, event_name: str, event_time: datetime, yes: list[str], maybe: list[str],
+) -> None:
     thread = await _fetch_thread(thread_id)
     if thread is None:
         return
     reminder = await _find_roster_reminder(thread)
     if reminder is None:
         return
-
-    yes, maybe = await _refetch_attendees(int(sesh_message_id))
     embed = build_roster_embed(event_name, event_time, yes, maybe)
     try:
         await reminder.edit(embed=embed, allowed_mentions=discord.AllowedMentions.none())
     except discord.HTTPException:
-        log.warning(f"refresh_roster_reminder: could not edit reminder {reminder.id}", exc_info=True)
+        log.warning(f"could not edit roster reminder {reminder.id}", exc_info=True)
 
 
 def _load_event_for_roster(sesh_message_id: str) -> tuple[int, datetime, str, str] | None:
@@ -239,6 +258,14 @@ def _load_event_for_roster(sesh_message_id: str) -> tuple[int, datetime, str, st
         event = session.execute(
             select(PodDraftEvent).where(PodDraftEvent.sesh_message_id == sesh_message_id)
         ).scalar_one_or_none()
+        if event is None:
+            return None
+        return int(event.discord_thread_id), event.event_time, event.name, event.socket_status
+
+
+def _load_event_for_roster_by_id(event_id: str) -> tuple[int, datetime, str, str] | None:
+    with SessionLocal() as session:
+        event = session.get(PodDraftEvent, event_id)
         if event is None:
             return None
         return int(event.discord_thread_id), event.event_time, event.name, event.socket_status
@@ -297,6 +324,34 @@ async def fetch_sesh_rsvps(bot: commands.Bot, sesh_message_id: int | str) -> tup
 async def _refetch_attendees(sesh_message_id: int) -> tuple[list[str], list[str]]:
     """Re-fetch the sesh embed for the latest Yes / Maybe RSVPs. Returns (yes, maybe)."""
     return await fetch_sesh_rsvps(_bot, sesh_message_id) or ([], [])
+
+
+async def event_rsvps(event_id: str, sesh_message_id: str | None) -> tuple[list[str], list[str]]:
+    """Latest Yes / Maybe rosters for an event: the sesh embed for sesh-born pods, the signal
+    members for card-born pods."""
+    if sesh_message_id is not None:
+        return await _refetch_attendees(int(sesh_message_id))
+    rsvps = await asyncio.to_thread(signal_rsvps_sync, event_id)
+    return rsvps or ([], [])
+
+
+def signal_rsvps_sync(event_id: str) -> tuple[list[str], list[str]] | None:
+    """Yes / Maybe display names off the signal that created this pod, in join order; None when the
+    pod has no signal. Poll and queue members are implicit Yes."""
+    with SessionLocal() as session:
+        signal = session.execute(
+            select(PodSignal).where(PodSignal.event_id == event_id)
+        ).scalar_one_or_none()
+        if signal is None:
+            return None
+        rows = session.execute(
+            select(PodSignalMember.rsvp, PodSignalMember.display_name)
+            .where(PodSignalMember.signal_id == signal.id)
+            .order_by(PodSignalMember.created_at)
+        ).all()
+    yes = [name for state, name in rows if state == RSVP_YES]
+    maybe = [name for state, name in rows if state == RSVP_MAYBE]
+    return yes, maybe
 
 
 MENTION_RE = re.compile(r"^<@!?(\d+)>$")

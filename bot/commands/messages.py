@@ -41,6 +41,11 @@ MSG_FIRST_POD_TIP_QUEUE = (
     "post right away. Run `/pod-guide` for the full rundown."
 )
 
+MSG_SLOT_ROLE_GRANTED = (
+    "{emoji} You're now on {role} and will be pinged for drafts {when}. "
+    "Run `/roles` to manage your notifications."
+)
+
 MSG_TABLE_NO_SOURCE = "Run `/pod-table` in a pod-draft thread, or pass an `event` to pick the pod."
 MSG_TABLE_UNKNOWN_EVENT = "No pod-draft event named `{event}`."
 MSG_TABLE_INTRO = "New draft table off this pod."
@@ -51,3 +56,4 @@ MSG_TABLE_BUTTON = "Join Table {table}"
 MSG_TABLE_SUPERSEDED = "Reopened further down the channel. Join the newer Table {table} card."
 MSG_TABLE_GOTO = "Go to Table {table}"
 MSG_TABLE_LOBBY_STARTER = "{draftmancer_emoji} **{event_name}** created."
+MSG_SECOND_TABLE_OFFER = "🔥 The first pod filled up. Click Join to fire a second table."

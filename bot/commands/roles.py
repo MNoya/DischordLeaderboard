@@ -61,6 +61,8 @@ class _RoleToggleButton(discord.ui.Button):
         if new_state and self.role_name != POD_DRAFTERS_ROLE_NAME:
             if await grant_pod_drafters(refreshed):
                 held.add(POD_DRAFTERS_ROLE_NAME)
+        if not new_state and self.role_name == POD_DRAFTERS_ROLE_NAME:
+            held -= {spec.name for spec in PING_ROLES}
         await interaction.response.edit_message(view=RolesView(held, guild))
 
 
@@ -148,18 +150,26 @@ async def setup(bot: commands.Bot) -> None:
             if umbrella is None:
                 reports.append(f"{guild.name}: missing {POD_DRAFTERS_ROLE_NAME} — run after the startup reconcile")
                 continue
-            holders: set[discord.Member] = set()
+            holders_by_role: dict[str, set[discord.Member]] = {}
             for spec in PING_ROLES:
                 if spec.name == POD_DRAFTERS_ROLE_NAME:
                     continue
                 role = find_role(guild, spec.name)
                 if role is not None:
-                    holders.update(role.members)
-            granted = 0
+                    holders_by_role[spec.name] = set(role.members)
+            holders = set().union(*holders_by_role.values()) if holders_by_role else set()
+            newly_granted: set[discord.Member] = set()
             for member in holders:
                 if await grant_role(member, umbrella):
-                    granted += 1
+                    newly_granted.add(member)
+            by_role = ", ".join(
+                f"{name} {len(newly_granted & members)}"
+                for name, members in holders_by_role.items()
+                if newly_granted & members
+            )
+            breakdown = f" ({by_role})" if by_role else ""
             reports.append(
-                f"{guild.name}: granted {umbrella.name} to {granted} of {len(holders)} pod-role members"
+                f"{guild.name}: granted {umbrella.name} to {len(newly_granted)} of {len(holders)} "
+                f"pod-role members{breakdown}"
             )
         await ctx.send("\n".join(reports) if reports else "No guilds.")

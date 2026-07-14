@@ -19,12 +19,19 @@ POLL_POST_HOUR_ET = 11
 
 KIND_POLL = "poll"
 KIND_QUEUE = "queue"
+KIND_SCHEDULED = "scheduled"
 
 QUEUE_BUCKET = "queue"
+SCHEDULED_BUCKET = "scheduled"
 
 STATUS_OPEN = "open"
 STATUS_FIRED = "fired"
 STATUS_EXPIRED = "expired"
+
+RSVP_YES = "yes"
+RSVP_MAYBE = "maybe"
+RSVP_NO = "no"
+RSVP_STATES = (RSVP_YES, RSVP_MAYBE, RSVP_NO)
 
 
 @dataclass(frozen=True)

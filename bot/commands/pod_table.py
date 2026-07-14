@@ -21,10 +21,10 @@ from discord.ext import commands
 from bot import audit, emojis
 from bot.commands import descriptions as desc
 from bot.commands.messages import (
-    MSG_ADMIN_ONLY,
     MSG_TABLE_BUTTON,
     MSG_TABLE_CREATED,
     MSG_LOBBY_GATHERING,
+    MSG_SECOND_TABLE_OFFER,
     MSG_TABLE_GOTO,
     MSG_TABLE_INTRO,
     MSG_PLAYERS_JOINED,
@@ -36,9 +36,10 @@ from bot.commands.messages import (
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.models import PodDraftEvent
+from bot.services import pod_launch
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_roles import grant_pod_drafters
-from bot.services.pod_draft_manager import start_manager
+from bot.services.pod_draft_manager import set_second_table_hook, start_manager
 from bot.services.pod_drafts import (
     draftmancer_url_for,
     load_event_id_by_name_sync,
@@ -228,6 +229,71 @@ async def build_table_view(
     )
 
 
+async def offer_second_table(
+    bot: commands.Bot, source_event_id: str, locked_names: list[str],
+) -> discord.Message | None:
+    """Draft-start hook: once a scheduled pod locks its seats, offer whoever's left from the Yes and
+    Maybe roster a pre-pinged follow-up table. Leftovers are invited, not seated — they must click to
+    claim. Posts nothing unless a full table's worth is left over. `locked_names` is the seated
+    roster; matching back to signups is by casefolded name, so a miss only means a stray extra ping."""
+    candidates = await asyncio.to_thread(pod_launch.second_table_candidates_sync, source_event_id)
+    if not candidates:
+        return None
+    locked = {name.casefold() for name in locked_names}
+    leftovers: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for user_id, name in candidates:
+        if name.casefold() in locked or user_id in seen:
+            continue
+        seen.add(user_id)
+        leftovers.append((user_id, name))
+    if len(leftovers) < settings.pod_table_open_threshold:
+        return None
+    thread = await _source_thread(bot, source_event_id)
+    if thread is None or thread.parent is None:
+        return None
+    view = await build_table_view(bot, source_event_id, lobby_channel=thread.parent)
+    if view is None:
+        return None
+    message = await thread.send(
+        content=f"{_ping_line(leftovers)}\n{MSG_SECOND_TABLE_OFFER}",
+        embed=view.render_embed(), view=view,
+        allowed_mentions=discord.AllowedMentions(users=True),
+    )
+    view.claim_message = message
+    await view.activate()
+    log.info(f"pod-table: offered second table off {source_event_id} to {len(leftovers)} leftover(s)")
+    return message
+
+
+def _ping_line(leftovers: list[tuple[str, str]]) -> str:
+    """Mentions for leftovers with a real Discord id; fabricated test ids fall back to a plain name."""
+    return " ".join(f"<@{user_id}>" if user_id.isdigit() else name for user_id, name in leftovers)
+
+
+async def _source_thread(bot: commands.Bot, source_event_id: str) -> "discord.Thread | None":
+    """The source pod's thread — where the second-table offer posts, so it reaches the players
+    already gathered there. A new table's own thread hangs off this thread's parent (Discord can't
+    nest threads), which build_table_view takes as its lobby channel."""
+    thread_id = await asyncio.to_thread(load_event_thread_id_sync, source_event_id)
+    if not thread_id or thread_id == "pending":
+        return None
+    thread = bot.get_channel(int(thread_id))
+    if thread is None:
+        try:
+            thread = await bot.fetch_channel(int(thread_id))
+        except discord.HTTPException:
+            return None
+    return thread if isinstance(thread, discord.Thread) else None
+
+
+async def _second_table_hook(bot: commands.Bot, event_id: str) -> None:
+    manager = ACTIVE_POD_MANAGERS.get(event_id)
+    if manager is None:
+        return
+    await offer_second_table(bot, event_id, manager.non_bot_session_names())
+
+
 class PodTable(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
@@ -237,10 +303,6 @@ class PodTable(commands.Cog):
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
     async def pod_table(self, interaction: discord.Interaction, event: str | None = None) -> None:
-        if not await self.bot.is_owner(interaction.user):
-            await interaction.response.send_message(MSG_ADMIN_ONLY, ephemeral=True)
-            return
-
         source_id = await self._resolve_source(interaction, event)
         if source_id is None:
             message = MSG_TABLE_UNKNOWN_EVENT.format(event=event) if event else MSG_TABLE_NO_SOURCE
@@ -290,4 +352,5 @@ class PodTable(commands.Cog):
 
 
 async def setup(bot: commands.Bot) -> None:
+    set_second_table_hook(_second_table_hook)
     await bot.add_cog(PodTable(bot))

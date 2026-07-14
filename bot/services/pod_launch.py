@@ -22,7 +22,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import discord
 from discord.ext import commands
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
 from bot import emojis
@@ -34,7 +34,12 @@ from bot.services.pod_draft_manager import start_manager
 from bot.services.pod_drafts import draftmancer_url_for, record_ondemand_event
 from bot.services.pod_schedule import highest_event_number
 from bot.services.pod_signals import SCHEDULE_TZ, slot_event_time
-from bot.tasks.pod_draft_reminder import schedule_team_vote_offer
+from bot.tasks.pod_draft_reminder import (
+    schedule_roster_reminder,
+    schedule_team_vote_offer,
+    signal_rsvps_sync,
+)
+from bot.tasks.pod_underfill import schedule_underfill_checks
 
 
 log = logging.getLogger(__name__)
@@ -61,6 +66,15 @@ class ToggleResult:
     changed: bool
     closed: bool
     first_contact: bool = False
+
+
+@dataclass(frozen=True)
+class RsvpResult:
+    state: SignalState
+    rosters: dict[str, list[str]]
+    rsvp: str | None
+    joined: bool
+    closed: bool
 
 
 def create_poll_signals(
@@ -98,6 +112,8 @@ def create_poll_signals_sync(
 
 def create_queue_signal_sync(
     *, guild_id: str, channel_id: str, message_id: str, signal_date: date, opened_by: str,
+    set_code: str | None = None, pairing_mode: str | None = None, seating_mode: str | None = None,
+    pick_timer: int | None = None,
 ) -> str:
     with SessionLocal() as session:
         signal = PodSignal(
@@ -108,10 +124,136 @@ def create_queue_signal_sync(
             message_id=message_id,
             signal_date=signal_date,
             opened_by=opened_by,
+            set_code=set_code,
+            pairing_mode=pairing_mode,
+            seating_mode=seating_mode,
+            pick_timer=pick_timer,
         )
         session.add(signal)
         session.commit()
         return signal.id
+
+
+@dataclass(frozen=True)
+class QueuePresets:
+    set_code: str | None
+    pairing_mode: str | None
+    seating_mode: str | None
+    pick_timer: int | None
+
+
+def queue_presets_sync(signal_id: str) -> QueuePresets:
+    """The set + pairing / seating / pick-timer chosen in the /draft launcher, applied to the pod once
+    its queue fires. All None when the pod was opened without presets (defaults to the active set)."""
+    with SessionLocal() as session:
+        signal = session.get(PodSignal, signal_id)
+        if signal is None:
+            return QueuePresets(None, None, None, None)
+        return QueuePresets(
+            signal.set_code, signal.pairing_mode, signal.seating_mode, signal.pick_timer,
+        )
+
+
+@dataclass(frozen=True)
+class JoinableSignal:
+    kind: str
+    channel_id: str
+    message_id: str
+    slot_time: datetime | None
+    count: int
+
+
+def joinable_signals_sync(guild_id: str, *, now: datetime, within: timedelta) -> list[JoinableSignal]:
+    """Open queues and soon-to-fire poll slots in the guild — what a /draft caller could join instead
+    of starting a fresh pod. Poll slots past `within` from now are too far off to divert to."""
+    with SessionLocal() as session:
+        signals = session.execute(
+            select(PodSignal).where(
+                PodSignal.guild_id == guild_id,
+                PodSignal.status == pod_signals.STATUS_OPEN,
+                PodSignal.kind.in_([pod_signals.KIND_QUEUE, pod_signals.KIND_POLL]),
+            ).order_by(PodSignal.created_at)
+        ).scalars().all()
+        joinable: list[JoinableSignal] = []
+        for signal in signals:
+            if signal.slot_time is not None and not (now < signal.slot_time <= now + within):
+                continue
+            joinable.append(JoinableSignal(
+                signal.kind, signal.channel_id, signal.message_id, signal.slot_time, len(signal.members),
+            ))
+        return joinable
+
+
+def create_scheduled_signal_sync(
+    *, guild_id: str, channel_id: str, message_id: str, event_time: datetime,
+) -> str:
+    """A scheduled pod's signal is born fired with the caller linking its event right after: RSVPs
+    stay open forever for over-signups and expiry never applies."""
+    with SessionLocal() as session:
+        signal = PodSignal(
+            kind=pod_signals.KIND_SCHEDULED,
+            bucket=pod_signals.SCHEDULED_BUCKET,
+            guild_id=guild_id,
+            channel_id=channel_id,
+            message_id=message_id,
+            signal_date=event_time.astimezone(SCHEDULE_TZ).date(),
+            slot_time=event_time,
+            status=pod_signals.STATUS_FIRED,
+        )
+        session.add(signal)
+        session.commit()
+        return signal.id
+
+
+def set_rsvp(
+    session: Session, message_id: str, discord_user_id: str, display_name: str, rsvp: str,
+) -> RsvpResult | None:
+    """Three-state RSVP on a scheduled card: clicking a state moves the member there; clicking the
+    state they already hold removes the row. `rsvp` in the result is the recorded state, None when
+    the click removed the RSVP. `joined` is True only when the member entered Yes. Scheduled signals
+    are born fired and never expire, so only a stray expired row refuses. Does not commit."""
+    signal = _scheduled_signal_by_surface(session, message_id)
+    if signal is None:
+        return None
+    if signal.status == pod_signals.STATUS_EXPIRED:
+        rosters = _members_by_rsvp(session, signal.id)
+        yes_count = len(rosters[pod_signals.RSVP_YES])
+        return RsvpResult(_state(signal, yes_count), rosters, rsvp=None, joined=False, closed=True)
+
+    existing = session.execute(
+        select(PodSignalMember).where(
+            PodSignalMember.signal_id == signal.id,
+            PodSignalMember.discord_user_id == discord_user_id,
+        )
+    ).scalar_one_or_none()
+    joined = False
+    recorded: str | None = rsvp
+    if existing is None:
+        session.add(PodSignalMember(
+            signal_id=signal.id, discord_user_id=discord_user_id, display_name=display_name, rsvp=rsvp,
+        ))
+        signal.last_activity_at = datetime.now(timezone.utc)
+        joined = rsvp == pod_signals.RSVP_YES
+    elif existing.rsvp == rsvp:
+        session.delete(existing)
+        recorded = None
+    else:
+        joined = rsvp == pod_signals.RSVP_YES
+        existing.rsvp = rsvp
+        existing.display_name = display_name
+    session.flush()
+    rosters = _members_by_rsvp(session, signal.id)
+    yes_count = len(rosters[pod_signals.RSVP_YES])
+    return RsvpResult(_state(signal, yes_count), rosters, rsvp=recorded, joined=joined, closed=False)
+
+
+def set_rsvp_sync(
+    message_id: str, discord_user_id: str, display_name: str, rsvp: str,
+) -> RsvpResult | None:
+    with SessionLocal() as session:
+        result = set_rsvp(session, message_id, discord_user_id, display_name, rsvp)
+        session.commit()
+        return result
 
 
 def toggle_member(
@@ -256,8 +398,12 @@ def signal_message_ref_sync(signal_id: str) -> tuple[str, str] | None:
     return (row[0], row[1]) if row else None
 
 
-def poll_snapshot_sync(message_id: str) -> list[tuple[str, str, int, datetime | None, list[str]]]:
-    """(bucket, status, count, slot_time, member names) per poll slot on a message, in POLL_BUCKETS order."""
+def poll_snapshot_sync(
+    message_id: str,
+) -> list[tuple[str, str, int, datetime | None, list[str], str | None]]:
+    """(bucket, status, count, slot_time, member names, fired-pod thread id) per poll slot on a
+    message, in POLL_BUCKETS order. The thread id lands once a slot fires and its scheduled card
+    creates the pod thread, so the poll can link straight into it."""
     order = {bucket.key: i for i, bucket in enumerate(pod_signals.POLL_BUCKETS)}
     with SessionLocal() as session:
         signals = session.execute(
@@ -266,13 +412,15 @@ def poll_snapshot_sync(message_id: str) -> list[tuple[str, str, int, datetime | 
         rows = []
         for s in signals:
             names = _member_names(session, s.id)
-            rows.append((s.bucket, s.status, len(names), s.slot_time, names))
+            thread_id = _fired_slot_thread_id(session, s)
+            rows.append((s.bucket, s.status, len(names), s.slot_time, names, thread_id))
     rows.sort(key=lambda r: order.get(r[0], 99))
     return rows
 
 
 def roster_for_event_sync(event_id: str) -> list[tuple[str, str]]:
-    """(discord_user_id, display_name) for the signal that created this pod, in join order."""
+    """(discord_user_id, display_name) of the Yes roster for the signal that created this pod, in
+    join order. Poll and queue members are implicit Yes."""
     with SessionLocal() as session:
         signal = session.execute(
             select(PodSignal).where(PodSignal.event_id == event_id)
@@ -281,10 +429,170 @@ def roster_for_event_sync(event_id: str) -> list[tuple[str, str]]:
             return []
         rows = session.execute(
             select(PodSignalMember.discord_user_id, PodSignalMember.display_name)
-            .where(PodSignalMember.signal_id == signal.id)
+            .where(
+                PodSignalMember.signal_id == signal.id,
+                PodSignalMember.rsvp == pod_signals.RSVP_YES,
+            )
             .order_by(PodSignalMember.created_at)
         ).all()
         return [(did, name) for did, name in rows]
+
+
+def poll_yes_members_sync(signal_id: str) -> list[tuple[str, str]]:
+    """(discord_user_id, display_name) of a poll slot's signups, in join order. Poll members are all
+    implicit Yes, so this is the set to carry over when the slot graduates to an RSVP card."""
+    with SessionLocal() as session:
+        rows = session.execute(
+            select(PodSignalMember.discord_user_id, PodSignalMember.display_name)
+            .where(PodSignalMember.signal_id == signal_id)
+            .order_by(PodSignalMember.created_at)
+        ).all()
+        return [(did, name) for did, name in rows]
+
+
+def seed_yes_members_sync(signal_id: str, members: list[tuple[str, str]]) -> None:
+    """Insert a batch of Yes members onto a fresh signal — poll signups carried onto their RSVP card.
+    Skips anyone already present so a retry is idempotent."""
+    with SessionLocal() as session:
+        present = set(session.execute(
+            select(PodSignalMember.discord_user_id).where(PodSignalMember.signal_id == signal_id)
+        ).scalars())
+        for user_id, display_name in members:
+            if user_id in present:
+                continue
+            session.add(PodSignalMember(
+                signal_id=signal_id, discord_user_id=user_id, display_name=display_name,
+                rsvp=pod_signals.RSVP_YES,
+            ))
+        session.commit()
+
+
+def second_table_candidates_sync(event_id: str) -> list[tuple[str, str]]:
+    """(discord_user_id, display_name) of the Yes then Maybe roster for the scheduled card that
+    created this pod, Yes first and each in join order — the pool to offer a follow-up table to once
+    the first pod locks its seats. Empty for poll/queue pods, which carry no standing roster."""
+    with SessionLocal() as session:
+        signal = session.execute(
+            select(PodSignal).where(
+                PodSignal.event_id == event_id, PodSignal.kind == pod_signals.KIND_SCHEDULED
+            )
+        ).scalar_one_or_none()
+        if signal is None:
+            return []
+        rows = session.execute(
+            select(PodSignalMember.discord_user_id, PodSignalMember.display_name, PodSignalMember.rsvp)
+            .where(
+                PodSignalMember.signal_id == signal.id,
+                PodSignalMember.rsvp.in_([pod_signals.RSVP_YES, pod_signals.RSVP_MAYBE]),
+            )
+            .order_by(PodSignalMember.created_at)
+        ).all()
+    rank = {pod_signals.RSVP_YES: 0, pod_signals.RSVP_MAYBE: 1}
+    ordered = sorted(rows, key=lambda row: rank.get(row[2], 2))
+    return [(did, name) for did, name, _ in ordered]
+
+
+def scheduled_card_ref_sync(event_id: str) -> tuple[str, str, str, datetime | None] | None:
+    """(signal_id, channel_id, message_id, slot_time) of the scheduled card that created this pod.
+    slot_time keeps the original slot through postpones, so slot-keyed rendering stays stable."""
+    with SessionLocal() as session:
+        row = session.execute(
+            select(PodSignal.id, PodSignal.channel_id, PodSignal.message_id, PodSignal.slot_time).where(
+                PodSignal.event_id == event_id, PodSignal.kind == pod_signals.KIND_SCHEDULED
+            )
+        ).first()
+    return (row[0], row[1], row[2], row[3]) if row else None
+
+
+def mirror_ref_sync(event_id: str) -> tuple[str, str] | None:
+    """(thread_id, message_id) of the thread's RSVP controls message, or None while unset."""
+    with SessionLocal() as session:
+        signal = session.execute(
+            select(PodSignal).where(
+                PodSignal.event_id == event_id, PodSignal.kind == pod_signals.KIND_SCHEDULED
+            )
+        ).scalar_one_or_none()
+        if signal is None or signal.thread_message_id is None:
+            return None
+        event = session.get(PodDraftEvent, event_id)
+        if event is None:
+            return None
+        return event.discord_thread_id, signal.thread_message_id
+
+
+def set_thread_message_sync(signal_id: str, thread_message_id: str) -> None:
+    with SessionLocal() as session:
+        session.execute(
+            update(PodSignal).where(PodSignal.id == signal_id).values(thread_message_id=thread_message_id)
+        )
+        session.commit()
+
+
+def rsvp_rosters_sync(message_id: str) -> dict[str, list[str]] | None:
+    """Display names per RSVP state for a scheduled card or its mirror, in join order; None when
+    no surface matches."""
+    with SessionLocal() as session:
+        signal = _scheduled_signal_by_surface(session, message_id)
+        if signal is None:
+            return None
+        return _members_by_rsvp(session, signal.id)
+
+
+def scheduled_event_for_message_sync(message_id: str) -> str | None:
+    """The pod event behind an RSVP surface, from the card's or the mirror's message id."""
+    with SessionLocal() as session:
+        signal = _scheduled_signal_by_surface(session, message_id)
+        return signal.event_id if signal else None
+
+
+def scheduled_event_for_slot_sync(guild_id: str, slot_time: datetime) -> str | None:
+    """The pod event a fired poll slot produced, so a post-fire poll click can drive the card."""
+    with SessionLocal() as session:
+        return _scheduled_event_id_for_slot(session, guild_id, slot_time)
+
+
+def set_card_yes(
+    session: Session, event_id: str, discord_user_id: str, display_name: str, *, joining: bool,
+) -> dict[str, list[str]] | None:
+    """Idempotently place a member in the scheduled card's Yes column, or remove their row, keyed by
+    the pod's event instead of toggling — a fired poll slot mirrors its clicks onto the card that
+    graduated from it. Returns the fresh rosters, or None when no scheduled signal backs the event.
+    Does not commit."""
+    signal = session.execute(
+        select(PodSignal).where(
+            PodSignal.event_id == event_id, PodSignal.kind == pod_signals.KIND_SCHEDULED
+        )
+    ).scalar_one_or_none()
+    if signal is None:
+        return None
+    existing = session.execute(
+        select(PodSignalMember).where(
+            PodSignalMember.signal_id == signal.id,
+            PodSignalMember.discord_user_id == discord_user_id,
+        )
+    ).scalar_one_or_none()
+    if joining:
+        if existing is None:
+            session.add(PodSignalMember(
+                signal_id=signal.id, discord_user_id=discord_user_id,
+                display_name=display_name, rsvp=pod_signals.RSVP_YES,
+            ))
+        else:
+            existing.rsvp = pod_signals.RSVP_YES
+            existing.display_name = display_name
+    elif existing is not None:
+        session.delete(existing)
+    session.flush()
+    return _members_by_rsvp(session, signal.id)
+
+
+def set_card_yes_sync(
+    event_id: str, discord_user_id: str, display_name: str, *, joining: bool,
+) -> dict[str, list[str]] | None:
+    with SessionLocal() as session:
+        rosters = set_card_yes(session, event_id, discord_user_id, display_name, joining=joining)
+        session.commit()
+        return rosters
 
 
 def ondemand_event_name_sync(set_code: str, event_time: datetime) -> str:
@@ -362,6 +670,8 @@ async def open_ondemand_lobby(bot: commands.Bot, event_id: str) -> None:
 
     roster = await asyncio.to_thread(roster_for_event_sync, event_id)
     display_names = [name for _, name in roster]
+    rsvps = await asyncio.to_thread(signal_rsvps_sync, event_id)
+    maybe_names = rsvps[1] if rsvps else []
     draftmancer_url = draftmancer_url_for(session_id)
 
     thread = await _fetch_thread(bot, thread_id)
@@ -390,10 +700,22 @@ async def open_ondemand_lobby(bot: commands.Bot, event_id: str) -> None:
 
     manager = await start_manager(
         bot, event_id, session_id, thread_id, set_code, len(display_names),
-        event_name=event_name, draftmancer_url=draftmancer_url, rsvps_yes=display_names,
+        event_name=event_name, draftmancer_url=draftmancer_url,
+        rsvps_yes=display_names, rsvps_maybe=maybe_names,
     )
     if manager is not None:
         manager.arm_team_vote_offer(len(display_names))
+
+
+def arm_scheduled_pod_jobs(
+    bot: commands.Bot, event_id: str, event_time: datetime, created_at: datetime,
+) -> None:
+    """Every timed job a scheduled card carries: T-10 lobby open, at-start team vote, underfill
+    checks, and the roster reminder. Creation, /pod-postpone, and the startup sweep all arm here."""
+    _arm_open(bot, event_id, event_time)
+    schedule_team_vote_offer(bot.pod_scheduler, event_id, event_time)
+    schedule_underfill_checks(bot.pod_scheduler, event_id, event_time, created_at)
+    schedule_roster_reminder(bot.pod_scheduler, event_id, event_time)
 
 
 def _arm_open(bot: commands.Bot, event_id: str, event_time: datetime) -> None:
@@ -474,7 +796,8 @@ async def rearm_signals(bot: commands.Bot) -> None:
 
     for signal_id, kind, status, slot_time, last_activity, event_id in pending:
         if status == pod_signals.STATUS_FIRED and event_id is not None:
-            if _rearm_open_if_pending(bot, event_id):
+            scheduled = kind == pod_signals.KIND_SCHEDULED
+            if _rearm_open_if_pending(bot, event_id, with_fill_jobs=scheduled):
                 continue
         if status != pod_signals.STATUS_OPEN:
             continue
@@ -491,14 +814,20 @@ async def rearm_signals(bot: commands.Bot) -> None:
                 arm_queue_teardown(bot, signal_id, teardown)
 
 
-def _rearm_open_if_pending(bot: commands.Bot, event_id: str) -> bool:
+def _rearm_open_if_pending(bot: commands.Bot, event_id: str, with_fill_jobs: bool = False) -> bool:
+    """`with_fill_jobs` re-arms the underfill and roster-reminder jobs a scheduled card carries on
+    top of the lobby open; poll and queue pods fire full by construction and skip them."""
     with SessionLocal() as session:
         event = session.get(PodDraftEvent, event_id)
         if event is None or event.socket_status not in ("pending", "reminded"):
             return False
         event_time = event.event_time
-    _arm_open(bot, event_id, event_time)
-    schedule_team_vote_offer(bot.pod_scheduler, event_id, event_time)
+        created_at = event.created_at
+    if with_fill_jobs:
+        arm_scheduled_pod_jobs(bot, event_id, event_time, created_at)
+    else:
+        _arm_open(bot, event_id, event_time)
+        schedule_team_vote_offer(bot.pod_scheduler, event_id, event_time)
     return True
 
 
@@ -536,12 +865,57 @@ def _signal_by_message_bucket(session: Session, message_id: str, bucket: str) ->
     ).scalar_one_or_none()
 
 
+def _scheduled_signal_by_surface(session: Session, message_id: str) -> PodSignal | None:
+    """The scheduled signal whose channel card or thread mirror is this message."""
+    return session.execute(
+        select(PodSignal).where(
+            PodSignal.bucket == pod_signals.SCHEDULED_BUCKET,
+            or_(PodSignal.message_id == message_id, PodSignal.thread_message_id == message_id),
+        )
+    ).scalar_one_or_none()
+
+
+def _fired_slot_thread_id(session: Session, poll_signal: PodSignal) -> str | None:
+    """The pod thread a fired poll slot produced, matched through the scheduled card that shares its
+    guild and slot time. None while the slot is still open or before its card creates the thread."""
+    if poll_signal.status != pod_signals.STATUS_FIRED or poll_signal.slot_time is None:
+        return None
+    event_id = _scheduled_event_id_for_slot(session, poll_signal.guild_id, poll_signal.slot_time)
+    if event_id is None:
+        return None
+    event = session.get(PodDraftEvent, event_id)
+    return event.discord_thread_id if event else None
+
+
+def _scheduled_event_id_for_slot(session: Session, guild_id: str, slot_time: datetime) -> str | None:
+    """The pod event a fired poll slot produced, via the scheduled card sharing its guild + slot."""
+    return session.execute(
+        select(PodSignal.event_id).where(
+            PodSignal.kind == pod_signals.KIND_SCHEDULED,
+            PodSignal.guild_id == guild_id,
+            PodSignal.slot_time == slot_time,
+        ).limit(1)
+    ).scalar_one_or_none()
+
+
 def _member_names(session: Session, signal_id: str) -> list[str]:
     return list(session.execute(
         select(PodSignalMember.display_name)
         .where(PodSignalMember.signal_id == signal_id)
         .order_by(PodSignalMember.created_at)
     ).scalars().all())
+
+
+def _members_by_rsvp(session: Session, signal_id: str) -> dict[str, list[str]]:
+    rows = session.execute(
+        select(PodSignalMember.rsvp, PodSignalMember.display_name)
+        .where(PodSignalMember.signal_id == signal_id)
+        .order_by(PodSignalMember.created_at)
+    ).all()
+    rosters: dict[str, list[str]] = {state: [] for state in pod_signals.RSVP_STATES}
+    for state, name in rows:
+        rosters.setdefault(state, []).append(name)
+    return rosters
 
 
 def _state(signal: PodSignal, count: int) -> SignalState:

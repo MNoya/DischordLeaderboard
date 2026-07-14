@@ -26,8 +26,9 @@ WEDNESDAY = 2
 THURSDAY = 3
 SATURDAY = 5
 
-CREATE_LEAD_HOURS = 50
-NA_CREATE_SEND_HOUR_ET = 12
+CARD_LEAD_HOURS = 50
+MONDAY_CARD_SEND_HOUR_ET = 12
+SATURDAY_CARD_AFTER_EARLY_H = 3
 
 MONDAY_KIND_NORMAL = "normal"
 MONDAY_KIND_RELEASE_WEEK = "release_week"
@@ -73,8 +74,6 @@ MSG_UNDERFILL = (
     "{hello}**{name}** looking for **{needed} more player{plural}** <t:{unix}:R> "
     "- [**Sign up here**]({jump_url}) {manat}"
 )
-
-MSG_CREATE_COMMAND_LEAD = "{emoji} {day} pod — paste the next message as-is to open RSVPs:"
 
 SLOT_EMOJI_AMERICAS = "🌎"
 SLOT_EMOJI_EU = "🇪🇺"
@@ -311,16 +310,21 @@ def build_create_command(
     )
 
 
-def create_command_send_time(slot: WeeklySlot, monday: date) -> datetime:
-    """When to DM a slot's standalone /create command.
+def card_send_time(slot: WeeklySlot, monday: date) -> datetime:
+    """When to post a slot's RSVP card.
 
-    The late slot goes out Monday midday alongside the weekly overview; the other slots fire a fixed
-    lead before slot start so they don't clutter the channel days ahead.
+    The late slot goes out Monday midday alongside the weekly overview; the Saturday card waits for
+    the Thursday pod to finish (early slot start + 3h) so it never lands mid-pod; the rest fire a
+    fixed lead before slot start so they don't clutter the channel days ahead.
     """
     if slot.send_monday_noon:
-        return datetime.combine(monday, time(NA_CREATE_SEND_HOUR_ET, 0), tzinfo=SCHEDULE_TZ)
+        return datetime.combine(monday, time(MONDAY_CARD_SEND_HOUR_ET, 0), tzinfo=SCHEDULE_TZ)
+    if slot.weekday == SATURDAY:
+        early = slot_by_weekday(THURSDAY)
+        early_start = datetime.combine(monday + timedelta(days=early.weekday), early.start, tzinfo=SCHEDULE_TZ)
+        return early_start + timedelta(hours=SATURDAY_CARD_AFTER_EARLY_H)
     slot_start = datetime.combine(monday + timedelta(days=slot.weekday), slot.start, tzinfo=SCHEDULE_TZ)
-    return slot_start - timedelta(hours=CREATE_LEAD_HOURS)
+    return slot_start - timedelta(hours=CARD_LEAD_HOURS)
 
 
 def slot_for_event_time(event_time: datetime) -> WeeklySlot | None:
