@@ -200,13 +200,13 @@ function ContributionBar({
                 src={card.imageArtCrop}
                 alt=""
                 aria-hidden
-                className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+                className="absolute inset-0 w-full -top-1 object-cover pointer-events-none"
               />
             )}
             <div className="absolute inset-0 bg-black/55 pointer-events-none" />
             {gihwr !== null && (
-              <span className="relative z-10 flex items-center justify-center h-full text-[7px] lg:text-[8px] font-mono font-semibold text-white/40 pointer-events-none select-none">
-                {(gihwr * 100).toFixed(0)}
+              <span className="relative z-10 flex items-center justify-center h-full text-[7px] lg:text-[8px] font-mono font-semibold text-white/50 pointer-events-none select-none">
+                {(gihwr * 100).toFixed(1)}
               </span>
             )}
           </div>
@@ -681,6 +681,11 @@ function FloatingSelfRow({
         <span className="font-mono tabular-nums text-[13px] lg:text-[14px] text-subtle shrink-0">
           {ballot.score.toFixed(1)}
         </span>
+
+        <ChevronDown
+          size={14}
+          className={`shrink-0 text-muted transition-transform duration-150`}
+        />
       </div>
     </div>
   );
