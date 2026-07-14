@@ -51,7 +51,7 @@ class PingRole:
 
 
 PING_ROLES: tuple[PingRole, ...] = (
-    PingRole(POD_DRAFTERS_ROLE_NAME, "llu", "Server-Wide Pod Announcements", color="#BFC9D4"),
+    PingRole(POD_DRAFTERS_ROLE_NAME, "llu", "Server-Wide Pod Announcements", color="#C0C0C0"),
     PingRole(
         EARLY_POD_ROLE_NAME, "💫", "Weekdays", color="#5CA8E0",
         aliases=("Early Pods", "Early Pod Drafters", "Euro Pod Drafters"), slot_weekday=THURSDAY, auto_grant=True,

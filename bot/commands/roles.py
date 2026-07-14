@@ -16,8 +16,8 @@ from discord.ext import commands
 from bot.commands import descriptions as desc
 from bot.config import settings
 from bot.services.ping_roles import PING_ROLES, blurb_with_time, button_custom_id, display_emoji
-from bot.services.pod_roles import find_role, grant_role, toggle_role
-from bot.services.pod_schedule import LATE_POD_ROLE_NAME, POD_DRAFTERS_ROLE_NAME
+from bot.services.pod_roles import find_role, grant_pod_drafters, grant_role, toggle_role
+from bot.services.pod_schedule import POD_DRAFTERS_ROLE_NAME
 
 
 log = logging.getLogger(__name__)
@@ -58,6 +58,9 @@ class _RoleToggleButton(discord.ui.Button):
         refreshed = guild.get_member(member.id) or member
         held = {held_role.name for held_role in refreshed.roles}
         held.add(self.role_name) if new_state else held.discard(self.role_name)
+        if new_state and self.role_name != POD_DRAFTERS_ROLE_NAME:
+            if await grant_pod_drafters(refreshed):
+                held.add(POD_DRAFTERS_ROLE_NAME)
         await interaction.response.edit_message(view=RolesView(held, guild))
 
 
@@ -95,6 +98,26 @@ class Roles(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
+    @commands.Cog.listener()
+    async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
+        """Dropping Pod Drafters means leaving pod notifications entirely: the umbrella carries the
+        one name color for pod players, so the slot roles go with it instead of surviving as a
+        colored back door. The server's onboarding question removes the umbrella directly, which is
+        what lands here."""
+        before_names = {role.name for role in before.roles}
+        after_names = {role.name for role in after.roles}
+        if POD_DRAFTERS_ROLE_NAME not in before_names or POD_DRAFTERS_ROLE_NAME in after_names:
+            return
+        other_ping_roles = {spec.name for spec in PING_ROLES if spec.name != POD_DRAFTERS_ROLE_NAME}
+        held = [role for role in after.roles if role.name in other_ping_roles]
+        if not held:
+            return
+        try:
+            await after.remove_roles(*held, reason="Pod Drafters removed; clearing slot roles with it")
+            log.info(f"cleared {[role.name for role in held]} from {after} after {POD_DRAFTERS_ROLE_NAME} removal")
+        except discord.HTTPException:
+            log.warning(f"could not clear slot roles from {after}", exc_info=True)
+
     @app_commands.command(name="roles", description=desc.ROLES)
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
@@ -114,23 +137,29 @@ class Roles(commands.Cog):
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Roles(bot))
 
-    @bot.command(name="grant-late")
+    @bot.command(name="grant-roles")
     @commands.is_owner()
-    async def grant_late(ctx: commands.Context) -> None:
-        """Owner-only, one-time: seed Late Pod with every current Pod Drafters member.
-
-        Idempotent via grant_role, so a re-run only reports zero new grants. Backfills the role split
-        that moved the Wed 20:00 ping off the Pod Drafters umbrella."""
+    async def grant_roles(ctx: commands.Context) -> None:
+        """Owner-only, idempotent: grant Pod Drafters to every member holding any other ping role,
+        so anyone in anything pod-related wears the umbrella name color."""
         reports = []
         for guild in bot.guilds:
             umbrella = find_role(guild, POD_DRAFTERS_ROLE_NAME)
-            late = find_role(guild, LATE_POD_ROLE_NAME)
-            if umbrella is None or late is None:
-                reports.append(f"{guild.name}: missing role — run after the startup reconcile creates it")
+            if umbrella is None:
+                reports.append(f"{guild.name}: missing {POD_DRAFTERS_ROLE_NAME} — run after the startup reconcile")
                 continue
+            holders: set[discord.Member] = set()
+            for spec in PING_ROLES:
+                if spec.name == POD_DRAFTERS_ROLE_NAME:
+                    continue
+                role = find_role(guild, spec.name)
+                if role is not None:
+                    holders.update(role.members)
             granted = 0
-            for member in umbrella.members:
-                if await grant_role(member, late):
+            for member in holders:
+                if await grant_role(member, umbrella):
                     granted += 1
-            reports.append(f"{guild.name}: granted {late.name} to {granted} of {len(umbrella.members)} members")
+            reports.append(
+                f"{guild.name}: granted {umbrella.name} to {granted} of {len(holders)} pod-role members"
+            )
         await ctx.send("\n".join(reports) if reports else "No guilds.")
