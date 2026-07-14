@@ -3,8 +3,6 @@ import { useSearchParams } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
 import { SectionLabel } from "../SectionLabel";
 import { PickGrid } from "./CommunityGrid";
-import { CtaPill } from "../CtaPill";
-import { DiscordIcon } from "../BrandIcons";
 import { MidwayBreakdownList } from "./MidwayBreakdownList";
 import { useMidwayVersusPager, MidwayVersusModal } from "./MidwayVersusCard";
 import { breakdownStripAccent, SLOT_ACCENT } from "./slotVisuals";
@@ -251,100 +249,13 @@ function ContributionBar({
   );
 }
 
-// ── Your result ──────────────────────────────────────────────────────────────
-
 const PODIUM: Record<number, { emoji: string; label: string; color: string }> = {
   1: { emoji: "🥇", label: "1st place", color: MEDAL_COLOR[1] },
   2: { emoji: "🥈", label: "2nd place", color: MEDAL_COLOR[2] },
   3: { emoji: "🥉", label: "3rd place", color: MEDAL_COLOR[3] },
 };
 
-function YourResultCard({
-  ballot,
-  total,
-  crowdScore,
-  bestScore,
-}: {
-  ballot: RankedBallot;
-  total: number;
-  crowdScore: number;
-  bestScore: number;
-}) {
-  const { rank, score } = ballot;
-  const pod = PODIUM[rank] ?? null;
-  const vsCrowd = score - crowdScore;
-  const vsBest = score - bestScore;
-  const topPct = Math.max(1, Math.round((rank / total) * 100));
 
-  const scoreColor = pod?.color ?? "#ffffff";
-  const borderBg = pod ? `${pod.color}8c` : "#3b4458";
-
-  // Bar positions: track scaled 0..bestScore
-  const fillPct = bestScore > 0 ? (score / bestScore) * 100 : 0;
-  const crowdPct = bestScore > 0 ? (crowdScore / bestScore) * 100 : 0;
-
-  return (
-    <div
-      className="animate-fadeUpIn w-full"
-      style={{ maxWidth: 720, clipPath: CHAMFER, background: borderBg, padding: 1 }}
-    >
-      <div className="bg-surface2" style={{ clipPath: CHAMFER }}>
-
-        {/* Header: medal badge + ordinal */}
-        <div className="flex items-center gap-3 px-4 sm:px-7 pt-4 sm:pt-5 pb-1">
-          {pod && (
-            <span
-              className="font-display tracking-[0.12em] text-[12px] sm:text-[13px] inline-flex items-center gap-1.5 px-2 sm:px-2.5 py-1 rounded-sm"
-              style={{ color: pod.color, background: `${pod.color}1a`, border: `1px solid ${pod.color}52` }}
-            >
-              {pod.emoji} {pod.label.toUpperCase()}
-            </span>
-          )}
-          <span className="font-mono text-[12px] text-dim">#{rank} of {total}</span>
-        </div>
-
-        {/* Score hero */}
-        <div className="px-4 sm:px-7 py-4 sm:py-5 text-center">
-          <div
-            className="font-mono tabular-nums leading-none"
-            style={{ fontSize: "clamp(52px,14vw,80px)", color: scoreColor, textShadow: `0 0 56px ${scoreColor}60` }}
-          >
-            {score.toFixed(1)}
-          </div>
-          <div className="font-display tracking-[0.14em] sm:tracking-[0.16em] text-[10px] sm:text-[11px] text-muted mt-2">
-            SCORE · GIH WIN RATE SUM
-          </div>
-          <div className="font-mono text-[12px] sm:text-[13px] text-subtle mt-1.5">top {topPct}%</div>
-        </div>
-
-        {/* Comparison bar */}
-        <div className="px-4 sm:px-7 pb-5 sm:pb-7">
-          {/* Labels above */}
-          <div className="flex justify-between font-display tracking-[0.08em] sm:tracking-[0.1em] text-[10px] text-muted mb-1.5">
-            <span>CROWD <span className="font-mono tabular-nums text-subtle">{crowdScore.toFixed(1)}</span></span>
-            <span className="text-green">YOU <span className="font-mono tabular-nums">{score.toFixed(1)}</span></span>
-            <span>BEST <span className="font-mono tabular-nums text-subtle">{bestScore.toFixed(1)}</span></span>
-          </div>
-          {/* Track */}
-          <div className="h-1.5 bg-border rounded-sm overflow-visible relative">
-            <div className="absolute inset-0 overflow-hidden rounded-sm">
-              <div className="absolute top-0 left-0 bottom-0 bg-green" style={{ width: `${fillPct}%` }} />
-            </div>
-            <div className="absolute top-0 bottom-0 w-px bg-muted/70" style={{ left: `${crowdPct}%` }} />
-          </div>
-          {/* Deltas */}
-          <div className="flex gap-5 mt-1.5 font-mono tabular-nums text-[11px]">
-            <span className={vsCrowd >= 0 ? "text-green" : "text-red"}>
-              {vsCrowd >= 0 ? "+" : ""}{vsCrowd.toFixed(1)} vs crowd
-            </span>
-            <span className="text-red">{vsBest.toFixed(1)} vs best</span>
-          </div>
-        </div>
-
-      </div>
-    </div>
-  );
-}
 
 // ── Champion spotlight ──────────────────────────────────────────────────────────
 
@@ -1289,54 +1200,6 @@ export function FinalResults({
       {/* ── OVERVIEW ─────────────────────────────────────────────────── */}
       {activeTab === "overview" && (
         <div className="flex flex-col gap-8">
-          {/* Your result */}
-          {showYourPicks && userBallot && (
-            <div className="flex justify-center">
-              <YourResultCard ballot={userBallot} total={rankedBallots.length} crowdScore={crowdTeam.score} bestScore={bestTeam.score} />
-            </div>
-          )}
-          {showYourPicks && !userBallot && (
-            <div className="flex justify-center">
-              <div className="flex flex-col items-center gap-1 py-3 px-6 bg-surface2 border border-border2 rounded-sm">
-                <div className="font-display tracking-[0.18em] text-[13px] text-subtle uppercase">Your result</div>
-                <div className="font-mono tabular-nums text-[28px] text-white mt-1">{displayScore.toFixed(1)}</div>
-              </div>
-            </div>
-          )}
-          {loggedOut && (
-            <div className="flex justify-center">
-              <button
-                type="button"
-                onClick={signIn}
-                className="bg-transparent border-0 cursor-pointer p-0"
-              >
-                <CtaPill size="lg" icon={<DiscordIcon size={19} />}>
-                  LOG IN TO VIEW YOUR PICKS
-                </CtaPill>
-              </button>
-            </div>
-          )}
-
-          {/* Stat tiles */}
-          {statsBlock && (
-            <div className="grid grid-cols-3 gap-3">
-              <div className="bg-surface2 border border-border2 rounded-sm px-4 py-3">
-                <div className="font-display tracking-[0.14em] text-[11px] text-muted uppercase mb-1">Participants</div>
-                <div className="font-mono tabular-nums text-[22px] text-text font-semibold">{statsBlock.count}</div>
-              </div>
-              <div className="bg-surface2 border border-border2 rounded-sm px-4 py-3">
-                <div className="font-display tracking-[0.14em] text-[11px] text-muted uppercase mb-1">Avg score</div>
-                <div className="font-mono tabular-nums text-[22px] text-text font-semibold">{statsBlock.avg.toFixed(1)}</div>
-              </div>
-              <div className="bg-surface2 border border-border2 rounded-sm px-4 py-3">
-                <div className="font-display tracking-[0.14em] text-[11px] text-muted uppercase mb-1">Top score</div>
-                <div className="font-mono tabular-nums text-[22px] font-semibold" style={{ color: "#ffc63a" }}>
-                  {statsBlock.top.score.toFixed(1)}
-                </div>
-                <div className="text-[11px] text-muted mt-0.5 truncate">{statsBlock.top.name}</div>
-              </div>
-            </div>
-          )}
 
           {/* Top-3 standings peek */}
           {rankedBallots.length > 0 && (
