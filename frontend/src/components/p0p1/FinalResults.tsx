@@ -183,6 +183,9 @@ function ContributionBar({
     // self-stretch + negative vertical margins cancel the button's py-2.5/py-3 padding,
     // so the bar bleeds to the full row height while hover events still reach Layer 2.
     <div className="hidden lg:block flex-1 self-stretch -my-2.5 lg:-my-3 relative min-w-0" onClick={(e) => e.stopPropagation()}>
+      {/* Track: full-width faint bar marks the max bar length / non-clickable extent */}
+      <div className="absolute inset-0 bg-black/15 pointer-events-none" />
+
       {/* Layer 1: visual segments — overflow:hidden clips art to fill width */}
       <div
         className="absolute top-0 left-0 h-full flex gap-px overflow-hidden"
