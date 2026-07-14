@@ -413,6 +413,50 @@ def record_mock_event(
     return event
 
 
+def build_ondemand_session(session: Session, set_code: str, event_date: date) -> str:
+    """`LLU-<SET>-<Mon>-<Day>` for a poll/queue-born pod, suffixing A/B/… on collision so two
+    on-demand pods the same day never share a Draftmancer lobby."""
+    base = f"{settings.pod_draft_session_prefix}-{set_code.upper()}-{event_date:%b}-{event_date.day}"
+    taken = set(session.execute(
+        select(PodDraftEvent.draftmancer_session).where(PodDraftEvent.draftmancer_session.like(f"{base}%"))
+    ).scalars().all())
+    if base not in taken:
+        return base
+    for i in range(26):
+        candidate = f"{base}-{chr(ord('A') + i)}"
+        if candidate not in taken:
+            return candidate
+    n = 27
+    while f"{base}-{n}" in taken:
+        n += 1
+    return f"{base}-{n}"
+
+
+def record_ondemand_event(
+    session: Session, *, set_code: str, event_time: datetime, name: str, discord_thread_id: str,
+) -> PodDraftEvent:
+    """Insert a kind='tournament' pod with no sesh post — the shared creation path for the daily poll
+    and /pod-queue. The roster is seeded by the caller from the signal's members; rounds and champion
+    finalize exactly like a sesh-born tournament."""
+    code = set_code.upper()
+    event = PodDraftEvent(
+        event_date=event_time.date(),
+        event_time=event_time,
+        set_id=_lookup_set_id(session, code),
+        set_code=code,
+        format_label=pod_format.label_for(code),
+        name=name,
+        draftmancer_session=build_ondemand_session(session, code, event_time.date()),
+        discord_thread_id=discord_thread_id,
+        sesh_message_id=None,
+        socket_status="pending",
+        kind="tournament",
+    )
+    session.add(event)
+    session.flush()
+    return event
+
+
 _TABLE_SUFFIX_RE = re.compile(r"\s+(?:[-–]\s+)?Table\s+\d+\s*$", re.IGNORECASE)
 
 

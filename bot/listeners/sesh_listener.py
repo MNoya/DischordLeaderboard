@@ -30,7 +30,7 @@ from bot.services.pod_drafts import (
     update_event_time_if_changed,
 )
 from bot.services.ping_roles import auto_grant_spec_for_event, build_grant_embed
-from bot.services.pod_roles import find_role, grant_role, resolve_member
+from bot.services.pod_roles import find_role, grant_pod_drafters, grant_role, resolve_member
 from bot.services.sesh_parser import ParsedSeshFields, parse_sesh_embed
 from bot.sets import active_set_code
 from bot.tasks.pod_draft_reminder import (
@@ -315,23 +315,26 @@ class SeshListener(commands.Cog):
     async def _grant_subscription_roles(
         self, guild: discord.Guild | None, thread: discord.Thread | None, event_time: datetime, attendees,
     ) -> None:
-        """Sticky-grant a slot's subscription role to everyone RSVP'd Yes to a time-specific pod.
+        """Sticky-grant the Pod Drafters umbrella to every RSVP, plus a slot's subscription role when
+        the pod maps to a weekly slot.
 
         Sesh hands the full attendee list on every RSVP edit with no delta, so the loop re-runs over
         everyone and relies on `grant_role` to no-op those already subscribed. The announcement is
         deduped per (thread, member) rather than on `grant_role` alone: back-to-back edits can both
         re-add before the member-role cache reflects the first add, which would double-announce.
         """
+        if guild is None:
+            return
         spec = auto_grant_spec_for_event(event_time)
-        if guild is None or spec is None:
-            return
-        role = find_role(guild, spec.name)
-        if role is None:
-            log.info(f"{spec.name!r} role missing in {guild.name}; skipping auto-grant")
-            return
+        role = find_role(guild, spec.name) if spec is not None else None
+        if spec is not None and role is None:
+            log.info(f"{spec.name!r} role missing in {guild.name}; granting only the umbrella")
         for token in attendees:
             member = await resolve_member(guild, token)
             if member is None:
+                continue
+            await grant_pod_drafters(member)
+            if role is None:
                 continue
             granted = await grant_role(member, role)
             if not granted or thread is None:
@@ -340,14 +343,14 @@ class SeshListener(commands.Cog):
             if key in self._announced_grants:
                 continue
             self._announced_grants.add(key)
-            await self._announce_grant(thread, member, role, spec.emoji)
+            await self._announce_grant(thread, member, role, spec)
 
     async def _announce_grant(
-        self, thread: discord.Thread, member: discord.Member, role: discord.Role, emoji: str,
+        self, thread: discord.Thread, member: discord.Member, role: discord.Role, spec,
     ) -> None:
         try:
             await thread.send(
-                embed=build_grant_embed(member.mention, role, emoji),
+                embed=build_grant_embed(member.mention, role, spec),
                 allowed_mentions=discord.AllowedMentions.none(),
             )
         except discord.HTTPException:
@@ -402,6 +405,8 @@ def reschedule_pending_events(bot: commands.Bot) -> None:
             select(PodDraftEvent).where(PodDraftEvent.socket_status == "pending")
         ).scalars().all()
         for event in pending:
+            if event.sesh_message_id is None:
+                continue
             run_at = event.event_time - timedelta(minutes=REMINDER_LEAD_MIN)
             if event.event_time < now - timedelta(minutes=30):
                 continue

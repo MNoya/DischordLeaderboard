@@ -39,6 +39,11 @@ def in_pod_coordination(channel: "discord.interactions.InteractionChannel | None
     return getattr(channel, "parent_id", None) == settings.pod_draft_channel_id
 
 
+def in_pod_chat(channel: "discord.interactions.InteractionChannel | None") -> bool:
+    name = getattr(channel, "name", "") or ""
+    return settings.pod_draft_chat_channel_name.lower() in name.lower()
+
+
 def channel_matching_name(guild: "discord.Guild", name_fragment: str) -> "discord.abc.GuildChannel | None":
     """First text channel in guild whose name contains name_fragment, case-insensitively."""
     fragment = name_fragment.lower()

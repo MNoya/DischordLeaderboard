@@ -5,7 +5,7 @@ import pytest
 from bot.services.pod_schedule import (
     CREATE_DESCRIPTION,
     CREATE_LEAD_HOURS,
-    CREATE_MENTIONS_EURO,
+    CREATE_MENTIONS_EARLY,
     MONDAY_KIND_CHAMPIONSHIP_WEEK,
     MONDAY_KIND_NORMAL,
     MONDAY_KIND_RELEASE_WEEK,
@@ -220,9 +220,9 @@ def test_build_create_command_carries_the_year_in_the_datetime_not_the_title():
 def test_build_create_command_uses_supplied_mentions():
     slot = datetime(2026, 6, 25, 14, 0, tzinfo=SCHEDULE_TZ)
 
-    command = build_create_command("MSH", 6, slot, CREATE_DESCRIPTION, CREATE_MENTIONS_EURO)
+    command = build_create_command("MSH", 6, slot, CREATE_DESCRIPTION, CREATE_MENTIONS_EARLY)
 
-    assert CREATE_MENTIONS_EURO in command
+    assert CREATE_MENTIONS_EARLY in command
 
 
 @pytest.mark.parametrize(

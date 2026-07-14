@@ -13,16 +13,17 @@ from dataclasses import dataclass
 
 import discord
 
+from bot import emojis
 from bot.services.pod_schedule import (
-    EURO_POD_DRAFTERS_ROLE_NAME,
+    EARLY_POD_ROLE_NAME,
+    LATE_POD_ROLE_NAME,
     POD_DRAFTERS_ROLE_NAME,
+    POD_QUEUE_ROLE_NAME,
     SATURDAY,
-    SLOT_EMOJI_AMERICAS,
-    SLOT_EMOJI_EU,
     SLOT_EMOJI_SATURDAY,
     THURSDAY,
     WEDNESDAY,
-    WEEKEND_POD_DRAFTERS_ROLE_NAME,
+    WEEKEND_POD_ROLE_NAME,
     next_slot_datetime,
     slot_by_weekday,
     slot_for_event_time,
@@ -32,7 +33,7 @@ from bot.services.pod_schedule import (
 log = logging.getLogger(__name__)
 
 MSG_ROLE_GRANTED = (
-    "{emoji} {user} you're now on {role} and will be pinged for drafts at this time of day. "
+    "{emoji} {user} you're now on {role} and will be pinged for drafts {when}. "
     "Run `/roles` to manage your notifications."
 )
 
@@ -46,19 +47,33 @@ class PingRole:
     aliases: tuple[str, ...] = ()
     slot_weekday: int | None = None
     auto_grant: bool = False
+    grant_when: str = "at this time of day"
 
 
 PING_ROLES: tuple[PingRole, ...] = (
-    PingRole(POD_DRAFTERS_ROLE_NAME, SLOT_EMOJI_AMERICAS, "Late weekday pods", slot_weekday=WEDNESDAY),
+    PingRole(POD_DRAFTERS_ROLE_NAME, "llu", "Server-Wide Pod Announcements", color="#BFC9D4"),
     PingRole(
-        EURO_POD_DRAFTERS_ROLE_NAME, SLOT_EMOJI_EU, "Early weekday pods",
-        slot_weekday=THURSDAY, auto_grant=True,
+        EARLY_POD_ROLE_NAME, "💫", "Weekdays", color="#5CA8E0",
+        aliases=("Early Pods", "Early Pod Drafters", "Euro Pod Drafters"), slot_weekday=THURSDAY, auto_grant=True,
     ),
     PingRole(
-        WEEKEND_POD_DRAFTERS_ROLE_NAME, SLOT_EMOJI_SATURDAY, "Weekend pods",
-        color="#D2B48C", slot_weekday=SATURDAY, auto_grant=True,
+        LATE_POD_ROLE_NAME, "☄️", "Weekdays", color="#9B8AE6",
+        aliases=("Late Pods", "Late Pod Drafters"), slot_weekday=WEDNESDAY, auto_grant=True,
     ),
+    PingRole(
+        WEEKEND_POD_ROLE_NAME, SLOT_EMOJI_SATURDAY, "Weekends", color="#D2B48C",
+        aliases=("Weekend Pods", "Weekend Pod Drafters"), slot_weekday=SATURDAY, auto_grant=True,
+        grant_when="on weekends",
+    ),
+    PingRole(POD_QUEUE_ROLE_NAME, "⚡", "On-Demand Pods with `/draft`", color="#FFAC33"),
 )
+
+
+def spec_named(name: str) -> PingRole | None:
+    for spec in PING_ROLES:
+        if spec.name == name:
+            return spec
+    return None
 
 
 def button_custom_id(spec: PingRole) -> str:
@@ -66,23 +81,32 @@ def button_custom_id(spec: PingRole) -> str:
 
 
 def blurb_with_time(spec: PingRole) -> str:
+    """A slot role's menu line is its next occurrence, always in the future; the blurb text is the
+    fallback for roles without a slot."""
     if spec.slot_weekday is None:
         return spec.blurb
     slot = slot_by_weekday(spec.slot_weekday)
     if slot is None:
         return spec.blurb
     unix = int(next_slot_datetime(slot).timestamp())
-    return f"{spec.blurb}: <t:{unix}:t>"
+    return f"<t:{unix}:F>"
 
 
-def build_grant_embed(user_mention: str, role: discord.Role, emoji: str) -> discord.Embed:
+def display_emoji(spec: PingRole) -> str | None:
+    return emojis.resolve(spec.emoji)
+
+
+def build_grant_embed(user_mention: str, role: discord.Role, spec: PingRole) -> discord.Embed:
     """The embed announcing a fresh auto-grant in the event thread. Shared by the listener and tests.
 
     A role mention inside an embed never pings (only message content does), so the role tag is safe;
     it renders as the colored role pill from the viewer's role cache.
     """
+    message = MSG_ROLE_GRANTED.format(
+        emoji=display_emoji(spec) or "", user=user_mention, role=role.mention, when=spec.grant_when,
+    )
     return discord.Embed(
-        description=MSG_ROLE_GRANTED.format(emoji=emoji, user=user_mention, role=role.mention),
+        description=message,
         color=role.color if role.color.value else discord.Color.blurple(),
     )
 
@@ -107,6 +131,26 @@ async def reconcile_ping_roles(bot: discord.Client) -> None:
             continue
         for spec in PING_ROLES:
             await _ensure_role(guild, spec)
+        await _keep_umbrella_on_top(guild)
+
+
+async def _keep_umbrella_on_top(guild: discord.Guild) -> None:
+    """Members wear the gray Pod Drafters umbrella for their name color; every other ping role must
+    sit below it in the hierarchy so its color stays a cosmetic mention-pill color."""
+    umbrella = discord.utils.get(guild.roles, name=POD_DRAFTERS_ROLE_NAME)
+    if umbrella is None:
+        return
+    for spec in PING_ROLES:
+        if spec.name == POD_DRAFTERS_ROLE_NAME:
+            continue
+        role = discord.utils.get(guild.roles, name=spec.name)
+        if role is None or role.position < umbrella.position:
+            continue
+        try:
+            await role.edit(position=umbrella.position, reason="ping-role reorder below umbrella")
+            log.info(f"moved {spec.name!r} below {POD_DRAFTERS_ROLE_NAME!r} in {guild.name}")
+        except discord.HTTPException:
+            log.warning(f"could not reorder {spec.name!r} in {guild.name}", exc_info=True)
 
 
 async def _ensure_role(guild: discord.Guild, spec: PingRole) -> None:
@@ -114,6 +158,9 @@ async def _ensure_role(guild: discord.Guild, spec: PingRole) -> None:
     if role is None:
         await _create_role(guild, spec)
         return
+    for alias in spec.aliases:
+        if discord.utils.get(guild.roles, name=alias) is not None:
+            log.warning(f"both {spec.name!r} and stale alias {alias!r} exist in {guild.name}; delete the alias role")
     if spec.color is not None:
         wanted = discord.Colour.from_str(spec.color)
         if role.colour != wanted:

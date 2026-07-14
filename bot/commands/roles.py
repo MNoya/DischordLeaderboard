@@ -15,8 +15,9 @@ from discord.ext import commands
 
 from bot.commands import descriptions as desc
 from bot.config import settings
-from bot.services.ping_roles import PING_ROLES, blurb_with_time, button_custom_id
-from bot.services.pod_roles import find_role, toggle_role
+from bot.services.ping_roles import PING_ROLES, blurb_with_time, button_custom_id, display_emoji
+from bot.services.pod_roles import find_role, grant_role, toggle_role
+from bot.services.pod_schedule import LATE_POD_ROLE_NAME, POD_DRAFTERS_ROLE_NAME
 
 
 log = logging.getLogger(__name__)
@@ -28,9 +29,15 @@ MSG_ROLE_TOGGLE_FAILED = "Couldn't update that role. The bot is missing the Mana
 
 
 class _RoleToggleButton(discord.ui.Button):
-    def __init__(self, role_name: str, emoji: str, custom_id: str, held: bool) -> None:
+    """A unicode emoji rides in the label so it renders right of the name; a custom emoji can't
+    appear in label text, so it stays in the emoji slot on the left."""
+
+    def __init__(self, role_name: str, emoji: str | None, custom_id: str, held: bool) -> None:
+        unicode_emoji = emoji if emoji is not None and not emoji.startswith("<") else None
         super().__init__(
-            label=role_name, emoji=emoji, custom_id=custom_id,
+            label=f"{role_name} {unicode_emoji}" if unicode_emoji else role_name,
+            emoji=None if unicode_emoji else emoji,
+            custom_id=custom_id,
             style=discord.ButtonStyle.success if held else discord.ButtonStyle.secondary,
         )
         self.role_name = role_name
@@ -51,17 +58,20 @@ class _RoleToggleButton(discord.ui.Button):
         refreshed = guild.get_member(member.id) or member
         held = {held_role.name for held_role in refreshed.roles}
         held.add(self.role_name) if new_state else held.discard(self.role_name)
-        await interaction.response.edit_message(view=RolesView(held))
+        await interaction.response.edit_message(view=RolesView(held, guild))
 
 
 class RolesView(discord.ui.LayoutView):
-    def __init__(self, held: set[str] | None = None) -> None:
+    def __init__(self, held: set[str] | None = None, guild: discord.Guild | None = None) -> None:
         super().__init__(timeout=None)
         held = held or set()
         self.add_item(discord.ui.TextDisplay(MSG_INTRO))
         for spec in PING_ROLES:
-            button = _RoleToggleButton(spec.name, spec.emoji, button_custom_id(spec), spec.name in held)
-            self.add_item(discord.ui.Section(discord.ui.TextDisplay(blurb_with_time(spec)), accessory=button))
+            button = _RoleToggleButton(spec.name, display_emoji(spec), button_custom_id(spec), spec.name in held)
+            role = find_role(guild, spec.name)
+            blurb = blurb_with_time(spec)
+            line = f"{role.mention} {blurb}" if role else blurb
+            self.add_item(discord.ui.Section(discord.ui.TextDisplay(line), accessory=button))
 
 
 async def _resolve_member(
@@ -89,13 +99,38 @@ class Roles(commands.Cog):
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
     async def roles(self, interaction: discord.Interaction) -> None:
-        member, _ = await _resolve_member(interaction)
+        member, guild = await _resolve_member(interaction)
         if member is None:
             await interaction.response.send_message(MSG_NO_GUILD, ephemeral=True)
             return
         held = {role.name for role in member.roles}
-        await interaction.response.send_message(view=RolesView(held), ephemeral=(interaction.guild is not None))
+        await interaction.response.send_message(
+            view=RolesView(held, guild),
+            ephemeral=(interaction.guild is not None),
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
 
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Roles(bot))
+
+    @bot.command(name="grant-late")
+    @commands.is_owner()
+    async def grant_late(ctx: commands.Context) -> None:
+        """Owner-only, one-time: seed Late Pod with every current Pod Drafters member.
+
+        Idempotent via grant_role, so a re-run only reports zero new grants. Backfills the role split
+        that moved the Wed 20:00 ping off the Pod Drafters umbrella."""
+        reports = []
+        for guild in bot.guilds:
+            umbrella = find_role(guild, POD_DRAFTERS_ROLE_NAME)
+            late = find_role(guild, LATE_POD_ROLE_NAME)
+            if umbrella is None or late is None:
+                reports.append(f"{guild.name}: missing role — run after the startup reconcile creates it")
+                continue
+            granted = 0
+            for member in umbrella.members:
+                if await grant_role(member, late):
+                    granted += 1
+            reports.append(f"{guild.name}: granted {late.name} to {granted} of {len(umbrella.members)} members")
+        await ctx.send("\n".join(reports) if reports else "No guilds.")

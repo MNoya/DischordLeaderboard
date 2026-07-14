@@ -81,14 +81,17 @@ SLOT_EMOJI_EU = "🇪🇺"
 SLOT_EMOJI_SATURDAY = "🪐"
 
 POD_DRAFTERS_ROLE_NAME = "Pod Drafters"
-EURO_POD_DRAFTERS_ROLE_NAME = "Euro Pod Drafters"
-WEEKEND_POD_DRAFTERS_ROLE_NAME = "Weekend Pod Drafters"
+EARLY_POD_ROLE_NAME = "Early Pod"
+LATE_POD_ROLE_NAME = "Late Pod"
+WEEKEND_POD_ROLE_NAME = "Weekend Pod"
+POD_QUEUE_ROLE_NAME = "Pod Draft Queue"
 
 CREATE_MENTIONS = f"@{POD_DRAFTERS_ROLE_NAME}"
-CREATE_MENTIONS_EURO = f"@{EURO_POD_DRAFTERS_ROLE_NAME}"
-CREATE_MENTIONS_WEEKEND = f"@{WEEKEND_POD_DRAFTERS_ROLE_NAME}"
+CREATE_MENTIONS_EARLY = f"@{EARLY_POD_ROLE_NAME}"
+CREATE_MENTIONS_LATE = f"@{LATE_POD_ROLE_NAME}"
+CREATE_MENTIONS_WEEKEND = f"@{WEEKEND_POD_ROLE_NAME}"
 CREATE_DESCRIPTION = f"{SLOT_EMOJI_AMERICAS} Please RSVP"
-CREATE_DESCRIPTION_EU = f"{SLOT_EMOJI_EU} Early Draft! Please RSVP"
+CREATE_DESCRIPTION_EARLY = f"{SLOT_EMOJI_EU} Early Draft! Please RSVP"
 CREATE_DESCRIPTION_SAT = f"{SLOT_EMOJI_SATURDAY} Weekend Draft! Please RSVP"
 CREATE_COMMAND_TEMPLATE = (
     "/create title:{set_code} Pod Draft #{event_number} - {day} "
@@ -117,9 +120,9 @@ class WeeklySlot:
 
 WEEKLY_SLOTS: tuple[WeeklySlot, ...] = (
     WeeklySlot(
-        WEDNESDAY, time(20, 0), CREATE_DESCRIPTION, SLOT_EMOJI_AMERICAS, CREATE_MENTIONS, send_monday_noon=True
+        WEDNESDAY, time(20, 0), CREATE_DESCRIPTION, SLOT_EMOJI_AMERICAS, CREATE_MENTIONS_LATE, send_monday_noon=True
     ),
-    WeeklySlot(THURSDAY, time(14, 0), CREATE_DESCRIPTION_EU, SLOT_EMOJI_EU, CREATE_MENTIONS_EURO),
+    WeeklySlot(THURSDAY, time(14, 0), CREATE_DESCRIPTION_EARLY, SLOT_EMOJI_EU, CREATE_MENTIONS_EARLY),
     WeeklySlot(SATURDAY, time(15, 0), CREATE_DESCRIPTION_SAT, SLOT_EMOJI_SATURDAY, CREATE_MENTIONS_WEEKEND),
 )
 
@@ -311,8 +314,8 @@ def build_create_command(
 def create_command_send_time(slot: WeeklySlot, monday: date) -> datetime:
     """When to DM a slot's standalone /create command.
 
-    The Americas slot goes out Monday midday alongside the weekly overview; the EU-timed slots
-    fire a fixed lead before slot start so they don't clutter the channel days ahead of an evening-Europe pod.
+    The late slot goes out Monday midday alongside the weekly overview; the other slots fire a fixed
+    lead before slot start so they don't clutter the channel days ahead.
     """
     if slot.send_monday_noon:
         return datetime.combine(monday, time(NA_CREATE_SEND_HOUR_ET, 0), tzinfo=SCHEDULE_TZ)

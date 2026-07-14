@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     pod_draft_fallback_tz: str = "America/New_York"
     pod_draft_skip_reminder_wait: bool = False
     pod_draft_end_watchdog_minutes: int = 90
+    pod_signal_fire_threshold: int = 6
+    pod_queue_inactivity_minutes: int = 180
     sesh_bot_id: int = 616754792965865495
     draftmancer_ws_url: str = f"wss://{DRAFTMANCER_HOST}"
     draftmancer_web_url: str = f"https://{DRAFTMANCER_HOST}"

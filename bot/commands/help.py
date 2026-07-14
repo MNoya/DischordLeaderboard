@@ -9,7 +9,7 @@ from discord.ext import commands
 from bot import audit
 from bot.commands import descriptions as desc
 from bot.config import settings
-from bot.discord_helpers import command_line, in_pod_coordination
+from bot.discord_helpers import command_line, in_pod_chat, in_pod_coordination
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,7 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
 
 POD_HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
     ("🚀 Pod Drafts", [
+        ("/draft", desc.POD_QUEUE),
         ("/pod-seeding", desc.POD_SEEDING),
         ("/pod-ready", desc.POD_READY),
         ("/pod-start", desc.POD_START),
@@ -111,7 +112,8 @@ class Help(commands.Cog):
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
     async def help(self, interaction: discord.Interaction) -> None:
-        sections = POD_HELP_SECTIONS if in_pod_coordination(interaction.channel) else HELP_SECTIONS
+        in_pod_context = in_pod_coordination(interaction.channel) or in_pod_chat(interaction.channel)
+        sections = POD_HELP_SECTIONS if in_pod_context else HELP_SECTIONS
         audit.event("help_invoked", user_id=str(interaction.user.id))
         await interaction.response.send_message(embed=render_help_embed(sections), view=HelpView(), ephemeral=False)
 

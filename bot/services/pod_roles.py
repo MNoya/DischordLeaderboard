@@ -1,4 +1,4 @@
-"""Pod-draft notification roles — resolve, grant, and toggle the Pod Drafters / Euro Pod Drafter roles.
+"""Pod-draft notification roles — resolve, grant, and toggle the pod ping roles.
 
 Logic only; the role-name constants live in bot/services/pod_schedule.py and the user-facing copy
 lives with each caller (sesh listener auto-grant, /pod-roles toggle).
@@ -9,6 +9,8 @@ import logging
 import re
 
 import discord
+
+from bot.services.pod_schedule import POD_DRAFTERS_ROLE_NAME
 
 
 log = logging.getLogger(__name__)
@@ -32,6 +34,15 @@ async def grant_role(member: discord.Member, role: discord.Role) -> bool:
     except discord.HTTPException:
         log.warning(f"could not grant {role.name} to {member}", exc_info=True)
         return False
+
+
+async def grant_pod_drafters(member: discord.Member) -> bool:
+    """Sticky umbrella grant: any pod-draft interaction makes the member a Pod Drafter. Silent —
+    the umbrella carries the name color and the server-wide announce ping, nothing to celebrate."""
+    role = find_role(member.guild, POD_DRAFTERS_ROLE_NAME)
+    if role is None:
+        return False
+    return await grant_role(member, role)
 
 
 async def toggle_role(member: discord.Member, role: discord.Role) -> bool | None:

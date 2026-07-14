@@ -319,6 +319,60 @@ class PodDraftReplay(Base):
     )
 
 
+class PodSignal(Base):
+    """Interest-gathering surface for an on-demand pod: a daily-poll slot or a /pod-queue.
+
+    A daily poll is two rows (bucket 'EU'/'NA') sharing one message_id so each slot fires and
+    expires on its own; a queue is one row (bucket 'queue'). Fires once member count reaches the
+    threshold while status is 'open'; event_id then links the pod it created so the sesh-less
+    lobby-open reads the roster back off the signal. DB-backed so a restart re-arms everything.
+    """
+    __tablename__ = "pod_signals"
+
+    id               = Column(String, primary_key=True, default=lambda: str(uuid4()))
+    kind             = Column(String, nullable=False)
+    bucket           = Column(String, nullable=False)
+    guild_id         = Column(String, nullable=False)
+    channel_id       = Column(String, nullable=False)
+    message_id       = Column(String, nullable=False)
+    signal_date      = Column(Date, nullable=False)
+    slot_time        = Column(DateTime(timezone=True), nullable=True)
+    status           = Column(String, nullable=False, server_default="open")
+    opened_by        = Column(String, nullable=True)
+    event_id         = Column(String, ForeignKey("pod_draft_events.id", ondelete="SET NULL"), nullable=True)
+    created_at       = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    last_activity_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    nudged_at        = Column(DateTime(timezone=True), nullable=True)
+
+    members = relationship(
+        "PodSignalMember",
+        back_populates="signal",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    __table_args__ = (
+        UniqueConstraint("message_id", "bucket", name="uq_pod_signal_message_bucket"),
+        Index("ix_pod_signals_status", "status"),
+    )
+
+
+class PodSignalMember(Base):
+    __tablename__ = "pod_signal_members"
+
+    id              = Column(String, primary_key=True, default=lambda: str(uuid4()))
+    signal_id       = Column(String, ForeignKey("pod_signals.id", ondelete="CASCADE"), nullable=False)
+    discord_user_id = Column(String, nullable=False)
+    display_name    = Column(String, nullable=False)
+    created_at      = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    signal = relationship("PodSignal", back_populates="members")
+
+    __table_args__ = (
+        UniqueConstraint("signal_id", "discord_user_id", name="uq_pod_signal_member"),
+    )
+
+
 class SelfReportedEvent(Base):
     """A draft result a player posted in trophy-hype and logged to their profile via /trophy.
 

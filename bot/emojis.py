@@ -26,6 +26,15 @@ def prefix(name: str) -> str:
     return f"{e} " if e else ""
 
 
+def resolve(token: str) -> str | None:
+    """An application-emoji name resolves to its glyph, a unicode glyph passes through, and an
+    application name that isn't loaded yet resolves to None."""
+    e = _EMOJIS.get(token)
+    if e:
+        return str(e)
+    return None if token.isalnum() else token
+
+
 def mana_number(n: int) -> str:
     """`5` → `:mana5:` glyph if loaded, else `'5'` fallback. Mana font ships 0–20."""
     e = _EMOJIS.get(f"mana{n}")

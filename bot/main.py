@@ -32,6 +32,7 @@ from bot.commands.leaderboard import (
 from bot.commands.pod_backfill import setup as setup_pod_backfill
 from bot.commands.mock_draft import setup as setup_mock_draft
 from bot.commands.pod_draft import setup as setup_pod_draft
+from bot.commands.pod_queue import PodQueueView, setup as setup_pod_queue
 from bot.commands.pod_guide import setup as setup_pod_guide
 from bot.commands.roles import RolesView, setup as setup_roles
 from bot.commands.pod_schedule import setup as setup_pod_schedule
@@ -53,6 +54,7 @@ from bot.commands.testchampionship import setup as setup_testchampionship
 from bot.commands.testcomponent import setup as setup_testcomponent
 from bot.commands.testlobby import setup as setup_testlobby
 from bot.commands.testschedule import setup as setup_testschedule
+from bot.commands.testpolls import setup as setup_testpolls
 from bot.commands.testformatschedule import setup as setup_testformatschedule
 from bot.commands.testscribe import setup as setup_testscribe
 from bot.listeners.auto_link_listener import setup as setup_auto_link_listener
@@ -79,6 +81,8 @@ from bot.services.refresh_report import build_refresh_report, format_elapsed
 from bot.services.seventeenlands import MinIntervalLimiter, SeventeenLandsClient
 from bot.sets import active_set_code
 from bot.tasks.pod_draft_reminder import init_reminder
+from bot.tasks.pod_daily_poll import PodPollView, init_daily_poll
+from bot.services.pod_launch import init_launch, rearm_signals
 from bot.tasks.format_schedule_post import init_format_schedule
 from bot.tasks.pod_schedule_post import init_schedule_post
 from bot.tasks.set_awards_post import init_set_awards_schedule
@@ -182,6 +186,8 @@ def build_bot(guild_id: int) -> commands.Bot:
         init_schedule_post(bot)
         init_format_schedule(bot)
         init_set_awards_schedule(bot)
+        init_launch(bot)
+        init_daily_poll(bot)
 
         # Load cogs into memory and mirror to the guild tree so dispatch works.
         # Discord-side sync is handled by the owner-only `!sync` text command, not on startup.
@@ -198,6 +204,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_link_17lands(bot)
         await setup_leaderboard_visibility(bot)
         await setup_pod_draft(bot)
+        await setup_pod_queue(bot)
         await setup_pod_guide(bot)
         await setup_roles(bot)
         await setup_mock_draft(bot)
@@ -216,10 +223,12 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_testcomponent(bot)
         await setup_testawards(bot)
         await setup_testschedule(bot)
+        await setup_testpolls(bot)
         await setup_testscribe(bot)
         await setup_testformatschedule(bot)
         await setup_testchampionship(bot)
         reschedule_pending_events(bot)
+        await rearm_signals(bot)
         register_pod_views(bot)
         bot.add_dynamic_items(TeamReportButton)
         bot.add_dynamic_items(TeamVoteButton)
@@ -231,6 +240,8 @@ def build_bot(guild_id: int) -> commands.Bot:
         bot.add_view(LeaderboardView())
         bot.add_view(LobbyReadyButtonView(show_force_start=True))
         bot.add_view(RolesView())
+        bot.add_view(PodPollView())
+        bot.add_view(PodQueueView())
 
         log.info("setup_hook: cogs loaded; run `!sync` to publish slash commands to Discord")
 

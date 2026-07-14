@@ -29,12 +29,24 @@ MSG_MOCK_LOBBY_COUNTER = " 👥 {count}/8"
 MSG_LOBBY_FULL_PROMPT = "8️⃣ Players locked in! Initiate Ready Check?"
 MSG_BOT_RECONNECTED = "🤖 Bot reconnected — back to managing the lobby."
 
+MSG_FIRST_POD_TIP_POLL = (
+    "First pod? Pods are live multiplayer drafts on Draftmancer, played out as Arena matches. "
+    "This slot is a set time, so no need to stay online now. Once {threshold} players are in, a thread opens "
+    "in the pod channel and the Draftmancer link posts there 10 minutes before start. "
+    "Run `/pod-guide` for the full rundown."
+)
+MSG_FIRST_POD_TIP_QUEUE = (
+    "First pod? Pods are live multiplayer drafts on Draftmancer, played out as Arena matches. "
+    "The queue starts a pod the moment {threshold} players are in. The thread and Draftmancer link "
+    "post right away. Run `/pod-guide` for the full rundown."
+)
+
 MSG_TABLE_NO_SOURCE = "Run `/pod-table` in a pod-draft thread, or pass an `event` to pick the pod."
 MSG_TABLE_UNKNOWN_EVENT = "No pod-draft event named `{event}`."
 MSG_TABLE_INTRO = "New draft table off this pod."
-MSG_TABLE_GATHERING = "New thread and Draftmancer lobby will be created once {threshold} players join."
+MSG_LOBBY_GATHERING = "Event thread and Draftmancer lobby will be created once {threshold} players join."
 MSG_TABLE_CREATED = "{name} created"
-MSG_TABLE_JOINED = "Players ({count})"
+MSG_PLAYERS_JOINED = "Players ({count})"
 MSG_TABLE_BUTTON = "Join Table {table}"
 MSG_TABLE_SUPERSEDED = "Reopened further down the channel. Join the newer Table {table} card."
 MSG_TABLE_GOTO = "Go to Table {table}"

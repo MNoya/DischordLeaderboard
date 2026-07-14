@@ -89,7 +89,7 @@ async def setup(bot: commands.Bot) -> None:
             if role is None:
                 await ctx.send(f"No `{spec.name}` role on **{guild.name}** — create it first.")
                 continue
-            embed = build_grant_embed(ctx.author.mention, role, spec.emoji)
+            embed = build_grant_embed(ctx.author.mention, role, spec)
             await ctx.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
             posted += 1
         if posted == 0:

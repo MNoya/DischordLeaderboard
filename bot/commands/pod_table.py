@@ -24,10 +24,10 @@ from bot.commands.messages import (
     MSG_ADMIN_ONLY,
     MSG_TABLE_BUTTON,
     MSG_TABLE_CREATED,
-    MSG_TABLE_GATHERING,
+    MSG_LOBBY_GATHERING,
     MSG_TABLE_GOTO,
     MSG_TABLE_INTRO,
-    MSG_TABLE_JOINED,
+    MSG_PLAYERS_JOINED,
     MSG_TABLE_LOBBY_STARTER,
     MSG_TABLE_NO_SOURCE,
     MSG_TABLE_SUPERSEDED,
@@ -37,6 +37,7 @@ from bot.config import settings
 from bot.database import SessionLocal
 from bot.models import PodDraftEvent
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
+from bot.services.pod_roles import grant_pod_drafters
 from bot.services.pod_draft_manager import start_manager
 from bot.services.pod_drafts import (
     draftmancer_url_for,
@@ -141,11 +142,11 @@ class TableClaimView(discord.ui.View):
             description = MSG_TABLE_INTRO
         else:
             title = name
-            description = f"{MSG_TABLE_INTRO}\n\n{MSG_TABLE_GATHERING.format(threshold=self.threshold)}"
+            description = f"{MSG_TABLE_INTRO}\n\n{MSG_LOBBY_GATHERING.format(threshold=self.threshold)}"
         embed = discord.Embed(color=discord.Color.green(), title=title, description=description)
         if self.claims:
             embed.add_field(
-                name=MSG_TABLE_JOINED.format(count=len(self.claims)),
+                name=MSG_PLAYERS_JOINED.format(count=len(self.claims)),
                 value=", ".join(self.claims.values()), inline=False,
             )
         return embed
@@ -180,11 +181,14 @@ class TableClaimView(discord.ui.View):
             await interaction.response.defer()
             return
         user_id = interaction.user.id
-        if user_id in self.claims:
-            del self.claims[user_id]
-        else:
+        joined = user_id not in self.claims
+        if joined:
             self.claims[user_id] = interaction.user.display_name
+        else:
+            del self.claims[user_id]
         await interaction.response.edit_message(embed=self.render_embed(), view=self)
+        if joined and isinstance(interaction.user, discord.Member):
+            await grant_pod_drafters(interaction.user)
         if len(self.claims) >= self.threshold:
             await self._materialize()
 
