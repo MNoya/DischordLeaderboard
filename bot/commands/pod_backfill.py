@@ -52,7 +52,12 @@ from bot.services.pod_thread_backfill import (
     extract_draft_log_attachment,
     fill_reported_ats,
 )
-from bot.services.pod_tournament import TOTAL_ROUNDS, post_championship_for_event, set_organizer_deck_override
+from bot.services.pod_tournament import (
+    TOTAL_ROUNDS,
+    is_pod_organizer,
+    post_championship_for_event,
+    set_organizer_deck_override,
+)
 from bot.services.sesh_parser import parse_sesh_embed, unescape_markdown
 from bot.services.seventeenlands import SeventeenLandsClient
 from bot.sets import active_set_code
@@ -189,16 +194,13 @@ async def launch_backfill_wizard(bot: commands.Bot, interaction: discord.Interac
     view.message = message
 
 
-ORGANIZER_ROLE_NAMES = frozenset({"admin", "moderator"})
-
-
 async def maybe_open_organizer_backfill(bot: commands.Bot, interaction: discord.Interaction) -> bool:
     """Submit Deck override for organizers: an admin or moderator clicking the button in a pod
     thread gets the backfill wizard instead of the personal color picker, so colors and records
     for the whole pod report from one place. Returns False to fall through to the personal flow."""
     if interaction.guild is None:
         return False
-    if not await _is_organizer(bot, interaction.user):
+    if not await is_pod_organizer(bot, interaction.user):
         return False
     thread_id = str(interaction.channel_id) if interaction.channel_id else None
     event_id = await asyncio.to_thread(load_event_id_by_thread_sync, thread_id) if thread_id else None
@@ -207,13 +209,6 @@ async def maybe_open_organizer_backfill(bot: commands.Bot, interaction: discord.
     await interaction.response.defer(ephemeral=True, thinking=True)
     await launch_backfill_wizard(bot, interaction, event_id)
     return True
-
-
-async def _is_organizer(bot: commands.Bot, user: discord.abc.User) -> bool:
-    if await bot.is_owner(user):
-        return True
-    roles = getattr(user, "roles", None) or []
-    return any(role.name.lower() in ORGANIZER_ROLE_NAMES for role in roles)
 
 
 async def reconstruct_event_from_thread(bot: commands.Bot, thread_id: str) -> str | None:

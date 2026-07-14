@@ -99,6 +99,13 @@ MIDDLE = "middle"
 LAST_CHANCE = "last_chance"
 GRACE_SECONDS = 60  # window after round completion during which edits regenerate the next round
 BRACKET_EDIT_BLOCKED_MSG = "That result can't be changed now — a later round already reported a result."
+MANAGE_ROUND_CUSTOM_PREFIX = "podmanageround"
+ORGANIZER_ROLE_NAMES = frozenset({"admin", "moderator"})
+MSG_FIX_NOT_ORGANIZER = "Only pod organizers can reorganize a round's matches."
+MSG_FIX_NOT_POD_THREAD = "Open this from inside the pod-draft thread."
+MSG_FIX_NO_MATCHES = "This round has no matches to reorganize yet."
+MSG_FIX_SAME_PLAYER = "Pick two different players for the match."
+MSG_FIX_MATCH_GONE = "That match no longer exists — reopen the editor to see the current round."
 POD_PAIRING_FAILED_MSG = (
     "⚠️ Round {round_num} pairings couldn't be generated. Reported results are safe, but the next "
     "round won't post on its own — an organizer needs to step in."
@@ -117,6 +124,14 @@ TROPHY_HYPE_HISTORY_LIMIT = 100  # messages scanned for a champion's own trophy 
 CHAMPIONSHIP_DEADLINE_SECONDS = 600  # hard cap from R3 end: post the announcement with whatever decks landed
 CHAMPIONSHIP_RECONCILE_WINDOW = timedelta(hours=24)  # startup sweep only revisits recently-finalized pods
 TOURNAMENT_REHYDRATE_WINDOW = timedelta(hours=24)  # startup sweep only rebuilds managers for recently-scheduled pods
+
+
+async def is_pod_organizer(bot, user: discord.abc.User) -> bool:
+    """Owner, admin or moderator — the roles allowed to reorganize pod rounds and run backfill."""
+    if await bot.is_owner(user):
+        return True
+    roles = getattr(user, "roles", None) or []
+    return any(role.name.lower() in ORGANIZER_ROLE_NAMES for role in roles)
 
 
 CHAMPIONSHIP_DECK_HEADER = "Championship post is waiting on a few decks 🏆"
@@ -1177,18 +1192,239 @@ class RoundResultsView(ui.View):
                     row=next_row,
                 ))
                 next_row += 1
-            if link_url and link_label and next_row < MAX_MATCHES_PER_ROUND:
-                self.add_item(discord.ui.Button(
-                    style=discord.ButtonStyle.link,
-                    url=link_url,
-                    label=link_label,
-                    emoji=emojis.get_emoji("manat"),
-                    row=next_row,
-                ))
+            if next_row < MAX_MATCHES_PER_ROUND:
+                if round_num is not None:
+                    self.add_item(ManageRoundButton(round_num, row=next_row))
+                if link_url and link_label:
+                    self.add_item(discord.ui.Button(
+                        style=discord.ButtonStyle.link,
+                        url=link_url,
+                        label=link_label,
+                        emoji=emojis.get_emoji("manat"),
+                        row=next_row,
+                    ))
         else:
             # Persistent template covering all possible slots; real messages will only render the slots they need
             for slot in range(MAX_MATCHES_PER_ROUND):
                 self.add_item(MatchResultSelect(slot=slot))
+
+
+class ManageRoundButton(ui.DynamicItem[ui.Button], template=rf"{MANAGE_ROUND_CUSTOM_PREFIX}:(?P<round>\d+)"):
+    """Organizer-only button on each round message that opens an ephemeral pairing editor. The event
+    is resolved from the thread at click time, so only the round number rides in the custom_id and the
+    button dispatches after a restart without any per-message state."""
+
+    def __init__(self, round_num: int, *, row: int | None = None):
+        self.round_num = round_num
+        super().__init__(ui.Button(
+            style=discord.ButtonStyle.secondary,
+            emoji="⚙️",
+            custom_id=f"{MANAGE_ROUND_CUSTOM_PREFIX}:{round_num}",
+            row=row,
+        ))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["round"]))
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if not await is_pod_organizer(interaction.client, interaction.user):
+            await interaction.response.send_message(MSG_FIX_NOT_ORGANIZER, ephemeral=True)
+            return
+        thread_id = str(interaction.channel_id) if interaction.channel_id else None
+        event_id = await asyncio.to_thread(load_event_id_by_thread_sync, thread_id) if thread_id else None
+        if event_id is None:
+            await interaction.response.send_message(MSG_FIX_NOT_POD_THREAD, ephemeral=True)
+            return
+        matches = await asyncio.to_thread(_load_round_states, event_id, self.round_num)
+        if not matches:
+            await interaction.response.send_message(MSG_FIX_NO_MATCHES, ephemeral=True)
+            return
+        roster = await asyncio.to_thread(_load_round_roster, event_id)
+        view = FixPairingView(event_id, self.round_num, interaction.message, matches, roster)
+        await interaction.response.send_message(
+            f"Reorganize Round {self.round_num} — pick a match, then set its two players.",
+            view=view, ephemeral=True,
+        )
+
+
+class FixPairingView(ui.View):
+    """Ephemeral organizer editor: choose a round match, reassign its two players, save. The swap is
+    written straight to the match row and the round message is re-rendered. A result already reported
+    for a player no longer in the match is cleared so it can be re-reported."""
+
+    def __init__(self, event_id: str, round_num: int, round_message: discord.Message | None,
+                 matches: list[dict], roster: list[tuple[str, str]]):
+        super().__init__(timeout=300)
+        self.event_id = event_id
+        self.round_num = round_num
+        self.round_message = round_message
+        self.matches = matches
+        self.roster = roster
+        self.selected_match: dict | None = None
+        self.selected_a: str | None = None
+        self.selected_b: str | None = None
+        self._build_items()
+
+    def _build_items(self) -> None:
+        self.clear_items()
+        chosen_id = self.selected_match["match_id"] if self.selected_match else None
+        match_select = ui.Select(placeholder="Match to fix…", row=0, options=[
+            discord.SelectOption(
+                label=f"{m['a_display']} vs {m['b_display']}"[:100],
+                value=m["match_id"],
+                default=m["match_id"] == chosen_id,
+            )
+            for m in self.matches
+        ])
+        match_select.callback = self._on_match
+        self.add_item(match_select)
+        if self.selected_match is not None:
+            self.add_item(self._player_select("a", self.selected_a, row=1))
+            self.add_item(self._player_select("b", self.selected_b, row=2))
+            save = ui.Button(label="Save pairing", style=discord.ButtonStyle.success, row=3)
+            save.callback = self._on_save
+            self.add_item(save)
+            cancel = ui.Button(label="Cancel", style=discord.ButtonStyle.secondary, row=3)
+            cancel.callback = self._on_cancel
+            self.add_item(cancel)
+
+    def _player_select(self, slot: str, selected: str | None, row: int) -> ui.Select:
+        options = []
+        names = set()
+        for name, display in self.roster:
+            options.append(discord.SelectOption(label=display[:100], value=name[:100], default=name == selected))
+            names.add(name)
+        if selected and selected not in names:
+            options.insert(0, discord.SelectOption(label=selected[:100], value=selected[:100], default=True))
+        select = ui.Select(placeholder=f"Player {slot.upper()}…", row=row, options=options[:25])
+        select.callback = self._on_player_a if slot == "a" else self._on_player_b
+        return select
+
+    async def _on_match(self, interaction: discord.Interaction) -> None:
+        match_id = interaction.data["values"][0]
+        self.selected_match = next((m for m in self.matches if m["match_id"] == match_id), None)
+        if self.selected_match is not None:
+            self.selected_a = self.selected_match["a_name"]
+            self.selected_b = self.selected_match["b_name"]
+        self._build_items()
+        await interaction.response.edit_message(view=self)
+
+    async def _on_player_a(self, interaction: discord.Interaction) -> None:
+        self.selected_a = interaction.data["values"][0]
+        self._build_items()
+        await interaction.response.edit_message(view=self)
+
+    async def _on_player_b(self, interaction: discord.Interaction) -> None:
+        self.selected_b = interaction.data["values"][0]
+        self._build_items()
+        await interaction.response.edit_message(view=self)
+
+    async def _on_cancel(self, interaction: discord.Interaction) -> None:
+        self.stop()
+        await interaction.response.edit_message(content="No changes made.", view=None)
+
+    async def _on_save(self, interaction: discord.Interaction) -> None:
+        if self.selected_match is None:
+            self.stop()
+            await interaction.response.edit_message(content=MSG_FIX_MATCH_GONE, view=None)
+            return
+        if self.selected_a == self.selected_b:
+            await interaction.response.send_message(MSG_FIX_SAME_PLAYER, ephemeral=True)
+            return
+        match_id = self.selected_match["match_id"]
+        if await asyncio.to_thread(bracket_edit_blocked, match_id):
+            await interaction.response.send_message(BRACKET_EDIT_BLOCKED_MSG, ephemeral=True)
+            return
+        result = await asyncio.to_thread(apply_pairing_swap, match_id, self.selected_a, self.selected_b)
+        if result is None:
+            self.stop()
+            await interaction.response.edit_message(content=MSG_FIX_MATCH_GONE, view=None)
+            return
+        self.stop()
+        await interaction.response.defer()
+        try:
+            await interaction.delete_original_response()
+        except discord.HTTPException:
+            log.warning("could not dismiss pairing editor", exc_info=True)
+        log.info(
+            f"[{self.event_id}] R{self.round_num} pairing edited {match_id} -> "
+            f"{self.selected_a} vs {self.selected_b} by {actor_label(interaction)}"
+        )
+        await _refresh_round_message_after_edit(
+            interaction.client, self.round_message, self.event_id, self.round_num, match_id,
+        )
+        a_disp = _roster_display(self.roster, self.selected_a)
+        b_disp = _roster_display(self.roster, self.selected_b)
+        url = self.round_message.jump_url if self.round_message is not None else None
+        label = f"[Round {self.round_num}]({url})" if url else f"[Round {self.round_num}]"
+        note = " — report the result again" if result["cleared"] else ""
+        phrase = f"**{label}** match updated: {a_disp} vs {b_disp}{note}"
+        await _announce_round_result(interaction.client, self.event_id, phrase)
+
+
+def apply_pairing_swap(match_id: str, new_a: str, new_b: str) -> dict | None:
+    """Reassign a match's two players. Clears a reported result whose winner is no longer in the
+    match so standings can't reference a phantom win. Returns None when the row is gone."""
+    with SessionLocal() as session:
+        match = session.get(PodDraftMatch, match_id)
+        if match is None:
+            return None
+        match.player_a_name = new_a
+        match.player_b_name = new_b
+        cleared = False
+        if match.winner_name is not None and match.winner_name not in (new_a, new_b, SKIPPED_SENTINEL):
+            match.winner_name = None
+            match.score = None
+            match.reported_at = None
+            cleared = True
+        result = {"round": match.round, "event_id": match.event_id, "cleared": cleared}
+        session.commit()
+    return result
+
+
+def _load_round_roster(event_id: str) -> list[tuple[str, str]]:
+    """(draftmancer_name, display label) for every participant, feeding the pairing-editor selects."""
+    with SessionLocal() as session:
+        rows = session.execute(
+            select(PodDraftParticipant.draftmancer_name, PodDraftParticipant.display_name)
+            .where(
+                PodDraftParticipant.event_id == event_id,
+                PodDraftParticipant.draftmancer_name.is_not(None),
+            )
+            .order_by(PodDraftParticipant.seat_index.nulls_last(), PodDraftParticipant.draftmancer_name)
+        ).all()
+    return [(name, display or name) for name, display in rows]
+
+
+def _roster_display(roster: list[tuple[str, str]], name: str | None) -> str:
+    for candidate, display in roster:
+        if candidate == name:
+            return display
+    return name or "?"
+
+
+async def _refresh_round_message_after_edit(
+    bot_client, round_message: discord.Message | None, event_id: str, round_num: int, match_id: str,
+) -> None:
+    """Re-render the edited round message from DB state and fan the change out to any DM surfaces."""
+    bracket = (await asyncio.to_thread(load_event_pairing_mode_sync, event_id)) == "bracket"
+    states = await asyncio.to_thread(render_round_states, event_id, round_num, bracket=bracket)
+    manager = ACTIVE_POD_MANAGERS.get(event_id)
+    url, label = _round_nav_link(manager, round_num)
+    if round_message is not None:
+        try:
+            await round_message.edit(
+                content=None,
+                embed=round_embed(round_num, states),
+                view=RoundResultsView(states, round_num=round_num, link_url=url, link_label=label),
+            )
+        except discord.HTTPException:
+            log.warning(f"could not refresh round {round_num} message after pairing edit", exc_info=True)
+    exclude = str(round_message.channel.id) if round_message is not None and round_message.channel else None
+    asyncio.create_task(_propagate_match_to_other_surfaces(
+        bot_client, event_id, match_id, round_num, exclude_channel_id=exclude,
+    ))
 
 
 async def _handle_result_submission(interaction: discord.Interaction, value: str) -> None:
@@ -1802,6 +2038,7 @@ async def _resolve_discord_mention(event_id: str, draftmancer_name: str) -> str 
 def register_persistent_views(bot) -> None:
     """Register persistent views so component clicks dispatch after restart."""
     bot.add_view(RoundResultsView())
+    bot.add_dynamic_items(ManageRoundButton)
     bot.add_view(build_live_submit_deck_view())
     bot.add_view(build_live_deck_color_select_view())
 
