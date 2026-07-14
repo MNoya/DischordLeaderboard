@@ -121,7 +121,7 @@ export function MidwayResults({
   return (
     <div className="flex flex-col gap-3 lg:gap-6">
       <TeamRow
-        label={viewingYours ? "YOUR PICKS" : "CROWD TEAM"}
+        label={viewingYours ? "YOUR PICKS" : "CROWD PICKS"}
         labelToggle={showYourPicks}
         labelColor="#ffffff"
         score={viewingYours ? yourScore : crowdTeam.score}
@@ -164,7 +164,7 @@ interface Toggle {
   onClick: () => void;
 }
 
-const TOP_LABELS = ["YOUR PICKS", "CROWD TEAM"];
+const TOP_LABELS = ["YOUR PICKS", "CROWD PICKS"];
 
 function TeamRow({
   label,

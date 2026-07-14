@@ -277,7 +277,7 @@ export function FinalBallotScorecard({
             className="group inline-flex items-center gap-1.5 self-start cursor-help bg-transparent border-0 p-0"
           >
             <HelpCircle size={15} strokeWidth={2} className="text-white transition-colors" />
-            <span className="font-display text-white" style={{ fontSize: 15, letterSpacing: "0.22em" }}>YOUR BALLOT</span>
+            <span className="font-display text-white" style={{ fontSize: 15, letterSpacing: "0.22em" }}>YOUR RESULT</span>
           </button>
         </Tooltip>
 
@@ -286,7 +286,7 @@ export function FinalBallotScorecard({
             <span className="font-mono tabular-nums leading-none" style={{ fontSize: 24, color: accent }}>
               {result.score.toFixed(1)}
             </span>
-            <span className="font-body text-[12px] leading-none" style={{ color: accent }}>GIH WR SUM</span>
+            <span className="font-body text-[12px] leading-none" style={{ color: accent }}>GIH WR total</span>
           </span>
           {result.rank !== null && (
             <span
@@ -320,7 +320,7 @@ function FinalBallotLegend() {
       <div className="text-subtle">
         The bar spans the <b className="font-semibold text-text">lowest completed ballot</b> to
         the <b className="font-semibold text-text">best possible</b> ballot;
-        the tick marks the <b className="font-semibold text-text">crowd team</b>
+        the white line marks the performance of the <b className="font-semibold text-text">crowd picks</b>
       </div>
     </div>
   );

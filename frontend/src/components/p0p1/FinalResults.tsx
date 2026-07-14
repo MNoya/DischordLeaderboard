@@ -1264,7 +1264,7 @@ export function FinalResults({
               <PickGrid entries={yourEntries} cardsByName={cardsByName} onTileOpen={onTileOpen} />
             )}
             <div className="flex items-baseline justify-center gap-3 mb-2 mt-4">
-              <SectionLabel size={22} className="text-white">CROWD TEAM</SectionLabel>
+              <SectionLabel size={22} className="text-white">CROWD PICKS</SectionLabel>
               <span className="font-mono tabular-nums text-[18px] text-subtle">
                 {crowdTeam.score.toFixed(1)}
               </span>
