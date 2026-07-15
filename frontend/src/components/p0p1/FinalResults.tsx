@@ -60,6 +60,41 @@ function formatDateEnd(iso: string): string {
   });
 }
 
+function BallotAvatar({
+  name,
+  avatarUrl,
+  className,
+  fallbackClassName,
+  style,
+  title,
+}: {
+  name: string;
+  avatarUrl: string | null;
+  className: string;
+  fallbackClassName: string;
+  style?: React.CSSProperties;
+  title?: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  if (avatarUrl && !failed) {
+    return (
+      <img
+        src={avatarUrl}
+        alt={name}
+        title={title}
+        onError={() => setFailed(true)}
+        className={className}
+        style={style}
+      />
+    );
+  }
+  return (
+    <div className={fallbackClassName} style={style} title={title}>
+      {name.replace(/^\W+/, "").charAt(0).toUpperCase() || "?"}
+    </div>
+  );
+}
+
 function teamToEntries(picks: TeamPick[], setCode: string): PickEntry[] {
   const bySlot = new Map(picks.map((p) => [p.slot, p]));
   return SLOTS.map((slot) => {
@@ -419,21 +454,13 @@ function ChampionCard({
         </div>
 
         <div className="relative flex flex-wrap items-center gap-3 sm:gap-4">
-          {ballot.avatarUrl ? (
-            <img
-              src={ballot.avatarUrl}
-              alt={ballot.name}
-              className="w-14 h-14 sm:w-16 sm:h-16 rounded-full shrink-0 object-cover"
-              style={{ boxShadow: "0 0 0 2px #1d2330, 0 0 0 4px #ffc63a, 0 0 24px #ffc63a66" }}
-            />
-          ) : (
-            <div
-              className="w-14 h-14 sm:w-16 sm:h-16 rounded-full shrink-0 bg-surface flex items-center justify-center text-[20px] sm:text-[24px] text-muted font-mono"
-              style={{ boxShadow: "0 0 0 2px #1d2330, 0 0 0 4px #ffc63a, 0 0 24px #ffc63a66" }}
-            >
-              ?
-            </div>
-          )}
+          <BallotAvatar
+            name={ballot.name}
+            avatarUrl={ballot.avatarUrl}
+            className="w-14 h-14 sm:w-16 sm:h-16 rounded-full shrink-0 object-cover"
+            fallbackClassName="w-14 h-14 sm:w-16 sm:h-16 rounded-full shrink-0 bg-surface flex items-center justify-center text-[20px] sm:text-[24px] text-muted font-mono"
+            style={{ boxShadow: "0 0 0 2px #1d2330, 0 0 0 4px #ffc63a, 0 0 24px #ffc63a66" }}
+          />
 
           <div className="flex-1 min-w-0">
             <div className="font-display tracking-[0.2em] sm:tracking-[0.22em] text-[13px] sm:text-[15px] text-gold">
@@ -538,21 +565,13 @@ function BroadcastTop3({
           style={{ transform: "skewX(6deg)", paddingLeft: 74, paddingRight: 20 }}
         >
           <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
-            {champion.avatarUrl ? (
-              <img
-                src={champion.avatarUrl}
-                alt={champion.name}
-                className="w-10 h-10 sm:w-14 sm:h-14 rounded-full shrink-0 object-cover"
-                style={{ boxShadow: `0 0 0 2px #1d2330, 0 0 0 3px ${MEDAL_COLOR[1]}, 0 0 18px #ffc63a66` }}
-              />
-            ) : (
-              <div
-                className="w-10 h-10 sm:w-14 sm:h-14 rounded-full shrink-0 bg-surface flex items-center justify-center text-[14px] sm:text-[20px] text-muted font-mono"
-                style={{ boxShadow: `0 0 0 2px #1d2330, 0 0 0 3px ${MEDAL_COLOR[1]}, 0 0 18px #ffc63a66` }}
-              >
-                ?
-              </div>
-            )}
+            <BallotAvatar
+              name={champion.name}
+              avatarUrl={champion.avatarUrl}
+              className="w-10 h-10 sm:w-14 sm:h-14 rounded-full shrink-0 object-cover"
+              fallbackClassName="w-10 h-10 sm:w-14 sm:h-14 rounded-full shrink-0 bg-surface flex items-center justify-center text-[14px] sm:text-[20px] text-muted font-mono"
+              style={{ boxShadow: `0 0 0 2px #1d2330, 0 0 0 3px ${MEDAL_COLOR[1]}, 0 0 18px #ffc63a66` }}
+            />
 
             <div className="flex-1 min-w-0">
               <div className="font-mono tracking-[0.22em] text-[10px] sm:text-[10.5px] uppercase text-gold">
@@ -672,21 +691,13 @@ function BroadcastSubBar({
           </span>
         </div>
         <div className="flex-1 min-w-0 flex items-center gap-3 py-2 px-4" style={{ transform: "skewX(6deg)" }}>
-          {ballot.avatarUrl ? (
-            <img
-              src={ballot.avatarUrl}
-              alt={ballot.name}
-              className="w-6 h-6 sm:w-7 sm:h-7 rounded-full shrink-0 object-cover"
-              style={{ boxShadow: `0 0 0 1.5px ${accent}` }}
-            />
-          ) : (
-            <div
-              className="w-6 h-6 sm:w-7 sm:h-7 rounded-full shrink-0 bg-surface flex items-center justify-center text-[10px] sm:text-[11px] text-muted font-mono"
-              style={{ boxShadow: `0 0 0 1.5px ${accent}` }}
-            >
-              ?
-            </div>
-          )}
+          <BallotAvatar
+            name={ballot.name}
+            avatarUrl={ballot.avatarUrl}
+            className="w-6 h-6 sm:w-7 sm:h-7 rounded-full shrink-0 object-cover"
+            fallbackClassName="w-6 h-6 sm:w-7 sm:h-7 rounded-full shrink-0 bg-surface flex items-center justify-center text-[10px] sm:text-[11px] text-muted font-mono"
+            style={{ boxShadow: `0 0 0 1.5px ${accent}` }}
+          />
           <span className="font-display text-[16px] sm:text-[20px] tracking-[0.04em] flex-1 min-w-0 truncate">
             {ballot.name.toUpperCase()}
             {isSelf && (
@@ -770,21 +781,13 @@ function MedalRow({
           {medal.label}
         </span>
 
-        {ballot.avatarUrl ? (
-          <img
-            src={ballot.avatarUrl}
-            alt={ballot.name}
-            className="w-6 h-6 lg:w-7 lg:h-7 rounded-full shrink-0 object-cover"
-            style={{ boxShadow: `0 0 0 1.5px ${medal.color}` }}
-          />
-        ) : (
-          <div
-            className="w-6 h-6 lg:w-7 lg:h-7 rounded-full shrink-0 bg-surface flex items-center justify-center text-[10px] lg:text-[11px] text-muted font-mono"
-            style={{ boxShadow: `0 0 0 1.5px ${medal.color}` }}
-          >
-            ?
-          </div>
-        )}
+        <BallotAvatar
+          name={ballot.name}
+          avatarUrl={ballot.avatarUrl}
+          className="w-6 h-6 lg:w-7 lg:h-7 rounded-full shrink-0 object-cover"
+          fallbackClassName="w-6 h-6 lg:w-7 lg:h-7 rounded-full shrink-0 bg-surface flex items-center justify-center text-[10px] lg:text-[11px] text-muted font-mono"
+          style={{ boxShadow: `0 0 0 1.5px ${medal.color}` }}
+        />
 
         <span
           className={`flex-1 min-w-0 lg:flex-none lg:w-[150px] lg:shrink-0 text-[14px] lg:text-[15px] truncate ${isSelf ? "text-white font-semibold" : "text-text"}`}
@@ -869,17 +872,12 @@ function LeaderboardRow({
           #{ballot.rank}
         </span>
 
-        {ballot.avatarUrl ? (
-          <img
-            src={ballot.avatarUrl}
-            alt={ballot.name}
-            className="w-6 h-6 lg:w-7 lg:h-7 rounded-full shrink-0 object-cover"
-          />
-        ) : (
-          <div className="w-6 h-6 lg:w-7 lg:h-7 rounded-full shrink-0 bg-surface flex items-center justify-center text-[10px] lg:text-[11px] text-muted font-mono">
-            ?
-          </div>
-        )}
+        <BallotAvatar
+          name={ballot.name}
+          avatarUrl={ballot.avatarUrl}
+          className="w-6 h-6 lg:w-7 lg:h-7 rounded-full shrink-0 object-cover"
+          fallbackClassName="w-6 h-6 lg:w-7 lg:h-7 rounded-full shrink-0 bg-surface flex items-center justify-center text-[10px] lg:text-[11px] text-muted font-mono"
+        />
 
         <span
           className={`flex-1 min-w-0 lg:flex-none lg:w-[150px] lg:shrink-0 text-[14px] lg:text-[15px] truncate ${isSelf ? "text-white font-semibold" : "text-text"}`}
@@ -953,17 +951,12 @@ function FloatingSelfRow({
           #{ballot.rank}
         </span>
 
-        {ballot.avatarUrl ? (
-          <img
-            src={ballot.avatarUrl}
-            alt={ballot.name}
-            className="w-6 h-6 lg:w-7 lg:h-7 rounded-full shrink-0 object-cover"
-          />
-        ) : (
-          <div className="w-6 h-6 lg:w-7 lg:h-7 rounded-full shrink-0 bg-surface flex items-center justify-center text-[10px] lg:text-[11px] text-muted font-mono">
-            ?
-          </div>
-        )}
+        <BallotAvatar
+          name={ballot.name}
+          avatarUrl={ballot.avatarUrl}
+          className="w-6 h-6 lg:w-7 lg:h-7 rounded-full shrink-0 object-cover"
+          fallbackClassName="w-6 h-6 lg:w-7 lg:h-7 rounded-full shrink-0 bg-surface flex items-center justify-center text-[10px] lg:text-[11px] text-muted font-mono"
+        />
 
         <span className="flex-1 min-w-0 lg:flex-none lg:w-[150px] lg:shrink-0 text-[14px] lg:text-[15px] truncate text-white font-semibold">
           {ballot.name}
@@ -1260,25 +1253,16 @@ function VoterStack({ voters }: { voters: HighlightVoter[] }) {
 
   return (
     <div className="flex -space-x-1.5">
-      {shown.map((v) =>
-        v.avatarUrl ? (
-          <img
-            key={v.name}
-            src={v.avatarUrl}
-            alt={v.name}
-            title={v.name}
-            className={`w-[22px] h-[22px] rounded-full shrink-0 ${ring}`}
-          />
-        ) : (
-          <span
-            key={v.name}
-            title={v.name}
-            className={`w-[22px] h-[22px] rounded-full shrink-0 bg-surface flex items-center justify-center font-mono text-[10px] text-green ${ring}`}
-          >
-            {v.name.replace(/^\W+/, "").charAt(0).toUpperCase()}
-          </span>
-        ),
-      )}
+      {shown.map((v) => (
+        <BallotAvatar
+          key={v.name}
+          name={v.name}
+          avatarUrl={v.avatarUrl}
+          title={v.name}
+          className={`w-[22px] h-[22px] rounded-full shrink-0 ${ring}`}
+          fallbackClassName={`w-[22px] h-[22px] rounded-full shrink-0 bg-surface flex items-center justify-center font-mono text-[10px] text-green ${ring}`}
+        />
+      ))}
       {extra > 0 && (
         <span
           className={`w-[22px] h-[22px] rounded-full shrink-0 bg-surface flex items-center justify-center font-mono text-[9px] text-green ${ring}`}
