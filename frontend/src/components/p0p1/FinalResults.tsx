@@ -1,21 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { SectionLabel } from "../SectionLabel";
 import { Tooltip } from "../Tooltip";
 import { PickGrid } from "./CommunityGrid";
-import { MidwayBreakdownList } from "./MidwayBreakdownList";
-import { useMidwayVersusPager } from "./MidwayVersusCard";
 import { breakdownStripAccent } from "./slotVisuals";
 import { CHAMFER, MEDAL_COLOR } from "./P0P1BallotScorecard";
 import { SLOTS } from "../../data/p0p1Slots";
 import {
   buildRatingsByName,
-  scoreBallot,
   bestPossibleTeam,
   mostPopularTeam,
-  buildMidwaySlotVersus,
-  gihwrBounds,
   groupBallotRows,
   rankBallots,
   buildStandingsList,
@@ -40,24 +34,8 @@ import type { PickEntry } from "./CommunityGrid";
 
 const HIGHLIGHTS_COUNT = 5;
 
-type Top3Treatment = "spotlight" | "broadcast";
-const TOP3_TREATMENT: Top3Treatment =
-  typeof window !== "undefined" &&
-  new URLSearchParams(window.location.search).get("top3") === "spotlight"
-    ? "spotlight"
-    : "broadcast";
-
 function gihwrLabel(gihwr: number): string {
   return `${(gihwr * 100).toFixed(1)}%`;
-}
-
-function formatDateEnd(iso: string): string {
-  return new Date(iso + "T00:00:00Z").toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    timeZone: "UTC",
-  });
 }
 
 function BallotAvatar({
@@ -82,6 +60,7 @@ function BallotAvatar({
         src={avatarUrl}
         alt={name}
         title={title}
+        decoding="async"
         onError={() => setFailed(true)}
         className={className}
         style={style}
@@ -105,26 +84,6 @@ function teamToEntries(picks: TeamPick[], setCode: string): PickEntry[] {
       label: slot.label,
       stats: [{ setCode, slot: slot.key as SlotKey, cardName: pick.cardName, pickCount: 0, pickPct: 0 }],
       pctLabel: pick.gihwr > 0 ? gihwrLabel(pick.gihwr) : "—",
-    };
-  });
-}
-
-function yourPicksEntries(
-  picksBySlot: Map<string, string>,
-  setCode: string,
-  ratingsByName: Map<string, CardRating>,
-): PickEntry[] {
-  return SLOTS.map((slot) => {
-    const cardName = picksBySlot.get(slot.key);
-    if (!cardName) return { slotKey: slot.key, label: slot.label, stats: [] };
-    const rating = ratingsByName.get(cardName);
-    const gihwr =
-      rating && rating.gih >= GIH_SAMPLE_FLOOR && rating.gihwr !== null ? rating.gihwr : null;
-    return {
-      slotKey: slot.key,
-      label: slot.label,
-      stats: [{ setCode, slot: slot.key as SlotKey, cardName, pickCount: 0, pickPct: 0 }],
-      pctLabel: gihwr !== null ? gihwrLabel(gihwr) : "—",
     };
   });
 }
@@ -241,10 +200,12 @@ function ContributionBar({
               style={{ background: breakdownStripAccent(slotKey) }}
             />
             {card && (
+              // no loading="lazy" — these measure 0-height inside content-visibility rows and never load
               <img
                 src={card.imageArtCrop}
                 alt=""
                 aria-hidden
+                decoding="async"
                 className="absolute inset-0 w-full xl:-top-1/4 object-cover pointer-events-none"
               />
             )}
@@ -395,122 +356,12 @@ function SyntheticRow({
   );
 }
 
-const PODIUM: Record<number, { emoji: string; label: string; color: string }> = {
-  1: { emoji: "🥇", label: "1st place", color: MEDAL_COLOR[1] },
-  2: { emoji: "🥈", label: "2nd place", color: MEDAL_COLOR[2] },
-  3: { emoji: "🥉", label: "3rd place", color: MEDAL_COLOR[3] },
-};
-
-
-
-// ── Champion spotlight ──────────────────────────────────────────────────────────
-
-function ChampionCard({
-  ballot,
-  total,
-  isSelf,
-  isBest,
-  setCode,
-  cardsByName,
-  ratingsByName,
-}: {
-  ballot: RankedBallot;
-  total: number;
-  isSelf: boolean;
-  isBest: boolean;
-  setCode: string;
-  cardsByName: Map<string, Card>;
-  ratingsByName: Map<string, CardRating>;
-}) {
-  const topPct = Math.max(1, Math.round((ballot.rank / total) * 100));
-
-  const entries = useMemo(
-    () => ballotToEntries(ballot, setCode, ratingsByName),
-    [ballot, setCode, ratingsByName],
-  );
-
-  return (
-    <div
-      className="animate-fadeUpIn w-full"
-      style={{
-        clipPath: CHAMFER,
-        padding: 1,
-        background: "linear-gradient(120deg, #ffc63a, #ffc63a55 35%, #3b4458 65%, #ffc63a44)",
-        filter: "drop-shadow(0 0 28px #ffc63a2e)",
-      }}
-    >
-      <div
-        className="relative overflow-hidden bg-surface2 px-4 sm:px-6 pt-4 sm:pt-5 pb-4 sm:pb-5"
-        style={{
-          clipPath: CHAMFER,
-          backgroundImage: "radial-gradient(120% 140% at 8% 0%, #ffc63a1c, transparent 45%)",
-        }}
-      >
-        <div
-          className="absolute -top-8 sm:-top-11 right-1 font-display leading-none pointer-events-none select-none"
-          style={{ fontSize: "clamp(140px,32vw,230px)", color: "#ffc63a12" }}
-        >
-          1
-        </div>
-
-        <div className="relative flex flex-wrap items-center gap-3 sm:gap-4">
-          <BallotAvatar
-            name={ballot.name}
-            avatarUrl={ballot.avatarUrl}
-            className="w-14 h-14 sm:w-16 sm:h-16 rounded-full shrink-0 object-cover"
-            fallbackClassName="w-14 h-14 sm:w-16 sm:h-16 rounded-full shrink-0 bg-surface flex items-center justify-center text-[20px] sm:text-[24px] text-muted font-mono"
-            style={{ boxShadow: "0 0 0 2px #1d2330, 0 0 0 4px #ffc63a, 0 0 24px #ffc63a66" }}
-          />
-
-          <div className="flex-1 min-w-0">
-            <div className="font-display tracking-[0.2em] sm:tracking-[0.22em] text-[13px] sm:text-[15px] text-gold">
-              🥇 CHAMPION
-            </div>
-            <div className="text-[19px] sm:text-[26px] font-semibold leading-tight truncate">
-              {ballot.name}
-              {isSelf && (
-                <span className="ml-2 text-[10px] font-normal text-subtle font-display tracking-widest align-middle">
-                  YOU
-                </span>
-              )}
-              {isBest && <BestPossibleBadge />}
-            </div>
-          </div>
-
-          <div className="hidden lg:block text-right shrink-0">
-            <div
-              className="font-mono tabular-nums text-[52px] font-bold leading-none text-gold"
-              style={{ textShadow: "0 0 56px #ffc63ab0, 0 0 18px #ffc63a50" }}
-            >
-              {ballot.score.toFixed(1)}
-            </div>
-          </div>
-        </div>
-
-        <div className="lg:hidden mt-3 flex items-baseline gap-2.5">
-          <div
-            className="font-mono tabular-nums text-[40px] font-bold leading-none text-gold"
-            style={{ textShadow: "0 0 56px #ffc63ab0, 0 0 18px #ffc63a50" }}
-          >
-            {ballot.score.toFixed(1)}
-          </div>
-        </div>
-
-        <div className="mt-4">
-          <PickGrid  entries={entries} cardsByName={cardsByName} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Broadcast overlay (default top-3 treatment; ?top3=spotlight for the alt) ────
+// ── Broadcast top-3 ─────────────────────────────────────────────────────────────
 
 function BroadcastTop3({
   champion,
   runnersUp,
   self,
-  total,
   setCode,
   cardsByName,
   ratingsByName,
@@ -520,7 +371,6 @@ function BroadcastTop3({
   champion: RankedBallot;
   runnersUp: RankedBallot[];
   self: RankedBallot | null;
-  total: number;
   setCode: string;
   cardsByName: Map<string, Card>;
   ratingsByName: Map<string, CardRating>;
@@ -864,6 +714,7 @@ function LeaderboardRow({
     <div
       ref={rowRef}
       className={`border-b border-border2 last:border-b-0 ${isSelf ? "bg-green/[0.07] shadow-[inset_3px_0_0_0_#2ee85c]" : ""}`}
+      style={{ contentVisibility: "auto", containIntrinsicSize: "auto 52px" }}
     >
       <button
         type="button"
@@ -988,6 +839,7 @@ function FloatingSelfRow({
 }
 
 const COLLAPSED_COUNT = 3;
+const ROW_CHUNK = 30;
 
 function Leaderboard({
   rankedBallots,
@@ -999,7 +851,6 @@ function Leaderboard({
   ratingsByName,
   mode = "full",
   onSeeAll,
-  spotlight = false,
   stickyTop = 0,
 }: {
   rankedBallots: RankedBallot[];
@@ -1011,7 +862,6 @@ function Leaderboard({
   ratingsByName: Map<string, CardRating>;
   mode?: "peek" | "full";
   onSeeAll?: () => void;
-  spotlight?: boolean;
   /** Viewport offset (px) below which the floating self-row pins — clears sticky page chrome. */
   stickyTop?: number;
 }) {
@@ -1020,14 +870,10 @@ function Leaderboard({
     [rankedBallots, bestTeam, crowdTeam],
   );
   const isPeek = mode === "peek";
-  const maxScore = isPeek
-    ? rankedBallots[0]?.score ?? 1
-    : standings.entries.reduce(
-        (m, e) => Math.max(m, e.kind === "ballot" ? e.ballot.score : e.standing.team.score),
-        1,
-      );
-  const hasMore = rankedBallots.length > COLLAPSED_COUNT;
-  const useSpotlight = spotlight && isPeek;
+  const maxScore = standings.entries.reduce(
+    (m, e) => Math.max(m, e.kind === "ballot" ? e.ballot.score : e.standing.team.score),
+    1,
+  );
 
   const [selfRowEl, setSelfRowEl] = useState<HTMLDivElement | null>(null);
   const [selfRowVisible, setSelfRowVisible] = useState(true);
@@ -1044,131 +890,132 @@ function Leaderboard({
     return () => observer.disconnect();
   }, [selfRowEl, stickyTop]);
 
-  const visible = useMemo(() => {
-    if (!isPeek || !hasMore) return rankedBallots;
-    const peek = rankedBallots.slice(0, COLLAPSED_COUNT);
-    // Pin the user's own row if it falls outside the peek window
-    if (userBallotId !== null) {
-      const selfInPeek = peek.some((b) => b.ballotId === userBallotId);
-      if (!selfInPeek) {
-        const selfBallot = rankedBallots.find((b) => b.ballotId === userBallotId);
-        if (selfBallot) return [...peek, selfBallot];
-      }
+  // Rows mount in chunks as the sentinel approaches the viewport, so a 300-ballot
+  // field never pays one synchronous mount of ~8 art crops per row
+  const [visibleCount, setVisibleCount] = useState(ROW_CHUNK);
+  const [sentinelEl, setSentinelEl] = useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!sentinelEl) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) setVisibleCount((c) => c + ROW_CHUNK);
+      },
+      { rootMargin: "1200px 0px" },
+    );
+    observer.observe(sentinelEl);
+    return () => observer.disconnect();
+  }, [sentinelEl, visibleCount]);
+
+  const [pendingScrollToSelf, setPendingScrollToSelf] = useState(false);
+  useEffect(() => {
+    if (pendingScrollToSelf && selfRowEl) {
+      selfRowEl.scrollIntoView({ behavior: "smooth", block: "center" });
+      setPendingScrollToSelf(false);
     }
-    return peek;
-  }, [isPeek, hasMore, rankedBallots, userBallotId]);
+  }, [pendingScrollToSelf, selfRowEl]);
 
-  const champion = useSpotlight ? visible.find((b) => b.rank === 1) ?? null : null;
-  const isBroadcast = useSpotlight && TOP3_TREATMENT === "broadcast";
-  const runnersUp = isBroadcast ? visible.filter((b) => b.rank === 2 || b.rank === 3) : [];
-  const broadcastSelf = isBroadcast
-    ? visible.find((b) => b.ballotId === userBallotId && b.rank > 3) ?? null
-    : null;
-  const rows = champion
-    ? visible.filter(
-        (b) =>
-          b.ballotId !== champion.ballotId &&
-          !runnersUp.some((r) => r.ballotId === b.ballotId) &&
-          b.ballotId !== broadcastSelf?.ballotId,
-      )
-    : visible;
-
-  const entries = useMemo(
-    () =>
-      isPeek
-        ? rows.map((ballot) => ({ kind: "ballot" as const, ballot }))
-        : standings.entries,
-    [isPeek, rows, standings.entries],
-  );
-
-  return (
-    <div className="flex flex-col gap-3">
-      {champion && (isBroadcast ? (
+  if (isPeek) {
+    const champion = rankedBallots.find((b) => b.rank === 1);
+    if (!champion) return null;
+    const runnersUp = rankedBallots.filter((b) => b.rank === 2 || b.rank === 3);
+    const broadcastSelf =
+      rankedBallots.find((b) => b.ballotId === userBallotId && b.rank > COLLAPSED_COUNT) ?? null;
+    return (
+      <div className="flex flex-col gap-3">
         <BroadcastTop3
           champion={champion}
           runnersUp={runnersUp}
           self={broadcastSelf}
-          total={rankedBallots.length}
           setCode={setCode}
           cardsByName={cardsByName}
           ratingsByName={ratingsByName}
           userBallotId={userBallotId}
           bestAchieverIds={standings.bestAchieverIds}
         />
-      ) : (
-        <ChampionCard
-          ballot={champion}
-          total={rankedBallots.length}
-          isSelf={champion.ballotId === userBallotId}
-          isBest={standings.bestAchieverIds.has(champion.ballotId)}
-          setCode={setCode}
-          cardsByName={cardsByName}
-          ratingsByName={ratingsByName}
-        />
-      ))}
-      <div>
-        {!isBroadcast && (
-          <div className="relative">
-            <div className="border-t border-border2 bg-surface2">
-              {mode === "full" && (
-                <FloatingSelfRow
-                  ballot={rankedBallots.find((b) => b.ballotId === userBallotId)}
-                  setCode={setCode}
-                  isBest={userBallotId !== null && standings.bestAchieverIds.has(userBallotId)}
-                  maxScore={maxScore}
-                  cardsByName={cardsByName}
-                  ratingsByName={ratingsByName}
-                  hidden={selfRowVisible}
-                  stickyTop={stickyTop}
-                  onScrollToRow={() => selfRowEl?.scrollIntoView({ behavior: "smooth", block: "center" })}
-                />
-              )}
-              {entries.map((entry) => {
-                if (entry.kind === "synthetic") {
-                  return (
-                    <SyntheticRow
-                      key={`synthetic-${entry.standing.kind}`}
-                      standing={entry.standing}
-                      setCode={setCode}
-                      maxScore={maxScore}
-                      cardsByName={cardsByName}
-                      ratingsByName={ratingsByName}
-                      stickyTop={stickyTop}
-                    />
-                  );
-                }
-                const { ballot } = entry;
-                const Row = ballot.rank <= 3 ? MedalRow : LeaderboardRow;
-                return (
-                  <Row
-                    key={ballot.ballotId}
-                    ballot={ballot}
-                    setCode={setCode}
-                    isSelf={ballot.ballotId === userBallotId}
-                    isBest={standings.bestAchieverIds.has(ballot.ballotId)}
-                    maxScore={maxScore}
-                    cardsByName={cardsByName}
-                    ratingsByName={ratingsByName}
-                    rowRef={ballot.ballotId === userBallotId ? setSelfRowEl : undefined}
-                    stickyTop={stickyTop}
-                  />
-                );
-              })}
-            </div>
+        {rankedBallots.length > COLLAPSED_COUNT && onSeeAll && (
+          <div className="flex justify-center mt-2.5">
+            <button
+              type="button"
+              onClick={onSeeAll}
+              className="font-mono tracking-[0.16em] text-[11px] text-subtle hover:text-text transition-colors"
+              style={{
+                transform: "skewX(-6deg)",
+                background: "#1d2330",
+                border: "1px solid #3b4458",
+                padding: "7px 18px",
+              }}
+            >
+              <span className="inline-block" style={{ transform: "skewX(6deg)" }}>
+                SEE ALL {rankedBallots.length} STANDINGS →
+              </span>
+            </button>
           </div>
         )}
-        {isPeek && hasMore && onSeeAll && (
-          <button
-            type="button"
-            onClick={onSeeAll}
-            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-surface2 border-t-0 border border-border2 text-subtle hover:text-text transition-colors"
-          >
-            <span className="font-display tracking-[0.14em] text-[13px]">
-              SEE ALL {rankedBallots.length} STANDINGS →
-            </span>
-          </button>
-        )}
       </div>
+    );
+  }
+
+  const selfEntryIndex = standings.entries.findIndex(
+    (e) => e.kind === "ballot" && e.ballot.ballotId === userBallotId,
+  );
+  const selfMounted = selfEntryIndex !== -1 && selfEntryIndex < visibleCount;
+  const mountedEntries = standings.entries.slice(0, visibleCount);
+
+  return (
+    <div className="relative">
+      <div className="border-t border-border2 bg-surface2">
+        <FloatingSelfRow
+          ballot={rankedBallots.find((b) => b.ballotId === userBallotId)}
+          setCode={setCode}
+          isBest={userBallotId !== null && standings.bestAchieverIds.has(userBallotId)}
+          maxScore={maxScore}
+          cardsByName={cardsByName}
+          ratingsByName={ratingsByName}
+          hidden={selfMounted && selfRowVisible}
+          stickyTop={stickyTop}
+          onScrollToRow={() => {
+            if (selfRowEl) {
+              selfRowEl.scrollIntoView({ behavior: "smooth", block: "center" });
+              return;
+            }
+            if (selfEntryIndex === -1) return;
+            setVisibleCount((c) => Math.max(c, selfEntryIndex + ROW_CHUNK));
+            setPendingScrollToSelf(true);
+          }}
+        />
+        {mountedEntries.map((entry) => {
+          if (entry.kind === "synthetic") {
+            return (
+              <SyntheticRow
+                key={`synthetic-${entry.standing.kind}`}
+                standing={entry.standing}
+                setCode={setCode}
+                maxScore={maxScore}
+                cardsByName={cardsByName}
+                ratingsByName={ratingsByName}
+                stickyTop={stickyTop}
+              />
+            );
+          }
+          const { ballot } = entry;
+          const Row = ballot.rank <= 3 ? MedalRow : LeaderboardRow;
+          return (
+            <Row
+              key={ballot.ballotId}
+              ballot={ballot}
+              setCode={setCode}
+              isSelf={ballot.ballotId === userBallotId}
+              isBest={standings.bestAchieverIds.has(ballot.ballotId)}
+              maxScore={maxScore}
+              cardsByName={cardsByName}
+              ratingsByName={ratingsByName}
+              rowRef={ballot.ballotId === userBallotId ? setSelfRowEl : undefined}
+              stickyTop={stickyTop}
+            />
+          );
+        })}
+      </div>
+      {visibleCount < standings.entries.length && <div ref={setSentinelEl} className="h-px" />}
     </div>
   );
 }
@@ -1435,7 +1282,6 @@ export function FinalResults({
   cardsByName,
   picksBySlot,
   user,
-  signIn,
   hasParticipated,
   stickyTop = 0,
 }: {
@@ -1446,7 +1292,6 @@ export function FinalResults({
   cardsByName: Map<string, Card>;
   picksBySlot: Map<string, string>;
   user: object | null;
-  signIn: () => void;
   hasParticipated: boolean;
   /** Viewport offset (px) below which the FULL RESULTS floating self-row pins — clears sticky page chrome. */
   stickyTop?: number;
@@ -1483,13 +1328,6 @@ export function FinalResults({
   );
 
   const showYourPicks = Boolean(user) && hasParticipated;
-  const loggedOut = !user;
-  const yourScore = showYourPicks
-    ? scoreBallot(picksBySlot as Map<SlotKey, string>, ratingsByName)
-    : null;
-  const dateCaption = ratingsSnapshot.dateRange
-    ? formatDateEnd(ratingsSnapshot.dateRange.end)
-    : null;
 
   const { setCode } = ratingsSnapshot;
 
@@ -1498,155 +1336,56 @@ export function FinalResults({
     [showYourPicks, rankedForDisplay, picksBySlot],
   );
 
-  const yourEntries = useMemo(
-    () => (showYourPicks ? yourPicksEntries(picksBySlot, setCode, ratingsByName) : []),
-    [showYourPicks, picksBySlot, setCode, ratingsByName],
-  );
-  const versusList = useMemo(
-    () =>
-      buildMidwaySlotVersus(
-        SLOTS,
-        picksBySlot,
-        crowdTeam,
-        bestTeam,
-        ratingsByName,
-        cardsByName,
-        showYourPicks,
-      ),
-    [picksBySlot, crowdTeam, bestTeam, ratingsByName, cardsByName, showYourPicks],
-  );
-  const pager = useMidwayVersusPager(versusList);
-  const bounds = useMemo(() => gihwrBounds(pickStats, ratingsByName), [pickStats, ratingsByName]);
-
-  const onTileOpen = (slotKey: SlotKey) => {
-    const idx = SLOTS.findIndex((s) => s.key === slotKey);
-    if (idx !== -1) pager.open(idx);
-  };
-
-  const yourCardBySlot = useMemo(
-    () => (showYourPicks ? (picksBySlot as Map<SlotKey, string>) : new Map<SlotKey, string>()),
-    [showYourPicks, picksBySlot],
-  );
-
-  // Keep "your picks" score visible even when no ratingsSnapshot score — show raw
-  const displayScore = yourScore ?? 0;
-
-  const [searchParams, setSearchParams] = useSearchParams();
-  const TABS = [
-    { id: "overview", label: "OVERVIEW" },
-    { id: "results", label: "FULL RESULTS" },
-    { id: "breakdown", label: "BREAKDOWN" },
-  ] as const;
-  type TabId = typeof TABS[number]["id"];
-  const rawTab = searchParams.get("tab") as TabId | null;
-  const activeTab: TabId = TABS.some((t) => t.id === rawTab) ? rawTab! : "overview";
-
-  const goToTab = (id: TabId) =>
-    setSearchParams({ tab: id }, { replace: true });
-
-  const statsBlock = useMemo(() => {
-    if (rankedForDisplay.length === 0) return null;
-    const avg = rankedForDisplay.reduce((s, b) => s + b.score, 0) / rankedForDisplay.length;
-    const top = rankedForDisplay[0];
-    return { count: rankedForDisplay.length, avg, top };
-  }, [rankedForDisplay]);
+  const fullSectionRef = useRef<HTMLDivElement>(null);
 
   return (
-    <div className="flex flex-col gap-6">
-      {/* Sub-tab bar */}
-      <div className="flex items-center gap-4">
-        <div className="flex gap-1 bg-surface2 border border-border rounded-md p-1">
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => goToTab(tab.id)}
-              className={`font-display tracking-[0.14em] text-[13px] px-4 py-1.5 rounded transition-colors border-0 cursor-pointer ${
-                activeTab === tab.id
-                  ? "bg-green text-bg"
-                  : "bg-transparent text-muted hover:text-text"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* ── OVERVIEW ─────────────────────────────────────────────────── */}
-      {activeTab === "overview" && (
-        <div className="flex flex-col gap-8">
-
-          {/* Top-3 standings peek */}
-          {rankedForDisplay.length > 0 && (
-            <div className="flex flex-col gap-3">
-              <div className="flex items-center justify-between">
-                <SectionLabel size={16} className="text-white">TOP STANDINGS</SectionLabel>
-                <button
-                  type="button"
-                  onClick={() => goToTab("results")}
-                  className="font-display tracking-[0.12em] text-[11px] px-3 py-1 bg-transparent border border-border2 text-muted hover:text-text rounded transition-colors cursor-pointer"
-                >
-                  SEE ALL →
-                </button>
-              </div>
-              <Leaderboard
-                rankedBallots={rankedForDisplay}
-                bestTeam={bestTeam}
-                crowdTeam={crowdTeam}
-                setCode={setCode}
-                userBallotId={userBallot?.ballotId ?? null}
-                cardsByName={cardsByName}
-                ratingsByName={ratingsByName}
-                mode="peek"
-                onSeeAll={() => goToTab("results")}
-                spotlight
-                stickyTop={stickyTop}
-              />
-            </div>
-          )}
-
-          {/* Highlights reel */}
-          <HighlightsReel
-            highlights={highlights}
-            ballotCount={voterCount}
+    <div className="flex flex-col gap-8">
+      {/* Top-3 broadcast */}
+      {rankedForDisplay.length > 0 && (
+        <div className="flex flex-col gap-3">
+          <SectionLabel size={16} className="text-white">TOP STANDINGS</SectionLabel>
+          <Leaderboard
+            rankedBallots={rankedForDisplay}
+            bestTeam={bestTeam}
+            crowdTeam={crowdTeam}
+            setCode={setCode}
+            userBallotId={userBallot?.ballotId ?? null}
             cardsByName={cardsByName}
+            ratingsByName={ratingsByName}
+            mode="peek"
+            onSeeAll={() => fullSectionRef.current?.scrollIntoView({ behavior: "smooth" })}
+            stickyTop={stickyTop}
           />
         </div>
       )}
 
-      {/* ── FULL RESULTS ─────────────────────────────────────────────── */}
-      {activeTab === "results" && (
-        <div className="flex flex-col gap-8">
-          {rankedForDisplay.length > 0 && (
-            <div className="flex flex-col gap-3 pb-24">
-              <SectionLabel size={16} className="text-white">STANDINGS</SectionLabel>
-              <Leaderboard
-                rankedBallots={rankedForDisplay}
-                bestTeam={bestTeam}
-                crowdTeam={crowdTeam}
-                setCode={setCode}
-                userBallotId={userBallot?.ballotId ?? null}
-                cardsByName={cardsByName}
-                ratingsByName={ratingsByName}
-                mode="full"
-                stickyTop={stickyTop}
-              />
-            </div>
-          )}
-        </div>
-      )}
+      {/* Highlights reel */}
+      <HighlightsReel
+        highlights={highlights}
+        ballotCount={voterCount}
+        cardsByName={cardsByName}
+      />
 
-      {/* ── BREAKDOWN ────────────────────────────────────────────────── */}
-      {activeTab === "breakdown" && (
-        <MidwayBreakdownList
-          cards={cards}
-          cardsByName={cardsByName}
-          ratingsByName={ratingsByName}
-          yourCardBySlot={yourCardBySlot}
-          pickStats={pickStats}
-          bounds={bounds}
-        />
+      {/* Full standings */}
+      {rankedForDisplay.length > 0 && (
+        <div
+          ref={fullSectionRef}
+          className="flex flex-col gap-3 pb-24"
+          style={{ scrollMarginTop: stickyTop }}
+        >
+          <SectionLabel size={16} className="text-white">FULL STANDINGS</SectionLabel>
+          <Leaderboard
+            rankedBallots={rankedForDisplay}
+            bestTeam={bestTeam}
+            crowdTeam={crowdTeam}
+            setCode={setCode}
+            userBallotId={userBallot?.ballotId ?? null}
+            cardsByName={cardsByName}
+            ratingsByName={ratingsByName}
+            mode="full"
+            stickyTop={stickyTop}
+          />
+        </div>
       )}
     </div>
   );

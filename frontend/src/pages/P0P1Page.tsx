@@ -163,7 +163,6 @@ export function P0P1Page() {
               cardsByName={cardsByName}
               picksBySlot={picksBySlot}
               user={user}
-              signIn={signIn}
               hasParticipated={hasParticipated}
               stickyTop={heroHeight}
             />
