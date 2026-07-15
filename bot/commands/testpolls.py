@@ -6,9 +6,10 @@ signals, so clicking the buttons drives the real add / remove / fire path (a fir
 and Draftmancer lobby for real, and `rsvp` creates its thread, event, and timed jobs at post time).
 Set POD_SIGNAL_FIRE_THRESHOLD low to reach a fire on your own.
 
-`launcher` is a DB-free visual spike: it feeds fixture slots to the real launcher builder so the
-reflected-vs-lazy rendering can be eyeballed without staging a scheduled pod. Its lazy buttons report
-the poll inactive on click and the reflected link points at this channel as a placeholder.
+`launcher` drives the whole surface for real: it stages a scheduled pod at the day's last slot so that
+slot reflects as a committed jump-link with its Yes roster, leaving the other slots as live lazy
+signals, then posts the live launcher. Everything routes through the production paths, so the preview
+can't drift from what players see.
 """
 from __future__ import annotations
 
@@ -44,12 +45,12 @@ async def setup(bot: commands.Bot) -> None:
 
     @test_group.command(name="launcher")
     @commands.is_owner()
-    async def test_launcher(ctx: commands.Context) -> None:
+    async def test_launcher(ctx: commands.Context, fill: int = 5) -> None:
         """Owner-only. Drive the launcher end to end: stage a real scheduled pod at the day's last slot
-        so it reflects as a jump-link, then post the live launcher for that day. The reflected slot links
-        a real thread; the other slots are real lazy signals whose buttons drive the fire path. Set
-        POD_SIGNAL_FIRE_THRESHOLD low to graduate a lazy slot yourself. Uses today when a slot is still
-        ahead, otherwise tomorrow, so the staged pod is always in the future."""
+        so it reflects as a committed jump-link, seed `fill` Yes RSVPs on it so the committed slot shows
+        its roster, then post the live launcher for that day. The other slots are real lazy signals whose
+        buttons drive the fire path; set POD_SIGNAL_FIRE_THRESHOLD low to graduate one yourself. Uses
+        today when a slot is still ahead, otherwise tomorrow, so the staged pod is always in the future."""
         if not isinstance(ctx.channel, discord.TextChannel):
             await ctx.send("Run `!test launcher` in a server text channel — the pod thread is created there.")
             return
@@ -67,6 +68,8 @@ async def setup(bot: commands.Bot) -> None:
         if event_id is None:
             await ctx.send("Could not stage the reflected scheduled pod. Check the logs.")
             return
+        if fill > 0:
+            await _seed_fake_yes(ctx.channel, event_id, slot_time, name, fill)
         await ctx.send(f"Staged **{name}** at {reflect.name}; posting the live launcher for that day.")
         await post_launcher(ctx.bot, ctx.channel, target_day)
 

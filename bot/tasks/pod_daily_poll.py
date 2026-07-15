@@ -21,7 +21,7 @@ from discord.ext import commands
 from bot import emojis
 from bot.commands.messages import MSG_FIRST_POD_TIP_POLL, MSG_SLOT_ROLE_GRANTED
 from bot.commands.pod_queue import queue_role_mention
-from bot.commands.pod_rsvp import post_scheduled_card
+from bot.commands.pod_rsvp import post_scheduled_card, register_launcher_refresh
 from bot.config import settings
 from bot.discord_helpers import NBSP, ZWSP
 from bot.services import pod_launch
@@ -62,6 +62,7 @@ POLL_NUDGE_QUIET_MINUTES = 30
 def init_daily_poll(bot: commands.Bot) -> None:
     global _bot
     _bot = bot
+    register_launcher_refresh(refresh_launcher_for_date)
     bot.pod_scheduler.add_job(
         fire_daily_poll, "cron", day_of_week="mon-fri", hour=WEEKDAY_POST_HOUR_ET, minute=0,
         timezone=SCHEDULE_TZ, id="pod-daily-poll-weekday", replace_existing=True,
@@ -150,7 +151,9 @@ def build_poll_embed(slots: list[pod_launch.LauncherSlot], guild: discord.Guild 
         check = "✅" if slot.committed or slot.status == STATUS_FIRED else ""
         header = " ".join(part for part in (slot_emoji, label, when, count_part, check) if part)
         if slot.committed:
-            body = f"<#{slot.thread_id}>" if slot.thread_id else "-"
+            link = f"<#{slot.thread_id}>" if slot.thread_id else "-"
+            roster = "\n".join(f"> {member}" for member in slot.names)
+            body = f"{link}\n{roster}" if roster else link
         elif slot.status == STATUS_EXPIRED:
             body = MARKER_CLOSED
         elif slot.names:
@@ -308,6 +311,15 @@ async def _grant_slot_role(member: discord.Member, bucket_key: str) -> discord.R
         return None
     granted = await grant_role(member, role)
     return role if granted else None
+
+
+async def refresh_launcher_for_date(bot: commands.Bot, signal_date: date) -> None:
+    """Re-render the day's launcher so a committed slot tracks late Yes/No churn on its scheduled card.
+    No-op when no launcher was posted that day."""
+    message_id = await asyncio.to_thread(pod_launch.launcher_message_id_for_date_sync, signal_date)
+    if message_id is None:
+        return
+    await _rerender_poll(bot, message_id, signal_date)
 
 
 async def _rerender_poll(bot: commands.Bot, message_id: str, signal_date: date) -> None:

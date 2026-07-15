@@ -22,7 +22,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from datetime import datetime, time as dtime, timedelta, timezone
+from datetime import date, datetime, time as dtime, timedelta, timezone
+from typing import Awaitable, Callable
 from urllib.parse import urlencode
 
 import discord
@@ -71,6 +72,18 @@ THREAD_NOTE_BODY = (
     "New time: <t:{unix}:F> (<t:{unix}:R>).\n"
     "Draftmancer link will be posted {lead} minutes before the event starts."
 )
+
+LauncherRefresh = Callable[[commands.Bot, date], Awaitable[None]]
+
+_launcher_refresh: LauncherRefresh | None = None
+
+
+def register_launcher_refresh(handler: LauncherRefresh) -> None:
+    """The daily-launcher task registers here so a card RSVP re-renders any launcher reflecting it,
+    without pod_rsvp importing the task module and cycling back."""
+    global _launcher_refresh
+    _launcher_refresh = handler
+
 
 OFFSET_RE = re.compile(r"^\+(?:(\d+)h)?(?:(\d+)m)?$")
 TIMESTAMP_RE = re.compile(r"^<t:(\d{1,15})(?::[a-z])?>$")
@@ -314,6 +327,14 @@ async def _handle_rsvp(interaction: discord.Interaction, state: str) -> None:
         maybe = result.rosters.get(RSVP_MAYBE) or []
         await refresh_underfill_nudge_for_event(interaction.client, result.state.event_id, len(yes))
         await refresh_roster_reminder_for_event(interaction.client, result.state.event_id, yes, maybe)
+        if result.yes_changed:
+            await _refresh_launcher(interaction.client, result.state.slot_time)
+
+
+async def _refresh_launcher(bot: commands.Bot, slot_time: datetime | None) -> None:
+    if _launcher_refresh is None or slot_time is None:
+        return
+    await _launcher_refresh(bot, slot_time.astimezone(SCHEDULE_TZ).date())
 
 
 async def _grant_slot_role(member: discord.Member, slot_time: datetime | None) -> discord.Role | None:

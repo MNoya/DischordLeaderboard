@@ -67,6 +67,28 @@ def test_moving_from_maybe_to_yes_counts_as_joining(session, scheduled_signal):
     assert result.joined
 
 
+@pytest.mark.parametrize("prior, click, expected", [
+    (None, pod_signals.RSVP_YES, True),
+    (None, pod_signals.RSVP_MAYBE, False),
+    (None, pod_signals.RSVP_NO, False),
+    (pod_signals.RSVP_MAYBE, pod_signals.RSVP_YES, True),
+    (pod_signals.RSVP_NO, pod_signals.RSVP_YES, True),
+    (pod_signals.RSVP_YES, pod_signals.RSVP_MAYBE, True),
+    (pod_signals.RSVP_YES, pod_signals.RSVP_NO, True),
+    (pod_signals.RSVP_YES, pod_signals.RSVP_YES, True),
+    (pod_signals.RSVP_MAYBE, pod_signals.RSVP_NO, False),
+    (pod_signals.RSVP_MAYBE, pod_signals.RSVP_MAYBE, False),
+    (pod_signals.RSVP_NO, pod_signals.RSVP_NO, False),
+])
+def test_yes_changed_flags_only_yes_membership_transitions(session, scheduled_signal, prior, click, expected):
+    if prior is not None:
+        set_rsvp(session, MESSAGE_ID, "u1", "Nissa Revane", prior)
+
+    result = set_rsvp(session, MESSAGE_ID, "u1", "Nissa Revane", click)
+
+    assert result.yes_changed is expected
+
+
 def test_a_no_click_never_joins(session, scheduled_signal):
     result = set_rsvp(session, MESSAGE_ID, "u1", "Nissa Revane", pod_signals.RSVP_NO)
 
@@ -148,7 +170,7 @@ def test_reflection_ignores_a_pod_at_a_different_time(session):
     assert _event_id_for_slot(session, off_grid) is None
 
 
-def test_committed_slot_reads_count_and_thread_off_the_event(session):
+def test_committed_slot_projects_the_yes_roster_off_the_card(session):
     slot_time = datetime.now(timezone.utc) + timedelta(days=1)
     event_id = _scheduled_pod(session, slot_time, ["Nissa Revane", "Chandra Nalaar"])
 
@@ -157,10 +179,10 @@ def test_committed_slot_reads_count_and_thread_off_the_event(session):
     assert slot.committed
     assert slot.count == 2
     assert slot.thread_id == "tid-1"
-    assert slot.names == []
+    assert slot.names == ["Nissa Revane", "Chandra Nalaar"]
 
 
-def test_committed_slot_for_a_sesh_pod_shows_no_count(session):
+def test_committed_slot_for_a_sesh_pod_shows_no_count_and_no_roster(session):
     slot_time = datetime.now(timezone.utc) + timedelta(days=1)
     event_id = _pod_event(session, slot_time, sesh=True)
 
@@ -169,6 +191,7 @@ def test_committed_slot_for_a_sesh_pod_shows_no_count(session):
     assert slot.committed
     assert slot.count == 0
     assert slot.thread_id == "tid-1"
+    assert slot.names == []
 
 
 CURRENT = datetime(2026, 7, 15, 20, 0, tzinfo=SCHEDULE_TZ)

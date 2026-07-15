@@ -78,13 +78,15 @@ class RsvpResult:
     rsvp: str | None
     joined: bool
     closed: bool
+    yes_changed: bool = False
 
 
 @dataclass(frozen=True)
 class LauncherSlot:
-    """One rendered launcher slot. `committed` is a locked scheduled pod the slot reflects: its roster
-    lives on the card, so `count`/`thread_id`/`slot_time` are read off the event and `names` stays
-    empty. A lazy slot carries its own poll `signal_id`, roster `names`, and `status`."""
+    """One rendered launcher slot. `committed` is a locked scheduled pod the slot reflects: `count`/
+    `thread_id`/`slot_time` are read off the event and `names` projects the card's Yes roster read-only
+    (empty for sesh pods, which have no signal roster). A lazy slot carries its own poll `signal_id`,
+    roster `names`, and `status`."""
     bucket_key: str
     committed: bool
     status: str
@@ -261,6 +263,7 @@ def set_rsvp(
             PodSignalMember.discord_user_id == discord_user_id,
         )
     ).scalar_one_or_none()
+    was_yes = existing is not None and existing.rsvp == pod_signals.RSVP_YES
     joined = False
     recorded: str | None = rsvp
     if existing is None:
@@ -279,7 +282,11 @@ def set_rsvp(
     session.flush()
     rosters = _members_by_rsvp(session, signal.id)
     yes_count = len(rosters[pod_signals.RSVP_YES])
-    return RsvpResult(_state(signal, yes_count), rosters, rsvp=recorded, joined=joined, closed=False)
+    yes_changed = was_yes != (recorded == pod_signals.RSVP_YES)
+    return RsvpResult(
+        _state(signal, yes_count), rosters, rsvp=recorded, joined=joined, closed=False,
+        yes_changed=yes_changed,
+    )
 
 
 def set_rsvp_sync(
@@ -437,6 +444,17 @@ def poll_exists_for_date_sync(signal_date: date) -> bool:
         ).scalar_one_or_none() is not None
 
 
+def launcher_message_id_for_date_sync(signal_date: date) -> str | None:
+    """The launcher message posted that day, if any. Every poll-bucket signal shares it, so any one
+    resolves it; None means no launcher was posted (a card can exist without one)."""
+    with SessionLocal() as session:
+        return session.execute(
+            select(PodSignal.message_id).where(
+                PodSignal.kind == pod_signals.KIND_POLL, PodSignal.signal_date == signal_date
+            ).limit(1)
+        ).scalar_one_or_none()
+
+
 def event_thread_id_sync(event_id: str) -> str | None:
     with SessionLocal() as session:
         event = session.get(PodDraftEvent, event_id)
@@ -488,11 +506,11 @@ def _committed_slot(session: Session, bucket_key: str, event_id: str) -> Launche
             PodSignal.event_id == event_id, PodSignal.kind == pod_signals.KIND_SCHEDULED
         )
     ).scalar_one_or_none()
-    yes_count = len(_members_by_rsvp(session, signal.id)[pod_signals.RSVP_YES]) if signal else 0
+    yes_names = _members_by_rsvp(session, signal.id)[pod_signals.RSVP_YES] if signal else []
     return LauncherSlot(
-        bucket_key, committed=True, status=pod_signals.STATUS_FIRED, count=yes_count,
+        bucket_key, committed=True, status=pod_signals.STATUS_FIRED, count=len(yes_names),
         slot_time=event.event_time if event else None,
-        names=[], thread_id=event.discord_thread_id if event else None, signal_id=None,
+        names=yes_names, thread_id=event.discord_thread_id if event else None, signal_id=None,
     )
 
 
