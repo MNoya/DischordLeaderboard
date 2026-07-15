@@ -5,7 +5,7 @@ import { SectionLabel } from "../SectionLabel";
 import { Tooltip } from "../Tooltip";
 import { PickGrid } from "./CommunityGrid";
 import { MidwayBreakdownList } from "./MidwayBreakdownList";
-import { useMidwayVersusPager, MidwayVersusModal } from "./MidwayVersusCard";
+import { useMidwayVersusPager } from "./MidwayVersusCard";
 import { breakdownStripAccent } from "./slotVisuals";
 import { CHAMFER, MEDAL_COLOR } from "./P0P1BallotScorecard";
 import { SLOTS } from "../../data/p0p1Slots";
@@ -1605,7 +1605,7 @@ export function FinalResults({
       {activeTab === "results" && (
         <div className="flex flex-col gap-8">
           {rankedForDisplay.length > 0 && (
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-3 pb-24">
               <SectionLabel size={16} className="text-white">STANDINGS</SectionLabel>
               <Leaderboard
                 rankedBallots={rankedForDisplay}
@@ -1620,23 +1620,6 @@ export function FinalResults({
               />
             </div>
           )}
-
-          {/* Per-slot 3-way comparison — yours / crowd / best, keyed on GIHWR */}
-          <div className="flex flex-col gap-3">
-            <div className="flex items-baseline justify-center gap-3 mb-2">
-              <SectionLabel size={22} className="text-white">YOUR PICKS</SectionLabel>
-              {showYourPicks && (
-                <span className="font-mono tabular-nums text-[18px] text-subtle">
-                  {displayScore.toFixed(1)}
-                </span>
-              )}
-            </div>
-            {showYourPicks && (
-              <PickGrid entries={yourEntries} cardsByName={cardsByName} onTileOpen={onTileOpen} />
-            )}
-          </div>
-
-          <MidwayVersusModal pager={pager} bounds={bounds} />
         </div>
       )}
 
