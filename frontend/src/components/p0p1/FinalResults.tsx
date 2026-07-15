@@ -510,6 +510,7 @@ function BroadcastTop3({
   champion,
   runnersUp,
   self,
+  total,
   setCode,
   cardsByName,
   ratingsByName,
@@ -519,6 +520,7 @@ function BroadcastTop3({
   champion: RankedBallot;
   runnersUp: RankedBallot[];
   self: RankedBallot | null;
+  total: number;
   setCode: string;
   cardsByName: Map<string, Card>;
   ratingsByName: Map<string, CardRating>;
@@ -575,7 +577,7 @@ function BroadcastTop3({
 
             <div className="flex-1 min-w-0">
               <div className="font-mono tracking-[0.22em] text-[10px] sm:text-[10.5px] uppercase text-gold">
-                {setCode} // P0P1 FINAL RESULTS
+                🏆 CHAMPION
               </div>
               <div className="font-display text-[28px] sm:text-[44px] leading-[0.95] tracking-[0.03em] truncate">
                 {champion.name.toUpperCase()}
@@ -1086,6 +1088,7 @@ function Leaderboard({
           champion={champion}
           runnersUp={runnersUp}
           self={broadcastSelf}
+          total={rankedBallots.length}
           setCode={setCode}
           cardsByName={cardsByName}
           ratingsByName={ratingsByName}
