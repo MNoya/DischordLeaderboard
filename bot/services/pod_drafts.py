@@ -21,6 +21,8 @@ from bot.models import (
     PodDraftParticipant,
 )
 from bot.services import pod_format
+from bot.services.pod_schedule import highest_event_number
+from bot.services.sesh_parser import NUM_RE
 from bot.slug import disambiguate_slug, slugify
 
 
@@ -607,15 +609,39 @@ def update_event_time_if_changed(
     return event, True, was_active
 
 
-def update_event_format(session: Session, event_id: str, code: str) -> bool:
-    """Repoint a pre-draft pod event's set_code, set_id and format label; False if missing or already finalized."""
+def update_event_format(session: Session, event_id: str, code: str) -> str | None:
+    """Repoint a pre-draft pod event's set_code, set_id and format label, swapping the leading set
+    token in its name to match. Returns the (possibly renamed) event name, or None if missing or
+    already finalized."""
     event = session.get(PodDraftEvent, event_id)
     if event is None or event.socket_status in FINALIZED_STATUSES:
-        return False
+        return None
+    next_number = highest_event_number(_set_event_names(session, code)) + 1
+    event.name = renamed_for_format(event.name, event.set_code, code, next_number)
     event.set_code = code
     event.set_id = _lookup_set_id(session, code)
     event.format_label = pod_format.label_for(code)
-    return True
+    return event.name
+
+
+def _set_event_names(session: Session, code: str) -> list[str]:
+    return list(session.execute(
+        select(PodDraftEvent.name).where(PodDraftEvent.set_code == code.upper())
+    ).scalars())
+
+
+def renamed_for_format(name: str, old_code: str | None, new_code: str, next_number: int) -> str:
+    """Rebuild a `SET Pod Draft #N - date` name for the new format: swap the leading set token and
+    renumber to the new set's next slot, keeping the date suffix. Since pods are counted per set,
+    switching MSH → SOS moves `#14` to SOS's own next number. Names that don't lead with the old code
+    are returned unchanged."""
+    if not old_code:
+        return name
+    prefix = f"{old_code.upper()} "
+    if not name.upper().startswith(prefix):
+        return name
+    renumbered = NUM_RE.sub(f"#{next_number}", name[len(prefix):], count=1)
+    return f"{new_code.upper()} {renumbered}"
 
 
 def load_event_set_code_sync(event_id: str) -> str | None:

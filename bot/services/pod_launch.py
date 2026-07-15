@@ -56,6 +56,7 @@ class SignalState:
     count: int
     slot_time: datetime | None
     event_id: str | None
+    set_code: str | None
 
 
 @dataclass(frozen=True)
@@ -186,9 +187,11 @@ def joinable_signals_sync(guild_id: str, *, now: datetime, within: timedelta) ->
 
 def create_scheduled_signal_sync(
     *, guild_id: str, channel_id: str, message_id: str, event_time: datetime,
+    pick_timer: int | None = None,
 ) -> str:
     """A scheduled pod's signal is born fired with the caller linking its event right after: RSVPs
-    stay open forever for over-signups and expiry never applies."""
+    stay open forever for over-signups and expiry never applies. Pairing and seating live on the
+    event; only the pick timer rides the signal, since it is live-only and applied at lobby open."""
     with SessionLocal() as session:
         signal = PodSignal(
             kind=pod_signals.KIND_SCHEDULED,
@@ -199,10 +202,20 @@ def create_scheduled_signal_sync(
             signal_date=event_time.astimezone(SCHEDULE_TZ).date(),
             slot_time=event_time,
             status=pod_signals.STATUS_FIRED,
+            pick_timer=pick_timer,
         )
         session.add(signal)
         session.commit()
         return signal.id
+
+
+def scheduled_pick_timer_for_event_sync(event_id: str) -> int | None:
+    with SessionLocal() as session:
+        return session.execute(
+            select(PodSignal.pick_timer).where(
+                PodSignal.event_id == event_id, PodSignal.kind == pod_signals.KIND_SCHEDULED
+            )
+        ).scalar_one_or_none()
 
 
 def set_rsvp(
@@ -705,6 +718,9 @@ async def open_ondemand_lobby(bot: commands.Bot, event_id: str) -> None:
     )
     if manager is not None:
         manager.arm_team_vote_offer(len(display_names))
+        pick_timer = await asyncio.to_thread(scheduled_pick_timer_for_event_sync, event_id)
+        if pick_timer is not None:
+            await manager.apply_pick_timer(pick_timer)
 
 
 def arm_scheduled_pod_jobs(
@@ -774,9 +790,12 @@ async def fire_queue_teardown(signal_id: str) -> None:
     channel = await _fetch_text_channel(_bot, int(channel_id))
     if channel is None:
         return
+    presets = await asyncio.to_thread(queue_presets_sync, signal_id)
     try:
         message = await channel.fetch_message(int(message_id))
-        closed_view = PodQueueView(role_mention=queue_role_mention(channel.guild), closed=True)
+        closed_view = PodQueueView(
+            role_mention=queue_role_mention(channel.guild), closed=True, set_code=presets.set_code,
+        )
         await message.edit(view=closed_view)
     except discord.HTTPException:
         log.warning(f"fire_queue_teardown: could not edit queue message {message_id}", exc_info=True)
@@ -921,6 +940,7 @@ def _members_by_rsvp(session: Session, signal_id: str) -> dict[str, list[str]]:
 def _state(signal: PodSignal, count: int) -> SignalState:
     return SignalState(
         signal.id, signal.kind, signal.bucket, signal.status, count, signal.slot_time, signal.event_id,
+        signal.set_code,
     )
 
 

@@ -12,7 +12,7 @@ from bot.services.pod_drafts import (
     record_mock_event,
 )
 from bot.services.pod_format_select import format_options
-from bot.sets import active_set_code, is_known_set, upcoming_sets
+from bot.sets import active_set_code, is_known_set, recent_released_sets, upcoming_sets
 
 
 def _seed_player(session, discord_id="901", username="cap", display_name="Cap"):
@@ -38,11 +38,29 @@ def test_upcoming_sets_and_known_set():
     assert is_known_set("msh") and not is_known_set("zzz")
 
 
-def test_format_options_offers_active_and_upcoming_sets():
-    values = [opt.value for opt in format_options(None)]
+def test_recent_released_sets_excludes_active_and_upcoming_and_caps():
+    when = datetime(2026, 7, 14, 12, tzinfo=timezone.utc)
+    codes = [seed.code for seed in recent_released_sets(when=when)]
 
-    assert values[0] == active_set_code()
-    assert "MSH" in values
+    assert active_set_code(when) not in codes
+    assert not any(seed.code in codes for seed in upcoming_sets(when))
+    assert codes[0] == "SOS"
+    assert len(codes) <= 8
+
+
+def test_recent_released_sets_honors_limit():
+    when = datetime(2026, 7, 14, 12, tzinfo=timezone.utc)
+    assert len(recent_released_sets(limit=3, when=when)) == 3
+
+
+def test_format_options_excludes_unreleased_sets():
+    options = format_options(None)
+    values = [opt.value for opt in options]
+    upcoming_codes = [s.code for s in upcoming_sets()]
+
+    assert [opt.value for opt in options if opt.default] == [active_set_code()]
+    assert upcoming_codes
+    assert all(code not in values for code in upcoming_codes)
 
 
 def test_build_mock_session_numbers_per_set(session, monkeypatch):

@@ -814,7 +814,7 @@ async def build_pod_settings_view(bot, event_id: str, *, is_owner: bool) -> PodS
     scheduled = await asyncio.to_thread(pod_launch.scheduled_card_ref_sync, event_id) is not None
 
     async def on_format(inter: discord.Interaction, code: str) -> str | None:
-        return await set_event_format(event_id, code)
+        return await set_event_format(bot, event_id, code)
 
     async def on_pairing(inter: discord.Interaction, mode: str) -> str | None:
         return await set_event_pairing_mode(event_id, mode)

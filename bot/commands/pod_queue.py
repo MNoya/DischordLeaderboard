@@ -22,6 +22,7 @@ from discord.ext import commands
 from bot import emojis
 from bot.commands import descriptions as desc
 from bot.commands.messages import MSG_FIRST_POD_TIP_QUEUE, MSG_LOBBY_GATHERING, MSG_PLAYERS_JOINED
+from bot.commands.pod_rsvp import parse_new_time, post_scheduled_card
 from bot.config import settings
 from bot.discord_helpers import NBSP
 from bot.services import pod_launch
@@ -30,7 +31,7 @@ from bot.services.pod_draft_manager import (
     set_event_pick_timer,
     set_event_seating_mode,
 )
-from bot.services.pod_format_select import WRITE_IN_VALUE
+from bot.services.pod_format_select import WRITE_IN_VALUE, set_select_option, write_in_option
 from bot.services.pod_pairing_select import SELECT_PLACEHOLDER as PAIRING_PLACEHOLDER
 from bot.services.pod_pairing_select import pairing_options
 from bot.services.pod_roles import find_role, grant_pod_drafters, grant_role
@@ -42,10 +43,12 @@ from bot.services.pod_signals import (
     QUEUE_BUCKET,
     SCHEDULE_TZ,
     STATUS_FIRED,
+    bucket_by_key,
     should_fire,
+    slot_event_time,
     teardown_at,
 )
-from bot.sets import active_set_code
+from bot.sets import active_set_code, recent_released_sets, set_name_for
 
 
 log = logging.getLogger(__name__)
@@ -70,12 +73,16 @@ QUEUE_PLAYERS_EMPTY = "Players"
 JOINABLE_WINDOW = timedelta(hours=6)
 MAX_JOINABLE_LINES = 3
 SET_PLACEHOLDER = "Choose the set"
-LAUNCHER_PROMPT = "Confirm settings, then hit Start Draft to open the queue."
-LAUNCHER_JOIN_HINT = "You can jump into one of these instead of starting a new pod:"
-LAUNCHER_QUEUE_LINE = "A pod queue is already open with {count} in. {url}"
-LAUNCHER_SLOT_LINE = "A pod is already set for {when} with {count} in. {url}"
-LAUNCHER_MORE_LINE = "Plus {count} more."
-LAUNCHER_STARTED = "Queue opened below."
+WHEN_PLACEHOLDER = "When to draft"
+LAUNCHER_PROMPT = "Confirm settings, then open a queue now or schedule a draft for later."
+LAUNCHER_JOIN_HINT = "Join an existing pod instead of starting a new one:"
+LAUNCHER_QUEUE_LINE = "Open queue with {count} waiting: {url}"
+LAUNCHER_SLOT_LINE = "Scheduled for {when} with {count} in: {url}"
+LAUNCHER_MORE_LINE = "And {count} more."
+LAUNCHER_SCHEDULED = "Scheduled for {when}. RSVP card posted: {url}"
+LAUNCHER_SCHEDULE_FAILED = "The scheduled pod card could not be posted. Try again."
+LAUNCHER_SCHEDULE_NO_CHANNEL = "The pod coordination channel could not be reached."
+WHEN_MODAL_BAD_TIME = "Enter a future time like Today 7pm, tomorrow 8:30pm, Fri 9pm, or +3h."
 
 
 class PodQueueActions(discord.ui.ActionRow):
@@ -95,13 +102,14 @@ class PodQueueView(discord.ui.LayoutView):
     def __init__(
         self, names: list[str] | None = None, role_mention: str | None = None,
         fired: bool = False, thread_mention: str | None = None, closed: bool = False,
+        set_code: str | None = None,
     ) -> None:
         super().__init__(timeout=None)
         names = names or []
         threshold = settings.pod_signal_fire_threshold
         container = discord.ui.Container(accent_colour=discord.Colour.green())
         self.add_item(container)
-        container.add_item(discord.ui.TextDisplay(f"## {NBSP * 2}⚡ {role_mention or QUEUE_TITLE}"))
+        container.add_item(discord.ui.TextDisplay(f"## {NBSP * 2}⚡ {_queue_title(role_mention, set_code)}"))
         if closed:
             window = inactivity_window_text(settings.pod_queue_inactivity_minutes)
             container.add_item(discord.ui.TextDisplay(QUEUE_CLOSED.format(window=window)))
@@ -119,6 +127,15 @@ class PodQueueView(discord.ui.LayoutView):
         window = inactivity_window_text(settings.pod_queue_inactivity_minutes)
         container.add_item(discord.ui.TextDisplay(f"-# {QUEUE_CLOSES.format(window=window)}"))
         self.add_item(PodQueueActions())
+
+
+def _queue_title(role_mention: str | None, set_code: str | None) -> str:
+    """`SET Pod Draft Queue {emoji}` so a non-default queue is legible before anyone joins. The queue
+    role is itself named "Pod Draft Queue", so its mention doubles as the label and the ping."""
+    code = (set_code or active_set_code()).upper()
+    emoji = emojis.set_symbol(code)
+    suffix = f" {emoji}" if emoji else ""
+    return f"{code} {role_mention or QUEUE_TITLE}{suffix}"
 
 
 def inactivity_window_text(minutes: int) -> str:
@@ -162,10 +179,10 @@ async def _handle_click(interaction: discord.Interaction, action: str) -> None:
             thread_id = await asyncio.to_thread(pod_launch.event_thread_id_sync, result.state.event_id)
         view = PodQueueView(
             names=result.names, role_mention=mention, fired=True,
-            thread_mention=f"<#{thread_id}>" if thread_id else None,
+            thread_mention=f"<#{thread_id}>" if thread_id else None, set_code=result.state.set_code,
         )
     else:
-        view = PodQueueView(names=result.names, role_mention=mention)
+        view = PodQueueView(names=result.names, role_mention=mention, set_code=result.state.set_code)
     await interaction.response.edit_message(view=view)
     await _post_join_followups(interaction, result, fired)
 
@@ -206,10 +223,10 @@ async def _launch_pod(bot: commands.Bot, state) -> None:
         log.warning(f"queue fire for {state.signal_id} failed to launch; reverted to open")
         return
     await _apply_queue_presets(event_id, presets)
-    await _link_thread_on_card(bot, state.signal_id, event_id)
+    await _link_thread_on_card(bot, state.signal_id, event_id, set_code)
 
 
-async def _link_thread_on_card(bot: commands.Bot, signal_id: str, event_id: str) -> None:
+async def _link_thread_on_card(bot: commands.Bot, signal_id: str, event_id: str, set_code: str) -> None:
     """The fired card's only update: same roster, the thread link added, buttons gone. The card is
     left untouched between the fire and the thread existing."""
     thread_id = await asyncio.to_thread(pod_launch.event_thread_id_sync, event_id)
@@ -227,7 +244,7 @@ async def _link_thread_on_card(bot: commands.Bot, signal_id: str, event_id: str)
         message = await channel.fetch_message(int(message_id))
         view = PodQueueView(
             names=names, role_mention=queue_role_mention(guild), fired=True,
-            thread_mention=f"<#{thread_id}>",
+            thread_mention=f"<#{thread_id}>", set_code=set_code,
         )
         await message.edit(view=view)
     except discord.HTTPException:
@@ -289,47 +306,55 @@ class DraftLauncherView(discord.ui.View):
     name and Draftmancer session when the queue fires; the default is the active set."""
 
     def __init__(self, *, set_code: str | None = None, pairing_mode: str | None = None,
-                 seating_mode: str | None = None, pick_timer: int | None = None) -> None:
+                 seating_mode: str | None = None, pick_timer: int | None = None,
+                 scheduled_time: datetime | None = None, scheduled_ping: bool = False) -> None:
         super().__init__(timeout=300)
         self.set_code = set_code
         self.pairing_mode = pairing_mode
         self.seating_mode = seating_mode
         self.pick_timer = pick_timer
-        self.add_item(_LauncherSetSelect(set_code))
-        self.add_item(_LauncherPairingSelect(pairing_mode))
-        self.add_item(_LauncherSeatingSelect(seating_mode))
-        self.add_item(_LauncherTimerButton(pick_timer, row=3))
-        self.add_item(_LauncherStartButton(row=3))
+        self.scheduled_time = scheduled_time
+        self.scheduled_ping = scheduled_ping
+        self.add_item(_LauncherSetSelect(set_code, row=0))
+        self.add_item(_LauncherWhenSelect(scheduled_time, row=1))
+        self.add_item(_LauncherPairingSelect(pairing_mode, row=2))
+        self.add_item(_LauncherSeatingSelect(seating_mode, row=3))
+        self.add_item(_LauncherTimerButton(pick_timer, row=4))
+        self.add_item(_LauncherStartButton(scheduled=scheduled_time is not None, row=4))
 
     async def rerender(self, interaction: discord.Interaction) -> None:
         await interaction.response.edit_message(view=DraftLauncherView(
             set_code=self.set_code, pairing_mode=self.pairing_mode, seating_mode=self.seating_mode,
-            pick_timer=self.pick_timer,
+            pick_timer=self.pick_timer, scheduled_time=self.scheduled_time, scheduled_ping=self.scheduled_ping,
         ))
 
 
 def _set_options(current: str | None) -> list[discord.SelectOption]:
-    """The set dropdown: the active set (default) + a write-in for any other released set. Unreleased
-    upcoming sets are left out — they have no card pool to draft. A written-in current shows as its
-    own defaulted option so it survives re-render."""
+    """The set dropdown: the active set (default), the most recent released sets, then a write-in for
+    any other code — each carrying its keyrune emoji when one is loaded. Unreleased upcoming sets are
+    left out; they have no card pool to draft. A written-in current outside the recent list shows as
+    its own defaulted option so it survives re-render."""
     active = active_set_code()
+    active_upper = active.upper()
     chosen = (current or active).upper()
-    options: list[discord.SelectOption] = []
-    if chosen != active.upper():
-        options.append(discord.SelectOption(
-            label=f"Set: {chosen}", value=chosen, description="Written-in set", default=True))
-    options.append(discord.SelectOption(
-        label=f"Set: {active}", value=active, description="The latest set",
-        default=(chosen == active.upper())))
-    options.append(discord.SelectOption(
-        label="Set: write in a code…", value=WRITE_IN_VALUE, description="Draft any other set"))
+    recent = [seed.code for seed in recent_released_sets()]
+
+    options: list[discord.SelectOption] = [write_in_option("Set")]
+    if chosen != active_upper and chosen not in recent:
+        options.append(set_select_option(
+            chosen, label=f"Set: {chosen}", description=set_name_for(chosen), default=True))
+    options.append(set_select_option(
+        active, label=f"Set: {active}", description="The latest set", default=(chosen == active_upper)))
+    for code in recent:
+        options.append(set_select_option(
+            code, label=f"Set: {code}", description=set_name_for(code), default=(chosen == code)))
     return options
 
 
 class _LauncherSetSelect(discord.ui.Select):
-    def __init__(self, current: str | None) -> None:
+    def __init__(self, current: str | None, row: int | None = None) -> None:
         super().__init__(placeholder=SET_PLACEHOLDER, options=_set_options(current),
-                         min_values=1, max_values=1)
+                         min_values=1, max_values=1, row=row)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         if self.values[0] == WRITE_IN_VALUE:
@@ -340,7 +365,7 @@ class _LauncherSetSelect(discord.ui.Select):
 
 
 class _LauncherSetModal(discord.ui.Modal, title="Draft a different set"):
-    code = discord.ui.TextInput(label="Set code", placeholder="e.g. SOS", min_length=2, max_length=8)
+    code = discord.ui.TextInput(label="Set code", placeholder="e.g. FIN", min_length=2, max_length=8)
 
     def __init__(self, view: "DraftLauncherView") -> None:
         super().__init__()
@@ -351,10 +376,100 @@ class _LauncherSetModal(discord.ui.Modal, title="Draft a different set"):
         await self.launcher.rerender(interaction)
 
 
+def _preset_slot_time(bucket_key: str, now: datetime) -> datetime | None:
+    """The next occurrence of an Early / Late slot: today's if still ahead, otherwise tomorrow's."""
+    today = now.astimezone(SCHEDULE_TZ).date()
+    slot = slot_event_time(today, bucket_key)
+    if slot is None:
+        return None
+    if slot <= now:
+        slot = slot_event_time(today + timedelta(days=1), bucket_key)
+    return slot
+
+
+def _when_day_label(when: datetime, now: datetime) -> str:
+    local = when.astimezone(SCHEDULE_TZ)
+    today = now.astimezone(SCHEDULE_TZ).date()
+    if local.date() == today:
+        return "Today"
+    if local.date() == today + timedelta(days=1):
+        return "Tomorrow"
+    return local.strftime("%b %-d")
+
+
+def _when_clock(when: datetime) -> str:
+    return when.astimezone(SCHEDULE_TZ).strftime("%-I:%M %p ET")
+
+
+def _when_options(scheduled_time: datetime | None, now: datetime) -> list[discord.SelectOption]:
+    """Right now (default) plus the two named slots at their next occurrence, then a custom write-in.
+    A custom time shows as its own defaulted option; the presets ping their slot role, custom does not."""
+    early = _preset_slot_time("EARLY", now)
+    late = _preset_slot_time("LATE", now)
+    options = [discord.SelectOption(
+        label="When: Right now", value="now", emoji="⚡", description="Open a live queue now",
+        default=(scheduled_time is None))]
+    for key, slot in (("EARLY", early), ("LATE", late)):
+        bucket = bucket_by_key(key)
+        options.append(discord.SelectOption(
+            label=f"When: {bucket.name}", value=key, emoji=bucket.emoji,
+            description=f"{_when_day_label(slot, now)} {_when_clock(slot)}",
+            default=(scheduled_time is not None and scheduled_time == slot)))
+    is_custom = scheduled_time is not None and scheduled_time not in (early, late)
+    if is_custom:
+        label = f"When: {_when_day_label(scheduled_time, now)} {_when_clock(scheduled_time)}"
+        description = "Change the custom time"
+    else:
+        label = "When: Schedule for later…"
+        description = "Pick a custom date and time"
+    options.append(discord.SelectOption(
+        label=label, value=WRITE_IN_VALUE, description=description, default=is_custom))
+    return options
+
+
+class _LauncherWhenSelect(discord.ui.Select):
+    def __init__(self, current: datetime | None, row: int | None = None) -> None:
+        super().__init__(placeholder=WHEN_PLACEHOLDER, min_values=1, max_values=1, row=row,
+                         options=_when_options(current, datetime.now(timezone.utc)))
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        value = self.values[0]
+        if value == WRITE_IN_VALUE:
+            await interaction.response.send_modal(_LauncherWhenModal(self.view))
+            return
+        if value == "now":
+            self.view.scheduled_time = None
+            self.view.scheduled_ping = False
+        else:
+            self.view.scheduled_time = _preset_slot_time(value, datetime.now(timezone.utc))
+            self.view.scheduled_ping = True
+        await self.view.rerender(interaction)
+
+
+class _LauncherWhenModal(discord.ui.Modal, title="Schedule a Pod"):
+    when = discord.ui.TextInput(
+        label="When (ET)", placeholder="Today 7pm, tomorrow 8:30pm, Fri 9pm, +3h", min_length=2, max_length=32)
+
+    def __init__(self, view: "DraftLauncherView") -> None:
+        super().__init__()
+        self.launcher = view
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        now = datetime.now(timezone.utc)
+        parsed = parse_new_time(self.when.value.strip(), now, now)
+        if parsed is None:
+            await self.launcher.rerender(interaction)
+            await interaction.followup.send(f"⚠️ {WHEN_MODAL_BAD_TIME}", ephemeral=True)
+            return
+        self.launcher.scheduled_time = parsed
+        self.launcher.scheduled_ping = False
+        await self.launcher.rerender(interaction)
+
+
 class _LauncherPairingSelect(discord.ui.Select):
-    def __init__(self, current: str | None) -> None:
+    def __init__(self, current: str | None, row: int | None = None) -> None:
         super().__init__(placeholder=PAIRING_PLACEHOLDER, options=pairing_options(current),
-                         min_values=1, max_values=1)
+                         min_values=1, max_values=1, row=row)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         self.view.pairing_mode = self.values[0]
@@ -362,9 +477,9 @@ class _LauncherPairingSelect(discord.ui.Select):
 
 
 class _LauncherSeatingSelect(discord.ui.Select):
-    def __init__(self, current: str | None) -> None:
+    def __init__(self, current: str | None, row: int | None = None) -> None:
         super().__init__(placeholder=SEATING_SELECT_PLACEHOLDER, options=seating_mode_options(current),
-                         min_values=1, max_values=1)
+                         min_values=1, max_values=1, row=row)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         self.view.seating_mode = self.values[0]
@@ -401,11 +516,19 @@ class _LauncherTimerModal(discord.ui.Modal, title="Pick timer"):
 
 
 class _LauncherStartButton(discord.ui.Button):
-    def __init__(self, row: int | None = None) -> None:
-        super().__init__(label="Start Draft", emoji="✅", style=discord.ButtonStyle.success, row=row)
+    def __init__(self, scheduled: bool = False, row: int | None = None) -> None:
+        label = "Confirm Draft" if scheduled else "Open Queue"
+        emoji = "🗓️" if scheduled else "⚡"
+        super().__init__(label=label, emoji=emoji, style=discord.ButtonStyle.success, row=row)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         view: DraftLauncherView = self.view
+        if view.scheduled_time is not None:
+            await _schedule_pod(
+                interaction, view.set_code, view.pairing_mode, view.seating_mode, view.pick_timer,
+                view.scheduled_time, view.scheduled_ping,
+            )
+            return
         await _open_queue(
             interaction, view.set_code, view.pairing_mode, view.seating_mode, view.pick_timer,
         )
@@ -416,10 +539,11 @@ async def _open_queue(
     seating_mode: str | None, pick_timer: int | None,
 ) -> None:
     """Post the public queue card from the launcher and wire its signal, carrying the chosen set and
-    presets. Closes the ephemeral launcher and runs the opener's own join through the normal path."""
+    presets. Dismisses the ephemeral launcher and runs the opener's own join through the normal path."""
+    await interaction.response.defer()
     mention = queue_role_mention(interaction.guild)
     message = await interaction.channel.send(
-        view=PodQueueView(names=[interaction.user.display_name], role_mention=mention),
+        view=PodQueueView(names=[interaction.user.display_name], role_mention=mention, set_code=set_code),
         allowed_mentions=discord.AllowedMentions(roles=True),
     )
     signal_id = await asyncio.to_thread(
@@ -436,10 +560,39 @@ async def _open_queue(
     teardown = teardown_at(datetime.now(timezone.utc), settings.pod_queue_inactivity_minutes)
     pod_launch.arm_queue_teardown(interaction.client, signal_id, teardown)
     log.info(f"opened pod queue as message {message.id} (signal {signal_id})")
-    await interaction.response.edit_message(content=LAUNCHER_STARTED, view=None)
+    await interaction.delete_original_response()
     if result is not None:
         fired = await _claim_fire_if_ready(result)
         await _post_join_followups(interaction, result, fired)
+
+
+async def _schedule_pod(
+    interaction: discord.Interaction, set_code: str | None, pairing_mode: str | None,
+    seating_mode: str | None, pick_timer: int | None, when: datetime, ping: bool,
+) -> None:
+    """Post a scheduled RSVP card in the coordination channel for a future pod, carrying the launcher's
+    set and presets, with the opener seeded as the first Yes. Custom times skip the slot-role ping."""
+    await interaction.response.defer()
+    channel = interaction.client.get_channel(settings.pod_draft_channel_id)
+    if not isinstance(channel, discord.TextChannel):
+        await interaction.edit_original_response(content=LAUNCHER_SCHEDULE_NO_CHANNEL, view=None)
+        return
+    resolved_set = (set_code or active_set_code()).upper()
+    name = await asyncio.to_thread(pod_launch.ondemand_event_name_sync, resolved_set, when)
+    opener = [(str(interaction.user.id), interaction.user.display_name)]
+    event_id = await post_scheduled_card(
+        interaction.client, channel, set_code=resolved_set, event_time=when, name=name,
+        preseed_yes=opener, ping_role=ping,
+        pairing_mode=pairing_mode, seating_mode=seating_mode, pick_timer=pick_timer,
+    )
+    if event_id is None:
+        await interaction.edit_original_response(content=LAUNCHER_SCHEDULE_FAILED, view=None)
+        return
+    ref = await asyncio.to_thread(pod_launch.scheduled_card_ref_sync, event_id)
+    url = f"https://discord.com/channels/{interaction.guild_id}/{ref[1]}/{ref[2]}" if ref else channel.mention
+    when_tag = f"<t:{int(when.timestamp())}:F>"
+    log.info(f"scheduled pod {name} for {when.isoformat()} (event {event_id})")
+    await interaction.edit_original_response(content=LAUNCHER_SCHEDULED.format(when=when_tag, url=url), view=None)
 
 
 def _launcher_content(guild: discord.Guild | None, joinable: list) -> str:

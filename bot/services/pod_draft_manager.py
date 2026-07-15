@@ -38,6 +38,7 @@ from bot.services import bot_log as bot_log_mod
 from bot.services.lobby_embed import (
     LobbyReadyButtonView,
     build_drafting_view,
+    event_title,
     render as render_lobby_embed,
     render_ready_check_progress,
 )
@@ -62,6 +63,7 @@ from bot.services.pod_drafts import (
     finalize_mock_event,
     load_event_pairing_mode_sync,
     load_event_seating_mode_sync,
+    load_event_thread_id_sync,
     load_event_time_sync,
     name_token_match,
     player_for_name,
@@ -519,18 +521,32 @@ class PodDraftManager:
 
     async def apply_format(self, code: str) -> str | None:
         """Switch this pod's format to `code` (a set code or a registered cube code). Pre-draft only.
-        Persists set_code, re-emits to a live session, and refreshes the lobby card."""
+        Persists set_code, renames the thread to lead with the new set, re-emits to a live session,
+        and refreshes the lobby card so its title picks up the new keyrune symbol."""
         if self.drafting or self.draft_complete:
             return pod_format.FORMAT_LOCKED_MSG
-        if not await asyncio.to_thread(_persist_format, self.event_id, code):
+        new_name = await asyncio.to_thread(_persist_format, self.event_id, code)
+        if new_name is None:
             return pod_format.FORMAT_LOCKED_MSG
         self.set_code = code
+        if new_name != self.event_name:
+            self.event_name = new_name
+            await self._rename_thread(new_name)
         if self.sio.connected and self.owner_claimed:
             err = await self._emit_format()
             if err is not None:
                 return err
         await self.refresh_lobby_now()
         return None
+
+    async def _rename_thread(self, name: str) -> None:
+        thread = await self._fetch_thread()
+        if thread is None:
+            return
+        try:
+            await thread.edit(name=name[:100])
+        except discord.HTTPException:
+            log.warning(f"[LIFECYCLE] rename_thread.failed event={self.event_id} name={name!r}", exc_info=True)
 
     async def apply_pick_timer(self, seconds: int) -> str | None:
         """Set this pod's Draftmancer pick timer. Pre-draft only — Draftmancer locks the timer once the
@@ -721,8 +737,10 @@ class PodDraftManager:
         return out
 
     def _settings_labels(self) -> dict[str, str]:
-        """Format / Pairings / Seats labels for the sticky lobby + progress-card footer."""
+        """Render inputs shared by the lobby + progress cards: the set code that prefixes the title's
+        keyrune symbol, plus the Format / Pairings / Seats footer labels."""
         return {
+            "set_code": self.set_code,
             "format_label": pod_format.format_display(self.set_code),
             "pairing_label": pairing_label(self.pairing_mode),
             "seating_label": seating_mode_label(self.seating_mode),
@@ -794,7 +812,8 @@ class PodDraftManager:
                     await thread.send(MSG_BOT_RECONNECTED)
                 except Exception:
                     log.warning(f"could not post reconnect notice for {self.session_id}", exc_info=True)
-                adopted = await _find_pinned_lobby_card(thread, self.bot.user, self.event_name)
+                adopted = await _find_pinned_lobby_card(
+                    thread, self.bot.user, self.event_name, self.set_code)
                 if adopted is not None:
                     self.lobby_status_message = adopted
                     log.info(f"[LIFECYCLE] rehydrate_lobby.adopted_card event={self.event_id} msg={adopted.id}")
@@ -1901,23 +1920,38 @@ async def start_manager(
     return manager
 
 
-async def set_event_format(event_id: str, code: str) -> str | None:
-    """Change a pod's format by event id; routes to the live manager when one exists, else persists directly.
-    Returns an error string or None."""
+async def set_event_format(bot: commands.Bot, event_id: str, code: str) -> str | None:
+    """Change a pod's format by event id; routes to the live manager when one exists, else persists directly
+    and renames the thread to lead with the new set. Returns an error string or None."""
     manager = ACTIVE_POD_MANAGERS.get(event_id)
     if manager is not None:
         return await manager.apply_format(code)
-    if not await asyncio.to_thread(_persist_format, event_id, code):
+    new_name = await asyncio.to_thread(_persist_format, event_id, code)
+    if new_name is None:
         return pod_format.FORMAT_LOCKED_MSG
+    await _rename_event_thread(bot, event_id, new_name)
     return None
 
 
-def _persist_format(event_id: str, code: str) -> bool:
+def _persist_format(event_id: str, code: str) -> str | None:
+    """Persist the format change and return the pod's (possibly renamed) event name, or None when the
+    event is missing or already finalized."""
     with SessionLocal() as session:
-        if update_event_format(session, event_id, code):
+        new_name = update_event_format(session, event_id, code)
+        if new_name is not None:
             session.commit()
-            return True
-        return False
+        return new_name
+
+
+async def _rename_event_thread(bot: commands.Bot, event_id: str, name: str) -> None:
+    thread_id = await asyncio.to_thread(load_event_thread_id_sync, event_id)
+    if thread_id is None:
+        return
+    try:
+        thread = await bot.fetch_channel(int(thread_id))
+        await thread.edit(name=name[:100])
+    except discord.HTTPException:
+        log.warning(f"could not rename thread for event {event_id}", exc_info=True)
 
 
 async def set_event_pairing_mode(event_id: str, mode: str) -> str | None:
@@ -2031,7 +2065,7 @@ def _count_participants_sync(event_id: str) -> int:
         ).scalar_one()
 
 
-async def _find_pinned_lobby_card(thread, bot_user, event_name: str) -> "discord.Message | None":
+async def _find_pinned_lobby_card(thread, bot_user, event_name: str, set_code: str | None) -> "discord.Message | None":
     """Rediscover the lobby status card pinned by an earlier manager (pre-restart) so a reconnect
     edits it in place instead of posting and pinning a duplicate. The 🤖 Commands field is unique to
     the lobby card, distinguishing it from a pinned standings or round-pairings embed."""
@@ -2040,11 +2074,12 @@ async def _find_pinned_lobby_card(thread, bot_user, event_name: str) -> "discord
     except discord.HTTPException:
         log.warning(f"could not fetch pins to rediscover lobby card for {event_name}", exc_info=True)
         return None
+    card_title = event_title(set_code, event_name)
     for msg in pins:
         if bot_user is not None and msg.author.id != bot_user.id:
             continue
         for pinned_embed in msg.embeds:
-            if (pinned_embed.title or "") != event_name:
+            if (pinned_embed.title or "") != card_title:
                 continue
             if any("Commands" in (field.name or "") for field in pinned_embed.fields):
                 return msg

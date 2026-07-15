@@ -729,6 +729,7 @@ _PROGRESS_STATES = ("ready", "notready", "cancelled", "superseded", "drafting", 
 
 def _preview_settings_labels() -> dict:
     return dict(
+        set_code=active_set_code(),
         format_label=format_display(active_set_code()),
         pairing_label=pairing_label(DEFAULT_PAIRING_MODE),
         seating_label=seating_mode_label("random"),
@@ -987,11 +988,10 @@ async def setup(bot: commands.Bot) -> None:
 
         if state == "format":
             async def _test_apply(inter: discord.Interaction, code: str) -> str | None:
+                labels = {**_preview_settings_labels(), "set_code": code, "format_label": format_display(code)}
                 embed = render_lobby_embed(
                     _THREAD_NAME, _RSVPS_YES, _RSVPS_MAYBE, list(_LINKED_EIGHT),
-                    state="linked", draftmancer_url=_DRAFTMANCER_URL,
-                    format_label=format_display(code), pairing_label=pairing_label(DEFAULT_PAIRING_MODE),
-                    seating_label=seating_mode_label("random"),
+                    state="linked", draftmancer_url=_DRAFTMANCER_URL, **labels,
                 )
                 await inter.channel.send(embed=embed)
                 return None

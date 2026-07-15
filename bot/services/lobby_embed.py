@@ -201,6 +201,14 @@ def build_drafting_view(spectate_url: str | None) -> discord.ui.View | None:
     return view
 
 
+def event_title(set_code: str | None, event_name: str) -> str:
+    """Lobby / ready-check card title: the event name with the set's keyrune symbol prefixed when its
+    app emoji is loaded. Custom emoji render in embed titles, so the fancy symbol lives here while the
+    plain thread name stays symbol-free. A cube code or an unloaded symbol yields the bare name."""
+    prefix = emojis.prefix(set_code.lower()) if set_code else ""
+    return f"{prefix}{event_name}"
+
+
 def render(
     title: str,
     rsvps_yes: list[str],
@@ -208,6 +216,7 @@ def render(
     in_session: list[tuple[str, str | None]],
     *,
     state: str,
+    set_code: str | None = None,
     draftmancer_url: str | None = None,
     decliner_name: str | None = None,
     cancel_reason: str | None = None,
@@ -241,6 +250,7 @@ def render(
         name for name in rsvps_maybe
         if _rsvp_dedup_key(name, mention_map) not in in_session_keys
     ]
+    title = event_title(set_code, title)
     show_pending = state not in ("ready", "drafting", "complete")
 
     banner_state = state
@@ -343,6 +353,7 @@ def render_ready_check_progress(
     in_session: list[tuple[str, str | None]],
     *,
     state: str,
+    set_code: str | None = None,
     draftmancer_url: str | None = None,
     ready_arena_names: set[str] | None = None,
     decliner_name: str | None = None,
@@ -366,6 +377,7 @@ def render_ready_check_progress(
     `❌ <name> is Not Ready` + `✅ ready_count/total_count Ready` — with no link, buttons, or roster,
     since the retry controls live on the main lobby card.
     """
+    title = event_title(set_code, title)
     roster = _seat_rows(in_session)
 
     declined = state == "notready"

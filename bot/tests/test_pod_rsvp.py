@@ -212,3 +212,40 @@ def test_parse_new_time_refuses_a_past_result():
     late_now = CURRENT + timedelta(hours=3)
 
     assert parse_new_time("+2h", CURRENT, late_now) is None
+
+
+REF = datetime(2026, 7, 14, 12, 0, tzinfo=SCHEDULE_TZ)
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("Today 10pm ET", datetime(2026, 7, 14, 22, 0, tzinfo=SCHEDULE_TZ)),
+        ("tonight 8pm", datetime(2026, 7, 14, 20, 0, tzinfo=SCHEDULE_TZ)),
+        ("tomorrow 8:30pm", datetime(2026, 7, 15, 20, 30, tzinfo=SCHEDULE_TZ)),
+        ("fri 9pm", datetime(2026, 7, 17, 21, 0, tzinfo=SCHEDULE_TZ)),
+        ("friday at 20:00", datetime(2026, 7, 17, 20, 0, tzinfo=SCHEDULE_TZ)),
+        ("next tuesday 8pm", datetime(2026, 7, 21, 20, 0, tzinfo=SCHEDULE_TZ)),
+        ("10pm", datetime(2026, 7, 14, 22, 0, tzinfo=SCHEDULE_TZ)),
+        ("8am", datetime(2026, 7, 15, 8, 0, tzinfo=SCHEDULE_TZ)),
+        ("12pm", datetime(2026, 7, 14, 12, 0, tzinfo=SCHEDULE_TZ) + timedelta(days=1)),
+        ("today 8am", None),
+        ("half past nine", None),
+    ],
+)
+def test_parse_new_time_natural_language(raw, expected):
+    assert parse_new_time(raw, REF, REF) == expected
+
+
+def test_parse_new_time_accepts_a_pasted_discord_timestamp():
+    future = datetime(2026, 7, 18, 21, 0, tzinfo=SCHEDULE_TZ)
+
+    parsed = parse_new_time(f"<t:{int(future.timestamp())}:F>", REF, REF)
+
+    assert parsed == future
+
+
+def test_parse_new_time_rejects_a_past_discord_timestamp():
+    past = datetime(2020, 1, 1, 12, 0, tzinfo=SCHEDULE_TZ)
+
+    assert parse_new_time(f"<t:{int(past.timestamp())}:F>", REF, REF) is None

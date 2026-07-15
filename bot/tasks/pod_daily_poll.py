@@ -49,12 +49,11 @@ _bot: commands.Bot | None = None
 
 POLL_TITLE = "Daily Pod Launcher"
 POLL_INTRO = (
+    "### Sign up for any time below\n"
     "• Event thread will be created as soon as each pod reaches {threshold} players.\n"
-    "• Draftmancer lobby opens {lead} minutes before the scheduled time.\n"
-    "• 3 rounds of Swiss, Bo3 matches. Pairings sent by DM. New here? Run /pod-guide."
+    "• Draftmancer lobby opens {lead} minutes before the scheduled time."
 )
 MARKER_CLOSED = "Closed"
-POLL_PING = "{mention} `/draft` to start a pod anytime, or join one below"
 MSG_POLL_INACTIVE = "This poll is no longer active."
 MSG_SLOT_CLOSED = "That slot's time already passed. Catch the next poll."
 SLOT_ROLE_BY_BUCKET = {"EARLY": EARLY_POD_ROLE_NAME, "LATE": LATE_POD_ROLE_NAME}
@@ -108,8 +107,7 @@ async def fire_daily_poll() -> None:
 
 
 def poll_ping_line(guild: discord.Guild | None) -> str | None:
-    mention = queue_role_mention(guild)
-    return POLL_PING.format(mention=mention) if mention else None
+    return queue_role_mention(guild)
 
 
 def initial_poll_embed(signal_date: date, guild: discord.Guild | None = None) -> discord.Embed:

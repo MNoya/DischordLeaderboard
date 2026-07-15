@@ -20,6 +20,11 @@ def get_emoji(name: str) -> discord.Emoji | None:
     return _EMOJIS.get(name)
 
 
+def set_symbol(code: str) -> discord.Emoji | None:
+    """The keyrune set-symbol app emoji for a set code, looked up case-insensitively."""
+    return _EMOJIS.get(code.lower()) or _EMOJIS.get(code.upper())
+
+
 def prefix(name: str) -> str:
     """Custom emoji followed by a space for inlining before text, or '' if not loaded."""
     e = _EMOJIS.get(name)

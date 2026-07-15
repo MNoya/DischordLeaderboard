@@ -22,7 +22,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time as dtime, timedelta, timezone
 from urllib.parse import urlencode
 
 import discord
@@ -73,6 +73,15 @@ THREAD_NOTE_BODY = (
 )
 
 OFFSET_RE = re.compile(r"^\+(?:(\d+)h)?(?:(\d+)m)?$")
+TIMESTAMP_RE = re.compile(r"^<t:(\d{1,15})(?::[a-z])?>$")
+CLOCK_RE = re.compile(r"^(\d{1,2})(?::(\d{2}))?(am|pm)?$")
+TZ_TOKENS = {"et", "est", "edt"}
+FILLER_TOKENS = {"at", "on"}
+WEEKDAYS = {
+    "monday": 0, "mon": 0, "tuesday": 1, "tue": 1, "tues": 1, "wednesday": 2, "wed": 2,
+    "thursday": 3, "thu": 3, "thur": 3, "thurs": 3, "friday": 4, "fri": 4,
+    "saturday": 5, "sat": 5, "sunday": 6, "sun": 6,
+}
 
 
 class RsvpButton(discord.ui.Button):
@@ -193,7 +202,8 @@ def slot_role_mention(guild: discord.Guild | None, event_time: datetime) -> str 
 
 async def post_scheduled_card(
     bot: commands.Bot, channel: discord.TextChannel, *, set_code: str, event_time: datetime, name: str,
-    preseed_yes: list[tuple[str, str]] | None = None,
+    preseed_yes: list[tuple[str, str]] | None = None, ping_role: bool = True,
+    pairing_mode: str | None = None, seating_mode: str | None = None, pick_timer: int | None = None,
 ) -> str | None:
     """Create a scheduled pod end to end and return its event id, or None when the thread or the
     card could not be posted. The signal is born fired, so the RSVP buttons never close.
@@ -211,7 +221,7 @@ async def post_scheduled_card(
     guild = channel.guild
     try:
         message = await channel.send(
-            content=slot_role_mention(guild, event_time),
+            content=slot_role_mention(guild, event_time) if ping_role else None,
             embed=build_rsvp_embed(name, event_time, rosters),
             view=PodRsvpView(),
             allowed_mentions=discord.AllowedMentions(roles=True),
@@ -224,13 +234,14 @@ async def post_scheduled_card(
     signal_id = await asyncio.to_thread(
         pod_launch.create_scheduled_signal_sync,
         guild_id=str(guild.id), channel_id=str(channel.id), message_id=str(message.id),
-        event_time=event_time,
+        event_time=event_time, pick_timer=pick_timer,
     )
     if preseed_yes:
         await asyncio.to_thread(pod_launch.seed_yes_members_sync, signal_id, preseed_yes)
     native_event_id = await _create_native_event(channel, name, event_time, message.jump_url)
     event_id, created_at, pairing_mode, seating_mode = await asyncio.to_thread(
         _record_scheduled_event, set_code, event_time, name, str(thread.id), native_event_id,
+        pairing_mode, seating_mode,
     )
     await asyncio.to_thread(pod_launch.link_event_sync, signal_id, event_id)
 
@@ -462,12 +473,17 @@ async def _create_native_event(
 
 def _record_scheduled_event(
     set_code: str, event_time: datetime, name: str, thread_id: str, native_event_id: str | None,
+    pairing_mode: str | None = None, seating_mode: str | None = None,
 ) -> tuple[str, datetime, str, str]:
     with SessionLocal() as session:
         event = record_ondemand_event(
             session, set_code=set_code, event_time=event_time, name=name, discord_thread_id=thread_id,
         )
         event.discord_scheduled_event_id = native_event_id
+        if pairing_mode is not None:
+            event.pairing_mode = pairing_mode
+        if seating_mode is not None:
+            event.seating_mode = seating_mode
         session.commit()
         session.refresh(event)
         return event.id, event.created_at, event.pairing_mode, event.seating_mode
@@ -558,26 +574,78 @@ async def _post_thread_note(bot: commands.Bot, thread_id: str, new_time: datetim
 
 
 def parse_new_time(raw: str, current: datetime, now: datetime) -> datetime | None:
-    """New event time from '+NhNm' (offset from the current time), 'HH:MM' (ET, same day as the
-    current time), or 'YYYY-MM-DD HH:MM' (ET). None when unreadable or not in the future."""
+    """A future event time (ET) from a sesh-style phrase. Understood forms:
+    a pasted Discord timestamp token ('<t:1752624000:F>', in the viewer's own zone); '+NhNm' offset
+    from the current time; 'YYYY-MM-DD HH:MM'; a day word ('today', 'tonight', 'tomorrow', or a
+    weekday like 'fri') optionally with 'at'/'on'/'ET' filler, followed by a clock ('10pm', '8:30pm',
+    '20:00'); or a bare clock. A bare clock or weekday already past today rolls forward. None when
+    unreadable or not in the future."""
     raw = raw.strip().lower()
+    if not raw:
+        return None
+    stamp = TIMESTAMP_RE.match(raw)
+    if stamp:
+        parsed = datetime.fromtimestamp(int(stamp.group(1)), tz=timezone.utc)
+        return parsed if parsed > now else None
     offset = OFFSET_RE.match(raw)
     if offset and (offset.group(1) or offset.group(2)):
-        hours, minutes = int(offset.group(1) or 0), int(offset.group(2) or 0)
-        parsed = current + timedelta(hours=hours, minutes=minutes)
-    else:
-        try:
-            if len(raw) <= 5:
-                clock = datetime.strptime(raw, "%H:%M").time()
-                current_local = current.astimezone(SCHEDULE_TZ)
-                parsed = datetime.combine(current_local.date(), clock, tzinfo=SCHEDULE_TZ)
-            else:
-                parsed = datetime.strptime(raw, "%Y-%m-%d %H:%M").replace(tzinfo=SCHEDULE_TZ)
-        except ValueError:
-            return None
-    if parsed <= now:
+        parsed = current + timedelta(hours=int(offset.group(1) or 0), minutes=int(offset.group(2) or 0))
+        return parsed if parsed > now else None
+    try:
+        parsed = datetime.strptime(raw, "%Y-%m-%d %H:%M").replace(tzinfo=SCHEDULE_TZ)
+        return parsed if parsed > now else None
+    except ValueError:
+        pass
+    parsed = _parse_natural_time(raw, current, now)
+    return parsed if parsed is not None and parsed > now else None
+
+
+def _parse_natural_time(raw: str, current: datetime, now: datetime) -> datetime | None:
+    tokens = [t for t in raw.replace(",", " ").split() if t not in FILLER_TOKENS and t not in TZ_TOKENS]
+    if not tokens:
         return None
+
+    base_date = current.astimezone(SCHEDULE_TZ).date()
+    day = base_date
+    day_word, weekday_word = False, False
+    next_week = tokens[0] == "next" and len(tokens) > 1
+    if next_week:
+        tokens = tokens[1:]
+    head = tokens[0]
+    if head in ("today", "tonight"):
+        tokens, day_word = tokens[1:], True
+    elif head == "tomorrow":
+        day, tokens, day_word = base_date + timedelta(days=1), tokens[1:], True
+    elif head in WEEKDAYS:
+        ahead = (WEEKDAYS[head] - base_date.weekday()) % 7
+        day, tokens, weekday_word = base_date + timedelta(days=ahead + (7 if next_week else 0)), tokens[1:], True
+
+    clock = _parse_clock("".join(tokens))
+    if clock is None:
+        return None
+    parsed = datetime.combine(day, clock, tzinfo=SCHEDULE_TZ)
+    if parsed <= now and not day_word:
+        parsed += timedelta(days=7) if weekday_word else timedelta(days=1)
     return parsed
+
+
+def _parse_clock(token: str) -> dtime | None:
+    match = CLOCK_RE.match(token)
+    if match is None:
+        return None
+    hour, minute, meridiem = int(match.group(1)), int(match.group(2) or 0), match.group(3)
+    if minute > 59:
+        return None
+    if meridiem:
+        if not 1 <= hour <= 12:
+            return None
+        if meridiem == "pm" and hour != 12:
+            hour += 12
+        elif meridiem == "am" and hour == 12:
+            hour = 0
+    elif hour > 23:
+        return None
+    return dtime(hour, minute)
 
 
 def _load_event(event_id: str) -> tuple[str, datetime, str, str, str | None, datetime] | None:
