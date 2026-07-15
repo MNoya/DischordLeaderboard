@@ -5,7 +5,7 @@ import { SectionLabel } from "../SectionLabel";
 import { PickGrid } from "./CommunityGrid";
 import { MidwayBreakdownList } from "./MidwayBreakdownList";
 import { useMidwayVersusPager, MidwayVersusModal } from "./MidwayVersusCard";
-import { breakdownStripAccent, SLOT_ACCENT } from "./slotVisuals";
+import { breakdownStripAccent } from "./slotVisuals";
 import { CHAMFER, MEDAL_COLOR } from "./P0P1BallotScorecard";
 import { SLOTS } from "../../data/p0p1Slots";
 import {
@@ -375,85 +375,28 @@ const PODIUM: Record<number, { emoji: string; label: string; color: string }> = 
 
 // ── Champion spotlight ──────────────────────────────────────────────────────────
 
-function WinningBallotTile({
-  slotKey,
-  label,
-  cardName,
-  card,
-}: {
-  slotKey: SlotKey;
-  label: string;
-  cardName: string | null;
-  card: Card | undefined;
-}) {
-  const [touchOpen, setTouchOpen] = useState(false);
-  const accent = SLOT_ACCENT[slotKey];
-
-  return (
-    <div className="group/wtile relative min-w-0">
-      <div
-        className="flex flex-col border border-t-0 border-border2 bg-surface overflow-hidden cursor-pointer"
-        onTouchStart={(e) => {
-          e.stopPropagation();
-          setTouchOpen((o) => !o);
-        }}
-      >
-        <div className="h-[3px] w-full shrink-0" style={{ background: accent }} />
-        <div className="relative aspect-square bg-surface2 overflow-hidden">
-          {card ? (
-            <img src={card.imageArtCrop} alt={card.name} className="w-full h-full object-cover" />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center text-muted text-[10px] px-1 text-center">
-              {cardName ?? "—"}
-            </div>
-          )}
-        </div>
-        <div className="px-1 py-1 min-w-0">
-          <span className="text-subtle text-[9px] lg:text-[10px] truncate block" title={cardName ?? label}>
-            {cardName ?? "—"}
-          </span>
-        </div>
-      </div>
-
-      {card && (
-        <>
-          <div className="absolute bottom-[calc(100%+7px)] left-1/2 -translate-x-1/2 z-50 pointer-events-none opacity-0 group-hover/wtile:opacity-100 transition-opacity duration-100 hidden lg:block">
-            <img src={card.imageNormal} alt={card.name} className="w-[160px] rounded-sm border border-border2 shadow-xl" />
-          </div>
-          {touchOpen && (
-            <div className="absolute bottom-[calc(100%+7px)] left-1/2 -translate-x-1/2 z-50 pointer-events-none lg:hidden">
-              <img src={card.imageNormal} alt={card.name} className="w-[160px] rounded-sm border border-border2 shadow-xl" />
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
-
 function ChampionCard({
   ballot,
   total,
   isSelf,
   isBest,
+  setCode,
   cardsByName,
+  ratingsByName,
 }: {
   ballot: RankedBallot;
   total: number;
   isSelf: boolean;
   isBest: boolean;
+  setCode: string;
   cardsByName: Map<string, Card>;
+  ratingsByName: Map<string, CardRating>;
 }) {
   const topPct = Math.max(1, Math.round((ballot.rank / total) * 100));
 
-  const tiles = useMemo(
-    () =>
-      SLOTS.map((slot) => {
-        const cardName = ballot.picks.get(slot.key) ?? null;
-        const card = cardName ? cardsByName.get(cardName) : undefined;
-        return { slotKey: slot.key, label: slot.label, cardName, card };
-      }),
-    [ballot, cardsByName],
+  const entries = useMemo(
+    () => ballotToEntries(ballot, setCode, ratingsByName),
+    [ballot, setCode, ratingsByName],
   );
 
   return (
@@ -539,11 +482,7 @@ function ChampionCard({
         <div className="font-display tracking-[0.2em] text-[11px] sm:text-[12px] text-muted mt-4 mb-1.5">
           THE WINNING BALLOT
         </div>
-        <div className="grid grid-cols-4 lg:grid-cols-8 gap-1.5">
-          {tiles.map((t) => (
-            <WinningBallotTile key={t.slotKey} {...t} />
-          ))}
-        </div>
+        <PickGrid entries={entries} cardsByName={cardsByName} />
       </div>
     </div>
   );
@@ -909,7 +848,9 @@ function Leaderboard({
           total={rankedBallots.length}
           isSelf={champion.ballotId === userBallotId}
           isBest={standings.bestAchieverIds.has(champion.ballotId)}
+          setCode={setCode}
           cardsByName={cardsByName}
+          ratingsByName={ratingsByName}
         />
       )}
       <div>
