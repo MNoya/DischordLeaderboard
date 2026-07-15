@@ -43,9 +43,9 @@ const HIGHLIGHTS_COUNT = 5;
 type Top3Treatment = "spotlight" | "broadcast";
 const TOP3_TREATMENT: Top3Treatment =
   typeof window !== "undefined" &&
-  new URLSearchParams(window.location.search).get("top3") === "broadcast"
-    ? "broadcast"
-    : "spotlight";
+  new URLSearchParams(window.location.search).get("top3") === "spotlight"
+    ? "spotlight"
+    : "broadcast";
 
 function gihwrLabel(gihwr: number): string {
   return `${(gihwr * 100).toFixed(1)}%`;
@@ -504,7 +504,7 @@ function ChampionCard({
   );
 }
 
-// ── Broadcast overlay (alt top-3 treatment, ?top3=broadcast) ────────────────────
+// ── Broadcast overlay (default top-3 treatment; ?top3=spotlight for the alt) ────
 
 function BroadcastTop3({
   champion,
