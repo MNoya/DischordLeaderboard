@@ -90,6 +90,7 @@ _BACKOFF_MAX_RETRIES = 8
 LOBBY_REHYDRATE_WINDOW = timedelta(hours=12)
 _READY_TIMEOUT_S = 90
 _READY_DEBOUNCE_S = 2.0
+_READY_GRACE_S = 20
 _LOBBY_FULL_THRESHOLD = 8
 _LOBBY_HALF_THRESHOLD = _LOBBY_FULL_THRESHOLD // 2
 _LOBBY_FULL_PROMPT_DELAY_S = 10
@@ -196,6 +197,7 @@ class PodDraftManager:
         self.ready_check_active = False
         self.ready_users: set[str] = set()
         self.expected_user_ids: set[str] = set()
+        self.expected_user_names: dict[str, str] = {}
         self._lobby_full_prompt_task: asyncio.Task | None = None
         self._lobby_full_prompt_message: "discord.Message | None" = None
         self._lobby_full_prompted = False
@@ -205,6 +207,7 @@ class PodDraftManager:
         self.ready_check_progress_message: object | None = None
         self._lobby_post_lock = asyncio.Lock()
         self._ready_timeout_task: asyncio.Task | None = None
+        self._ready_grace_task: asyncio.Task | None = None
         self.drafting = False
         self.draft_paused = False
         self.draft_cancelled = False
@@ -368,8 +371,11 @@ class PodDraftManager:
         if self.ready_check_active:
             present = {u.get("userID") for u in self.player_session_users()}
             if not present <= self.expected_user_ids:
-                await self._invalidate_ready_check("Player list changed")
+                await self._invalidate_ready_check("New player joined")
+            elif not self.expected_user_ids <= present:
+                self._arm_ready_grace()
             else:
+                self._cancel_ready_grace()
                 await self._maybe_complete_ready_check()
 
     async def _on_session_spectators(self, spectators) -> None:
@@ -571,12 +577,10 @@ class PodDraftManager:
                 event.socket_status = status
                 session.commit()
 
-    async def initiate_ready_check(
-        self, thread, initiated_by: str | None = None, *, min_players: int | None = None,
-    ) -> str | None:
-        """Start a Draftmancer ready check; returns an error string on failure, None on success.
-        `min_players` overrides the floor — the lobby button uses the default, the manual /pod-ready
-        command passes a lower one so a small pod can be readied."""
+    def ready_check_blocker(self, *, min_players: int | None = None) -> str | None:
+        """The hard guards that stop a ready check outright, shared by the lobby button's pre-check and
+        initiate_ready_check so they can't drift. None means the pod can start — an unrecognized seat only
+        warns, which the caller confirms. `min_players` overrides the floor."""
         if not self.sio.connected:
             return "Draftmancer session is not connected."
         if self.drafting or self.draft_complete:
@@ -586,15 +590,36 @@ class PodDraftManager:
         non_bot = self.player_session_users()
         if not non_bot:
             return "Nobody in the Draftmancer lobby yet."
-        min_players = min_players if min_players is not None else settings.pod_draft_min_ready_players
-        if len(non_bot) < min_players:
+        floor = min_players if min_players is not None else settings.pod_draft_min_ready_players
+        if len(non_bot) < floor:
             return (
-                f"Ready check is only available with {min_players} or more players. "
+                f"Ready check is only available with {floor} or more players. "
                 f"Currently {len(non_bot)} in the Draftmancer lobby.\n"
                 "Wait for more players to join, or run `/pod-start` to start the draft now, "
                 "skipping the ready check."
             )
+        if len(non_bot) % 2 != 0:
+            return (
+                f"Ready check needs an even number of players. Currently {len(non_bot)} in the "
+                "Draftmancer lobby.\nAdd or drop a player, or run `/pod-start` to start the draft "
+                "now, skipping the ready check."
+            )
+        return None
+
+    async def initiate_ready_check(
+        self, thread, initiated_by: str | None = None, *, min_players: int | None = None,
+    ) -> str | None:
+        """Start a Draftmancer ready check; returns an error string on failure, None on success.
+        `min_players` overrides the floor — the lobby button uses the default, the manual /pod-ready
+        command passes a lower one so a small pod can be readied. An unrecognized seat does not block
+        here; the lobby button warns and confirms before reaching this point."""
+        blocker = self.ready_check_blocker(min_players=min_players)
+        if blocker:
+            return blocker
+        non_bot = self.player_session_users()
+        self._cancel_ready_grace()
         self.expected_user_ids = {u.get("userID") for u in non_bot}
+        self.expected_user_names = {u.get("userID"): u.get("userName") for u in non_bot}
         self.ready_users = set()
         self.ready_check_active = True
         self._suppress_lobby_full_prompt()
@@ -833,7 +858,8 @@ class PodDraftManager:
                 except Exception:
                     log.warning(f"could not edit lobby status for {self.session_id}", exc_info=True)
 
-        if self.ready_check_progress_message is not None:
+        progress_card_live = self.ready_check_active or state in ("drafting", "complete", "notready")
+        if self.ready_check_progress_message is not None and progress_card_live:
             progress_embed = render_ready_check_progress(
                 title=self.event_name,
                 in_session=classified,
@@ -1166,6 +1192,7 @@ class PodDraftManager:
             return
         log.info(f"[READY] complete event={self.event_id} ready_count={len(self.ready_users)}")
         self.ready_check_active = False
+        self._cancel_ready_grace()
         if self._ready_timeout_task is not None:
             self._ready_timeout_task.cancel()
         await self._start_draft()
@@ -1180,6 +1207,7 @@ class PodDraftManager:
             return "Draft is already in progress."
         if self._ready_timeout_task is not None:
             self._ready_timeout_task.cancel()
+        self._cancel_ready_grace()
         self.ready_check_active = False
         self.ready_users = set()
         self.last_decliner_name = None
@@ -1493,7 +1521,8 @@ class PodDraftManager:
             return
         self._lobby_full_prompted = True
         try:
-            self._lobby_full_prompt_message = await thread.send(MSG_LOBBY_FULL_PROMPT, view=LobbyReadyButtonView())
+            prompt = MSG_LOBBY_FULL_PROMPT.format(count=emojis.mana_number(_LOBBY_FULL_THRESHOLD))
+            self._lobby_full_prompt_message = await thread.send(prompt, view=LobbyReadyButtonView())
         except discord.HTTPException:
             self._lobby_full_prompted = False
             log.warning(f"[LOBBY] full_prompt_send_failed event={self.event_id}", exc_info=True)
@@ -1820,6 +1849,38 @@ class PodDraftManager:
         self.last_decliner_name = decliner_name
         self.last_cancel_reason = None if decliner_name is not None else reason
         await self.refresh_lobby_now()
+
+    def _arm_ready_grace(self) -> None:
+        if self._ready_grace_task is not None and not self._ready_grace_task.done():
+            return
+        self._ready_grace_task = asyncio.create_task(self._ready_grace_countdown())
+
+    def _cancel_ready_grace(self) -> None:
+        if self._ready_grace_task is not None and not self._ready_grace_task.done():
+            self._ready_grace_task.cancel()
+        self._ready_grace_task = None
+
+    async def _ready_grace_countdown(self) -> None:
+        """A player who leaves mid-check gets _READY_GRACE_S to rejoin before the check aborts, so a
+        brief disconnect or a seat swap doesn't force a restart. Auto-resumes if they return."""
+        try:
+            await asyncio.sleep(_READY_GRACE_S)
+        except asyncio.CancelledError:
+            return
+        if not self.ready_check_active:
+            return
+        present = {u.get("userID") for u in self.player_session_users()}
+        if self.expected_user_ids <= present:
+            return
+        missing_names = [self.expected_user_names.get(uid) for uid in (self.expected_user_ids - present)]
+        missing_names = [name for name in missing_names if name]
+        if len(missing_names) == 1:
+            reason = f"`{missing_names[0]}` left"
+        elif missing_names:
+            reason = f"{len(missing_names)} players left"
+        else:
+            reason = "A player left"
+        await self._invalidate_ready_check(reason)
 
     def _schedule_end_watchdog(self) -> None:
         self._cancel_end_watchdog()

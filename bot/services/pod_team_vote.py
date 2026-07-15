@@ -11,10 +11,12 @@ import re
 import discord
 from discord import ui
 
+from bot import emojis
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 
 
-TEAM_VOTE_PROMPT = "6️⃣ Players locked in! Make it a Team Draft?"
+TEAM_VOTE_POD_SIZE = 6
+TEAM_VOTE_PROMPT = "{count} Players locked in! Make it a Team Draft?"
 TEAM_VOTE_GATHERING = "Turns into a Team Draft once {needed} players vote."
 TEAM_VOTE_LOCKED_TITLE = "🤝 Team Draft is on!"
 TEAM_VOTE_TALLY = "Votes ({count})"
@@ -37,7 +39,8 @@ def build_team_vote_offer_embed(voter_names: list[str], needed: int, *, locked: 
         embed = discord.Embed(color=discord.Color.green(), title=TEAM_VOTE_LOCKED_TITLE)
     else:
         embed = discord.Embed(
-            color=discord.Color.green(), title=TEAM_VOTE_PROMPT,
+            color=discord.Color.green(),
+            title=TEAM_VOTE_PROMPT.format(count=emojis.mana_number(TEAM_VOTE_POD_SIZE)),
             description=TEAM_VOTE_GATHERING.format(needed=needed),
         )
     if voter_names:

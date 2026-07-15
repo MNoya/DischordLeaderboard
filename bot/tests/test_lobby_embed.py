@@ -160,13 +160,15 @@ def test_ready_progress_declined_collapses_to_tally():
     assert _field(embed, "⏳ Pending") is None
 
 
-def test_ready_progress_shows_initiator_only_during_active_check():
+def test_ready_progress_carries_initiator_through_decline():
     in_session = [(f"P{i}#000{i}", f"Player{i}") for i in range(8)]
     active = render_ready_check_progress(
         "Pod Draft", in_session, state="ready", ready_arena_names=set(), initiated_by="Noya",
     )
     assert "Noya" in active.description
+
     declined = render_ready_check_progress(
         "Pod Draft", in_session, state="notready", decliner_name="x", initiated_by="Noya",
     )
-    assert "Noya" not in (declined.description or "")
+
+    assert "Noya" in (declined.description or "")

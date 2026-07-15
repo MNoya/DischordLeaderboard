@@ -16,6 +16,7 @@ from bot.commands.messages import MSG_ADMIN_ONLY
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.discord_helpers import display_width, extract_avatar_hash, player_url
+from bot.services.lobby_embed import guard_ready_check
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_draft_manager import (
     cancel_pod_event,
@@ -118,8 +119,13 @@ class PodDraft(commands.Cog):
         thread = interaction.channel
         log.info(f"ready-check: {interaction.user} in thread {interaction.channel_id}")
         await interaction.response.defer(ephemeral=True, thinking=False)
+        actor = actor_label(interaction)
+        if await guard_ready_check(
+            interaction, manager, thread, initiated_by=actor, min_players=MANUAL_READY_MIN_PLAYERS,
+        ):
+            return
         err = await manager.initiate_ready_check(
-            thread, initiated_by=actor_label(interaction), min_players=MANUAL_READY_MIN_PLAYERS,
+            thread, initiated_by=actor, min_players=MANUAL_READY_MIN_PLAYERS,
         )
         if err is not None:
             log.warning(f"ready-check: failed — {err}")

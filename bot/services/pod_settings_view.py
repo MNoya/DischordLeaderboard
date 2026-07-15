@@ -40,6 +40,8 @@ LinkApply = Callable[[discord.Interaction, str, discord.abc.User], Awaitable[str
 LinkTargetsProvider = Callable[[], Awaitable[list[str]]]
 CancelApply = Callable[[discord.Interaction], Awaitable[str | None]]
 
+LINK_SEAT_PROMPT = "Pick the unlinked Draftmancer seat to assign:"
+
 TIMER_MIN = 10
 TIMER_MAX = 600
 
@@ -309,12 +311,15 @@ class _LinkPlayersButton(ui.Button):
             )
             return
         await interaction.response.send_message(
-            "Pick the unlinked Draftmancer seat to assign:",
-            view=_LinkSeatSelectView(targets, view.on_link), ephemeral=True,
+            LINK_SEAT_PROMPT,
+            view=LinkSeatSelectView(targets, view.on_link), ephemeral=True,
         )
 
 
-class _LinkSeatSelectView(ui.View):
+class LinkSeatSelectView(ui.View):
+    """Two-step seat→member link picker, shared by the Settings 'Link Players' button and the ready-check
+    unlinked-seat confirm so an organizer can bind a stray seat from either spot."""
+
     def __init__(self, targets: list[str], on_link: LinkApply) -> None:
         super().__init__(timeout=120)
         self.add_item(_LinkSeatSelect(targets, on_link))

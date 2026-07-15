@@ -1,4 +1,6 @@
+from bot import emojis
 from bot.services.pod_team_vote import (
+    TEAM_VOTE_POD_SIZE,
     TEAM_VOTE_PROMPT,
     build_team_vote_offer_embed,
     team_vote_needed,
@@ -15,7 +17,7 @@ def test_team_vote_needed_is_a_majority_of_the_pod():
 def test_offer_embed_states_the_vote_target_and_has_no_votes_field_yet():
     embed = build_team_vote_offer_embed([], needed=4)
 
-    assert embed.title == TEAM_VOTE_PROMPT
+    assert embed.title == TEAM_VOTE_PROMPT.format(count=emojis.mana_number(TEAM_VOTE_POD_SIZE))
     assert "4" in embed.description
     assert embed.fields == []
 
