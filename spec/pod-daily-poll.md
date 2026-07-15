@@ -99,6 +99,8 @@ The load-bearing new path. Today every `PodDraftEvent` is born from a detected s
 
 ## Feature A — Daily poll
 
+> Cadence and slot rules below are superseded by the 2026-07-14 consolidation amendment at the end of this doc (daily posting, day-dependent slots, reflected scheduled pods, lazy-slot nudge). The signal model, fire semantics, and bot-native creation path carry over unchanged.
+
 `bot/tasks/pod_daily_poll.py`
 - `init_daily_poll(bot)` — a cron job at 11:00 ET, `day_of_week='mon,tue,fri,sun'`, `SCHEDULE_TZ`. Runs through paused (release/championship) weeks by design — the poll is how pods stay alive when the fixed slots are off.
 - `fire_daily_poll()` — idempotent per day (skip if a `poll` signal already exists for today). Posts the poll in `pod-draft-chat` and inserts two `pod_signal` rows; arms a per-slot expiry job at each `slot_time`.
@@ -191,6 +193,60 @@ Exercising over automated tests: the two `!test` commands drive every user-facin
 ## Out of scope
 
 - Website surface for polls/queues.
-- Custom or per-signal times; more than two poll slots.
+- Custom or per-signal times. (Fixed two-slot rule relaxed by the 2026-07-14 amendment: weekends carry three slots.)
 - Waitlist / auto-second-pod split (Phase 2's deferred idea).
-- Coexistence suppression between the queue and scheduled pods.
+- Coexistence suppression between the queue and scheduled pods. (The poll↔scheduled-pod relationship is now in scope as *reflection* — see the 2026-07-14 amendment — but the queue stays independent.)
+
+---
+
+## Amendment 2026-07-14 — Daily launcher + reflected scheduled pods
+
+Status: agreed with the owner 2026-07-14, not started. Supersedes Feature A's cadence and slot rules above; leaves Feature B (queue) and `spec/pod-scheduled-rsvp.md` structurally intact.
+
+Why: the poll, the scheduled RSVP cards, and the queue are the same `pod_signal` + card tail at three commitment levels, but players met two different UIs depending on the day. This promotes the poll to the single day-of surface and folds the locked pods into it, so a scheduled pod and its day's poll slot are two live windows on one roster.
+
+### Three tiers
+
+- **Scheduled cards (Wed/Thu/Sat)** — locked, sent >48h out, on people's calendars. `spec/pod-scheduled-rsvp.md`, unchanged.
+- **Daily Pod Launcher** — on-demand, the day-of "who's playing today" heartbeat. Posts every day.
+- **Queue (`/draft`)** — right-now, aggressive ping-hunting. Feature B, unchanged.
+
+### Cadence and slots
+
+The poll cron moves from `mon,tue,fri,sun` to every day. `POLL_WEEKDAYS` / `is_poll_day` retire; the slot set and the post time both become a function of the signal date, resolved in `pod_signals`:
+
+- **Weekday (Mon–Fri):** posts 11:00 ET. Slots Early 14:00, Late 20:00 → Early Pod / Late Pod roles.
+- **Weekend (Sat–Sun):** posts 08:00 ET (earlier so the 10:00 slot has runway — an 11:00 post would land after Morning's slot time). Slots Morning 10:00, Afternoon 15:00, Evening 20:00 → Weekend Pod role for all three (role and mention already exist in `pod_schedule.py`).
+
+`POLL_BUCKETS` and `POLL_POST_HOUR_ET` become date-dependent; the bucket→role map gains the weekend buckets pointing at Weekend Pod. Slots still fire independently.
+
+### Reflection of locked pods — the load-bearing behavior
+
+On a day whose slot time matches a locked scheduled pod, the poll slot does not open a fresh signal — it **binds to the existing scheduled `pod_signal`** (already fired, event linked). One roster, two live surfaces; never a duplicate, never an inert lookalike (the one-canonical-surface rule from `spec/pod-scheduled-rsvp.md` holds because both surfaces are live and edit the same signal).
+
+- The poll message records, per slot, the bound `signal_id`: an existing scheduled signal for reflected slots, a freshly created lazy poll signal otherwise.
+- Rendering reads the bound signal — live count, thread link, and the pod's **real** start time (a reflected slot shows its actual time, not the bucket default).
+- Poll join maps to the scheduled card's Yes (live join). Maybe/No stay on the rich card; the poll is a binary in/out day-of surface.
+- Mapping: Wed 20:00 → Late, Thu 14:00 → Early, Sat 15:00 → weekend Afternoon. Saturday stays at 15:00 (no calendar/native-event change) and now coincides with the Afternoon bucket, so the old time-vs-bucket mismatch disappears.
+- Binding resolves by looking up a scheduled event at the slot instant at poll-post time; a lazy slot that would otherwise fire also checks for an existing event first, so a late-created scheduled pod can never be doubled.
+
+### Lazy-slot nudge
+
+A poll slot with **no linked event yet** nudges once at threshold−1, pinging its slot role (targeted, not channel-wide), behind a quiet-window guard — mirroring the queue's `_maybe_nudge`. Reflected/locked slots already carry an event, so the scheduled-pod underfill nudge owns those; the poll nudge is gated on "no event" so the two never double-ping.
+
+### Notification polish (2026-07-14 clarity audit)
+
+When the system advances a pod's state, it should carry the already-opted-in players with it:
+
+- Poll slot graduation preseeds and pings its signups; a reschedule pings the Yes roster with the new time.
+- A failed slot launch surfaces a notice instead of silently reopening.
+- The lobby-open body becomes one shared builder (today duplicated across `pod_draft_reminder` and `pod_launch` with divergent headlines).
+- The queue card gains a live "opened `<t:…:R>`" age line (DraftBot parity), sourced from `PodSignal.created_at` via `SignalState`.
+
+### Touched surfaces
+
+`pod_signals` (date→buckets, weekend roles), `pod_daily_poll` (daily cron, reflection binding, lazy nudge), `pod_launch` (`SignalState.created_at`; scheduled-signal lookup by instant), `pod_rsvp` (reschedule ping), `pod_queue` (opened-age line, poll/queue naming), and one shared lobby-open builder. Copy lives in those modules, not here.
+
+### Still out of scope
+
+Website surface, waitlists, auto-split past 8, and any change to the queue's independence.

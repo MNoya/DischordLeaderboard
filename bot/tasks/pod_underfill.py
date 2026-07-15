@@ -50,8 +50,12 @@ def schedule_underfill_checks(scheduler, event_id: str, event_time: datetime, cr
     A past check is only caught up when the event predates it (`created_at <= run_at`): that means the
     check was missed to downtime, not that the event was created short-notice. Freshly created events
     stay silent until their first future check, since the nudge means "created a while ago, still unfilled".
+
+    Only the scheduled T-3h job resurfaces the nudge (delete + repost); the catch-up refreshes it in
+    place, so a restart inside the window never reposts an already-standing nudge.
     """
     now = datetime.now(timezone.utc)
+    resurface_hours = min(UNDERFILL_CHECK_HOURS)
     catch_up = False
     for hours in UNDERFILL_CHECK_HOURS:
         run_at = event_time - timedelta(hours=hours)
@@ -66,7 +70,7 @@ def schedule_underfill_checks(scheduler, event_id: str, event_time: datetime, cr
             fire_underfill,
             "date",
             run_date=run_at,
-            args=[event_id, hours],
+            args=[event_id, hours, hours == resurface_hours],
             id=job_id,
             replace_existing=True,
         )
@@ -77,14 +81,14 @@ def schedule_underfill_checks(scheduler, event_id: str, event_time: datetime, cr
             fire_underfill,
             "date",
             run_date=now + timedelta(seconds=CATCH_UP_DELAY_S),
-            args=[event_id, min(UNDERFILL_CHECK_HOURS)],
+            args=[event_id, resurface_hours, False],
             id=f"pod-underfill-catchup-{event_id}",
             replace_existing=True,
         )
         log.info(f"scheduled catch-up underfill check for event {event_id} (missed a check to downtime)")
 
 
-async def fire_underfill(event_id: str, hours_before: int) -> None:
+async def fire_underfill(event_id: str, hours_before: int, resurface: bool = False) -> None:
     if _bot is None:
         log.error(f"fire_underfill for {event_id}: bot reference is not initialised")
         return
@@ -134,7 +138,7 @@ async def fire_underfill(event_id: str, hours_before: int) -> None:
         return
 
     body = build_underfill_message(name, yes_count, target, event_time, jump_url)
-    if hours_before == min(UNDERFILL_CHECK_HOURS) and nudge is not None:
+    if resurface and nudge is not None:
         await _safe_delete(nudge)
         nudge = None
     if nudge is not None:

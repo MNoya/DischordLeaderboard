@@ -1,11 +1,14 @@
 """Owner-only `!test` triggers for the on-demand pod signup surfaces.
 
-`poll` posts a live daily poll in this channel; `draft` posts a live /draft queue; `rsvp` posts a
+`poll` posts a live daily launcher in this channel; `draft` posts a live /draft queue; `rsvp` posts a
 live scheduled RSVP card. All reuse the production builders and persistent views and register real
 signals, so clicking the buttons drives the real add / remove / fire path (a fire creates the thread
 and Draftmancer lobby for real, and `rsvp` creates its thread, event, and timed jobs at post time).
-Set POD_SIGNAL_FIRE_THRESHOLD low to reach a fire on your own. Neither poll nor draft arms expiry or
-teardown, so the surface stays open while you poke at it.
+Set POD_SIGNAL_FIRE_THRESHOLD low to reach a fire on your own.
+
+`launcher` is a DB-free visual spike: it feeds fixture slots to the real launcher builder so the
+reflected-vs-lazy rendering can be eyeballed without staging a scheduled pod. Its lazy buttons report
+the poll inactive on click and the reflected link points at this channel as a placeholder.
 """
 from __future__ import annotations
 
@@ -23,9 +26,9 @@ from bot.commands.pod_table import offer_second_table
 from bot.commands.test_group import test_group
 from bot.config import settings
 from bot.services import pod_launch
-from bot.services.pod_signals import RSVP_YES, SCHEDULE_TZ
+from bot.services.pod_signals import RSVP_YES, SCHEDULE_TZ, poll_buckets_for, slot_event_time
 from bot.sets import active_set_code
-from bot.tasks.pod_daily_poll import PodPollView, initial_poll_embed, poll_ping_line
+from bot.tasks.pod_daily_poll import post_launcher
 
 
 log = logging.getLogger(__name__)
@@ -35,17 +38,48 @@ async def setup(bot: commands.Bot) -> None:
     @test_group.command(name="poll")
     @commands.is_owner()
     async def test_poll(ctx: commands.Context) -> None:
-        """Owner-only. Post a live daily poll in this channel; the slot buttons drive the real signal."""
+        """Owner-only. Post a live daily launcher in this channel; the slot buttons drive real signals."""
         today = datetime.now(SCHEDULE_TZ).date()
-        embed = initial_poll_embed(today, ctx.guild)
-        message = await ctx.send(
-            content=poll_ping_line(ctx.guild), embed=embed, view=PodPollView(),
-            allowed_mentions=discord.AllowedMentions(roles=True),
+        await post_launcher(ctx.bot, ctx.channel, today)
+
+    @test_group.command(name="launcher")
+    @commands.is_owner()
+    async def test_launcher(ctx: commands.Context) -> None:
+        """Owner-only. Drive the launcher end to end: stage a real scheduled pod at the day's last slot
+        so it reflects as a jump-link, then post the live launcher for that day. The reflected slot links
+        a real thread; the other slots are real lazy signals whose buttons drive the fire path. Set
+        POD_SIGNAL_FIRE_THRESHOLD low to graduate a lazy slot yourself. Uses today when a slot is still
+        ahead, otherwise tomorrow, so the staged pod is always in the future."""
+        if not isinstance(ctx.channel, discord.TextChannel):
+            await ctx.send("Run `!test launcher` in a server text channel — the pod thread is created there.")
+            return
+        now = datetime.now(SCHEDULE_TZ)
+        today = now.date()
+        last_today = slot_event_time(today, poll_buckets_for(today)[-1].key)
+        target_day = today if last_today > now else today + timedelta(days=1)
+        reflect = poll_buckets_for(target_day)[-1]
+        slot_time = slot_event_time(target_day, reflect.key)
+        set_code = active_set_code()
+        name = await asyncio.to_thread(pod_launch.ondemand_event_name_sync, set_code, slot_time)
+        event_id = await post_scheduled_card(
+            ctx.bot, ctx.channel, set_code=set_code, event_time=slot_time, name=name, ping_role=False,
         )
+        if event_id is None:
+            await ctx.send("Could not stage the reflected scheduled pod. Check the logs.")
+            return
+        await ctx.send(f"Staged **{name}** at {reflect.name}; posting the live launcher for that day.")
+        await post_launcher(ctx.bot, ctx.channel, target_day)
+
+    @test_group.command(name="reset")
+    @commands.is_owner()
+    async def test_reset(ctx: commands.Context) -> None:
+        """Owner-only. Clear this guild's on-demand pod signals (poll / queue / scheduled) so the `!test`
+        surfaces start from a clean slate — every slot goes back to lazy. Leaves pod_draft_events and any
+        live lobby alone; only the signup signals reflection reads are wiped."""
         guild_id = str(ctx.guild.id) if ctx.guild else ""
-        await asyncio.to_thread(
-            pod_launch.create_poll_signals_sync,
-            guild_id=guild_id, channel_id=str(ctx.channel.id), message_id=str(message.id), signal_date=today,
+        counts = await asyncio.to_thread(pod_launch.reset_ondemand_signals_sync, guild_id)
+        await ctx.send(
+            f"Cleared on-demand pod signals: {counts['signals']} signals, {counts['members']} members."
         )
 
     @test_group.command(name="tip")

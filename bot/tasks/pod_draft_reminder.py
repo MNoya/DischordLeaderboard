@@ -18,6 +18,7 @@ from discord.ext import commands
 from sqlalchemy import select
 
 from bot import emojis
+from bot.commands.messages import MSG_LOBBY_HEADLINE_NOW, MSG_LOBBY_HEADLINE_SOON, MSG_LOBBY_OPEN
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.models import PodDraftEvent, PodSignal, PodSignalMember
@@ -76,16 +77,8 @@ async def fire_reminder(event_id: str, *, early: bool = False) -> None:
     mention_block = await _resolve_mentions(thread.guild, attendees) if attendees else ""
     expected_attendee_count = len(attendees)
 
-    headline = (
-        "Lobby opening now!"
-        if early
-        else f"Pod Draft starts in {REMINDER_LEAD_MIN} minutes!"
-    )
-    body = (
-        f"{emojis.get('draftmancer')} {headline}\n"
-        f"**Join the Draftmancer session:** <{draftmancer_url}>\n"
-        "Set your Arena Name (e.g., `ArenaID#12345`) as your name in Draftmancer so pairings work smoothly."
-        + (f"\n\n{mention_block}" if mention_block else "")
+    body = build_lobby_open_body(
+        draftmancer_url, mention_block, imminent_minutes=None if early else REMINDER_LEAD_MIN,
     )
     log.info(f"fire_reminder body repr for {event_id} (early={early}): {body!r}")
     try:
@@ -381,6 +374,21 @@ async def _member_from_mention(guild: discord.Guild | None, token: str) -> disco
         return await guild.fetch_member(user_id)
     except discord.HTTPException:
         return None
+
+
+def build_lobby_open_body(
+    draftmancer_url: str, mention_block: str, *, imminent_minutes: int | None = None,
+) -> str:
+    """The lobby-open post shared by sesh reminders (fire_reminder) and bot-native opens
+    (open_ondemand_lobby). `imminent_minutes` set → 'starts in N minutes'; None → 'opening now'."""
+    if imminent_minutes is None:
+        headline = MSG_LOBBY_HEADLINE_NOW
+    else:
+        headline = MSG_LOBBY_HEADLINE_SOON.format(minutes=imminent_minutes)
+    mentions = f"\n\n{mention_block}" if mention_block else ""
+    return MSG_LOBBY_OPEN.format(
+        draftmancer=emojis.get("draftmancer"), headline=headline, url=draftmancer_url, mentions=mentions,
+    )
 
 
 def build_roster_embed(

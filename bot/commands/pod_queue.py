@@ -31,6 +31,7 @@ from bot.services.pod_draft_manager import (
     set_event_pick_timer,
     set_event_seating_mode,
 )
+from bot.services.pod_format import PEASANT_CODE, PEASANT_CUBE_ID, PEASANT_LABEL
 from bot.services.pod_format_select import WRITE_IN_VALUE, set_select_option, write_in_option
 from bot.services.pod_pairing_select import SELECT_PLACEHOLDER as PAIRING_PLACEHOLDER
 from bot.services.pod_pairing_select import pairing_options
@@ -62,6 +63,7 @@ QUEUE_INSTRUCTIONS = (
     f"- {MSG_LOBBY_GATHERING}"
 )
 QUEUE_CLOSES = "Queue closes after {window} of inactivity."
+QUEUE_OPENED = "Queue opened {when}"
 QUEUE_ROLE_GRANTED = (
     "⚡ You're now on {role} and will be pinged when a queue opens or needs more players. "
     "Run `/roles` to manage your notifications."
@@ -74,7 +76,7 @@ JOINABLE_WINDOW = timedelta(hours=6)
 MAX_JOINABLE_LINES = 3
 SET_PLACEHOLDER = "Choose the set"
 WHEN_PLACEHOLDER = "When to draft"
-LAUNCHER_PROMPT = "Confirm settings, then open a queue now or schedule a draft for later."
+LAUNCHER_PROMPT = "Set your options below, then open a queue now or schedule a pod for later."
 LAUNCHER_JOIN_HINT = "Join an existing pod instead of starting a new one:"
 LAUNCHER_QUEUE_LINE = "Open queue with {count} waiting: {url}"
 LAUNCHER_SLOT_LINE = "Scheduled for {when} with {count} in: {url}"
@@ -102,7 +104,7 @@ class PodQueueView(discord.ui.LayoutView):
     def __init__(
         self, names: list[str] | None = None, role_mention: str | None = None,
         fired: bool = False, thread_mention: str | None = None, closed: bool = False,
-        set_code: str | None = None,
+        set_code: str | None = None, opened_at: datetime | None = None,
     ) -> None:
         super().__init__(timeout=None)
         names = names or []
@@ -125,6 +127,9 @@ class PodQueueView(discord.ui.LayoutView):
         container.add_item(discord.ui.TextDisplay(instructions))
         container.add_item(discord.ui.TextDisplay(f"**{roster_name}**\n{roster}"))
         window = inactivity_window_text(settings.pod_queue_inactivity_minutes)
+        if opened_at is not None:
+            opened = QUEUE_OPENED.format(when=f"<t:{int(opened_at.timestamp())}:R>")
+            container.add_item(discord.ui.TextDisplay(f"-# {opened}"))
         container.add_item(discord.ui.TextDisplay(f"-# {QUEUE_CLOSES.format(window=window)}"))
         self.add_item(PodQueueActions())
 
@@ -182,7 +187,10 @@ async def _handle_click(interaction: discord.Interaction, action: str) -> None:
             thread_mention=f"<#{thread_id}>" if thread_id else None, set_code=result.state.set_code,
         )
     else:
-        view = PodQueueView(names=result.names, role_mention=mention, set_code=result.state.set_code)
+        view = PodQueueView(
+            names=result.names, role_mention=mention, set_code=result.state.set_code,
+            opened_at=result.state.created_at,
+        )
     await interaction.response.edit_message(view=view)
     await _post_join_followups(interaction, result, fired)
 
@@ -330,21 +338,26 @@ class DraftLauncherView(discord.ui.View):
 
 
 def _set_options(current: str | None) -> list[discord.SelectOption]:
-    """The set dropdown: the active set (default), the most recent released sets, then a write-in for
-    any other code — each carrying its keyrune emoji when one is loaded. Unreleased upcoming sets are
-    left out; they have no card pool to draft. A written-in current outside the recent list shows as
-    its own defaulted option so it survives re-render."""
+    """The set dropdown: the active set (default), Peasant Cube, the most recent released sets, then a
+    write-in for any other code — each carrying its keyrune emoji when one is loaded. Peasant Cube is
+    always offered right under the latest set. Unreleased upcoming sets are left out; they have no card
+    pool to draft. A written-in current outside the known list shows as its own defaulted option so it
+    survives re-render."""
     active = active_set_code()
     active_upper = active.upper()
     chosen = (current or active).upper()
     recent = [seed.code for seed in recent_released_sets()]
+    known = {active_upper, PEASANT_CODE} | {code.upper() for code in recent}
 
     options: list[discord.SelectOption] = [write_in_option("Set")]
-    if chosen != active_upper and chosen not in recent:
+    if chosen not in known:
         options.append(set_select_option(
             chosen, label=f"Set: {chosen}", description=set_name_for(chosen), default=True))
     options.append(set_select_option(
         active, label=f"Set: {active}", description="The latest set", default=(chosen == active_upper)))
+    options.append(discord.SelectOption(
+        label=f"Set: {PEASANT_LABEL}", value=PEASANT_CODE, description=f"CubeCobra: {PEASANT_CUBE_ID}",
+        emoji=emojis.get_emoji("cube"), default=(chosen == PEASANT_CODE)))
     for code in recent:
         options.append(set_select_option(
             code, label=f"Set: {code}", description=set_name_for(code), default=(chosen == code)))
@@ -543,7 +556,10 @@ async def _open_queue(
     await interaction.response.defer()
     mention = queue_role_mention(interaction.guild)
     message = await interaction.channel.send(
-        view=PodQueueView(names=[interaction.user.display_name], role_mention=mention, set_code=set_code),
+        view=PodQueueView(
+            names=[interaction.user.display_name], role_mention=mention, set_code=set_code,
+            opened_at=datetime.now(timezone.utc),
+        ),
         allowed_mentions=discord.AllowedMentions(roles=True),
     )
     signal_id = await asyncio.to_thread(

@@ -29,6 +29,15 @@ MSG_MOCK_LOBBY_COUNTER = " 👥 {count}/8"
 MSG_LOBBY_FULL_PROMPT = "8️⃣ Players locked in! Initiate Ready Check?"
 MSG_BOT_RECONNECTED = "🤖 Bot reconnected — back to managing the lobby."
 
+MSG_LOBBY_OPEN = (
+    "{draftmancer} {headline}\n"
+    "**Join the Draftmancer session:** <{url}>\n"
+    "Set your Arena Name (e.g., `ArenaID#12345`) as your name in Draftmancer so pairings work smoothly."
+    "{mentions}"
+)
+MSG_LOBBY_HEADLINE_NOW = "Lobby opening now!"
+MSG_LOBBY_HEADLINE_SOON = "Pod Draft starts in {minutes} minutes!"
+
 MSG_FIRST_POD_TIP_POLL = (
     "First pod? Pods are live multiplayer drafts on Draftmancer, played out as Arena matches. "
     "This slot is a set time, so no need to stay online now. Once {threshold} players are in, a thread opens "

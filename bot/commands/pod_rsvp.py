@@ -271,26 +271,6 @@ async def _add_members_to_thread(thread: discord.Thread, members: list[tuple[str
             log.warning(f"could not add {user_id} to thread {thread.id}", exc_info=True)
 
 
-async def sync_card_membership(
-    bot: commands.Bot, event_id: str, member: discord.Member, *, joining: bool,
-) -> None:
-    """Mirror a post-fire daily-poll click onto the scheduled card that graduated from it: sign the
-    member up as Yes or drop them, re-render the card, move them in or out of the thread, and refresh
-    the fill jobs. The poll button becomes a shortcut into the pod once its card exists, so a poll
-    joiner lands in the Yes roster the lobby ping and reminders read from."""
-    rosters = await asyncio.to_thread(
-        pod_launch.set_card_yes_sync, event_id, str(member.id), member.display_name, joining=joining,
-    )
-    if rosters is None:
-        return
-    await _render_channel_card(bot, event_id, rosters)
-    await _move_member_thread(bot, event_id, member, join=joining)
-    yes = rosters.get(RSVP_YES) or []
-    maybe = rosters.get(RSVP_MAYBE) or []
-    await refresh_underfill_nudge_for_event(bot, event_id, len(yes))
-    await refresh_roster_reminder_for_event(bot, event_id, yes, maybe)
-
-
 async def _handle_rsvp(interaction: discord.Interaction, state: str) -> None:
     message_id = str(interaction.message.id)
     result = await asyncio.to_thread(
@@ -508,7 +488,9 @@ async def reschedule_event(
     await _update_card_time(bot, event_id, name, new_time)
     await _update_native_event(guild, native_event_id, new_time)
     await _refresh_live_messages(bot, event_id)
-    await _post_thread_note(bot, thread_id, new_time)
+    yes_roster = await asyncio.to_thread(pod_launch.roster_for_event_sync, event_id)
+    mention_block = " ".join(f"<@{did}>" for did, _ in yes_roster)
+    await _post_thread_note(bot, thread_id, new_time, mention_block)
     audit.event(
         "pod_postpone", user_id=actor_id, event_id=event_id,
         old_time=event_time.isoformat(), new_time=new_time.isoformat(),
@@ -555,7 +537,11 @@ async def _refresh_live_messages(bot: commands.Bot, event_id: str) -> None:
     await refresh_roster_reminder_for_event(bot, event_id, yes, maybe)
 
 
-async def _post_thread_note(bot: commands.Bot, thread_id: str, new_time: datetime) -> None:
+async def _post_thread_note(
+    bot: commands.Bot, thread_id: str, new_time: datetime, mention_block: str = "",
+) -> None:
+    """The reschedule note, pinging the Yes roster so opted-in players catch the new time. Embeds never
+    notify, so the mentions ride as message content beside the embed."""
     try:
         thread = await bot.fetch_channel(int(thread_id))
     except (discord.HTTPException, ValueError):
@@ -568,7 +554,10 @@ async def _post_thread_note(bot: commands.Bot, thread_id: str, new_time: datetim
         color=discord.Color.blue(),
     )
     try:
-        await thread.send(embed=embed)
+        await thread.send(
+            content=mention_block or None, embed=embed,
+            allowed_mentions=discord.AllowedMentions(users=True),
+        )
     except discord.HTTPException:
         log.warning(f"postpone: could not post in thread {thread_id}", exc_info=True)
 

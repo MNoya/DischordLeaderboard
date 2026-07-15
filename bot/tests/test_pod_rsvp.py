@@ -5,7 +5,7 @@ import pytest
 from bot.commands.pod_rsvp import parse_new_time
 from bot.models import PodDraftEvent, PodSignal
 from bot.services import pod_signals
-from bot.services.pod_launch import _fired_slot_thread_id, set_card_yes, set_rsvp
+from bot.services.pod_launch import _committed_slot, _event_id_for_slot, set_rsvp
 from bot.services.pod_schedule import SCHEDULE_TZ
 
 
@@ -100,91 +100,75 @@ def test_mirror_message_resolves_the_same_signal(session, scheduled_signal):
     assert result.rosters[pod_signals.RSVP_YES] == ["Nissa Revane", "Chandra Nalaar"]
 
 
-def test_fired_slot_links_to_the_scheduled_pod_thread(session):
-    slot_time = datetime.now(timezone.utc) + timedelta(days=1)
+def _pod_event(session, slot_time: datetime, *, sesh: bool = False) -> str:
     event = PodDraftEvent(
         event_date=slot_time.date(), event_time=slot_time, set_code="TST",
         name="TST Pod Draft #1", draftmancer_session="s1", discord_thread_id="tid-1",
-        socket_status="pending",
+        socket_status="pending", sesh_message_id="sesh-1" if sesh else None,
     )
     session.add(event)
-    session.flush()
-    session.add(PodSignal(
-        kind=pod_signals.KIND_SCHEDULED, bucket=pod_signals.SCHEDULED_BUCKET, guild_id="1",
-        channel_id="2", message_id="card-1", signal_date=slot_time.date(), slot_time=slot_time,
-        status=pod_signals.STATUS_FIRED, event_id=event.id,
-    ))
-    poll_signal = PodSignal(
-        kind=pod_signals.KIND_POLL, bucket="EARLY", guild_id="1", channel_id="2",
-        message_id="poll-1", signal_date=slot_time.date(), slot_time=slot_time,
-        status=pod_signals.STATUS_FIRED,
-    )
-    session.add(poll_signal)
-    session.flush()
-
-    assert _fired_slot_thread_id(session, poll_signal) == "tid-1"
-
-
-def test_open_slot_has_no_thread(session):
-    poll_signal = PodSignal(
-        kind=pod_signals.KIND_POLL, bucket="EARLY", guild_id="1", channel_id="2",
-        message_id="poll-1", signal_date=datetime.now(timezone.utc).date(),
-        slot_time=datetime.now(timezone.utc) + timedelta(days=1), status=pod_signals.STATUS_OPEN,
-    )
-    session.add(poll_signal)
-    session.flush()
-
-    assert _fired_slot_thread_id(session, poll_signal) is None
-
-
-def _scheduled_pod_with_event(session) -> str:
-    slot_time = datetime.now(timezone.utc) + timedelta(days=1)
-    event = PodDraftEvent(
-        event_date=slot_time.date(), event_time=slot_time, set_code="TST",
-        name="TST Pod Draft #1", draftmancer_session="s1", discord_thread_id="tid-1",
-        socket_status="pending",
-    )
-    session.add(event)
-    session.flush()
-    session.add(PodSignal(
-        kind=pod_signals.KIND_SCHEDULED, bucket=pod_signals.SCHEDULED_BUCKET, guild_id="1",
-        channel_id="2", message_id="card-1", signal_date=slot_time.date(), slot_time=slot_time,
-        status=pod_signals.STATUS_FIRED, event_id=event.id,
-    ))
     session.flush()
     return event.id
 
 
-def test_set_card_yes_is_idempotent(session):
-    event_id = _scheduled_pod_with_event(session)
-    set_card_yes(session, event_id, "u1", "Nissa Revane", joining=True)
-
-    rosters = set_card_yes(session, event_id, "u1", "Nissa Revane", joining=True)
-
-    assert rosters[pod_signals.RSVP_YES] == ["Nissa Revane"]
-
-
-def test_set_card_yes_removes_on_leave(session):
-    event_id = _scheduled_pod_with_event(session)
-    set_card_yes(session, event_id, "u1", "Nissa Revane", joining=True)
-
-    rosters = set_card_yes(session, event_id, "u1", "Nissa Revane", joining=False)
-
-    assert rosters[pod_signals.RSVP_YES] == []
+def _scheduled_pod(session, slot_time: datetime, yes: list[str]) -> str:
+    event_id = _pod_event(session, slot_time)
+    signal = PodSignal(
+        kind=pod_signals.KIND_SCHEDULED, bucket=pod_signals.SCHEDULED_BUCKET, guild_id="1",
+        channel_id="2", message_id="card-1", signal_date=slot_time.date(), slot_time=slot_time,
+        status=pod_signals.STATUS_FIRED, event_id=event_id,
+    )
+    session.add(signal)
+    session.flush()
+    for i, name in enumerate(yes):
+        set_rsvp(session, "card-1", f"u{i}", name, pod_signals.RSVP_YES)
+    session.flush()
+    return event_id
 
 
-def test_set_card_yes_promotes_a_maybe_to_yes(session):
-    event_id = _scheduled_pod_with_event(session)
-    set_rsvp(session, "card-1", "u1", "Nissa Revane", pod_signals.RSVP_MAYBE)
+def test_reflection_binds_a_slot_to_the_pod_at_its_instant(session):
+    slot_time = datetime.now(timezone.utc) + timedelta(days=1)
+    event_id = _scheduled_pod(session, slot_time, [])
 
-    rosters = set_card_yes(session, event_id, "u1", "Nissa Revane", joining=True)
-
-    assert rosters[pod_signals.RSVP_YES] == ["Nissa Revane"]
-    assert rosters[pod_signals.RSVP_MAYBE] == []
+    assert _event_id_for_slot(session, slot_time) == event_id
 
 
-def test_set_card_yes_without_a_scheduled_signal_returns_none(session):
-    assert set_card_yes(session, "no-event", "u1", "Nissa Revane", joining=True) is None
+def test_reflection_binds_a_sesh_pod_with_no_signal(session):
+    slot_time = datetime.now(timezone.utc) + timedelta(days=1)
+    event_id = _pod_event(session, slot_time, sesh=True)
+
+    assert _event_id_for_slot(session, slot_time) == event_id
+
+
+def test_reflection_ignores_a_pod_at_a_different_time(session):
+    slot_time = datetime.now(timezone.utc) + timedelta(days=1)
+    _scheduled_pod(session, slot_time, [])
+
+    off_grid = slot_time + timedelta(hours=1)
+    assert _event_id_for_slot(session, off_grid) is None
+
+
+def test_committed_slot_reads_count_and_thread_off_the_event(session):
+    slot_time = datetime.now(timezone.utc) + timedelta(days=1)
+    event_id = _scheduled_pod(session, slot_time, ["Nissa Revane", "Chandra Nalaar"])
+
+    slot = _committed_slot(session, "AFTERNOON", event_id)
+
+    assert slot.committed
+    assert slot.count == 2
+    assert slot.thread_id == "tid-1"
+    assert slot.names == []
+
+
+def test_committed_slot_for_a_sesh_pod_shows_no_count(session):
+    slot_time = datetime.now(timezone.utc) + timedelta(days=1)
+    event_id = _pod_event(session, slot_time, sesh=True)
+
+    slot = _committed_slot(session, "LATE", event_id)
+
+    assert slot.committed
+    assert slot.count == 0
+    assert slot.thread_id == "tid-1"
 
 
 CURRENT = datetime(2026, 7, 15, 20, 0, tzinfo=SCHEDULE_TZ)
