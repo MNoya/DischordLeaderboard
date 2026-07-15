@@ -127,22 +127,6 @@ The formula may diverge per set in the future — `DEFAULT_QUEUE_GROUPS` is glob
 - `draft_events` is the additive event log — one row per individual 17lands draft, keyed on `(player_id, seventeenlands_event_id)`. `set_id` is nullable so drafts in not-yet-registered expansions still persist; `/add-set` claims orphans by matching `expansion` to the new set's `code`. 17lands' case-encoded color string (`WBg` = WB main + green splash) is preserved verbatim in `colors`.
 - `leaderboard_messages` tracks the bot's posted leaderboard per `(channel, set, filter)` so `/leaderboard` delete-and-reposts instead of duplicating. Posted boards are **frozen snapshots** — never auto-edited after posting (the broadcast/live-edit subsystem was removed); the 🔎 Filter button opens a per-user **ephemeral** board rather than mutating the shared message. Fresh standings come from re-running `/leaderboard` or the website.
 
-### Slash commands — `bot/commands/`
-
-All commands work in server channels and DMs.
-
-| Command | Purpose |
-|---|---|
-| `/leaderboard` | Current set leaderboard, posted as a frozen snapshot; persistent Join/Stats view (registered via `bot.add_view()` at startup so buttons survive restarts) plus a 🔎 Filter button that opens a per-user ephemeral board |
-| `/stats [player]` | Per-player formula breakdown by queue group |
-| `/join` | Sign-up DM walkthrough with 17lands token; per-user lock prevents duplicate flows |
-| `/retire` | Pause participation (replies via DM) |
-| `/relink` | Update 17lands token |
-| `/exile` | Scrub stats + 17lands link, keep the row so pod history still references the player; button-confirm |
-| `/help` | List commands |
-
-Every interaction `send_message`/`followup.send` uses `ephemeral=(interaction.guild is not None)` so DMs don't get the "only you can see this" auto-expire badge.
-
 ### Frontend swap point — `frontend/src/data/api.ts`
 
 Selects backend at module-load time via `useSupabase` from `data/supabase.ts`, driven by **`VITE_DATA_MODE`** (`prod` | `local` | `mock`; default `prod`). `prod`/`local` run `realApi.ts` against the prod public config or the `local_supabase_proxy` on `:3001`; `mock` runs the fixture-backed `mockApi.ts`. An explicit `VITE_SUPABASE_URL` + `VITE_SUPABASE_PUBLISHABLE_KEY` pair overrides prod/local for staging; `mock` always wins. The hook layer (`data/hooks.ts`) imports from `api.ts` and never knows which is live.
@@ -160,8 +144,6 @@ On push/PR to `master`: spin up Postgres service container → `alembic upgrade 
 - **Solo repo: commit directly to `master`** for routine changes. Large changesets get a branch — **never a PR**. Merge back by squash, or with a merge commit when the intermediate history is worth keeping; ask which when finishing a branch.
 - **Hold commits until the user asks; bundle backend + frontend in one commit.** Leave changes staged in the working tree and don't prompt to commit after each task — the user iterates locally and commits everything together on their own timing.
 - **Tests target logic, not framework behavior.** No tests for "does Postgres work" or "does Alembic apply migrations" — focus on aggregator / scoring / signup branches / interaction handling.
-- **Bot user-facing strings avoid first-person.** Use "Check your DMs" not "I sent you a DM". No "sign up" in user copy — use "join" / "joined" / "on the leaderboard" (internal Python identifiers like `process_signup`, `SignupKind` stay as-is).
-- **Use the short set code (`SOS`) in user-visible strings**, not the full name ("Secrets of Strixhaven") — too long for embed slots.
 - **Shared user-facing message strings live in `bot/commands/messages.py`** (the `MSG_*` constants), parallel to `descriptions.py` for command descriptions. Any string used by more than one command/listener goes there — never duplicate the same copy inline across modules, and don't park shared strings in a service module just because the first caller lived there. A string used by exactly one command may stay as a local `MSG_*` in that command's module; promote it to `messages.py` the moment a second caller needs it. Service modules (`bot/services/`) hold logic, not user copy.
 - **Code comments: default to none.** If a comment runs longer than one line, delete the whole block — don't shrink it, delete it. The code is already self-explanatory if names are right. No periods at end of single-line comments (they're labels, not sentences). No parenthetical asides. Don't paraphrase library / decorator behavior at the declaration site — that belongs in upstream docs, not your file.
 - **Commit style**: subjects start with uppercase; no manual line wrapping in description paragraphs; no `Co-Authored-By: Claude` or any AI trailer; plain senior-engineer prose, no AI/ML jargon. Use `- ` bullets when a commit has 2+ distinct changes; prefer one bullet per distinct change over fewer "and"-joined bullets.
