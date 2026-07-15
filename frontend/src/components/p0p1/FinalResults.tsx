@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
 import { SectionLabel } from "../SectionLabel";
+import { Tooltip } from "../Tooltip";
 import { PickGrid } from "./CommunityGrid";
 import { MidwayBreakdownList } from "./MidwayBreakdownList";
 import { useMidwayVersusPager, MidwayVersusModal } from "./MidwayVersusCard";
@@ -147,7 +148,7 @@ function ballotContributions(
 
 function SegTooltipContent({ seg }: { seg: SlotContrib }) {
   return (
-    <div className="bg-surface2 border border-border2 rounded-sm shadow-xl overflow-hidden w-[160px]">
+    <div className="bg-surface2 border border-border2 rounded-sm shadow-xl overflow-hidden w-[184px]">
       {seg.card ? (
         <img src={seg.card.imageNormal} alt={seg.card.name} className="w-full block" />
       ) : (
@@ -156,12 +157,6 @@ function SegTooltipContent({ seg }: { seg: SlotContrib }) {
             {seg.label}
           </div>
           <div className="text-[12px] text-subtle">{seg.cardName ?? "—"}</div>
-        </div>
-      )}
-      {seg.gihwr !== null && (
-        <div className="px-2 py-1 font-mono tabular-nums text-[11px] font-semibold text-white border-t border-border2">
-          {(seg.gihwr * 100).toFixed(1)}%
-          <span className="ml-1.5 font-normal text-muted text-[10px]">{seg.label}</span>
         </div>
       )}
     </div>
@@ -173,14 +168,15 @@ function ContributionBar({
   maxScore,
   ratingsByName,
   cardsByName,
+  stickyTop = 0,
 }: {
   ballot: RankedBallot;
   maxScore: number;
   ratingsByName: Map<string, CardRating>;
   cardsByName: Map<string, Card>;
+  /** Viewport offset (px) reserved by sticky page chrome — tooltips flip below the bar to clear it. */
+  stickyTop?: number;
 }) {
-  const [touchIdx, setTouchIdx] = useState<number | null>(null);
-
   const contribs = useMemo(
     () => ballotContributions(ballot, ratingsByName, cardsByName),
     [ballot, ratingsByName, cardsByName],
@@ -228,37 +224,24 @@ function ContributionBar({
         ))}
       </div>
 
-      {/* Layer 2: transparent hover targets — no overflow:hidden so tooltips escape upward */}
+      {/* Layer 2: hover/tap targets — Tooltip portals to body so it escapes ancestor
+          stacking contexts (e.g. the floating self-row) and clips to the viewport */}
       <div
         className="absolute top-0 left-0 h-full flex gap-px"
         style={{ width: `${fillPct}%` }}
       >
-        {activeContribs.map((seg, i) => {
-          const isActive = touchIdx === i;
-          return (
-            <div
-              key={seg.slotKey}
-              className="group/seg relative h-full cursor-pointer"
-              style={{ flexGrow: seg.points, flexBasis: 0 }}
-              onTouchStart={(e) => {
-                e.stopPropagation();
-                setTouchIdx(isActive ? null : i);
-              }}
-              onTouchEnd={(e) => e.stopPropagation()}
-            >
-              {/* desktop: CSS hover — full card image preview */}
-              <div className="absolute bottom-[calc(100%+7px)] left-1/2 -translate-x-1/2 z-50 pointer-events-none opacity-0 group-hover/seg:opacity-100 transition-opacity duration-100 hidden lg:block">
-                <SegTooltipContent seg={seg} />
-              </div>
-              {/* mobile: tap-toggled */}
-              {isActive && (
-                <div className="absolute bottom-[calc(100%+7px)] left-1/2 -translate-x-1/2 z-50 pointer-events-none lg:hidden">
-                  <SegTooltipContent seg={seg} />
-                </div>
-              )}
-            </div>
-          );
-        })}
+        {activeContribs.map((seg) => (
+          <Tooltip
+            key={seg.slotKey}
+            label={<SegTooltipContent seg={seg} />}
+            side="top"
+            hideArrow
+            collisionPadding={{ top: stickyTop + 8, bottom: 8, left: 8, right: 8 }}
+            className="p-0 bg-transparent border-0 shadow-none"
+          >
+            <div className="relative h-full cursor-pointer" style={{ flexGrow: seg.points, flexBasis: 0 }} />
+          </Tooltip>
+        ))}
       </div>
     </div>
   );
@@ -304,12 +287,14 @@ function SyntheticRow({
   maxScore,
   cardsByName,
   ratingsByName,
+  stickyTop = 0,
 }: {
   standing: SyntheticStanding;
   setCode: string;
   maxScore: number;
   cardsByName: Map<string, Card>;
   ratingsByName: Map<string, CardRating>;
+  stickyTop?: number;
 }) {
   const [expanded, setExpanded] = useState(false);
   const style = SYNTHETIC_STYLE[standing.kind];
@@ -350,6 +335,7 @@ function SyntheticRow({
           maxScore={maxScore}
           ratingsByName={ratingsByName}
           cardsByName={cardsByName}
+          stickyTop={stickyTop}
         />
 
         <span
@@ -750,6 +736,7 @@ function MedalRow({
   cardsByName,
   ratingsByName,
   rowRef,
+  stickyTop = 0,
 }: {
   ballot: RankedBallot;
   setCode: string;
@@ -759,6 +746,7 @@ function MedalRow({
   cardsByName: Map<string, Card>;
   ratingsByName: Map<string, CardRating>;
   rowRef?: (el: HTMLDivElement | null) => void;
+  stickyTop?: number;
 }) {
   const [expanded, setExpanded] = useState(false);
   const entries = useMemo(
@@ -819,6 +807,7 @@ function MedalRow({
           maxScore={maxScore}
           ratingsByName={ratingsByName}
           cardsByName={cardsByName}
+          stickyTop={stickyTop}
         />
 
         <span
@@ -854,6 +843,7 @@ function LeaderboardRow({
   cardsByName,
   ratingsByName,
   rowRef,
+  stickyTop = 0,
 }: {
   ballot: RankedBallot;
   setCode: string;
@@ -863,6 +853,7 @@ function LeaderboardRow({
   cardsByName: Map<string, Card>;
   ratingsByName: Map<string, CardRating>;
   rowRef?: (el: HTMLDivElement | null) => void;
+  stickyTop?: number;
 }) {
   const [expanded, setExpanded] = useState(false);
   const entries = useMemo(
@@ -912,6 +903,7 @@ function LeaderboardRow({
           maxScore={maxScore}
           ratingsByName={ratingsByName}
           cardsByName={cardsByName}
+          stickyTop={stickyTop}
         />
 
         <span className="font-mono tabular-nums text-[13px] lg:text-[14px] text-subtle shrink-0">
@@ -990,6 +982,7 @@ function FloatingSelfRow({
           maxScore={maxScore}
           ratingsByName={ratingsByName}
           cardsByName={cardsByName}
+          stickyTop={stickyTop}
         />
 
         <span className="font-mono tabular-nums text-[13px] lg:text-[14px] text-subtle shrink-0">
@@ -1150,6 +1143,7 @@ function Leaderboard({
                       maxScore={maxScore}
                       cardsByName={cardsByName}
                       ratingsByName={ratingsByName}
+                      stickyTop={stickyTop}
                     />
                   );
                 }
@@ -1166,6 +1160,7 @@ function Leaderboard({
                     cardsByName={cardsByName}
                     ratingsByName={ratingsByName}
                     rowRef={ballot.ballotId === userBallotId ? setSelfRowEl : undefined}
+                    stickyTop={stickyTop}
                   />
                 );
               })}
@@ -1591,6 +1586,7 @@ export function FinalResults({
                 mode="peek"
                 onSeeAll={() => goToTab("results")}
                 spotlight
+                stickyTop={stickyTop}
               />
             </div>
           )}

@@ -21,6 +21,7 @@ export function Tooltip({
   onOpenChange,
   delayDuration,
   hideArrow,
+  collisionPadding,
 }: {
   label: React.ReactNode;
   side?: Side;
@@ -31,6 +32,7 @@ export function Tooltip({
   onOpenChange?: (open: boolean) => void;
   delayDuration?: number;
   hideArrow?: boolean;
+  collisionPadding?: number | Partial<Record<Side, number>>;
 }) {
   return (
     <Root open={open} onOpenChange={onOpenChange} delayDuration={delayDuration}>
@@ -40,7 +42,7 @@ export function Tooltip({
           side={side}
           align={align}
           sideOffset={7}
-          collisionPadding={8}
+          collisionPadding={collisionPadding ?? 8}
           className={cn(
             "relative z-50 pointer-events-none select-none rounded-md px-2.5 py-1.5",
             "border border-border2 bg-black text-text text-[12px] leading-tight",
