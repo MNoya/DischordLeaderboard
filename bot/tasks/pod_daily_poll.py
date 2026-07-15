@@ -103,6 +103,7 @@ async def fire_daily_poll() -> None:
     message = await post_launcher(_bot, channel, today)
     if message is not None:
         log.info(f"posted daily pod launcher for {today} as message {message.id}")
+    await pod_launch.close_past_pod_cards()
 
 
 async def post_launcher(

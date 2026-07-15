@@ -45,6 +45,7 @@ from bot.tasks.pod_underfill import schedule_underfill_checks
 log = logging.getLogger(__name__)
 
 REMINDER_LEAD_MIN = 10
+CARD_CLOSE_WINDOW_H = 48
 
 
 @dataclass(frozen=True)
@@ -581,22 +582,6 @@ def scheduled_card_ref_sync(event_id: str) -> tuple[str, str, str, datetime | No
     return (row[0], row[1], row[2], row[3]) if row else None
 
 
-def mirror_ref_sync(event_id: str) -> tuple[str, str] | None:
-    """(thread_id, message_id) of the thread's RSVP controls message, or None while unset."""
-    with SessionLocal() as session:
-        signal = session.execute(
-            select(PodSignal).where(
-                PodSignal.event_id == event_id, PodSignal.kind == pod_signals.KIND_SCHEDULED
-            )
-        ).scalar_one_or_none()
-        if signal is None or signal.thread_message_id is None:
-            return None
-        event = session.get(PodDraftEvent, event_id)
-        if event is None:
-            return None
-        return event.discord_thread_id, signal.thread_message_id
-
-
 def set_thread_message_sync(signal_id: str, thread_message_id: str) -> None:
     with SessionLocal() as session:
         session.execute(
@@ -774,6 +759,52 @@ async def fire_slot_expiry(signal_id: str) -> None:
     now refuses it, so a late click gets a graceful ephemeral and never joins a dead slot."""
     if await asyncio.to_thread(expire_signal_sync, signal_id):
         log.info(f"poll slot {signal_id} expired unfired")
+
+
+def past_pod_cards_sync(now: datetime, since: datetime) -> list[tuple[str, str, str | None, str | None]]:
+    """(card channel_id, card message_id, thread_id, thread-controls message_id) for scheduled pods
+    whose real start is in (since, now] — the ones that have run since the last launcher. Keyed on the
+    event's current start, so a pod rescheduled back into the future is skipped."""
+    with SessionLocal() as session:
+        rows = session.execute(
+            select(PodSignal, PodDraftEvent)
+            .join(PodDraftEvent, PodDraftEvent.id == PodSignal.event_id)
+            .where(
+                PodSignal.kind == pod_signals.KIND_SCHEDULED,
+                PodDraftEvent.event_time > since,
+                PodDraftEvent.event_time <= now,
+            )
+        ).all()
+    return [(s.channel_id, s.message_id, e.discord_thread_id, s.thread_message_id) for s, e in rows]
+
+
+async def close_past_pod_cards() -> None:
+    """Drop the RSVP buttons on cards for pods that have already run, called from the daily launcher
+    post. Signups stay live from a pod's start until the next launcher — a generous grace for late
+    joiners rescuing an underfilled pod — then close in one sweep, so reschedules never need reopening."""
+    if _bot is None:
+        return
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(hours=CARD_CLOSE_WINDOW_H)
+    cards = await asyncio.to_thread(past_pod_cards_sync, now, since)
+    for channel_id, message_id, thread_id, thread_message_id in cards:
+        await _clear_view(int(channel_id), int(message_id))
+        if thread_id and thread_message_id:
+            await _clear_view(int(thread_id), int(thread_message_id))
+
+
+async def _clear_view(channel_id: int, message_id: int) -> None:
+    channel = _bot.get_channel(channel_id)
+    if channel is None:
+        try:
+            channel = await _bot.fetch_channel(channel_id)
+        except discord.HTTPException:
+            return
+    try:
+        message = await channel.fetch_message(message_id)
+        await message.edit(view=None)
+    except discord.HTTPException:
+        log.warning(f"could not clear RSVP buttons on message {message_id}", exc_info=True)
 
 
 def arm_queue_teardown(bot: commands.Bot, signal_id: str, teardown_time: datetime) -> None:
