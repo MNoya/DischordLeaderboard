@@ -11,9 +11,11 @@ import {
   groupBallotRows,
   rankBallots,
   findUserBallot,
+  applyDevSelfPlacement,
 } from "../../data/p0p1Results";
 import type { RatingsSnapshot } from "../../data/p0p1Results";
 import type { Card, P0P1BallotRow, P0P1PickStat, SlotKey } from "../../types/p0p1";
+import { p0p1DevEnabled, useP0P1DevSelfPlacement } from "../../data/p0p1DevState";
 
 type PickState = "fav" | "pack" | "rogue";
 type ScoredPick = { state: PickState; cardName: string; pickCount: number };
@@ -238,9 +240,16 @@ export function FinalBallotScorecard({
   cards: Card[];
   picksBySlot: Map<string, string>;
 }) {
+  const selfPlacement = useP0P1DevSelfPlacement();
   const result = useMemo(() => {
     const ratingsByName = buildRatingsByName(ratingsSnapshot);
-    const rankedBallots = rankBallots(groupBallotRows(ballots), ratingsByName);
+    const bestTeam = bestPossibleTeam(cards, SLOTS, ratingsByName);
+    const rankedBallots = applyDevSelfPlacement(
+      rankBallots(groupBallotRows(ballots), ratingsByName),
+      0,
+      bestTeam,
+      p0p1DevEnabled ? selfPlacement : "auto",
+    );
     const userBallot = findUserBallot(rankedBallots, picksBySlot);
     const completeScores = rankedBallots
       .filter((b) => b.picks.size === SLOTS.length)
@@ -249,11 +258,11 @@ export function FinalBallotScorecard({
       score: userBallot?.score ?? scoreBallot(picksBySlot as Map<SlotKey, string>, ratingsByName),
       rank: userBallot?.rank ?? null,
       total: rankedBallots.length,
-      bestScore: bestPossibleTeam(cards, SLOTS, ratingsByName).score,
+      bestScore: bestTeam.score,
       crowdScore: mostPopularTeam(pickStats, SLOTS, ratingsByName).score,
       floor: completeScores.length > 0 ? Math.min(...completeScores) : 0,
     };
-  }, [ratingsSnapshot, pickStats, ballots, cards, picksBySlot]);
+  }, [ratingsSnapshot, pickStats, ballots, cards, picksBySlot, selfPlacement]);
 
   const medal = result.rank !== null && result.rank <= 3 ? (result.rank as 1 | 2 | 3) : null;
   const accent = medal ? MEDAL_COLOR[medal] : GREEN;

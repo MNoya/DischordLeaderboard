@@ -1,5 +1,13 @@
 import { useState } from "react";
-import { p0p1DevEnabled, useP0P1DevPreset, setP0P1DevPreset, P0P1_DEV_PRESETS } from "../../data/p0p1DevState";
+import {
+  p0p1DevEnabled,
+  useP0P1DevPreset,
+  setP0P1DevPreset,
+  P0P1_DEV_PRESETS,
+  useP0P1DevSelfPlacement,
+  setP0P1DevSelfPlacement,
+  P0P1_DEV_SELF_PLACEMENTS,
+} from "../../data/p0p1DevState";
 
 export function P0P1DevPanel() {
   if (!p0p1DevEnabled) return null;
@@ -8,6 +16,7 @@ export function P0P1DevPanel() {
 
 function DevPanelBody() {
   const preset = useP0P1DevPreset();
+  const selfPlacement = useP0P1DevSelfPlacement();
   const [open, setOpen] = useState(false);
 
   return (
@@ -30,6 +39,28 @@ function DevPanelBody() {
               </button>
             );
           })}
+          {preset === "finalScoring" && (
+            <>
+              <div className="mt-1 px-1 pb-1 text-[10px] tracking-[0.16em] text-green border-t border-green/30 pt-2">
+                DEV · YOUR ROW
+              </div>
+              {P0P1_DEV_SELF_PLACEMENTS.map((option) => {
+                const active = option.value === selfPlacement;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setP0P1DevSelfPlacement(option.value)}
+                    className={`rounded px-3 py-2 text-left text-[13px] tracking-wide transition-colors ${
+                      active ? "bg-green text-black" : "text-green hover:bg-green/20"
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </>
+          )}
         </div>
       )}
       <button

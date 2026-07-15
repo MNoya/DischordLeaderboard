@@ -3,6 +3,7 @@
 
 import type { Card, P0P1BallotRow, P0P1PickStat, SlotKey } from "../types/p0p1";
 import type { SlotDefinition } from "../types/p0p1";
+import type { P0P1DevSelfPlacement } from "./p0p1DevState";
 
 export type P0P1Phase = "voting" | "postVoting" | "midway" | "finalizing" | "final";
 
@@ -270,6 +271,45 @@ export function rankBallots(
     scored[i].percentile = n > 1 ? Math.round(((n - i - 1) / (n - 1)) * 100) : 100;
   }
   return scored;
+}
+
+// Dev-only: rewrite the viewer's ballot score so it lands at a chosen standings
+// position, then re-rank. Lets the best-possible badge and medal rows be
+// previewed without waiting for a real submission to earn them.
+export function applyDevSelfPlacement(
+  ranked: RankedBallot[],
+  selfBallotId: number,
+  bestTeam: TeamResult,
+  placement: P0P1DevSelfPlacement,
+): RankedBallot[] {
+  if (placement === "auto") return ranked;
+
+  const self = ranked.find((b) => b.ballotId === selfBallotId);
+  if (!self) return ranked;
+  const others = ranked.filter((b) => b.ballotId !== selfBallotId);
+
+  let targetScore: number;
+  if (placement === "best") {
+    targetScore = bestTeam.score;
+  } else if (placement === "first") {
+    targetScore = (others[0]?.score ?? 0) + 1;
+  } else if (placement === "second") {
+    targetScore = others.length >= 2 ? (others[0].score + others[1].score) / 2 : (others[0]?.score ?? 0) - 1;
+  } else {
+    targetScore =
+      others.length >= 3
+        ? (others[1].score + others[2].score) / 2
+        : (others[others.length - 1]?.score ?? 0) - 1;
+  }
+
+  const rescored = [...others, { ...self, score: targetScore }];
+  rescored.sort((a, b) => b.score - a.score);
+  const n = rescored.length;
+  return rescored.map((b, i) => ({
+    ...b,
+    rank: i + 1,
+    percentile: n > 1 ? Math.round(((n - i - 1) / (n - 1)) * 100) : 100,
+  }));
 }
 
 // Ghost rows for the reference teams, inserted into the standings at their

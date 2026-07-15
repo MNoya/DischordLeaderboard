@@ -51,6 +51,46 @@ export function useP0P1DevPreset(): P0P1DevPreset {
   return useSyncExternalStore(subscribe, () => current, () => "live");
 }
 
+// Forces the viewer's synthetic ballot (finalScoring preset) into a chosen
+// standings position so the best-possible badge and 1st/2nd/3rd medal
+// treatments can be previewed without waiting for real submissions to land there.
+export type P0P1DevSelfPlacement = "auto" | "best" | "first" | "second" | "third";
+
+export const P0P1_DEV_SELF_PLACEMENTS: { value: P0P1DevSelfPlacement; label: string }[] = [
+  { value: "auto", label: "Auto" },
+  { value: "best", label: "Best possible" },
+  { value: "first", label: "1st" },
+  { value: "second", label: "2nd" },
+  { value: "third", label: "3rd" },
+];
+
+const SELF_PLACEMENT_STORAGE_KEY = "p0p1DevSelfPlacement";
+const selfPlacementListeners = new Set<() => void>();
+
+function readStoredSelfPlacement(): P0P1DevSelfPlacement {
+  if (!p0p1DevEnabled) return "auto";
+  const stored = window.localStorage.getItem(SELF_PLACEMENT_STORAGE_KEY);
+  const valid = P0P1_DEV_SELF_PLACEMENTS.some((p) => p.value === stored);
+  return valid ? (stored as P0P1DevSelfPlacement) : "auto";
+}
+
+let currentSelfPlacement = readStoredSelfPlacement();
+
+export function setP0P1DevSelfPlacement(placement: P0P1DevSelfPlacement) {
+  currentSelfPlacement = placement;
+  window.localStorage.setItem(SELF_PLACEMENT_STORAGE_KEY, placement);
+  selfPlacementListeners.forEach((notify) => notify());
+}
+
+function subscribeSelfPlacement(notify: () => void) {
+  selfPlacementListeners.add(notify);
+  return () => selfPlacementListeners.delete(notify);
+}
+
+export function useP0P1DevSelfPlacement(): P0P1DevSelfPlacement {
+  return useSyncExternalStore(subscribeSelfPlacement, () => currentSelfPlacement, () => "auto");
+}
+
 const DEV_RESULTS_REMAINING_MS = (20 * 24 + 1) * 60 * 60 * 1000;
 const DEV_PAST_SCORING_MS = 60 * 60 * 1000;
 

@@ -20,8 +20,10 @@ import {
   buildStandingsList,
   findUserBallot,
   highlightsFeed,
+  applyDevSelfPlacement,
   GIH_SAMPLE_FLOOR,
 } from "../../data/p0p1Results";
+import { p0p1DevEnabled, useP0P1DevSelfPlacement } from "../../data/p0p1DevState";
 import type {
   RatingsSnapshot,
   TeamPick,
@@ -1459,6 +1461,12 @@ export function FinalResults({
     const grouped = groupBallotRows(ballots);
     return rankBallots(grouped, ratingsByName);
   }, [ballots, ratingsByName]);
+  const selfPlacement = useP0P1DevSelfPlacement();
+  const rankedForDisplay = useMemo(
+    () =>
+      applyDevSelfPlacement(rankedBallots, 0, bestTeam, p0p1DevEnabled ? selfPlacement : "auto"),
+    [rankedBallots, bestTeam, selfPlacement],
+  );
   const highlights = useMemo(
     () => highlightsFeed(pickStats, ballots, cards, SLOTS, ratingsByName, HIGHLIGHTS_COUNT),
     [pickStats, ballots, cards, ratingsByName],
@@ -1476,8 +1484,8 @@ export function FinalResults({
   const { setCode } = ratingsSnapshot;
 
   const userBallot = useMemo(
-    () => (showYourPicks ? findUserBallot(rankedBallots, picksBySlot) : null),
-    [showYourPicks, rankedBallots, picksBySlot],
+    () => (showYourPicks ? findUserBallot(rankedForDisplay, picksBySlot) : null),
+    [showYourPicks, rankedForDisplay, picksBySlot],
   );
 
   const yourEntries = useMemo(
@@ -1527,11 +1535,11 @@ export function FinalResults({
     setSearchParams({ tab: id }, { replace: true });
 
   const statsBlock = useMemo(() => {
-    if (rankedBallots.length === 0) return null;
-    const avg = rankedBallots.reduce((s, b) => s + b.score, 0) / rankedBallots.length;
-    const top = rankedBallots[0];
-    return { count: rankedBallots.length, avg, top };
-  }, [rankedBallots]);
+    if (rankedForDisplay.length === 0) return null;
+    const avg = rankedForDisplay.reduce((s, b) => s + b.score, 0) / rankedForDisplay.length;
+    const top = rankedForDisplay[0];
+    return { count: rankedForDisplay.length, avg, top };
+  }, [rankedForDisplay]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -1560,7 +1568,7 @@ export function FinalResults({
         <div className="flex flex-col gap-8">
 
           {/* Top-3 standings peek */}
-          {rankedBallots.length > 0 && (
+          {rankedForDisplay.length > 0 && (
             <div className="flex flex-col gap-3">
               <div className="flex items-center justify-between">
                 <SectionLabel size={16} className="text-white">TOP STANDINGS</SectionLabel>
@@ -1573,7 +1581,7 @@ export function FinalResults({
                 </button>
               </div>
               <Leaderboard
-                rankedBallots={rankedBallots}
+                rankedBallots={rankedForDisplay}
                 bestTeam={bestTeam}
                 crowdTeam={crowdTeam}
                 setCode={setCode}
@@ -1590,7 +1598,7 @@ export function FinalResults({
           {/* Highlights reel */}
           <HighlightsReel
             highlights={highlights}
-            ballotCount={rankedBallots.length}
+            ballotCount={rankedForDisplay.length}
             cardsByName={cardsByName}
           />
         </div>
@@ -1599,11 +1607,11 @@ export function FinalResults({
       {/* ── FULL RESULTS ─────────────────────────────────────────────── */}
       {activeTab === "results" && (
         <div className="flex flex-col gap-8">
-          {rankedBallots.length > 0 && (
+          {rankedForDisplay.length > 0 && (
             <div className="flex flex-col gap-3">
               <SectionLabel size={16} className="text-white">STANDINGS</SectionLabel>
               <Leaderboard
-                rankedBallots={rankedBallots}
+                rankedBallots={rankedForDisplay}
                 bestTeam={bestTeam}
                 crowdTeam={crowdTeam}
                 setCode={setCode}
