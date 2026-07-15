@@ -555,18 +555,36 @@ function BroadcastTop3({
           className="relative flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 py-3 sm:py-4"
           style={{ transform: "skewX(6deg)", paddingLeft: 74, paddingRight: 20 }}
         >
-          <div className="flex-1 min-w-0">
-            <div className="font-mono tracking-[0.22em] text-[10px] sm:text-[10.5px] uppercase text-gold">
-              {setCode} // P0P1 FINAL RESULTS
-            </div>
-            <div className="font-display text-[28px] sm:text-[44px] leading-[0.95] tracking-[0.03em] truncate">
-              {champion.name.toUpperCase()}
-              {champion.ballotId === userBallotId && (
-                <span className="ml-2 text-[10px] font-body font-normal normal-case text-subtle tracking-widest align-middle">
-                  YOU
-                </span>
-              )}
-              {bestAchieverIds.has(champion.ballotId) && <BestPossibleBadge />}
+          <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
+            {champion.avatarUrl ? (
+              <img
+                src={champion.avatarUrl}
+                alt={champion.name}
+                className="w-10 h-10 sm:w-14 sm:h-14 rounded-full shrink-0 object-cover"
+                style={{ boxShadow: `0 0 0 2px #1d2330, 0 0 0 3px ${MEDAL_COLOR[1]}, 0 0 18px #ffc63a66` }}
+              />
+            ) : (
+              <div
+                className="w-10 h-10 sm:w-14 sm:h-14 rounded-full shrink-0 bg-surface flex items-center justify-center text-[14px] sm:text-[20px] text-muted font-mono"
+                style={{ boxShadow: `0 0 0 2px #1d2330, 0 0 0 3px ${MEDAL_COLOR[1]}, 0 0 18px #ffc63a66` }}
+              >
+                ?
+              </div>
+            )}
+
+            <div className="flex-1 min-w-0">
+              <div className="font-mono tracking-[0.22em] text-[10px] sm:text-[10.5px] uppercase text-gold">
+                {setCode} // P0P1 FINAL RESULTS
+              </div>
+              <div className="font-display text-[28px] sm:text-[44px] leading-[0.95] tracking-[0.03em] truncate">
+                {champion.name.toUpperCase()}
+                {champion.ballotId === userBallotId && (
+                  <span className="ml-2 text-[10px] font-body font-normal normal-case text-subtle tracking-widest align-middle">
+                    YOU
+                  </span>
+                )}
+                {bestAchieverIds.has(champion.ballotId) && <BestPossibleBadge />}
+              </div>
             </div>
           </div>
           <div className="text-left sm:text-right shrink-0 sm:pl-4" style={{ borderLeft: "0" }}>
@@ -672,6 +690,21 @@ function BroadcastSubBar({
           </span>
         </div>
         <div className="flex-1 min-w-0 flex items-center gap-3 py-2 px-4" style={{ transform: "skewX(6deg)" }}>
+          {ballot.avatarUrl ? (
+            <img
+              src={ballot.avatarUrl}
+              alt={ballot.name}
+              className="w-6 h-6 sm:w-7 sm:h-7 rounded-full shrink-0 object-cover"
+              style={{ boxShadow: `0 0 0 1.5px ${accent}` }}
+            />
+          ) : (
+            <div
+              className="w-6 h-6 sm:w-7 sm:h-7 rounded-full shrink-0 bg-surface flex items-center justify-center text-[10px] sm:text-[11px] text-muted font-mono"
+              style={{ boxShadow: `0 0 0 1.5px ${accent}` }}
+            >
+              ?
+            </div>
+          )}
           <span className="font-display text-[16px] sm:text-[20px] tracking-[0.04em] flex-1 min-w-0 truncate">
             {ballot.name.toUpperCase()}
             {isSelf && (
