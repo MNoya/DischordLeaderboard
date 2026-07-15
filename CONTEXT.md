@@ -7,7 +7,7 @@ Discord bot + public website ranking an MTGA community's drafting within the cur
 ### P0P1 highlights
 
 **Highlight**:
-One entry in the final-results highlights reel — a Trap, Sleeper, or Prophet.
+One entry in the final-results highlights reel — a Trap or a Sleeper.
 _Avoid_: Overrated/underrated tile, rank gap
 
 **The Trap**:
@@ -15,12 +15,8 @@ A card many voters picked that underperformed the best card available in its slo
 _Avoid_: Overrated, mistake, bad pick
 
 **The Sleeper**:
-A card almost nobody (possibly nobody) picked that outperformed the slot's crowd favorite. Zero-vote cards are eligible.
-_Avoid_: Underrated, hidden gem
-
-**The Prophet**:
-A voter who picked a slot's best-performing card when few others did. Prophets are the only voter-named highlight; personal callouts are positive-only — negative stories stay at the card level.
-_Avoid_: Winner, clairvoyant
+A card almost nobody (possibly nobody) picked that outperformed the slot's crowd favorite. Zero-vote cards are eligible. The only voter-named highlight — its pickers are shown by name; personal callouts are positive-only, negative stories stay at the card level.
+_Avoid_: Underrated, hidden gem, Prophet (retired award, merged into the Sleeper)
 
 **Drama score**:
 The per-category magnitude used to select and order highlights; normalized within category to interleave the mixed feed.

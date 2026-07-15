@@ -379,14 +379,13 @@ export function findUserBallot(
 }
 
 // ── Highlights feed ─────────────────────────────────────────────────────────
-// Trap / Sleeper / Prophet awards selected by GIHWR effect size; see
-// spec/p0p1-results.md → Highlights. Sleeper and Prophet popularity uses team
-// share (fraction of all ballots playing the card in any slot — wildcard slots
+// Trap / Sleeper awards selected by GIHWR effect size; see
+// spec/p0p1-results.md → Highlights. Sleeper popularity uses team share
+// (fraction of all ballots playing the card in any slot — wildcard slots
 // overlap the color slots); the Trap keeps within-slot share, its cost is slot-local.
 
 export const TRAP_SHORTFALL_FLOOR = 0.02;
 export const SLEEPER_TEAM_SHARE_CEIL = 0.05;
-export const PROPHET_TEAM_SHARE_CEIL = 0.2;
 
 export interface HighlightVoter {
   name: string;
@@ -416,18 +415,13 @@ export interface SleeperHighlight extends HighlightBase {
   teamShare: number;
   crowdFavName: string;
   crowdFavGihwr: number;
-}
-
-export interface ProphetHighlight extends HighlightBase {
-  kind: "prophet";
-  teamShare: number;
   voters: HighlightVoter[];
 }
 
-export type Highlight = TrapHighlight | SleeperHighlight | ProphetHighlight;
+export type Highlight = TrapHighlight | SleeperHighlight;
 
-// Top highlights across all slots: the best Trap, Sleeper, and Prophet are
-// guaranteed a slot (quota), the rest fill by drama normalized within category.
+// Top highlights across all slots: the best Trap and Sleeper are guaranteed
+// a slot (quota), the rest fill by drama normalized within category.
 export function highlightsFeed(
   pickStats: P0P1PickStat[],
   ballots: P0P1BallotRow[],
@@ -445,7 +439,13 @@ export function highlightsFeed(
   const voterCount = voterIds.size;
   if (voterCount === 0) return [];
   const teamCount = new Map<string, number>();
-  for (const b of ballots) teamCount.set(b.cardName, (teamCount.get(b.cardName) ?? 0) + 1);
+  const teamVoters = new Map<string, HighlightVoter[]>();
+  for (const b of ballots) {
+    teamCount.set(b.cardName, (teamCount.get(b.cardName) ?? 0) + 1);
+    const arr = teamVoters.get(b.cardName) ?? [];
+    arr.push({ name: b.name, avatarUrl: b.avatarUrl });
+    teamVoters.set(b.cardName, arr);
+  }
   const teamShare = (name: string) => (teamCount.get(name) ?? 0) / voterCount;
 
   const statsBySlot = new Map<SlotKey, P0P1PickStat[]>();
@@ -458,7 +458,6 @@ export function highlightsFeed(
   const emptyPicked = new Set<string>();
   const traps: TrapHighlight[] = [];
   const sleepers: SleeperHighlight[] = [];
-  const prophets: ProphetHighlight[] = [];
 
   for (const slot of slots) {
     const pool = cards
@@ -512,24 +511,7 @@ export function highlightsFeed(
           teamShare: teamShare(c.name),
           crowdFavName: crowdFavStat.cardName,
           crowdFavGihwr,
-        });
-      }
-    }
-
-    if (teamShare(best.name) <= PROPHET_TEAM_SHARE_CEIL) {
-      const voters = ballots
-        .filter((b) => b.slot === slot.key && b.cardName === best.name)
-        .map((b) => ({ name: b.name, avatarUrl: b.avatarUrl }));
-      if (voters.length > 0) {
-        prophets.push({
-          kind: "prophet",
-          slot: slot.key,
-          slotLabel: slot.label,
-          cardName: best.name,
-          gihwr: best.gihwr,
-          drama: 1 - teamShare(best.name),
-          teamShare: teamShare(best.name),
-          voters,
+          voters: teamVoters.get(c.name) ?? [],
         });
       }
     }
@@ -545,7 +527,7 @@ export function highlightsFeed(
     return Array.from(byCard.values()).sort((a, b) => b.drama - a.drama);
   };
 
-  const categories: Highlight[][] = [dedupe(traps), dedupe(sleepers), dedupe(prophets)];
+  const categories: Highlight[][] = [dedupe(traps), dedupe(sleepers)];
   for (const entries of categories) {
     const max = entries[0]?.drama ?? 1;
     for (const e of entries) e.drama = e.drama / max;

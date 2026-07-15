@@ -33,8 +33,7 @@ import type {
   RankedBallot,
   SyntheticStanding,
   Highlight,
-  TrapHighlight,
-  SleeperHighlight,
+  HighlightVoter,
 } from "../../data/p0p1Results";
 import type { Card, P0P1BallotRow, P0P1PickStat, SlotKey } from "../../types/p0p1";
 import type { PickEntry } from "./CommunityGrid";
@@ -449,9 +448,6 @@ function ChampionCard({
               )}
               {isBest && <BestPossibleBadge />}
             </div>
-            <div className="text-[11px] sm:text-[12.5px] text-muted mt-0.5">
-              Top {topPct}% of {total} ballots
-            </div>
           </div>
 
           <div className="hidden lg:block text-right shrink-0">
@@ -461,7 +457,6 @@ function ChampionCard({
             >
               {ballot.score.toFixed(1)}
             </div>
-            <div className="font-display tracking-[0.2em] text-[12px] text-muted mt-1">FINAL SCORE</div>
           </div>
         </div>
 
@@ -472,13 +467,11 @@ function ChampionCard({
           >
             {ballot.score.toFixed(1)}
           </div>
-          <div className="font-display tracking-[0.2em] text-[11px] text-muted">FINAL SCORE</div>
         </div>
 
-        <div className="font-display tracking-[0.2em] text-[11px] sm:text-[12px] text-muted mt-4 mb-1.5">
-          THE WINNING BALLOT
+        <div className="mt-4">
+          <PickGrid  entries={entries} cardsByName={cardsByName} />
         </div>
-        <PickGrid entries={entries} cardsByName={cardsByName} />
       </div>
     </div>
   );
@@ -1189,51 +1182,111 @@ function Leaderboard({
 const HIGHLIGHT_ACCENT: Record<Highlight["kind"], string> = {
   trap: "#ff5e5e",
   sleeper: "#2ee85c",
-  prophet: "#ffc63a",
 };
 
 const HIGHLIGHT_STAMP: Record<Highlight["kind"], string> = {
-  trap: "THE TRAP",
-  sleeper: "THE SLEEPER",
-  prophet: "THE PROPHET",
+  trap: "TRAP",
+  sleeper: "SLEEPER",
 };
 
-const HIGHLIGHT_STAT_LABEL: Record<"trap" | "sleeper", string> = {
-  trap: "BEHIND THE BEST PICK",
+const HIGHLIGHT_STAT_LABEL: Record<Highlight["kind"], string> = {
+  trap: "BEHIND THE SLOT'S BEST",
   sleeper: "OVER THE CROWD FAVORITE",
 };
 
-const NUMBER_WORDS = ["zero", "one", "two", "three", "four", "five"] as const;
+const VOTER_STACK_MAX = 10;
 
-function ppStat(h: TrapHighlight | SleeperHighlight): string {
+function ppStat(h: Highlight): string {
   const delta =
     h.kind === "trap" ? h.gihwr - h.slotBestGihwr : h.gihwr - h.crowdFavGihwr;
   const sign = delta < 0 ? "−" : "+";
   return `${sign}${Math.abs(delta * 100).toFixed(1)}`;
 }
 
-function highlightStory(h: TrapHighlight | SleeperHighlight, ballotCount: number) {
+function shareLabel(share: number): string {
+  const pct = Math.round(share * 100);
+  return pct === 0 ? "<1%" : `${pct}%`;
+}
+
+function joinNames(names: string[]): string {
+  if (names.length === 1) return names[0];
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+function highlightStory(h: Highlight) {
   if (h.kind === "trap") {
     return (
       <>
-        <b className="text-subtle font-medium">{h.pickCount} ballots</b> took the
-        bait — {h.slotBestName} won more games.
+        <b className="text-subtle font-medium">
+          {h.pickCount} {h.pickCount === 1 ? "player" : "players"} ({shareLabel(h.pickShare)})
+        </b>{" "}
+        picked it. {h.slotBestName} performed better.
       </>
     );
   }
   if (h.teamCount === 0) {
     return (
       <>
-        <b className="text-subtle font-medium">Nobody</b> played it — and it beat
-        the crowd's pick anyway.
+        <b className="text-subtle font-medium">Everyone</b> missed it. It
+        outperformed {h.crowdFavName}, the slot's most-picked card.
+      </>
+    );
+  }
+  if (h.teamCount <= 3) {
+    return (
+      <>
+        Only{" "}
+        <b className="text-subtle font-medium">
+          {joinNames(h.voters.map((v) => v.name))}
+        </b>{" "}
+        found it. It outperformed {h.crowdFavName}.
       </>
     );
   }
   return (
     <>
-      On <b className="text-subtle font-medium">{h.teamCount} {h.teamCount === 1 ? "team" : "teams"}</b> out
-      of {ballotCount} — and it beat the crowd's pick anyway.
+      <b className="text-subtle font-medium">
+        {h.teamCount} players ({shareLabel(h.teamShare)})
+      </b>{" "}
+      picked it. It outperformed {h.crowdFavName}.
     </>
+  );
+}
+
+function VoterStack({ voters }: { voters: HighlightVoter[] }) {
+  const shown = voters.slice(0, VOTER_STACK_MAX);
+  const extra = voters.length - shown.length;
+  const ring = "[box-shadow:0_0_0_1.5px_#1d2330,0_0_0_2.5px_#1d2330]";
+
+  return (
+    <div className="flex -space-x-1.5">
+      {shown.map((v) =>
+        v.avatarUrl ? (
+          <img
+            key={v.name}
+            src={v.avatarUrl}
+            alt={v.name}
+            title={v.name}
+            className={`w-[22px] h-[22px] rounded-full shrink-0 ${ring}`}
+          />
+        ) : (
+          <span
+            key={v.name}
+            title={v.name}
+            className={`w-[22px] h-[22px] rounded-full shrink-0 bg-surface flex items-center justify-center font-mono text-[10px] text-green ${ring}`}
+          >
+            {v.name.replace(/^\W+/, "").charAt(0).toUpperCase()}
+          </span>
+        ),
+      )}
+      {extra > 0 && (
+        <span
+          className={`w-[22px] h-[22px] rounded-full shrink-0 bg-surface flex items-center justify-center font-mono text-[9px] text-green ${ring}`}
+        >
+          +{extra}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -1253,17 +1306,14 @@ function SprocketRail() {
 function HighlightTile({
   highlight,
   index,
-  ballotCount,
   cardsByName,
 }: {
   highlight: Highlight;
   index: number;
-  ballotCount: number;
   cardsByName: Map<string, Card>;
 }) {
   const card = cardsByName.get(highlight.cardName);
   const accent = HIGHLIGHT_ACCENT[highlight.kind];
-  const isProphet = highlight.kind === "prophet";
 
   return (
     <article
@@ -1273,7 +1323,6 @@ function HighlightTile({
         padding: 1,
         background: `linear-gradient(165deg, ${accent} 0%, color-mix(in srgb, ${accent} 28%, #3b4458) 30%, #3b4458 70%, color-mix(in srgb, ${accent} 22%, #3b4458) 100%)`,
         animationDelay: `${index * 80}ms`,
-        ...(isProphet ? { filter: "drop-shadow(0 0 22px #ffc63a26)" } : null),
       }}
     >
       <div
@@ -1313,60 +1362,37 @@ function HighlightTile({
             <span className="font-mono text-[10px] text-dim">Nº {index + 1}</span>
           </div>
 
-          {isProphet ? (
-            <>
-              <div className="font-display text-[11px] tracking-[0.2em] text-muted mt-2">
-                CALLED THE SLOT'S BEST CARD
-              </div>
-              <div className="flex flex-row flex-wrap gap-x-3 gap-y-1.5 mt-2 sm:flex-col sm:gap-1.5">
-                {highlight.voters.map((v) => (
-                  <div key={v.name} className="flex items-center gap-2 min-w-0">
-                    {v.avatarUrl ? (
-                      <img
-                        src={v.avatarUrl}
-                        alt=""
-                        className="w-[22px] h-[22px] rounded-full shrink-0 [box-shadow:0_0_0_1.5px_#1d2330,0_0_0_2.5px_#ffc63a]"
-                      />
-                    ) : (
-                      <span className="w-[22px] h-[22px] rounded-full shrink-0 bg-surface flex items-center justify-center font-mono text-[10px] text-gold [box-shadow:0_0_0_1.5px_#1d2330,0_0_0_2.5px_#ffc63a]">
-                        {v.name.replace(/^\W+/, "").charAt(0).toUpperCase()}
-                      </span>
-                    )}
-                    <span className="text-[12.5px] text-text truncate">{v.name}</span>
-                  </div>
-                ))}
-              </div>
-            </>
-          ) : (
-            <>
-              <div
-                className="font-mono font-bold tabular-nums leading-none mt-2 sm:mt-1.5 text-[30px] sm:text-[38px]"
-                style={{
-                  color: accent,
-                  textShadow: `0 0 34px color-mix(in srgb, ${accent} 45%, transparent)`,
-                }}
-              >
-                {ppStat(highlight)}
-                <span className="text-[15px] sm:text-[18px]">pp</span>
-              </div>
-              <div className="font-display text-[11px] tracking-[0.2em] text-muted mt-1">
-                {HIGHLIGHT_STAT_LABEL[highlight.kind]}
-              </div>
-            </>
-          )}
+          <div
+            className="font-mono font-bold tabular-nums leading-none mt-2 sm:mt-1.5 text-[30px] sm:text-[38px]"
+            style={{
+              color: accent,
+              textShadow: `0 0 34px color-mix(in srgb, ${accent} 45%, transparent)`,
+            }}
+          >
+            {ppStat(highlight)}
+            <span className="text-[15px] sm:text-[18px]">%</span>
+          </div>
+          <div className="font-display text-[11px] tracking-[0.2em] text-muted mt-1">
+            {HIGHLIGHT_STAT_LABEL[highlight.kind]}
+          </div>
 
-          <div className="font-semibold text-[15.5px] leading-tight mt-2 sm:mt-2.5">
+          <div className="font-semibold text-[15.5px] leading-tight mt-2 sm:mt-2.5 truncate">
             {highlight.cardName}
           </div>
           <div className="font-mono text-[10px] text-dim mt-0.5 truncate">
-            {highlight.slotLabel} · {gihwrLabel(highlight.gihwr)} GIH WR
+            {highlight.slotLabel}, {gihwrLabel(highlight.gihwr)} GIH
           </div>
 
-          {!isProphet && (
-            <p className="text-[12px] leading-[1.45] text-muted mt-auto pt-2.5">
-              {highlightStory(highlight, ballotCount)}
+          <div className="mt-auto pt-2.5">
+            {highlight.kind === "sleeper" && highlight.voters.length > 0 && (
+              <div className="mb-1.5">
+                <VoterStack voters={highlight.voters} />
+              </div>
+            )}
+            <p className="text-[12px] leading-[1.45] text-muted">
+              {highlightStory(highlight)}
             </p>
-          )}
+          </div>
         </div>
       </div>
     </article>
@@ -1383,7 +1409,6 @@ function HighlightsReel({
   cardsByName: Map<string, Card>;
 }) {
   if (highlights.length === 0) return null;
-  const countWord = NUMBER_WORDS[highlights.length] ?? String(highlights.length);
 
   return (
     <div className="flex flex-col">
@@ -1391,9 +1416,8 @@ function HighlightsReel({
         <SectionLabel size={22} className="text-white">HIGHLIGHTS</SectionLabel>
       </div>
       <p className="text-center text-[12.5px] text-muted mt-1.5">
-        The {countWord} stories of the contest, told by{" "}
-        <b className="text-subtle font-medium">{ballotCount} ballots</b> and four
-        weeks of games.
+        How <b className="text-subtle font-medium">{ballotCount} players'</b>{" "}
+        picks held up against the data.
       </p>
 
       <div className="mt-5">
@@ -1404,7 +1428,6 @@ function HighlightsReel({
               key={`${h.kind}-${h.slot}-${h.cardName}`}
               highlight={h}
               index={i}
-              ballotCount={ballotCount}
               cardsByName={cardsByName}
             />
           ))}
@@ -1466,6 +1489,10 @@ export function FinalResults({
   const highlights = useMemo(
     () => highlightsFeed(pickStats, ballots, cards, SLOTS, ratingsByName, HIGHLIGHTS_COUNT),
     [pickStats, ballots, cards, ratingsByName],
+  );
+  const voterCount = useMemo(
+    () => new Set(ballots.map((b) => b.ballotId)).size,
+    [ballots],
   );
 
   const showYourPicks = Boolean(user) && hasParticipated;
@@ -1595,7 +1622,7 @@ export function FinalResults({
           {/* Highlights reel */}
           <HighlightsReel
             highlights={highlights}
-            ballotCount={rankedForDisplay.length}
+            ballotCount={voterCount}
             cardsByName={cardsByName}
           />
         </div>
