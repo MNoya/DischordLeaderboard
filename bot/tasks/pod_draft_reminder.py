@@ -314,6 +314,31 @@ async def fetch_sesh_rsvps(bot: commands.Bot, sesh_message_id: int | str) -> tup
     return [], []
 
 
+async def fetch_sesh_rsvp_ids(bot: commands.Bot, sesh_message_id: int | str) -> list[tuple[str, str]] | None:
+    """(discord_id, display_name) for the sesh Yes-then-Maybe attendees carrying a resolvable mention,
+    Yes first — the second-table candidate pool for a sesh pod. None when the message is gone; name-only
+    attendees are skipped since they can't be matched or pinged by id."""
+    message = await fetch_sesh_message(bot, sesh_message_id)
+    if message is None:
+        return None
+    for embed in message.embeds:
+        parsed = parse_sesh_embed(embed)
+        if parsed is None:
+            continue
+        roster: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        for token in list(parsed.attendees) + list(parsed.maybe_attendees):
+            match = MENTION_RE.match(token)
+            if match is None or match.group(1) in seen:
+                continue
+            discord_id = match.group(1)
+            seen.add(discord_id)
+            member = await _member_from_mention(message.guild, token)
+            roster.append((discord_id, member.display_name if member else discord_id))
+        return roster
+    return []
+
+
 async def _refetch_attendees(sesh_message_id: int) -> tuple[list[str], list[str]]:
     """Re-fetch the sesh embed for the latest Yes / Maybe RSVPs. Returns (yes, maybe)."""
     return await fetch_sesh_rsvps(_bot, sesh_message_id) or ([], [])

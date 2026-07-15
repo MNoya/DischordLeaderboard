@@ -981,7 +981,7 @@ class PodDraftManager:
         names = self.non_bot_session_names()
         if not names:
             return
-        discord_id_by_name = await asyncio.to_thread(_discord_ids_for_names_sync, names)
+        discord_id_by_name = await asyncio.to_thread(discord_ids_for_names_sync, names)
         for name in names:
             discord_id = discord_id_by_name.get(name)
             member = guild.get_member(int(discord_id)) if discord_id else _find_guild_member_for_arena(guild, name)
@@ -2091,7 +2091,7 @@ def _classify_names_sync(names: list[str]) -> list[tuple[str, str | None]]:
         return classify_lobby_names(session, names)
 
 
-def _discord_ids_for_names_sync(names: list[str]) -> dict[str, str | None]:
+def discord_ids_for_names_sync(names: list[str]) -> dict[str, str | None]:
     """Map each Draftmancer userName to its linked player's discord_id (or None when unrecognized)."""
     with SessionLocal() as session:
         result: dict[str, str | None] = {}

@@ -39,16 +39,18 @@ from bot.models import PodDraftEvent
 from bot.services import pod_launch
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_roles import grant_pod_drafters
-from bot.services.pod_draft_manager import set_second_table_hook, start_manager
+from bot.services.pod_draft_manager import discord_ids_for_names_sync, set_second_table_hook, start_manager
 from bot.services.pod_drafts import (
     draftmancer_url_for,
     load_event_id_by_name_sync,
     load_event_id_by_thread_sync,
+    load_event_sesh_message_id_sync,
     load_event_thread_id_sync,
     preview_table_target_sync,
     record_table_event,
     search_event_names_sync,
 )
+from bot.tasks.pod_draft_reminder import fetch_sesh_rsvp_ids
 
 
 log = logging.getLogger(__name__)
@@ -230,20 +232,19 @@ async def build_table_view(
 
 
 async def offer_second_table(
-    bot: commands.Bot, source_event_id: str, locked_names: list[str],
+    bot: commands.Bot, source_event_id: str, seated_ids: set[str],
 ) -> discord.Message | None:
-    """Draft-start hook: once a scheduled pod locks its seats, offer whoever's left from the Yes and
-    Maybe roster a pre-pinged follow-up table. Leftovers are invited, not seated — they must click to
-    claim. Posts nothing unless a full table's worth is left over. `locked_names` is the seated
-    roster; matching back to signups is by casefolded name, so a miss only means a stray extra ping."""
-    candidates = await asyncio.to_thread(pod_launch.second_table_candidates_sync, source_event_id)
+    """Draft-start hook: once a pod locks its seats, offer whoever's left from the Yes and Maybe roster
+    a pre-pinged follow-up table. Leftovers are invited, not seated — they must click to claim. Posts
+    nothing unless a full table's worth is left over. Matching is by Discord id: `seated_ids` are the
+    players who made the first pod, so a signup already seated is dropped and never re-pinged."""
+    candidates = await _second_table_candidates(bot, source_event_id)
     if not candidates:
         return None
-    locked = {name.casefold() for name in locked_names}
     leftovers: list[tuple[str, str]] = []
     seen: set[str] = set()
     for user_id, name in candidates:
-        if name.casefold() in locked or user_id in seen:
+        if user_id in seated_ids or user_id in seen:
             continue
         seen.add(user_id)
         leftovers.append((user_id, name))
@@ -287,11 +288,25 @@ async def _source_thread(bot: commands.Bot, source_event_id: str) -> "discord.Th
     return thread if isinstance(thread, discord.Thread) else None
 
 
+async def _second_table_candidates(bot: commands.Bot, event_id: str) -> list[tuple[str, str]]:
+    """(discord_id, display_name) Yes-then-Maybe pool to offer a follow-up table to: the signal roster
+    for bot-native pods, else the sesh embed's mentioned attendees for sesh pods."""
+    candidates = await asyncio.to_thread(pod_launch.second_table_candidates_sync, event_id)
+    if candidates:
+        return candidates
+    sesh_message_id = await asyncio.to_thread(load_event_sesh_message_id_sync, event_id)
+    if sesh_message_id is None:
+        return []
+    return await fetch_sesh_rsvp_ids(bot, sesh_message_id) or []
+
+
 async def _second_table_hook(bot: commands.Bot, event_id: str) -> None:
     manager = ACTIVE_POD_MANAGERS.get(event_id)
     if manager is None:
         return
-    await offer_second_table(bot, event_id, manager.non_bot_session_names())
+    name_to_id = await asyncio.to_thread(discord_ids_for_names_sync, manager.non_bot_session_names())
+    seated_ids = {discord_id for discord_id in name_to_id.values() if discord_id}
+    await offer_second_table(bot, event_id, seated_ids)
 
 
 class PodTable(commands.Cog):

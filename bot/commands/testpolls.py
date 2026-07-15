@@ -135,7 +135,7 @@ async def setup(bot: commands.Bot) -> None:
         ref = await asyncio.to_thread(pod_launch.scheduled_card_ref_sync, event_id)
         for i, display in enumerate(names):
             await asyncio.to_thread(pod_launch.set_rsvp_sync, ref[2], f"filltest-{i}", display, RSVP_YES)
-        await offer_second_table(ctx.bot, event_id, names[:seated])
+        await offer_second_table(ctx.bot, event_id, {f"filltest-{i}" for i in range(seated)})
 
     @test_group.command(name="draft")
     @commands.is_owner()
