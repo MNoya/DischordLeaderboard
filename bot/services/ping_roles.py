@@ -26,8 +26,8 @@ from bot.services.pod_schedule import (
     WEEKEND_POD_ROLE_NAME,
     next_slot_datetime,
     slot_by_weekday,
-    slot_for_event_time,
 )
+from bot.services.pod_signals import slot_role_name_for_event_time
 
 
 log = logging.getLogger(__name__)
@@ -112,14 +112,14 @@ def build_grant_embed(user_mention: str, role: discord.Role, spec: PingRole) -> 
 
 
 def auto_grant_spec_for_event(event_time) -> PingRole | None:
-    """The ping role auto-granted to RSVPs of the pod at this time, or None."""
-    slot = slot_for_event_time(event_time)
-    if slot is None:
+    """The ping role auto-granted to RSVPs of the pod at this time, or None. Resolves off the poll
+    buckets (weekend + time-of-day), so a launcher pod and a weekly-schedule pod at the same slot map
+    to the same role regardless of weekday."""
+    role_name = slot_role_name_for_event_time(event_time)
+    if role_name is None:
         return None
-    for spec in PING_ROLES:
-        if spec.auto_grant and spec.slot_weekday == slot.weekday:
-            return spec
-    return None
+    spec = spec_named(role_name)
+    return spec if spec is not None and spec.auto_grant else None
 
 
 async def reconcile_ping_roles(bot: discord.Client) -> None:

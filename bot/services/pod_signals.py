@@ -9,7 +9,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 
-from bot.services.pod_schedule import SCHEDULE_TZ
+from bot.services.pod_schedule import (
+    EARLY_POD_ROLE_NAME,
+    LATE_POD_ROLE_NAME,
+    SCHEDULE_TZ,
+    WEEKEND_POD_ROLE_NAME,
+)
 
 
 SATURDAY = 5
@@ -40,16 +45,17 @@ class PollBucket:
     name: str
     emoji: str
     start: time
+    role_name: str
 
 
 WEEKDAY_BUCKETS: tuple[PollBucket, ...] = (
-    PollBucket("EARLY", "Early Pod", "💫", time(14, 0)),
-    PollBucket("LATE", "Late Pod", "☄️", time(20, 0)),
+    PollBucket("EARLY", "Early Pod", "💫", time(14, 0), EARLY_POD_ROLE_NAME),
+    PollBucket("LATE", "Late Pod", "☄️", time(20, 0), LATE_POD_ROLE_NAME),
 )
 WEEKEND_BUCKETS: tuple[PollBucket, ...] = (
-    PollBucket("MORNING", "Morning Pod", "🌅", time(10, 0)),
-    PollBucket("AFTERNOON", "Early Pod", "💫", time(15, 0)),
-    PollBucket("EVENING", "Late Pod", "☄️", time(20, 0)),
+    PollBucket("MORNING", "Morning Pod", "🌅", time(10, 0), WEEKEND_POD_ROLE_NAME),
+    PollBucket("AFTERNOON", "Early Pod", "💫", time(15, 0), WEEKEND_POD_ROLE_NAME),
+    PollBucket("EVENING", "Late Pod", "☄️", time(20, 0), WEEKEND_POD_ROLE_NAME),
 )
 ALL_BUCKETS: tuple[PollBucket, ...] = WEEKDAY_BUCKETS + WEEKEND_BUCKETS
 WEEKEND_BUCKET_KEYS: frozenset[str] = frozenset(bucket.key for bucket in WEEKEND_BUCKETS)
@@ -76,6 +82,22 @@ def bucket_by_key(key: str) -> PollBucket | None:
     for bucket in ALL_BUCKETS:
         if bucket.key == key:
             return bucket
+    return None
+
+
+def bucket_role_name(key: str) -> str | None:
+    bucket = bucket_by_key(key)
+    return bucket.role_name if bucket else None
+
+
+def slot_role_name_for_event_time(event_time: datetime) -> str | None:
+    """The slot ping role owning a pod at this instant, keyed on weekend and time-of-day off the poll
+    buckets — the one source of truth for who a pod pings. An off-grid custom time matches no bucket
+    and returns None, so such a pod pings nobody rather than mis-resolving to a neighbouring slot."""
+    local = event_time.astimezone(SCHEDULE_TZ)
+    for bucket in poll_buckets_for(local.date()):
+        if bucket.start.hour == local.hour and bucket.start.minute == local.minute:
+            return bucket.role_name
     return None
 
 

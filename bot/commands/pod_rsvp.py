@@ -193,10 +193,12 @@ def refresh_roster_fields(embed: discord.Embed, rosters: dict[str, list[str]]) -
 
 def slot_role_mention(guild: discord.Guild | None, event_time: datetime) -> str | None:
     """Bare role mention as the card's content line, sesh-style — only content pings, embeds never
-    do. A card always speaks for one specific pod, so an off-grid time falls back to the Late Pod
-    slot, never the server-wide Pod Drafters umbrella."""
+    do. The slot role is resolved off the poll buckets by weekend and time-of-day; an off-grid custom
+    time resolves to no slot and pings nobody rather than mis-tagging a neighbouring slot."""
     spec = auto_grant_spec_for_event(event_time)
-    role = find_role(guild, spec.name if spec else LATE_POD_ROLE_NAME)
+    if spec is None:
+        return None
+    role = find_role(guild, spec.name)
     return role.mention if role else None
 
 

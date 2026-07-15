@@ -27,7 +27,6 @@ from bot.discord_helpers import NBSP, ZWSP
 from bot.services import pod_launch
 from bot.services.ping_roles import display_emoji, spec_named
 from bot.services.pod_roles import find_role, grant_pod_drafters, grant_role
-from bot.services.pod_schedule import EARLY_POD_ROLE_NAME, LATE_POD_ROLE_NAME, WEEKEND_POD_ROLE_NAME
 from bot.services.pod_signals import (
     ALL_BUCKETS,
     SCHEDULE_TZ,
@@ -36,6 +35,7 @@ from bot.services.pod_signals import (
     WEEKDAY_POST_HOUR_ET,
     WEEKEND_POST_HOUR_ET,
     bucket_by_key,
+    bucket_role_name,
     is_weekend_bucket,
     should_fire,
 )
@@ -57,13 +57,6 @@ MSG_POLL_INACTIVE = "This poll is no longer active."
 MSG_SLOT_CLOSED = "That slot's time already passed. Catch the next poll."
 POLL_NUDGE = "⚡ {count} in for {slot}! {mention}"
 POLL_NUDGE_QUIET_MINUTES = 30
-SLOT_ROLE_BY_BUCKET = {
-    "EARLY": EARLY_POD_ROLE_NAME,
-    "LATE": LATE_POD_ROLE_NAME,
-    "MORNING": WEEKEND_POD_ROLE_NAME,
-    "AFTERNOON": WEEKEND_POD_ROLE_NAME,
-    "EVENING": WEEKEND_POD_ROLE_NAME,
-}
 
 
 def init_daily_poll(bot: commands.Bot) -> None:
@@ -152,7 +145,7 @@ def build_poll_embed(slots: list[pod_launch.LauncherSlot], guild: discord.Guild 
         if is_weekend_bucket(slot.bucket_key):
             label = ""
         else:
-            role = find_role(guild, SLOT_ROLE_BY_BUCKET.get(slot.bucket_key, ""))
+            role = find_role(guild, bucket_role_name(slot.bucket_key) or "")
             label = role.mention if role else bucket.name
         check = "✅" if slot.committed or slot.status == STATUS_FIRED else ""
         header = " ".join(part for part in (slot_emoji, label, when, count_part, check) if part)
@@ -272,7 +265,7 @@ async def _maybe_nudge_slot(interaction: discord.Interaction, state, bucket_key:
     )
     if not claimed:
         return
-    role = find_role(interaction.guild, SLOT_ROLE_BY_BUCKET.get(bucket_key, ""))
+    role = find_role(interaction.guild, bucket_role_name(bucket_key) or "")
     bucket = bucket_by_key(bucket_key)
     if role is None or bucket is None or interaction.channel is None:
         return
@@ -307,7 +300,7 @@ async def _launch_slot(bot: commands.Bot, state, message_id: str) -> None:
 
 async def _grant_slot_role(member: discord.Member, bucket_key: str) -> discord.Role | None:
     """Returns the role only on a fresh grant, so the ephemeral confirmation fires once per member."""
-    role_name = SLOT_ROLE_BY_BUCKET.get(bucket_key)
+    role_name = bucket_role_name(bucket_key)
     if role_name is None:
         return None
     role = find_role(member.guild, role_name)
