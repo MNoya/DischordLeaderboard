@@ -148,7 +148,7 @@ function ballotContributions(
 
 function SegTooltipContent({ seg }: { seg: SlotContrib }) {
   return (
-    <div className="bg-surface2 border border-border2 rounded-sm shadow-xl overflow-hidden w-[184px]">
+    <div className="bg-surface2 border border-border2 rounded-sm shadow-xl overflow-hidden w-56">
       {seg.card ? (
         <img src={seg.card.imageNormal} alt={seg.card.name} className="w-full block" />
       ) : (
@@ -211,7 +211,7 @@ function ContributionBar({
                 src={card.imageArtCrop}
                 alt=""
                 aria-hidden
-                className="absolute inset-0 w-full -top-3.5 object-cover pointer-events-none"
+                className="absolute inset-0 w-full xl:-top-1/4 object-cover pointer-events-none"
               />
             )}
             <div className="absolute inset-0 bg-black/55 pointer-events-none" />
@@ -236,6 +236,7 @@ function ContributionBar({
             label={<SegTooltipContent seg={seg} />}
             side="top"
             hideArrow
+            delayDuration={0}
             collisionPadding={{ top: stickyTop + 8, bottom: 8, left: 8, right: 8 }}
             className="p-0 bg-transparent border-0 shadow-none"
           >
