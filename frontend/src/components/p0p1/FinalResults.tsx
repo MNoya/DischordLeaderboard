@@ -1259,7 +1259,6 @@ function HighlightsReel({
         The biggest traps and sleepers of the set.
       </SectionHeading>
 
-      <div className="mt-5">
         <div className="flex flex-col sm:flex-row sm:flex-wrap sm:justify-center gap-3.5 px-1 py-3.5 sm:px-3">
           {highlights.map((h, i) => (
             <HighlightTile
@@ -1270,7 +1269,6 @@ function HighlightsReel({
             />
           ))}
         </div>
-      </div>
     </div>
   );
 }
