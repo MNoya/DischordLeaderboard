@@ -15,6 +15,7 @@ import { CtaPill } from "../components/CtaPill";
 import { ChamferedButton } from "../components/ChamferedButton";
 import { Tooltip } from "../components/Tooltip";
 import { BREAKDOWN_CAPTION, DeckScreenshotModal } from "../components/pod/DeckScreenshotModal";
+import { PodEventTitle } from "../components/pod/EventLabel";
 import { Pips } from "../components/ManaPips";
 import { Record } from "../components/Record";
 import {
@@ -617,7 +618,7 @@ function EventRowBody({ event, nowMs }: { event: PodEventSummary; nowMs: number 
         )}
         style={{ fontSize: 21, letterSpacing: "0.04em", lineHeight: 1.15 }}
       >
-        {cleanPodEventName(event.name, event.setCode).toUpperCase()}
+        <PodEventTitle event={event} />
       </span>
       {isUpcoming && <CountdownChip iso={event.eventTime} />}
       {hasChamp && event.championDisplayName && (

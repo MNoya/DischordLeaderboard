@@ -75,6 +75,14 @@ MSG_UNDERFILL = (
     "- [**Sign up here**]({jump_url}) {manat}"
 )
 
+MSG_UNDERFILL_ONE_MORE = (
+    "{hello}**{name}** needs just **1 more** {goal} <t:{unix}:R> "
+    "- [**Sign up here**]({jump_url}) {manat}"
+)
+
+GOAL_FULL_POD = "for a full {target}-player pod"
+GOAL_TEAM_DRAFT = "to fire a Team draft"
+
 SLOT_EMOJI_AMERICAS = "🌎"
 SLOT_EMOJI_EU = "🇪🇺"
 SLOT_EMOJI_SATURDAY = "🪐"
@@ -376,19 +384,26 @@ def build_underfill_message(
     thread_name: str,
     yes_count: int,
     target: int,
+    fire_threshold: int,
     event_time: datetime,
     jump_url: str,
 ) -> str:
-    needed = target - yes_count
-    body = MSG_UNDERFILL.format(
-        hello=emojis.prefix("chordoHello"),
-        name=short_event_name(thread_name),
-        needed=needed,
-        plural="s" if needed != 1 else "",
-        unix=int(event_time.timestamp()),
-        jump_url=jump_url,
-        manat=emojis.get("manat"),
-    )
+    """Milestone-aware nudge copy: at target-1 the ask is a full pod, at fire_threshold-1 a team draft,
+    otherwise the plain count toward target. Never carries a role mention — pinging is the caller's call."""
+    shared = {
+        "hello": emojis.prefix("chordoHello"),
+        "name": short_event_name(thread_name),
+        "unix": int(event_time.timestamp()),
+        "jump_url": jump_url,
+        "manat": emojis.get("manat"),
+    }
+    if yes_count == target - 1:
+        body = MSG_UNDERFILL_ONE_MORE.format(goal=GOAL_FULL_POD.format(target=target), **shared)
+    elif yes_count == fire_threshold - 1:
+        body = MSG_UNDERFILL_ONE_MORE.format(goal=GOAL_TEAM_DRAFT, **shared)
+    else:
+        needed = target - yes_count
+        body = MSG_UNDERFILL.format(needed=needed, plural="s" if needed != 1 else "", **shared)
     return body.rstrip()
 
 

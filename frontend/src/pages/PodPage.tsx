@@ -21,7 +21,7 @@ import {
 } from "../data/hooks";
 import { resolveDeck } from "../data/draft-artifact";
 import { useCardImageMap } from "../data/cardImages";
-import { cleanPodEventName, podDiscordName, podSeatName } from "../data/utils";
+import { podDiscordName, podEventTitle, podSeatName } from "../data/utils";
 import type {
   PodEventParticipantRow,
   PodSeat,
@@ -321,7 +321,7 @@ export function PodPage() {
     );
   }
 
-  const eventLabel = cleanPodEventName(event.name, event.setCode).toUpperCase();
+  const eventLabel = podEventTitle(event).toUpperCase();
   const deckLogHref =
     draftArtifact && deckTarget ? `/pods/${event.slug}/${deckTarget.playerSlug ?? deckTarget.seatIndex}` : null;
   const open = selectedParticipant !== null;

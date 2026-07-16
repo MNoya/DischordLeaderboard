@@ -135,16 +135,20 @@ class ScheduledRegisteredView(discord.ui.View):
 
 def build_rsvp_embed(
     name: str, event_time: datetime, rosters: dict[str, list[str]], role_time: datetime | None = None,
+    description: str | None = None,
 ) -> discord.Embed:
     """The RSVP surface. Time and the roster columns are embed fields so sesh's vertical breathing
     room comes for free. `role_time` keys the slot emoji; it defaults to `event_time` and callers
-    pass the signal's original slot time after a reschedule."""
+    pass the signal's original slot time after a reschedule. `description` is the optional organizer
+    note, shown between the intro and the multi-pod notice so a roster refresh preserves it."""
     unix = int(event_time.timestamp())
     calendar_url = google_calendar_url(name, event_time)
+    note = f"\n> {description}" if description else ""
     embed = discord.Embed(
         description=(
             f"## {NBSP * 2}🗓️ {name}\n"
             f"{_intro_line(role_time or event_time)}"
+            f"{note}"
             f"{_multipod_suffix(rosters)}"
         ),
         color=discord.Color.green(),
@@ -215,9 +219,23 @@ def slot_role_mention(guild: discord.Guild | None, event_time: datetime) -> str 
     return role.mention if role else None
 
 
+def _card_ping(
+    guild: discord.Guild | None, event_time: datetime, ping_role: bool, notify_role_name: str | None,
+) -> str | None:
+    """The card's content ping. An explicit notify role overrides the slot-derived one; otherwise the
+    slot role fires when ping_role is set, and nobody is pinged when it is not."""
+    if notify_role_name is not None:
+        role = find_role(guild, notify_role_name)
+        return role.mention if role else None
+    if ping_role:
+        return slot_role_mention(guild, event_time)
+    return None
+
+
 async def post_scheduled_card(
     bot: commands.Bot, channel: discord.TextChannel, *, set_code: str, event_time: datetime, name: str,
     preseed_yes: list[tuple[str, str]] | None = None, ping_role: bool = True,
+    notify_role_name: str | None = None, description: str | None = None,
     pairing_mode: str | None = None, seating_mode: str | None = None, pick_timer: int | None = None,
 ) -> str | None:
     """Create a scheduled pod end to end and return its event id, or None when the thread or the
@@ -234,10 +252,11 @@ async def post_scheduled_card(
     rosters = {state: [] for state in RSVP_STATES}
     rosters[RSVP_YES] = [display for _, display in preseed_yes]
     guild = channel.guild
+    content = _card_ping(guild, event_time, ping_role, notify_role_name)
     try:
         message = await channel.send(
-            content=slot_role_mention(guild, event_time) if ping_role else None,
-            embed=build_rsvp_embed(name, event_time, rosters),
+            content=content,
+            embed=build_rsvp_embed(name, event_time, rosters, description=description),
             view=PodRsvpView(),
             allowed_mentions=discord.AllowedMentions(roles=True),
         )
@@ -256,7 +275,7 @@ async def post_scheduled_card(
     native_event_id = await _create_native_event(channel, name, event_time, message.jump_url)
     event_id, created_at, pairing_mode, seating_mode = await asyncio.to_thread(
         _record_scheduled_event, set_code, event_time, name, str(thread.id), native_event_id,
-        pairing_mode, seating_mode,
+        pairing_mode, seating_mode, description,
     )
     await asyncio.to_thread(pod_launch.link_event_sync, signal_id, event_id)
 
@@ -266,6 +285,8 @@ async def post_scheduled_card(
             view=ScheduledRegisteredView(),
         )
         await asyncio.to_thread(pod_launch.set_thread_message_sync, signal_id, str(registered.id))
+        if description:
+            await thread.send(description)
     except discord.HTTPException:
         log.warning(f"could not post the registered embed in thread {thread.id}", exc_info=True)
 
@@ -476,13 +497,14 @@ async def _create_native_event(
 
 def _record_scheduled_event(
     set_code: str, event_time: datetime, name: str, thread_id: str, native_event_id: str | None,
-    pairing_mode: str | None = None, seating_mode: str | None = None,
+    pairing_mode: str | None = None, seating_mode: str | None = None, description: str | None = None,
 ) -> tuple[str, datetime, str, str]:
     with SessionLocal() as session:
         event = record_ondemand_event(
             session, set_code=set_code, event_time=event_time, name=name, discord_thread_id=thread_id,
         )
         event.discord_scheduled_event_id = native_event_id
+        event.description = description
         if pairing_mode is not None:
             event.pairing_mode = pairing_mode
         if seating_mode is not None:
@@ -534,9 +556,10 @@ async def _update_card_time(bot: commands.Bot, event_id: str, name: str, new_tim
     channel = await _fetch_channel(bot, channel_id)
     if channel is None:
         return
+    description = await asyncio.to_thread(_event_description, event_id)
     try:
         message = await channel.fetch_message(int(message_id))
-        await message.edit(embed=build_rsvp_embed(name, new_time, rosters, slot_time))
+        await message.edit(embed=build_rsvp_embed(name, new_time, rosters, slot_time, description))
     except discord.HTTPException:
         log.warning(f"reschedule: could not edit card {message_id}", exc_info=True)
 
@@ -669,6 +692,12 @@ def _load_event(event_id: str) -> tuple[str, datetime, str, str, str | None, dat
             event.name, event.event_time, event.socket_status,
             event.discord_thread_id, event.discord_scheduled_event_id, event.created_at,
         )
+
+
+def _event_description(event_id: str) -> str | None:
+    with SessionLocal() as session:
+        event = session.get(PodDraftEvent, event_id)
+        return event.description if event is not None else None
 
 
 def _apply_new_time(event_id: str, new_time: datetime) -> None:

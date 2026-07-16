@@ -40,6 +40,7 @@ def pairing_options(current_mode: str | None) -> list[discord.SelectOption]:
     Seats dropdowns and disambiguating its Random option from the Seats one."""
     cur = (current_mode or DEFAULT_PAIRING_MODE).lower()
     return [
-        discord.SelectOption(label=f"Pairings: {label}", value=code, description=desc, default=(cur == code))
+        discord.SelectOption(
+            label=f"Pairings: {label}", value=code, description=desc, emoji="👥", default=(cur == code))
         for code, label, desc in PAIRING_MODES
     ]

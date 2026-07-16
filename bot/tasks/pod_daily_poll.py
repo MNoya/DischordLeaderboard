@@ -23,7 +23,7 @@ from bot.commands.messages import MSG_FIRST_POD_TIP_POLL, MSG_SLOT_ROLE_GRANTED
 from bot.commands.pod_queue import queue_role_mention
 from bot.commands.pod_rsvp import post_scheduled_card, register_launcher_refresh
 from bot.config import settings
-from bot.discord_helpers import NBSP, ZWSP
+from bot.discord_helpers import NBSP, ZWSP, resolve_pod_chat_channel
 from bot.services import pod_launch
 from bot.services.ping_roles import display_emoji, spec_named
 from bot.services.pod_roles import find_role, grant_pod_drafters, grant_role
@@ -55,7 +55,7 @@ POLL_INTRO = (
 MARKER_CLOSED = "Closed"
 MSG_POLL_INACTIVE = "This poll is no longer active."
 MSG_SLOT_CLOSED = "That slot's time already passed. Catch the next poll."
-POLL_NUDGE = "⚡ {count} in for {slot}! {mention}"
+POLL_NUDGE = "⚡ **{count} in** for {slot} — grab **1 more** to fire a Team draft! {link}{mention}"
 POLL_NUDGE_QUIET_MINUTES = 30
 
 
@@ -260,7 +260,9 @@ async def _handle_poll_click(interaction: discord.Interaction, bucket_key: str) 
 async def _maybe_nudge_slot(interaction: discord.Interaction, state, bucket_key: str) -> None:
     """One ping to the slot role when a lazy slot reaches one short of firing, mirroring the queue's
     nudge: once per slot and only after the quiet window. Lazy slots never carry a scheduled event, so
-    the scheduled-pod underfill nudge owns the reflected slots and the two never double-ping."""
+    the scheduled-pod underfill nudge owns the reflected slots and the two never double-ping. Lands in
+    pod-draft-chat with a jump link back to the launcher when POD_NUDGE_IN_CHAT is set, otherwise posts
+    in place under the launcher."""
     if state.count != settings.pod_signal_fire_threshold - 1:
         return
     claimed = await asyncio.to_thread(
@@ -270,11 +272,19 @@ async def _maybe_nudge_slot(interaction: discord.Interaction, state, bucket_key:
         return
     role = find_role(interaction.guild, bucket_role_name(bucket_key) or "")
     bucket = bucket_by_key(bucket_key)
-    if role is None or bucket is None or interaction.channel is None:
+    if role is None or bucket is None:
+        return
+    if settings.pod_nudge_in_chat:
+        channel = resolve_pod_chat_channel(interaction.client)
+        link = f"[**Sign up here**]({interaction.message.jump_url}) "
+    else:
+        channel = interaction.channel
+        link = ""
+    if channel is None:
         return
     try:
-        await interaction.channel.send(
-            POLL_NUDGE.format(count=state.count, slot=bucket.name, mention=role.mention),
+        await channel.send(
+            POLL_NUDGE.format(count=state.count, slot=bucket.name, link=link, mention=role.mention),
             allowed_mentions=discord.AllowedMentions(roles=True),
         )
     except discord.HTTPException:

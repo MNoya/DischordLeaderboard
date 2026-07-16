@@ -23,6 +23,7 @@ from bot.services.lobby_embed import (
     LobbyReadyButtonView,
     ReadyCheckUnlinkedConfirmView,
     build_drafting_view,
+    ready_cancel_notice,
     ready_check_unlinked_text,
     register_force_start_preview,
     register_settings_preview,
@@ -718,7 +719,7 @@ _LINKED_EIGHT: list[tuple[str, str]] = [
 ]
 _VALID_STATES = (
     "empty", "partial", "linked", "unlinked", "ready", "notready", "cancelled", "left", "superseded",
-    "readyunlinked",
+    "readyunlinked", "readycancel",
     "drafting", "complete", "submit", "podbracket", "podswiss", "podrandom", "podteam", "podlobby",
     "format", "seeding", "trophyhype", "round1", "round2", "round3", "voicelink", "review", "table",
     "teams", "teamstandings", "teamchamp", "teamhype", "teamvote",
@@ -761,10 +762,22 @@ def _preview_settings_labels() -> dict:
 def _preview_cancel_reason(state: str) -> str | None:
     """Representative cancel reasons matching the runtime paths: a mid-check join and a mid-check leave."""
     if state == "cancelled":
-        return "New player joined"
+        return f"`{_UNLINKED_SEAT}` joined the lobby"
     if state == "left":
-        return f"`{_LINKED_EIGHT[4][0]}` left"
+        return f"`{_LINKED_EIGHT[4][0]}` left the lobby"
     return None
+
+
+def _ready_cancel_notice_previews(retry_url: str) -> list[str]:
+    """The thread lines posted when a ready check is called off, one per runtime path, through the
+    prod builder so the copy can't drift from what players actually see. `retry_url` links the
+    Ready Check call-out to the lobby card just above, mirroring the live cancel. A decline is not
+    included — it posts no thread line, only the card's Not Ready banner."""
+    return [
+        ready_cancel_notice("joined", detail=f"`{_UNLINKED_SEAT}` joined the lobby", retry_url=retry_url),
+        ready_cancel_notice("left", detail=f"`{_LINKED_EIGHT[4][0]}` left the lobby", retry_url=retry_url),
+        ready_cancel_notice("timeout", detail="timed out", retry_url=retry_url),
+    ]
 
 
 def _build(state: str) -> tuple[discord.Embed, discord.ui.View | None]:
@@ -918,7 +931,9 @@ async def setup(bot: commands.Bot) -> None:
         `teamvote` shows the Team-Draft offer card with a working 🤝 vote button and three votes
         prefilled — your click is the fourth, locking it to Team Draft and proposing a Ready Check.
         `ready` shows the active ready-check card; clicking its Force Start button previews the ephemeral
-        confirm dialog (no live pod needed). `round1`/`round2`/`round3` are no-DB snapshots of each round
+        confirm dialog (no live pod needed). `readycancel` posts the lobby card plus the thread lines sent
+        when a check is called off — a mid-check join, a leave, and a timeout (a decline posts no line).
+        `round1`/`round2`/`round3` are no-DB snapshots of each round
         embed (`round1 random` for the random-pairing header).
         No arg → posts the beginning lobby state. Every invocation posts fresh messages.
         `podbracket` / `podswiss` / `podrandom` seed a real 8-player pod (seat 1 = you) and hand off to
@@ -947,6 +962,13 @@ async def setup(bot: commands.Bot) -> None:
         if state == "readyunlinked":
             embed, _ = _build("unlinked")
             await ctx.send(embed=embed, view=_ReadyCheckPreviewView())
+            return
+
+        if state == "readycancel":
+            embed, view = _build("linked")
+            lobby_msg = await ctx.send(embed=embed, view=view)
+            for notice in _ready_cancel_notice_previews(lobby_msg.jump_url):
+                await ctx.send(notice, allowed_mentions=discord.AllowedMentions.none())
             return
 
         if state == "table":

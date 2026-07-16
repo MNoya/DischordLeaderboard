@@ -29,10 +29,10 @@ from bot.config import settings
 from bot.database import SessionLocal
 from bot.models import Player, PodDraftEvent, PodDraftParticipant, PodSignal, PodSignalMember
 from bot.services import pod_signals
-from bot.services.pod_draft_manager import start_manager
+from bot.services.pod_draft_manager import set_card_close_hook, start_manager
 from bot.services.pod_drafts import draftmancer_url_for, record_ondemand_event
-from bot.services.pod_schedule import highest_event_number
 from bot.services.pod_signals import SCHEDULE_TZ, slot_event_time
+from bot.services.pod_slot import pod_display_name
 from bot.tasks.pod_draft_reminder import (
     build_lobby_open_body,
     schedule_roster_reminder,
@@ -59,6 +59,9 @@ class SignalState:
     event_id: str | None
     set_code: str | None
     created_at: datetime | None = None
+    opened_by: str | None = None
+    notify_role: str | None = None
+    description: str | None = None
 
 
 @dataclass(frozen=True)
@@ -69,6 +72,27 @@ class ToggleResult:
     changed: bool
     closed: bool
     first_contact: bool = False
+
+
+@dataclass(frozen=True)
+class LeaveResolution:
+    """Outcome of the last-player Leave confirmation. `cancelled` when the confirmer was still the only
+    member and the queue was closed; `left` when others joined during the prompt so the confirmer was
+    just removed and the queue stays open; `gone` when the signal had already closed. `names`, `set_code`,
+    `created_at`, `opened_by`, `notify_role`, and `description` re-render the still-open card on the
+    `left` path."""
+    outcome: str
+    names: list[str]
+    set_code: str | None
+    created_at: datetime | None
+    opened_by: str | None
+    notify_role: str | None = None
+    description: str | None = None
+
+
+LEAVE_CANCELLED = "cancelled"
+LEAVE_LEFT = "left"
+LEAVE_GONE = "gone"
 
 
 @dataclass(frozen=True)
@@ -138,7 +162,7 @@ def create_poll_signals_sync(
 def create_queue_signal_sync(
     *, guild_id: str, channel_id: str, message_id: str, signal_date: date, opened_by: str,
     set_code: str | None = None, pairing_mode: str | None = None, seating_mode: str | None = None,
-    pick_timer: int | None = None,
+    pick_timer: int | None = None, notify_role: str | None = None, description: str | None = None,
 ) -> str:
     with SessionLocal() as session:
         signal = PodSignal(
@@ -153,6 +177,8 @@ def create_queue_signal_sync(
             pairing_mode=pairing_mode,
             seating_mode=seating_mode,
             pick_timer=pick_timer,
+            notify_role=notify_role,
+            description=description,
         )
         session.add(signal)
         session.commit()
@@ -186,6 +212,7 @@ class JoinableSignal:
     message_id: str
     slot_time: datetime | None
     count: int
+    set_code: str | None
 
 
 def joinable_signals_sync(guild_id: str, *, now: datetime, within: timedelta) -> list[JoinableSignal]:
@@ -205,6 +232,7 @@ def joinable_signals_sync(guild_id: str, *, now: datetime, within: timedelta) ->
                 continue
             joinable.append(JoinableSignal(
                 signal.kind, signal.channel_id, signal.message_id, signal.slot_time, len(signal.members),
+                signal.set_code,
             ))
         return joinable
 
@@ -347,6 +375,60 @@ def toggle_member_sync(
         result = toggle_member(session, message_id, bucket, discord_user_id, display_name, action)
         session.commit()
         return result
+
+
+def queue_member_count(session: Session, message_id: str, discord_user_id: str) -> tuple[bool, int] | None:
+    """(is_member, count) for an open queue by its card message id, or None if the signal is gone or
+    closed — lets the Leave button decide whether the click would empty the queue."""
+    signal = _signal_by_message_bucket(session, message_id, pod_signals.QUEUE_BUCKET)
+    if signal is None or signal.status != pod_signals.STATUS_OPEN:
+        return None
+    member_ids = session.execute(
+        select(PodSignalMember.discord_user_id).where(PodSignalMember.signal_id == signal.id)
+    ).scalars().all()
+    return discord_user_id in member_ids, len(member_ids)
+
+
+def queue_member_count_sync(message_id: str, discord_user_id: str) -> tuple[bool, int] | None:
+    with SessionLocal() as session:
+        return queue_member_count(session, message_id, discord_user_id)
+
+
+def resolve_last_leave(session: Session, message_id: str, discord_user_id: str) -> LeaveResolution:
+    """Settle a confirmed last-player Leave. Cancels the queue only if the confirmer is still the sole
+    member; if anyone joined during the prompt the confirmer is just removed and the queue stays open.
+    Does not commit."""
+    signal = _signal_by_message_bucket(session, message_id, pod_signals.QUEUE_BUCKET)
+    if signal is None or signal.status != pod_signals.STATUS_OPEN:
+        return LeaveResolution(LEAVE_GONE, [], None, None, None)
+    member_ids = session.execute(
+        select(PodSignalMember.discord_user_id).where(PodSignalMember.signal_id == signal.id)
+    ).scalars().all()
+    if discord_user_id in member_ids and len(member_ids) > 1:
+        session.execute(
+            delete(PodSignalMember).where(
+                PodSignalMember.signal_id == signal.id,
+                PodSignalMember.discord_user_id == discord_user_id,
+            )
+        )
+        session.flush()
+        names = _member_names(session, signal.id)
+        return LeaveResolution(
+            LEAVE_LEFT, names, signal.set_code, signal.created_at, signal.opened_by,
+            signal.notify_role, signal.description,
+        )
+    signal.status = pod_signals.STATUS_EXPIRED
+    return LeaveResolution(
+        LEAVE_CANCELLED, [], signal.set_code, signal.created_at, signal.opened_by,
+        signal.notify_role, signal.description,
+    )
+
+
+def resolve_last_leave_sync(message_id: str, discord_user_id: str) -> LeaveResolution:
+    with SessionLocal() as session:
+        resolution = resolve_last_leave(session, message_id, discord_user_id)
+        session.commit()
+        return resolution
 
 
 def claim_fire(session: Session, signal_id: str) -> bool:
@@ -626,14 +708,10 @@ def scheduled_event_for_message_sync(message_id: str) -> str | None:
 
 
 def ondemand_event_name_sync(set_code: str, event_time: datetime) -> str:
-    """The standard `SET Pod Draft #N - date` name, numbered after the set's highest existing pod.
-    Gaps against numbers the weekly schedule has reserved but not yet created are fine."""
-    with SessionLocal() as session:
-        names = session.execute(
-            select(PodDraftEvent.name).where(PodDraftEvent.set_code == set_code.upper())
-        ).scalars()
-        number = highest_event_number(names) + 1
-    return f"{set_code} Pod Draft #{number} - {event_time.astimezone(SCHEDULE_TZ):%b %-d}"
+    """The `SET Mon Day Slot Pod` name, fixed at creation and never renumbered. The website's `#N`
+    milestone is a separate execution-ordered projection in `public_pod_draft_events`, not baked in
+    here, so a scheduled card posted days ahead can never carry an out-of-order number."""
+    return pod_display_name(set_code, event_time)
 
 
 async def launch_from_signal(
@@ -669,6 +747,9 @@ async def launch_from_signal(
                 session, set_code=set_code, event_time=event_time, name=name,
                 discord_thread_id=str(thread.id),
             )
+            signal = session.get(PodSignal, signal_id)
+            if signal is not None:
+                event.description = signal.description
             session.commit()
             return event.id
 
@@ -796,10 +877,41 @@ def past_pod_cards_sync(now: datetime, since: datetime) -> list[tuple[str, str, 
     return [(s.channel_id, s.message_id, e.discord_thread_id, s.thread_message_id) for s, e in rows]
 
 
+def event_card_surfaces_sync(event_id: str) -> tuple[str, str, str | None, str | None] | None:
+    """(card channel_id, card message_id, thread_id, thread-controls message_id) for one scheduled
+    pod, or None when the pod has no card (poll/queue-born pods carry no RSVP card)."""
+    with SessionLocal() as session:
+        row = session.execute(
+            select(
+                PodSignal.channel_id, PodSignal.message_id, PodSignal.thread_message_id,
+                PodDraftEvent.discord_thread_id,
+            )
+            .join(PodDraftEvent, PodDraftEvent.id == PodSignal.event_id)
+            .where(PodSignal.event_id == event_id, PodSignal.kind == pod_signals.KIND_SCHEDULED)
+        ).first()
+    if row is None:
+        return None
+    channel_id, message_id, thread_message_id, thread_id = row
+    return channel_id, message_id, thread_id, thread_message_id
+
+
+async def close_event_card(bot: commands.Bot, event_id: str) -> None:
+    """Drop the RSVP buttons on one pod's card the moment its draft finishes. The card stays live
+    through lobby fill and the ready check — including a restart that reopens the lobby — and closes
+    only at draft_done, the first state a restart can no longer revert. No-op for pods without a card."""
+    surfaces = await asyncio.to_thread(event_card_surfaces_sync, event_id)
+    if surfaces is None or _bot is None:
+        return
+    channel_id, message_id, thread_id, thread_message_id = surfaces
+    await _clear_view(int(channel_id), int(message_id))
+    if thread_id and thread_message_id:
+        await _clear_view(int(thread_id), int(thread_message_id))
+
+
 async def close_past_pod_cards() -> None:
-    """Drop the RSVP buttons on cards for pods that have already run, called from the daily launcher
-    post. Signups stay live from a pod's start until the next launcher — a generous grace for late
-    joiners rescuing an underfilled pod — then close in one sweep, so reschedules never need reopening."""
+    """Backstop for the per-draft close: sweep RSVP buttons off cards for pods that ran but never hit
+    draft_done — cancelled or no-show pods whose `close_event_card` never fired — so no card outlives
+    its pod indefinitely. Runs from the daily launcher post over pods started in the last window."""
     if _bot is None:
         return
     now = datetime.now(timezone.utc)
@@ -912,9 +1024,11 @@ _bot: commands.Bot | None = None
 
 
 def init_launch(bot: commands.Bot) -> None:
-    """Wire the bot reference so scheduler callbacks (queue teardown) can edit Discord messages."""
+    """Wire the bot reference so scheduler callbacks (queue teardown) can edit Discord messages, and
+    register the draft-done card close so the manager can fire it without importing this module."""
     global _bot
     _bot = bot
+    set_card_close_hook(close_event_card)
 
 
 def _has_pod_history(session: Session, discord_user_id: str) -> bool:
@@ -989,7 +1103,7 @@ def _members_by_rsvp(session: Session, signal_id: str) -> dict[str, list[str]]:
 def _state(signal: PodSignal, count: int) -> SignalState:
     return SignalState(
         signal.id, signal.kind, signal.bucket, signal.status, count, signal.slot_time, signal.event_id,
-        signal.set_code, signal.created_at,
+        signal.set_code, signal.created_at, signal.opened_by, signal.notify_role, signal.description,
     )
 
 

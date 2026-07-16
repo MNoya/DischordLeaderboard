@@ -52,8 +52,22 @@ class Settings(BaseSettings):
     pod_draft_fallback_tz: str = "America/New_York"
     pod_draft_skip_reminder_wait: bool = False
     pod_draft_end_watchdog_minutes: int = 90
+    pod_draft_start_ping_ttl_minutes: int = 120
     pod_signal_fire_threshold: int = 6
     pod_queue_inactivity_minutes: int = 180
+    pod_underfill_check_hours: str = "24,3,1"
+    pod_underfill_ping_hours: str = "1"
+    pod_underfill_ping_one_short_only: bool = True
+    pod_nudge_in_chat: bool = True
+
+    @property
+    def pod_underfill_check_hours_tuple(self) -> tuple[int, ...]:
+        return _int_csv(self.pod_underfill_check_hours)
+
+    @property
+    def pod_underfill_ping_hours_set(self) -> frozenset[int]:
+        return frozenset(_int_csv(self.pod_underfill_ping_hours))
+
     sesh_bot_id: int = 616754792965865495
     draftmancer_ws_url: str = f"wss://{DRAFTMANCER_HOST}"
     draftmancer_web_url: str = f"https://{DRAFTMANCER_HOST}"
@@ -63,6 +77,10 @@ class Settings(BaseSettings):
     libsyn_feed_url: str = "https://feeds.libsyn.com/limitedlevelups/rss"
     media_sync_enabled: bool = True
     profile_sync_enabled: bool = True
+
+
+def _int_csv(raw: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in raw.split(",") if part.strip())
 
 
 settings = Settings()

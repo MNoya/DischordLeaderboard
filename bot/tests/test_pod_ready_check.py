@@ -1,7 +1,7 @@
 import asyncio
 
 from bot.services import pod_draft_manager
-from bot.services.lobby_embed import ready_check_unlinked_text, ready_status_banner
+from bot.services.lobby_embed import ready_cancel_notice, ready_check_unlinked_text, ready_status_banner
 from bot.services.pod_draft_manager import PodDraftManager
 
 
@@ -69,8 +69,8 @@ def test_grace_aborts_when_player_stays_gone(monkeypatch):
     mgr.session_users = [u for u in mgr.session_users if u["userID"] != "7"]
     aborts: list[str] = []
 
-    async def _record(reason, *, decliner_name=None):
-        aborts.append(reason)
+    async def _record(kind, *, decliner_name=None, detail=None):
+        aborts.append(detail)
         mgr.ready_check_active = False
 
     mgr._invalidate_ready_check = _record
@@ -85,13 +85,27 @@ def test_grace_resumes_when_player_returns(monkeypatch):
     mgr, _ = _ready_manager([str(i) for i in range(8)])
     aborts: list[str] = []
 
-    async def _record(reason, *, decliner_name=None):
-        aborts.append(reason)
+    async def _record(kind, *, decliner_name=None, detail=None):
+        aborts.append(detail)
 
     mgr._invalidate_ready_check = _record
     asyncio.run(mgr._ready_grace_countdown())
 
     assert aborts == []
+
+
+def test_roster_change_detail_pluralizes():
+    assert "`Ada`" in pod_draft_manager._roster_change_detail(["Ada"], "joined")
+    assert "2 players" in pod_draft_manager._roster_change_detail(["Ada", "Bo"], "left")
+    assert pod_draft_manager._roster_change_detail([], "left")
+
+
+def test_ready_cancel_notice_links_button_and_names_players():
+    joined = ready_cancel_notice("joined", detail="`Ada` joined the lobby", retry_url="https://d/1")
+    no_link = ready_cancel_notice("timeout", retry_url=None)
+
+    assert "https://d/1" in joined and "Ada" in joined
+    assert "http" not in no_link
 
 
 def test_declined_banner_carries_initiator():

@@ -283,6 +283,37 @@ export function cleanPodEventName(name: string, setCode: string): string {
   return (withoutCode || cleaned) + tableSuffix;
 }
 
+// The slot phrase alone (`Early Pod`, `Late Pod`), stripped of set code, date, baked number, and any
+// Table suffix. Legacy pods with no slot in the name fall back to `Pod Draft`. The date lives in the
+// row's date box and the Table suffix renders separately, so neither belongs here.
+export function podSlotName(name: string, setCode: string): string {
+  const escaped = setCode.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return name
+    .replace(/\s*[-–]?\s*Table\s+\d+\s*$/i, "")
+    .replace(/#\d+/g, "")
+    .replace(/\s+[-–]\s+[A-Z][a-z]+\.?\s+\d{1,2}\s*$/, "")
+    .replace(new RegExp(`\\b${escaped}\\b`, "gi"), "")
+    .replace(/^\s*[A-Z][a-z]+\.?\s+\d{1,2}\s+/, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+// Plain-string title (medallions, aria): `#15 Early Pod - Table 2` once run, the slot alone upcoming.
+// PodEventTitle renders the styled version. Number is the execution-ordered ordinal, not any baked #N.
+export function podEventTitle(event: {
+  ordinal?: number | null;
+  tableIndex?: number;
+  name: string;
+  setCode: string;
+}): string {
+  const slot = podSlotName(event.name, event.setCode);
+  const table = (event.tableIndex ?? 1) > 1 ? ` - Table ${event.tableIndex}` : "";
+  if (event.ordinal != null) {
+    return `#${event.ordinal} ${slot}${table}`;
+  }
+  return slot;
+}
+
 // Set codes are uppercase in the data; URLs are case-insensitive.
 export function canonicalSetCode(raw: string, sets: SetSummary[] | undefined): string {
   const known = sets?.find((s) => s.code.toLowerCase() === raw.toLowerCase());

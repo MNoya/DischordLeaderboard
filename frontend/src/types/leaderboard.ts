@@ -148,6 +148,9 @@ export interface PodEventSummary {
   participantCount: number;
   isFinalized: boolean;
   seshMessageId: string | null;
+  // Execution-ordered milestone number, null until the pod has run; tables share it and split on tableIndex
+  ordinal?: number | null;
+  tableIndex?: number;
 }
 
 export interface MainboardCard {

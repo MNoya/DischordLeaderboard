@@ -178,6 +178,19 @@ def ready_check_unlinked_text(unlinked: list[str]) -> str:
     )
 
 
+def ready_cancel_notice(kind: str, *, detail: str | None = None, retry_url: str | None = None) -> str:
+    """Thread line posted when a ready check is called off by a roster change or timeout — the lobby
+    embed edit alone is easy to miss when players are looking at Draftmancer. A decline is not
+    announced here; the lobby card's Not Ready banner already carries it. `kind` is 'timeout' or a
+    roster-change 'joined'/'left' carrying `detail`. The call-out links to the lobby card's Ready
+    Check button when `retry_url` is given. Shared by the live cancel path and the `!test` preview so
+    the copy never drifts."""
+    ready_check = f"[Ready Check]({retry_url})" if retry_url else "Ready Check"
+    headline = "⚠️ **Ready Check timed out!**" if kind == "timeout" else \
+        f"⚠️ **Ready Check cancelled!** {detail}"
+    return f"{headline}\n🔄 Click **{ready_check}** when all players are present"
+
+
 class ReadyCheckUnlinkedConfirmView(discord.ui.View):
     """Ephemeral warn-but-allow gate shown to the initiator when a ready check would include unrecognized
     seats — proceeds on confirm so nobody drafts a scoring-blind seat without seeing it first."""

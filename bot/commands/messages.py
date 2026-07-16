@@ -38,6 +38,9 @@ MSG_LOBBY_OPEN = (
 MSG_LOBBY_HEADLINE_NOW = "Lobby opening now!"
 MSG_LOBBY_HEADLINE_SOON = "Pod Draft starts in {minutes} minutes!"
 
+MSG_DRAFT_STARTED_ANNOUNCE = "{name} is starting now!"
+MSG_DRAFT_STARTED_LINK = "[**Event Details**]({url})"
+
 MSG_FIRST_POD_TIP_POLL = (
     "First pod? Pods are live multiplayer drafts on Draftmancer, played out as Arena matches. "
     "This slot is a set time, so no need to stay online now. Once {threshold} players are in, a thread opens "

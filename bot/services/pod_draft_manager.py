@@ -8,6 +8,7 @@ sessionUsers updates so later commands can act on who is in the lobby
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import gzip
 import json
 import logging
@@ -24,6 +25,8 @@ from sqlalchemy import func, select
 from bot import emojis
 from bot.commands.messages import (
     MSG_BOT_RECONNECTED,
+    MSG_DRAFT_STARTED_ANNOUNCE,
+    MSG_DRAFT_STARTED_LINK,
     MSG_LOBBY_FULL_PROMPT,
     MSG_MOCK_COMPLETE,
     MSG_MOCK_LOBBY_COUNTER,
@@ -39,6 +42,7 @@ from bot.services.lobby_embed import (
     LobbyReadyButtonView,
     build_drafting_view,
     event_title,
+    ready_cancel_notice,
     render as render_lobby_embed,
     render_ready_check_progress,
 )
@@ -100,6 +104,21 @@ _RESTART_READY_MIN_PLAYERS = 2
 _SEEDING_REFRESH_HOOK = None
 _SEEDING_REPOST_HOOK = None
 _SECOND_TABLE_HOOK = None
+_CARD_CLOSE_HOOK = None
+
+
+def set_card_close_hook(callback) -> None:
+    """pod_launch registers its RSVP-card close here so the manager can drop the card's buttons at
+    draft_done without importing pod_launch (which imports the manager)."""
+    global _CARD_CLOSE_HOOK
+    _CARD_CLOSE_HOOK = callback
+
+
+def notify_card_close(bot, event_id: str) -> None:
+    """Close the pod's RSVP card (no-op if unset). Fired at draft_done — the first state a restart can
+    no longer revert to the lobby — so the card stays live through fill, ready check, and any restart."""
+    if _CARD_CLOSE_HOOK is not None:
+        asyncio.create_task(_CARD_CLOSE_HOOK(bot, event_id))
 
 
 def set_second_table_hook(callback) -> None:
@@ -246,6 +265,7 @@ class PodDraftManager:
         self.champion_discord_ids: set[str] = set()
         self.championship_task: asyncio.Task | None = None
         self._end_watchdog_task: asyncio.Task | None = None
+        self._start_ping_delete_task: asyncio.Task | None = None
         self.sio = socketio.AsyncClient(reconnection=False, logger=False, engineio_logger=False)
         self.sio.on("connect", self._on_connect)
         self.sio.on("disconnect", self._on_disconnect)
@@ -371,7 +391,8 @@ class PodDraftManager:
         if self.ready_check_active:
             present = {u.get("userID") for u in self.player_session_users()}
             if not present <= self.expected_user_ids:
-                await self._invalidate_ready_check("New player joined")
+                joined = present - self.expected_user_ids
+                await self._invalidate_ready_check("joined", detail=self._joined_detail(joined))
             elif not self.expected_user_ids <= present:
                 self._arm_ready_grace()
             else:
@@ -938,6 +959,7 @@ class PodDraftManager:
         self.draft_complete = True
         self._cancel_end_watchdog()
         await self._mark_socket_status("draft_done")
+        notify_card_close(self.bot, self.event_id)
         self.tournament_roster = self._snapshot_tournament_roster()
         log.info(
             f"[DRAFT] roster_snapshot event={self.event_id} roster_size={len(self.tournament_roster)}"
@@ -1332,6 +1354,7 @@ class PodDraftManager:
                 await thread.send(content="**🎉 Draft started!**")
             except Exception:
                 log.warning("[DRAFT] started.thread_post_error", exc_info=True)
+        await self._announce_start_in_channel(thread)
 
     async def _refuse_odd_roster_start(self) -> None:
         """Block startDraft on an odd roster: every pairing mode needs an even table, and a ready check
@@ -1832,14 +1855,17 @@ class PodDraftManager:
             fingerprint=f"ready_check_timeout:{self.event_id}",
             tag="READY",
         )
-        await self._invalidate_ready_check("timed out")
+        await self._invalidate_ready_check("timeout", detail="timed out")
 
-    async def _invalidate_ready_check(self, reason: str, *, decliner_name: str | None = None) -> None:
+    async def _invalidate_ready_check(
+        self, kind: str, *, decliner_name: str | None = None, detail: str | None = None,
+    ) -> None:
+        """Call off an in-flight ready check. `kind` drives the thread notice ('joined', 'left',
+        'declined', 'timeout'); `detail` is the human phrase shown on the lobby embed banner."""
         if not self.ready_check_active:
             return
         log.info(
-            f"[READY] invalidated event={self.event_id} reason={reason!r} "
-            f"decliner={decliner_name!r}"
+            f"[READY] invalidated event={self.event_id} kind={kind!r} decliner={decliner_name!r}"
         )
         self.ready_check_active = False
         self.last_ready_summary = (len(self.ready_users), len(self.expected_user_ids))
@@ -1847,8 +1873,25 @@ class PodDraftManager:
         if self._ready_timeout_task is not None:
             self._ready_timeout_task.cancel()
         self.last_decliner_name = decliner_name
-        self.last_cancel_reason = None if decliner_name is not None else reason
+        self.last_cancel_reason = None if decliner_name is not None else detail
         await self.refresh_lobby_now()
+        if kind != "declined":
+            await self._announce_ready_cancel(kind, detail)
+
+    async def _announce_ready_cancel(self, kind: str, detail: str | None) -> None:
+        """Post the cancel in the thread — the lobby embed edit alone is easy to miss when players
+        are looking at Draftmancer rather than Discord. The call-out links to the lobby card that
+        carries the Ready Check button. Declines are not posted here; their Not Ready banner already
+        surfaces on the card."""
+        thread = await self._fetch_thread()
+        if thread is None:
+            return
+        retry_url = getattr(self.lobby_status_message, "jump_url", None)
+        notice = ready_cancel_notice(kind, detail=detail, retry_url=retry_url)
+        try:
+            await thread.send(notice, allowed_mentions=discord.AllowedMentions.none())
+        except Exception:
+            log.warning(f"[READY] cancel_notice_failed event={self.event_id}", exc_info=True)
 
     def _arm_ready_grace(self) -> None:
         if self._ready_grace_task is not None and not self._ready_grace_task.done():
@@ -1874,13 +1917,42 @@ class PodDraftManager:
             return
         missing_names = [self.expected_user_names.get(uid) for uid in (self.expected_user_ids - present)]
         missing_names = [name for name in missing_names if name]
-        if len(missing_names) == 1:
-            reason = f"`{missing_names[0]}` left"
-        elif missing_names:
-            reason = f"{len(missing_names)} players left"
-        else:
-            reason = "A player left"
-        await self._invalidate_ready_check(reason)
+        await self._invalidate_ready_check("left", detail=_roster_change_detail(missing_names, "left"))
+
+    def _joined_detail(self, joined_ids: set[str]) -> str:
+        names = [u.get("userName") for u in self.session_users if u.get("userID") in joined_ids]
+        names = [name for name in names if name]
+        return _roster_change_detail(names, "joined")
+
+    async def _announce_start_in_channel(self, thread) -> None:
+        """Post the sesh-style 'starting now' embed into the coordination channel so the community sees
+        a pod fired without opening the thread, then self-delete it after a fixed window. Skipped for mock
+        drafts, which never touch the shared channel."""
+        if self.kind == "mock" or thread is None:
+            return
+        channel = self.bot.get_channel(settings.pod_draft_channel_id)
+        if channel is None:
+            return
+        embed = discord.Embed(
+            title=MSG_DRAFT_STARTED_ANNOUNCE.format(name=self.event_name),
+            description=MSG_DRAFT_STARTED_LINK.format(url=thread.jump_url),
+            color=discord.Color.green(),
+        )
+        try:
+            message = await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+        except discord.HTTPException:
+            log.warning(f"[DRAFT] start_announce.post_error event={self.event_id}", exc_info=True)
+            return
+        self._start_ping_delete_task = asyncio.create_task(self._delete_start_ping(message))
+
+    async def _delete_start_ping(self, message) -> None:
+        window_s = max(1, settings.pod_draft_start_ping_ttl_minutes) * 60
+        try:
+            await asyncio.sleep(window_s)
+        except asyncio.CancelledError:
+            return
+        with contextlib.suppress(discord.HTTPException):
+            await message.delete()
 
     def _schedule_end_watchdog(self) -> None:
         self._cancel_end_watchdog()
@@ -1909,6 +1981,15 @@ class PodDraftManager:
             fingerprint=f"end_draft_watchdog:{self.event_id}",
             tag="DRAFT",
         )
+
+def _roster_change_detail(names: list[str], verb: str) -> str:
+    """Phrase for who joined or left mid-check, shown on the lobby banner and the thread notice."""
+    if len(names) == 1:
+        return f"`{names[0]}` {verb} the lobby"
+    if names:
+        return f"{len(names)} players {verb} the lobby"
+    return f"A player {verb} the lobby"
+
 
 def _is_ready_state(state) -> bool:
     """Draftmancer sends setReady(userID, state) where state can be 0/1 or 'Ready'/'NotReady'."""
