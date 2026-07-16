@@ -3,7 +3,7 @@ import discord
 from bot.services import pod_team
 from bot.services.pod_drafts import normalize_player_name
 from bot.services.pod_swiss import Standing
-from bot.services.pod_team_flow import TEAM_VICTORY_COLORS
+from bot.services.pod_team_flow import TEAM_VICTORY_COLORS, team_showcase_keys
 from bot.services.pod_team_showcase import build_team_championship_view, decided_trophy_standings
 from bot.services.pod_tournament import ParticipantDeckData
 
@@ -98,8 +98,8 @@ def test_championship_view_shows_only_the_winning_teams_gallery():
     assert container.accent_colour == TEAM_VICTORY_COLORS[pod_team.TEAM_A]
     assert len(galleries) == 1 and len(galleries[0].items) == 3
     assert {m.media.url for m in galleries[0].items} == {f"https://cdn.example/{n}.png" for n in GREEN}
-    assert any("Fern" in t for t in texts)
-    assert thumbnail_sections == []
+    assert len(thumbnail_sections) == 1
+    assert {m.media.url for m in galleries[0].items}.isdisjoint({thumbnail_sections[0].accessory.media.url})
 
 
 def test_championship_view_rows_carry_captions_for_both_teams():
@@ -113,9 +113,10 @@ def test_championship_view_rows_carry_captions_for_both_teams():
         player_colors={}, deck_data=deck_data,
     )
 
-    _, _, texts, _ = _container_parts(view)
-    green_block = next(t for t in texts if "Ava" in t)
-    blue_block = next(t for t in texts if "Fern" in t)
+    container, _, _, _ = _container_parts(view)
+    blocks = [_block_text(c) for c in container.children]
+    green_block = next(b for b in blocks if "Ava" in b)
+    blue_block = next(b for b in blocks if "Fern" in b)
     assert "pure value" in green_block
     assert "pure value" in blue_block
 
@@ -136,6 +137,67 @@ def test_championship_view_losing_3_0_gets_a_row_thumbnail():
     block = section.children[0].content
     assert "Bram" in block and "Dex" in block and "Fern" in block
     assert section.accessory.media.url == "https://cdn.example/Bram.png"
+
+
+def _block_text(child):
+    if isinstance(child, discord.ui.TextDisplay):
+        return child.content
+    if isinstance(child, discord.ui.Section):
+        return child.children[0].content
+    return ""
+
+
+def test_championship_view_puts_the_winning_team_on_top():
+    standings = _standings([(1, 2), (1, 2), (0, 3)], [(3, 0), (2, 1), (2, 1)])
+    deck_data = _deck_data([(n, f"https://cdn.example/{n}.png") for n in GREEN + BLUE])
+
+    view = build_team_championship_view(
+        standings, TEAMS, event_name="Pod", displays=DISPLAYS,
+        player_colors={}, deck_data=deck_data,
+    )
+
+    container, _, texts, _ = _container_parts(view)
+    blocks = [_block_text(c) for c in container.children]
+    winning_index = next(i for i, b in enumerate(blocks) if "Bram" in b)
+    losing_index = next(i for i, b in enumerate(blocks) if "Ava" in b)
+    assert "Blue Team wins" in texts[0]
+    assert winning_index < losing_index
+
+
+def test_championship_view_losing_team_thumbnail_is_the_best_performer():
+    standings = _standings([(3, 0), (2, 1), (2, 1)], [(2, 1), (1, 2), (0, 3)])
+    deck_data = _deck_data([(n, f"https://cdn.example/{n}.png") for n in GREEN + BLUE])
+
+    view = build_team_championship_view(
+        standings, TEAMS, event_name="Pod", displays=DISPLAYS,
+        player_colors={}, deck_data=deck_data,
+    )
+
+    _, _, _, thumbnail_sections = _container_parts(view)
+    assert len(thumbnail_sections) == 1
+    (section,) = thumbnail_sections
+    assert section.accessory.media.url == "https://cdn.example/Bram.png"
+
+
+def test_championship_view_skips_thumbnail_when_top_loser_deck_missing():
+    standings = _standings([(3, 0), (2, 1), (2, 1)], [(2, 1), (1, 2), (0, 3)])
+    deck_data = _deck_data([(n, f"https://cdn.example/{n}.png") for n in GREEN + ["Dex", "Fern"]])
+
+    view = build_team_championship_view(
+        standings, TEAMS, event_name="Pod", displays=DISPLAYS,
+        player_colors={}, deck_data=deck_data,
+    )
+
+    _, _, _, thumbnail_sections = _container_parts(view)
+    assert thumbnail_sections == []
+
+
+def test_showcase_keys_do_not_gate_the_losing_side():
+    standings = _standings([(3, 0), (2, 1), (2, 1)], [(2, 1), (1, 2), (0, 3)])
+
+    keys = team_showcase_keys(standings, TEAMS)
+
+    assert keys == {normalize_player_name(n) for n in GREEN}
 
 
 def test_championship_view_draw_shows_no_gallery():

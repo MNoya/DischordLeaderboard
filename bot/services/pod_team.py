@@ -96,3 +96,7 @@ def team_winner(a_wins: int, b_wins: int) -> str | None:
     if b_wins > a_wins:
         return TEAM_B
     return None
+
+
+def other_team(team: str) -> str:
+    return TEAM_B if team == TEAM_A else TEAM_A

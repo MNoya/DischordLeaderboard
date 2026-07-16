@@ -338,7 +338,8 @@ def team_final_standings(standings) -> list[FinalStanding]:
 
 def team_showcase_keys(standings, teams: dict[str, str]) -> set[str]:
     """Normalized names whose decks gate the team championship post: the winning side plus any 3-0
-    from the losing side. A draw has no winning side, so only the 3-0s gate."""
+    from the losing side. A draw has no winning side, so only the 3-0s gate. The losing team's
+    best-performer thumbnail is best-effort — never gated, shown only if that deck is already in."""
     normalized = {normalize_player_name(name): team for name, team in teams.items()}
     a_wins, b_wins = team_scores(standings, teams)
     winner = pod_team.team_winner(a_wins, b_wins)

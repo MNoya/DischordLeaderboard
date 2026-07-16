@@ -141,9 +141,10 @@ def build_team_championship_view(
     thread_id: int | None = None,
 ) -> ui.LayoutView:
     """The team counterpart of the champion announcement card: scoreline headline, then one block per
-    team divided by a separator — roster rows with records, captions, and deck colors for both sides,
-    a screenshot gallery for the winning team, and a row thumbnail for a losing-side 3-0. The rest of
-    the losing decks live behind the Draft Recap link. A draw has no gallery, only 3-0 thumbnails."""
+    team divided by a separator — the winning team on top, roster rows with records, captions, and deck
+    colors for both sides, a screenshot gallery for the winning team, and a row thumbnail of the losing
+    team's best performer's deck. The rest of the losing decks live behind the Draft Recap link. A draw
+    keeps the fixed team order and shows only 3-0 thumbnails."""
     normalized = {normalize_player_name(name): team for name, team in teams.items()}
     a_wins, b_wins = team_scores(standings, teams)
     winner = pod_team.team_winner(a_wins, b_wins)
@@ -159,7 +160,12 @@ def build_team_championship_view(
     started_at = event_started_at or datetime.now(timezone.utc)
     container.add_item(ui.TextDisplay(f"## {title}\n**Drafted on** <t:{int(started_at.timestamp())}:F>"))
 
-    for team in (pod_team.TEAM_A, pod_team.TEAM_B):
+    if winner is None:
+        team_order = (pod_team.TEAM_A, pod_team.TEAM_B)
+    else:
+        team_order = (winner, pod_team.other_team(winner))
+
+    for team in team_order:
         members = [s for s in standings if normalized.get(normalize_player_name(s.player_name)) == team]
         container.add_item(ui.Separator())
         header = f"### {pod_team.team_emoji(team)} {pod_team.team_label(team)}"
@@ -179,19 +185,24 @@ def build_team_championship_view(
                 container.add_item(ui.MediaGallery(*gallery_items))
         else:
             lines = [header]
-            trophy_thumbnail = None
             for s in members:
-                key = normalize_player_name(s.player_name)
                 lines.append(team_record_line(s, displays, player_colors, deck_data))
+            block = "\n".join(lines)
+            if winner is not None:
+                thumbnail_members = members[:1]
+            else:
+                thumbnail_members = [s for s in members if s.wins == 3 and s.losses == 0]
+            thumbnail = None
+            for s in thumbnail_members:
+                key = normalize_player_name(s.player_name)
                 data = deck_data.get(key)
-                trophied = s.wins == 3 and s.losses == 0
-                if trophied and trophy_thumbnail is None and data is not None and data.screenshot_url:
+                if data is not None and data.screenshot_url:
                     info = displays.get(key, {})
                     name = info.get("display_name") or s.player_name
-                    trophy_thumbnail = ui.Thumbnail(data.screenshot_url, description=f"{name}'s deck")
-            block = "\n".join(lines)
-            if trophy_thumbnail is not None:
-                container.add_item(ui.Section(block, accessory=trophy_thumbnail))
+                    thumbnail = ui.Thumbnail(data.screenshot_url, description=f"{name}'s deck")
+                    break
+            if thumbnail is not None:
+                container.add_item(ui.Section(block, accessory=thumbnail))
             else:
                 container.add_item(ui.TextDisplay(block))
 
