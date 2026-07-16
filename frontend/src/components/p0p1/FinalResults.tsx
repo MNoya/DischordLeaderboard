@@ -34,6 +34,17 @@ import type { PickEntry } from "./CommunityGrid";
 
 const HIGHLIGHTS_COUNT = 5;
 
+function SectionHeading({ title, children }: { title: string; children?: React.ReactNode }) {
+  return (
+    <div className="flex flex-col">
+      <div className="flex justify-center">
+        <SectionLabel size={22} className="text-white">{title}</SectionLabel>
+      </div>
+      {children && <p className="text-center text-[12.5px] text-muted mt-1.5">{children}</p>}
+    </div>
+  );
+}
+
 function gihwrLabel(gihwr: number): string {
   return `${(gihwr * 100).toFixed(1)}%`;
 }
@@ -951,7 +962,7 @@ function Leaderboard({
               }}
             >
               <span className="inline-block" style={{ transform: "skewX(6deg)" }}>
-                SEE ALL {rankedBallots.length} STANDINGS →
+                SEE FULL STANDINGS →
               </span>
             </button>
           </div>
@@ -1235,24 +1246,18 @@ function HighlightTile({
 
 function HighlightsReel({
   highlights,
-  ballotCount,
   cardsByName,
 }: {
   highlights: Highlight[];
-  ballotCount: number;
   cardsByName: Map<string, Card>;
 }) {
   if (highlights.length === 0) return null;
 
   return (
     <div className="flex flex-col">
-      <div className="flex justify-center">
-        <SectionLabel size={22} className="text-white">HIGHLIGHTS</SectionLabel>
-      </div>
-      <p className="text-center text-[12.5px] text-muted mt-1.5">
-        How <b className="text-subtle font-medium">{ballotCount} players'</b>{" "}
-        picks held up against the data.
-      </p>
+      <SectionHeading title="CARD HIGHLIGHTS">
+        The biggest traps and sleepers of the set.
+      </SectionHeading>
 
       <div className="mt-5">
         <SprocketRail />
@@ -1343,7 +1348,10 @@ export function FinalResults({
       {/* Top-3 broadcast */}
       {rankedForDisplay.length > 0 && (
         <div className="flex flex-col gap-3">
-          <SectionLabel size={16} className="text-white">TOP STANDINGS</SectionLabel>
+          <SectionHeading title="TOP OF THE PACK">
+            The best finishes out of{" "}
+            <b className="text-subtle font-medium">{voterCount} entries</b>.
+          </SectionHeading>
           <Leaderboard
             rankedBallots={rankedForDisplay}
             bestTeam={bestTeam}
@@ -1362,7 +1370,6 @@ export function FinalResults({
       {/* Highlights reel */}
       <HighlightsReel
         highlights={highlights}
-        ballotCount={voterCount}
         cardsByName={cardsByName}
       />
 
@@ -1373,7 +1380,9 @@ export function FinalResults({
           className="flex flex-col gap-3 pb-24"
           style={{ scrollMarginTop: stickyTop }}
         >
-          <SectionLabel size={16} className="text-white">FULL STANDINGS</SectionLabel>
+          <SectionHeading title="FULL STANDINGS">
+            Every player ranked alongside the best possible team and the crowd's picks.
+          </SectionHeading>
           <Leaderboard
             rankedBallots={rankedForDisplay}
             bestTeam={bestTeam}
