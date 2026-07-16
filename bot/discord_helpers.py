@@ -31,6 +31,16 @@ def command_line(cmd: str, blurb: str) -> str:
     return f"`{cmd}` - {blurb}"
 
 
+def posts_publicly(interaction: "discord.Interaction") -> bool:
+    """A moderator (Manage Messages) posts to the channel for everyone; everyone else gets an ephemeral
+    copy. Permission rather than a role name so it holds across guilds. In a DM there is no one to shield
+    it from, so the reply is never ephemeral."""
+    if interaction.guild is None:
+        return True
+    permissions = getattr(interaction.user, "guild_permissions", None)
+    return bool(permissions and permissions.manage_messages)
+
+
 def in_pod_coordination(channel: "discord.interactions.InteractionChannel | None") -> bool:
     if channel is None:
         return False

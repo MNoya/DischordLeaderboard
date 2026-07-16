@@ -293,7 +293,7 @@ class _KickSelect(ui.Select):
         if err:
             await interaction.followup.send(f"⚠️ {err}", ephemeral=True)
             return
-        await interaction.edit_original_response(content=f"🔨 **{name}** removed.", view=None)
+        await interaction.delete_original_response()
         if interaction.channel is not None:
             await interaction.channel.send(kick_notice(actor_label(interaction), name))
 

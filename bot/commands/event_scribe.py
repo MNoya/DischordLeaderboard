@@ -13,7 +13,7 @@ from discord.utils import format_dt
 
 from bot import audit
 from bot.commands import descriptions as desc
-from bot.discord_helpers import NBSP
+from bot.discord_helpers import NBSP, posts_publicly
 from bot.services import mtgscribe
 from bot.services.scribe_formats import short_format
 from bot.sets import ALL_SETS
@@ -72,7 +72,7 @@ class EventScribe(commands.Cog):
     async def event_scribe(self, interaction: discord.Interaction,
                            format: app_commands.Choice[str] | None = None,
                            set: str | None = None) -> None:
-        await interaction.response.defer(ephemeral=not _posts_publicly(interaction))
+        await interaction.response.defer(ephemeral=not posts_publicly(interaction))
         start_date = date.today() - LOOKBACK
         selected = format.value if format else None
         try:
@@ -102,16 +102,6 @@ class EventScribe(commands.Cog):
         matches = [app_commands.Choice(name=seed.name, value=seed.name)
                    for seed in ALL_SETS if lowered in seed.name.lower()]
         return matches[:25]
-
-
-def _posts_publicly(interaction: discord.Interaction) -> bool:
-    """A moderator (Manage Messages) posts the schedule to the channel for everyone; everyone else
-    gets an ephemeral copy. Permission rather than a role name so it holds across guilds. In a DM
-    there is no one to shield it from, so the reply is never ephemeral."""
-    if interaction.guild is None:
-        return True
-    permissions = getattr(interaction.user, "guild_permissions", None)
-    return bool(permissions and permissions.manage_messages)
 
 
 def select_groups(events: list, filters: list | None, set_query: str | None = None,

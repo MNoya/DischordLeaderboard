@@ -9,7 +9,7 @@ from discord.ext import commands
 from bot import audit
 from bot.commands import descriptions as desc
 from bot.config import settings
-from bot.discord_helpers import command_line, in_pod_chat, in_pod_coordination
+from bot.discord_helpers import command_line, in_pod_chat, in_pod_coordination, posts_publicly
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +115,8 @@ class Help(commands.Cog):
         in_pod_context = in_pod_coordination(interaction.channel) or in_pod_chat(interaction.channel)
         sections = POD_HELP_SECTIONS if in_pod_context else HELP_SECTIONS
         audit.event("help_invoked", user_id=str(interaction.user.id))
-        await interaction.response.send_message(embed=render_help_embed(sections), view=HelpView(), ephemeral=False)
+        ephemeral = not posts_publicly(interaction)
+        await interaction.response.send_message(embed=render_help_embed(sections), view=HelpView(), ephemeral=ephemeral)
 
 
 async def setup(bot: commands.Bot) -> None:
