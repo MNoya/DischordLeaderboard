@@ -26,12 +26,12 @@ from bot.discord_helpers import (
     extract_avatar_hash,
     first_image_url,
     parse_message_link,
-    player_url,
+    player_deck_url,
     resolve_display_name,
 )
 from bot.services import bot_log
 from bot.services.pod_backfill import COLORS_RE, RECORD_RE, normalize_colors, strip_cdn_dims
-from bot.services.pod_deck_color import GUILDS, PAIR_EMOJI_NAME, color_label
+from bot.services.pod_deck_color import GUILDS, PAIR_EMOJI_NAME, color_label, format_deck_color_emojis
 from bot.services.pod_drafts import parse_caption_record
 from bot.services.pod_thread_backfill import parse_caption_colors
 from bot.services.pod_tournament import TROPHY_HYPE_HISTORY_LIMIT
@@ -47,6 +47,7 @@ PLATFORM_CHOICES: tuple[tuple[str, str], ...] = (
     ("xMage", "xmage"),
     ("Paper", "cardboard"),
 )
+PLATFORM_EMOJI_NAME = dict(PLATFORM_CHOICES)
 FORMAT_CHOICES: tuple[str, ...] = ("Premier", "Traditional", "Single Elim")
 WRITE_IN_EMOJI = "manax"
 WRITE_IN = "__write_in__"
@@ -371,7 +372,7 @@ class _ConfirmButton(ui.Button):
                 source_url=draft.source_url,
                 reported_at=draft.event_time,
             )
-            profile = player_url(player.slug, draft.set_code)
+            deck = player_deck_url(player.slug, draft.set_code, draft.source_message_id)
             session.commit()
         audit.event(
             "trophy_logged", user_id=view.user_id, set_code=draft.set_code,
@@ -387,10 +388,17 @@ class _ConfirmButton(ui.Button):
         )
         await bot_log.get(interaction.client).post_plain(oversight)
         await _mark_post_logged(view.message, draft.set_code, draft.platform)
+        color_glyph = format_deck_color_emojis(draft.colors)
+        platform_glyph = emojis.prefix(PLATFORM_EMOJI_NAME.get(draft.platform, ""))
+        headline_parts = [f"**{draft.record}**"]
+        if color_glyph:
+            headline_parts.append(color_glyph)
+        headline_parts.append(f"{platform_glyph}{draft.platform}")
         whose_profile = f"{draft.display_name}'s profile" if draft.on_behalf else "your profile"
+        profile_line = f"Added to [{whose_profile}]({deck}) {emojis.get('manat')}".rstrip()
         done = discord.Embed(
-            title="🏆 Trophy saved" if draft.is_trophy else "📋 Deck saved",
-            description=f"**{draft.record}** · {colors} · {draft.platform}\nAdded to [{whose_profile}]({profile}).",
+            title="🏆 Trophy Recorded" if draft.is_trophy else "📋 Event Recorded",
+            description=f"{' '.join(headline_parts)}\n{profile_line}",
             color=0x57F287,
         )
         await interaction.response.edit_message(embed=done, view=None)

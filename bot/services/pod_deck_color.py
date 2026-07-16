@@ -17,6 +17,8 @@ from typing import Awaitable, Callable
 import discord
 from discord import ui
 
+from bot import emojis
+
 
 class NotInPodError(Exception):
     """Raised by lookup/submit callbacks when the interaction user isn't a participant."""
@@ -71,6 +73,57 @@ def color_label(code: str) -> str:
     if code in GUILD_LABEL:
         return f"{GUILD_LABEL[code]} ({code})"
     return code
+
+
+def format_deck_color_emojis(code: str | None) -> str:
+    """Render deck color string as Mana font application emojis.
+
+    Main colors render first using guild-pair / pentacolor / WUBRG-order rules. Splash colors
+    (lowercase in `code`) render after, separated by '/'.
+
+    - "WR"   → :manarw:                        (guild pair, no splash)
+    - "URG"  → :manau::manar::manag:           (3 main, no splash)
+    - "WUBRG"→ :manawubrg:                     (5 main, no splash)
+    - "BGw"  → :manab::manag:/:manaw:          (BG main, W splash)
+    - "URw"  → :manaur:/:manaw:                (UR guild pair main, W splash)
+    """
+    if not code:
+        return ""
+    main: set[str] = set()
+    splash: set[str] = set()
+    for c in code:
+        u = c.upper()
+        if u not in "WUBRG":
+            continue
+        (main if c.isupper() else splash).add(u)
+    if not main and splash:
+        main, splash = splash, set()
+    if not main:
+        return ""
+
+    main_glyph = _emojis_for_color_set(main)
+    if not splash:
+        return main_glyph
+    return f"{main_glyph}/{_emojis_for_color_set(splash)}"
+
+
+def _emojis_for_color_set(colors: set[str]) -> str:
+    if len(colors) == 2:
+        emoji_name = PAIR_EMOJI_NAME.get(frozenset(colors))
+        if emoji_name:
+            glyph = emojis.get(emoji_name)
+            if glyph:
+                return glyph
+    if len(colors) == 5:
+        glyph = emojis.get("manawubrg")
+        if glyph:
+            return glyph
+    out = []
+    for c in "WUBRG":
+        if c in colors:
+            glyph = emojis.get(f"mana{c.lower()}") or c
+            out.append(glyph)
+    return "".join(out)
 
 
 def _sanitize(raw: str) -> str | None:
@@ -148,14 +201,13 @@ def _dm_ephemeral(interaction: discord.Interaction) -> bool:
 
 
 def _build_color_options(current_value: str | None) -> list[discord.SelectOption]:
-    from bot import emojis as _emojis
     guild_codes = {code for code, _ in GUILDS}
     is_write_in = current_value is not None and current_value not in guild_codes
     options = [discord.SelectOption(
         label=f"Other ({current_value})" if is_write_in else "Other (write-in)",
         value=OTHER_VALUE,
         description="Mono, 3-color, splash, etc.",
-        emoji=_emojis.get_emoji("manax"),
+        emoji=emojis.get_emoji("manax"),
         default=is_write_in,
     )]
     options.extend(
@@ -163,7 +215,7 @@ def _build_color_options(current_value: str | None) -> list[discord.SelectOption
             label=f"{name} ({code})",
             value=code,
             default=(current_value == code),
-            emoji=_emojis.get_emoji(PAIR_EMOJI_NAME[frozenset(code)]),
+            emoji=emojis.get_emoji(PAIR_EMOJI_NAME[frozenset(code)]),
         )
         for code, name in GUILDS
     )

@@ -147,6 +147,11 @@ def player_url(slug: str, set_code: str | None = None) -> str:
     return f"{base}/{slug}/{set_code}" if set_code else f"{base}/{slug}"
 
 
+def player_deck_url(slug: str, set_code: str, source_message_id: str) -> str:
+    """Set-scoped player URL that opens a specific saved deck in the profile popup."""
+    return f"{player_url(slug, set_code)}?deck={source_message_id}"
+
+
 async def resolve_display_name(bot: "commands.Bot", user: "discord.User") -> str:
     """Prefer the LLU guild nickname, falling back to the user's global display name.
 

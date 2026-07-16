@@ -29,13 +29,13 @@ from bot.models import Player as DbPlayer, PodDraftEvent, PodDraftMatch, PodDraf
 from bot.services import bot_log as bot_log_mod, pod_bracket, pod_swiss
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_deck_color import (
-    PAIR_EMOJI_NAME,
     SAVED_MSG,
     DeckColorSelectView,
     NotInPodError,
     OrganizerCallback,
     SubmitDeckButton,
     SubmitDeckView,
+    format_deck_color_emojis,
 )
 from bot.services.player_stats import leaderboard_seat_order
 from bot.services.pod_pairing_select import DEFAULT_PAIRING_MODE
@@ -2061,58 +2061,6 @@ def _standings_header_text(pending_count: int) -> str:
         return "Final Standings"
     word = "match" if pending_count == 1 else "matches"
     return f"Live Standings - {pending_count} {word} pending ⏳"
-
-
-def format_deck_color_emojis(code: str | None) -> str:
-    """Render deck color string as Mana font application emojis.
-
-    Main colors render first using guild-pair / pentacolor / WUBRG-order rules. Splash colors
-    (lowercase in `code`) render after, separated by '/'.
-
-    - "WR"   → :manarw:                        (guild pair, no splash)
-    - "URG"  → :manau::manar::manag:           (3 main, no splash)
-    - "WUBRG"→ :manawubrg:                     (5 main, no splash)
-    - "BGw"  → :manab::manag:/:manaw:          (BG main, W splash)
-    - "URw"  → :manaur:/:manaw:                (UR guild pair main, W splash)
-    """
-    if not code:
-        return ""
-    main: set[str] = set()
-    splash: set[str] = set()
-    for c in code:
-        u = c.upper()
-        if u not in "WUBRG":
-            continue
-        (main if c.isupper() else splash).add(u)
-    # All-lowercase input: treat splash as main (no separator)
-    if not main and splash:
-        main, splash = splash, set()
-    if not main:
-        return ""
-
-    main_glyph = _emojis_for_color_set(main)
-    if not splash:
-        return main_glyph
-    return f"{main_glyph}/{_emojis_for_color_set(splash)}"
-
-
-def _emojis_for_color_set(colors: set[str]) -> str:
-    if len(colors) == 2:
-        emoji_name = PAIR_EMOJI_NAME.get(frozenset(colors))
-        if emoji_name:
-            glyph = emojis.get(emoji_name)
-            if glyph:
-                return glyph
-    if len(colors) == 5:
-        glyph = emojis.get("manawubrg")
-        if glyph:
-            return glyph
-    out = []
-    for c in "WUBRG":
-        if c in colors:
-            glyph = emojis.get(f"mana{c.lower()}") or c
-            out.append(glyph)
-    return "".join(out)
 
 
 REVIEW_EMOJI = "🙋"
