@@ -1260,7 +1260,6 @@ function HighlightsReel({
       </SectionHeading>
 
       <div className="mt-5">
-        <SprocketRail />
         <div className="flex flex-col sm:flex-row sm:flex-wrap sm:justify-center gap-3.5 px-1 py-3.5 sm:px-3">
           {highlights.map((h, i) => (
             <HighlightTile
@@ -1271,7 +1270,6 @@ function HighlightsReel({
             />
           ))}
         </div>
-        <SprocketRail />
       </div>
     </div>
   );
@@ -1367,11 +1365,15 @@ export function FinalResults({
         </div>
       )}
 
+      <SprocketRail />
+
       {/* Highlights reel */}
       <HighlightsReel
         highlights={highlights}
         cardsByName={cardsByName}
       />
+
+      <SprocketRail />
 
       {/* Full standings */}
       {rankedForDisplay.length > 0 && (
