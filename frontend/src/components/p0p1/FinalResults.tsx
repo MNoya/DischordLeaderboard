@@ -253,8 +253,8 @@ const SYNTHETIC_STYLE: Record<SyntheticStanding["kind"], { label: string; color:
 function BestPossibleBadge() {
   return (
     <span
-      className="shrink-0 text-[10px] font-normal font-display tracking-widest"
-      style={{ color: SYNTHETIC_STYLE.best.color }}
+      className="shrink-0 inline-flex items-center h-[18px] font-display uppercase tracking-[0.14em] px-[7px] text-[11px] text-bg"
+      style={{ background: SYNTHETIC_STYLE.best.color }}
     >
       ✦ BEST POSSIBLE
     </span>
@@ -263,7 +263,7 @@ function BestPossibleBadge() {
 
 function SelfBadge() {
   return (
-    <span className="shrink-0 inline-block font-display uppercase tracking-[0.14em] leading-none px-[7px] py-[3px] text-[11px] bg-green text-bg">
+    <span className="shrink-0 inline-flex items-center h-[18px] font-display uppercase tracking-[0.14em] px-[7px] text-[11px] bg-green text-bg">
       YOU
     </span>
   );
@@ -437,12 +437,16 @@ function BroadcastTop3({
               <div className="font-mono tracking-[0.22em] text-[10px] sm:text-[10.5px] uppercase text-gold">
                 🏆 CHAMPION
               </div>
-              <div className="flex items-center gap-2 min-w-0">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 min-w-0">
                 <span className="font-display text-[28px] sm:text-[44px] leading-[0.95] tracking-[0.03em] truncate min-w-0">
                   {champion.name.toUpperCase()}
                 </span>
-                {champion.ballotId === userBallotId && <SelfBadge />}
-                {bestAchieverIds.has(champion.ballotId) && <BestPossibleBadge />}
+                {(champion.ballotId === userBallotId || bestAchieverIds.has(champion.ballotId)) && (
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {champion.ballotId === userBallotId && <SelfBadge />}
+                    {bestAchieverIds.has(champion.ballotId) && <BestPossibleBadge />}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -556,12 +560,16 @@ function BroadcastSubBar({
             fallbackClassName="w-6 h-6 sm:w-7 sm:h-7 rounded-full shrink-0 bg-surface flex items-center justify-center text-[10px] sm:text-[11px] text-muted font-mono"
             style={{ boxShadow: `0 0 0 1.5px ${accent}` }}
           />
-          <span className="flex items-center gap-2 flex-1 min-w-0">
+          <span className="flex flex-col sm:flex-row sm:items-center gap-0.5 sm:gap-2 flex-1 min-w-0">
             <span className="font-display text-[16px] sm:text-[20px] tracking-[0.04em] truncate min-w-0">
               {ballot.name.toUpperCase()}
             </span>
-            {isSelf && <SelfBadge />}
-            {isBest && <BestPossibleBadge />}
+            {(isSelf || isBest) && (
+              <span className="flex items-center gap-1.5 shrink-0">
+                {isSelf && <SelfBadge />}
+                {isBest && <BestPossibleBadge />}
+              </span>
+            )}
           </span>
           <span className="font-mono tabular-nums text-[14px] sm:text-[16px] shrink-0" style={{ color: accent }}>
             {ballot.score.toFixed(1)}
