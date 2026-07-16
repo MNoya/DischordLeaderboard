@@ -205,6 +205,40 @@ def queue_presets_sync(signal_id: str) -> QueuePresets:
         )
 
 
+def queue_opener_sync(signal_id: str) -> tuple[datetime | None, str | None]:
+    """(opened_at, opened_by) for a queue signal, so a closed card can still credit who opened it."""
+    with SessionLocal() as session:
+        signal = session.get(PodSignal, signal_id)
+        if signal is None:
+            return None, None
+        return signal.created_at, signal.opened_by
+
+
+def queue_member_names_sync(signal_id: str) -> list[str]:
+    """Display names still in the queue, so a timed-out card keeps showing who was around."""
+    with SessionLocal() as session:
+        return _member_names(session, signal_id)
+
+
+def set_discussion_thread_sync(signal_id: str, thread_id: str) -> None:
+    with SessionLocal() as session:
+        signal = session.get(PodSignal, signal_id)
+        if signal is not None:
+            signal.discussion_thread_id = thread_id
+            session.commit()
+
+
+def discussion_thread_id_sync(message_id: str) -> str | None:
+    """The standalone discussion thread's id for a queue card, keyed by the card message id."""
+    with SessionLocal() as session:
+        return session.execute(
+            select(PodSignal.discussion_thread_id).where(
+                PodSignal.message_id == message_id,
+                PodSignal.bucket == pod_signals.QUEUE_BUCKET,
+            )
+        ).scalar_one_or_none()
+
+
 @dataclass(frozen=True)
 class JoinableSignal:
     kind: str
@@ -949,7 +983,7 @@ def arm_queue_teardown(bot: commands.Bot, signal_id: str, teardown_time: datetim
 
 async def fire_queue_teardown(signal_id: str) -> None:
     """Close an idle queue: swap the card for its closed state, which carries no buttons."""
-    from bot.commands.pod_queue import PodQueueView, queue_role_mention
+    from bot.commands.pod_queue import PodQueueView, queue_inactivity_close_reason, queue_role_mention
 
     if not await asyncio.to_thread(expire_signal_sync, signal_id):
         return
@@ -961,10 +995,14 @@ async def fire_queue_teardown(signal_id: str) -> None:
     if channel is None:
         return
     presets = await asyncio.to_thread(queue_presets_sync, signal_id)
+    opened_at, opened_by = await asyncio.to_thread(queue_opener_sync, signal_id)
+    names = await asyncio.to_thread(queue_member_names_sync, signal_id)
     try:
         message = await channel.fetch_message(int(message_id))
         closed_view = PodQueueView(
-            role_mention=queue_role_mention(channel.guild), closed=True, set_code=presets.set_code,
+            names=names, role_mention=queue_role_mention(channel.guild),
+            close_reason=queue_inactivity_close_reason(), set_code=presets.set_code,
+            opened_at=opened_at, opened_by=opened_by,
         )
         await message.edit(view=closed_view)
     except discord.HTTPException:

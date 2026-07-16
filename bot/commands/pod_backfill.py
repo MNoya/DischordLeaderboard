@@ -610,7 +610,7 @@ class BackfillView(discord.ui.View):
 
     async def _on_cancel(self, interaction: discord.Interaction) -> None:
         self.stop()
-        await interaction.response.edit_message(content="Backfill cancelled — nothing written.",
+        await interaction.response.edit_message(content="Backfill canceled — nothing written.",
                                                 embed=None, view=None)
 
     async def _on_confirm(self, interaction: discord.Interaction) -> None:

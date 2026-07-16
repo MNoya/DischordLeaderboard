@@ -4,10 +4,11 @@
 the bot creates the thread + Draftmancer lobby immediately (open_now). Staleness follows Amelas/
 DraftBot: no per-entry expiry, one inactivity window that resets on each join.
 
-The queue message is one Components V2 card and the single interactive surface: V2 text mentions
-notify (unlike embeds), so the role ping lives inside the card instead of a bare content line above
-it. The persistent view re-attaches on restart, and closure is enforced in the DB, so a stale
-button goes inert on click and never becomes a dead duplicate card.
+The queue message is one Components V2 card and the single interactive surface. A V2 card and an
+embed look identical, but text in a V2 TextDisplay counts as message content for notifications
+while an embed's does not, so the role ping lives inside the card and needs no bare content line
+above it. The persistent view re-attaches on restart, and closure is enforced in the DB, so a
+stale button goes inert on click and never becomes a dead duplicate card.
 """
 from __future__ import annotations
 
@@ -31,17 +32,12 @@ from bot.services.pod_draft_manager import (
     set_event_pick_timer,
     set_event_seating_mode,
 )
-from bot.services.pod_format import PEASANT_CODE, PEASANT_CUBE_ID, PEASANT_LABEL
+from bot.services.pod_format import PEASANT_CODE, PEASANT_CUBE_ID, PEASANT_LABEL, format_display
 from bot.services.pod_format_select import WRITE_IN_VALUE, set_select_option, write_in_option
 from bot.services.pod_pairing_select import SELECT_PLACEHOLDER as PAIRING_PLACEHOLDER
 from bot.services.pod_pairing_select import pairing_options
 from bot.services.pod_roles import find_role, grant_pod_drafters, grant_role
-from bot.services.pod_schedule import (
-    EARLY_POD_ROLE_NAME,
-    LATE_POD_ROLE_NAME,
-    POD_QUEUE_ROLE_NAME,
-    WEEKEND_POD_ROLE_NAME,
-)
+from bot.services.pod_schedule import POD_QUEUE_ROLE_NAME
 from bot.services.pod_slot import pod_display_name
 from bot.services.pod_settings_view import TIMER_MAX, TIMER_MIN
 from bot.services.pod_signals import (
@@ -52,6 +48,7 @@ from bot.services.pod_signals import (
     bucket_by_key,
     should_fire,
     slot_event_time,
+    slot_role_name_for_event_time,
     teardown_at,
 )
 from bot.sets import active_set_code, recent_released_sets, set_name_for
@@ -62,18 +59,19 @@ log = logging.getLogger(__name__)
 QUEUE_TITLE = "Pod Draft Queue"
 QUEUE_FIRED = "Join {thread}"
 QUEUE_CREATING = "Creating the lobby..."
-QUEUE_CLOSED = "Queue closed after {window} of inactivity."
-QUEUE_CANCELLED = "Queue cancelled."
-QUEUE_CANCEL_CONFIRM = "You're the last one in this queue. Cancel it, or keep it open for others?"
+QUEUE_CLOSED_INACTIVE = "**Closed** after {window} of inactivity"
+QUEUE_CLOSED_MANUAL = "**Closed** {when}"
+QUEUE_CANCEL_CONFIRM = "Last one in the queue, please confirm."
 QUEUE_CANCEL_KEPT = "Still in the queue."
 QUEUE_CANCEL_LEFT = "Someone else joined, so you left and the queue stays open."
 QUEUE_INSTRUCTIONS = (
     "- Hit **Join** if you can draft right now. **Leave** when you no longer can.\n"
     f"- {MSG_LOBBY_GATHERING}"
 )
-QUEUE_CLOSES = "Queue closes after {window} of inactivity."
+QUEUE_CLOSES = "Closes after {window} of inactivity"
 QUEUE_OPENED = "Queue opened by {opener} {when}"
 QUEUE_OPENED_ANON = "Queue opened {when}"
+QUEUE_THREAD_INTRO = "💬 Chat while it fills\n[**Queue here**]({jump}) {manat}"
 QUEUE_ROLE_GRANTED = (
     "⚡ You're now on {role} and will be pinged when a queue opens or needs more players. "
     "Run `/roles` to manage your notifications."
@@ -87,14 +85,6 @@ MAX_JOINABLE_LINES = 3
 SET_PLACEHOLDER = "Choose the set"
 WHEN_PLACEHOLDER = "When to draft"
 DESCRIPTION_MAX_LEN = 300
-NOTIFY_PLACEHOLDER = "Who to notify"
-NOTIFY_NONE = "none"
-NOTIFY_ROLE_CHOICES = (
-    (POD_QUEUE_ROLE_NAME, "Pod Draft Queue", "⚡"),
-    (EARLY_POD_ROLE_NAME, "Early Pod", "💫"),
-    (LATE_POD_ROLE_NAME, "Late Pod", "☄️"),
-    (WEEKEND_POD_ROLE_NAME, "Weekend Pod", "🪐"),
-)
 LAUNCHER_TITLE = "### Start a Pod Draft"
 LAUNCHER_PROMPT = "Set your options below, then open a queue now or schedule a pod for later."
 LAUNCHER_JOIN_HINT = "Join an existing pod instead of starting a new one:"
@@ -126,14 +116,14 @@ class PodQueueActions(discord.ui.ActionRow):
 
 
 class _QueueCancelConfirm(discord.ui.View):
-    """Ephemeral last-player prompt: cancel the queue outright, or keep it open. Cancelling self-corrects
-    if someone joined during the prompt — the confirmer just leaves and the card stays live."""
+    """Ephemeral last-player prompt: close the queue, or stay in it. Closing self-corrects if someone
+    joined during the prompt — the confirmer just leaves and the card stays live."""
 
     def __init__(self, card: discord.Message) -> None:
         super().__init__(timeout=120)
         self.card = card
 
-    @discord.ui.button(label="Cancel Queue", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="Close Queue", style=discord.ButtonStyle.danger)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         resolution = await asyncio.to_thread(
             pod_launch.resolve_last_leave_sync, str(self.card.id), str(interaction.user.id),
@@ -149,13 +139,20 @@ class _QueueCancelConfirm(discord.ui.View):
                 description=resolution.description,
             )
             await self.card.edit(view=view)
+            await _remove_from_discussion_thread(
+                str(self.card.id), interaction.guild, interaction.client, interaction.user,
+            )
             await interaction.response.edit_message(content=QUEUE_CANCEL_LEFT, view=None)
             return
-        view = PodQueueView(role_mention=mention, closed=True, cancelled=True, set_code=resolution.set_code)
+        reason = QUEUE_CLOSED_MANUAL.format(when=f"<t:{int(datetime.now(timezone.utc).timestamp())}:R>")
+        view = PodQueueView(
+            role_mention=mention, close_reason=reason, set_code=resolution.set_code,
+            opened_at=resolution.created_at, opened_by=resolution.opened_by,
+        )
         await self.card.edit(view=view)
-        await interaction.response.edit_message(content=QUEUE_CANCELLED, view=None)
+        await interaction.response.edit_message(content=reason, view=None)
 
-    @discord.ui.button(label="Keep it open", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Stay in Queue", style=discord.ButtonStyle.secondary)
     async def keep(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await interaction.response.edit_message(content=QUEUE_CANCEL_KEPT, view=None)
 
@@ -166,8 +163,8 @@ class PodQueueView(discord.ui.LayoutView):
 
     def __init__(
         self, names: list[str] | None = None, role_mention: str | None = None,
-        fired: bool = False, thread_mention: str | None = None, closed: bool = False,
-        cancelled: bool = False, set_code: str | None = None, opened_at: datetime | None = None,
+        fired: bool = False, thread_mention: str | None = None, close_reason: str | None = None,
+        set_code: str | None = None, opened_at: datetime | None = None,
         opened_by: str | None = None, description: str | None = None,
     ) -> None:
         super().__init__(timeout=None)
@@ -176,14 +173,17 @@ class PodQueueView(discord.ui.LayoutView):
         container = discord.ui.Container(accent_colour=discord.Colour.green())
         self.add_item(container)
         container.add_item(discord.ui.TextDisplay(f"## {NBSP * 2}⚡ {_queue_title(role_mention, set_code)}"))
-        if description and not closed:
+        if description and close_reason is None:
             container.add_item(discord.ui.TextDisplay(f"> {description}"))
-        if closed:
-            if cancelled:
-                container.add_item(discord.ui.TextDisplay(QUEUE_CANCELLED))
-            else:
-                window = inactivity_window_text(settings.pod_queue_inactivity_minutes)
-                container.add_item(discord.ui.TextDisplay(QUEUE_CLOSED.format(window=window)))
+        if close_reason is not None:
+            container.add_item(discord.ui.TextDisplay(close_reason))
+            if names:
+                roster = "\n".join(f"> {name}" for name in names)
+                container.add_item(discord.ui.TextDisplay(
+                    f"**{MSG_PLAYERS_JOINED.format(count=len(names))}**\n{roster}"))
+            opened = _opened_line(opened_at, opened_by)
+            if opened is not None:
+                container.add_item(discord.ui.TextDisplay(opened))
             return
         roster_name = MSG_PLAYERS_JOINED.format(count=len(names)) if names else QUEUE_PLAYERS_EMPTY
         roster = "\n".join(f"> {name}" for name in names) if names else "-"
@@ -194,17 +194,23 @@ class PodQueueView(discord.ui.LayoutView):
             return
         instructions = QUEUE_INSTRUCTIONS.format(threshold=emojis.mana_number(threshold))
         container.add_item(discord.ui.TextDisplay(instructions))
-        if opened_at is not None:
-            when = f"<t:{int(opened_at.timestamp())}:R>"
-            if opened_by is not None:
-                opened = QUEUE_OPENED.format(opener=f"<@{opened_by}>", when=when)
-            else:
-                opened = QUEUE_OPENED_ANON.format(when=when)
+        opened = _opened_line(opened_at, opened_by)
+        if opened is not None:
             container.add_item(discord.ui.TextDisplay(opened))
         container.add_item(discord.ui.TextDisplay(f"**{roster_name}**\n{roster}"))
         window = inactivity_window_text(settings.pod_queue_inactivity_minutes)
+        container.add_item(discord.ui.Separator())
         container.add_item(discord.ui.TextDisplay(f"-# {QUEUE_CLOSES.format(window=window)}"))
         self.add_item(PodQueueActions())
+
+
+def _opened_line(opened_at: datetime | None, opened_by: str | None) -> str | None:
+    if opened_at is None:
+        return None
+    when = f"<t:{int(opened_at.timestamp())}:R>"
+    if opened_by is not None:
+        return QUEUE_OPENED.format(opener=f"<@{opened_by}>", when=when)
+    return QUEUE_OPENED_ANON.format(when=when)
 
 
 def _queue_title(role_mention: str | None, set_code: str | None) -> str:
@@ -213,7 +219,7 @@ def _queue_title(role_mention: str | None, set_code: str | None) -> str:
     code = (set_code or active_set_code()).upper()
     emoji = emojis.set_symbol(code)
     suffix = f" {emoji}" if emoji else ""
-    return f"{code} {role_mention or QUEUE_TITLE}{suffix}"
+    return f"{format_display(code)} {role_mention or QUEUE_TITLE}{suffix}"
 
 
 def inactivity_window_text(minutes: int) -> str:
@@ -221,6 +227,11 @@ def inactivity_window_text(minutes: int) -> str:
         hours = minutes // 60
         return f"{hours} hour" if hours == 1 else f"{hours} hours"
     return f"{minutes} minutes"
+
+
+def queue_inactivity_close_reason() -> str:
+    window = inactivity_window_text(settings.pod_queue_inactivity_minutes)
+    return QUEUE_CLOSED_INACTIVE.format(window=window)
 
 
 def queue_role_mention(guild: discord.Guild | None) -> str | None:
@@ -235,14 +246,15 @@ def role_mention_for(guild: discord.Guild | None, role_name: str | None) -> str 
     return role.mention if role else None
 
 
-def notify_role(choice: str | None) -> str | None:
-    """The role a pod pings: the Pod Draft Queue role by default, an explicit role, or nobody for No
-    ping. Independent of when the pod runs."""
-    if choice == NOTIFY_NONE:
+def derived_notify_role(scheduled_time: datetime | None, notify: bool) -> str | None:
+    """Who a launched pod pings, derived from its time rather than a free choice so a slot always
+    reaches the people who subscribed to it: nobody when the bell is off, the slot's role when the
+    scheduled time lands on a named slot, otherwise the general Pod Draft Queue role."""
+    if not notify:
         return None
-    if choice in {name for name, _, _ in NOTIFY_ROLE_CHOICES}:
-        return choice
-    return POD_QUEUE_ROLE_NAME
+    if scheduled_time is None:
+        return POD_QUEUE_ROLE_NAME
+    return slot_role_name_for_event_time(scheduled_time) or POD_QUEUE_ROLE_NAME
 
 
 async def _handle_click(interaction: discord.Interaction, action: str) -> None:
@@ -284,6 +296,10 @@ async def _handle_click(interaction: discord.Interaction, action: str) -> None:
             description=result.state.description,
         )
     await interaction.response.edit_message(view=view)
+    if action == "leave":
+        await _remove_from_discussion_thread(
+            message_id, interaction.guild, interaction.client, interaction.user,
+        )
     await _post_join_followups(interaction, result, fired)
 
 
@@ -298,6 +314,7 @@ async def _post_join_followups(interaction: discord.Interaction, result, fired: 
         tip = MSG_FIRST_POD_TIP_QUEUE.format(threshold=settings.pod_signal_fire_threshold)
         await interaction.followup.send(tip, ephemeral=True)
     if result.joined:
+        await _add_to_discussion_thread(interaction)
         granted_role = await _grant_queue_role(interaction)
         if granted_role is not None:
             await interaction.followup.send(
@@ -405,26 +422,27 @@ async def _apply_queue_presets(event_id: str, presets) -> None:
 
 
 class DraftLauncherView(discord.ui.View):
-    """Ephemeral pre-draft config for /draft: set, when, pairings, and who-to-notify as dropdowns plus
-    seats, pick-timer, and description buttons, all on one panel, then Start Draft. Rebuilds itself on
-    each choice so every control shows the current selection, like the lobby Settings panel. The chosen
-    set rides into the pod name and Draftmancer session when the queue fires; the default is the active
-    set. Seats is a button, not a dropdown, to leave a row for Notify within Discord's five-row limit."""
+    """Ephemeral pre-draft config for /draft: set, when, and pairings as dropdowns plus a notify bell,
+    pick-timer, and description buttons, all on one panel, then Start Draft. Rebuilds itself on each
+    choice so every control shows the current selection, like the lobby Settings panel. The chosen set
+    rides into the pod name and Draftmancer session when the queue fires; the default is the active
+    set. Notify is a plain on/off bell; the ping role follows the pod's time via derived_notify_role,
+    so a slot always reaches the people who subscribed to it."""
 
     def __init__(self, *, set_code: str | None = None, pairing_mode: str | None = None,
                  pick_timer: int | None = None, scheduled_time: datetime | None = None,
-                 notify_choice: str | None = None, description: str | None = None) -> None:
+                 notify: bool = True, description: str | None = None) -> None:
         super().__init__(timeout=300)
         self.set_code = set_code
         self.pairing_mode = pairing_mode
         self.pick_timer = pick_timer
         self.scheduled_time = scheduled_time
-        self.notify_choice = notify_choice
+        self.notify = notify
         self.description = description
         self.add_item(_LauncherSetSelect(set_code, row=0))
         self.add_item(_LauncherWhenSelect(scheduled_time, row=1))
         self.add_item(_LauncherPairingSelect(pairing_mode, row=2))
-        self.add_item(_LauncherNotifySelect(notify_choice, row=3))
+        self.add_item(_LauncherNotifyButton(notify, row=4))
         self.add_item(_LauncherTimerButton(pick_timer, row=4))
         self.add_item(_LauncherDescriptionButton(description, row=4))
         self.add_item(_LauncherStartButton(scheduled=scheduled_time is not None, row=4))
@@ -433,7 +451,7 @@ class DraftLauncherView(discord.ui.View):
         await interaction.response.edit_message(view=DraftLauncherView(
             set_code=self.set_code, pairing_mode=self.pairing_mode,
             pick_timer=self.pick_timer, scheduled_time=self.scheduled_time,
-            notify_choice=self.notify_choice, description=self.description,
+            notify=self.notify, description=self.description,
         ))
 
 
@@ -586,26 +604,14 @@ class _LauncherPairingSelect(discord.ui.Select):
         await self.view.rerender(interaction)
 
 
-def _notify_options(current: str | None) -> list[discord.SelectOption]:
-    """The role the pod pings, defaulting to the Pod Draft Queue role. No ping opens it silently."""
-    choice = current or POD_QUEUE_ROLE_NAME
-    options = []
-    for role_name, label, emoji in NOTIFY_ROLE_CHOICES:
-        options.append(discord.SelectOption(
-            label=f"Notify: {label}", value=role_name, emoji=emoji, default=(choice == role_name)))
-    options.append(discord.SelectOption(
-        label="Notify: No ping", value=NOTIFY_NONE, emoji="🔕", description="Open quietly",
-        default=(choice == NOTIFY_NONE)))
-    return options
-
-
-class _LauncherNotifySelect(discord.ui.Select):
-    def __init__(self, current: str | None, row: int | None = None) -> None:
-        super().__init__(placeholder=NOTIFY_PLACEHOLDER, options=_notify_options(current),
-                         min_values=1, max_values=1, row=row)
+class _LauncherNotifyButton(discord.ui.Button):
+    def __init__(self, notify: bool, row: int | None = None) -> None:
+        label = "Notify: On" if notify else "Notify: Off"
+        emoji = "🔔" if notify else "🔕"
+        super().__init__(label=label, emoji=emoji, style=discord.ButtonStyle.grey, row=row)
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        self.view.notify_choice = self.values[0]
+        self.view.notify = not self.view.notify
         await self.view.rerender(interaction)
 
 
@@ -675,23 +681,23 @@ class _LauncherStartButton(discord.ui.Button):
         if view.scheduled_time is not None:
             await _schedule_pod(
                 interaction, view.set_code, view.pairing_mode, view.pick_timer,
-                view.scheduled_time, view.notify_choice, view.description,
+                view.scheduled_time, view.notify, view.description,
             )
             return
         await _open_queue(
             interaction, view.set_code, view.pairing_mode, view.pick_timer,
-            view.notify_choice, view.description,
+            view.notify, view.description,
         )
 
 
 async def _open_queue(
     interaction: discord.Interaction, set_code: str | None, pairing_mode: str | None,
-    pick_timer: int | None, notify_choice: str | None, description: str | None,
+    pick_timer: int | None, notify: bool, description: str | None,
 ) -> None:
     """Post the public queue card from the launcher and wire its signal, carrying the chosen set and
     presets. Dismisses the ephemeral launcher and runs the opener's own join through the normal path."""
     await interaction.response.defer()
-    role = notify_role(notify_choice)
+    role = derived_notify_role(None, notify)
     mention = role_mention_for(interaction.guild, role)
     message = await interaction.channel.send(
         view=PodQueueView(
@@ -708,7 +714,7 @@ async def _open_queue(
         set_code=set_code, pairing_mode=pairing_mode, pick_timer=pick_timer,
         notify_role=role, description=description,
     )
-    await _open_discussion_thread(message, set_code, description)
+    await _open_discussion_thread(message, set_code, description, interaction.user, signal_id)
     result = await asyncio.to_thread(
         pod_launch.toggle_member_sync,
         str(message.id), QUEUE_BUCKET, str(interaction.user.id), interaction.user.display_name, "join",
@@ -724,32 +730,91 @@ async def _open_queue(
 
 async def _open_discussion_thread(
     message: discord.Message, set_code: str | None, description: str | None,
+    opener: discord.abc.User, signal_id: str,
 ) -> None:
-    """Hang a discussion thread off the queue card so people can chat under it while the queue fills,
-    seeded with the description when one was set."""
+    """Open a standalone discussion thread for the queue, tracked on the signal by its own id.
+
+    Deliberately not hung off the card message: a message-anchored thread mirrors the card as its
+    starter, so its role ping and Join instructions read as confusing noise inside the thread. A
+    standalone thread carries a clean intro linking back to the card instead. The opener joins it,
+    matching how the Join button pulls every other joiner in.
+    """
+    channel = message.channel
+    if not isinstance(channel, discord.TextChannel):
+        return
     resolved_set = (set_code or active_set_code()).upper()
-    thread_name = LAUNCHER_QUEUE_NAME.format(set_code=resolved_set)
+    thread_name = LAUNCHER_QUEUE_NAME.format(set_code=format_display(resolved_set))
     try:
-        thread = await message.create_thread(name=thread_name[:100])
-        if description:
-            await thread.send(description)
+        thread = await channel.create_thread(name=thread_name[:100], type=discord.ChannelType.public_thread)
     except discord.HTTPException:
-        log.warning(f"could not open discussion thread on queue message {message.id}", exc_info=True)
+        log.warning(f"could not open discussion thread for queue {message.id}", exc_info=True)
+        return
+    await asyncio.to_thread(pod_launch.set_discussion_thread_sync, signal_id, str(thread.id))
+    intro = QUEUE_THREAD_INTRO.format(jump=message.jump_url, manat=emojis.get("manat"))
+    if description:
+        intro = f"{intro}\n> {description}"
+    try:
+        await thread.send(intro)
+        await thread.add_user(opener)
+    except discord.HTTPException:
+        log.warning(f"could not seed discussion thread {thread.id}", exc_info=True)
+
+
+async def _resolve_discussion_thread(
+    card_message_id: str, guild: discord.Guild | None, client: discord.Client,
+) -> discord.Thread | None:
+    thread_id = await asyncio.to_thread(pod_launch.discussion_thread_id_sync, card_message_id)
+    if thread_id is None:
+        return None
+    thread = guild.get_thread(int(thread_id)) if guild is not None else None
+    if thread is None:
+        try:
+            fetched = await client.fetch_channel(int(thread_id))
+            thread = fetched if isinstance(fetched, discord.Thread) else None
+        except discord.HTTPException:
+            thread = None
+    return thread
+
+
+async def _add_to_discussion_thread(interaction: discord.Interaction) -> None:
+    """Pull a joiner into the queue's discussion thread so they follow the "who's around" chatter."""
+    thread = await _resolve_discussion_thread(
+        str(interaction.message.id), interaction.guild, interaction.client,
+    )
+    if thread is None:
+        return
+    try:
+        await thread.add_user(interaction.user)
+    except discord.HTTPException:
+        log.warning(f"could not add {interaction.user} to queue thread {thread.id}", exc_info=True)
+
+
+async def _remove_from_discussion_thread(
+    card_message_id: str, guild: discord.Guild | None, client: discord.Client, user: discord.abc.User,
+) -> None:
+    """Drop a leaver from the discussion thread, so its member list tracks the live queue roster."""
+    thread = await _resolve_discussion_thread(card_message_id, guild, client)
+    if thread is None:
+        return
+    try:
+        await thread.remove_user(user)
+    except discord.HTTPException:
+        log.warning(f"could not remove {user} from queue thread {thread.id}", exc_info=True)
 
 
 async def _schedule_pod(
     interaction: discord.Interaction, set_code: str | None, pairing_mode: str | None,
-    pick_timer: int | None, when: datetime, notify_choice: str | None, description: str | None,
+    pick_timer: int | None, when: datetime, notify: bool, description: str | None,
 ) -> None:
     """Post a scheduled RSVP card in the coordination channel for a future pod, carrying the launcher's
-    set and presets, with the opener seeded as the first Yes. The Notify choice picks the ping; No ping
-    silences the card."""
+    set and presets, with the opener seeded as the first Yes. The bell picks the slot's ping role off
+    the pod's time; Notify off silences the card."""
     await interaction.response.defer()
     channel = interaction.client.get_channel(settings.pod_draft_channel_id)
     if not isinstance(channel, discord.TextChannel):
         await interaction.edit_original_response(content=LAUNCHER_SCHEDULE_NO_CHANNEL, view=None)
         return
-    role = notify_role(notify_choice)
+    role = derived_notify_role(when, notify)
     resolved_set = (set_code or active_set_code()).upper()
     name = await asyncio.to_thread(pod_launch.ondemand_event_name_sync, resolved_set, when)
     opener = [(str(interaction.user.id), interaction.user.display_name)]
@@ -772,7 +837,7 @@ def _joinable_line(guild: discord.Guild, signal) -> str:
     url = f"https://discord.com/channels/{guild.id}/{signal.channel_id}/{signal.message_id}"
     set_code = (signal.set_code or active_set_code()).upper()
     if signal.kind == KIND_QUEUE or signal.slot_time is None:
-        name = LAUNCHER_QUEUE_NAME.format(set_code=set_code)
+        name = LAUNCHER_QUEUE_NAME.format(set_code=format_display(set_code))
     else:
         name = pod_display_name(set_code, signal.slot_time)
     symbol = emojis.set_symbol(set_code)

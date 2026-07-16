@@ -444,7 +444,7 @@ def build_pairing_dm_embed(
 
     if pairings_url:
         link_prefix = emojis.get("manat") or "↳"
-        body_lines.append(f"{link_prefix} [View Pairings]({pairings_url})")
+        body_lines.append(f"{link_prefix} [**View Pairings**]({pairings_url})")
 
     color = discord.Color.yellow() if updated else discord.Color.green()
     if match_state and match_state.get("winner_name"):
@@ -1218,7 +1218,7 @@ class ManageRoundButton(ui.DynamicItem[ui.Button], template=rf"{MANAGE_ROUND_CUS
         self.round_num = round_num
         super().__init__(ui.Button(
             style=discord.ButtonStyle.secondary,
-            emoji="⚙️",
+            emoji="🔧",
             custom_id=f"{MANAGE_ROUND_CUSTOM_PREFIX}:{round_num}",
             row=row,
         ))

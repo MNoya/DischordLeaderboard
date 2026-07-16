@@ -15,13 +15,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import discord
 from discord.ext import commands
 
 from bot.commands.messages import MSG_FIRST_POD_TIP_POLL, MSG_FIRST_POD_TIP_QUEUE
-from bot.commands.pod_queue import PodQueueView, queue_role_mention
+from bot.commands.pod_queue import (
+    QUEUE_CLOSED_MANUAL,
+    PodQueueView,
+    queue_inactivity_close_reason,
+    queue_role_mention,
+)
 from bot.commands.pod_rsvp import build_rsvp_embed, post_scheduled_card
 from bot.commands.pod_table import offer_second_table
 from bot.commands.test_group import test_group
@@ -153,6 +158,26 @@ async def setup(bot: commands.Bot) -> None:
             guild_id=guild_id, channel_id=str(ctx.channel.id), message_id=str(message.id),
             signal_date=today, opened_by=str(ctx.author.id),
         )
+
+    @test_group.command(name="queueclosed")
+    @commands.is_owner()
+    async def test_queueclosed(ctx: commands.Context) -> None:
+        """Owner-only. Post both closed-queue cards to eyeball the copy: the inactivity timeout keeps its
+        roster of idle players, the manual close shows none (only the last player can close it). Inert
+        previews through the real builder, no signal."""
+        mention = queue_role_mention(ctx.guild)
+        set_code = active_set_code()
+        opened_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        opened_by = str(ctx.author.id)
+        await ctx.send(view=PodQueueView(
+            names=["Tester One", "Tester Two", "Tester Three"], role_mention=mention,
+            close_reason=queue_inactivity_close_reason(), set_code=set_code,
+            opened_at=opened_at, opened_by=opened_by,
+        ))
+        await ctx.send(view=PodQueueView(
+            role_mention=mention, close_reason=QUEUE_CLOSED_MANUAL,
+            set_code=set_code, opened_at=opened_at, opened_by=opened_by,
+        ))
 
 
 async def _seed_fake_yes(

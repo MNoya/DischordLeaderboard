@@ -227,7 +227,7 @@ class _SaveAnywayView(ui.View):
 
     @ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: ui.Button) -> None:
-        await interaction.response.edit_message(content="Cancelled.", view=None)
+        await interaction.response.edit_message(content="Canceled.", view=None)
 
 
 def _build_tag_select(forum: discord.ForumChannel, selected_ids: set[int]) -> ui.Select | None:

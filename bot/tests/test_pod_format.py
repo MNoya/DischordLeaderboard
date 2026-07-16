@@ -106,8 +106,8 @@ def test_update_event_format_repoints_set_code(session):
 
     assert event.set_code == PEASANT_CODE
     assert event.format_label == PEASANT_LABEL
-    assert new_name == "PEASANT Pod Draft"
-    assert event.name == "PEASANT Pod Draft"
+    assert new_name == "Peasant Cube Pod Draft"
+    assert event.name == "Peasant Cube Pod Draft"
 
 
 def test_update_event_format_renumbers_against_target_set(session):
@@ -131,7 +131,7 @@ def test_persist_format_commits(session, monkeypatch):
     import bot.services.pod_draft_manager as mod
     event = _seed_event(session)
     monkeypatch.setattr(mod, "SessionLocal", _session_factory(session))
-    assert _persist_format(event.id, PEASANT_CODE) == "PEASANT Pod Draft"
+    assert _persist_format(event.id, PEASANT_CODE) == "Peasant Cube Pod Draft"
     assert session.get(PodDraftEvent, event.id).set_code == PEASANT_CODE
 
 

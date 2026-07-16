@@ -409,7 +409,7 @@ class _CancelButton(ui.Button):
         super().__init__(label="Cancel", style=discord.ButtonStyle.secondary)
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        await interaction.response.edit_message(content="Cancelled.", embed=None, view=None)
+        await interaction.response.edit_message(content="Canceled.", embed=None, view=None)
 
 
 class _PlatformWriteInModal(ui.Modal, title="Platform"):

@@ -145,7 +145,8 @@ class TableClaimView(discord.ui.View):
             description = MSG_TABLE_INTRO
         else:
             title = name
-            description = f"{MSG_TABLE_INTRO}\n\n{MSG_LOBBY_GATHERING.format(threshold=self.threshold)}"
+            gathering = MSG_LOBBY_GATHERING.format(threshold=emojis.mana_number(self.threshold))
+            description = f"{MSG_TABLE_INTRO}\n\n{gathering}"
         embed = discord.Embed(color=discord.Color.green(), title=title, description=description)
         if self.claims:
             embed.add_field(

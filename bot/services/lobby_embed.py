@@ -164,7 +164,7 @@ class ForceStartConfirmView(discord.ui.View):
 
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.grey)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        await interaction.response.edit_message(content="Force start cancelled.", view=None)
+        await interaction.response.edit_message(content="Force start canceled.", view=None)
 
 
 def ready_check_unlinked_text(unlinked: list[str]) -> str:
@@ -187,7 +187,7 @@ def ready_cancel_notice(kind: str, *, detail: str | None = None, retry_url: str 
     the copy never drifts."""
     ready_check = f"[Ready Check]({retry_url})" if retry_url else "Ready Check"
     headline = "⚠️ **Ready Check timed out!**" if kind == "timeout" else \
-        f"⚠️ **Ready Check cancelled!** {detail}"
+        f"⚠️ **Ready Check canceled!** {detail}"
     return f"{headline}\n🔄 Click **{ready_check}** when all players are present"
 
 
@@ -237,7 +237,7 @@ class ReadyCheckUnlinkedConfirmView(discord.ui.View):
 
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.grey)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        await interaction.response.edit_message(content="Ready check cancelled.", view=None)
+        await interaction.response.edit_message(content="Ready check canceled.", view=None)
 
 
 async def guard_ready_check(interaction, manager, thread, *, initiated_by, min_players=None) -> bool:
@@ -532,7 +532,7 @@ def ready_status_banner(
         return [f"### {emojis.get('draftmancer')} Draft complete!"], discord.Color.green()
     if state == "notready":
         retry = "! Click Ready Check to retry" if retry_hint else ""
-        reason = f"`{decliner_name}` is Not Ready" if decliner_name else (cancel_reason or "Ready Check cancelled")
+        reason = f"`{decliner_name}` is Not Ready" if decliner_name else (cancel_reason or "Ready Check canceled")
         lines = [f"### ❌ {reason}{retry}"]
         if initiated_by:
             lines.append(f"-# Started by {initiated_by}")

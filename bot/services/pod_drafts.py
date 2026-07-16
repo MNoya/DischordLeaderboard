@@ -631,17 +631,18 @@ def _set_event_names(session: Session, code: str) -> list[str]:
 
 
 def renamed_for_format(name: str, old_code: str | None, new_code: str, next_number: int) -> str:
-    """Rebuild a `SET Pod Draft #N - date` name for the new format: swap the leading set token and
+    """Rebuild a `SET Pod Draft #N - date` name for the new format: swap the leading format label and
     renumber to the new set's next slot, keeping the date suffix. Since pods are counted per set,
-    switching MSH → SOS moves `#14` to SOS's own next number. Names that don't lead with the old code
-    are returned unchanged."""
+    switching MSH → SOS moves `#14` to SOS's own next number. Labels come from `format_display`, so a
+    cube reads as its proper name (Peasant Cube) on both sides. Names that don't lead with the old
+    format's label are returned unchanged."""
     if not old_code:
         return name
-    prefix = f"{old_code.upper()} "
-    if not name.upper().startswith(prefix):
+    prefix = f"{pod_format.format_display(old_code)} "
+    if not name.upper().startswith(prefix.upper()):
         return name
     renumbered = NUM_RE.sub(f"#{next_number}", name[len(prefix):], count=1)
-    return f"{new_code.upper()} {renumbered}"
+    return f"{pod_format.format_display(new_code)} {renumbered}"
 
 
 def load_event_set_code_sync(event_id: str) -> str | None:

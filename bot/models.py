@@ -338,6 +338,7 @@ class PodSignal(Base):
     channel_id       = Column(String, nullable=False)
     message_id       = Column(String, nullable=False)
     thread_message_id = Column(String, nullable=True)
+    discussion_thread_id = Column(String, nullable=True)
     signal_date      = Column(Date, nullable=False)
     slot_time        = Column(DateTime(timezone=True), nullable=True)
     status           = Column(String, nullable=False, server_default="open")

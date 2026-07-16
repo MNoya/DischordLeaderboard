@@ -10,13 +10,14 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from bot.services.pod_format import format_display
 from bot.services.pod_schedule import SCHEDULE_TZ
 from bot.services.pod_signals import PollBucket, poll_buckets_for
 
 
 def pod_display_name(set_code: str, event_time: datetime) -> str:
     local = event_time.astimezone(SCHEDULE_TZ)
-    return f"{set_code.upper()} {local:%b %-d} {pod_slot_label(event_time)}"
+    return f"{format_display(set_code)} {local:%b %-d} {pod_slot_label(event_time)}"
 
 
 def pod_slot_label(event_time: datetime) -> str:
