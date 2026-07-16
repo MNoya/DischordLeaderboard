@@ -1177,7 +1177,7 @@ function HighlightTile({
           <div
             className="absolute inset-0 sm:hidden"
             style={{
-              background: `linear-gradient(to bottom, color-mix(in srgb, ${accent} 14%, transparent) 0%, transparent 45%), linear-gradient(to right, transparent 25%, #1d2330 96%)`,
+              background: `linear-gradient(to bottom, #1d2330 0%, color-mix(in srgb, #1d2330 45%, transparent) 10%, transparent 22%), linear-gradient(to top, #1d2330 0%, transparent 14%), linear-gradient(to right, #1d2330 0%, transparent 12%), linear-gradient(to right, transparent 20%, #1d2330 88%)`,
             }}
           />
           <div
@@ -1189,21 +1189,18 @@ function HighlightTile({
         </div>
 
         <div className="relative flex-1 flex flex-col ml-[104px] pt-3 pr-4 pb-3.5 sm:ml-0 sm:mt-[124px] sm:pt-0 sm:px-4 sm:pb-4">
-          <div className="flex items-center justify-between">
-            <span
-              className="font-display text-[15px] tracking-[0.2em] [text-shadow:0_1px_8px_#0009]"
-              style={{ color: accent }}
-            >
-              {HIGHLIGHT_STAMP[highlight.kind]}
-            </span>
-            <span className="font-mono text-[10px] text-dim">Nº {index + 1}</span>
-          </div>
+          <span
+            className="font-display text-[15px] tracking-[0.2em] [text-shadow:none] sm:[text-shadow:0_1px_8px_#0009]"
+            style={{ color: accent }}
+          >
+            {HIGHLIGHT_STAMP[highlight.kind]}
+          </span>
 
           <div
-            className="font-mono font-bold tabular-nums leading-none mt-2 sm:mt-1.5 text-[30px] sm:text-[38px]"
+            className="font-mono font-bold tabular-nums leading-none mt-2 sm:mt-1.5 text-[30px] sm:text-[38px] [text-shadow:none] sm:[text-shadow:var(--pp-glow)]"
             style={{
               color: accent,
-              textShadow: `0 0 34px color-mix(in srgb, ${accent} 45%, transparent)`,
+              ["--pp-glow" as string]: `0 0 16px color-mix(in srgb, ${accent} 30%, transparent)`,
             }}
           >
             {ppStat(highlight)}
