@@ -151,7 +151,7 @@ export function P0P1Page() {
               hasParticipated={hasParticipated}
             />
           ) : (
-            <CardGridSkeleton />
+            <ResultsSkeleton />
           )
         ) : phase === "final" ? (
           resultsDataReady && ratingsSnapshot && cards && pickStats && ballots ? (
@@ -167,7 +167,7 @@ export function P0P1Page() {
               stickyTop={heroHeight}
             />
           ) : (
-            <CardGridSkeleton />
+            <ResultsSkeleton />
           )
         ) : phase === "postVoting" || phase === "finalizing" ? (
           pickStats && pickStats.length > 0 && (
@@ -343,19 +343,41 @@ function RosterTile({
   );
 }
 
+function SkeletonTile() {
+  return (
+    <div className="flex flex-col aspect-square border-t-0 bg-surface border border-border2">
+      <div className="h-1 w-full bg-surface2" />
+      <div className="flex-1 min-h-0 bg-surface2 animate-pulse" />
+      <div className="px-2.5 py-1.5 shrink-0 flex flex-col gap-1">
+        <div className="h-2 w-12 bg-surface2 animate-pulse" />
+        <div className="h-2.5 w-16 bg-surface2 animate-pulse" />
+      </div>
+    </div>
+  );
+}
+
 function RosterStripSkeleton() {
   return (
     <div className="grid grid-cols-8 gap-2">
       {Array.from({ length: SLOTS.length }, (_, i) => (
-        <div key={i} className="flex flex-col aspect-square border-t-0 bg-surface border border-border2">
-          <div className="h-1 w-full bg-surface2" />
-          <div className="flex-1 min-h-0 bg-surface2 animate-pulse" />
-          <div className="px-2.5 py-1.5 shrink-0 flex flex-col gap-1">
-            <div className="h-2 w-12 bg-surface2 animate-pulse" />
-            <div className="h-2.5 w-16 bg-surface2 animate-pulse" />
-          </div>
-        </div>
+        <SkeletonTile key={i} />
       ))}
+    </div>
+  );
+}
+
+function ResultsSkeleton() {
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-col items-center gap-2">
+        <div className="h-5 w-52 bg-surface2 animate-pulse" />
+        <div className="h-3 w-72 bg-surface2 animate-pulse" />
+      </div>
+      <div className="grid grid-cols-8 gap-2">
+        {Array.from({ length: SLOTS.length }, (_, i) => (
+          <SkeletonTile key={i} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -363,11 +385,12 @@ function RosterStripSkeleton() {
 function CardGridSkeleton() {
   return (
     <div>
-      <div className="flex items-center gap-3 mb-3">
-        <div className="h-5 w-40 bg-surface2 animate-pulse" />
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 mb-3">
+        <div />
+        <div className="h-6 w-56 bg-surface2 animate-pulse" />
         <div className="ml-auto h-7 w-60 bg-surface2 animate-pulse" />
       </div>
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-3.5">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3.5">
         {Array.from({ length: 10 }, (_, i) => (
           <div key={i} className="bg-surface2 animate-pulse rounded-[3%]" style={{ aspectRatio: "488 / 680" }} />
         ))}

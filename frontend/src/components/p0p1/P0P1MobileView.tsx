@@ -532,7 +532,7 @@ const SKEL_NAME_W = [120, 100, 110, 95, 105, 130, 115, 125, 140];
 export function SlotsListSkeleton() {
   return (
     <div className="flex flex-col gap-1.5">
-      {Array.from({ length: 8 }, (_, i) => (
+      {Array.from({ length: SLOTS.length }, (_, i) => (
         <div key={i} className="w-full flex items-center gap-4 px-4 py-3 bg-surface border border-border2">
           <div className="w-20 h-12 bg-surface2 animate-pulse shrink-0" />
           <div className="flex-1 flex flex-col gap-1.5">
