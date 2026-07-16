@@ -231,7 +231,7 @@ async def _create_team_threads(manager: "PodDraftManager", board_message: discor
     existing_by_name = {t.name: t for t in parent.threads}
 
     for team in (pod_team.TEAM_A, pod_team.TEAM_B):
-        name = f"{event_name} {pod_team.team_emoji(team)} Team"[:100]
+        name = f"{pod_team.team_emoji(team)} Team - {event_name}"[:100]
         thread = existing_by_name.get(name)
         if thread is not None:
             log.info(f"[TEAM] thread_reused event={manager.event_id} team={team} thread={thread.id}")
