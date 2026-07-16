@@ -242,7 +242,7 @@ export function groupBallotRows(
 }
 
 // Rank all ballots by summed GIHWR (descending). Partial ballots sink naturally.
-// Returns the same ballots array with rank and percentile attached.
+// Returns the same ballots array with rank attached.
 export interface RankedBallot {
   ballotId: number;
   name: string;
@@ -250,7 +250,6 @@ export interface RankedBallot {
   picks: Map<SlotKey, string>;
   score: number;
   rank: number;
-  percentile: number;
 }
 
 export function rankBallots(
@@ -261,14 +260,10 @@ export function rankBallots(
     ...b,
     score: scoreBallot(b.picks, ratingsByName),
     rank: 0,
-    percentile: 0,
   }));
   scored.sort((a, b) => b.score - a.score);
-  const n = scored.length;
-  for (let i = 0; i < n; i++) {
+  for (let i = 0; i < scored.length; i++) {
     scored[i].rank = i + 1;
-    // percentile: what fraction scored strictly worse
-    scored[i].percentile = n > 1 ? Math.round(((n - i - 1) / (n - 1)) * 100) : 100;
   }
   return scored;
 }
@@ -304,12 +299,7 @@ export function applyDevSelfPlacement(
 
   const rescored = [...others, { ...self, score: targetScore }];
   rescored.sort((a, b) => b.score - a.score);
-  const n = rescored.length;
-  return rescored.map((b, i) => ({
-    ...b,
-    rank: i + 1,
-    percentile: n > 1 ? Math.round(((n - i - 1) / (n - 1)) * 100) : 100,
-  }));
+  return rescored.map((b, i) => ({ ...b, rank: i + 1 }));
 }
 
 // Ghost rows for the reference teams, inserted into the standings at their
@@ -384,8 +374,8 @@ export function findUserBallot(
 // (fraction of all ballots playing the card in any slot — wildcard slots
 // overlap the color slots); the Trap keeps within-slot share, its cost is slot-local.
 
-export const TRAP_SHORTFALL_FLOOR = 0.02;
-export const SLEEPER_TEAM_SHARE_CEIL = 0.05;
+const TRAP_SHORTFALL_FLOOR = 0.02;
+const SLEEPER_TEAM_SHARE_CEIL = 0.05;
 
 export interface HighlightVoter {
   name: string;

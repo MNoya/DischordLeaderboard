@@ -292,7 +292,6 @@ function syntheticToBallot(standing: SyntheticStanding): RankedBallot {
     picks,
     score: standing.team.score,
     rank: 0,
-    percentile: 0,
   };
 }
 
