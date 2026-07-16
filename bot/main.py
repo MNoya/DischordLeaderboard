@@ -88,6 +88,7 @@ from bot.tasks.format_schedule_post import init_format_schedule
 from bot.tasks.pod_schedule_post import init_schedule_post
 from bot.tasks.set_awards_post import init_set_awards_schedule
 from bot.tasks.pod_underfill import init_underfill
+from bot.tasks.pod_thread_cleanup import init_thread_cleanup
 
 
 log = logging.getLogger("bot.main")
@@ -189,6 +190,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         init_set_awards_schedule(bot)
         init_launch(bot)
         init_daily_poll(bot)
+        init_thread_cleanup(bot)
 
         # Load cogs into memory and mirror to the guild tree so dispatch works.
         # Discord-side sync is handled by the owner-only `!sync` text command, not on startup.
