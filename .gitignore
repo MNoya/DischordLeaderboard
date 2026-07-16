@@ -27,6 +27,7 @@ cache/
 # Claude Code: user-specific settings and transient agent state
 .claude/settings.local.json
 .claude/worktrees/
+CLAUDE.local.md
 
 # wrangler files
 .wrangler
