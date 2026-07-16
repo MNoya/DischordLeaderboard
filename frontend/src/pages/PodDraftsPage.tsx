@@ -590,8 +590,8 @@ function DateRail({
 function EventRowBody({ event, nowMs }: { event: PodEventSummary; nowMs: number }) {
   const hasChamp = !!event.championDisplayName;
   const startMs = new Date(event.eventTime).getTime();
-  const inProgress = !hasChamp && startMs <= nowMs;
-  const isUpcoming = !hasChamp && startMs > nowMs;
+  const inProgress = !event.isFinalized && startMs <= nowMs;
+  const isUpcoming = !event.isFinalized && startMs > nowMs;
   const { data: matches } = usePodEventMatches(inProgress ? event.eventId : undefined);
   const currentRound = useMemo(() => {
     if (!matches || matches.length === 0) return null;

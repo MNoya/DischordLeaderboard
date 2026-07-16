@@ -68,7 +68,7 @@ function DeckPips({ decks }: { decks: TrophyLeaderboardRow["decks"] }) {
   return (
     <div className="flex items-center gap-2 mt-1.5 flex-wrap">
       {decks.slice(0, MAX_DECK_PIPS).map((d, i) => (
-        <Pips key={`${d.sourceMessageId}-${i}`} colors={d.colors} size={12} flat />
+        <Pips key={`${d.sourceMessageId}-${i}`} colors={d.colors} size={12} />
       ))}
       {decks.length > MAX_DECK_PIPS && (
         <span className="mono text-[11px] text-dim">+{decks.length - MAX_DECK_PIPS}</span>

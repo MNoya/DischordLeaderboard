@@ -1980,7 +1980,7 @@ function PlayerTile({
       >
         {seat.name}
       </span>
-      <Pips colors={seat.colors} size={14} flat />
+      <Pips colors={seat.colors} size={14} />
     </button>
   );
 }

@@ -1589,7 +1589,7 @@ function EventLogRow({
       : { name: "", splash: "" };
     const deckContent = (
       <span className="grid items-center" style={{ gridTemplateColumns: "100px 60px 1fr" }}>
-        <Pips colors={e.colors} size={14} flat />
+        <Pips colors={e.colors} size={14} />
         <span
           className="text-[13px] text-muted"
           style={deckSplash ? undefined : { gridColumn: "span 2" }}
@@ -1621,7 +1621,7 @@ function EventLogRow({
               </span>
             ) : (
               <>
-                <Pips colors={e.colors} size={14} flat />
+                <Pips colors={e.colors} size={14} />
                 <span
                   className="text-[13px] text-muted"
                   style={deckSplash ? undefined : { gridColumn: "span 2" }}
@@ -1744,7 +1744,7 @@ function EventLogRow({
       </span>
       <div>
         <div className="flex items-center gap-1.5 flex-wrap">
-          {!podWithoutDeck && <Pips colors={e.colors} size={11} flat />}
+          {!podWithoutDeck && <Pips colors={e.colors} size={11} />}
           <span className="font-display text-[13px] tracking-[0.08em]">
             {formatLabel}
           </span>
