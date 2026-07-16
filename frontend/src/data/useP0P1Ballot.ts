@@ -275,7 +275,7 @@ function topPickPerSlot(pickStats: P0P1PickStat[] | undefined): Map<string, stri
   return picks;
 }
 
-function deriveP0P1Phase(
+export function deriveP0P1Phase(
   isPastDeadline: boolean,
   isPastScoringDate: boolean,
   snapshot: RatingsSnapshot | undefined,
