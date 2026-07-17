@@ -25,6 +25,7 @@ from bot.services.pod_draft_manager import (
     set_event_pick_timer,
     set_event_seating,
     set_event_seating_mode,
+    set_card_refresh_hook,
     set_seeding_refresh_hook,
     set_seeding_repost_hook,
 )
@@ -43,7 +44,7 @@ from bot.services.pod_drafts import (
     lobby_match_status,
     search_event_names_sync,
 )
-from bot.commands.pod_rsvp import fetch_channel, reflect_format_change, reschedule_event
+from bot.commands.pod_rsvp import fetch_channel, reflect_format_change, refresh_scheduled_card, reschedule_event
 from bot.services import pod_launch
 from bot.services.player_stats import SeededAttendee, rank_ordered_names, seed_attendees, seated_ring_order
 from bot.services.pod_seating_select import SEATING_ORDER_MARKER, seating_change_message
@@ -1152,4 +1153,5 @@ def _live_lobby_names() -> list[str]:
 async def setup(bot: commands.Bot) -> None:
     set_seeding_refresh_hook(refresh_seeding_table)
     set_seeding_repost_hook(repost_seeding_table)
+    set_card_refresh_hook(refresh_scheduled_card)
     await bot.add_cog(PodDraft(bot))

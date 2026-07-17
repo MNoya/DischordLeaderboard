@@ -26,10 +26,16 @@ from bot.commands.pod_queue import (
     queue_inactivity_close_reason,
     queue_role_mention,
 )
-from bot.commands.pod_rsvp import build_rsvp_embed, post_scheduled_card, purge_native_events
+from bot.commands.pod_rsvp import (
+    build_rsvp_embed,
+    post_scheduled_card,
+    purge_native_events,
+    refresh_scheduled_card,
+)
 from bot.commands.pod_table import offer_second_table
 from bot.commands.test_group import test_group
 from bot.services import pod_launch
+from bot.services.pod_draft_manager import set_event_pairing_mode
 from bot.services.ping_roles import (
     PING_ROLES,
     QUEUE_GRANT_PING,
@@ -160,11 +166,15 @@ async def setup(bot: commands.Bot) -> None:
 
     @test_group.command(name="rsvp")
     @commands.is_owner()
-    async def test_rsvp(ctx: commands.Context, minutes: int = 60, fill: int = 0) -> None:
+    async def test_rsvp(
+        ctx: commands.Context, minutes: int = 60, fill: int = 0, team: str = "",
+    ) -> None:
         """Owner-only. Post a live scheduled RSVP card in this channel via the production creation
         path — thread, event, native Discord event, and timed jobs included. `minutes` sets how far
         out the pod starts; `fill` seeds that many fake Yes signups so the '≥8' multi-pod notice can
-        be previewed without eight real people."""
+        be previewed without eight real people. Pass `team` as the third word to flip the card into a
+        Team Draft through the real persist-and-refresh path, so the ` - Team Draft` title marker can
+        be eyeballed without a live lobby vote."""
         if not isinstance(ctx.channel, discord.TextChannel):
             await ctx.send("Run `!test rsvp` in a server text channel — the thread is created there.")
             return
@@ -179,6 +189,9 @@ async def setup(bot: commands.Bot) -> None:
             return
         if fill > 0:
             await _seed_fake_yes(ctx.channel, event_id, event_time, name, fill)
+        if team.lower() == "team":
+            await set_event_pairing_mode(event_id, "team")
+            await refresh_scheduled_card(ctx.bot, event_id)
 
     @test_group.command(name="secondtable")
     @commands.is_owner()

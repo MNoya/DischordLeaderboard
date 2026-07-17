@@ -43,10 +43,16 @@ from bot.services.ping_roles import (
     slot_grant_ping,
     spec_named,
 )
-from bot.services.pod_drafts import load_event_set_code_sync, load_event_time_sync, record_ondemand_event
+from bot.services.pod_drafts import (
+    load_event_pairing_mode_sync,
+    load_event_set_code_sync,
+    load_event_time_sync,
+    record_ondemand_event,
+)
 from bot.services.pod_registration_embed import build_registered_embed
 from bot.services.pod_roles import find_role, grant_pod_drafters, grant_role
 from bot.services.pod_schedule import LATE_POD_ROLE_NAME, SCHEDULE_TZ
+from bot.services.pod_slot import team_aware_pod_name
 from bot.services.pod_signals import RSVP_MAYBE, RSVP_NO, RSVP_STATES, RSVP_YES
 from bot.tasks.pod_draft_reminder import (
     REMINDER_LEAD_MIN,
@@ -146,21 +152,23 @@ class ScheduledRegisteredView(discord.ui.View):
 
 def build_rsvp_embed(
     name: str, event_time: datetime, rosters: dict[str, list[str]], role_time: datetime | None = None,
-    description: str | None = None, set_code: str | None = None,
+    description: str | None = None, set_code: str | None = None, team_draft: bool = False,
 ) -> discord.Embed:
     """The RSVP surface. Time and the roster columns are embed fields so sesh's vertical breathing
     room comes for free. `role_time` keys the slot emoji; it defaults to `event_time` and callers
     pass the signal's original slot time after a reschedule. `description` is the optional organizer
     note, shown between the intro and the multi-pod notice so a roster refresh preserves it.
-    `set_code` trails the format's keyrune symbol after the name."""
+    `set_code` trails the format's keyrune symbol after the name; `team_draft` marks the title once
+    the pod locks into teams."""
     unix = int(event_time.timestamp())
     calendar_url = google_calendar_url(name, event_time)
     note = f"\n> {description}" if description else ""
     symbol = emojis.get(set_code.lower()) if set_code else ""
-    suffix = f" {NBSP}{symbol}" if symbol else ""
+    suffix = f"{NBSP}{symbol}" if symbol else ""
+    title_name = team_aware_pod_name(name, "team" if team_draft else None)
     embed = discord.Embed(
         description=(
-            f"### {NBSP * 2}🗓️ {name}{suffix}\n"
+            f"### {NBSP * 2}🗓️ {title_name}{suffix}\n"
             f"{_intro_line(role_time or event_time)}"
             f"{note}"
             f"{_multipod_suffix(rosters)}"
@@ -270,7 +278,10 @@ async def post_scheduled_card(
     try:
         message = await channel.send(
             content=content,
-            embed=build_rsvp_embed(name, event_time, rosters, description=description, set_code=set_code),
+            embed=build_rsvp_embed(
+                name, event_time, rosters, description=description, set_code=set_code,
+                team_draft=pairing_mode == "team",
+            ),
             view=PodRsvpView(),
             allowed_mentions=discord.AllowedMentions(roles=True),
         )
@@ -634,25 +645,55 @@ async def _edit_scheduled_card(bot: commands.Bot, event_id: str, name: str, even
         return
     description = await asyncio.to_thread(_event_description, event_id)
     set_code = await asyncio.to_thread(load_event_set_code_sync, event_id)
+    pairing_mode = await asyncio.to_thread(load_event_pairing_mode_sync, event_id)
     try:
         message = await channel.fetch_message(int(message_id))
         await message.edit(embed=build_rsvp_embed(
-            name, event_time, rosters, slot_time, description, set_code=set_code))
+            name, event_time, rosters, slot_time, description, set_code=set_code,
+            team_draft=pairing_mode == "team"))
     except discord.HTTPException:
         log.warning(f"could not edit scheduled card {message_id}", exc_info=True)
 
 
-async def reflect_format_change(bot: commands.Bot, event_id: str) -> None:
-    """Mirror a pre-draft format change onto the surfaces addressed by stored ids: the channel card
-    title (new name + set symbol) and the native scheduled event's name. The thread rename lives in
-    set_event_format; the in-thread registered embed re-renders through the Settings panel. Called
-    after the format persists, so the pod reads as its new format wherever the gear was clicked."""
+async def refresh_scheduled_card(bot: commands.Bot, event_id: str) -> None:
+    """Surface a mid-lobby pairing change on every scheduling surface — the channel card title, the
+    thread name, and the native event. Fired when a pod locks into a Team Draft."""
     loaded = await asyncio.to_thread(_load_event, event_id)
     if loaded is None:
         return
     name, event_time, _status, thread_id, native_event_id, _created_at = loaded
+    pairing_mode = await asyncio.to_thread(load_event_pairing_mode_sync, event_id)
+    display_name = team_aware_pod_name(name, pairing_mode)
     await _edit_scheduled_card(bot, event_id, name, event_time)
-    await _rename_native_event(bot, thread_id, native_event_id, name)
+    await _rename_thread(bot, thread_id, display_name)
+    await _rename_native_event(bot, thread_id, native_event_id, display_name)
+
+
+async def reflect_format_change(bot: commands.Bot, event_id: str) -> None:
+    """Mirror a pre-draft format change onto the surfaces addressed by stored ids: the channel card
+    title (new name + set symbol) and the native scheduled event's name, both carrying the Team-Draft
+    marker when the pod has locked into teams. The thread rename lives in set_event_format; the
+    in-thread registered embed re-renders through the Settings panel. Called after the format persists,
+    so the pod reads as its new format wherever the gear was clicked."""
+    loaded = await asyncio.to_thread(_load_event, event_id)
+    if loaded is None:
+        return
+    name, event_time, _status, thread_id, native_event_id, _created_at = loaded
+    pairing_mode = await asyncio.to_thread(load_event_pairing_mode_sync, event_id)
+    await _edit_scheduled_card(bot, event_id, name, event_time)
+    await _rename_native_event(bot, thread_id, native_event_id, team_aware_pod_name(name, pairing_mode))
+
+
+async def _rename_thread(bot: commands.Bot, thread_id: str | None, name: str) -> None:
+    if thread_id is None:
+        return
+    thread = await fetch_channel(bot, thread_id)
+    if not isinstance(thread, discord.Thread):
+        return
+    try:
+        await thread.edit(name=name[:100])
+    except discord.HTTPException:
+        log.warning(f"could not rename thread {thread_id}", exc_info=True)
 
 
 async def _rename_native_event(

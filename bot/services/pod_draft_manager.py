@@ -74,6 +74,7 @@ from bot.services.pod_drafts import (
     seed_event_participants,
     update_event_format,
 )
+from bot.services.pod_slot import team_aware_pod_name
 from bot.services.pod_team_flow import assign_teams_at_draft_start, load_teams_sync
 from bot.services.pod_tournament import (
     persist_pairing_mode,
@@ -105,6 +106,7 @@ _SEEDING_REFRESH_HOOK = None
 _SEEDING_REPOST_HOOK = None
 _SECOND_TABLE_HOOK = None
 _CARD_CLOSE_HOOK = None
+_CARD_REFRESH_HOOK = None
 
 
 def set_card_close_hook(callback) -> None:
@@ -119,6 +121,20 @@ def notify_card_close(bot, event_id: str) -> None:
     no longer revert to the lobby — so the card stays live through fill, ready check, and any restart."""
     if _CARD_CLOSE_HOOK is not None:
         asyncio.create_task(_CARD_CLOSE_HOOK(bot, event_id))
+
+
+def set_card_refresh_hook(callback) -> None:
+    """pod_draft registers its RSVP-card re-render here so the manager can refresh the card title when
+    the pod's pairing mode changes without importing the command module (which imports the manager)."""
+    global _CARD_REFRESH_HOOK
+    _CARD_REFRESH_HOOK = callback
+
+
+def notify_card_refresh(bot, event_id: str) -> None:
+    """Re-render the pod's RSVP card (no-op if unset). Fired when the pairing mode flips to or from a
+    Team Draft so the card title picks up the ` - Team Draft` marker."""
+    if _CARD_REFRESH_HOOK is not None:
+        asyncio.create_task(_CARD_REFRESH_HOOK(bot, event_id))
 
 
 def set_second_table_hook(callback) -> None:
@@ -558,7 +574,7 @@ class PodDraftManager:
         self.set_code = code
         if new_name != self.event_name:
             self.event_name = new_name
-            await self._rename_thread(new_name)
+            await self._rename_thread(team_aware_pod_name(new_name, self.pairing_mode))
         if self.sio.connected and self.owner_claimed:
             err = await self._emit_format()
             if err is not None:
@@ -2074,7 +2090,8 @@ async def set_event_format(bot: commands.Bot, event_id: str, code: str) -> str |
     new_name = await asyncio.to_thread(_persist_format, event_id, code)
     if new_name is None:
         return pod_format.FORMAT_LOCKED_MSG
-    await _rename_event_thread(bot, event_id, new_name)
+    pairing_mode = await asyncio.to_thread(load_event_pairing_mode_sync, event_id)
+    await _rename_event_thread(bot, event_id, team_aware_pod_name(new_name, pairing_mode))
     return None
 
 
@@ -2113,6 +2130,7 @@ async def set_event_pairing_mode(event_id: str, mode: str) -> str | None:
     await asyncio.to_thread(persist_pairing_mode, event_id, mode)
     if manager is not None:
         await manager.refresh_lobby_now()
+        notify_card_refresh(manager.bot, event_id)
     return None
 
 

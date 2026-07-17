@@ -15,9 +15,17 @@ from bot.services.pod_schedule import SCHEDULE_TZ
 from bot.services.pod_signals import PollBucket, poll_buckets_for
 
 
+TEAM_DRAFT_TITLE_SUFFIX = " - Team Draft"
+
+
 def pod_display_name(set_code: str, event_time: datetime) -> str:
     local = event_time.astimezone(SCHEDULE_TZ)
     return f"{format_display(set_code)} {local:%b %-d} {pod_slot_label(event_time)}"
+
+
+def team_aware_pod_name(name: str, pairing_mode: str | None) -> str:
+    """A pod's base name with the Team-Draft marker appended once it has locked into teams."""
+    return f"{name}{TEAM_DRAFT_TITLE_SUFFIX}" if pairing_mode == "team" else name
 
 
 def pod_slot_label(event_time: datetime) -> str:
