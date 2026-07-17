@@ -642,10 +642,13 @@ function GamesGrid({
   );
 }
 
-function EmptyReplayCell({ label, title }: { label: string; title: string }) {
+function EmptyReplayCell({ label, title, className }: { label: string; title: string; className?: string }) {
   return (
     <div
-      className="flex items-center bg-transparent border border-dashed border-border/70 text-dim cursor-default px-3"
+      className={cn(
+        "flex items-center bg-transparent border border-dashed border-border/70 text-dim cursor-default px-3",
+        className,
+      )}
       style={{ height: 38 }}
       title={title}
     >
@@ -705,6 +708,8 @@ function PlayerReplayCell({ row }: { row: PodEventReplayRow | null }) {
   );
 }
 
+const OPPONENT_CELL = "lg:w-[186px] lg:justify-center";
+
 function OpponentReplayCell({ row }: { row: PodEventReplayRow | null }) {
   const isMobile = useIsCompact();
   if (!row) {
@@ -713,6 +718,7 @@ function OpponentReplayCell({ row }: { row: PodEventReplayRow | null }) {
       <EmptyReplayCell
         label="NO OPPONENT REPLAY"
         title="The opponent did not capture a replay for this game"
+        className={OPPONENT_CELL}
       />
     );
   }
@@ -723,13 +729,16 @@ function OpponentReplayCell({ row }: { row: PodEventReplayRow | null }) {
       rel="noreferrer noopener"
       onClick={(e) => e.stopPropagation()}
       style={{ height: 38 }}
-      className="group inline-flex items-center gap-1.5 bg-bg border border-border hover:border-green/60 hover:bg-green/10 transition-colors px-3 no-underline"
+      className={cn(
+        "group inline-flex items-center gap-1.5 bg-bg border border-border hover:border-green/60 hover:bg-green/10 transition-colors px-3 no-underline",
+        OPPONENT_CELL,
+      )}
     >
       <span
         className="font-display tracking-[0.16em] text-text group-hover:text-green transition-colors leading-none whitespace-nowrap"
         style={{ fontSize: 14 }}
       >
-        {isMobile ? "OPP REPLAY" : "VIEW OPPONENT'S REPLAY"}
+        {isMobile ? "OPP REPLAY" : "OPPONENT'S REPLAY"}
       </span>
       <ExternalLink
         size={13}
