@@ -37,6 +37,14 @@ class P0P1Entry(Base):
     )
 
 
+class P0P1Voter(Base):
+    __tablename__ = "p0p1_voters"
+
+    user_id    = Column(UUID(as_uuid=True), primary_key=True)
+    name       = Column(Text, nullable=False)
+    avatar_url = Column(Text, nullable=True)
+
+
 class Player(Base):
     __tablename__ = "players"
 
