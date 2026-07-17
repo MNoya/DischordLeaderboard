@@ -37,7 +37,7 @@ log = logging.getLogger(__name__)
 
 MSG_ALREADY_LINKED = "That token is already linked to your account — use `/leaderboard` to see your stats."
 MSG_UPDATED = "Updated. Your latest stats are on the [leaderboard](https://dischord.pages.dev/leaderboard)"
-MSG_UPDATED_HIDDEN = "Updated. Your rank stays hidden. Run `/join` to appear on the [leaderboard](https://dischord.pages.dev/leaderboard)"
+MSG_UPDATED_HIDDEN = "Updated. Your rank stays hidden. Run `/join` to appear on the [leaderboard](https://limitedlevelups.com/leaderboard)"
 
 
 def updated_message(opted_in: bool) -> str:

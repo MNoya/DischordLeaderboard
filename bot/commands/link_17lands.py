@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 DM_TIMEOUT_S = 10 * 60
 PROMPT_TIMEOUT_S = 10 * 60
 
-LEADERBOARD_URL = "https://dischord.pages.dev/leaderboard"
+LEADERBOARD_URL = "https://limitedlevelups.com/leaderboard"
 
 INSTRUCTIONS = (
     "**Link your 17lands profile** to track your games.\n"
