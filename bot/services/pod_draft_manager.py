@@ -1933,8 +1933,11 @@ class PodDraftManager:
         channel = self.bot.get_channel(settings.pod_draft_channel_id)
         if channel is None:
             return
+        headline_name = self.event_name
+        if not headline_name.lower().endswith("draft"):
+            headline_name = f"{headline_name} Draft"
         embed = discord.Embed(
-            title=MSG_DRAFT_STARTED_ANNOUNCE.format(name=self.event_name),
+            title=MSG_DRAFT_STARTED_ANNOUNCE.format(name=headline_name),
             description=MSG_DRAFT_STARTED_LINK.format(url=thread.jump_url),
             color=discord.Color.green(),
         )

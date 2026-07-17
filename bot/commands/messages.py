@@ -39,7 +39,7 @@ MSG_LOBBY_HEADLINE_NOW = "Lobby opening now!"
 MSG_LOBBY_HEADLINE_SOON = "Pod Draft starts in {minutes} minutes!"
 MSG_DRAFTMANCER_LINK_LEAD = "Draftmancer link will be posted {lead} minutes before."
 
-MSG_DRAFT_STARTED_ANNOUNCE = "{name} is starting now!"
+MSG_DRAFT_STARTED_ANNOUNCE = "{name} started!"
 MSG_DRAFT_STARTED_LINK = "[**Event Details**]({url})"
 
 MSG_POD_WELCOME = (
