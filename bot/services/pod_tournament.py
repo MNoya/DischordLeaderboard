@@ -1412,7 +1412,7 @@ class FixPairingView(ui.View):
         a_disp = _roster_display(self.roster, self.selected_a)
         b_disp = _roster_display(self.roster, self.selected_b)
         url = self.round_message.jump_url if self.round_message is not None else None
-        label = f"[Round {self.round_num}]({url})" if url else f"[Round {self.round_num}]"
+        label = f"[__Round {self.round_num}__]({url})" if url else f"[Round {self.round_num}]"
 
         if await self._regenerate_bracket_after_result(choice, result_meta):
             return
@@ -3837,9 +3837,9 @@ def format_reported_result(m: dict) -> str:
 
 
 def format_round_announcement(round_num: int, m: dict, pairings_url: str | None = None) -> str:
-    """The per-result thread announcement, round-labelled: '**[Round 2]** Marlo wins 2-1 vs Bob'. The
-    label links back to that round's pairings embed when its jump URL is known."""
-    label = f"[Round {round_num}]({pairings_url})" if pairings_url else f"[Round {round_num}]"
+    """The per-result thread announcement, round-labelled: '**[__Round 2__]** Marlo wins 2-1 vs Bob'. The
+    label links back to that round's pairings embed when its jump URL is known; the underline signals it."""
+    label = f"[__Round {round_num}__]({pairings_url})" if pairings_url else f"[Round {round_num}]"
     return f"**{label}** {format_reported_result(m)}"
 
 
@@ -4246,7 +4246,7 @@ def bracket_fill_notice(round_num: int, matchups: list[tuple[str, str]], url: st
     """Thread note when the fast bracket fills previously-pending slots in an already-posted round, so
     the other-half matches read as newly set rather than the message changing silently."""
     pairings = ", ".join(f"{a} vs {b}" for a, b in matchups)
-    link = f"[Round {round_num} Pairings]({url})" if url else f"Round {round_num} Pairings"
+    link = f"[__Round {round_num} Pairings__]({url})" if url else f"Round {round_num} Pairings"
     return f"**{link}** {pairings}"
 
 

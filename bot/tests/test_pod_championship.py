@@ -209,7 +209,7 @@ def test_round_announcement_prefixes_the_round_label():
     assert format_round_announcement(1, match) == "**[Round 1]** Marlo wins 2-0 vs Bob"
 
     linked = format_round_announcement(3, match, "https://discord.com/channels/1/2/3")
-    assert linked == "**[Round 3](https://discord.com/channels/1/2/3)** Marlo wins 2-0 vs Bob"
+    assert linked == "**[__Round 3__](https://discord.com/channels/1/2/3)** Marlo wins 2-0 vs Bob"
 
 
 def _standings(*names: str) -> list:

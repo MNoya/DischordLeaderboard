@@ -54,6 +54,7 @@ from bot.commands.testchampionship import setup as setup_testchampionship
 from bot.commands.testcomponent import setup as setup_testcomponent
 from bot.commands.testlobby import setup as setup_testlobby
 from bot.commands.testschedule import setup as setup_testschedule
+from bot.commands.testthreadintro import setup as setup_testthreadintro
 from bot.commands.testpolls import setup as setup_testpolls
 from bot.commands.testformatschedule import setup as setup_testformatschedule
 from bot.commands.testscribe import setup as setup_testscribe
@@ -226,6 +227,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_testcomponent(bot)
         await setup_testawards(bot)
         await setup_testschedule(bot)
+        await setup_testthreadintro(bot)
         await setup_testpolls(bot)
         await setup_testscribe(bot)
         await setup_testformatschedule(bot)

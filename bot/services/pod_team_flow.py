@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING
 import discord
 from sqlalchemy import select, update
 
-from bot import emojis
 from bot.database import SessionLocal
 from bot.models import Player as DbPlayer, PodDraftEvent, PodDraftParticipant
 from bot.services import pod_swiss, pod_team
@@ -65,7 +64,7 @@ log = logging.getLogger(__name__)
 
 TEAM_THREAD_INTRO = (
     "{emoji} **{label}** private room. Talk deckbuilding and strategy here. "
-    "Report your matches on the [**shared thread**]({board_url}) {manat}"
+    "Report your matches on the [__**shared thread**__]({board_url}) ➡️"
 )
 
 
@@ -257,7 +256,6 @@ async def _create_team_threads(manager: "PodDraftManager", board_message: discor
                 emoji=pod_team.team_emoji(team),
                 label=pod_team.team_label(team),
                 board_url=board_message.jump_url,
-                manat=emojis.get("manat"),
             ).rstrip())
         except discord.HTTPException:
             log.warning(f"[TEAM] thread_intro_failed event={manager.event_id} team={team}", exc_info=True)
