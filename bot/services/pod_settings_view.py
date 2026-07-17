@@ -77,8 +77,10 @@ class PodSettingsView(ui.View):
                  on_link: LinkApply | None = None,
                  on_cancel: CancelApply | None = None,
                  on_reschedule: Apply | None = None,
-                 event_name: str | None = None) -> None:
+                 event_name: str | None = None,
+                 notice_channel: discord.abc.Messageable | None = None) -> None:
         super().__init__(timeout=300)
+        self.notice_channel = notice_channel
         self.on_format = on_format
         self.on_pairing = on_pairing
         self.current_code = current_code
@@ -137,11 +139,13 @@ class PodSettingsView(ui.View):
             kick_targets_provider=self.kick_targets_provider, on_kick=self.on_kick,
             link_targets_provider=self.link_targets_provider, on_link=self.on_link,
             on_cancel=self.on_cancel, on_reschedule=self.on_reschedule, event_name=self.event_name,
+            notice_channel=self.notice_channel,
         ))
-        if interaction.channel is not None:
-            await send_settings_notice(interaction.channel, interaction.client.user, notice, marker=marker)
+        channel = self.notice_channel or interaction.channel
+        if channel is not None:
+            await send_settings_notice(channel, interaction.client.user, notice, marker=marker)
         await update_registered_embed(
-            interaction.channel,
+            channel,
             client_user=interaction.client.user,
             set_code=self.current_code or active_set_code(),
             pairing_mode=self.current_mode,

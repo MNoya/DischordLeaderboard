@@ -29,6 +29,7 @@ from bot.services.pod_drafts import (
     record_event,
     update_event_time_if_changed,
 )
+from bot.commands.messages import MSG_DRAFTMANCER_LINK_LEAD
 from bot.services.ping_roles import auto_grant_spec_for_event, build_grant_embed
 from bot.services.pod_roles import find_role, grant_pod_drafters, grant_role, resolve_member
 from bot.services.sesh_parser import ParsedSeshFields, parse_sesh_embed
@@ -234,8 +235,8 @@ class SeshListener(commands.Cog):
             await thread.send(embed=discord.Embed(
                 title="🕐 Pod Draft rescheduled",
                 description=(
-                    f"New time: <t:{unix}:F> (<t:{unix}:R>).\n"
-                    f"Draftmancer link will be posted {REMINDER_LEAD_MIN} minutes before the event starts."
+                    f"New time: <t:{unix}:F> (<t:{unix}:R>)\n"
+                    f"{MSG_DRAFTMANCER_LINK_LEAD.format(lead=REMINDER_LEAD_MIN)}"
                 ),
                 color=discord.Color.blue(),
             ))

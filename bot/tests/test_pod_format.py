@@ -81,6 +81,10 @@ def test_renamed_for_format_leaves_untokenized_name_untouched():
     assert renamed_for_format("Friday Night Pod", "MSH", "SOS", 9) == "Friday Night Pod"
 
 
+def test_renamed_for_format_swaps_scheduled_card_name_to_cube():
+    assert renamed_for_format("MSH Jul 18 Early Pod", "MSH", PEASANT_CODE, 1) == "Peasant Cube Jul 18 Early Pod"
+
+
 # --- persistence + pre-draft guard ---
 
 def _seed_event(session, socket_status="reminded", set_code="SOS", name="SOS Pod Draft"):

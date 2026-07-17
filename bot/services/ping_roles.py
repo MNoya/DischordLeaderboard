@@ -14,6 +14,8 @@ from dataclasses import dataclass
 import discord
 
 from bot import emojis
+from bot.commands.messages import MSG_POD_ROLE_GRANTED, MSG_POD_WELCOME
+from bot.discord_helpers import post_welcome
 from bot.services.pod_schedule import (
     EARLY_POD_ROLE_NAME,
     LATE_POD_ROLE_NAME,
@@ -32,10 +34,7 @@ from bot.services.pod_signals import slot_role_name_for_event_time
 
 log = logging.getLogger(__name__)
 
-MSG_ROLE_GRANTED = (
-    "{emoji} {user} you're now on {role} and will be pinged for drafts {when}. "
-    "Run `/roles` to manage your notifications."
-)
+QUEUE_GRANT_PING = "when a queue opens or needs more players"
 
 
 @dataclass(frozen=True)
@@ -96,19 +95,81 @@ def display_emoji(spec: PingRole) -> str | None:
     return emojis.resolve(spec.emoji)
 
 
-def build_grant_embed(user_mention: str, role: discord.Role, spec: PingRole) -> discord.Embed:
+def slot_grant_ping(spec: PingRole) -> str:
+    return f"for drafts {spec.grant_when}"
+
+
+def pod_role_grant_text(
+    role_mention: str, ping: str, *, emoji: str = "", member_mention: str | None = None,
+) -> str:
+    """One role-grant line for every surface: `member_mention` set addresses a member by mention for a
+    public thread post, unset addresses the clicker for an ephemeral reply."""
+    if member_mention:
+        subject = f"{emoji} {member_mention} you're".strip()
+    else:
+        subject = f"{emoji} You're".strip()
+    return MSG_POD_ROLE_GRANTED.format(subject=subject, role=role_mention, ping=ping)
+
+
+def build_grant_embed(
+    user_mention: str, role: discord.Role, spec: PingRole, *, ping: str | None = None,
+) -> discord.Embed:
     """The embed announcing a fresh auto-grant in the event thread. Shared by the listener and tests.
 
     A role mention inside an embed never pings (only message content does), so the role tag is safe;
     it renders as the colored role pill from the viewer's role cache.
     """
-    message = MSG_ROLE_GRANTED.format(
-        emoji=display_emoji(spec) or "", user=user_mention, role=role.mention, when=spec.grant_when,
+    message = pod_role_grant_text(
+        role.mention, ping or slot_grant_ping(spec),
+        emoji=display_emoji(spec) or "", member_mention=user_mention,
     )
     return discord.Embed(
         description=message,
         color=role.color if role.color.value else discord.Color.blurple(),
     )
+
+
+def build_welcome_view(
+    guild: discord.Guild, user_mention: str, slot_role: discord.Role | None, *, ping: str | None = None,
+) -> discord.ui.LayoutView:
+    """First-pod welcome as a Components V2 container: a green accent card whose text block behaves as
+    message content, so the newcomer mention pings where an embed mention would stay silent. Folds in
+    the role grant for a one-message welcome; returning drafters get `build_grant_embed` instead."""
+    umbrella = discord.utils.get(guild.roles, name=POD_DRAFTERS_ROLE_NAME)
+    pod_drafters = umbrella.mention if umbrella is not None else POD_DRAFTERS_ROLE_NAME
+    if slot_role is not None and ping is not None:
+        grant = f"You're now on {slot_role.mention} and will be pinged {ping}. "
+    else:
+        grant = ""
+    message = MSG_POD_WELCOME.format(user=user_mention, pod_drafters=pod_drafters, grant=grant)
+    return _WelcomeView(message)
+
+
+class _WelcomeView(discord.ui.LayoutView):
+    def __init__(self, text: str) -> None:
+        super().__init__(timeout=None)
+        container = discord.ui.Container(accent_colour=discord.Color.green())
+        container.add_item(discord.ui.TextDisplay(text))
+        self.add_item(container)
+
+
+async def announce_pod_grant(
+    interaction: discord.Interaction, *, first_pod: bool,
+    granted_role: discord.Role | None, welcome_role: discord.Role | None,
+    spec: PingRole | None, ping: str | None,
+) -> None:
+    """The post-join notice every signal surface shares: a first-ever drafter gets the public welcome
+    in pod-draft-chat, folding in `welcome_role`; a returning drafter who freshly picked up a slot role
+    gets the ephemeral grant embed; anyone else gets nothing. `granted_role` gates the returning case
+    on an actual fresh grant, so a re-click never re-announces."""
+    if first_pod:
+        welcome = build_welcome_view(interaction.guild, interaction.user.mention, welcome_role, ping=ping)
+        await post_welcome(interaction, welcome)
+    elif granted_role is not None:
+        grant = build_grant_embed(interaction.user.mention, granted_role, spec, ping=ping)
+        await interaction.followup.send(
+            embed=grant, ephemeral=True, allowed_mentions=discord.AllowedMentions.none(),
+        )
 
 
 def auto_grant_spec_for_event(event_time) -> PingRole | None:
@@ -132,6 +193,22 @@ async def reconcile_ping_roles(bot: discord.Client) -> None:
         for spec in PING_ROLES:
             await _ensure_role(guild, spec)
         await _keep_umbrella_on_top(guild)
+
+
+async def strip_pod_roles(member: discord.Member) -> int:
+    """Remove the auto-granted pod ping roles — the slot roles plus the Pod Drafters umbrella — from
+    one member. Backs `!test reset` so the tester's own re-test starts with no leftover grants; the
+    opt-in-only Pod Queue role is left alone. Returns the number of roles removed."""
+    target_names = {POD_DRAFTERS_ROLE_NAME} | {spec.name for spec in PING_ROLES if spec.auto_grant}
+    roles = [role for role in member.roles if role.name in target_names]
+    if not roles:
+        return 0
+    try:
+        await member.remove_roles(*roles, reason="test reset")
+    except discord.HTTPException:
+        log.warning(f"could not strip pod roles from {member.id} in {member.guild.name}", exc_info=True)
+        return 0
+    return len(roles)
 
 
 async def _keep_umbrella_on_top(guild: discord.Guild) -> None:

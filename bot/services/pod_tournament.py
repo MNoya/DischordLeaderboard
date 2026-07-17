@@ -89,6 +89,7 @@ SELECT_CUSTOM_PREFIX = "podmatchresult"
 MAX_MATCHES_PER_ROUND = 5  # Discord caps ActionRows at 5; supports pods up to 10 players
 SKIPPED_SENTINEL = "(skipped)"  # winner_name value for "Not played" matches
 CLEAR_SENTINEL = "(clear)"  # transient value from the dropdown; commits NULL winner/score
+RESULT_KEEP = "(keep)"  # reorganize-editor value: leave the recorded result untouched
 
 # Pairing group kinds \u2014 the data model for a round's brackets, independent of how they render
 WINNERS = "winners"
@@ -1243,15 +1244,16 @@ class ManageRoundButton(ui.DynamicItem[ui.Button], template=rf"{MANAGE_ROUND_CUS
         roster = await asyncio.to_thread(_load_round_roster, event_id)
         view = FixPairingView(event_id, self.round_num, interaction.message, matches, roster)
         await interaction.response.send_message(
-            f"Reorganize Round {self.round_num} — pick a match, then set its two players.",
+            f"Reorganize Round {self.round_num} — pick a match, then set its players and result.",
             view=view, ephemeral=True,
         )
 
 
 class FixPairingView(ui.View):
-    """Ephemeral organizer editor: choose a round match, reassign its two players, save. The swap is
-    written straight to the match row and the round message is re-rendered. A result already reported
-    for a player no longer in the match is cleared so it can be re-reported."""
+    """Ephemeral organizer editor: choose a round match, reassign its two players, set or correct its
+    result, save. Changes are written straight to the match row and the round message is re-rendered.
+    The result editor is the only way to fix a match once its round has locked and the public report
+    dropdowns are gone — e.g. a match reported early that the players then actually played."""
 
     def __init__(self, event_id: str, round_num: int, round_message: discord.Message | None,
                  matches: list[dict], roster: list[tuple[str, str]]):
@@ -1264,6 +1266,7 @@ class FixPairingView(ui.View):
         self.selected_match: dict | None = None
         self.selected_a: str | None = None
         self.selected_b: str | None = None
+        self.selected_result: str | None = None
         self._build_items()
 
     def _build_items(self) -> None:
@@ -1282,10 +1285,11 @@ class FixPairingView(ui.View):
         if self.selected_match is not None:
             self.add_item(self._player_select("a", self.selected_a, row=1))
             self.add_item(self._player_select("b", self.selected_b, row=2))
-            save = ui.Button(label="Save pairing", style=discord.ButtonStyle.success, row=3)
+            self.add_item(self._result_select(row=3))
+            save = ui.Button(label="Save", style=discord.ButtonStyle.success, row=4)
             save.callback = self._on_save
             self.add_item(save)
-            cancel = ui.Button(label="Cancel", style=discord.ButtonStyle.secondary, row=3)
+            cancel = ui.Button(label="Cancel", style=discord.ButtonStyle.secondary, row=4)
             cancel.callback = self._on_cancel
             self.add_item(cancel)
 
@@ -1300,6 +1304,44 @@ class FixPairingView(ui.View):
         select = ui.Select(placeholder=f"Player {slot.upper()}…", row=row, options=options[:25])
         select.callback = self._on_player_a if slot == "a" else self._on_player_b
         return select
+
+    def _result_select(self, row: int) -> ui.Select:
+        a_disp = _roster_display(self.roster, self.selected_a)
+        b_disp = _roster_display(self.roster, self.selected_b)
+        chosen = self.selected_result or self._current_result_token()
+        values = [
+            ("Leave result as-is", RESULT_KEEP),
+            (f"{a_disp} wins 2-0", "a|2-0"),
+            (f"{a_disp} wins 2-1", "a|2-1"),
+            (f"{b_disp} wins 2-1", "b|2-1"),
+            (f"{b_disp} wins 2-0", "b|2-0"),
+            ("No Match Played", "skip"),
+        ]
+        if self.selected_match and self.selected_match.get("winner_name"):
+            values.append(("Clear result", "clear"))
+        options = [
+            discord.SelectOption(label=label[:100], value=value, default=value == chosen)
+            for label, value in values
+        ]
+        select = ui.Select(placeholder="Result…", row=row, options=options)
+        select.callback = self._on_result
+        return select
+
+    def _current_result_token(self) -> str:
+        """The result token matching the match's recorded outcome, keyed to the current player slots so
+        the dropdown shows the standing result until the organizer picks a different one."""
+        match = self.selected_match
+        if match is None or not match.get("winner_name"):
+            return RESULT_KEEP
+        winner = match["winner_name"]
+        if winner == SKIPPED_SENTINEL:
+            return "skip"
+        score = match.get("score") or ""
+        if winner == self.selected_a:
+            return f"a|{score}"
+        if winner == self.selected_b:
+            return f"b|{score}"
+        return RESULT_KEEP
 
     async def _on_match(self, interaction: discord.Interaction) -> None:
         match_id = interaction.data["values"][0]
@@ -1317,6 +1359,11 @@ class FixPairingView(ui.View):
 
     async def _on_player_b(self, interaction: discord.Interaction) -> None:
         self.selected_b = interaction.data["values"][0]
+        self._build_items()
+        await interaction.response.edit_message(view=self)
+
+    async def _on_result(self, interaction: discord.Interaction) -> None:
+        self.selected_result = interaction.data["values"][0]
         self._build_items()
         await interaction.response.edit_message(view=self)
 
@@ -1341,6 +1388,13 @@ class FixPairingView(ui.View):
             self.stop()
             await interaction.response.edit_message(content=MSG_FIX_MATCH_GONE, view=None)
             return
+        choice = self._resolve_result_choice()
+        result_meta = None
+        if choice is not None:
+            winner_name, score = choice
+            result_meta = await asyncio.to_thread(commit_result, match_id, winner_name, score)
+            if result_meta == "not_found":
+                result_meta = None
         self.stop()
         await interaction.response.defer()
         try:
@@ -1348,8 +1402,9 @@ class FixPairingView(ui.View):
         except discord.HTTPException:
             log.warning("could not dismiss pairing editor", exc_info=True)
         log.info(
-            f"[{self.event_id}] R{self.round_num} pairing edited {match_id} -> "
-            f"{self.selected_a} vs {self.selected_b} by {actor_label(interaction)}"
+            f"[{self.event_id}] R{self.round_num} match edited {match_id} -> "
+            f"{self.selected_a} vs {self.selected_b} result={self.selected_result or RESULT_KEEP} "
+            f"by {actor_label(interaction)}"
         )
         await _refresh_round_message_after_edit(
             interaction.client, self.round_message, self.event_id, self.round_num, match_id,
@@ -1358,9 +1413,56 @@ class FixPairingView(ui.View):
         b_disp = _roster_display(self.roster, self.selected_b)
         url = self.round_message.jump_url if self.round_message is not None else None
         label = f"[Round {self.round_num}]({url})" if url else f"[Round {self.round_num}]"
+
+        if await self._regenerate_bracket_after_result(choice, result_meta):
+            return
+        if result_meta is not None:
+            phrase = f"**{label}** Result corrected by Organizer: {self._result_phrase(choice, a_disp, b_disp)}"
+            await _announce_round_result(interaction.client, self.event_id, phrase)
+            return
+        a_ref = await _resolve_discord_mention(self.event_id, self.selected_a) or a_disp
+        b_ref = await _resolve_discord_mention(self.event_id, self.selected_b) or b_disp
         note = " — report the result again" if result["cleared"] else ""
-        phrase = f"**{label}** match updated: {a_disp} vs {b_disp}{note}"
-        await _announce_round_result(interaction.client, self.event_id, phrase)
+        phrase = f"**{label}** Match updated by Organizer: {a_ref} vs {b_ref}{note}"
+        await _announce_round_result(interaction.client, self.event_id, phrase, mention_users=True)
+
+    def _resolve_result_choice(self) -> tuple[str, str] | None:
+        token = self.selected_result or RESULT_KEEP
+        if token == RESULT_KEEP:
+            return None
+        if token == "clear":
+            return CLEAR_SENTINEL, "0-0"
+        if token == "skip":
+            return SKIPPED_SENTINEL, "0-0"
+        slot, score = token.split("|", 1)
+        winner = self.selected_a if slot == "a" else self.selected_b
+        return winner, score
+
+    def _result_phrase(self, choice: tuple[str, str], a_disp: str, b_disp: str) -> str:
+        winner_name, score = choice
+        if winner_name == SKIPPED_SENTINEL:
+            return f"{a_disp} vs {b_disp} marked not played"
+        if winner_name == CLEAR_SENTINEL:
+            return format_result_change(self.selected_a, self.selected_b, None, None)
+        return format_result_change(self.selected_a, self.selected_b, winner_name, score)
+
+    async def _regenerate_bracket_after_result(self, choice: tuple[str, str] | None,
+                                               result_meta: dict | None) -> bool:
+        """Rebuild downstream bracket rounds when a corrected result changed the winner. Posts its own
+        thread note, so the caller skips the plain announcement. Returns whether it ran."""
+        if result_meta is None or not result_meta.get("winner_changed"):
+            return False
+        manager = ACTIVE_POD_MANAGERS.get(self.event_id)
+        if manager is None or manager.pairing_mode != "bracket" or self.round_num >= TOTAL_ROUNDS:
+            return False
+        winner_name, score = choice
+        settled = winner_name not in (CLEAR_SENTINEL, SKIPPED_SENTINEL)
+        phrase = format_result_change(
+            self.selected_a, self.selected_b,
+            winner_name if settled else None, score if settled else None,
+        )
+        await bracket_regenerate_downstream(manager, self.round_num, phrase)
+        return True
 
 
 def apply_pairing_swap(match_id: str, new_a: str, new_b: str) -> dict | None:
@@ -1736,9 +1838,13 @@ def commit_result(match_id: str, winner_name: str, score: str):
         }
 
 
-async def _announce_round_result(bot_client, event_id: str, phrase: str) -> None:
+async def _announce_round_result(bot_client, event_id: str, phrase: str,
+                                 mention_users: bool = False) -> None:
     """Post a single reported result to the pod thread for immediate feedback, e.g. '[Round 2] Marlo
-    wins 2-1 vs Bob'. Best-effort — a missing thread or send failure is logged, not raised."""
+    wins 2-1 vs Bob'. Best-effort — a missing thread or send failure is logged, not raised.
+
+    `mention_users` lets a re-pairing notice actually ping the two players so they know to go play;
+    result announcements leave it off."""
     thread_id = await asyncio.to_thread(_load_event_thread_id_sync, event_id)
     if thread_id is None:
         return
@@ -1747,8 +1853,9 @@ async def _announce_round_result(bot_client, event_id: str, phrase: str) -> None
     except discord.HTTPException:
         log.info(f"[ROUND-RESULT] could not fetch thread event={event_id}", exc_info=True)
         return
+    allowed = discord.AllowedMentions(users=True) if mention_users else discord.AllowedMentions.none()
     try:
-        await thread.send(phrase, allowed_mentions=discord.AllowedMentions.none())
+        await thread.send(phrase, allowed_mentions=allowed)
     except discord.HTTPException:
         log.warning(f"[ROUND-RESULT] announce failed event={event_id}", exc_info=True)
 

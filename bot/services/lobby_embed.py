@@ -87,9 +87,9 @@ class LobbyReadyButtonView(discord.ui.View):
 
 
 class SettingsButton(discord.ui.Button):
-    def __init__(self) -> None:
+    def __init__(self, label: str | None = "Settings") -> None:
         super().__init__(
-            label="Settings", style=discord.ButtonStyle.grey,
+            label=label, style=discord.ButtonStyle.grey,
             custom_id=SETTINGS_CUSTOM_ID, emoji="⚙️",
         )
 
@@ -263,12 +263,16 @@ async def guard_ready_check(interaction, manager, thread, *, initiated_by, min_p
 async def open_settings_panel(interaction: discord.Interaction) -> None:
     """Resolve the thread's pod-draft event and open the ephemeral Settings panel. Resolution goes
     through the DB rather than ACTIVE_POD_MANAGERS so the button works from registration onward,
-    before the Draftmancer session launches."""
+    before the Draftmancer session launches. From inside the thread the interaction channel is the
+    thread; from the channel card the interaction channel is the parent, so it falls back to the
+    clicked message id — the starter message and its thread share the same id."""
     from bot.commands.pod_draft import build_pod_settings_view
     channel_id = interaction.channel_id
     actor = actor_label(interaction)
     thread_id = str(channel_id) if channel_id else None
     event_id = await asyncio.to_thread(load_event_id_by_thread_sync, thread_id) if thread_id else None
+    if event_id is None and interaction.message is not None:
+        event_id = await asyncio.to_thread(load_event_id_by_thread_sync, str(interaction.message.id))
     if event_id is None:
         if _settings_preview_factory is not None:
             await interaction.response.send_message(view=_settings_preview_factory(), ephemeral=True)

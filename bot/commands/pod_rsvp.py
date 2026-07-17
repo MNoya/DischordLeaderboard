@@ -29,15 +29,21 @@ from urllib.parse import urlencode
 import discord
 from discord.ext import commands
 
-from bot import audit
-from bot.commands.messages import MSG_SLOT_ROLE_GRANTED
+from bot import audit, emojis
+from bot.commands.messages import MSG_DRAFTMANCER_LINK_LEAD
 from bot.database import SessionLocal
 from bot.discord_helpers import NBSP
 from bot.services.lobby_embed import SettingsButton
 from bot.models import PodDraftEvent
 from bot.services import pod_launch
-from bot.services.ping_roles import auto_grant_spec_for_event, display_emoji, spec_named
-from bot.services.pod_drafts import load_event_time_sync, record_ondemand_event
+from bot.services.ping_roles import (
+    announce_pod_grant,
+    auto_grant_spec_for_event,
+    display_emoji,
+    slot_grant_ping,
+    spec_named,
+)
+from bot.services.pod_drafts import load_event_set_code_sync, load_event_time_sync, record_ondemand_event
 from bot.services.pod_registration_embed import build_registered_embed
 from bot.services.pod_roles import find_role, grant_pod_drafters, grant_role
 from bot.services.pod_schedule import LATE_POD_ROLE_NAME, SCHEDULE_TZ
@@ -58,20 +64,22 @@ POD_CAPACITY = 8
 CARD_INTRO = "{emoji} Please RSVP"
 MULTIPOD_NOTICE = "🔥 Keep signing up past 8, run `/pod-table` to fire another pod"
 TIME_LABEL = "Time"
-NATIVE_EVENT_DESCRIPTION = "RSVP on the card: {jump_url}"
+NATIVE_EVENT_SIGNUP = "**Event Details and Signup Link: {jump_url}**"
 RSVP_EMOJI = {RSVP_YES: "✅", RSVP_MAYBE: "🤷", RSVP_NO: "❌"}
 RSVP_WORDS = {RSVP_YES: "Yes", RSVP_MAYBE: "Maybe", RSVP_NO: "No"}
 RSVP_LABELS = {RSVP_YES: "Sign Up", RSVP_MAYBE: "Maybe", RSVP_NO: "Can't"}
-MSG_RSVP_CONFIRMED = "{emoji} RSVP confirmed"
-MSG_RSVP_REMOVED = "RSVP removed"
-MSG_DRAFT_STARTS = "Draft starts <t:{unix}:R>. Draftmancer link posts {lead} min before."
+RSVP_CONFIRM_COLOR = {
+    RSVP_YES: discord.Color.green(),
+    RSVP_MAYBE: discord.Color.orange(),
+    RSVP_NO: discord.Color.red(),
+}
+MSG_RSVP_CONFIRMED = "{emoji} RSVP Confirmed"
+MSG_RSVP_REMOVED = "RSVP Removed"
+MSG_DRAFT_STARTS = "Draft scheduled for <t:{unix}:F> (<t:{unix}:R>)"
 MSG_CARD_INACTIVE = "This RSVP card is no longer active."
 MSG_BAD_TIME = "Couldn't read that time. Use `+2h30m`, `21:00` (ET), or `2026-07-18 21:00` (ET), in the future."
 THREAD_NOTE_TITLE = "🕐 Pod Draft rescheduled"
-THREAD_NOTE_BODY = (
-    "New time: <t:{unix}:F> (<t:{unix}:R>).\n"
-    "Draftmancer link will be posted {lead} minutes before the event starts."
-)
+THREAD_NOTE_BODY = "New time: <t:{unix}:F> (<t:{unix}:R>)\n" + MSG_DRAFTMANCER_LINK_LEAD
 
 LauncherRefresh = Callable[[commands.Bot, date], Awaitable[None]]
 
@@ -110,12 +118,15 @@ class RsvpButton(discord.ui.Button):
 
 
 class PodRsvpView(discord.ui.View):
-    """Persistent — static custom_ids registered once at startup; state lives in the DB per message."""
+    """Persistent — static custom_ids registered once at startup; state lives in the DB per message.
+    The Settings gear trails the RSVP row so the channel card carries the same format/reschedule/cancel
+    controls as the thread; its custom_id is dispatched by the globally-registered Settings button."""
 
     def __init__(self) -> None:
         super().__init__(timeout=None)
         for state in RSVP_STATES:
             self.add_item(RsvpButton(state))
+        self.add_item(SettingsButton(label=None))
 
 
 class ScheduledRegisteredView(discord.ui.View):
@@ -135,18 +146,21 @@ class ScheduledRegisteredView(discord.ui.View):
 
 def build_rsvp_embed(
     name: str, event_time: datetime, rosters: dict[str, list[str]], role_time: datetime | None = None,
-    description: str | None = None,
+    description: str | None = None, set_code: str | None = None,
 ) -> discord.Embed:
     """The RSVP surface. Time and the roster columns are embed fields so sesh's vertical breathing
     room comes for free. `role_time` keys the slot emoji; it defaults to `event_time` and callers
     pass the signal's original slot time after a reschedule. `description` is the optional organizer
-    note, shown between the intro and the multi-pod notice so a roster refresh preserves it."""
+    note, shown between the intro and the multi-pod notice so a roster refresh preserves it.
+    `set_code` trails the format's keyrune symbol after the name."""
     unix = int(event_time.timestamp())
     calendar_url = google_calendar_url(name, event_time)
     note = f"\n> {description}" if description else ""
+    symbol = emojis.get(set_code.lower()) if set_code else ""
+    suffix = f" {NBSP}{symbol}" if symbol else ""
     embed = discord.Embed(
         description=(
-            f"## {NBSP * 2}🗓️ {name}\n"
+            f"### {NBSP * 2}🗓️ {name}{suffix}\n"
             f"{_intro_line(role_time or event_time)}"
             f"{note}"
             f"{_multipod_suffix(rosters)}"
@@ -256,7 +270,7 @@ async def post_scheduled_card(
     try:
         message = await channel.send(
             content=content,
-            embed=build_rsvp_embed(name, event_time, rosters, description=description),
+            embed=build_rsvp_embed(name, event_time, rosters, description=description, set_code=set_code),
             view=PodRsvpView(),
             allowed_mentions=discord.AllowedMentions(roles=True),
         )
@@ -272,7 +286,7 @@ async def post_scheduled_card(
     )
     if preseed_yes:
         await asyncio.to_thread(pod_launch.seed_yes_members_sync, signal_id, preseed_yes)
-    native_event_id = await _create_native_event(channel, name, event_time, message.jump_url)
+    native_event_id = await _create_native_event(channel, name, event_time, message.jump_url, rosters)
     event_id, created_at, pairing_mode, seating_mode = await asyncio.to_thread(
         _record_scheduled_event, set_code, event_time, name, str(thread.id), native_event_id,
         pairing_mode, seating_mode, description,
@@ -281,7 +295,10 @@ async def post_scheduled_card(
 
     try:
         registered = await thread.send(
-            embed=build_registered_embed(set_code.upper(), pairing_mode, seating_mode),
+            embed=build_registered_embed(
+                set_code.upper(), pairing_mode, seating_mode,
+                rsvp_hint=True, channel_post_url=message.jump_url,
+            ),
             view=ScheduledRegisteredView(),
         )
         await asyncio.to_thread(pod_launch.set_thread_message_sync, signal_id, str(registered.id))
@@ -326,17 +343,19 @@ async def _handle_rsvp(interaction: discord.Interaction, state: str) -> None:
     else:
         await interaction.response.send_message(embed=confirmation, ephemeral=True)
 
+    first_pod = False
+    granted_role = None
+    slot_spec = slot_role = slot_ping = None
     if result.joined and isinstance(interaction.user, discord.Member):
-        await grant_pod_drafters(interaction.user)
+        slot_spec = auto_grant_spec_for_event(result.state.slot_time)
+        slot_role = find_role(interaction.guild, slot_spec.name) if slot_spec is not None else None
+        slot_ping = slot_grant_ping(slot_spec) if slot_spec is not None else None
+        first_pod = await grant_pod_drafters(interaction.user)
         granted_role = await _grant_slot_role(interaction.user, result.state.slot_time)
-        if granted_role is not None:
-            spec = spec_named(granted_role.name)
-            confirmation = MSG_SLOT_ROLE_GRANTED.format(
-                emoji=display_emoji(spec) or "", role=granted_role.mention, when=spec.grant_when,
-            )
-            await interaction.followup.send(
-                confirmation, ephemeral=True, allowed_mentions=discord.AllowedMentions.none(),
-            )
+    await announce_pod_grant(
+        interaction, first_pod=first_pod, granted_role=granted_role,
+        welcome_role=slot_role, spec=slot_spec, ping=slot_ping,
+    )
 
     if result.state.event_id is not None:
         if result.rsvp in (RSVP_YES, RSVP_MAYBE):
@@ -344,6 +363,7 @@ async def _handle_rsvp(interaction: discord.Interaction, state: str) -> None:
         elif result.rsvp == RSVP_NO:
             await _set_thread_membership(interaction, result.state.event_id, join=False)
         await _sync_other_surfaces(interaction.client, result.state.event_id, message_id, result.rosters)
+        await _sync_native_event_tally(interaction.guild, message_id, result.rosters)
         yes = result.rosters.get(RSVP_YES) or []
         maybe = result.rosters.get(RSVP_MAYBE) or []
         await refresh_underfill_nudge_for_event(interaction.client, result.state.event_id, len(yes))
@@ -382,22 +402,21 @@ def _is_card_surface(message: discord.Message) -> bool:
 
 
 async def _confirmation_embed(result: pod_launch.RsvpResult) -> discord.Embed:
-    """No declining reads low-key — a plain non-bold line, no start time — while Yes and Maybe keep
-    the bold header and the countdown."""
+    """Per-state confirmation, sesh-style: Yes green, Maybe orange, No red. Yes and Maybe carry the
+    start time in the card's own full-plus-relative format and the link-drop lead; No and a cleared
+    RSVP stay a bare one-line acknowledgement, since the start time is moot once you're not in."""
+    if result.rsvp is None:
+        return discord.Embed(title=MSG_RSVP_REMOVED, color=discord.Color.greyple())
+    title = MSG_RSVP_CONFIRMED.format(emoji=RSVP_EMOJI[result.rsvp])
+    color = RSVP_CONFIRM_COLOR[result.rsvp]
     if result.rsvp == RSVP_NO:
-        return discord.Embed(
-            description=MSG_RSVP_CONFIRMED.format(emoji=RSVP_EMOJI[RSVP_NO]), color=discord.Color.green(),
-        )
-    if result.rsvp is not None:
-        title = MSG_RSVP_CONFIRMED.format(emoji=RSVP_EMOJI[result.rsvp])
-    else:
-        title = MSG_RSVP_REMOVED
+        return discord.Embed(title=title, color=color)
     description = None
     if result.state.event_id is not None:
         event_time = await asyncio.to_thread(load_event_time_sync, result.state.event_id)
         if event_time is not None:
-            description = MSG_DRAFT_STARTS.format(unix=int(event_time.timestamp()), lead=REMINDER_LEAD_MIN)
-    return discord.Embed(title=title, description=description, color=discord.Color.green())
+            description = MSG_DRAFT_STARTS.format(unix=int(event_time.timestamp()))
+    return discord.Embed(title=title, description=description, color=color)
 
 
 async def _set_thread_membership(interaction: discord.Interaction, event_id: str, *, join: bool) -> None:
@@ -409,11 +428,8 @@ async def _set_thread_membership(interaction: discord.Interaction, event_id: str
 async def _move_member_thread(
     bot: commands.Bot, event_id: str, user: discord.abc.User, *, join: bool,
 ) -> None:
-    thread_id = await asyncio.to_thread(pod_launch.event_thread_id_sync, event_id)
-    if thread_id is None:
-        return
-    thread = await _fetch_channel(bot, thread_id)
-    if not isinstance(thread, discord.Thread):
+    thread = await _resolve_event_thread(bot, event_id)
+    if thread is None:
         return
     try:
         if join:
@@ -422,7 +438,17 @@ async def _move_member_thread(
             await thread.remove_user(user)
     except discord.HTTPException:
         action = "add" if join else "remove"
-        log.warning(f"could not {action} {user} on thread {thread_id}", exc_info=True)
+        log.warning(f"could not {action} {user} on thread {thread.id}", exc_info=True)
+
+
+async def _resolve_event_thread(bot: commands.Bot, event_id: str | None) -> discord.Thread | None:
+    if event_id is None:
+        return None
+    thread_id = await asyncio.to_thread(pod_launch.event_thread_id_sync, event_id)
+    if thread_id is None:
+        return None
+    thread = await fetch_channel(bot, thread_id)
+    return thread if isinstance(thread, discord.Thread) else None
 
 
 async def _sync_other_surfaces(
@@ -447,7 +473,7 @@ async def _render_channel_card(
     if card is None:
         return
     _, channel_id, message_id, _ = card
-    channel = await _fetch_channel(bot, channel_id)
+    channel = await fetch_channel(bot, channel_id)
     if channel is None:
         return
     try:
@@ -464,7 +490,7 @@ async def _render_channel_card(
         log.warning(f"could not render the channel card {message_id}", exc_info=True)
 
 
-async def _fetch_channel(bot: commands.Bot, channel_id: str) -> discord.abc.Messageable | None:
+async def fetch_channel(bot: commands.Bot, channel_id: str) -> discord.abc.Messageable | None:
     channel = bot.get_channel(int(channel_id))
     if channel is not None:
         return channel
@@ -474,8 +500,17 @@ async def _fetch_channel(bot: commands.Bot, channel_id: str) -> discord.abc.Mess
         return None
 
 
+def native_event_description(rosters: dict[str, list[str]], jump_url: str) -> str:
+    """The native event's body: a live RSVP tally over the card's link. Discord exposes no read/write
+    interest API for a guild scheduled event, so this text is the only surface that can carry the
+    counts the card holds."""
+    tally = " ".join(f"{RSVP_EMOJI[state]} {len(rosters.get(state) or [])}" for state in RSVP_STATES)
+    return f"{tally}\n\n{NATIVE_EVENT_SIGNUP.format(jump_url=jump_url)}"
+
+
 async def _create_native_event(
     channel: discord.TextChannel, name: str, event_time: datetime, jump_url: str,
+    rosters: dict[str, list[str]],
 ) -> str | None:
     if event_time <= datetime.now(timezone.utc):
         return None
@@ -486,13 +521,53 @@ async def _create_native_event(
             end_time=event_time + timedelta(hours=EVENT_DURATION_H),
             entity_type=discord.EntityType.external,
             privacy_level=discord.PrivacyLevel.guild_only,
-            location=f"#{channel.name}",
-            description=NATIVE_EVENT_DESCRIPTION.format(jump_url=jump_url),
+            location=jump_url,
+            description=native_event_description(rosters, jump_url),
         )
     except discord.HTTPException:
         log.warning("could not create the native scheduled event", exc_info=True)
         return None
     return str(native.id)
+
+
+async def _sync_native_event_tally(
+    guild: discord.Guild | None, message_id: str, rosters: dict[str, list[str]],
+) -> None:
+    """Re-render the native event's tally after a click on any RSVP surface. The card stays the
+    canonical roster; this keeps the Events tab's count honest."""
+    if guild is None:
+        return
+    ref = await asyncio.to_thread(pod_launch.native_event_ref_by_surface_sync, message_id)
+    if ref is None:
+        return
+    native_event_id, guild_id, channel_id, card_message_id = ref
+    jump_url = f"https://discord.com/channels/{guild_id}/{channel_id}/{card_message_id}"
+    try:
+        event_id_int = int(native_event_id)
+        native = guild.get_scheduled_event(event_id_int) or await guild.fetch_scheduled_event(event_id_int)
+        await native.edit(description=native_event_description(rosters, jump_url))
+    except discord.HTTPException:
+        log.warning(f"could not sync native event tally {native_event_id}", exc_info=True)
+
+
+async def purge_native_events(guild: discord.Guild, bot_user_id: int) -> int:
+    """Delete every scheduled event this bot created in the guild, clearing the Events calendar. Backs
+    `!test reset`; other creators' events (sesh, humans) are left alone."""
+    try:
+        events = await guild.fetch_scheduled_events()
+    except discord.HTTPException:
+        log.warning("could not fetch scheduled events for purge", exc_info=True)
+        return 0
+    deleted = 0
+    for event in events:
+        if event.creator_id != bot_user_id:
+            continue
+        try:
+            await event.delete()
+            deleted += 1
+        except discord.HTTPException:
+            log.warning(f"could not delete scheduled event {event.id}", exc_info=True)
+    return deleted
 
 
 def _record_scheduled_event(
@@ -530,7 +605,7 @@ async def reschedule_event(
         return MSG_BAD_TIME
     await asyncio.to_thread(_apply_new_time, event_id, new_time)
     pod_launch.arm_scheduled_pod_jobs(bot, event_id, new_time, created_at)
-    await _update_card_time(bot, event_id, name, new_time)
+    await _edit_scheduled_card(bot, event_id, name, new_time)
     await _update_native_event(guild, native_event_id, new_time)
     await _refresh_live_messages(bot, event_id)
     yes_roster = await asyncio.to_thread(pod_launch.roster_for_event_sync, event_id)
@@ -543,9 +618,10 @@ async def reschedule_event(
     return None
 
 
-async def _update_card_time(bot: commands.Bot, event_id: str, name: str, new_time: datetime) -> None:
-    """Re-render the channel card with the new timestamp. It is the thread starter, so the thread
-    view moves with it. Poll and queue-born pods have no card at all."""
+async def _edit_scheduled_card(bot: commands.Bot, event_id: str, name: str, event_time: datetime) -> None:
+    """Re-render the channel card from scratch — name, set symbol, time, description, rosters. It is
+    the thread starter, so the thread view moves with it. Poll and queue-born pods have no card at
+    all. Shared by reschedule (new time) and a format change (new name + symbol)."""
     ref = await asyncio.to_thread(pod_launch.scheduled_card_ref_sync, event_id)
     if ref is None:
         return
@@ -553,15 +629,46 @@ async def _update_card_time(bot: commands.Bot, event_id: str, name: str, new_tim
     rosters = await asyncio.to_thread(pod_launch.rsvp_rosters_sync, message_id)
     if rosters is None:
         return
-    channel = await _fetch_channel(bot, channel_id)
+    channel = await fetch_channel(bot, channel_id)
     if channel is None:
         return
     description = await asyncio.to_thread(_event_description, event_id)
+    set_code = await asyncio.to_thread(load_event_set_code_sync, event_id)
     try:
         message = await channel.fetch_message(int(message_id))
-        await message.edit(embed=build_rsvp_embed(name, new_time, rosters, slot_time, description))
+        await message.edit(embed=build_rsvp_embed(
+            name, event_time, rosters, slot_time, description, set_code=set_code))
     except discord.HTTPException:
-        log.warning(f"reschedule: could not edit card {message_id}", exc_info=True)
+        log.warning(f"could not edit scheduled card {message_id}", exc_info=True)
+
+
+async def reflect_format_change(bot: commands.Bot, event_id: str) -> None:
+    """Mirror a pre-draft format change onto the surfaces addressed by stored ids: the channel card
+    title (new name + set symbol) and the native scheduled event's name. The thread rename lives in
+    set_event_format; the in-thread registered embed re-renders through the Settings panel. Called
+    after the format persists, so the pod reads as its new format wherever the gear was clicked."""
+    loaded = await asyncio.to_thread(_load_event, event_id)
+    if loaded is None:
+        return
+    name, event_time, _status, thread_id, native_event_id, _created_at = loaded
+    await _edit_scheduled_card(bot, event_id, name, event_time)
+    await _rename_native_event(bot, thread_id, native_event_id, name)
+
+
+async def _rename_native_event(
+    bot: commands.Bot, thread_id: str | None, native_event_id: str | None, name: str,
+) -> None:
+    if native_event_id is None or thread_id is None:
+        return
+    thread = await fetch_channel(bot, thread_id)
+    guild = getattr(thread, "guild", None)
+    if guild is None:
+        return
+    try:
+        native = await guild.fetch_scheduled_event(int(native_event_id))
+        await native.edit(name=name)
+    except discord.HTTPException:
+        log.warning(f"could not rename native event {native_event_id}", exc_info=True)
 
 
 async def _update_native_event(

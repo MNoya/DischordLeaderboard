@@ -43,7 +43,7 @@ from bot.services.pod_drafts import (
     lobby_match_status,
     search_event_names_sync,
 )
-from bot.commands.pod_rsvp import reschedule_event
+from bot.commands.pod_rsvp import fetch_channel, reflect_format_change, reschedule_event
 from bot.services import pod_launch
 from bot.services.player_stats import SeededAttendee, rank_ordered_names, seed_attendees, seated_ring_order
 from bot.services.pod_seating_select import SEATING_ORDER_MARKER, seating_change_message
@@ -818,9 +818,14 @@ async def build_pod_settings_view(bot, event_id: str, *, is_owner: bool) -> PodS
     manager = ACTIVE_POD_MANAGERS.get(event_id)
     drafting = manager is not None and (manager.drafting or manager.draft_complete)
     scheduled = await asyncio.to_thread(pod_launch.scheduled_card_ref_sync, event_id) is not None
+    thread_id = await asyncio.to_thread(load_event_thread_id_sync, event_id)
+    notice_channel = await fetch_channel(bot, thread_id) if thread_id else None
 
     async def on_format(inter: discord.Interaction, code: str) -> str | None:
-        return await set_event_format(bot, event_id, code)
+        err = await set_event_format(bot, event_id, code)
+        if err is None:
+            await reflect_format_change(bot, event_id)
+        return err
 
     async def on_pairing(inter: discord.Interaction, mode: str) -> str | None:
         return await set_event_pairing_mode(event_id, mode)
@@ -882,6 +887,7 @@ async def build_pod_settings_view(bot, event_id: str, *, is_owner: bool) -> PodS
         kick_targets_provider=kick_targets_provider, on_kick=on_kick,
         link_targets_provider=link_targets_provider, on_link=on_link,
         on_cancel=on_cancel, on_reschedule=on_reschedule, event_name=event_name,
+        notice_channel=notice_channel,
     )
 
 

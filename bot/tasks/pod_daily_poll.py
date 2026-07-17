@@ -19,13 +19,12 @@ import discord
 from discord.ext import commands
 
 from bot import emojis
-from bot.commands.messages import MSG_FIRST_POD_TIP_POLL, MSG_SLOT_ROLE_GRANTED
 from bot.commands.pod_queue import queue_role_mention
 from bot.commands.pod_rsvp import post_scheduled_card, register_launcher_refresh
 from bot.config import settings
 from bot.discord_helpers import NBSP, ZWSP, resolve_pod_chat_channel
 from bot.services import pod_launch
-from bot.services.ping_roles import display_emoji, spec_named
+from bot.services.ping_roles import announce_pod_grant, slot_grant_ping, spec_named
 from bot.services.pod_roles import find_role, grant_pod_drafters, grant_role
 from bot.services.pod_signals import (
     ALL_BUCKETS,
@@ -54,7 +53,7 @@ POLL_INTRO = (
 )
 MARKER_CLOSED = "Closed"
 MSG_POLL_INACTIVE = "This poll is no longer active."
-MSG_SLOT_CLOSED = "That slot's time already passed. Catch the next poll."
+MSG_SLOT_CLOSED = "This slot is closed."
 POLL_NUDGE = "⚡ **{count} in** for {slot} — grab **1 more** to fire a Team draft! {link}{mention}"
 POLL_NUDGE_QUIET_MINUTES = 30
 
@@ -237,20 +236,19 @@ async def _handle_poll_click(interaction: discord.Interaction, bucket_key: str) 
         embed=build_poll_embed(slots, interaction.guild), view=PodPollView(slots, interaction.guild),
     )
 
-    if result.first_contact:
-        tip = MSG_FIRST_POD_TIP_POLL.format(threshold=settings.pod_signal_fire_threshold)
-        await interaction.followup.send(tip, ephemeral=True)
+    granted_role = None
+    spec = None
+    first_pod = False
     if result.joined and isinstance(interaction.user, discord.Member):
-        await grant_pod_drafters(interaction.user)
+        first_pod = await grant_pod_drafters(interaction.user)
         granted_role = await _grant_slot_role(interaction.user, bucket_key)
         if granted_role is not None:
             spec = spec_named(granted_role.name)
-            note = MSG_SLOT_ROLE_GRANTED.format(
-                emoji=display_emoji(spec) or "", role=granted_role.mention, when=spec.grant_when,
-            )
-            await interaction.followup.send(
-                note, ephemeral=True, allowed_mentions=discord.AllowedMentions.none(),
-            )
+    ping = slot_grant_ping(spec) if spec is not None else None
+    await announce_pod_grant(
+        interaction, first_pod=first_pod, granted_role=granted_role,
+        welcome_role=granted_role, spec=spec, ping=ping,
+    )
     if fired:
         asyncio.create_task(_launch_slot(interaction.client, result.state, message_id))
     elif result.joined:

@@ -37,26 +37,18 @@ MSG_LOBBY_OPEN = (
 )
 MSG_LOBBY_HEADLINE_NOW = "Lobby opening now!"
 MSG_LOBBY_HEADLINE_SOON = "Pod Draft starts in {minutes} minutes!"
+MSG_DRAFTMANCER_LINK_LEAD = "Draftmancer link will be posted {lead} minutes before."
 
 MSG_DRAFT_STARTED_ANNOUNCE = "{name} is starting now!"
 MSG_DRAFT_STARTED_LINK = "[**Event Details**]({url})"
 
-MSG_FIRST_POD_TIP_POLL = (
-    "First pod? Pods are live multiplayer drafts on Draftmancer, played out as Arena matches. "
-    "This slot is a set time, so no need to stay online now. Once {threshold} players are in, a thread opens "
-    "in the pod channel and the Draftmancer link posts there 10 minutes before start. "
-    "Run `/pod-guide` for the full rundown."
+MSG_POD_WELCOME = (
+    "### 👋 Welcome {user} to {pod_drafters}\n"
+    "\n"
+    "{grant}"
+    "Run `/pod-guide` for instructions and `/roles` to manage your notifications."
 )
-MSG_FIRST_POD_TIP_QUEUE = (
-    "First pod? Pods are live multiplayer drafts on Draftmancer, played out as Arena matches. "
-    "The queue starts a pod the moment {threshold} players are in. The thread and Draftmancer link "
-    "post right away. Run `/pod-guide` for the full rundown."
-)
-
-MSG_SLOT_ROLE_GRANTED = (
-    "{emoji} You're now on {role} and will be pinged for drafts {when}. "
-    "Run `/roles` to manage your notifications."
-)
+MSG_POD_ROLE_GRANTED = "{subject} now on {role} and will be pinged {ping}. Run `/roles` to manage your notifications."
 
 MSG_TABLE_NO_SOURCE = "Run `/pod-table` in a pod-draft thread, or pass an `event` to pick the pod."
 MSG_TABLE_UNKNOWN_EVENT = "No pod-draft event named `{event}`."

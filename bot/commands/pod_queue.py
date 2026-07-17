@@ -22,7 +22,7 @@ from discord.ext import commands
 
 from bot import emojis
 from bot.commands import descriptions as desc
-from bot.commands.messages import MSG_FIRST_POD_TIP_QUEUE, MSG_LOBBY_GATHERING, MSG_PLAYERS_JOINED
+from bot.commands.messages import MSG_LOBBY_GATHERING, MSG_PLAYERS_JOINED
 from bot.commands.pod_rsvp import parse_new_time, post_scheduled_card
 from bot.config import settings
 from bot.discord_helpers import NBSP
@@ -36,6 +36,7 @@ from bot.services.pod_format import PEASANT_CODE, PEASANT_CUBE_ID, PEASANT_LABEL
 from bot.services.pod_format_select import WRITE_IN_VALUE, set_select_option, write_in_option
 from bot.services.pod_pairing_select import SELECT_PLACEHOLDER as PAIRING_PLACEHOLDER
 from bot.services.pod_pairing_select import pairing_options
+from bot.services.ping_roles import QUEUE_GRANT_PING, announce_pod_grant, spec_named
 from bot.services.pod_roles import find_role, grant_pod_drafters, grant_role
 from bot.services.pod_schedule import POD_QUEUE_ROLE_NAME
 from bot.services.pod_slot import pod_display_name
@@ -72,10 +73,6 @@ QUEUE_CLOSES = "Closes after {window} of inactivity"
 QUEUE_OPENED = "Queue opened by {opener} {when}"
 QUEUE_OPENED_ANON = "Queue opened {when}"
 QUEUE_THREAD_INTRO = "💬 Chat while it fills\n[**Queue here**]({jump}) {manat}"
-QUEUE_ROLE_GRANTED = (
-    "⚡ You're now on {role} and will be pinged when a queue opens or needs more players. "
-    "Run `/roles` to manage your notifications."
-)
 QUEUE_NUDGE = "⚡ {count} players in queue! {mention}"
 QUEUE_NUDGE_QUIET_MINUTES = 30
 QUEUE_PLAYERS_EMPTY = "Players"
@@ -310,19 +307,19 @@ async def _claim_fire_if_ready(result) -> bool:
 
 
 async def _post_join_followups(interaction: discord.Interaction, result, fired: bool) -> None:
-    if result.first_contact:
-        tip = MSG_FIRST_POD_TIP_QUEUE.format(threshold=settings.pod_signal_fire_threshold)
-        await interaction.followup.send(tip, ephemeral=True)
-    if result.joined:
+    granted_role = None
+    first_pod = False
+    if result.joined and isinstance(interaction.user, discord.Member):
         await _add_to_discussion_thread(interaction)
+        first_pod = await grant_pod_drafters(interaction.user)
         granted_role = await _grant_queue_role(interaction)
-        if granted_role is not None:
-            await interaction.followup.send(
-                QUEUE_ROLE_GRANTED.format(role=granted_role.mention),
-                ephemeral=True, allowed_mentions=discord.AllowedMentions.none(),
-            )
-        if not fired:
-            await _maybe_nudge(interaction, result.state)
+    await announce_pod_grant(
+        interaction, first_pod=first_pod, granted_role=granted_role,
+        welcome_role=find_role(interaction.guild, POD_QUEUE_ROLE_NAME),
+        spec=spec_named(POD_QUEUE_ROLE_NAME), ping=QUEUE_GRANT_PING,
+    )
+    if result.joined and not fired:
+        await _maybe_nudge(interaction, result.state)
     if fired:
         asyncio.create_task(_launch_pod(interaction.client, result.state))
 
@@ -401,7 +398,6 @@ async def _grant_queue_role(interaction: discord.Interaction) -> discord.Role | 
     member = interaction.user
     if not isinstance(member, discord.Member):
         return None
-    await grant_pod_drafters(member)
     role = find_role(interaction.guild, POD_QUEUE_ROLE_NAME)
     if role is None:
         return None

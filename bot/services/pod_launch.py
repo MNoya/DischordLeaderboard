@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 
 from bot.config import settings
 from bot.database import SessionLocal
-from bot.models import Player, PodDraftEvent, PodDraftParticipant, PodSignal, PodSignalMember
+from bot.models import PodDraftEvent, PodSignal, PodSignalMember
 from bot.services import pod_signals
 from bot.services.pod_draft_manager import set_card_close_hook, start_manager
 from bot.services.pod_drafts import draftmancer_url_for, record_ondemand_event
@@ -71,7 +71,6 @@ class ToggleResult:
     joined: bool
     changed: bool
     closed: bool
-    first_contact: bool = False
 
 
 @dataclass(frozen=True)
@@ -308,9 +307,9 @@ def set_rsvp(
     session: Session, message_id: str, discord_user_id: str, display_name: str, rsvp: str,
 ) -> RsvpResult | None:
     """Three-state RSVP on a scheduled card: clicking a state moves the member there; clicking the
-    state they already hold removes the row. `rsvp` in the result is the recorded state, None when
-    the click removed the RSVP. `joined` is True only when the member entered Yes. Scheduled signals
-    are born fired and never expire, so only a stray expired row refuses. Does not commit."""
+    state they already hold is a no-op, so a double-click can't drop them off the card. `rsvp` in the
+    result is the recorded state; `joined` is True only when the member freshly entered Yes. Scheduled
+    signals are born fired and never expire, so only a stray expired row refuses. Does not commit."""
     signal = _scheduled_signal_by_surface(session, message_id)
     if signal is None:
         return None
@@ -334,10 +333,7 @@ def set_rsvp(
         ))
         signal.last_activity_at = datetime.now(timezone.utc)
         joined = rsvp == pod_signals.RSVP_YES
-    elif existing.rsvp == rsvp:
-        session.delete(existing)
-        recorded = None
-    else:
+    elif existing.rsvp != rsvp:
         joined = rsvp == pod_signals.RSVP_YES
         existing.rsvp = rsvp
         existing.display_name = display_name
@@ -383,9 +379,8 @@ def toggle_member(
         )
     ).scalar_one_or_none()
     add = existing is None if action == "toggle" else action == "join"
-    joined = changed = first_contact = False
+    joined = changed = False
     if add and existing is None:
-        first_contact = not _has_pod_history(session, discord_user_id)
         session.add(PodSignalMember(
             signal_id=signal.id, discord_user_id=discord_user_id, display_name=display_name,
         ))
@@ -397,8 +392,7 @@ def toggle_member(
     session.flush()
     names = _member_names(session, signal.id)
     return ToggleResult(
-        _state(signal, len(names)), names,
-        joined=joined, changed=changed, closed=False, first_contact=first_contact,
+        _state(signal, len(names)), names, joined=joined, changed=changed, closed=False,
     )
 
 
@@ -741,6 +735,20 @@ def scheduled_event_for_message_sync(message_id: str) -> str | None:
         return signal.event_id if signal else None
 
 
+def native_event_ref_by_surface_sync(message_id: str) -> tuple[str, str, str, str] | None:
+    """(native_event_id, guild_id, channel_id, card_message_id) for the native Discord event behind
+    an RSVP surface, so its description tally can be re-synced on a click. None when the signal, its
+    pod event, or the native event id is missing."""
+    with SessionLocal() as session:
+        signal = _scheduled_signal_by_surface(session, message_id)
+        if signal is None or signal.event_id is None:
+            return None
+        event = session.get(PodDraftEvent, signal.event_id)
+        if event is None or event.discord_scheduled_event_id is None:
+            return None
+        return event.discord_scheduled_event_id, signal.guild_id, signal.channel_id, signal.message_id
+
+
 def ondemand_event_name_sync(set_code: str, event_time: datetime) -> str:
     """The `SET Mon Day Slot Pod` name, fixed at creation and never renumbered. The website's `#N`
     milestone is a separate execution-ordered projection in `public_pod_draft_events`, not baked in
@@ -1067,25 +1075,6 @@ def init_launch(bot: commands.Bot) -> None:
     global _bot
     _bot = bot
     set_card_close_hook(close_event_card)
-
-
-def _has_pod_history(session: Session, discord_user_id: str) -> bool:
-    """Whether this Discord user has ever joined a pod signal or played in a pod. Gates the one-time
-    first-contact tip; must run before the member row is inserted."""
-    prior_signal = session.execute(
-        select(PodSignalMember.id)
-        .where(PodSignalMember.discord_user_id == discord_user_id)
-        .limit(1)
-    ).scalar_one_or_none()
-    if prior_signal is not None:
-        return True
-    prior_participation = session.execute(
-        select(PodDraftParticipant.id)
-        .join(Player, Player.id == PodDraftParticipant.player_id)
-        .where(Player.discord_id == discord_user_id)
-        .limit(1)
-    ).scalar_one_or_none()
-    return prior_participation is not None
 
 
 def _signal_by_message_bucket(session: Session, message_id: str, bucket: str) -> PodSignal | None:

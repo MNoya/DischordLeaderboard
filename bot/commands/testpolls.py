@@ -20,18 +20,26 @@ from datetime import datetime, timedelta, timezone
 import discord
 from discord.ext import commands
 
-from bot.commands.messages import MSG_FIRST_POD_TIP_POLL, MSG_FIRST_POD_TIP_QUEUE
 from bot.commands.pod_queue import (
     QUEUE_CLOSED_MANUAL,
     PodQueueView,
     queue_inactivity_close_reason,
     queue_role_mention,
 )
-from bot.commands.pod_rsvp import build_rsvp_embed, post_scheduled_card
+from bot.commands.pod_rsvp import build_rsvp_embed, post_scheduled_card, purge_native_events
 from bot.commands.pod_table import offer_second_table
 from bot.commands.test_group import test_group
-from bot.config import settings
 from bot.services import pod_launch
+from bot.services.ping_roles import (
+    PING_ROLES,
+    QUEUE_GRANT_PING,
+    build_grant_embed,
+    build_welcome_view,
+    slot_grant_ping,
+    spec_named,
+    strip_pod_roles,
+)
+from bot.services.pod_schedule import POD_QUEUE_ROLE_NAME
 from bot.services.pod_signals import RSVP_YES, SCHEDULE_TZ, poll_buckets_for, slot_event_time
 from bot.sets import active_set_code
 from bot.tasks.pod_daily_poll import post_launcher
@@ -40,13 +48,54 @@ from bot.tasks.pod_daily_poll import post_launcher
 log = logging.getLogger(__name__)
 
 
+async def _show_welcome_preview(interaction: discord.Interaction, role_name: str) -> None:
+    guild = interaction.guild
+    spec = spec_named(role_name)
+    role = discord.utils.get(guild.roles, name=role_name) if guild is not None else None
+    ping = QUEUE_GRANT_PING if role_name == POD_QUEUE_ROLE_NAME else slot_grant_ping(spec)
+    await interaction.response.send_message("**First pod:**", allowed_mentions=discord.AllowedMentions.none())
+    await interaction.followup.send(
+        view=build_welcome_view(guild, interaction.user.mention, role, ping=ping),
+        allowed_mentions=discord.AllowedMentions.none(),
+    )
+    if role is not None:
+        await interaction.followup.send(
+            content="**Returning, picks up a new slot:**",
+            embed=build_grant_embed(interaction.user.mention, role, spec, ping=ping),
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+
+class _WelcomePreviewButton(discord.ui.Button):
+    def __init__(self, role_name: str) -> None:
+        super().__init__(label=role_name, style=discord.ButtonStyle.secondary)
+        self.role_name = role_name
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await _show_welcome_preview(interaction, self.role_name)
+
+
+class WelcomePreviewView(discord.ui.View):
+    """Buttons that replay the first-pod welcome and role-grant a new drafter sees, addressed to
+    whoever clicks — eyeball the copy without wiping pod history to trip first contact."""
+
+    def __init__(self) -> None:
+        super().__init__(timeout=None)
+        for spec in PING_ROLES:
+            if spec.auto_grant or spec.name == POD_QUEUE_ROLE_NAME:
+                self.add_item(_WelcomePreviewButton(spec.name))
+
+
 async def setup(bot: commands.Bot) -> None:
     @test_group.command(name="poll")
     @commands.is_owner()
     async def test_poll(ctx: commands.Context) -> None:
-        """Owner-only. Post a live daily launcher in this channel; the slot buttons drive real signals."""
-        today = datetime.now(SCHEDULE_TZ).date()
-        await post_launcher(ctx.bot, ctx.channel, today)
+        """Owner-only. Post a live daily launcher whose slots are still ahead — today if one remains,
+        otherwise tomorrow — so the buttons are clickable and drive real signals."""
+        now = datetime.now(SCHEDULE_TZ)
+        last_slot = slot_event_time(now.date(), poll_buckets_for(now.date())[-1].key)
+        day = now.date() if last_slot is not None and last_slot > now else now.date() + timedelta(days=1)
+        await post_launcher(ctx.bot, ctx.channel, day)
 
     @test_group.command(name="launcher")
     @commands.is_owner()
@@ -82,21 +131,32 @@ async def setup(bot: commands.Bot) -> None:
     @commands.is_owner()
     async def test_reset(ctx: commands.Context) -> None:
         """Owner-only. Clear this guild's on-demand pod signals (poll / queue / scheduled) so the `!test`
-        surfaces start from a clean slate — every slot goes back to lazy. Leaves pod_draft_events and any
-        live lobby alone; only the signup signals reflection reads are wiped."""
+        surfaces start from a clean slate — every slot goes back to lazy — delete the bot's scheduled
+        events off the Events calendar, and strip the auto-granted pod ping roles. Leaves pod_draft_events
+        and any live lobby alone; only the signup signals reflection reads are wiped."""
         guild_id = str(ctx.guild.id) if ctx.guild else ""
         counts = await asyncio.to_thread(pod_launch.reset_ondemand_signals_sync, guild_id)
+        purged = await purge_native_events(ctx.guild, ctx.bot.user.id) if ctx.guild else 0
+        roles_removed = 0
+        if isinstance(ctx.author, discord.Member):
+            roles_removed = await strip_pod_roles(ctx.author)
         await ctx.send(
-            f"Cleared on-demand pod signals: {counts['signals']} signals, {counts['members']} members."
+            f"Cleared on-demand pod signals: {counts['signals']} signals, {counts['members']} members. "
+            f"Removed {purged} scheduled events from the calendar and stripped {roles_removed} of your pod roles."
         )
 
-    @test_group.command(name="tip")
+    @test_group.command(name="welcome")
     @commands.is_owner()
-    async def test_tip(ctx: commands.Context) -> None:
-        """Owner-only. Post both first-contact tips verbatim to eyeball the copy."""
-        threshold = settings.pod_signal_fire_threshold
-        await ctx.send(MSG_FIRST_POD_TIP_POLL.format(threshold=threshold))
-        await ctx.send(MSG_FIRST_POD_TIP_QUEUE.format(threshold=threshold))
+    async def test_welcome(ctx: commands.Context) -> None:
+        """Owner-only. Post slot buttons that replay the first-pod welcome and role-grant a new drafter
+        sees, addressed to whoever clicks."""
+        if ctx.guild is None:
+            await ctx.send("Run `!test welcome` in the server so the role pills resolve.")
+            return
+        await ctx.send(
+            "Click a slot to see the first-pod welcome and role-grant a new drafter gets.",
+            view=WelcomePreviewView(),
+        )
 
     @test_group.command(name="rsvp")
     @commands.is_owner()

@@ -639,33 +639,30 @@ function Header({
     />
   );
 
+  const backClass = "flex min-w-0 items-center gap-2.5 text-left transition-colors hover:text-green";
+  const backContent = (
+    <>
+      <ChevronIcon dir="left" />
+      <SetSymbol src={setSymbol} className="h-7 w-7 shrink-0" />
+      <span className="truncate font-display text-[19px] tracking-[0.08em]">
+        {highlightEventLabel(eventTitle)}
+      </span>
+    </>
+  );
+
   return (
     <header className="hidden h-[60px] shrink-0 items-center gap-5 border-b border-border bg-surface px-5 lg:flex">
-      {backHref ? (
-        <Link
-          to={backHref}
-          className="flex min-w-0 flex-1 items-center gap-2.5 text-left transition-colors hover:text-green"
-          aria-label="Back to pod"
-        >
-          <ChevronIcon dir="left" />
-          <SetSymbol src={setSymbol} className="h-7 w-7 shrink-0" />
-          <span className="truncate font-display text-[19px] tracking-[0.08em]">
-            {highlightEventLabel(eventTitle)}
-          </span>
-        </Link>
-      ) : (
-        <button
-          onClick={onClose}
-          className="flex min-w-0 flex-1 items-center gap-2.5 text-left transition-colors hover:text-green"
-          aria-label="Back to pod"
-        >
-          <ChevronIcon dir="left" />
-          <SetSymbol src={setSymbol} className="h-7 w-7 shrink-0" />
-          <span className="truncate font-display text-[19px] tracking-[0.08em]">
-            {highlightEventLabel(eventTitle)}
-          </span>
-        </button>
-      )}
+      <div className="flex min-w-0 flex-1 items-center">
+        {backHref ? (
+          <Link to={backHref} className={backClass} aria-label="Back to pod">
+            {backContent}
+          </Link>
+        ) : (
+          <button onClick={onClose} className={backClass} aria-label="Back to pod">
+            {backContent}
+          </button>
+        )}
+      </div>
 
       {viewMode === "step" && (
         <div className="flex items-center gap-5">

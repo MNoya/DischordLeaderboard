@@ -49,14 +49,14 @@ def test_clicking_another_state_moves_the_member(session, scheduled_signal):
     assert result.rosters[pod_signals.RSVP_MAYBE] == ["Nissa Revane"]
 
 
-def test_clicking_the_held_state_removes_the_rsvp(session, scheduled_signal):
+def test_clicking_the_held_state_keeps_the_rsvp(session, scheduled_signal):
     set_rsvp(session, MESSAGE_ID, "u1", "Nissa Revane", pod_signals.RSVP_YES)
 
     result = set_rsvp(session, MESSAGE_ID, "u1", "Nissa Revane", pod_signals.RSVP_YES)
 
-    assert result.rsvp is None
+    assert result.rsvp == pod_signals.RSVP_YES
     assert not result.joined
-    assert all(names == [] for names in result.rosters.values())
+    assert result.rosters[pod_signals.RSVP_YES] == ["Nissa Revane"]
 
 
 def test_moving_from_maybe_to_yes_counts_as_joining(session, scheduled_signal):
@@ -75,7 +75,7 @@ def test_moving_from_maybe_to_yes_counts_as_joining(session, scheduled_signal):
     (pod_signals.RSVP_NO, pod_signals.RSVP_YES, True),
     (pod_signals.RSVP_YES, pod_signals.RSVP_MAYBE, True),
     (pod_signals.RSVP_YES, pod_signals.RSVP_NO, True),
-    (pod_signals.RSVP_YES, pod_signals.RSVP_YES, True),
+    (pod_signals.RSVP_YES, pod_signals.RSVP_YES, False),
     (pod_signals.RSVP_MAYBE, pod_signals.RSVP_NO, False),
     (pod_signals.RSVP_MAYBE, pod_signals.RSVP_MAYBE, False),
     (pod_signals.RSVP_NO, pod_signals.RSVP_NO, False),

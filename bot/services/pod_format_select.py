@@ -46,11 +46,12 @@ def write_in_option(label_prefix: str) -> discord.SelectOption:
 
 
 def format_options(current_code: str | None) -> list[discord.SelectOption]:
-    """The format dropdown options (active set + recent released sets + custom cubes + a write-in
-    launcher), with the current one defaulted. Labels are prefixed with 'Format:' so the collapsed
-    dropdown reads e.g. 'Format: SOS', matching the Pairings and Seats dropdowns and the lobby footer.
-    Unreleased upcoming sets are left out — they have no card pool to draft; the write-in option still
-    drafts any set code the user types, so a preview draft stays possible on purpose."""
+    """The format dropdown options (active set + custom cubes + recent released sets + a write-in
+    launcher), with the current one defaulted. Custom cubes sit right under the active set, matching
+    the /draft set picker. Labels are prefixed with 'Format:' so the collapsed dropdown reads e.g.
+    'Format: SOS', matching the Pairings and Seats dropdowns and the lobby footer. Unreleased upcoming
+    sets are left out — they have no card pool to draft; the write-in option still drafts any set code
+    the user types, so a preview draft stays possible on purpose."""
     cur = (current_code or "").upper()
     active = active_set_code()
     recent = recent_released_sets()
@@ -64,17 +65,18 @@ def format_options(current_code: str | None) -> list[discord.SelectOption]:
         active, label=f"Format: {active}",
         description=f"Draft the latest set ({active})", default=cur in ("", active),
     ))
-    for seed in recent:
-        options.append(set_select_option(
-            seed.code, label=f"Format: {seed.code}",
-            description=f"Draft {seed.name}", default=(cur == seed.code),
-        ))
     for fmt in custom_formats():
         options.append(discord.SelectOption(
             label=f"Format: {fmt.label}",
             value=fmt.code,
             description=f"CubeCobra: {fmt.cube_id}",
+            emoji=emojis.get_emoji("cube"),
             default=(cur == fmt.code.upper()),
+        ))
+    for seed in recent:
+        options.append(set_select_option(
+            seed.code, label=f"Format: {seed.code}",
+            description=f"Draft {seed.name}", default=(cur == seed.code),
         ))
     return options
 
