@@ -642,22 +642,31 @@ function GamesGrid({
   );
 }
 
+function EmptyReplayCell({ label, title }: { label: string; title: string }) {
+  return (
+    <div
+      className="flex items-center bg-transparent border border-dashed border-border/70 text-dim cursor-default px-3"
+      style={{ height: 38 }}
+      title={title}
+    >
+      <span
+        className="font-display tracking-[0.16em] leading-none whitespace-nowrap"
+        style={{ fontSize: 13 }}
+      >
+        {label}
+      </span>
+    </div>
+  );
+}
+
 function PlayerReplayCell({ row }: { row: PodEventReplayRow | null }) {
   const isMobile = useIsCompact();
   if (!row) {
     return (
-      <div
-        className="flex items-center bg-bg border border-border text-dim cursor-default px-3"
-        style={{ height: 38 }}
+      <EmptyReplayCell
+        label={isMobile ? "NO REPLAY" : "NO REPLAY CAPTURED"}
         title="No replay was captured for this game"
-      >
-        <span
-          className="font-display tracking-[0.16em] leading-none whitespace-nowrap"
-          style={{ fontSize: 14 }}
-        >
-          {isMobile ? "NO REPLAY" : "NO REPLAY CAPTURED"}
-        </span>
-      </div>
+      />
     );
   }
   return (
@@ -701,18 +710,10 @@ function OpponentReplayCell({ row }: { row: PodEventReplayRow | null }) {
   if (!row) {
     if (isMobile) return null;
     return (
-      <div
-        className="inline-flex items-center bg-bg border border-border text-dim cursor-default px-3"
-        style={{ height: 38 }}
-        title="No opponent replay was captured for this game"
-      >
-        <span
-          className="font-display tracking-[0.16em] leading-none whitespace-nowrap"
-          style={{ fontSize: 14 }}
-        >
-          NO REPLAY CAPTURED
-        </span>
-      </div>
+      <EmptyReplayCell
+        label="NO OPPONENT REPLAY"
+        title="The opponent did not capture a replay for this game"
+      />
     );
   }
   return (

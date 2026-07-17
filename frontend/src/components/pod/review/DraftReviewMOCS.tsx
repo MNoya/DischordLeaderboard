@@ -1895,12 +1895,21 @@ function PassArrow({ dir }: { dir: "up" | "down" | "left" | "right" }) {
 
 // Two columns of four seats laid out so the arrows trace the pack-pass loop around the table: across the
 // top, down one column, across the bottom, up the other. The loop reverses for the right-to-left packs.
-const RING: { left: number; right: number; top?: boolean; bottom?: boolean }[] = [
-  { left: 0, right: 1, top: true },
-  { left: 7, right: 2 },
-  { left: 6, right: 3 },
-  { left: 5, right: 4, bottom: true },
-];
+type RingRow = { left: number; right: number | null; top: boolean; bottom: boolean };
+
+// Seats fold into two columns around a table: seat 0 at top-left, the right column
+// running down 1..⌊n/2⌋, the left column running back up the rest. Odd pods leave the
+// bottom-right cell empty. Clockwise ring order 0..n-1 drives the pass arrows.
+function buildRing(n: number): RingRow[] {
+  const rows = Math.ceil(n / 2);
+  const rightCount = Math.floor(n / 2);
+  const ring: RingRow[] = [];
+  for (let r = 0; r < rows; r++) {
+    const right = r + 1 <= rightCount ? r + 1 : null;
+    ring.push({ left: r === 0 ? 0 : n - r, right, top: r === 0, bottom: r === rows - 1 });
+  }
+  return ring;
+}
 
 function PlayerGrid({
   seats,
@@ -1913,21 +1922,25 @@ function PlayerGrid({
   onSelect: (i: number) => void;
   passRight: boolean;
 }) {
+  const ring = buildRing(seats.length);
   const topDir = passRight ? "right" : "left";
   const bottomDir = passRight ? "left" : "right";
   const leftColDir = passRight ? "up" : "down";
   const rightColDir = passRight ? "down" : "up";
   const arrowRiseToAvatar = 20;
-  const tile = (i: number) => (
-    <PlayerTile seat={seats[i]} active={i === activeSeat} onClick={() => onSelect(i)} />
-  );
+  const tile = (i: number | null) =>
+    i == null || !seats[i] ? (
+      <div className="flex-1" />
+    ) : (
+      <PlayerTile seat={seats[i]} active={i === activeSeat} onClick={() => onSelect(i)} />
+    );
   return (
     <div className="flex h-full flex-col px-1.5 py-2">
-      {RING.map((row, i) => (
+      {ring.map((row, i) => (
         <div key={i} className="relative flex flex-1 items-stretch">
           {tile(row.left)}
           {tile(row.right)}
-          {(row.top || row.bottom) && (
+          {(row.top || (row.bottom && row.right != null)) && (
             <span
               className="pointer-events-none absolute left-1/2 top-1/2"
               style={{ transform: `translate(-50%, calc(-50% - ${arrowRiseToAvatar}px))` }}
@@ -1935,14 +1948,16 @@ function PlayerGrid({
               <PassArrow dir={row.top ? topDir : bottomDir} />
             </span>
           )}
-          {i < RING.length - 1 && (
+          {i < ring.length - 1 && (
             <>
               <span className="pointer-events-none absolute bottom-0 left-1/4 -translate-x-1/2 translate-y-1/2">
                 <PassArrow dir={leftColDir} />
               </span>
-              <span className="pointer-events-none absolute bottom-0 left-3/4 -translate-x-1/2 translate-y-1/2">
-                <PassArrow dir={rightColDir} />
-              </span>
+              {ring[i + 1].right != null && (
+                <span className="pointer-events-none absolute bottom-0 left-3/4 -translate-x-1/2 translate-y-1/2">
+                  <PassArrow dir={rightColDir} />
+                </span>
+              )}
             </>
           )}
         </div>

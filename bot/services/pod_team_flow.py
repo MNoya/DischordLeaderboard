@@ -65,7 +65,7 @@ log = logging.getLogger(__name__)
 
 TEAM_THREAD_INTRO = (
     "{emoji} **{label}** private room. Talk deckbuilding and strategy here. "
-    "Report your matches on the [shared thread]({board_url}) {manat}"
+    "Report your matches on the [**shared thread**]({board_url}) {manat}"
 )
 
 
