@@ -6,9 +6,10 @@ locks the slot — only another record-pattern image can replace it. Once the ch
 has posted, participants with a deck on file are done: their later images are ignored
 unless record-captioned.
 
-On capture we trigger maybe_post_championship — once the top finishers all have colors and a
-screenshot the one-time coordination announcement (Components V2 layout) posts to the parent
-channel. A captured screenshot from a champion gets a 🏆 react on the message itself.
+On capture we re-run the championship trigger — swiss or team, live manager or the recovery
+shim once finalize has evicted it — so a late screenshot completing the showcase decks posts
+the announcement right away instead of waiting for the deadline. A captured screenshot from a
+champion gets a 🏆 react on the message itself.
 """
 from __future__ import annotations
 
@@ -26,8 +27,9 @@ from bot.services.pod_drafts import (
     capture_deck_screenshot,
     is_pod_thread_champion,
 )
+from bot.services.pod_team_showcase import maybe_post_team_championship, maybe_post_team_trophy_hype
 from bot.services.pod_thread_backfill import parse_caption_colors
-from bot.services.pod_tournament import maybe_post_championship
+from bot.services.pod_tournament import maybe_post_championship, refresh_standings_for_event
 
 
 log = logging.getLogger(__name__)
@@ -63,8 +65,14 @@ class PodScreenshotListener(commands.Cog):
         is_champion_in_memory = False
         manager = ACTIVE_POD_MANAGERS.get(event_id)
         if manager is not None and manager.kind != "mock":
-            await maybe_post_championship(manager)
+            if manager.pairing_mode == "team":
+                await maybe_post_team_trophy_hype(manager)
+                await maybe_post_team_championship(manager)
+            else:
+                await maybe_post_championship(manager)
             is_champion_in_memory = discord_id in manager.champion_discord_ids
+        elif manager is None:
+            await refresh_standings_for_event(self.bot, event_id, thread_id)
 
         is_champion_in_db = await asyncio.to_thread(_is_thread_champion_sync, thread_id, discord_id)
         if is_champion_in_memory or is_champion_in_db:
