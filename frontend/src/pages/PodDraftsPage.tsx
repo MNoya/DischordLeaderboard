@@ -596,11 +596,16 @@ function EventRowBody({ event, nowMs }: { event: PodEventSummary; nowMs: number 
   const { data: matches } = usePodEventMatches(inProgress ? event.eventId : undefined);
   const currentRound = useMemo(() => {
     if (!matches || matches.length === 0) return null;
+    let earliestUnreported = null;
     let latest = 1;
     for (const m of matches) {
       if (m.round > latest) latest = m.round;
+      if (m.reportedAt == null && (earliestUnreported == null || m.round < earliestUnreported)) {
+        earliestUnreported = m.round;
+      }
     }
-    return Math.min(latest, event.totalRounds);
+    const round = earliestUnreported ?? latest;
+    return Math.min(round, event.totalRounds);
   }, [matches, event.totalRounds]);
   return (
     <div
