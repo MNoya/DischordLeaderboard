@@ -1,15 +1,9 @@
-"""Nightly archive of past pod-draft threads.
+"""Nightly archive of finished pod threads at 02:00 ET.
 
-Fires at 02:00 ET, when the day's pods are long finished. Discord threads carry no auto-archive
-below 24h, so old draft rooms linger in the active list; this collapses them the way "Hide After
-Inactivity" would. Archiving is reversible — anyone posting reopens the thread — so it only tidies
-the sidebar, it does not lock conversation.
-
-Only events whose start time has already passed are touched, and only within a short lookback so
-each night re-scans a handful of threads rather than the full history; older threads were archived
-on an earlier night. Already-archived threads, and any thread with a message inside the activity
-grace window, are left alone so a live conversation is never cut off mid-sentence — it archives on
-a later night once it goes quiet.
+Discord threads have no auto-archive below 24h, so old draft rooms and never-fired queue threads
+linger in the sidebar. Archiving is reversible, so a stray reply just reopens the thread. A short
+lookback keeps each run to a handful; already-archived threads and any with activity inside the
+grace window are left for a later night so a live conversation is never cut off.
 """
 from __future__ import annotations
 
@@ -21,8 +15,9 @@ from discord.ext import commands
 from sqlalchemy import select
 
 from bot.database import SessionLocal
-from bot.models import PodDraftEvent
+from bot.models import PodDraftEvent, PodSignal
 from bot.services.pod_schedule import SCHEDULE_TZ
+from bot.services.pod_signals import QUEUE_BUCKET, STATUS_OPEN
 
 
 CLEANUP_HOUR_ET = 2
@@ -48,12 +43,17 @@ async def archive_past_threads() -> None:
     if _bot is None:
         return
     now = datetime.now(timezone.utc)
-    thread_ids = _past_event_thread_ids(now)
+    event_thread_ids = _past_event_thread_ids(now)
+    queue_thread_ids = _stale_queue_thread_ids(now)
     archived = 0
-    for thread_id in thread_ids:
+    for thread_id in event_thread_ids:
         if await _archive_thread(thread_id, now):
             archived += 1
-    log.info(f"pod thread cleanup: archived {archived} of {len(thread_ids)} past-event threads")
+    for thread_id in queue_thread_ids:
+        if await _archive_thread(thread_id, now):
+            archived += 1
+    total = len(event_thread_ids) + len(queue_thread_ids)
+    log.info(f"pod thread cleanup: archived {archived} of {total} past threads")
 
 
 def _past_event_thread_ids(now: datetime) -> list[int]:
@@ -76,6 +76,27 @@ def _past_event_thread_ids(now: datetime) -> list[int]:
             if thread_id not in seen:
                 seen.add(thread_id)
                 ids.append(thread_id)
+    return ids
+
+
+def _stale_queue_thread_ids(now: datetime) -> list[int]:
+    window_start = now - timedelta(days=LOOKBACK_DAYS)
+    with SessionLocal() as session:
+        rows = session.execute(
+            select(PodSignal.discussion_thread_id).where(
+                PodSignal.bucket == QUEUE_BUCKET,
+                PodSignal.discussion_thread_id.is_not(None),
+                PodSignal.status != STATUS_OPEN,
+                PodSignal.last_activity_at >= window_start,
+            )
+        ).all()
+    ids: list[int] = []
+    seen: set[int] = set()
+    for (raw,) in rows:
+        thread_id = int(raw)
+        if thread_id not in seen:
+            seen.add(thread_id)
+            ids.append(thread_id)
     return ids
 
 

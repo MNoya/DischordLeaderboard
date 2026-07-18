@@ -75,6 +75,7 @@ QUEUE_CLOSES = "Closes after {window} of inactivity"
 QUEUE_OPENED = "Queue opened by {opener} {when}"
 QUEUE_OPENED_ANON = "Queue opened {when}"
 QUEUE_THREAD_INTRO = "💬 Chat while it fills\n[**Queue here**]({jump}) {manat}"
+QUEUE_THREAD_CLOSED = "🎉 Draft started in {thread}"
 QUEUE_NUDGE = "⚡ {count} players in queue! {mention}"
 QUEUE_NUDGE_QUIET_MINUTES = 30
 QUEUE_PLAYERS_EMPTY = "Players"
@@ -342,6 +343,25 @@ async def _launch_pod(bot: commands.Bot, state) -> None:
     await _link_thread_on_card(
         bot, state.signal_id, event_id, set_code, state.notify_role, state.description,
     )
+    await _close_discussion_thread(bot, state.signal_id, event_id)
+
+
+async def _close_discussion_thread(bot: commands.Bot, signal_id: str, event_id: str) -> None:
+    """Archive the queue's discussion thread when the pod fires, after pointing its chatters at the draft room."""
+    ref = await asyncio.to_thread(pod_launch.signal_message_ref_sync, signal_id)
+    if ref is None:
+        return
+    _, card_message_id = ref
+    thread = await _resolve_discussion_thread(card_message_id, None, bot)
+    if thread is None or thread.archived:
+        return
+    event_thread_id = await asyncio.to_thread(pod_launch.event_thread_id_sync, event_id)
+    try:
+        if event_thread_id is not None:
+            await thread.send(QUEUE_THREAD_CLOSED.format(thread=f"<#{event_thread_id}>"))
+        await thread.edit(archived=True)
+    except discord.HTTPException:
+        log.warning(f"could not close discussion thread for queue {signal_id}", exc_info=True)
 
 
 async def _link_thread_on_card(
