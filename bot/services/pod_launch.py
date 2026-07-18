@@ -119,6 +119,7 @@ class LauncherSlot:
     names: list[str]
     thread_id: str | None
     signal_id: str | None
+    thread_message_id: str | None = None
 
 
 def create_poll_signals(
@@ -369,7 +370,8 @@ def toggle_member(
     signal = _signal_by_message_bucket(session, message_id, bucket)
     if signal is None:
         return None
-    if signal.status == pod_signals.STATUS_EXPIRED:
+    now = datetime.now(timezone.utc)
+    if _lazy_status(signal.status, signal.slot_time, now) == pod_signals.STATUS_EXPIRED:
         names = _member_names(session, signal.id)
         return ToggleResult(_state(signal, len(names)), names, joined=False, changed=False, closed=True)
 
@@ -636,6 +638,7 @@ def launcher_snapshot_sync(message_id: str, signal_date: date) -> list[LauncherS
     real start time are read off the event (the card is the truth; a little render-time staleness is
     fine). Otherwise the slot is lazy — its own poll signal, or an empty open slot before signals exist.
     Committed wins outright, so a lazy slot that fires and posts its card renders as committed next pass."""
+    now = datetime.now(timezone.utc)
     slots: list[LauncherSlot] = []
     with SessionLocal() as session:
         for bucket in pod_signals.poll_buckets_for(signal_date):
@@ -647,16 +650,24 @@ def launcher_snapshot_sync(message_id: str, signal_date: date) -> list[LauncherS
             signal = _signal_by_message_bucket(session, message_id, bucket.key)
             if signal is None:
                 slots.append(LauncherSlot(
-                    bucket.key, committed=False, status=pod_signals.STATUS_OPEN, count=0,
-                    slot_time=slot_time, names=[], thread_id=None, signal_id=None,
+                    bucket.key, committed=False, status=_lazy_status(pod_signals.STATUS_OPEN, slot_time, now),
+                    count=0, slot_time=slot_time, names=[], thread_id=None, signal_id=None,
                 ))
                 continue
             names = _member_names(session, signal.id)
             slots.append(LauncherSlot(
-                bucket.key, committed=False, status=signal.status, count=len(names),
-                slot_time=signal.slot_time, names=names, thread_id=None, signal_id=signal.id,
+                bucket.key, committed=False, status=_lazy_status(signal.status, signal.slot_time, now),
+                count=len(names), slot_time=signal.slot_time, names=names, thread_id=None, signal_id=signal.id,
             ))
     return slots
+
+
+def _lazy_status(status: str, slot_time: datetime | None, now: datetime) -> str:
+    """An open slot past its time is closed even if its expiry job never fired, so the render never
+    offers a join the toggle would refuse."""
+    if status == pod_signals.STATUS_OPEN and slot_time is not None and slot_time <= now:
+        return pod_signals.STATUS_EXPIRED
+    return status
 
 
 def _committed_slot(session: Session, bucket_key: str, event_id: str) -> LauncherSlot:
@@ -671,6 +682,7 @@ def _committed_slot(session: Session, bucket_key: str, event_id: str) -> Launche
         bucket_key, committed=True, status=pod_signals.STATUS_FIRED, count=len(yes_names),
         slot_time=event.event_time if event else None,
         names=yes_names, thread_id=event.discord_thread_id if event else None, signal_id=None,
+        thread_message_id=signal.thread_message_id if signal else None,
     )
 
 

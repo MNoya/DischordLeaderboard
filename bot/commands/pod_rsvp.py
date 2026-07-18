@@ -224,10 +224,15 @@ def refresh_roster_fields(embed: discord.Embed, rosters: dict[str, list[str]]) -
     if time_field is not None:
         embed.add_field(name=TIME_LABEL, value=time_field.value, inline=False)
     add_rsvp_fields(embed, rosters)
-    marker = f"\n\n{MULTIPOD_NOTICE}"
-    description = embed.description or ""
-    base = description[: -len(marker)] if description.endswith(marker) else description
-    embed.description = base + _multipod_suffix(rosters)
+    embed.description = _strip_multipod_notice(embed.description or "") + _multipod_suffix(rosters)
+
+
+def _strip_multipod_notice(description: str) -> str:
+    """Peel every trailing notice, self-healing cards that stacked copies before the marker matched."""
+    marker = f"\n{MULTIPOD_NOTICE}"
+    while description.endswith(marker):
+        description = description[: -len(marker)]
+    return description
 
 
 def slot_role_mention(guild: discord.Guild | None, event_time: datetime) -> str | None:

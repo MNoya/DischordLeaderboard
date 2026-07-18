@@ -1,11 +1,64 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from bot.commands.pod_queue import _preset_slot_time, _when_options
 from bot.services.pod_format_select import WRITE_IN_VALUE
+from bot.services.pod_launch import LauncherSlot, _lazy_status
+from bot.services.pod_signals import STATUS_EXPIRED, STATUS_FIRED, STATUS_OPEN
+from bot.tasks.pod_daily_poll import PodPollView
 
 
 BEFORE_EARLY = datetime(2026, 7, 14, 10, 0, tzinfo=timezone.utc)
 AFTER_LATE = datetime(2026, 7, 15, 3, 0, tzinfo=timezone.utc)
+
+
+def _committed(bucket_key, thread_id, thread_message_id):
+    return LauncherSlot(
+        bucket_key, committed=True, status=STATUS_FIRED, count=1, slot_time=None,
+        names=["p"], thread_id=thread_id, signal_id=None, thread_message_id=thread_message_id,
+    )
+
+
+def _lazy(bucket_key, status):
+    return LauncherSlot(
+        bucket_key, committed=False, status=status, count=0, slot_time=None,
+        names=[], thread_id=None, signal_id=None,
+    )
+
+
+def test_committed_slot_deep_links_to_its_thread_card():
+    view = PodPollView([_committed("EARLY", "555", "777")], guild=None)
+
+    assert view.children[0].url.endswith("/555/777")
+
+
+def test_committed_slot_without_a_card_links_to_the_thread_itself():
+    view = PodPollView([_committed("EARLY", "555", None)], guild=None)
+
+    assert view.children[0].url.endswith("/555")
+
+
+def test_open_slot_button_is_enabled_a_closed_one_disabled():
+    view = PodPollView([_lazy("MORNING", STATUS_EXPIRED), _lazy("EARLY", STATUS_OPEN)])
+
+    disabled = {child.custom_id: child.disabled for child in view.children}
+    assert disabled == {"pod_poll:MORNING": True, "pod_poll:EARLY": False}
+
+
+@pytest.mark.parametrize(
+    "status, slot_hour, expected",
+    [
+        (STATUS_OPEN, 10, STATUS_EXPIRED),
+        (STATUS_OPEN, 20, STATUS_OPEN),
+        (STATUS_FIRED, 10, STATUS_FIRED),
+    ],
+)
+def test_lazy_status_closes_only_a_passed_open_slot(status, slot_hour, expected):
+    slot_time = datetime(2026, 7, 18, slot_hour, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 18, 15, 0, tzinfo=timezone.utc)
+
+    assert _lazy_status(status, slot_time, now) == expected
 
 
 def test_preset_slot_time_uses_today_when_slot_is_ahead():

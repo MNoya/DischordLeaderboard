@@ -2,11 +2,18 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from bot.commands.pod_rsvp import parse_new_time
+from bot.commands.pod_rsvp import (
+    MULTIPOD_NOTICE,
+    POD_CAPACITY,
+    build_rsvp_embed,
+    parse_new_time,
+    refresh_roster_fields,
+)
 from bot.models import PodDraftEvent, PodSignal
 from bot.services import pod_signals
 from bot.services.pod_launch import _committed_slot, _event_id_for_slot, set_rsvp
 from bot.services.pod_schedule import SCHEDULE_TZ
+from bot.services.pod_signals import RSVP_YES
 
 
 MESSAGE_ID = "9001"
@@ -198,6 +205,16 @@ def test_committed_slot_for_a_sesh_pod_shows_no_count_and_no_roster(session):
     assert slot.count == 0
     assert slot.thread_id == "tid-1"
     assert slot.names == []
+
+
+def test_refresh_never_stacks_the_multipod_notice():
+    event_time = datetime(2026, 7, 18, 16, 0, tzinfo=timezone.utc)
+    embed = build_rsvp_embed("Early Pod", event_time, {RSVP_YES: []})
+
+    for count in range(1, POD_CAPACITY + 4):
+        refresh_roster_fields(embed, {RSVP_YES: [f"p{i}" for i in range(count)]})
+
+    assert embed.description.count(MULTIPOD_NOTICE) == 1
 
 
 CURRENT = datetime(2026, 7, 15, 20, 0, tzinfo=SCHEDULE_TZ)

@@ -179,9 +179,10 @@ def build_poll_embed(
     return embed
 
 
-def _thread_url(guild: discord.Guild | None, thread_id: str) -> str:
+def _thread_url(guild: discord.Guild | None, thread_id: str, message_id: str | None = None) -> str:
     scope = guild.id if guild is not None else "@me"
-    return f"https://discord.com/channels/{scope}/{thread_id}"
+    base = f"https://discord.com/channels/{scope}/{thread_id}"
+    return f"{base}/{message_id}" if message_id else base
 
 
 class PodPollView(discord.ui.View):
@@ -206,17 +207,18 @@ class PodPollView(discord.ui.View):
             if slot.committed:
                 if slot.thread_id:
                     self.add_item(discord.ui.Button(
-                        style=discord.ButtonStyle.link, url=_thread_url(guild, slot.thread_id),
+                        style=discord.ButtonStyle.link,
+                        url=_thread_url(guild, slot.thread_id, slot.thread_message_id),
                         label=bucket.name, emoji=emojis.resolve(bucket.emoji),
                     ))
             else:
-                self.add_item(_slot_toggle_button(slot.bucket_key))
+                self.add_item(_slot_toggle_button(slot.bucket_key, closed=slot.status == STATUS_EXPIRED))
 
 
-def _slot_toggle_button(bucket_key: str) -> discord.ui.Button:
+def _slot_toggle_button(bucket_key: str, closed: bool = False) -> discord.ui.Button:
     bucket = bucket_by_key(bucket_key)
     button = discord.ui.Button(
-        label=bucket.name, style=discord.ButtonStyle.secondary,
+        label=bucket.name, style=discord.ButtonStyle.secondary, disabled=closed,
         custom_id=f"pod_poll:{bucket_key}", emoji=emojis.resolve(bucket.emoji),
     )
 
