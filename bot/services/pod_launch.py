@@ -627,6 +627,16 @@ def _committed_slot(session: Session, bucket_key: str, event_id: str) -> Launche
 def roster_for_event_sync(event_id: str) -> list[tuple[str, str]]:
     """(discord_user_id, display_name) of the Yes roster for the signal that created this pod, in
     join order. Poll and queue members are implicit Yes."""
+    return _roster_for_event_sync(event_id, pod_signals.RSVP_YES)
+
+
+def maybe_roster_for_event_sync(event_id: str) -> list[tuple[str, str]]:
+    """(discord_user_id, display_name) of the Maybe roster for the signal that created this pod, in
+    join order."""
+    return _roster_for_event_sync(event_id, pod_signals.RSVP_MAYBE)
+
+
+def _roster_for_event_sync(event_id: str, rsvp: str) -> list[tuple[str, str]]:
     with SessionLocal() as session:
         signal = session.execute(
             select(PodSignal).where(PodSignal.event_id == event_id)
@@ -637,7 +647,7 @@ def roster_for_event_sync(event_id: str) -> list[tuple[str, str]]:
             select(PodSignalMember.discord_user_id, PodSignalMember.display_name)
             .where(
                 PodSignalMember.signal_id == signal.id,
-                PodSignalMember.rsvp == pod_signals.RSVP_YES,
+                PodSignalMember.rsvp == rsvp,
             )
             .order_by(PodSignalMember.created_at)
         ).all()

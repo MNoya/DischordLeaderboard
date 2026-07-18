@@ -45,7 +45,8 @@ def seating_mode_options(current_mode: str | None) -> list[discord.SelectOption]
     Pairings dropdown, which also offers a Random option."""
     cur = (current_mode or "random").lower()
     return [
-        discord.SelectOption(label=f"Seats: {label}", value=code, description=desc, default=(cur == code))
+        discord.SelectOption(label=f"Seats: {label}", value=code, description=desc,
+                             emoji=SEAT_BUTTON_EMOJI, default=(cur == code))
         for code, label, desc in SEATING_MODES
     ]
 

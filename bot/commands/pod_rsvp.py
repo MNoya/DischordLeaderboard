@@ -84,7 +84,7 @@ MSG_RSVP_REMOVED = "RSVP Removed"
 MSG_DRAFT_STARTS = "Draft scheduled for <t:{unix}:F> (<t:{unix}:R>)"
 MSG_CARD_INACTIVE = "This RSVP card is no longer active."
 MSG_BAD_TIME = "Couldn't read that time. Use `+2h30m`, `21:00` (ET), or `2026-07-18 21:00` (ET), in the future."
-THREAD_NOTE_TITLE = "🕐 Pod Draft rescheduled"
+THREAD_NOTE_TITLE = "🕐 Pod Draft Rescheduled by {actor}"
 THREAD_NOTE_BODY = "New time: <t:{unix}:F> (<t:{unix}:R>)\n" + MSG_DRAFTMANCER_LINK_LEAD
 
 LauncherRefresh = Callable[[commands.Bot, date], Awaitable[None]]
@@ -99,7 +99,7 @@ def register_launcher_refresh(handler: LauncherRefresh) -> None:
     _launcher_refresh = handler
 
 
-OFFSET_RE = re.compile(r"^\+(?:(\d+)h)?(?:(\d+)m)?$")
+OFFSET_RE = re.compile(r"^\+?(?:(\d+)h)?(?:(\d+)m)?$")
 TIMESTAMP_RE = re.compile(r"^<t:(\d{1,15})(?::[a-z])?>$")
 CLOCK_RE = re.compile(r"^(\d{1,2})(?::(\d{2}))?(am|pm)?$")
 TZ_TOKENS = {"et", "est", "edt"}
@@ -604,8 +604,9 @@ async def reschedule_event(
     bot: commands.Bot, event_id: str, raw: str, *, guild: discord.Guild | None, actor_id: str,
 ) -> str | None:
     """Move a scheduled pod to a new time and re-sync everything hanging off the old one: the event
-    row, every timed job, the card timestamps, the native Discord event, any live nudge or roster
-    reminder, and a thread note. Returns an error string for the caller to surface, or None on
+    row, every timed job, the card timestamps, any live nudge or roster reminder, and a thread note.
+    The native Discord scheduled event moves in a detached task since its edit is slow and rate-limited
+    and need not block the interaction. Returns an error string for the caller to surface, or None on
     success. Reachable from the lobby Settings panel; there is no 'too late' cutoff by design."""
     loaded = await asyncio.to_thread(_load_event, event_id)
     if loaded is None:
@@ -616,12 +617,18 @@ async def reschedule_event(
         return MSG_BAD_TIME
     await asyncio.to_thread(_apply_new_time, event_id, new_time)
     pod_launch.arm_scheduled_pod_jobs(bot, event_id, new_time, created_at)
-    await _edit_scheduled_card(bot, event_id, name, new_time)
-    await _update_native_event(guild, native_event_id, new_time)
-    await _refresh_live_messages(bot, event_id)
-    yes_roster = await asyncio.to_thread(pod_launch.roster_for_event_sync, event_id)
-    mention_block = " ".join(f"<@{did}>" for did, _ in yes_roster)
-    await _post_thread_note(bot, thread_id, new_time, mention_block)
+    yes_roster, maybe_roster = await asyncio.gather(
+        asyncio.to_thread(pod_launch.roster_for_event_sync, event_id),
+        asyncio.to_thread(pod_launch.maybe_roster_for_event_sync, event_id),
+    )
+    mention_block = _reschedule_mentions(yes_roster, maybe_roster)
+    actor_name = _actor_display_name(guild, actor_id)
+    asyncio.create_task(_update_native_event(guild, native_event_id, new_time))
+    await asyncio.gather(
+        _edit_scheduled_card(bot, event_id, name, new_time),
+        _refresh_live_messages(bot, event_id),
+        _post_thread_note(bot, thread_id, new_time, actor_name, mention_block),
+    )
     audit.event(
         "pod_postpone", user_id=actor_id, event_id=event_id,
         old_time=event_time.isoformat(), new_time=new_time.isoformat(),
@@ -732,18 +739,17 @@ async def _refresh_live_messages(bot: commands.Bot, event_id: str) -> None:
 
 
 async def _post_thread_note(
-    bot: commands.Bot, thread_id: str, new_time: datetime, mention_block: str = "",
+    bot: commands.Bot, thread_id: str, new_time: datetime, actor_name: str, mention_block: str = "",
 ) -> None:
     """The reschedule note, pinging the Yes roster so opted-in players catch the new time. Embeds never
     notify, so the mentions ride as message content beside the embed."""
-    try:
-        thread = await bot.fetch_channel(int(thread_id))
-    except (discord.HTTPException, ValueError):
+    thread = await fetch_channel(bot, thread_id)
+    if thread is None:
         log.warning(f"postpone: could not fetch thread {thread_id}")
         return
     unix = int(new_time.timestamp())
     embed = discord.Embed(
-        title=THREAD_NOTE_TITLE,
+        title=THREAD_NOTE_TITLE.format(actor=actor_name),
         description=THREAD_NOTE_BODY.format(unix=unix, lead=REMINDER_LEAD_MIN),
         color=discord.Color.blue(),
     )
@@ -756,10 +762,35 @@ async def _post_thread_note(
         log.warning(f"postpone: could not post in thread {thread_id}", exc_info=True)
 
 
+def _reschedule_mentions(
+    yes_roster: list[tuple[str, str]], maybe_roster: list[tuple[str, str]],
+) -> str:
+    """Ping content beside the note: a ✅ line for the Yes roster and a 🤷 line for Maybes. Either line
+    is dropped when its roster is empty."""
+    lines = []
+    if yes_roster:
+        lines.append("✅ " + " ".join(f"<@{did}>" for did, _ in yes_roster))
+    if maybe_roster:
+        lines.append("🤷 " + " ".join(f"<@{did}>" for did, _ in maybe_roster))
+    return "\n".join(lines)
+
+
+def _actor_display_name(guild: discord.Guild | None, actor_id: str) -> str:
+    if guild is not None:
+        try:
+            member = guild.get_member(int(actor_id))
+        except ValueError:
+            member = None
+        if member is not None:
+            return member.display_name
+    return "an organizer"
+
+
 def parse_new_time(raw: str, current: datetime, now: datetime) -> datetime | None:
     """A future event time (ET) from a sesh-style phrase. Understood forms:
-    a pasted Discord timestamp token ('<t:1752624000:F>', in the viewer's own zone); '+NhNm' offset
-    from the current time; 'YYYY-MM-DD HH:MM'; a day word ('today', 'tonight', 'tomorrow', or a
+    a pasted Discord timestamp token ('<t:1752624000:F>', in the viewer's own zone); an 'NhNm' offset
+    from the current time with an optional leading '+'; 'YYYY-MM-DD HH:MM'; a day word ('today',
+    'tonight', 'tomorrow', or a
     weekday like 'fri') optionally with 'at'/'on'/'ET' filler, followed by a clock ('10pm', '8:30pm',
     '20:00'); or a bare clock. A bare clock or weekday already past today rolls forward. None when
     unreadable or not in the future."""

@@ -243,19 +243,18 @@ class _RescheduleButton(ui.Button):
 
 
 class _RescheduleModal(ui.Modal, title="Reschedule pod"):
-    new_time = ui.TextInput(label="New start (ET)", placeholder="+2h30m, 21:00, or 2026-07-18 21:00")
+    new_time = ui.TextInput(
+        label="New start (time from now, or ET time)", placeholder="1h, 21:00, or 2026-07-18 21:00")
 
     def __init__(self, view: PodSettingsView) -> None:
         super().__init__()
         self.view = view
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.response.defer(ephemeral=True)
         err = await self.view.on_reschedule(interaction, self.new_time.value)
         if err:
             await interaction.followup.send(f"⚠️ {err}", ephemeral=True)
-            return
-        await interaction.followup.send("🕐 Rescheduled.", ephemeral=True)
 
 
 class _KickPlayerButton(ui.Button):
