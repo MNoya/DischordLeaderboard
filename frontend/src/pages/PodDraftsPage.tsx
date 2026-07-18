@@ -15,7 +15,7 @@ import { CtaPill } from "../components/CtaPill";
 import { ChamferedButton } from "../components/ChamferedButton";
 import { Tooltip } from "../components/Tooltip";
 import { BREAKDOWN_CAPTION, DeckScreenshotModal } from "../components/pod/DeckScreenshotModal";
-import { PodEventTitle } from "../components/pod/EventLabel";
+import { highlightEventLabel, PodEventTitle } from "../components/pod/EventLabel";
 import { Pips } from "../components/ManaPips";
 import { Record } from "../components/Record";
 import {
@@ -416,7 +416,7 @@ function MockEventRow({ event, index }: { event: PodEventSummary; index: number 
           className="font-display text-text min-w-0 truncate"
           style={{ fontSize: 21, letterSpacing: "0.04em", lineHeight: 1.15 }}
         >
-          {cleanPodEventName(event.name, event.setCode).toUpperCase()}
+          {highlightEventLabel(cleanPodEventName(event.name, event.setCode).toUpperCase())}
         </span>
       </div>
       <div className="flex items-center pr-3 md:pr-4 pl-2 shrink-0 self-center gap-3">

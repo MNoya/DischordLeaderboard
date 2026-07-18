@@ -32,7 +32,7 @@ from bot.services import pod_signals
 from bot.services.pod_draft_manager import set_card_cancel_hook, set_card_close_hook, start_manager
 from bot.services.pod_drafts import draftmancer_url_for, record_ondemand_event
 from bot.services.pod_signals import SCHEDULE_TZ, slot_event_time
-from bot.services.pod_slot import pod_display_name
+from bot.services.pod_slot import COLLISION_INDEX_RE, next_collision_index, pod_display_name
 from bot.tasks.pod_draft_reminder import (
     build_lobby_open_body,
     schedule_roster_reminder,
@@ -808,6 +808,22 @@ def ondemand_event_name_sync(set_code: str, event_time: datetime) -> str:
     return pod_display_name(set_code, event_time)
 
 
+def dedupe_thread_name(channel: discord.TextChannel, base_name: str) -> str:
+    """`base_name`, or `base_name #N` when a live thread of the same name already exists in `channel`.
+
+    Reads the guild's cached active threads only — no API call — and reuses the collision-index scheme
+    behind ` - Table N`, so back-to-back pods and queues for one slot stay distinguishable without ever
+    renumbering past a finished, archived pod.
+    """
+    live = [
+        thread.name for thread in channel.threads
+        if not thread.archived and (thread.name == base_name or thread.name.startswith(f"{base_name} #"))
+    ]
+    if base_name not in live:
+        return base_name
+    return f"{base_name} #{next_collision_index(live, COLLISION_INDEX_RE)}"
+
+
 async def launch_from_signal(
     bot: commands.Bot, signal_id: str, *, set_code: str, event_time: datetime,
     name: str, open_now: bool,
@@ -823,6 +839,7 @@ async def launch_from_signal(
         log.error(f"launch_from_signal: coordination channel {settings.pod_draft_channel_id} unreachable")
         return None
 
+    name = dedupe_thread_name(channel, name)
     try:
         if open_now:
             thread = await channel.create_thread(name=name[:100], type=discord.ChannelType.public_thread)

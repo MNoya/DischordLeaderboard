@@ -22,6 +22,7 @@ from bot.models import (
 )
 from bot.services import pod_format
 from bot.services.pod_schedule import highest_event_number
+from bot.services.pod_slot import next_collision_index
 from bot.services.sesh_parser import NUM_RE
 from bot.slug import disambiguate_slug, slugify
 
@@ -460,6 +461,7 @@ def record_ondemand_event(
 
 
 _TABLE_SUFFIX_RE = re.compile(r"\s+(?:[-–]\s+)?Table\s+\d+\s*$", re.IGNORECASE)
+_TABLE_INDEX_RE = re.compile(r"Table\s+(\d+)\s*$", re.IGNORECASE)
 
 
 def table_base_name(name: str) -> str:
@@ -473,12 +475,7 @@ def next_table_index(session: Session, base_name: str) -> int:
     names = session.execute(
         select(PodDraftEvent.name).where(PodDraftEvent.name.ilike(f"{base_name}%Table %"))
     ).scalars().all()
-    highest = 1
-    for name in names:
-        match = re.search(r"Table\s+(\d+)\s*$", name or "", re.IGNORECASE)
-        if match:
-            highest = max(highest, int(match.group(1)))
-    return highest + 1
+    return next_collision_index(names, _TABLE_INDEX_RE)
 
 
 def build_table_session(session: Session, source_session_id: str, table_index: int) -> str:

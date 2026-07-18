@@ -17,6 +17,7 @@ import {
 import { Pip, Pips } from "../components/ManaPips";
 import { ImageIcon } from "../components/Icons";
 import { DeckScreenshotModal } from "../components/pod/DeckScreenshotModal";
+import { highlightEventLabel } from "../components/pod/EventLabel";
 import { StatChip } from "../components/StatChip";
 import { PointsBreakdown } from "../components/PointsBreakdown";
 import { FilterDropdown } from "../components/FilterDropdown";
@@ -1606,7 +1607,7 @@ function EventLogRow({
         </span>
         <span className="text-[13px] text-muted text-center">{fmtShortDate(eventDate(e))}</span>
         <span className="flex items-center gap-2 min-w-0 pr-4">
-          <span className="font-display text-[16px] tracking-[0.08em] whitespace-nowrap">{formatLabel}</span>
+          <span className="font-display text-[16px] tracking-[0.08em] whitespace-nowrap">{highlightEventLabel(formatLabel)}</span>
           {e.isTrophy && isArenaChampionshipFormat(e.format) && <ArenaChampBadge size={36} box={22} />}
           <span className="flex-1 flex items-center justify-center">
             {cashPrize && <CashPrizePill amount={cashPrize} />}
@@ -1746,7 +1747,7 @@ function EventLogRow({
         <div className="flex items-center gap-1.5 flex-wrap">
           {!podWithoutDeck && <Pips colors={e.colors} size={11} />}
           <span className="font-display text-[13px] tracking-[0.08em]">
-            {formatLabel}
+            {highlightEventLabel(formatLabel)}
           </span>
           {e.isTrophy && isArenaChampionshipFormat(e.format) && <ArenaChampBadge size={28} box={16} />}
           {cashPrize && <CashPrizePill amount={cashPrize} className="mx-1.5" />}

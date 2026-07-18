@@ -41,7 +41,7 @@ from bot.services.pod_pairing_select import pairing_options
 from bot.services.ping_roles import QUEUE_GRANT_PING, announce_pod_grant, spec_named
 from bot.services.pod_roles import find_role, grant_pod_drafters, grant_role
 from bot.services.pod_schedule import POD_QUEUE_ROLE_NAME
-from bot.services.pod_slot import pod_display_name
+from bot.services.pod_slot import pod_display_name, queue_display_name
 from bot.services.pod_settings_view import TIMER_MAX, TIMER_MIN, pick_timer_label
 from bot.services.pod_signals import (
     KIND_QUEUE,
@@ -746,7 +746,8 @@ async def _open_discussion_thread(
     if not isinstance(channel, discord.TextChannel):
         return
     resolved_set = (set_code or active_set_code()).upper()
-    thread_name = LAUNCHER_QUEUE_NAME.format(set_code=format_display(resolved_set))
+    base_name = queue_display_name(resolved_set, datetime.now(timezone.utc))
+    thread_name = pod_launch.dedupe_thread_name(channel, base_name)
     try:
         thread = await channel.create_thread(name=thread_name[:100], type=discord.ChannelType.public_thread)
     except discord.HTTPException:

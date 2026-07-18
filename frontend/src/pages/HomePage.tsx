@@ -10,6 +10,7 @@ import { EpisodeThumbnail } from "../components/EpisodeThumbnail";
 import { EpisodeEmbed, episodePlayability } from "../components/PlayableThumbnail";
 import { PlayBadge } from "../components/PlayBadge";
 import { Pips } from "../components/ManaPips";
+import { highlightEventLabel } from "../components/pod/EventLabel";
 import { GiRoundTable } from "react-icons/gi";
 import { SiPatreon, SiTwitch, SiYoutube } from "react-icons/si";
 import type { IconType } from "react-icons";
@@ -1026,7 +1027,7 @@ function PodRow({ entry }: { entry: PodEntry }) {
         )}
       </span>
       <div className="min-w-0 flex-1">
-        <div className="text-[13px] font-medium text-text truncate">{title}</div>
+        <div className="text-[13px] font-medium text-text truncate">{highlightEventLabel(title)}</div>
         <div className="mono text-[12px] text-muted flex items-center gap-1.5 min-w-0">{sub}</div>
       </div>
       {upcoming ? (

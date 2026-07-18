@@ -8,6 +8,8 @@ part of this name. Pure — no Discord, no DB.
 """
 from __future__ import annotations
 
+import re
+from collections.abc import Iterable
 from datetime import datetime
 
 from bot.services.pod_format import format_display
@@ -16,11 +18,29 @@ from bot.services.pod_signals import PollBucket, poll_buckets_for
 
 
 TEAM_DRAFT_TITLE_SUFFIX = " - Team Draft"
+COLLISION_INDEX_RE = re.compile(r"#(\d+)\s*$")
 
 
 def pod_display_name(set_code: str, event_time: datetime) -> str:
     local = event_time.astimezone(SCHEDULE_TZ)
     return f"{format_display(set_code)} {local:%b %-d} {pod_slot_label(event_time)}"
+
+
+def queue_display_name(set_code: str, event_time: datetime) -> str:
+    local = event_time.astimezone(SCHEDULE_TZ)
+    return f"{format_display(set_code)} {local:%b %-d} Pod Draft Queue"
+
+
+def next_collision_index(names: Iterable[str], index_re: re.Pattern[str] = COLLISION_INDEX_RE) -> int:
+    """Next free trailing index across `names`; an unindexed name counts as 1, so the first collision
+    yields 2. `index_re` captures the integer in group 1. Shared by the ` - Table N` split naming and
+    the ` #N` disambiguation of same-named concurrent pods and queues."""
+    highest = 1
+    for name in names:
+        match = index_re.search(name or "")
+        if match:
+            highest = max(highest, int(match.group(1)))
+    return highest + 1
 
 
 def team_aware_pod_name(name: str, pairing_mode: str | None) -> str:
