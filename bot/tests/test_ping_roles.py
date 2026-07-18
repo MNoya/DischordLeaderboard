@@ -27,10 +27,16 @@ def test_button_custom_id_is_a_stable_slug():
     assert button_custom_id(_spec_named(POD_DRAFTERS_ROLE_NAME)) == "role-toggle-pod-drafters"
 
 
-def test_blurb_with_time_renders_the_next_occurrence_for_slot_roles():
+def test_blurb_with_time_pairs_a_weekday_slot_with_its_local_time():
     blurb = blurb_with_time(_spec_named(EARLY_POD_ROLE_NAME))
 
-    assert "<t:" in blurb and ":F>" in blurb
+    assert "<t:" in blurb and ":t>" in blurb
+
+
+def test_blurb_with_time_lists_all_three_weekend_slots():
+    blurb = blurb_with_time(_spec_named(WEEKEND_POD_ROLE_NAME))
+
+    assert blurb.count("<t:") == 3
 
 
 def _spec_named(name):

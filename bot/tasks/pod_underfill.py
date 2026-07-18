@@ -139,7 +139,7 @@ async def fire_underfill(event_id: str, hours_before: int, resurface: bool = Fal
         log.info(f"T-{hours_before}h check for {event_id}: {yes_count}/{target} Yes; nudge cleared")
         return
 
-    body = build_underfill_message(name, yes_count, target, settings.pod_signal_fire_threshold, event_time, jump_url)
+    body = build_underfill_message(name, yes_count, target, event_time, jump_url)
     if resurface and nudge is not None:
         await _safe_delete(nudge)
         nudge = None
@@ -195,7 +195,7 @@ async def _sync_nudge(
     if yes_count >= target:
         await _safe_delete(nudge)
         return
-    body = build_underfill_message(name, yes_count, target, settings.pod_signal_fire_threshold, event_time, jump_url)
+    body = build_underfill_message(name, yes_count, target, event_time, jump_url)
     await _safe_edit(nudge, body)
 
 

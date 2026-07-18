@@ -29,7 +29,7 @@ from bot.services.pod_schedule import (
     next_slot_datetime,
     slot_by_weekday,
 )
-from bot.services.pod_signals import slot_role_name_for_event_time
+from bot.services.pod_signals import WEEKEND_BUCKETS, slot_event_time, slot_role_name_for_event_time
 
 
 log = logging.getLogger(__name__)
@@ -60,11 +60,11 @@ PING_ROLES: tuple[PingRole, ...] = (
         aliases=("Late Pods", "Late Pod Drafters"), slot_weekday=WEDNESDAY, auto_grant=True,
     ),
     PingRole(
-        WEEKEND_POD_ROLE_NAME, SLOT_EMOJI_SATURDAY, "Weekends", color="#D2B48C",
+        WEEKEND_POD_ROLE_NAME, SLOT_EMOJI_SATURDAY, "", color="#D2B48C",
         aliases=("Weekend Pods", "Weekend Pod Drafters"), slot_weekday=SATURDAY, auto_grant=True,
         grant_when="on weekends",
     ),
-    PingRole(POD_QUEUE_ROLE_NAME, "⚡", "On-Demand Pods with `/draft`", color="#FFAC33"),
+    PingRole(POD_QUEUE_ROLE_NAME, "⚡", "Daily Draft Sign-Ups", color="#FFAC33"),
 )
 
 
@@ -80,15 +80,20 @@ def button_custom_id(spec: PingRole) -> str:
 
 
 def blurb_with_time(spec: PingRole) -> str:
-    """A slot role's menu line is its next occurrence, always in the future; the blurb text is the
-    fallback for roles without a slot."""
+    """A slot role pairs its blurb with its recurring local times: one for a weekday slot, all three
+    weekend buckets for the weekend role. Roles with no slot show their blurb alone."""
     if spec.slot_weekday is None:
         return spec.blurb
     slot = slot_by_weekday(spec.slot_weekday)
     if slot is None:
         return spec.blurb
-    unix = int(next_slot_datetime(slot).timestamp())
-    return f"<t:{unix}:F>"
+    slot_date = next_slot_datetime(slot).date()
+    if spec.slot_weekday >= SATURDAY:
+        stamps = [slot_event_time(slot_date, bucket.key) for bucket in WEEKEND_BUCKETS]
+    else:
+        stamps = [next_slot_datetime(slot)]
+    times = ", ".join(f"<t:{int(stamp.timestamp())}:t>" for stamp in stamps)
+    return f"{spec.blurb} at {times}" if spec.blurb else f"at {times}"
 
 
 def display_emoji(spec: PingRole) -> str | None:

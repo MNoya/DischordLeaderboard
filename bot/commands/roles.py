@@ -63,19 +63,24 @@ class _RoleToggleButton(discord.ui.Button):
                 held.add(POD_DRAFTERS_ROLE_NAME)
         if not new_state and self.role_name == POD_DRAFTERS_ROLE_NAME:
             held -= {spec.name for spec in PING_ROLES}
-        await interaction.response.edit_message(view=RolesView(held, guild))
+        await interaction.response.edit_message(view=RolesView(held, guild, in_guild=interaction.guild is not None))
 
 
 class RolesView(discord.ui.LayoutView):
-    def __init__(self, held: set[str] | None = None, guild: discord.Guild | None = None) -> None:
+    """In-guild the role mention leads each line (colored, clickable pill); in a DM the plain role
+    name stands in, since no client can resolve a mention outside its guild's role cache."""
+
+    def __init__(
+        self, held: set[str] | None = None, guild: discord.Guild | None = None, *, in_guild: bool = True,
+    ) -> None:
         super().__init__(timeout=None)
         held = held or set()
         self.add_item(discord.ui.TextDisplay(MSG_INTRO))
         for spec in PING_ROLES:
             button = _RoleToggleButton(spec.name, display_emoji(spec), button_custom_id(spec), spec.name in held)
             role = find_role(guild, spec.name)
-            blurb = blurb_with_time(spec)
-            line = f"{role.mention} {blurb}" if role else blurb
+            label = role.mention if role and in_guild else f"**{spec.name}:**"
+            line = f"{label} {blurb_with_time(spec)}"
             self.add_item(discord.ui.Section(discord.ui.TextDisplay(line), accessory=button))
 
 
@@ -130,7 +135,7 @@ class Roles(commands.Cog):
             return
         held = {role.name for role in member.roles}
         await interaction.response.send_message(
-            view=RolesView(held, guild),
+            view=RolesView(held, guild, in_guild=interaction.guild is not None),
             ephemeral=(interaction.guild is not None),
             allowed_mentions=discord.AllowedMentions.none(),
         )

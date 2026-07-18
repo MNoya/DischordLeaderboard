@@ -54,7 +54,7 @@ POLL_INTRO = (
 MARKER_CLOSED = "Closed"
 MSG_POLL_INACTIVE = "This poll is no longer active."
 MSG_SLOT_CLOSED = "This slot is closed."
-POLL_NUDGE = "⚡ **{count} in** for {slot} — grab **1 more** to fire a Team draft! {link}{mention}"
+POLL_NUDGE = "{hello}**{name}** looking for **{needed} more player{plural}** <t:{unix}:R> {link}{manat} {mention}"
 POLL_NUDGE_QUIET_MINUTES = 30
 
 
@@ -255,6 +255,24 @@ async def _handle_poll_click(interaction: discord.Interaction, bucket_key: str) 
         await _maybe_nudge_slot(interaction, result.state, bucket_key)
 
 
+def build_poll_nudge(name: str, needed: int, slot_time: datetime, link: str, mention: str) -> str:
+    """Launcher-slot underfill nudge, shaped to match the scheduled-pod nudge (build_underfill_message).
+
+    `name` is the pod's prospective thread name (ondemand_event_name_sync), not the slot role, so the
+    headline reads as the event and never doubles the role mention.
+    """
+    return POLL_NUDGE.format(
+        hello=emojis.prefix("chordoHello"),
+        name=name,
+        needed=needed,
+        plural="s" if needed != 1 else "",
+        unix=int(slot_time.timestamp()),
+        link=link,
+        manat=emojis.get("manat"),
+        mention=mention,
+    )
+
+
 async def _maybe_nudge_slot(interaction: discord.Interaction, state, bucket_key: str) -> None:
     """One ping to the slot role when a lazy slot reaches one short of firing, mirroring the queue's
     nudge: once per slot and only after the quiet window. Lazy slots never carry a scheduled event, so
@@ -269,22 +287,21 @@ async def _maybe_nudge_slot(interaction: discord.Interaction, state, bucket_key:
     if not claimed:
         return
     role = find_role(interaction.guild, bucket_role_name(bucket_key) or "")
-    bucket = bucket_by_key(bucket_key)
-    if role is None or bucket is None:
+    if role is None:
         return
     if settings.pod_nudge_in_chat:
         channel = resolve_pod_chat_channel(interaction.client)
-        link = f"[**Sign up here**]({interaction.message.jump_url}) "
+        link = f"- [**Sign up here**]({interaction.message.jump_url}) "
     else:
         channel = interaction.channel
         link = ""
     if channel is None:
         return
+    needed = settings.pod_signal_fire_threshold - state.count
+    name = pod_launch.ondemand_event_name_sync(active_set_code(), state.slot_time)
+    body = build_poll_nudge(name, needed, state.slot_time, link, role.mention)
     try:
-        await channel.send(
-            POLL_NUDGE.format(count=state.count, slot=bucket.name, link=link, mention=role.mention),
-            allowed_mentions=discord.AllowedMentions(roles=True),
-        )
+        await channel.send(body, allowed_mentions=discord.AllowedMentions(roles=True))
     except discord.HTTPException:
         log.warning("poll slot nudge send failed", exc_info=True)
 

@@ -315,7 +315,7 @@ def test_underfill_message_interpolates_name_count_time_and_signup_link():
     event_time = datetime(2026, 6, 24, 0, 0, tzinfo=timezone.utc)
     jump_url = "https://discord.com/channels/1/2/3"
 
-    body = build_underfill_message("FIN Pod Draft #1 - Jun 24", 4, 8, 6, event_time, jump_url)
+    body = build_underfill_message("FIN Pod Draft #1 - Jun 24", 4, 8, event_time, jump_url)
 
     assert "FIN Pod Draft #1" in body
     assert "Jun 24" not in body
@@ -328,27 +328,18 @@ def test_underfill_message_interpolates_name_count_time_and_signup_link():
 def test_underfill_message_never_pings_a_role():
     event_time = datetime(2026, 6, 24, 0, 0, tzinfo=timezone.utc)
 
-    body = build_underfill_message("Pod", 7, 8, 6, event_time, "url")
+    body = build_underfill_message("Pod", 7, 8, event_time, "url")
 
     assert "<@&" not in body
 
 
-def test_underfill_message_one_short_of_target_asks_for_a_full_pod():
+def test_underfill_message_one_short_uses_singular_plain_count():
     event_time = datetime(2026, 6, 24, 0, 0, tzinfo=timezone.utc)
 
-    body = build_underfill_message("Pod", 7, 8, 6, event_time, "url")
+    body = build_underfill_message("Pod", 7, 8, event_time, "url")
 
-    assert "8-player" in body
-    assert "more players" not in body
-
-
-def test_underfill_message_one_short_of_fire_asks_for_a_team_draft():
-    event_time = datetime(2026, 6, 24, 0, 0, tzinfo=timezone.utc)
-
-    body = build_underfill_message("Pod", 5, 8, 6, event_time, "url")
-
-    assert "Team draft" in body
-    assert "more players" not in body
+    assert "1 more player" in body
+    assert "1 more players" not in body
 
 
 @pytest.mark.parametrize(
