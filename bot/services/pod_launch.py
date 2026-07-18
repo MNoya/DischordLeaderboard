@@ -820,8 +820,9 @@ def dedupe_thread_name(channel: discord.TextChannel, base_name: str) -> str:
     """`base_name`, or `base_name #N` when a live thread of the same name already exists in `channel`.
 
     Reads the guild's cached active threads only — no API call — and reuses the collision-index scheme
-    behind ` - Table N`, so back-to-back pods and queues for one slot stay distinguishable without ever
-    renumbering past a finished, archived pod.
+    behind ` - Table N`, so back-to-back queues for one slot stay distinguishable without ever
+    renumbering past a finished, archived thread. Used for queue discussion threads, which carry no
+    pod_draft_events row; pod events dedupe against the DB via `dedupe_pod_name`.
     """
     live = [
         thread.name for thread in channel.threads
@@ -830,6 +831,36 @@ def dedupe_thread_name(channel: discord.TextChannel, base_name: str) -> str:
     if base_name not in live:
         return base_name
     return f"{base_name} #{next_collision_index(live, COLLISION_INDEX_RE)}"
+
+
+def dedupe_pod_name_sync(base_name: str, live_names: list[str] | None = None, session: Session | None = None) -> str:
+    """`base_name`, or `base_name #N` when a pod of that name already exists.
+
+    Keys off persisted pod_draft_events names so a same-slot pod launched after the previous one's
+    thread has archived still numbers correctly — the DB remembers finished pods that a live-thread
+    scan cannot see. `live_names` folds in threads created this instant whose event row has not yet
+    committed, covering pods that launch concurrently.
+    """
+    if session is None:
+        with SessionLocal() as owned:
+            return dedupe_pod_name_sync(base_name, live_names, session=owned)
+    persisted = session.execute(
+        select(PodDraftEvent.name).where(
+            or_(PodDraftEvent.name == base_name, PodDraftEvent.name.like(f"{base_name} #%"))
+        )
+    ).scalars().all()
+    taken = set(persisted)
+    for name in live_names or []:
+        if name == base_name or name.startswith(f"{base_name} #"):
+            taken.add(name)
+    if base_name not in taken:
+        return base_name
+    return f"{base_name} #{next_collision_index(taken, COLLISION_INDEX_RE)}"
+
+
+async def dedupe_pod_name(channel: discord.TextChannel, base_name: str) -> str:
+    live_names = [thread.name for thread in channel.threads if not thread.archived]
+    return await asyncio.to_thread(dedupe_pod_name_sync, base_name, live_names)
 
 
 async def launch_from_signal(
@@ -847,7 +878,7 @@ async def launch_from_signal(
         log.error(f"launch_from_signal: coordination channel {settings.pod_draft_channel_id} unreachable")
         return None
 
-    name = dedupe_thread_name(channel, name)
+    name = await dedupe_pod_name(channel, name)
     try:
         if open_now:
             thread = await channel.create_thread(name=name[:100], type=discord.ChannelType.public_thread)

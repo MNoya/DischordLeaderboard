@@ -274,6 +274,7 @@ async def post_scheduled_card(
     rosters = {state: [] for state in RSVP_STATES}
     rosters[RSVP_YES] = [display for _, display in preseed_yes]
     guild = channel.guild
+    name = await pod_launch.dedupe_pod_name(channel, name)
     content = _card_ping(guild, event_time, ping_role, notify_role_name)
     try:
         message = await channel.send(
