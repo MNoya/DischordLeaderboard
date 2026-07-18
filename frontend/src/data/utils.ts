@@ -301,15 +301,19 @@ export function podSlotName(name: string, setCode: string): string {
 
 // Plain-string title (medallions, aria): `#15 Early Pod - Table 2` once run, the slot alone upcoming.
 // PodEventTitle renders the styled version. Number is the execution-ordered ordinal, not any baked #N.
-export function podEventTitle(event: {
-  ordinal?: number | null;
-  tableIndex?: number;
-  isTeamDraft?: boolean;
-  name: string;
-  setCode: string;
-}): string {
+export function podEventTitle(
+  event: {
+    ordinal?: number | null;
+    tableIndex?: number;
+    isTeamDraft?: boolean;
+    name: string;
+    setCode: string;
+  },
+  opts: { teamAsSuffix?: boolean } = {},
+): string {
   const slot = podSlotName(event.name, event.setCode);
-  const qualifier = podEventQualifier(event);
+  const teamAsSuffix = opts.teamAsSuffix ?? true;
+  const qualifier = podEventQualifier({ ...event, isTeamDraft: teamAsSuffix && event.isTeamDraft });
   if (event.ordinal != null) {
     return `#${event.ordinal} ${slot}${qualifier}`;
   }
