@@ -15,8 +15,20 @@ from discord.ext import commands
 
 from bot.commands import descriptions as desc
 from bot.config import settings
-from bot.services.ping_roles import PING_ROLES, blurb_with_time, button_custom_id, display_emoji
-from bot.services.pod_roles import find_role, grant_pod_drafters, grant_role, toggle_role
+from bot.services.ping_roles import (
+    PING_ROLES,
+    announce_onboarding_welcome,
+    blurb_with_time,
+    button_custom_id,
+    display_emoji,
+)
+from bot.services.pod_roles import (
+    consume_bot_umbrella_grant,
+    find_role,
+    grant_pod_drafters,
+    grant_role,
+    toggle_role,
+)
 from bot.services.pod_schedule import POD_DRAFTERS_ROLE_NAME
 
 
@@ -107,12 +119,19 @@ class Roles(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
-        """Dropping Pod Drafters means leaving pod notifications entirely: the umbrella carries the
-        one name color for pod players, so the slot roles go with it instead of surviving as a
-        colored back door. The server's onboarding question removes the umbrella directly, which is
-        what lands here."""
+        """Pod Drafters gained through Discord's onboarding question bypasses every interaction path,
+        so its welcome fires here; bot-mediated gains are left to the path that granted them. Losing
+        the umbrella means leaving pod notifications entirely: it carries the one name color for pod
+        players, so the slot roles go with it instead of surviving as a colored back door."""
         before_names = {role.name for role in before.roles}
         after_names = {role.name for role in after.roles}
+        if POD_DRAFTERS_ROLE_NAME not in before_names and POD_DRAFTERS_ROLE_NAME in after_names:
+            if consume_bot_umbrella_grant(after.id):
+                log.info(f"{after} gained {POD_DRAFTERS_ROLE_NAME} via a bot path; welcome left to that path")
+            else:
+                log.info(f"{after} gained {POD_DRAFTERS_ROLE_NAME} outside the bot; posting onboarding welcome")
+                await announce_onboarding_welcome(self.bot, after)
+            return
         if POD_DRAFTERS_ROLE_NAME not in before_names or POD_DRAFTERS_ROLE_NAME in after_names:
             return
         other_ping_roles = {spec.name for spec in PING_ROLES if spec.name != POD_DRAFTERS_ROLE_NAME}

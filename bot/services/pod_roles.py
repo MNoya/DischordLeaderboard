@@ -17,6 +17,19 @@ log = logging.getLogger(__name__)
 
 _MENTION_RE = re.compile(r"^<@!?(\d+)>$")
 
+_bot_umbrella_grants: set[int] = set()
+
+
+def consume_bot_umbrella_grant(member_id: int) -> bool:
+    """Whether this Pod Drafters gain was bot-mediated (interaction auto-grant, /roles toggle, or the
+    backfill command) rather than Discord's onboarding question. Consumed once: the role-gain welcome
+    listener skips bot-mediated gains because the interaction path already welcomes them, and posts
+    the welcome only for onboarding gains, which bypass the bot entirely."""
+    if member_id in _bot_umbrella_grants:
+        _bot_umbrella_grants.discard(member_id)
+        return True
+    return False
+
 
 def find_role(guild: discord.Guild | None, name: str) -> discord.Role | None:
     if guild is None:
@@ -28,10 +41,13 @@ async def grant_role(member: discord.Member, role: discord.Role) -> bool:
     """Add the role if the member lacks it; True when a grant actually happened."""
     if role in member.roles:
         return False
+    if role.name == POD_DRAFTERS_ROLE_NAME:
+        _bot_umbrella_grants.add(member.id)
     try:
         await member.add_roles(role, reason="pod-draft auto-grant")
         return True
     except discord.HTTPException:
+        _bot_umbrella_grants.discard(member.id)
         log.warning(f"could not grant {role.name} to {member}", exc_info=True)
         return False
 
@@ -52,9 +68,12 @@ async def toggle_role(member: discord.Member, role: discord.Role) -> bool | None
         if held:
             await member.remove_roles(role, reason="pod-roles toggle")
         else:
+            if role.name == POD_DRAFTERS_ROLE_NAME:
+                _bot_umbrella_grants.add(member.id)
             await member.add_roles(role, reason="pod-roles toggle")
         return not held
     except discord.HTTPException:
+        _bot_umbrella_grants.discard(member.id)
         log.warning(f"could not toggle {role.name} for {member}", exc_info=True)
         return None
 

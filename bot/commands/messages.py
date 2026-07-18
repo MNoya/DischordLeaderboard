@@ -42,13 +42,15 @@ MSG_DRAFTMANCER_LINK_LEAD = "Draftmancer link will be posted {lead} minutes befo
 MSG_DRAFT_STARTED_ANNOUNCE = "{name} started!"
 MSG_DRAFT_STARTED_LINK = "[**Event Details**]({url})"
 
-MSG_POD_WELCOME = (
-    "### 👋 Welcome {user} to {pod_drafters}\n"
-    "\n"
-    "{grant}"
-    "Run `/pod-guide` for instructions and `/roles` to manage your notifications."
+MSG_POD_WELCOME = "### 👋 Welcome {user} to {pod_drafters}\n\n{grant}"
+MSG_ARENA_BAD_FORMAT = "❌ Expected a full MTG Arena handle: `ArenaID#12345`"
+MSG_ARENA_COLLISION = (
+    "❌ `{arena_name}` is already linked to another player. If this is your account, ask an admin for help."
 )
-MSG_POD_ROLE_GRANTED = "{subject} now on {role} and will be pinged {ping}. Run `/roles` to manage your notifications."
+MSG_ARENA_LINKED = "{emoji} {mention} is **{arena_name}** on Arena"
+MSG_ARENA_HANDLE_LINE = "{emoji} You're **{arena_name}** on Arena"
+MSG_ARENA_LINK_CTA = "Please link your Arena handle so the bot knows it's you when joining the lobby"
+MSG_POD_ROLE_GRANTED = "{subject} now on {role} and will be notified {ping}"
 
 MSG_TABLE_NO_SOURCE = "Run `/pod-table` in a pod-draft thread, or pass an `event` to pick the pod."
 MSG_TABLE_UNKNOWN_EVENT = "No pod-draft event named `{event}`."

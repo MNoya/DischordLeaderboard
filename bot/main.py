@@ -76,7 +76,7 @@ from bot.services.pod_tournament import (
     rehydrate_active_tournaments,
 )
 from bot.services.media_sync import sync_media, sync_recent, SyncResult
-from bot.services.ping_roles import reconcile_ping_roles
+from bot.services.ping_roles import persistent_pod_card_view, reconcile_ping_roles
 from bot.services.active_set import resolve_active_set
 from bot.services.refresh import refresh_active_players
 from bot.services.refresh_report import build_refresh_report, format_elapsed
@@ -247,6 +247,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         bot.add_view(LeaderboardView())
         bot.add_view(LobbyReadyButtonView(show_force_start=True))
         bot.add_view(RolesView())
+        bot.add_view(persistent_pod_card_view())
         bot.add_view(PodPollView())
         bot.add_view(PodQueueView())
         bot.add_view(PodRsvpView())

@@ -40,8 +40,9 @@ from bot.services.pod_draft_manager import set_event_pairing_mode
 from bot.services.ping_roles import (
     PING_ROLES,
     QUEUE_GRANT_PING,
-    build_grant_embed,
+    build_grant_view,
     build_welcome_view,
+    forget_welcome,
     slot_grant_ping,
     spec_named,
     strip_pod_roles,
@@ -60,17 +61,33 @@ async def _show_welcome_preview(interaction: discord.Interaction, role_name: str
     spec = spec_named(role_name)
     role = discord.utils.get(guild.roles, name=role_name) if guild is not None else None
     ping = QUEUE_GRANT_PING if role_name == POD_QUEUE_ROLE_NAME else slot_grant_ping(spec)
-    await interaction.response.send_message("**First pod:**", allowed_mentions=discord.AllowedMentions.none())
-    await interaction.followup.send(
+    preview_role = role or _StubRole(role_name)
+    await interaction.response.send_message(
         view=build_welcome_view(guild, interaction.user.mention, role, ping=ping),
         allowed_mentions=discord.AllowedMentions.none(),
     )
-    if role is not None:
-        await interaction.followup.send(
-            content="**Returning, picks up a new slot:**",
-            embed=build_grant_embed(interaction.user.mention, role, spec, ping=ping),
-            allowed_mentions=discord.AllowedMentions.none(),
-        )
+    linked = build_grant_view(preview_role, spec, ping=ping, arena_name="Tester#00000")
+    unlinked = build_grant_view(preview_role, spec, ping=ping, arena_name=None)
+    await _send_labeled_card(interaction, "**Returning, picks up a new slot (linked):**", linked)
+    await _send_labeled_card(interaction, "**Returning, picks up a new slot (not linked):**", unlinked)
+
+
+async def _send_labeled_card(
+    interaction: discord.Interaction, label: str, card: discord.ui.LayoutView,
+) -> None:
+    """A Components V2 view can't ride with a `content` field, so the preview label posts as its own
+    message ahead of the card."""
+    await interaction.followup.send(label, allowed_mentions=discord.AllowedMentions.none())
+    await interaction.followup.send(view=card, allowed_mentions=discord.AllowedMentions.none())
+
+
+class _StubRole:
+    """Stand-in for a slot role the test guild hasn't created, so the grant-card preview still renders
+    with a name mention and the default accent."""
+
+    def __init__(self, role_name: str) -> None:
+        self.mention = f"@{role_name}"
+        self.color = discord.Color.default()
 
 
 class _WelcomePreviewButton(discord.ui.Button):
@@ -154,6 +171,7 @@ async def setup(bot: commands.Bot) -> None:
         roles_removed = 0
         if isinstance(ctx.author, discord.Member):
             roles_removed = await strip_pod_roles(ctx.author)
+            forget_welcome(ctx.author.id)
         await ctx.send(
             f"Cleared on-demand pod signals: {counts['signals']} signals, {counts['members']} members, "
             f"{counts['events']} bot-native pods. Removed {purged} scheduled events from the calendar and "

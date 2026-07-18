@@ -378,6 +378,17 @@ def full_arena_handle(name: str | None) -> bool:
     return "#" in (name or "")
 
 
+def player_arena_handle(session: Session, discord_id: str) -> str | None:
+    """The full Arena handle stored for `discord_id`, or None when the player is unknown or holds only
+    a bare Draftmancer nickname. Drives the welcome's link gate and the returning card's handle line."""
+    player = session.execute(
+        select(Player).where(Player.discord_id == discord_id)
+    ).scalar_one_or_none()
+    if player is None or not full_arena_handle(player.arena_name):
+        return None
+    return player.arena_name
+
+
 def build_mock_session(session: Session, set_code: str) -> tuple[str, int]:
     """`LLU-<SET>-Mock-<N>` with N the next free per-set mock number. Collisions bump N, so two
     mocks opened back to back never share a Draftmancer lobby."""

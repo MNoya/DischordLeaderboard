@@ -50,19 +50,29 @@ def in_pod_coordination(channel: "discord.interactions.InteractionChannel | None
     return getattr(channel, "parent_id", None) == settings.pod_draft_channel_id
 
 
+async def send_welcome(
+    client: "commands.Bot", member: "discord.abc.User", view: "discord.ui.LayoutView",
+) -> bool:
+    """Post the welcome publicly in pod-draft-chat so the community sees a new drafter, pinging the
+    newcomer — a Components V2 text block notifies where an embed mention would not, and role pills
+    stay silent. False when the channel can't be resolved or the send fails."""
+    channel = resolve_pod_chat_channel(client)
+    if channel is None:
+        return False
+    mentions = discord.AllowedMentions(users=[member], roles=False, everyone=False)
+    try:
+        await channel.send(view=view, allowed_mentions=mentions)
+        return True
+    except discord.HTTPException:
+        logger.warning("could not post welcome in pod-draft-chat", exc_info=True)
+        return False
+
+
 async def post_welcome(interaction: "discord.Interaction", view: "discord.ui.LayoutView") -> None:
-    """The first-pod welcome, always public in pod-draft-chat so the community sees a new drafter, and
-    it pings the newcomer — a Components V2 text block notifies where an embed mention would not. Role
-    pills stay silent. An ephemeral reply is the fallback when the channel can't be resolved."""
-    mentions = discord.AllowedMentions(users=[interaction.user], roles=False, everyone=False)
-    channel = resolve_pod_chat_channel(interaction.client)
-    if channel is not None:
-        try:
-            await channel.send(view=view, allowed_mentions=mentions)
-            return
-        except discord.HTTPException:
-            logger.warning("could not post welcome in pod-draft-chat", exc_info=True)
-    await interaction.followup.send(view=view, ephemeral=True)
+    """The interaction-path welcome: public in pod-draft-chat, falling back to an ephemeral reply when
+    the channel can't be resolved."""
+    if not await send_welcome(interaction.client, interaction.user, view):
+        await interaction.followup.send(view=view, ephemeral=True)
 
 
 def in_pod_chat(channel: "discord.interactions.InteractionChannel | None") -> bool:

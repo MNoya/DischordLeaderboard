@@ -12,7 +12,7 @@ from discord.ext import commands
 
 from bot import audit, emojis
 from bot.commands import descriptions as desc
-from bot.commands.messages import MSG_ADMIN_ONLY
+from bot.commands.messages import MSG_ADMIN_ONLY, MSG_ARENA_BAD_FORMAT, MSG_ARENA_COLLISION, MSG_ARENA_LINKED
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.discord_helpers import display_width, extract_avatar_hash, player_url
@@ -302,10 +302,7 @@ class PodDraft(commands.Cog):
 
         if not _ARENA_INPUT_RE.match(arena_name):
             audit.event("pod_link_arena_bad_format", user_id=user_id, arena_name=arena_name)
-            await interaction.response.send_message(
-                "❌ Use the full MTG Arena handle: `ArenaID#12345`",
-                ephemeral=True,
-            )
+            await interaction.response.send_message(MSG_ARENA_BAD_FORMAT, ephemeral=True)
             return
 
         with SessionLocal() as session:
@@ -322,9 +319,7 @@ class PodDraft(commands.Cog):
                 audit.event("pod_link_arena_collision", user_id=user_id, arena_name=arena_name,
                             collides_with=collision_id)
                 await interaction.response.send_message(
-                    f"❌ `{arena_name}` is already linked to another player. "
-                    "If this is your account, ask an admin for help.",
-                    ephemeral=True,
+                    MSG_ARENA_COLLISION.format(arena_name=arena_name), ephemeral=True,
                 )
                 return
             session.commit()
@@ -332,7 +327,7 @@ class PodDraft(commands.Cog):
         audit.event("pod_link_arena_success", user_id=user_id, player_id=player_id)
         log.info(f"pod-link-arena: {interaction.user} linked {arena_name} (player_id={player_id})")
         await interaction.response.send_message(
-            f"{emojis.get('mtga')} {mention} is **{arena_name}** on Arena.",
+            MSG_ARENA_LINKED.format(emoji=emojis.get("mtga"), mention=mention, arena_name=arena_name),
             allowed_mentions=no_pings,
         )
 

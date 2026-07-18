@@ -16,6 +16,7 @@ from bot.services.pod_drafts import (
     lobby_match_status,
     normalize_player_name,
     player_for_name,
+    player_arena_handle,
     classify_lobby_names,
     strip_arena_suffix,
     suggest_lobby_name,
@@ -110,6 +111,24 @@ def test_has_arena_suffix(raw, present):
 
 
 # --- player_for_name priority ---
+
+def test_player_arena_handle_returns_full_handle(session):
+    _seed_player(session, discord_id="10", username="dana", display_name="Dana", arena_name="Dana#4242")
+
+    assert player_arena_handle(session, "10") == "Dana#4242"
+
+
+def test_player_arena_handle_none_when_unset_or_partial(session):
+    _seed_player(session, discord_id="11", username="evan", display_name="Evan", arena_name=None)
+    _seed_player(session, discord_id="12", username="finn", display_name="Finn", arena_name="Finn")
+
+    assert player_arena_handle(session, "11") is None
+    assert player_arena_handle(session, "12") is None
+
+
+def test_player_arena_handle_none_for_unknown_discord_id(session):
+    assert player_arena_handle(session, "does-not-exist") is None
+
 
 def test_exact_arena_name_wins_over_display_name(session):
     _seed_player(session, discord_id="1", username="alice", display_name="Alice", arena_name="MagicAlice#9999")
