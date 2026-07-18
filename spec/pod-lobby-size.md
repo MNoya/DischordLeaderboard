@@ -8,11 +8,21 @@ This change makes **8 the default cap** and adds a **live in-lobby control to ra
 
 Out of scope: a per-pod or per-guild stored size, a size choice at schedule/RSVP time, and (for now) a 6-player option — see [Open questions](#open-questions).
 
+## Status — shipped
+
+Built and committed to `master` (`Default pods to 8 with a live Max Players control`). Uncommitted push is the user's. File map as built:
+- `bot/config.py` — `pod_draft_max_players = 8`.
+- `bot/services/pod_draft_manager.py` — `self.max_players` per session, `apply_max_players`, module-level `set_event_max_players`.
+- `bot/services/pod_settings_view.py` — `_MaxPlayersButton` + `_MaxPlayersSelectView` / `_MaxPlayersSelect`, `max_players_notice`, `MAX_PLAYERS_OPTIONS = (8, 10)`.
+- `bot/commands/pod_draft.py` — `on_max_players` wiring + `current_max_players` gating; seeding-preview `seat_cap` reads the live manager.
+- `bot/commands/testlobby.py` — `_settings_preview_view` carries the control so `!test` mirrors prod.
+- `bot/tests/test_pod_lifecycle.py` — three `apply_max_players` branch tests.
+
 ## What the cap is vs what it is not
 
 Three "8"s exist today and only one of them is the ceiling. Keep them separate:
 
-- `pod_draft_max_players` (`config.py:49`, currently 10) — the **hard Draftmancer ceiling**. The only value this spec changes. Emitted via `setMaxPlayers`.
+- `pod_draft_max_players` (`config.py`, now 8, was 10) — the **hard Draftmancer ceiling**. The only global this change touches; per-session it becomes `manager.max_players`. Emitted via `setMaxPlayers`.
 - `_LOBBY_FULL_THRESHOLD = 8` (`pod_draft_manager.py:99`) — the **startable-pod size** that arms the "Initiate Ready Check?" nudge (`_lobby_pod_full`, line 1518; `_maybe_schedule_lobby_full_prompt`, line 1547). This is *semantically the count at which a pod is worth starting*, independent of the ceiling. **It does not change.** With the default ceiling dropping to 8 it simply coincides with the ceiling; when a host bumps the ceiling to 10 the nudge still fires at 8, which is correct — 8 is a full pod and the last two seats are a bonus, not a requirement.
 - `pod_draft_target_players = 8` (`config.py:45`) and `pod_draft_min_ready_players = 6` (`config.py:50`) — underfill-nudge target and ready-check floor. **Neither changes.**
 
@@ -22,9 +32,12 @@ Because the nudge/target/floor constants are already the "startable pod = 8" sem
 
 - New pods open at 8 seats. `setMaxPlayers 8` at session settings time.
 - The lobby **Settings** panel gains a **Max Players** control, visible pre-draft only (Draftmancer locks player count once the draft starts, same as the pick timer). It offers 8 and 10.
+- The control is a button labelled **Max Players** whose emoji is the mana glyph of the current cap (`:mana8:` / `:mana10:`). Clicking it opens an ephemeral **Table Size** dropdown with **8 Players** and **10 Players** (mana-glyph options), the current value preselected.
 - Changing it re-emits `setMaxPlayers` to the live session and posts a public thread notice, identical in shape to the pick-timer change notice (private ephemeral panel, public confirmation in the thread).
 - Lowering the cap below the number of players already seated is rejected with an error in the ephemeral, so a 10-seat lobby with 9 present can't be squeezed to 8.
 - A live bump is **not persisted**: a pre-draft reconnect re-runs session settings and resets the cap to the default 8. Acceptable by design (the user explicitly does not want DB state). The pick timer has the same non-persistence for on-demand pods; scheduled pods persist the timer via `PodSignal` and re-apply on open, and we are deliberately *not* mirroring that for size.
+- All control text is Title Case ("Max Players", "Table Size", "8 Players"), per the Discord options/menus convention.
+- **Known limitation:** picking a size deletes the ephemeral dropdown and posts the thread notice, but does not re-render the parent Settings panel, so its button glyph stays stale until the panel is reopened (same behavior as the Kick button, which also doesn't re-render). Reopening the picker reflects the new value.
 
 ## Implementation map
 
@@ -40,27 +53,30 @@ Mirror the pick-timer plumbing end to end. Reference implementation: `apply_pick
 - Add module-level `async def set_event_max_players(event_id: str, n: int) -> str | None` mirroring `set_event_pick_timer` (line 2174) — resolve the live manager, delegate to `apply_max_players`.
 
 ### 3. `bot/services/pod_settings_view.py`
-- `PodSettingsView.__init__`: add `on_max_players: Apply | None = None` and `current_max_players: int | None = None`; store both; add the control to the button block (`if on_max_players is not None: self.add_item(_MaxPlayersButton(current_max_players, row=3))`); thread both fields through `_render`.
-- Add `_apply_max_players` on the view mirroring `_apply_pick_timer` (line 201), using `view.apply(...)` with `attr="current_max_players"`.
-- Add `_MaxPlayersButton` (a `ui.Button`, label from a `max_players_label(n)` helper e.g. `Max Players: {n}`, seat emoji) that opens a small ephemeral size `ui.Select` (options 8 and 10), mirroring the `_KickPlayerButton` → `_KickSelectView` → `_KickSelect` pattern (line 300). The select's callback calls `view._apply_max_players`. A button-plus-select is used rather than a fourth in-panel `ui.Select` because the three existing selects already occupy rows 0–2 and a fourth select would collide with the button rows; a button shares a row.
-- Add `max_players_notice(actor, n)` via `settings_change_message(actor, "Max players", str(n))` and the `settings_notice_marker("Max players")` marker, mirroring `timer_notice`.
+- `PodSettingsView.__init__`: adds `on_max_players: Apply | None` and `current_max_players: int | None`; stores both; adds the control to the button block (`if on_max_players is not None: self.add_item(_MaxPlayersButton(current_max_players, row=3))`); threads both fields through `_render`.
+- `_MaxPlayersButton` (a `ui.Button`) labelled "Max Players", emoji `emojis.get_emoji(f"mana{current}")` for the current cap, opens an ephemeral `_MaxPlayersSelectView` / `_MaxPlayersSelect` (placeholder "Table Size", options "8 Players" / "10 Players" from `MAX_PLAYERS_OPTIONS`, mana-glyph emojis, current preselected). A button-plus-ephemeral-select is used, not a fourth in-panel `ui.Select`, because the three existing selects fill rows 0–2 and a fourth select would collide with the button rows; a button shares a row.
+- The select callback does **not** go through `view.apply` / `_render` (that would edit the ephemeral into a full panel). It mirrors the Kick flow instead: defer, call `panel.on_max_players`, on error surface it in a followup, else update `panel.current_max_players` in memory, delete the ephemeral, and post the thread notice via `send_settings_notice`. This is why the parent panel button glyph doesn't re-render in place (see Known limitation under Behavior).
+- `max_players_notice(actor, n)` via `settings_change_message(actor, "Max players", str(n))`; the change notice keeps sentence-style "Max players" like "Pick timer", the Title Case rule applies only to the menu controls.
 
-### 4. `bot/commands/pod_draft.py` (Settings-view builder, ~line 840)
-- Add `async def on_max_players(inter, value) -> str | None: return await set_event_max_players(event_id, int(value))`.
-- When a live `manager` exists and `not drafting`, set `current_max_players = manager.max_players`.
-- Pass `on_max_players=on_max_players if current_max_players is not None else None` and `current_max_players=current_max_players` into the `PodSettingsView(...)` constructor, matching the `on_timer` / `current_timer` gating.
+### 4. `bot/commands/pod_draft.py` (Settings-view builder)
+- `on_max_players(inter, value)` delegates to `set_event_max_players(event_id, int(value))`.
+- When a live `manager` exists and `not drafting`, `current_max_players = manager.max_players`.
+- Passes `on_max_players=on_max_players if current_max_players is not None else None` and `current_max_players` into `PodSettingsView(...)`, matching the `on_timer` / `current_timer` gating.
 
-### 5. Secondary consumer (consistency, optional)
-- The seeding-preview `seat_cap=settings.pod_draft_max_players` (`bot/commands/pod_draft.py:396`) should read `manager.max_players` when a manager exists, so a bumped pod previews 10 seats. Falls back to the config default otherwise.
+### 5. Seeding-preview consumer
+- The seeding-preview `seat_cap` (`bot/commands/pod_draft.py`, `pod_seeding`) reads the live manager's `max_players` when one exists for the event, else the config default — so a bumped pod previews 10 seats.
+
+### 6. `!test` preview
+- `_settings_preview_view` in `bot/commands/testlobby.py` passes `on_max_players` (no-op) + `current_max_players=8`, so the `!test` Settings panel shows the control and mirrors prod (per the testlobby-mirrors-prod rule).
 
 ## Testing
 
-Per repo convention, test logic not framework — no test that Draftmancer honors `setMaxPlayers`. Cover `apply_max_players` branching against a manager with a stubbed `sio` and a controllable player-count/`drafting` state:
-- Returns an error (non-`None`) and does not change `self.max_players` when `drafting` is set.
-- Returns an error when the requested cap is below current occupancy.
-- Success path sets `self.max_players` and emits `setMaxPlayers` with the new value.
+Per repo convention, test logic not framework — no test that Draftmancer honors `setMaxPlayers`, so the tests do **not** assert the `sio` emit. Three `apply_max_players` branch tests in `bot/tests/test_pod_lifecycle.py` against a manager with a stubbed `sio`:
+- Pre-draft success sets `self.max_players`.
+- Returns an error and leaves `self.max_players` unchanged when `drafting` is set.
+- Returns an error and leaves `self.max_players` unchanged when the requested cap is below current occupancy.
 
-Assert state and branch outcomes (error vs `None`, `self.max_players`, emit args), never exact copy. Mirror any existing `apply_pick_timer` test.
+Assert state and branch outcome (error vs `None`, `self.max_players`), never the emit or exact copy.
 
 ## Deployment notes
 
