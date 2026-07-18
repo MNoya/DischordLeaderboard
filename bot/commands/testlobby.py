@@ -914,6 +914,7 @@ def _settings_preview_view() -> PodSettingsView:
         on_seating=_settings_preview_seating_noop, seat_order_provider=_settings_preview_seat_order,
         on_seated=_settings_preview_on_seated,
         on_timer=_settings_preview_noop, current_timer=60,
+        on_max_players=_settings_preview_noop, current_max_players=8,
         link_targets_provider=_settings_preview_link_targets, on_link=_settings_preview_on_link,
     )
 

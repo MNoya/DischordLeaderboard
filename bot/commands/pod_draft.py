@@ -21,6 +21,7 @@ from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_draft_manager import (
     cancel_pod_event,
     set_event_format,
+    set_event_max_players,
     set_event_pairing_mode,
     set_event_pick_timer,
     set_event_seating,
@@ -392,8 +393,10 @@ class PodDraft(commands.Cog):
                 await interaction.followup.send(MSG_SEEDING_NO_RSVPS, ephemeral=True)
                 return
 
+            live = ACTIVE_POD_MANAGERS.get(event_id)
+            seat_cap = live.max_players if live is not None else settings.pod_draft_max_players
             file, embed = await asyncio.to_thread(
-                build_seeding_image_message_from_names, yes, maybe, seat_cap=settings.pod_draft_max_players,
+                build_seeding_image_message_from_names, yes, maybe, seat_cap=seat_cap,
             )
         log.info(f"pod-seeding: {interaction.user} for event_id={event_id} (mode={seating_mode})")
         if file is not None:
@@ -843,11 +846,15 @@ async def build_pod_settings_view(bot, event_id: str, *, is_owner: bool) -> PodS
     async def on_timer(inter: discord.Interaction, value: str) -> str | None:
         return await set_event_pick_timer(event_id, int(value))
 
+    async def on_max_players(inter: discord.Interaction, value: str) -> str | None:
+        return await set_event_max_players(event_id, int(value))
+
     on_seating = None
     seat_order_provider = None
     kick_targets_provider = None
     on_kick = None
     current_timer = None
+    current_max_players = None
     link_targets_provider = None
     on_link = None
     if manager is not None:
@@ -858,6 +865,7 @@ async def build_pod_settings_view(bot, event_id: str, *, is_owner: bool) -> PodS
 
         if not drafting:
             current_timer = manager.pick_timer
+            current_max_players = manager.max_players
             seat_order_provider = manager.seating_lobby_order
             kick_targets_provider = manager.kick_targets
 
@@ -885,6 +893,8 @@ async def build_pod_settings_view(bot, event_id: str, *, is_owner: bool) -> PodS
         on_seating=on_seating, seat_order_provider=seat_order_provider,
         on_seating_table=None if drafting else on_seating_table, on_seated=on_seated,
         on_timer=on_timer if current_timer is not None else None, current_timer=current_timer,
+        on_max_players=on_max_players if current_max_players is not None else None,
+        current_max_players=current_max_players,
         kick_targets_provider=kick_targets_provider, on_kick=on_kick,
         link_targets_provider=link_targets_provider, on_link=on_link,
         on_cancel=on_cancel, on_reschedule=on_reschedule, event_name=event_name,

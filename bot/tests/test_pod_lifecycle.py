@@ -112,6 +112,37 @@ def test_pick_timer_rejected_when_disconnected():
     assert mgr.sio.emitted == []
 
 
+def test_max_players_sets_value_pre_draft():
+    mgr = _manager()
+
+    err = asyncio.run(mgr.apply_max_players(10))
+
+    assert err is None
+    assert mgr.max_players == 10
+
+
+def test_max_players_rejected_once_drafting():
+    mgr = _manager()
+    mgr.drafting = True
+    before = mgr.max_players
+
+    err = asyncio.run(mgr.apply_max_players(10))
+
+    assert err is not None
+    assert mgr.max_players == before
+
+
+def test_max_players_rejected_below_current_occupancy():
+    mgr = _manager()
+    mgr.player_session_users = lambda: [{}] * 9
+    before = mgr.max_players
+
+    err = asyncio.run(mgr.apply_max_players(8))
+
+    assert err is not None
+    assert mgr.max_players == before
+
+
 def _manager() -> PodDraftManager:
     mgr = PodDraftManager(object(), "evt", "sid", 123, "SOS", 8)
     mgr.sio = _FakeSio()

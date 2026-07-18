@@ -270,6 +270,7 @@ class PodDraftManager:
         self.pairing_mode = "swiss"              # 'swiss', 'bracket', 'random', or 'team'; resolved in start_tournament
         self.seating_mode = "random"             # 'random', 'manual', or 'leaderboard'; hydrated on connect
         self.pick_timer = settings.pod_draft_pick_timer
+        self.max_players = settings.pod_draft_max_players
         self.team_map: dict[str, str] | None = None  # draftmancer_name -> 'A'/'B' for team drafts
         self.team_board_messages: list["discord.Message"] = []
         self.team_vote_message: "discord.Message | None" = None
@@ -492,7 +493,7 @@ class PodDraftManager:
     async def _emit_session_settings(self) -> None:
         await self._emit_format()
         await self.sio.emit("setOwnerIsPlayer", False)
-        await self.sio.emit("setMaxPlayers", settings.pod_draft_max_players)
+        await self.sio.emit("setMaxPlayers", self.max_players)
         await self.sio.emit("setPickTimer", self.pick_timer)
         await self.sio.emit("setBots", settings.pod_draft_bots)
         await self.sio.emit("setColorBalance", False)
@@ -502,7 +503,7 @@ class PodDraftManager:
         await self.sio.emit("teamDraft", team_draft)
         log.info(
             f"[LIFECYCLE] session_settings_applied event={self.event_id} set={self.set_code} "
-            f"max_players={settings.pod_draft_max_players} pick_timer={self.pick_timer} "
+            f"max_players={self.max_players} pick_timer={self.pick_timer} "
             f"bots={settings.pod_draft_bots} log_recipients={self._draft_log_recipients} team_draft={team_draft}"
         )
 
@@ -616,6 +617,26 @@ class PodDraftManager:
             log.exception(f"[TIMER] emit_failed event={self.event_id} seconds={seconds}")
             return "Could not update the pick timer."
         log.info(f"[TIMER] pick_timer_set event={self.event_id} seconds={seconds}")
+        return None
+
+    async def apply_max_players(self, n: int) -> str | None:
+        """Set this pod's Draftmancer seat cap. Pre-draft only — Draftmancer locks the count once the
+        draft starts. Rejects a cap below the players already seated so a live drop can't strand anyone.
+        Re-emits to the live session. Returns an error string or None."""
+        if self.drafting or self.draft_complete:
+            return "Max Players are locked once the draft has started."
+        if not self.sio.connected:
+            return "Draftmancer session is not connected."
+        seated = len(self.player_session_users())
+        if n < seated:
+            return f"{seated} players are already in the lobby."
+        self.max_players = n
+        try:
+            await self.sio.emit("setMaxPlayers", n)
+        except Exception:
+            log.exception(f"[LOBBY] max_players_emit_failed event={self.event_id} n={n}")
+            return "Could not update max players."
+        log.info(f"[LOBBY] max_players_set event={self.event_id} n={n}")
         return None
 
     async def _mark_socket_status(self, status: str) -> None:
@@ -2178,6 +2199,15 @@ async def set_event_pick_timer(event_id: str, seconds: int) -> str | None:
     if manager is None:
         return "Start the Draftmancer session before setting the pick timer."
     return await manager.apply_pick_timer(seconds)
+
+
+async def set_event_max_players(event_id: str, n: int) -> str | None:
+    """Set a pod's Draftmancer seat cap by event id. Live-only — the value is not persisted, so it
+    only applies while a session is connected. Returns an error string or None."""
+    manager = ACTIVE_POD_MANAGERS.get(event_id)
+    if manager is None:
+        return "Start the Draftmancer session before setting max players."
+    return await manager.apply_max_players(n)
 
 
 async def rehydrate_active_lobbies(bot) -> None:

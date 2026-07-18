@@ -11,6 +11,7 @@ from typing import Awaitable, Callable
 import discord
 from discord import ui
 
+from bot import emojis
 from bot.config import settings
 from bot.services.pod_format import (
     default_pick_timer_for, format_change_message, settings_change_message, settings_notice_marker,
@@ -48,6 +49,8 @@ LINK_SEAT_PROMPT = "Pick the unlinked Draftmancer seat to assign:"
 TIMER_MIN = 10
 TIMER_MAX = 600
 
+MAX_PLAYERS_OPTIONS = (8, 10)
+
 
 def kick_notice(actor: str, name: str) -> str:
     return f"🔨 **{name}** was removed by {actor}"
@@ -71,6 +74,10 @@ def pick_timer_label(seconds: int | None) -> str:
     return f"Pick Timer: {seconds if seconds is not None else settings.pod_draft_pick_timer}s"
 
 
+def max_players_notice(actor: str, count: int) -> str:
+    return settings_change_message(actor, "Max players", str(count))
+
+
 class PodSettingsView(ui.View):
     def __init__(self, *, on_format: Apply | None = None, on_pairing: Apply | None = None,
                  current_code: str | None = None, current_mode: str | None = None,
@@ -80,6 +87,7 @@ class PodSettingsView(ui.View):
                  on_seating_table: Callable[[discord.Interaction], Awaitable[None]] | None = None,
                  on_seated: SeatedNotify | None = None,
                  on_timer: Apply | None = None, current_timer: int | None = None,
+                 on_max_players: Apply | None = None, current_max_players: int | None = None,
                  kick_targets_provider: KickTargetsProvider | None = None,
                  on_kick: KickApply | None = None,
                  link_targets_provider: LinkTargetsProvider | None = None,
@@ -102,6 +110,8 @@ class PodSettingsView(ui.View):
         self.on_seated = on_seated
         self.on_timer = on_timer
         self.current_timer = current_timer
+        self.on_max_players = on_max_players
+        self.current_max_players = current_max_players
         self.kick_targets_provider = kick_targets_provider
         self.on_kick = on_kick
         self.link_targets_provider = link_targets_provider
@@ -121,6 +131,8 @@ class PodSettingsView(ui.View):
                 seat_order_provider=seat_order_provider, on_seating=on_seating, on_seated=on_seated, row=3))
         if on_timer is not None:
             self.add_item(_TimerButton(current_timer, row=3))
+        if on_max_players is not None:
+            self.add_item(_MaxPlayersButton(current_max_players, row=3))
         if link_targets_provider is not None and on_link is not None:
             self.add_item(_LinkPlayersButton(row=3))
         if kick_targets_provider is not None and on_kick is not None:
@@ -156,6 +168,7 @@ class PodSettingsView(ui.View):
             on_seating=self.on_seating, seat_order_provider=self.seat_order_provider,
             on_seating_table=self.on_seating_table, on_seated=self.on_seated,
             on_timer=self.on_timer, current_timer=self.current_timer,
+            on_max_players=self.on_max_players, current_max_players=self.current_max_players,
             kick_targets_provider=self.kick_targets_provider, on_kick=self.on_kick,
             link_targets_provider=self.link_targets_provider, on_link=self.on_link,
             on_cancel=self.on_cancel, on_reschedule=self.on_reschedule, event_name=self.event_name,
@@ -272,6 +285,55 @@ class _TimerModal(ui.Modal, title="Pick timer"):
             )
             return
         await self.view._apply_pick_timer(interaction, int(raw))
+
+
+class _MaxPlayersButton(ui.Button):
+    def __init__(self, current_max_players: int | None, row: int | None = None) -> None:
+        count = current_max_players if current_max_players is not None else settings.pod_draft_max_players
+        super().__init__(label="Max Players", emoji=emojis.get_emoji(f"mana{int(count)}"),
+                         style=discord.ButtonStyle.grey, row=row)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_message(
+            "Table Size", view=_MaxPlayersSelectView(self.view), ephemeral=True,
+        )
+
+
+class _MaxPlayersSelectView(ui.View):
+    def __init__(self, panel: PodSettingsView) -> None:
+        super().__init__(timeout=120)
+        self.add_item(_MaxPlayersSelect(panel))
+
+
+class _MaxPlayersSelect(ui.Select):
+    def __init__(self, panel: PodSettingsView) -> None:
+        current = panel.current_max_players
+        options = [
+            discord.SelectOption(
+                label=f"{count} Players", value=str(count), emoji=emojis.get_emoji(f"mana{count}"),
+                default=str(count) == str(current),
+            )
+            for count in MAX_PLAYERS_OPTIONS
+        ]
+        super().__init__(placeholder="Table Size", options=options, min_values=1, max_values=1)
+        self.panel = panel
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        count = int(self.values[0])
+        await interaction.response.defer()
+        err = await self.panel.on_max_players(interaction, str(count))
+        if err:
+            await interaction.followup.send(f"⚠️ {err}", ephemeral=True)
+            return
+        self.panel.current_max_players = count
+        await interaction.delete_original_response()
+        channel = self.panel.notice_channel or interaction.channel
+        if channel is not None:
+            await send_settings_notice(
+                channel, interaction.client.user,
+                max_players_notice(actor_label(interaction), count),
+                marker=settings_notice_marker("Max Players"),
+            )
 
 
 class _RescheduleButton(ui.Button):
