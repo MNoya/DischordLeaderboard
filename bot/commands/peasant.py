@@ -7,12 +7,16 @@ import discord
 from discord.ext import commands
 
 from bot import emojis
+from bot.discord_helpers import NBSP, ZWSP
 from bot.services.pod_format import PEASANT_CODE, cube_id_for
 
 EM_SPACE = "\u2003"
-NBSP = "\u00a0"
 LEAD_EMOJI_NAME = "cube"
 FALLBACK_LEAD_EMOJI = "🧊"
+
+
+def bold_underline(text: str) -> str:
+    return f"__**{text}**__"
 
 
 @dataclass(frozen=True)
@@ -66,9 +70,9 @@ def _cube_message(link: CubeLink, owner_mention: str) -> str:
     overview_link = f"{lead} [{overview_path}](https://{overview_path}) {owner_mention}"
     shortcuts = (EM_SPACE * 2).join(
         (
-            f"📊{NBSP}[**Tier List**](<https://cubecobra.com/cube/list/{cube_id}?view=mainboard&s1=Tags>)",
-            f"📖{NBSP}[**Primer**](<https://cubecobra.com/cube/about/{cube_id}?view=primer>)",
-            f"📝{NBSP}[**Changelog**](<https://cubecobra.com/cube/about/{cube_id}?view=blog>)",
+            f"📊{NBSP}[{bold_underline('Tier List')}](<https://cubecobra.com/cube/list/{cube_id}?view=mainboard&s1=Tags>)",
+            f"📖{NBSP}[{bold_underline('Primer')}](<https://cubecobra.com/cube/about/{cube_id}?view=primer>)",
+            f"📝{NBSP}[{bold_underline('Changelog')}](<https://cubecobra.com/cube/about/{cube_id}?view=blog>)",
         )
     )
-    return f"{overview_link}\n\n{shortcuts}"
+    return f"{overview_link}\n\n{shortcuts}\n{NBSP}{ZWSP}"
