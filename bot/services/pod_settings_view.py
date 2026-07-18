@@ -455,16 +455,20 @@ class _CancelDraftButton(ui.Button):
         await interaction.response.send_message(
             f"This permanently deletes **{event_name}** — participants, matches, replays, and the "
             "leaderboard page. This can't be undone.",
-            view=_CancelConfirmView(view.on_cancel, event_name),
+            view=_CancelConfirmView(view.on_cancel, event_name, view.notice_channel),
             ephemeral=True,
         )
 
 
 class _CancelConfirmView(ui.View):
-    def __init__(self, on_cancel: CancelApply, event_name: str) -> None:
+    def __init__(
+        self, on_cancel: CancelApply, event_name: str,
+        notice_channel: discord.abc.Messageable | None = None,
+    ) -> None:
         super().__init__(timeout=60)
         self.on_cancel = on_cancel
         self.event_name = event_name
+        self.notice_channel = notice_channel
 
     @ui.button(label="Delete Event", style=discord.ButtonStyle.danger, emoji="🗑️")
     async def confirm(self, interaction: discord.Interaction, button: ui.Button) -> None:
@@ -474,5 +478,6 @@ class _CancelConfirmView(ui.View):
             await interaction.followup.send(f"⚠️ {err}", ephemeral=True)
             return
         await interaction.edit_original_response(content=f"🗑️ **{self.event_name}** deleted.", view=None)
-        if interaction.channel is not None:
-            await interaction.channel.send(cancel_notice(actor_label(interaction)))
+        channel = self.notice_channel or interaction.channel
+        if channel is not None:
+            await channel.send(cancel_notice(actor_label(interaction)))

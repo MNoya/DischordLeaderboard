@@ -68,7 +68,7 @@ EVENT_DURATION_H = 2
 POD_CAPACITY = 8
 
 CARD_INTRO = "{emoji} Please RSVP"
-MULTIPOD_NOTICE = "🔥 Keep signing up past 8, run `/pod-table` to fire another pod"
+MULTIPOD_NOTICE = "🔥 Keep signing up to fire a second table"
 TIME_LABEL = "Time"
 NATIVE_EVENT_SIGNUP = "**Event Details and Signup Link: {jump_url}**"
 RSVP_EMOJI = {RSVP_YES: "✅", RSVP_MAYBE: "🤷", RSVP_NO: "❌"}
@@ -189,7 +189,7 @@ def _intro_line(role_time: datetime) -> str:
 def _multipod_suffix(rosters: dict[str, list[str]]) -> str:
     """The multi-pod heads-up only earns a line once one pod's worth of Yes has signed up."""
     yes = rosters.get(RSVP_YES) or []
-    return f"\n\n{MULTIPOD_NOTICE}" if len(yes) >= POD_CAPACITY else ""
+    return f"\n{MULTIPOD_NOTICE}" if len(yes) >= POD_CAPACITY else ""
 
 
 def google_calendar_url(name: str, event_time: datetime) -> str:

@@ -5,6 +5,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DRAFTMANCER_HOST = "draftmancer.com"
 
+PRODUCTION_GUILD_ID = 775371722065051658
+
 
 class Settings(BaseSettings):
     """Process-wide configuration loaded from env (or .env in repo root).

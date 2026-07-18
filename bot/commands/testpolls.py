@@ -34,6 +34,7 @@ from bot.commands.pod_rsvp import (
 )
 from bot.commands.pod_table import offer_second_table
 from bot.commands.test_group import test_group
+from bot.config import PRODUCTION_GUILD_ID
 from bot.services import pod_launch
 from bot.services.pod_draft_manager import set_event_pairing_mode
 from bot.services.ping_roles import (
@@ -48,7 +49,7 @@ from bot.services.ping_roles import (
 from bot.services.pod_schedule import POD_QUEUE_ROLE_NAME
 from bot.services.pod_signals import RSVP_YES, SCHEDULE_TZ, poll_buckets_for, slot_event_time
 from bot.sets import active_set_code
-from bot.tasks.pod_daily_poll import post_launcher
+from bot.tasks.pod_daily_poll import close_launcher_for_date, post_launcher
 
 
 log = logging.getLogger(__name__)
@@ -105,12 +106,14 @@ async def setup(bot: commands.Bot) -> None:
 
     @test_group.command(name="launcher")
     @commands.is_owner()
-    async def test_launcher(ctx: commands.Context, fill: int = 5) -> None:
+    async def test_launcher(ctx: commands.Context, fill: int = 5, close: str = "") -> None:
         """Owner-only. Drive the launcher end to end: stage a real scheduled pod at the day's last slot
         so it reflects as a committed jump-link, seed `fill` Yes RSVPs on it so the committed slot shows
         its roster, then post the live launcher for that day. The other slots are real lazy signals whose
         buttons drive the fire path; set POD_SIGNAL_FIRE_THRESHOLD low to graduate one yourself. Uses
-        today when a slot is still ahead, otherwise tomorrow, so the staged pod is always in the future."""
+        today when a slot is still ahead, otherwise tomorrow, so the staged pod is always in the future.
+        Pass `close` as the third word to immediately retire it into the closed state (grey, no buttons,
+        no role ping, committed slot shown as its roster) so that surface can be eyeballed."""
         if not isinstance(ctx.channel, discord.TextChannel):
             await ctx.send("Run `!test launcher` in a server text channel — the pod thread is created there.")
             return
@@ -132,23 +135,29 @@ async def setup(bot: commands.Bot) -> None:
             await _seed_fake_yes(ctx.channel, event_id, slot_time, name, fill)
         await ctx.send(f"Staged **{name}** at {reflect.name}; posting the live launcher for that day.")
         await post_launcher(ctx.bot, ctx.channel, target_day)
+        if close.lower() == "close":
+            await close_launcher_for_date(ctx.bot, target_day)
 
     @test_group.command(name="reset")
     @commands.is_owner()
     async def test_reset(ctx: commands.Context) -> None:
-        """Owner-only. Clear this guild's on-demand pod signals (poll / queue / scheduled) so the `!test`
-        surfaces start from a clean slate — every slot goes back to lazy — delete the bot's scheduled
-        events off the Events calendar, and strip the auto-granted pod ping roles. Leaves pod_draft_events
-        and any live lobby alone; only the signup signals reflection reads are wiped."""
-        guild_id = str(ctx.guild.id) if ctx.guild else ""
+        """Owner-only. Clear this guild's on-demand pod signals (poll / queue / scheduled) and the
+        bot-native pods they staged so the `!test` surfaces start from a clean slate — every slot goes
+        back to lazy — delete the bot's scheduled events off the Events calendar, and strip the
+        auto-granted pod ping roles. Finalized played pods and sesh pods are kept, as is any live lobby."""
+        if ctx.guild is None or ctx.guild.id == PRODUCTION_GUILD_ID:
+            await ctx.send("`!test reset` is disabled on the production guild — run it in a test server.")
+            return
+        guild_id = str(ctx.guild.id)
         counts = await asyncio.to_thread(pod_launch.reset_ondemand_signals_sync, guild_id)
         purged = await purge_native_events(ctx.guild, ctx.bot.user.id) if ctx.guild else 0
         roles_removed = 0
         if isinstance(ctx.author, discord.Member):
             roles_removed = await strip_pod_roles(ctx.author)
         await ctx.send(
-            f"Cleared on-demand pod signals: {counts['signals']} signals, {counts['members']} members. "
-            f"Removed {purged} scheduled events from the calendar and stripped {roles_removed} of your pod roles."
+            f"Cleared on-demand pod signals: {counts['signals']} signals, {counts['members']} members, "
+            f"{counts['events']} bot-native pods. Removed {purged} scheduled events from the calendar and "
+            f"stripped {roles_removed} of your pod roles."
         )
 
     @test_group.command(name="welcome")

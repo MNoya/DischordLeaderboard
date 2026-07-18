@@ -25,11 +25,11 @@ from discord.ext import commands
 from sqlalchemy import delete, or_, select, update
 from sqlalchemy.orm import Session
 
-from bot.config import settings
+from bot.config import PRODUCTION_GUILD_ID, settings
 from bot.database import SessionLocal
 from bot.models import PodDraftEvent, PodSignal, PodSignalMember
 from bot.services import pod_signals
-from bot.services.pod_draft_manager import set_card_close_hook, start_manager
+from bot.services.pod_draft_manager import set_card_cancel_hook, set_card_close_hook, start_manager
 from bot.services.pod_drafts import draftmancer_url_for, record_ondemand_event
 from bot.services.pod_signals import SCHEDULE_TZ, slot_event_time
 from bot.services.pod_slot import pod_display_name
@@ -529,8 +529,16 @@ def expire_signal_sync(signal_id: str) -> bool:
 
 def reset_ondemand_signals_sync(guild_id: str) -> dict[str, int]:
     """Test-only: clear every on-demand pod signal (poll / queue / scheduled) and its members for a
-    guild, so the `!test` surfaces start from a clean slate. Reflection reads only these signals, so
-    wiping them returns every slot to lazy; pod_draft_events and any live lobby are left untouched."""
+    guild, plus the bot-native pods those signals staged, so the `!test` surfaces start from a clean
+    slate. Reflection reads events by slot time, so a stale event row keeps reflecting as a committed
+    slot until it is dropped too. Only unfinalized bot-native events go — finalized played pods (their
+    leaderboard page) and sesh pods are left untouched, as is any live lobby.
+
+    The event delete is global (pods carry no guild), so this refuses outright unless it is scoped to a
+    known non-production guild: an empty guild or the production guild is a hard no-op, guarding against
+    ever wiping real pods from the prod deployment."""
+    if not guild_id or guild_id == str(PRODUCTION_GUILD_ID):
+        return {"signals": 0, "members": 0, "events": 0}
     with SessionLocal() as session:
         signal_ids = list(
             session.execute(select(PodSignal.id).where(PodSignal.guild_id == guild_id)).scalars()
@@ -541,8 +549,13 @@ def reset_ondemand_signals_sync(guild_id: str) -> dict[str, int]:
                 delete(PodSignalMember).where(PodSignalMember.signal_id.in_(signal_ids))
             ).rowcount
         signals = session.execute(delete(PodSignal).where(PodSignal.guild_id == guild_id)).rowcount
+        events = session.execute(
+            delete(PodDraftEvent).where(
+                PodDraftEvent.sesh_message_id.is_(None), PodDraftEvent.finalized_at.is_(None)
+            )
+        ).rowcount
         session.commit()
-        return {"signals": signals, "members": members}
+        return {"signals": signals, "members": members, "events": events}
 
 
 def poll_exists_for_date_sync(signal_date: date) -> bool:
@@ -563,6 +576,35 @@ def launcher_message_id_for_date_sync(signal_date: date) -> str | None:
                 PodSignal.kind == pod_signals.KIND_POLL, PodSignal.signal_date == signal_date
             ).limit(1)
         ).scalar_one_or_none()
+
+
+def past_launcher_dates_sync(before_date: date, since_date: date) -> list[date]:
+    """Distinct launcher dates in [since_date, before_date) — the recently-posted launchers a new day's
+    post closes out. Bounded to a short window so each daily post re-touches only a handful, never the
+    full history."""
+    with SessionLocal() as session:
+        rows = session.execute(
+            select(PodSignal.signal_date)
+            .where(
+                PodSignal.kind == pod_signals.KIND_POLL,
+                PodSignal.signal_date < before_date,
+                PodSignal.signal_date >= since_date,
+            )
+            .distinct()
+        ).scalars().all()
+    return sorted(rows)
+
+
+def launcher_ref_for_date_sync(signal_date: date) -> tuple[str, str] | None:
+    """(channel_id, message_id) of the launcher posted that day, if any. Resolving the channel off the
+    signal rather than a fixed setting keeps `!test` (posted in the test channel) and prod correct."""
+    with SessionLocal() as session:
+        row = session.execute(
+            select(PodSignal.channel_id, PodSignal.message_id).where(
+                PodSignal.kind == pod_signals.KIND_POLL, PodSignal.signal_date == signal_date
+            ).limit(1)
+        ).first()
+    return (row[0], row[1]) if row else None
 
 
 def event_thread_id_sync(event_id: str) -> str | None:
@@ -955,9 +997,45 @@ async def close_event_card(bot: commands.Bot, event_id: str) -> None:
     if surfaces is None or _bot is None:
         return
     channel_id, message_id, thread_id, thread_message_id = surfaces
-    await _clear_view(int(channel_id), int(message_id))
+    await _retire_message(int(channel_id), int(message_id))
     if thread_id and thread_message_id:
-        await _clear_view(int(thread_id), int(thread_message_id))
+        await _retire_message(int(thread_id), int(thread_message_id))
+
+
+CARD_CANCELED_MARKER = "🗑️ **Draft canceled**"
+
+
+async def cancel_event_card(event_id: str) -> None:
+    """Retire a canceled pod's card: grey it, stamp it canceled, and drop its buttons on both the
+    channel card and the thread mirror. Fired from `cancel_pod_event` before the event row is deleted,
+    so the card surfaces still resolve; a no-op for pods without a card."""
+    surfaces = await asyncio.to_thread(event_card_surfaces_sync, event_id)
+    if surfaces is None or _bot is None:
+        return
+    channel_id, message_id, thread_id, thread_message_id = surfaces
+    await _mark_card_canceled(int(channel_id), int(message_id))
+    if thread_id and thread_message_id:
+        await _retire_message(int(thread_id), int(thread_message_id))
+
+
+async def _mark_card_canceled(channel_id: int, message_id: int) -> None:
+    channel = await _resolve_channel(channel_id)
+    if channel is None:
+        return
+    try:
+        message = await channel.fetch_message(message_id)
+    except discord.HTTPException:
+        log.warning(f"could not fetch card {message_id} to cancel", exc_info=True)
+        return
+    embed = message.embeds[0] if message.embeds else None
+    if embed is not None and CARD_CANCELED_MARKER not in (embed.description or ""):
+        title_line = (embed.description or "").split("\n", 1)[0]
+        embed.color = discord.Color.dark_grey()
+        embed.description = f"{title_line}\n{CARD_CANCELED_MARKER}"
+    try:
+        await message.edit(content=None, embed=embed, view=None)
+    except discord.HTTPException:
+        log.warning(f"could not mark card {message_id} canceled", exc_info=True)
 
 
 async def close_past_pod_cards() -> None:
@@ -970,23 +1048,33 @@ async def close_past_pod_cards() -> None:
     since = now - timedelta(hours=CARD_CLOSE_WINDOW_H)
     cards = await asyncio.to_thread(past_pod_cards_sync, now, since)
     for channel_id, message_id, thread_id, thread_message_id in cards:
-        await _clear_view(int(channel_id), int(message_id))
+        await _retire_message(int(channel_id), int(message_id))
         if thread_id and thread_message_id:
-            await _clear_view(int(thread_id), int(thread_message_id))
+            await _retire_message(int(thread_id), int(thread_message_id))
 
 
-async def _clear_view(channel_id: int, message_id: int) -> None:
+async def _resolve_channel(channel_id: int) -> "discord.abc.Messageable | None":
     channel = _bot.get_channel(channel_id)
     if channel is None:
         try:
             channel = await _bot.fetch_channel(channel_id)
         except discord.HTTPException:
-            return
+            return None
+    return channel
+
+
+async def _retire_message(channel_id: int, message_id: int) -> None:
+    """Drop a retired pod message's buttons and clear its content ping, so a finished card carries no
+    live controls and no lingering role-mention highlight. The thread mirror has no content, so clearing
+    it there is a no-op."""
+    channel = await _resolve_channel(channel_id)
+    if channel is None:
+        return
     try:
         message = await channel.fetch_message(message_id)
-        await message.edit(view=None)
+        await message.edit(content=None, view=None)
     except discord.HTTPException:
-        log.warning(f"could not clear RSVP buttons on message {message_id}", exc_info=True)
+        log.warning(f"could not retire message {message_id}", exc_info=True)
 
 
 def arm_queue_teardown(bot: commands.Bot, signal_id: str, teardown_time: datetime) -> None:
@@ -1085,6 +1173,7 @@ def init_launch(bot: commands.Bot) -> None:
     global _bot
     _bot = bot
     set_card_close_hook(close_event_card)
+    set_card_cancel_hook(cancel_event_card)
 
 
 def _signal_by_message_bucket(session: Session, message_id: str, bucket: str) -> PodSignal | None:

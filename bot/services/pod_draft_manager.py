@@ -106,6 +106,7 @@ _SEEDING_REFRESH_HOOK = None
 _SEEDING_REPOST_HOOK = None
 _SECOND_TABLE_HOOK = None
 _CARD_CLOSE_HOOK = None
+_CARD_CANCEL_HOOK = None
 _CARD_REFRESH_HOOK = None
 
 
@@ -114,6 +115,14 @@ def set_card_close_hook(callback) -> None:
     draft_done without importing pod_launch (which imports the manager)."""
     global _CARD_CLOSE_HOOK
     _CARD_CLOSE_HOOK = callback
+
+
+def set_card_cancel_hook(callback) -> None:
+    """pod_launch registers its RSVP-card cancel here so `cancel_pod_event` can retire the card before
+    the event row is deleted — awaited, not fire-and-forget, so the card surfaces resolve while the row
+    still exists."""
+    global _CARD_CANCEL_HOOK
+    _CARD_CANCEL_HOOK = callback
 
 
 def notify_card_close(bot, event_id: str) -> None:
@@ -190,6 +199,8 @@ async def cancel_pod_event(event_id: str, *, actor: str) -> str | None:
             if task is not None and not task.done():
                 task.cancel()
         await manager.disconnect_safely()
+    if _CARD_CANCEL_HOOK is not None:
+        await _CARD_CANCEL_HOOK(event_id)
     await asyncio.to_thread(delete_event_sync, event_id)
     return None
 

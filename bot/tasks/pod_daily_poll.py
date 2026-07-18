@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import discord
 from discord.ext import commands
@@ -51,11 +51,13 @@ POLL_INTRO = (
     "• Event thread will be created as soon as each pod reaches {threshold} players.\n"
     "• Draftmancer lobby opens {lead} minutes before the scheduled time."
 )
+POLL_CLOSED_LABEL = "🔒 Signups Closed"
 MARKER_CLOSED = "Closed"
 MSG_POLL_INACTIVE = "This poll is no longer active."
 MSG_SLOT_CLOSED = "This slot is closed."
 POLL_NUDGE = "{hello}**{name}** looking for **{needed} more player{plural}** <t:{unix}:R> {link}{manat} {mention}"
 POLL_NUDGE_QUIET_MINUTES = 30
+LAUNCHER_CLOSE_LOOKBACK_DAYS = 3
 
 
 def init_daily_poll(bot: commands.Bot) -> None:
@@ -96,6 +98,7 @@ async def fire_daily_poll() -> None:
     message = await post_launcher(_bot, channel, today)
     if message is not None:
         log.info(f"posted daily pod launcher for {today} as message {message.id}")
+    await close_recent_launchers(_bot, today)
     await pod_launch.close_past_pod_cards()
 
 
@@ -124,16 +127,24 @@ def poll_ping_line(guild: discord.Guild | None) -> str | None:
     return queue_role_mention(guild)
 
 
-def build_poll_embed(slots: list[pod_launch.LauncherSlot], guild: discord.Guild | None = None) -> discord.Embed:
-    intro = POLL_INTRO.format(
-        threshold=emojis.mana_number(settings.pod_signal_fire_threshold), lead=pod_launch.REMINDER_LEAD_MIN,
-    )
+def build_poll_embed(
+    slots: list[pod_launch.LauncherSlot], guild: discord.Guild | None = None, closed: bool = False,
+) -> discord.Embed:
+    """`closed` renders the day's terminal state: signups shut, buttons gone (the caller drops the view),
+    greyed, and committed slots show their fired roster without a thread link — the thread is archived by
+    then and the link renders as #unknown."""
     slot_times = [slot.slot_time for slot in slots if slot.slot_time is not None]
     day = slot_times[0].astimezone(SCHEDULE_TZ) if slot_times else None
     title = f"{POLL_TITLE} - {day:%b %-d}" if day else POLL_TITLE
+    description = f"## {NBSP * 2}🚀 {title}"
+    if not closed:
+        intro = POLL_INTRO.format(
+            threshold=emojis.mana_number(settings.pod_signal_fire_threshold), lead=pod_launch.REMINDER_LEAD_MIN,
+        )
+        description = f"{description}\n{intro}"
     embed = discord.Embed(
-        description=f"## {NBSP * 2}🚀 {title}\n{intro}",
-        color=discord.Color.green(),
+        description=description,
+        color=discord.Color.dark_grey() if closed else discord.Color.green(),
     )
     for slot in slots:
         bucket = bucket_by_key(slot.bucket_key)
@@ -149,17 +160,22 @@ def build_poll_embed(slots: list[pod_launch.LauncherSlot], guild: discord.Guild 
             label = role.mention if role else bucket.name
         check = "✅" if slot.committed or slot.status == STATUS_FIRED else ""
         header = " ".join(part for part in (slot_emoji, label, when, count_part, check) if part)
+        roster = "\n".join(f"> {member}" for member in slot.names)
         if slot.committed:
-            link = f"<#{slot.thread_id}>" if slot.thread_id else "-"
-            roster = "\n".join(f"> {member}" for member in slot.names)
-            body = f"{link}\n{roster}" if roster else link
+            if closed:
+                body = roster or "-"
+            else:
+                link = f"<#{slot.thread_id}>" if slot.thread_id else "-"
+                body = f"{link}\n{roster}" if roster else link
         elif slot.status == STATUS_EXPIRED:
             body = MARKER_CLOSED
         elif slot.names:
-            body = "\n".join(f"> {member}" for member in slot.names)
+            body = roster
         else:
             body = "-"
         embed.add_field(name=ZWSP, value=f"{header}\n{body}", inline=True)
+    if closed:
+        embed.set_footer(text=POLL_CLOSED_LABEL)
     return embed
 
 
@@ -340,11 +356,50 @@ async def _grant_slot_role(member: discord.Member, bucket_key: str) -> discord.R
 
 async def refresh_launcher_for_date(bot: commands.Bot, signal_date: date) -> None:
     """Re-render the day's launcher so a committed slot tracks late Yes/No churn on its scheduled card.
-    No-op when no launcher was posted that day."""
+    A past day renders closed instead, so late churn can never reopen a retired board. No-op when no
+    launcher was posted that day."""
+    if signal_date < datetime.now(SCHEDULE_TZ).date():
+        await close_launcher_for_date(bot, signal_date)
+        return
     message_id = await asyncio.to_thread(pod_launch.launcher_message_id_for_date_sync, signal_date)
     if message_id is None:
         return
     await _rerender_poll(bot, message_id, signal_date)
+
+
+async def close_recent_launchers(bot: commands.Bot, today: date) -> None:
+    """Retire the last few days' launchers so a stale board can no longer be signed up on. Bounded to a
+    short window and idempotent, so each daily post re-touches only a handful and an already-closed one
+    is left untouched."""
+    since = today - timedelta(days=LAUNCHER_CLOSE_LOOKBACK_DAYS)
+    dates = await asyncio.to_thread(pod_launch.past_launcher_dates_sync, today, since)
+    for signal_date in dates:
+        await close_launcher_for_date(bot, signal_date)
+
+
+async def close_launcher_for_date(bot: commands.Bot, signal_date: date) -> None:
+    """Edit the day's launcher into its terminal state: signups closed, no buttons, no role ping (which
+    also clears the gold mention tint), greyed. No-op when no launcher was posted or it is already
+    closed."""
+    ref = await asyncio.to_thread(pod_launch.launcher_ref_for_date_sync, signal_date)
+    if ref is None:
+        return
+    channel_id, message_id = ref
+    channel = bot.get_channel(int(channel_id))
+    if channel is None:
+        try:
+            channel = await bot.fetch_channel(int(channel_id))
+        except discord.HTTPException:
+            return
+    guild = getattr(channel, "guild", None)
+    slots = await asyncio.to_thread(pod_launch.launcher_snapshot_sync, message_id, signal_date)
+    try:
+        message = await channel.fetch_message(int(message_id))
+        if not message.components and not message.content:
+            return
+        await message.edit(content=None, embed=build_poll_embed(slots, guild, closed=True), view=None)
+    except discord.HTTPException:
+        log.warning(f"could not close launcher message {message_id}", exc_info=True)
 
 
 async def _rerender_poll(bot: commands.Bot, message_id: str, signal_date: date) -> None:
