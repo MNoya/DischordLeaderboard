@@ -46,6 +46,7 @@ log = logging.getLogger(__name__)
 
 REMINDER_LEAD_MIN = 10
 CARD_CLOSE_WINDOW_H = 48
+SLOT_OCCUPANCY_WINDOW = timedelta(hours=2)
 
 
 @dataclass(frozen=True)
@@ -619,6 +620,13 @@ def signal_message_ref_sync(signal_id: str) -> tuple[str, str] | None:
             select(PodSignal.channel_id, PodSignal.message_id).where(PodSignal.id == signal_id)
         ).first()
     return (row[0], row[1]) if row else None
+
+
+def slot_occupied_by_any_pod_sync(slot_time: datetime) -> bool:
+    """Whether a pod of any set already sits at this slot, so an auto-scheduler stands down instead of
+    stacking a second pod onto the same window."""
+    with SessionLocal() as session:
+        return _event_id_for_slot(session, slot_time) is not None
 
 
 def launcher_snapshot_sync(message_id: str, signal_date: date) -> list[LauncherSlot]:
@@ -1210,15 +1218,16 @@ def _scheduled_signal_by_surface(session: Session, message_id: str) -> PodSignal
 
 
 def _event_id_for_slot(session: Session, slot_time: datetime) -> str | None:
-    """The pod already sitting at this slot instant — sesh-created or bot-native — so the launcher
-    reflects it as a jump-link instead of opening a duplicate lazy slot. Matches on the event time
-    within the slot's minute; slot_time is date-specific, so only that day's pod matches. Pods carry no
-    guild and pod-draft coordination is single-guild, so the match is by time alone (mirroring
-    fire_scheduled_card). Newest wins when repeated test runs leave several at one slot."""
+    """The pod already sitting at this slot — any set, sesh-created or bot-native — so the launcher
+    reflects it as a jump-link and the weekly card stands down instead of stacking a second pod on top.
+    A pod runs 2-3 hours, so occupancy is a window around the slot, not an exact-minute match; the
+    window stays inside the 5-hour gap between slots so a neighbouring slot's pod never counts. Pods
+    carry no guild and coordination is single-guild, so the match is by time alone. Newest wins when
+    repeated test runs leave several at one slot."""
     return session.execute(
         select(PodDraftEvent.id).where(
-            PodDraftEvent.event_time >= slot_time,
-            PodDraftEvent.event_time < slot_time + timedelta(minutes=1),
+            PodDraftEvent.event_time >= slot_time - SLOT_OCCUPANCY_WINDOW,
+            PodDraftEvent.event_time < slot_time + SLOT_OCCUPANCY_WINDOW,
         ).order_by(PodDraftEvent.created_at.desc()).limit(1)
     ).scalar_one_or_none()
 

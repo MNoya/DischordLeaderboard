@@ -321,6 +321,7 @@ async def post_scheduled_card(
     await _add_members_to_thread(thread, preseed_yes)
     pod_launch.arm_scheduled_pod_jobs(bot, event_id, event_time, created_at)
     log.info(f"posted scheduled pod card for {name} as message {message.id} (event {event_id})")
+    await _refresh_launcher(bot, event_time)
     return event_id
 
 

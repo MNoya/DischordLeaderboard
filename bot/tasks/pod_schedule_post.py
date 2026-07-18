@@ -26,7 +26,7 @@ from bot.config import settings
 from bot.database import SessionLocal
 from bot.discord_helpers import resolve_pod_chat_channel
 from bot.models import PodDraftEvent
-from bot.services.pod_launch import ondemand_event_name_sync
+from bot.services.pod_launch import ondemand_event_name_sync, slot_occupied_by_any_pod_sync
 from bot.services.pod_schedule import (
     BTN_EMOJI_GOT_IT,
     BTN_EMOJI_POST,
@@ -319,8 +319,7 @@ async def fire_scheduled_card(monday_iso: str, weekday: int) -> None:
     if slot_start <= datetime.now(timezone.utc):
         log.info(f"RSVP card for {monday_iso} weekday={weekday}: slot already started; standing down")
         return
-    _, scheduled = await asyncio.to_thread(_event_number_and_scheduled_starts)
-    if slot_instant(slot_start) in scheduled:
+    if await asyncio.to_thread(slot_occupied_by_any_pod_sync, slot_start):
         log.info(f"RSVP card for {monday_iso} weekday={weekday}: pod already exists; standing down")
         return
 

@@ -162,12 +162,18 @@ def test_reflection_binds_a_sesh_pod_with_no_signal(session):
     assert _event_id_for_slot(session, slot_time) == event_id
 
 
-def test_reflection_ignores_a_pod_at_a_different_time(session):
+def test_a_pod_within_the_window_occupies_the_slot(session):
     slot_time = datetime.now(timezone.utc) + timedelta(days=1)
-    _scheduled_pod(session, slot_time, [])
+    event_id = _scheduled_pod(session, slot_time + timedelta(hours=1), [])
 
-    off_grid = slot_time + timedelta(hours=1)
-    assert _event_id_for_slot(session, off_grid) is None
+    assert _event_id_for_slot(session, slot_time) == event_id
+
+
+def test_a_neighbouring_slots_pod_leaves_the_slot_open(session):
+    slot_time = datetime.now(timezone.utc) + timedelta(days=1)
+    _scheduled_pod(session, slot_time + timedelta(hours=5), [])
+
+    assert _event_id_for_slot(session, slot_time) is None
 
 
 def test_committed_slot_projects_the_yes_roster_off_the_card(session):
