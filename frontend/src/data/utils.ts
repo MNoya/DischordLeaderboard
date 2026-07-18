@@ -288,7 +288,7 @@ export function cleanPodEventName(name: string, setCode: string): string {
 // row's date box and the Table suffix renders separately, so neither belongs here.
 export function podSlotName(name: string, setCode: string): string {
   const escaped = setCode.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return name
+  const slot = name
     .replace(/\s*[-–]?\s*Table\s+\d+\s*$/i, "")
     .replace(/#\d+/g, "")
     .replace(/\s+[-–]\s+[A-Z][a-z]+\.?\s+\d{1,2}\s*$/, "")
@@ -296,6 +296,7 @@ export function podSlotName(name: string, setCode: string): string {
     .replace(/^\s*[A-Z][a-z]+\.?\s+\d{1,2}\s+/, "")
     .replace(/\s{2,}/g, " ")
     .trim();
+  return /\bpod$/i.test(slot) ? `${slot} Draft` : slot;
 }
 
 // Plain-string title (medallions, aria): `#15 Early Pod - Table 2` once run, the slot alone upcoming.
@@ -303,15 +304,23 @@ export function podSlotName(name: string, setCode: string): string {
 export function podEventTitle(event: {
   ordinal?: number | null;
   tableIndex?: number;
+  isTeamDraft?: boolean;
   name: string;
   setCode: string;
 }): string {
   const slot = podSlotName(event.name, event.setCode);
-  const table = (event.tableIndex ?? 1) > 1 ? ` - Table ${event.tableIndex}` : "";
+  const qualifier = podEventQualifier(event);
   if (event.ordinal != null) {
-    return `#${event.ordinal} ${slot}${table}`;
+    return `#${event.ordinal} ${slot}${qualifier}`;
   }
   return slot;
+}
+
+// A team draft outranks the table suffix, so a second-table team draft still reads as a team draft
+export function podEventQualifier(event: { tableIndex?: number; isTeamDraft?: boolean }): string {
+  if (event.isTeamDraft) return " - Team Draft";
+  if ((event.tableIndex ?? 1) > 1) return ` - Table ${event.tableIndex}`;
+  return "";
 }
 
 // Set codes are uppercase in the data; URLs are case-insensitive.

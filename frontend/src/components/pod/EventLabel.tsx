@@ -1,21 +1,20 @@
 import type { ReactNode } from "react";
 
-import { podSlotName } from "../../data/utils";
+import { podEventQualifier, podSlotName } from "../../data/utils";
 import type { PodEventSummary } from "../../types/leaderboard";
 
 const SPLIT_RE = /(#\d+|\bmock\b)/gi;
 const HIGHLIGHT_RE = /^(?:#\d+|mock)$/i;
 
-// The pod row title: green execution-ordered `#N` (absent until the pod runs), the slot phrase, and a
-// muted `Table N` qualifier for the second table onward. The date sits in the row's own date box.
+// Green execution-ordered `#N` (absent until the pod runs), the slot phrase, then a muted qualifier
 export function PodEventTitle({ event }: { event: PodEventSummary }): ReactNode {
   const slot = podSlotName(event.name, event.setCode).toUpperCase();
-  const tableIndex = event.tableIndex ?? 1;
+  const qualifier = podEventQualifier(event).toUpperCase();
   return (
     <>
       {event.ordinal != null && <span className="text-green">#{event.ordinal} </span>}
       {slot}
-      {tableIndex > 1 && <span className="text-muted"> - TABLE {tableIndex}</span>}
+      {qualifier && <span className="text-muted">{qualifier}</span>}
     </>
   );
 }

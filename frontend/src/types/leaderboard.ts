@@ -151,6 +151,7 @@ export interface PodEventSummary {
   // Execution-ordered milestone number, null until the pod has run; tables share it and split on tableIndex
   ordinal?: number | null;
   tableIndex?: number;
+  isTeamDraft?: boolean;
 }
 
 export interface MainboardCard {
