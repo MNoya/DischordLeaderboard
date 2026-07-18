@@ -66,8 +66,10 @@ async def _show_welcome_preview(interaction: discord.Interaction, role_name: str
         view=build_welcome_view(guild, interaction.user.mention, role, ping=ping),
         allowed_mentions=discord.AllowedMentions.none(),
     )
+    onboarding = build_welcome_view(guild, interaction.user.mention, None)
     linked = build_grant_view(preview_role, spec, ping=ping, arena_name="Tester#00000")
     unlinked = build_grant_view(preview_role, spec, ping=ping, arena_name=None)
+    await _send_labeled_card(interaction, "**Welcome via onboarding (no slot role):**", onboarding)
     await _send_labeled_card(interaction, "**Returning, picks up a new slot (linked):**", linked)
     await _send_labeled_card(interaction, "**Returning, picks up a new slot (not linked):**", unlinked)
 

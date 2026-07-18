@@ -157,7 +157,7 @@ def build_welcome_view(
     if slot_role is not None and ping is not None:
         grant = f"You're now on {slot_role.mention} and will be notified {ping}"
     else:
-        grant = f"You're now on {pod_drafters} and will be notified when pods are scheduled"
+        grant = "Use the buttons below to link your Arena handle, read the Pod Guide and manage Notifications"
     message = MSG_POD_WELCOME.format(user=user_mention, pod_drafters=pod_drafters, grant=grant).rstrip()
     return _PodButtonCard(message)
 
