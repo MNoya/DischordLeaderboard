@@ -11,7 +11,10 @@ from typing import Awaitable, Callable
 import discord
 from discord import ui
 
-from bot.services.pod_format import format_change_message, settings_change_message, settings_notice_marker
+from bot.config import settings
+from bot.services.pod_format import (
+    default_pick_timer_for, format_change_message, settings_change_message, settings_notice_marker,
+)
 from bot.services.pod_notices import send_settings_notice
 from bot.services.pod_drafts import is_championship
 from bot.services.pod_registration_embed import update_registered_embed
@@ -60,6 +63,12 @@ def cancel_notice(actor: str) -> str:
 
 def timer_notice(actor: str, seconds: int) -> str:
     return settings_change_message(actor, "Pick timer", f"{seconds}s")
+
+
+def pick_timer_label(seconds: int | None) -> str:
+    """Button label for a pod's pick timer, always showing a concrete number: an unset timer falls
+    back to the configured default that a set/cube pod draws at session open."""
+    return f"Pick Timer: {seconds if seconds is not None else settings.pod_draft_pick_timer}s"
 
 
 class PodSettingsView(ui.View):
@@ -123,12 +132,23 @@ class PodSettingsView(ui.View):
 
     async def apply(self, interaction: discord.Interaction, *, on_apply: Apply,
                     value: str, attr: str, notice: str, marker: str) -> None:
+        if await self._commit(interaction, on_apply, attr, value):
+            await self._render(interaction, [(notice, marker)])
+
+    async def _commit(self, interaction: discord.Interaction, on_apply: Apply,
+                      attr: str, value: str) -> bool:
+        """Defer, persist one setting, and store it on the view. False on error so the caller stops."""
         await interaction.response.defer()
         err = await on_apply(interaction, value)
         if err:
             await interaction.followup.send(f"⚠️ {err}", ephemeral=True)
-            return
+            return False
         setattr(self, attr, value)
+        return True
+
+    async def _render(self, interaction: discord.Interaction,
+                      notices: list[tuple[str, str]]) -> None:
+        """Rebuild the panel from the view's current state, post each thread notice, refresh the card."""
         await interaction.edit_original_response(view=PodSettingsView(
             on_format=self.on_format, on_pairing=self.on_pairing,
             current_code=self.current_code, current_mode=self.current_mode,
@@ -143,7 +163,8 @@ class PodSettingsView(ui.View):
         ))
         channel = self.notice_channel or interaction.channel
         if channel is not None:
-            await send_settings_notice(channel, interaction.client.user, notice, marker=marker)
+            for text, mark in notices:
+                await send_settings_notice(channel, interaction.client.user, text, marker=mark)
         await update_registered_embed(
             channel,
             client_user=interaction.client.user,
@@ -154,9 +175,28 @@ class PodSettingsView(ui.View):
         )
 
     async def _apply_format_code(self, interaction: discord.Interaction, code: str) -> None:
-        await self.apply(interaction, on_apply=self.on_format, value=code, attr="current_code",
-                         notice=format_change_message(actor_label(interaction), code),
-                         marker=settings_notice_marker("Format"))
+        if not await self._commit(interaction, self.on_format, "current_code", code):
+            return
+        notices = [(format_change_message(actor_label(interaction), code), settings_notice_marker("Format"))]
+        timer = await self._couple_pick_timer(interaction)
+        if timer is not None:
+            notices.append(timer)
+        await self._render(interaction, notices)
+
+    async def _couple_pick_timer(self, interaction: discord.Interaction) -> tuple[str, str] | None:
+        """Move the pick timer to the switched-to format's default (75s for an older set, the standard
+        clock for the latest set or a cube), so both controls track the format together. No-op when the
+        timer control is absent or already at the target."""
+        if self.on_timer is None:
+            return None
+        target = default_pick_timer_for(self.current_code, standard=settings.pod_draft_pick_timer)
+        if target == self.current_timer:
+            return None
+        err = await self.on_timer(interaction, str(target))
+        if err is not None:
+            return None
+        self.current_timer = target
+        return timer_notice(actor_label(interaction), target), settings_notice_marker("Pick timer")
 
     async def _apply_pick_timer(self, interaction: discord.Interaction, seconds: int) -> None:
         await self.apply(interaction, on_apply=self.on_timer, value=str(seconds), attr="current_timer",
@@ -208,8 +248,8 @@ class _SeatingSetting(ui.Select):
 
 class _TimerButton(ui.Button):
     def __init__(self, current_timer: int | None, row: int | None = None) -> None:
-        label = f"Pick Timer: {current_timer}s" if current_timer is not None else "Pick Timer"
-        super().__init__(label=label, emoji="⏱️", style=discord.ButtonStyle.grey, row=row)
+        super().__init__(label=pick_timer_label(current_timer), emoji="⏱️",
+                         style=discord.ButtonStyle.grey, row=row)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_modal(_TimerModal(self.view))

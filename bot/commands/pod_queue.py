@@ -32,7 +32,9 @@ from bot.services.pod_draft_manager import (
     set_event_pick_timer,
     set_event_seating_mode,
 )
-from bot.services.pod_format import PEASANT_CODE, PEASANT_CUBE_ID, PEASANT_LABEL, format_display
+from bot.services.pod_format import (
+    PEASANT_CODE, PEASANT_CUBE_ID, PEASANT_LABEL, default_pick_timer_for, format_display,
+)
 from bot.services.pod_format_select import WRITE_IN_VALUE, set_select_option, write_in_option
 from bot.services.pod_pairing_select import SELECT_PLACEHOLDER as PAIRING_PLACEHOLDER
 from bot.services.pod_pairing_select import pairing_options
@@ -40,7 +42,7 @@ from bot.services.ping_roles import QUEUE_GRANT_PING, announce_pod_grant, spec_n
 from bot.services.pod_roles import find_role, grant_pod_drafters, grant_role
 from bot.services.pod_schedule import POD_QUEUE_ROLE_NAME
 from bot.services.pod_slot import pod_display_name
-from bot.services.pod_settings_view import TIMER_MAX, TIMER_MIN
+from bot.services.pod_settings_view import TIMER_MAX, TIMER_MIN, pick_timer_label
 from bot.services.pod_signals import (
     KIND_QUEUE,
     QUEUE_BUCKET,
@@ -443,6 +445,11 @@ class DraftLauncherView(discord.ui.View):
         self.add_item(_LauncherDescriptionButton(description, row=4))
         self.add_item(_LauncherStartButton(scheduled=scheduled_time is not None, row=4))
 
+    def set_format(self, code: str) -> None:
+        """Choose the set and default the pick timer to match it, so both controls move together."""
+        self.set_code = code
+        self.pick_timer = default_pick_timer_for(code)
+
     async def rerender(self, interaction: discord.Interaction) -> None:
         await interaction.response.edit_message(view=DraftLauncherView(
             set_code=self.set_code, pairing_mode=self.pairing_mode,
@@ -487,7 +494,7 @@ class _LauncherSetSelect(discord.ui.Select):
         if self.values[0] == WRITE_IN_VALUE:
             await interaction.response.send_modal(_LauncherSetModal(self.view))
             return
-        self.view.set_code = self.values[0]
+        self.view.set_format(self.values[0])
         await self.view.rerender(interaction)
 
 
@@ -499,7 +506,7 @@ class _LauncherSetModal(discord.ui.Modal, title="Draft a different set"):
         self.launcher = view
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        self.launcher.set_code = self.code.value.strip().upper()
+        self.launcher.set_format(self.code.value.strip().upper())
         await self.launcher.rerender(interaction)
 
 
@@ -613,8 +620,8 @@ class _LauncherNotifyButton(discord.ui.Button):
 
 class _LauncherTimerButton(discord.ui.Button):
     def __init__(self, current: int | None, row: int | None = None) -> None:
-        label = f"Pick Timer: {current}s" if current is not None else "Pick Timer"
-        super().__init__(label=label, emoji="⏱️", style=discord.ButtonStyle.grey, row=row)
+        super().__init__(label=pick_timer_label(current), emoji="⏱️",
+                         style=discord.ButtonStyle.grey, row=row)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_modal(_LauncherTimerModal(self.view))

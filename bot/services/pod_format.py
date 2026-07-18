@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from bot.sets import active_set_code
+
 
 @dataclass(frozen=True)
 class PodFormat:
@@ -43,6 +45,14 @@ def custom_formats() -> list[PodFormat]:
 
 def is_custom(code: str | None) -> bool:
     return bool(code) and code.upper() in CUSTOM_FORMATS
+
+
+def is_latest_or_cube(code: str | None) -> bool:
+    """Whether `code` is the latest set or a registered cube — the formats players draft most often."""
+    if not code:
+        return True
+    upper = code.upper()
+    return upper == active_set_code().upper() or is_custom(upper)
 
 
 def cube_id_for(code: str) -> str | None:
@@ -94,3 +104,14 @@ def settings_change_message(actor: str, setting: str, value: str, *, subtext: st
 def format_change_message(actor: str, code: str) -> str:
     """Public thread notice when the draft format changes."""
     return settings_change_message(actor, "Format", label_for(code) or code)
+
+
+OLDER_SET_PICK_TIMER = 75
+
+
+def default_pick_timer_for(code: str | None, *, standard: int | None = None) -> int | None:
+    """Pick timer a pod defaults to when it switches to `code`: an older real set gets a longer 75s
+    clock since players are rustier on it; the latest set and cubes fall back to `standard`."""
+    if is_latest_or_cube(code):
+        return standard
+    return OLDER_SET_PICK_TIMER
