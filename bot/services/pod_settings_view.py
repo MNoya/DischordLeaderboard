@@ -320,54 +320,87 @@ class _LinkPlayersButton(ui.Button):
 
 
 class LinkSeatSelectView(ui.View):
-    """Two-step seat→member link picker, shared by the Settings 'Link Players' button and the ready-check
-    unlinked-seat confirm so an organizer can bind a stray seat from either spot."""
+    """Single-panel seat→member link picker, shared by the Settings 'Link Players' button and the
+    ready-check unlinked-seat confirm so an organizer can bind a stray seat from either spot. Picking a
+    seat reveals the guild-wide member picker and a Confirm button below it — both dropdowns stay visible
+    and the link commits only on Confirm, so a misclick can't silently bind the wrong person."""
 
     def __init__(self, targets: list[str], on_link: LinkApply) -> None:
         super().__init__(timeout=120)
-        self.add_item(_LinkSeatSelect(targets, on_link))
-
-
-class _LinkSeatSelect(ui.Select):
-    def __init__(self, targets: list[str], on_link: LinkApply) -> None:
-        options = [discord.SelectOption(label=name, value=name) for name in targets[:25]]
-        super().__init__(placeholder="Unlinked Draftmancer seat", options=options,
-                         min_values=1, max_values=1)
+        self.targets = targets
         self.on_link = on_link
+        self.selected_seat: str | None = None
+        self.selected_member: discord.abc.User | None = None
+        self._render()
 
-    async def callback(self, interaction: discord.Interaction) -> None:
-        arena_name = self.values[0]
+    def _render(self) -> None:
+        self.clear_items()
+        self.add_item(_LinkSeatSelect(self.targets, self.selected_seat))
+        if self.selected_seat is not None:
+            self.add_item(_LinkMemberSelect(self.selected_member))
+            self.add_item(_LinkConfirmButton())
+
+    def _content(self) -> str:
+        if self.selected_seat is None:
+            return LINK_SEAT_PROMPT
+        return f"Pick who `{self.selected_seat}` is, then press Confirm."
+
+    async def refresh(self, interaction: discord.Interaction) -> None:
+        self._render()
         await interaction.response.edit_message(
-            content=f"Who is `{arena_name}`?",
-            view=_LinkMemberSelectView(arena_name, self.on_link),
+            content=self._content(), view=self, allowed_mentions=discord.AllowedMentions.none(),
         )
 
 
-class _LinkMemberSelectView(ui.View):
-    def __init__(self, arena_name: str, on_link: LinkApply) -> None:
-        super().__init__(timeout=120)
-        self.add_item(_LinkMemberSelect(arena_name, on_link))
+class _LinkSeatSelect(ui.Select):
+    def __init__(self, targets: list[str], selected: str | None) -> None:
+        options = [
+            discord.SelectOption(label=name, value=name, default=name == selected) for name in targets[:25]
+        ]
+        super().__init__(placeholder="Unlinked Draftmancer seat", options=options,
+                         min_values=1, max_values=1, row=0)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view: LinkSeatSelectView = self.view
+        view.selected_seat = self.values[0]
+        await view.refresh(interaction)
 
 
 class _LinkMemberSelect(ui.UserSelect):
-    def __init__(self, arena_name: str, on_link: LinkApply) -> None:
-        super().__init__(placeholder="Pick the Discord member", min_values=1, max_values=1)
-        self.arena_name = arena_name
-        self.on_link = on_link
+    def __init__(self, selected: discord.abc.User | None) -> None:
+        super().__init__(placeholder="Pick the Discord member", min_values=1, max_values=1, row=1,
+                         default_values=[selected] if selected is not None else [])
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        view: LinkSeatSelectView = self.view
+        view.selected_member = self.values[0]
         await interaction.response.defer()
-        member = self.values[0]
-        err = await self.on_link(interaction, self.arena_name, member)
+
+
+class _LinkConfirmButton(ui.Button):
+    def __init__(self) -> None:
+        super().__init__(label="Confirm", style=discord.ButtonStyle.success, emoji="🔗", row=2)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view: LinkSeatSelectView = self.view
+        if view.selected_seat is None or view.selected_member is None:
+            await interaction.response.send_message(
+                "Pick a seat and a member first.", ephemeral=True,
+            )
+            return
+        member = view.selected_member
+        arena_name = view.selected_seat
+        await interaction.response.defer()
+        err = await view.on_link(interaction, arena_name, member)
         if err:
             await interaction.followup.send(f"⚠️ {err}", ephemeral=True)
             return
         await interaction.edit_original_response(
-            content=f"🔗 **{member.display_name}** linked as `{self.arena_name}`.", view=None,
+            content=f"🔗 **{member.display_name}** linked as `{arena_name}`.", view=None,
         )
         if interaction.channel is not None:
             await interaction.channel.send(
-                link_notice(actor_label(interaction), member.mention, self.arena_name),
+                link_notice(actor_label(interaction), member.mention, arena_name),
                 allowed_mentions=discord.AllowedMentions(users=True),
             )
 

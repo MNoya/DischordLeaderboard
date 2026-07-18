@@ -722,7 +722,7 @@ _VALID_STATES = (
     "readyunlinked", "readycancel",
     "drafting", "complete", "submit", "podbracket", "podswiss", "podrandom", "podteam", "podlobby",
     "format", "seeding", "trophyhype", "round1", "round2", "round3", "voicelink", "review", "table",
-    "teams", "teamstandings", "teamchamp", "teamhype", "teamvote",
+    "teams", "teamstandings", "teamchamp", "teamhype", "teamvote", "linkpicker",
 )
 
 _LIVE_POD_MODES = {
@@ -895,6 +895,14 @@ async def _settings_preview_on_link(
     return None
 
 
+async def _post_link_picker_preview(ctx) -> None:
+    """Throwaway: post the Link Players seat→member picker on its own, so the single-panel seat +
+    member + Confirm flow is eyeballable without a live pod or a stale-event-free channel."""
+    from bot.services.pod_settings_view import LINK_SEAT_PROMPT, LinkSeatSelectView
+
+    await ctx.send(LINK_SEAT_PROMPT, view=LinkSeatSelectView([_UNLINKED_SEAT], _settings_preview_on_link))
+
+
 def _settings_preview_view() -> PodSettingsView:
     """No-op Settings panel so `!test` can preview the format + pairing + seats dropdowns plus the Link
     Players flow with no pod. Defaults to Seats: Random (like a fresh pod); pick Manual in the dropdown
@@ -920,7 +928,9 @@ async def setup(bot: commands.Bot) -> None:
 
         `state` ∈ empty | partial | linked | unlinked | ready | notready | cancelled | left | superseded |
         readyunlinked | drafting | complete | submit | podbracket | podswiss | podrandom | podteam | podlobby |
-        format | seeding | trophyhype | round1 | round2 | round3 | voicelink.
+        format | seeding | trophyhype | round1 | round2 | round3 | voicelink | linkpicker.
+        `linkpicker` posts the Link Players picker on its own — pick a seat, the member dropdown and
+        Confirm button appear below it, and the link commits only on Confirm.
         `podteam [6|8|10]` seeds a real team draft at that player count (default 6; seat 1 = you,
         Green Team) — posts the team summary embed + live board with working report buttons and
         opens the two private team threads off this channel.
@@ -977,6 +987,10 @@ async def setup(bot: commands.Bot) -> None:
 
         if state == "seeding":
             await _post_test_seeding(ctx, int(extra) if extra.isdigit() else 8)
+            return
+
+        if state == "linkpicker":
+            await _post_link_picker_preview(ctx)
             return
 
         if state == "submit":
