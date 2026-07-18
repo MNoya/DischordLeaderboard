@@ -493,7 +493,7 @@ function DecklistView({ mainboard, warmedImages }: { mainboard: Mainboard; warme
 }
 
 const CARD_CLASS =
-  "w-full overflow-hidden rounded-[5px] [outline-style:solid] outline-1 -outline-offset-1 outline-white/10 shadow-[0_-2px_6px_rgba(0,0,0,0.6)] transition-[outline-color] group-hover:outline-white/50 hover:outline-white/50";
+  "w-full overflow-hidden rounded-[4.5%/3.2%] [outline-style:solid] outline-1 -outline-offset-1 outline-white/10 shadow-[0_-2px_6px_rgba(0,0,0,0.6)] transition-[outline-color] group-hover:outline-white/50 hover:outline-white/50";
 
 // Cards fan top-to-bottom with each one absolutely overlapping the previous, so only a revealed sliver
 // of the upper cards shows and their bottom edge is covered — the bottom card sits in normal flow and

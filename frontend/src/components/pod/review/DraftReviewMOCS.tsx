@@ -873,7 +873,7 @@ function BoosterCard({ card, picked }: { card: ArtifactCard; picked: boolean }) 
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-[5px] [outline-style:solid] outline-1 -outline-offset-1 outline-white/10 shadow-[0_-2px_6px_rgba(0,0,0,0.6)] transition-transform duration-150 hover:z-10 hover:scale-[1.04]",
+        "overflow-hidden rounded-[4.5%/3.2%] [outline-style:solid] outline-1 -outline-offset-1 outline-white/10 shadow-[0_-2px_6px_rgba(0,0,0,0.6)] transition-transform duration-150 hover:z-10 hover:scale-[1.04]",
         picked && "p0p1-card-selected z-10 scale-[1.03] hover:scale-[1.05]",
       )}
     >
@@ -1661,7 +1661,7 @@ function OrderStrip({
               <div
                 key={di}
                 className={cn(
-                  "absolute w-full overflow-hidden rounded-[5px] [outline-style:solid] outline-1 -outline-offset-1 outline-white/10 shadow-[0_-2px_6px_rgba(0,0,0,0.6)]",
+                  "absolute w-full overflow-hidden rounded-[4.5%/3.2%] [outline-style:solid] outline-1 -outline-offset-1 outline-white/10 shadow-[0_-2px_6px_rgba(0,0,0,0.6)]",
                   glowStrip && ri === lastRow && i === lastCol && "review-last-pick z-10",
                 )}
                 style={{ top: di * reveal }}
@@ -1682,7 +1682,7 @@ function OrderStrip({
             <div
               key={di}
               className={cn(
-                "absolute w-full overflow-hidden rounded-[5px] [outline-style:solid] outline-1 -outline-offset-1 outline-white/10 shadow-[0_-2px_6px_rgba(0,0,0,0.6)]",
+                "absolute w-full overflow-hidden rounded-[4.5%/3.2%] [outline-style:solid] outline-1 -outline-offset-1 outline-white/10 shadow-[0_-2px_6px_rgba(0,0,0,0.6)]",
                 markLast && lastPickInSideboard && di === sideboard.length - 1 && "review-last-pick z-10",
               )}
               style={{ top: di * reveal }}
@@ -1702,7 +1702,7 @@ const POOL_PAD = 8;
 const POOL_GAP = 4;
 const SIDE_COLUMN_GAP_RATIO = 0.1;
 const POOL_CARD_CLASS =
-  "overflow-hidden rounded-[5px] [outline-style:solid] outline-1 -outline-offset-1 outline-white/10 shadow-[0_-2px_6px_rgba(0,0,0,0.6)] transition-[outline-color] group-hover:outline-white/50 hover:outline-white/50";
+  "overflow-hidden rounded-[4.5%/3.2%] [outline-style:solid] outline-1 -outline-offset-1 outline-white/10 shadow-[0_-2px_6px_rgba(0,0,0,0.6)] transition-[outline-color] group-hover:outline-white/50 hover:outline-white/50";
 
 function Pool({
   cards,
