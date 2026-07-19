@@ -31,6 +31,8 @@ from bot.models import PodDraftEvent, PodSignal, PodSignalMember
 from bot.services import pod_signals
 from bot.services.pod_draft_manager import set_card_cancel_hook, set_card_close_hook, start_manager
 from bot.services.pod_drafts import draftmancer_url_for, record_ondemand_event
+from bot.services.pod_join_button import build_join_view
+from bot.services.pod_link_dm import send_lobby_link_dms
 from bot.services.pod_signals import SCHEDULE_TZ, slot_event_time
 from bot.services.pod_slot import COLLISION_INDEX_RE, next_collision_index, pod_display_name
 from bot.tasks.pod_draft_reminder import (
@@ -47,6 +49,7 @@ log = logging.getLogger(__name__)
 REMINDER_LEAD_MIN = 10
 CARD_CLOSE_WINDOW_H = 48
 SLOT_OCCUPANCY_WINDOW = timedelta(hours=2)
+TABLE_SUFFIX_SQL_RE = r"Table[[:space:]]+[0-9]+[[:space:]]*$"
 
 
 @dataclass(frozen=True)
@@ -955,7 +958,10 @@ async def open_ondemand_lobby(bot: commands.Bot, event_id: str) -> None:
     mention_block = " ".join(f"<@{did}>" for did, _ in roster)
     body = build_lobby_open_body(draftmancer_url, mention_block)
     try:
-        await thread.send(body, allowed_mentions=discord.AllowedMentions(users=True))
+        await thread.send(
+            body, view=build_join_view(session_id),
+            allowed_mentions=discord.AllowedMentions(users=True),
+        )
     except discord.HTTPException:
         log.warning(f"open_ondemand_lobby: could not post in thread {thread_id}", exc_info=True)
         return
@@ -965,6 +971,15 @@ async def open_ondemand_lobby(bot: commands.Bot, event_id: str) -> None:
         if event is not None and event.socket_status == "pending":
             event.socket_status = "reminded"
             session.commit()
+
+    maybe_roster = await asyncio.to_thread(maybe_roster_for_event_sync, event_id)
+    recipients = (
+        [(did, name, "yes") for did, name in roster]
+        + [(did, name, "maybe") for did, name in maybe_roster]
+    )
+    await send_lobby_link_dms(
+        bot, event_name=event_name, session_id=session_id, thread=thread, recipients=recipients,
+    )
 
     manager = await start_manager(
         bot, event_id, session_id, thread_id, set_code, len(display_names),
@@ -1266,11 +1281,16 @@ def _event_id_for_slot(session: Session, slot_time: datetime) -> str | None:
     A pod runs 2-3 hours, so occupancy is a window around the slot, not an exact-minute match; the
     window stays inside the 5-hour gap between slots so a neighbouring slot's pod never counts. Pods
     carry no guild and coordination is single-guild, so the match is by time alone. Newest wins when
-    repeated test runs leave several at one slot."""
+    repeated test runs leave several at one slot.
+
+    ` - Table N` spillover pods are excluded: a second table is a child of the pod already reflected
+    here, opened later so its event_time lands in this window, and reflecting it would drop the original
+    pod's roster off the launcher."""
     return session.execute(
         select(PodDraftEvent.id).where(
             PodDraftEvent.event_time >= slot_time - SLOT_OCCUPANCY_WINDOW,
             PodDraftEvent.event_time < slot_time + SLOT_OCCUPANCY_WINDOW,
+            PodDraftEvent.name.op("!~*")(TABLE_SUFFIX_SQL_RE),
         ).order_by(PodDraftEvent.created_at.desc()).limit(1)
     ).scalar_one_or_none()
 

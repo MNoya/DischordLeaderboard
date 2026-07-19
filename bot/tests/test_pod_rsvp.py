@@ -183,6 +183,25 @@ def test_a_neighbouring_slots_pod_leaves_the_slot_open(session):
     assert _event_id_for_slot(session, slot_time) is None
 
 
+def _table_event(session, slot_time: datetime, table_index: int) -> str:
+    event = PodDraftEvent(
+        event_date=slot_time.date(), event_time=slot_time, set_code="TST",
+        name=f"TST Pod Draft #1 - Table {table_index}", draftmancer_session=f"s1-T{table_index}",
+        discord_thread_id=f"tid-{table_index}", socket_status="pending", kind="tournament",
+    )
+    session.add(event)
+    session.flush()
+    return event.id
+
+
+def test_a_second_table_keeps_reflecting_the_original_pod(session):
+    slot_time = datetime.now(timezone.utc) + timedelta(days=1)
+    event_id = _scheduled_pod(session, slot_time, [])
+    _table_event(session, slot_time + timedelta(hours=1), 2)
+
+    assert _event_id_for_slot(session, slot_time) == event_id
+
+
 def test_committed_slot_projects_the_yes_roster_off_the_card(session):
     slot_time = datetime.now(timezone.utc) + timedelta(days=1)
     event_id = _scheduled_pod(session, slot_time, ["Nissa Revane", "Chandra Nalaar"])
