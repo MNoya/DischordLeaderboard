@@ -61,9 +61,15 @@ from bot.services.pod_team_board import (
 from bot.services.pod_team_flow import build_team_final_embed
 from bot.services.pod_team_showcase import build_team_championship_view, format_team_trophy_title
 from bot.services.pod_team_vote import (
-    TEAM_VOTE_BUTTON_LABEL,
-    TEAM_VOTE_EMOJI,
+    SIDE_TEAM,
+    SIDE_WAIT,
+    TEAM_VOTE_TEAM_EMOJI,
+    TEAM_VOTE_TEAM_LABEL,
+    TEAM_VOTE_WAIT_EMOJI,
+    TEAM_VOTE_WAIT_LABEL,
+    build_team_vote_locked_embed,
     build_team_vote_offer_embed,
+    build_team_vote_waited_embed,
     team_vote_needed,
 )
 from bot.services.pod_tournament import (
@@ -669,33 +675,48 @@ def _team_vote_seed() -> dict[str, str]:
 
 
 class _TeamVotePreviewView(discord.ui.View):
-    """Interactible preview of the Team-Draft vote button. Three votes are prefilled, so the previewer's
-    click is the fourth — the majority that locks the pod to Team Draft and proposes a Ready Check. No
-    live pod behind it."""
+    """Interactible preview of the two-sided Team-Draft vote. Three votes are prefilled on the Team side, so
+    the previewer's Team click is the fourth — the majority that locks the pod to Team Draft and proposes a
+    Ready Check. A Wait majority resolves the card to the waiting state. No live pod behind it."""
 
     def __init__(self) -> None:
         super().__init__(timeout=900)
-        self.voters = _team_vote_seed()
+        self.team = list(_team_vote_seed().values())
+        self.wait: list[str] = []
 
-    @discord.ui.button(emoji=TEAM_VOTE_EMOJI, label=TEAM_VOTE_BUTTON_LABEL, style=discord.ButtonStyle.primary)
-    async def vote(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+    @discord.ui.button(
+        emoji=TEAM_VOTE_TEAM_EMOJI, label=TEAM_VOTE_TEAM_LABEL, style=discord.ButtonStyle.primary)
+    async def team_vote(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._vote(interaction, SIDE_TEAM)
+
+    @discord.ui.button(
+        emoji=TEAM_VOTE_WAIT_EMOJI, label=TEAM_VOTE_WAIT_LABEL, style=discord.ButtonStyle.secondary)
+    async def wait_vote(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await self._vote(interaction, SIDE_WAIT)
+
+    async def _vote(self, interaction: discord.Interaction, side: str) -> None:
         needed = team_vote_needed(_TEAM_VOTE_POD_SIZE)
-        user_id = str(interaction.user.id)
-        if user_id in self.voters:
-            del self.voters[user_id]
-        else:
-            self.voters[user_id] = interaction.user.display_name
-        names = list(self.voters.values())
-        if len(names) >= needed:
+        name = interaction.user.display_name
+        on_side = name in (self.team if side == SIDE_TEAM else self.wait)
+        self.team = [voter for voter in self.team if voter != name]
+        self.wait = [voter for voter in self.wait if voter != name]
+        if not on_side:
+            (self.team if side == SIDE_TEAM else self.wait).append(name)
+        if len(self.team) >= needed:
             await interaction.response.edit_message(
-                embed=build_team_vote_offer_embed(names, needed, locked=True), view=None,
+                embed=build_team_vote_locked_embed(self.team, self.wait), view=None,
             )
             await interaction.followup.send(
                 MSG_LOBBY_FULL_PROMPT.format(count=emojis.mana_number(_TEAM_VOTE_POD_SIZE)),
                 view=LobbyReadyButtonView(draftmancer_url=_DRAFTMANCER_URL),
             )
             return
-        await interaction.response.edit_message(embed=build_team_vote_offer_embed(names, needed), view=self)
+        if len(self.wait) >= needed:
+            await interaction.response.edit_message(
+                embed=build_team_vote_waited_embed(self.team, self.wait), view=None)
+            return
+        await interaction.response.edit_message(
+            embed=build_team_vote_offer_embed(self.team, self.wait, _TEAM_VOTE_POD_SIZE), view=self)
 
 
 class _ReadyCheckPreviewView(discord.ui.View):
@@ -1139,7 +1160,7 @@ async def setup(bot: commands.Bot) -> None:
 
         if state == "teamvote":
             seeded = list(_team_vote_seed().values())
-            embed = build_team_vote_offer_embed(seeded, team_vote_needed(_TEAM_VOTE_POD_SIZE))
+            embed = build_team_vote_offer_embed(seeded, [], _TEAM_VOTE_POD_SIZE)
             await ctx.send(embed=embed, view=_TeamVotePreviewView())
             return
 

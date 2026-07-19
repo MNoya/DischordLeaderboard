@@ -26,15 +26,20 @@ from bot.models import PodDraftEvent, PodSignal, PodSignalMember
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_signals import RSVP_MAYBE, RSVP_YES
 from bot.services.pod_draft_manager import start_manager
-from bot.services.pod_drafts import draftmancer_url_for
+from bot.services.pod_drafts import draftmancer_url_for, load_event_pairing_mode_sync
 from bot.services.pod_join_button import build_join_view
 from bot.services.pod_link_dm import send_lobby_link_dms
+from bot.services.pod_team_vote import (
+    build_team_vote_offer_embed,
+    build_team_vote_view,
+    find_team_vote_card,
+)
 from bot.services.sesh_parser import parse_sesh_embed
 
 
 REMINDER_LEAD_MIN = 10
 ROSTER_REMINDER_LEAD_MIN = 60
-ROSTER_EMBED_TITLE = "🔔 Pod Draft starting soon"
+ROSTER_EMBED_TITLE = "🔔 Pod Draft Starting Soon"
 ROSTER_SEARCH_LIMIT = 50
 
 
@@ -182,6 +187,31 @@ async def fire_roster_reminder(event_id: str) -> None:
         await thread.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
     except discord.HTTPException:
         log.warning(f"fire_roster_reminder: could not post in thread {thread_id}", exc_info=True)
+    await maybe_offer_prelobby_team_vote(thread, event_id, len(yes))
+
+
+def _prelobby_team_vote_size(yes_count: int) -> int | None:
+    """The Team-Draft vote size when the Yes roster is auto-offer eligible at the T-60 reminder — exactly
+    six, a clean 3v3. A full pod plays a bracket; anything else is left alone."""
+    return 6 if yes_count == 6 else None
+
+
+async def maybe_offer_prelobby_team_vote(thread: discord.Thread, event_id: str, yes_count: int) -> None:
+    """At the T-60 roster reminder, offer Team Draft when the Yes roster settled small and even, so the pod
+    decides the pairing before the lobby opens. A separate call-to-action card whose tally lives on the
+    message, so it needs no live manager; the T-10 lobby adopts the same card."""
+    size = _prelobby_team_vote_size(yes_count)
+    if size is None:
+        return
+    pairing = await asyncio.to_thread(load_event_pairing_mode_sync, event_id)
+    if pairing == "team":
+        return
+    if await find_team_vote_card(thread, event_id) is not None:
+        return
+    try:
+        await thread.send(embed=build_team_vote_offer_embed([], [], size), view=build_team_vote_view(event_id))
+    except discord.HTTPException:
+        log.warning(f"fire_roster_reminder: could not post team offer in thread {thread.id}", exc_info=True)
 
 
 def schedule_team_vote_offer(scheduler, event_id: str, event_time: datetime) -> None:
@@ -449,11 +479,12 @@ def build_roster_embed(
     )
     embed.add_field(
         name=f"✅ Yes ({len(yes)})",
-        value="\n".join(yes) if yes else "None yet",
+        value="\n".join(f"> {name}" for name in yes) if yes else "None yet",
         inline=True,
     )
     if maybe:
-        embed.add_field(name=f"🤷 Maybe ({len(maybe)})", value="\n".join(maybe), inline=True)
+        maybe_list = "\n".join(f"> {name}" for name in maybe)
+        embed.add_field(name=f"🤷 Maybe ({len(maybe)})", value=maybe_list, inline=True)
     return embed
 
 

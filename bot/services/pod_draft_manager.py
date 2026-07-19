@@ -51,9 +51,18 @@ from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_pairing_select import pairing_label
 from bot.services.pod_seating_select import seating_mode_label
 from bot.services.pod_team_vote import (
+    SIDE_TEAM,
+    TEAM_VOTE_POD_SIZE,
+    build_team_vote_locked_embed,
     build_team_vote_offer_embed,
     build_team_vote_view,
-    team_vote_needed,
+    build_team_vote_waited_embed,
+    find_team_vote_card,
+    needed_from_embed,
+    register_team_vote_click_handler,
+    rerender_gathering,
+    team_voters_from_embed,
+    wait_voters_from_embed,
 )
 from bot.services.pod_drafts import (
     BOT_USER_NAME,
@@ -276,12 +285,10 @@ class PodDraftManager:
         self.team_map: dict[str, str] | None = None  # draftmancer_name -> 'A'/'B' for team drafts
         self.team_board_messages: list["discord.Message"] = []
         self.team_vote_message: "discord.Message | None" = None
-        self.team_voters: dict[str, str] = {}   # discord user id -> display name, in click order
         self.team_vote_offered = False
         self.team_vote_pending_size: int | None = None
         self.team_vote_size = 0
         self.scheduled_start: datetime | None = None
-        self._team_vote_lock = asyncio.Lock()
         self._last_seating_signature: tuple[str, ...] | None = None
         self.standings_message = None
         self._standings_post_lock = asyncio.Lock()
@@ -1641,12 +1648,10 @@ class PodDraftManager:
             await self.offer_team_vote(self.team_vote_pending_size)
 
     def _auto_team_vote_size(self) -> int | None:
-        """The lobby's team-vote size when it is currently auto-offer eligible (four to six players,
-        even), else None. The manual /pod-team path allows any even pod and does not use this."""
-        count = len(self.player_session_users())
-        if 4 <= count <= 6 and count % 2 == 0:
-            return count
-        return None
+        """The lobby's team-vote size when it is currently auto-offer eligible — exactly six, a clean 3v3.
+        A full pod plays a bracket. The manual /pod-team path allows any pod of at least four and does not
+        use this."""
+        return 6 if len(self.player_session_users()) == 6 else None
 
     async def offer_team_vote_if_eligible(self) -> None:
         """Offer the vote when the lobby sits at an auto-eligible size right now. Shared by the start-time
@@ -1695,55 +1700,31 @@ class PodDraftManager:
         self.team_vote_offered = True
         try:
             self.team_vote_message = await thread.send(
-                embed=build_team_vote_offer_embed([], team_vote_needed(pod_size)),
+                embed=build_team_vote_offer_embed([], [], pod_size),
                 view=build_team_vote_view(self.event_id),
             )
         except discord.HTTPException:
             self.team_vote_offered = False
             log.warning(f"[TEAM_VOTE] offer_post_failed event={self.event_id}", exc_info=True)
 
-    async def toggle_team_vote(self, interaction: "discord.Interaction") -> None:
-        """Toggle the clicker's Team-Draft vote and re-render the offer card. Locks the pod to Team Draft
-        once a majority of the pod has voted. Serialized so rapid concurrent clicks can't race."""
-        async with self._team_vote_lock:
-            if self.pairing_mode == "team" or self.drafting or self.team_vote_message is None:
-                await interaction.response.defer()
-                return
-            user_id = str(interaction.user.id)
-            if user_id in self.team_voters:
-                del self.team_voters[user_id]
-            else:
-                self.team_voters[user_id] = interaction.user.display_name
-            if len(self.team_voters) >= team_vote_needed(self.team_vote_size):
-                await self._lock_team_vote(interaction)
-                return
-            try:
-                await interaction.response.edit_message(
-                    embed=build_team_vote_offer_embed(
-                        list(self.team_voters.values()), team_vote_needed(self.team_vote_size),
-                    ),
-                    view=build_team_vote_view(self.event_id),
-                )
-            except discord.HTTPException:
-                log.warning(f"[TEAM_VOTE] edit_failed event={self.event_id}", exc_info=True)
-
-    async def _lock_team_vote(self, interaction: "discord.Interaction") -> None:
-        """Majority reached: switch the pod to Team Draft and edit the offer card in place to the locked
-        state, dropping the button. The card stays as the record of the vote — no separate notice."""
-        err = await set_event_pairing_mode(self.event_id, "team")
-        if err:
-            log.warning(f"[TEAM_VOTE] lock_failed event={self.event_id} err={err}")
-            await interaction.response.defer()
+    async def adopt_existing_team_vote(self) -> None:
+        """Take over a Team-Draft card already posted before this manager existed — the T-60 offer that ran
+        an hour before the lobby opened, or the card left behind by a restart. Adopting marks the offer
+        made so the at-start tick doesn't post a duplicate; the card's own button drives the vote either
+        way, since the tally lives on the message."""
+        if self.pairing_mode == "team" or self.team_vote_offered or self.drafting or self.draft_complete:
             return
-        log.info(f"[TEAM_VOTE] locked event={self.event_id} voters={list(self.team_voters.values())}")
-        locked = build_team_vote_offer_embed(
-            list(self.team_voters.values()), team_vote_needed(self.team_vote_size), locked=True,
-        )
-        self.team_vote_message = None
-        try:
-            await interaction.response.edit_message(embed=locked, view=None)
-        except discord.HTTPException:
-            log.warning(f"[TEAM_VOTE] lock_edit_failed event={self.event_id}", exc_info=True)
+        thread = await self._fetch_thread()
+        if thread is None:
+            return
+        card = await find_team_vote_card(thread, self.event_id)
+        if card is None:
+            return
+        self.team_vote_message = card
+        self.team_vote_offered = True
+        needed = needed_from_embed(card.embeds[0]) if card.embeds else None
+        self.team_vote_size = (needed - 1) * 2 if needed is not None else TEAM_VOTE_POD_SIZE
+        log.info(f"[TEAM_VOTE] adopted existing card event={self.event_id} size={self.team_vote_size}")
 
     async def _retire_team_vote_offer(self) -> None:
         """Delete the offer card so its button can't outlive the offer. Best-effort."""
@@ -2128,6 +2109,7 @@ async def start_manager(
         f"thread={thread_id} set={set_code} pairing={manager.pairing_mode} "
         f"registry_size={len(ACTIVE_POD_MANAGERS)}"
     )
+    await manager.adopt_existing_team_vote()
     ok = await manager.connect()
     if not ok:
         ACTIVE_POD_MANAGERS.pop(event_id, None)
@@ -2191,6 +2173,72 @@ async def set_event_pairing_mode(event_id: str, mode: str) -> str | None:
         await manager.refresh_lobby_now()
         notify_card_refresh(manager.bot, event_id)
     return None
+
+
+_team_vote_click_locks: dict[str, asyncio.Lock] = {}
+
+
+async def handle_team_vote_click(interaction: "discord.Interaction", event_id: str, side: str) -> None:
+    """Move the clicker to their side of the Team-Draft vote against the card message. The first side to a
+    majority decides it: Team Draft locks the pairing, Wait for 8 keeps the bracket and closes the vote. The
+    card message is the tally, so this works whether or not a live manager backs the pod — the T-60 offer
+    runs an hour before the lobby opens. Serialized per pod so rapid clicks can't race.
+
+    Registered as the vote-button handler at import, keeping pod_team_vote free of a manager import."""
+    lock = _team_vote_click_locks.setdefault(event_id, asyncio.Lock())
+    async with lock:
+        if not interaction.message.embeds:
+            await interaction.response.defer()
+            return
+        embed = interaction.message.embeds[0]
+        manager = ACTIVE_POD_MANAGERS.get(event_id)
+        if manager is not None and (manager.drafting or manager.draft_complete):
+            await interaction.response.defer()
+            return
+        if manager is not None:
+            already_team = manager.pairing_mode == "team"
+        else:
+            already_team = await asyncio.to_thread(load_event_pairing_mode_sync, event_id) == "team"
+        team = team_voters_from_embed(embed)
+        wait = wait_voters_from_embed(embed)
+        if already_team:
+            await interaction.response.edit_message(
+                embed=build_team_vote_locked_embed(team, wait), view=None)
+            return
+        needed = needed_from_embed(embed)
+        mention = interaction.user.mention
+        on_side = mention in (team if side == SIDE_TEAM else wait)
+        team = [voter for voter in team if voter != mention]
+        wait = [voter for voter in wait if voter != mention]
+        if not on_side:
+            (team if side == SIDE_TEAM else wait).append(mention)
+        if needed is not None and len(team) >= needed:
+            if manager is not None:
+                manager.team_vote_message = None
+            err = await set_event_pairing_mode(event_id, "team")
+            if err:
+                log.warning(f"[TEAM_VOTE] lock_failed event={event_id} err={err}")
+                await interaction.response.defer()
+                return
+            log.info(f"[TEAM_VOTE] locked team event={event_id} voters={team}")
+            await interaction.response.edit_message(
+                embed=build_team_vote_locked_embed(team, wait), view=None)
+            return
+        if needed is not None and len(wait) >= needed:
+            if manager is not None:
+                manager.team_vote_message = None
+            log.info(f"[TEAM_VOTE] waited event={event_id} voters={wait}")
+            await interaction.response.edit_message(
+                embed=build_team_vote_waited_embed(team, wait), view=None)
+            return
+        try:
+            await interaction.response.edit_message(
+                embed=rerender_gathering(embed, team, wait), view=build_team_vote_view(event_id))
+        except discord.HTTPException:
+            log.warning(f"[TEAM_VOTE] edit_failed event={event_id}", exc_info=True)
+
+
+register_team_vote_click_handler(handle_team_vote_click)
 
 
 async def set_event_seating_mode(event_id: str, mode: str) -> str | None:

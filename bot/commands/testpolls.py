@@ -35,6 +35,8 @@ from bot.commands.pod_rsvp import (
 from bot.commands.pod_table import offer_second_table
 from bot.commands.test_group import test_group
 from bot.config import PRODUCTION_GUILD_ID
+from bot.database import SessionLocal
+from bot.models import PodDraftEvent
 from bot.services import pod_launch
 from bot.services.pod_draft_manager import set_event_pairing_mode
 from bot.services.ping_roles import (
@@ -49,8 +51,10 @@ from bot.services.ping_roles import (
 )
 from bot.services.pod_schedule import POD_QUEUE_ROLE_NAME
 from bot.services.pod_signals import RSVP_YES, SCHEDULE_TZ, poll_buckets_for, slot_event_time
+from bot.services.pod_team_vote import find_team_vote_card, rerender_gathering
 from bot.sets import active_set_code
 from bot.tasks.pod_daily_poll import close_launcher_for_date, post_launcher
+from bot.tasks.pod_draft_reminder import fire_roster_reminder
 
 
 log = logging.getLogger(__name__)
@@ -247,6 +251,31 @@ async def setup(bot: commands.Bot) -> None:
             await asyncio.to_thread(pod_launch.set_rsvp_sync, ref[2], f"filltest-{i}", display, RSVP_YES)
         await offer_second_table(ctx.bot, event_id, {f"filltest-{i}" for i in range(seated)})
 
+    @test_group.command(name="teamoffer")
+    @commands.is_owner()
+    async def test_teamoffer(ctx: commands.Context, yes: int = 6, preseed: int = 0) -> None:
+        """Owner-only. Stage a scheduled pod 60 minutes out, seed `yes` fake Yes RSVPs, then fire the real
+        T-60 roster reminder so the roster embed and the Team-Draft offer card post through the production
+        path. The offer only appears when `yes` is exactly six. Pass `preseed` to prefill that many votes on
+        the card so a single real click locks the pod to Team Draft solo."""
+        if not isinstance(ctx.channel, discord.TextChannel):
+            await ctx.send("Run `!test teamoffer` in a server text channel — the thread is created there.")
+            return
+        event_time = datetime.now(SCHEDULE_TZ) + timedelta(minutes=60)
+        set_code = active_set_code()
+        name = await asyncio.to_thread(pod_launch.ondemand_event_name_sync, set_code, event_time)
+        event_id = await post_scheduled_card(
+            ctx.bot, ctx.channel, set_code=set_code, event_time=event_time, name=name,
+        )
+        if event_id is None:
+            await ctx.send("Could not create the scheduled card. Check the logs.")
+            return
+        if yes > 0:
+            await _seed_fake_yes(ctx.channel, event_id, event_time, name, yes)
+        await fire_roster_reminder(event_id)
+        if preseed > 0:
+            await _preseed_team_votes(ctx.bot, event_id, preseed)
+
     @test_group.command(name="draft")
     @commands.is_owner()
     async def test_draft(ctx: commands.Context) -> None:
@@ -304,3 +333,29 @@ async def _seed_fake_yes(
         await card.edit(embed=build_rsvp_embed(name, event_time, rosters))
     except discord.HTTPException:
         log.warning(f"could not re-render the fake-fill card {message_id}", exc_info=True)
+
+
+async def _preseed_team_votes(bot: commands.Bot, event_id: str, count: int) -> None:
+    """Prefill `count` fake votes on the just-posted Team-Draft card so the previewer's own click reaches
+    the majority and locks the pod solo. Fake voters render as broken mentions; they only fill the tally."""
+    thread_id = await asyncio.to_thread(_event_thread_id_sync, event_id)
+    if thread_id is None:
+        return
+    try:
+        thread = await bot.fetch_channel(thread_id)
+    except discord.HTTPException:
+        return
+    card = await find_team_vote_card(thread, event_id)
+    if card is None or not card.embeds:
+        return
+    fake = [f"<@{900000000000000000 + i}>" for i in range(count)]
+    try:
+        await card.edit(embed=rerender_gathering(card.embeds[0], fake, []))
+    except discord.HTTPException:
+        log.warning(f"could not preseed the team-vote card for {event_id}", exc_info=True)
+
+
+def _event_thread_id_sync(event_id: str) -> int | None:
+    with SessionLocal() as session:
+        event = session.get(PodDraftEvent, event_id)
+        return int(event.discord_thread_id) if event is not None else None
