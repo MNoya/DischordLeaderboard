@@ -62,7 +62,6 @@ POD_HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         ("/pod-restart", desc.POD_RESTART.removeprefix("[Admin] ")),
         ("/pod-champion", desc.POD_CHAMPION.removeprefix("[Admin] ")),
         ("/pod-backfill", desc.POD_BACKFILL.removeprefix("[Admin] ")),
-        ("/pod-schedule", desc.POD_SCHEDULE.removeprefix("[Admin] ")),
     ]),
 ]
 

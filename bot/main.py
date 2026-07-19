@@ -35,7 +35,6 @@ from bot.commands.pod_draft import setup as setup_pod_draft
 from bot.commands.pod_queue import PodQueueView, setup as setup_pod_queue
 from bot.commands.pod_guide import setup as setup_pod_guide
 from bot.commands.roles import RolesView, setup as setup_roles
-from bot.commands.pod_schedule import setup as setup_pod_schedule
 from bot.commands.pod_table import setup as setup_pod_table
 from bot.commands.peasant import setup as setup_peasant
 from bot.commands.preview_season_awards import setup as setup_preview_season_awards
@@ -216,7 +215,6 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_roles(bot)
         await setup_mock_draft(bot)
         await setup_pod_backfill(bot)
-        await setup_pod_schedule(bot)
         await setup_pod_table(bot)
         await setup_peasant(bot)
         await setup_preview_season_awards(bot)
