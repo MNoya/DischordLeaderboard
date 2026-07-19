@@ -230,16 +230,17 @@ def _slot_toggle_button(bucket_key: str, closed: bool = False) -> discord.ui.But
 
 
 async def _handle_poll_click(interaction: discord.Interaction, bucket_key: str) -> None:
+    await interaction.response.defer()
     message_id = str(interaction.message.id)
     result = await asyncio.to_thread(
         pod_launch.toggle_member_sync,
         message_id, bucket_key, str(interaction.user.id), interaction.user.display_name,
     )
     if result is None:
-        await interaction.response.send_message(MSG_POLL_INACTIVE, ephemeral=True)
+        await interaction.followup.send(MSG_POLL_INACTIVE, ephemeral=True)
         return
     if result.closed:
-        await interaction.response.send_message(MSG_SLOT_CLOSED, ephemeral=True)
+        await interaction.followup.send(MSG_SLOT_CLOSED, ephemeral=True)
         return
 
     fired = (
@@ -250,7 +251,7 @@ async def _handle_poll_click(interaction: discord.Interaction, bucket_key: str) 
 
     signal_date = interaction.message.created_at.astimezone(SCHEDULE_TZ).date()
     slots = await asyncio.to_thread(pod_launch.launcher_snapshot_sync, message_id, signal_date)
-    await interaction.response.edit_message(
+    await interaction.edit_original_response(
         embed=build_poll_embed(slots, interaction.guild), view=PodPollView(slots, interaction.guild),
     )
 
