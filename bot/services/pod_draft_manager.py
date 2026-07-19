@@ -519,7 +519,7 @@ class PodDraftManager:
         await self.sio.emit("setMaxPlayers", self.max_players)
         await self.sio.emit("setPickTimer", self.pick_timer)
         await self.sio.emit("setBots", settings.pod_draft_bots)
-        await self.sio.emit("setColorBalance", False)
+        await self.sio.emit("setColorBalance", True)
         await self.sio.emit("setPersonalLogs", True)
         await self.sio.emit("setDraftLogRecipients", self._draft_log_recipients)
         team_draft = self.pairing_mode == "team"
