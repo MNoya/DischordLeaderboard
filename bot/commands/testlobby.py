@@ -33,7 +33,9 @@ from bot.services.lobby_embed import (
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_deck_color import SubmitDeckView
 from bot.services.pod_draft_manager import PodDraftManager, start_manager
-from bot.services.pod_drafts import seed_event_participants
+from bot.services.pod_drafts import draftmancer_url_for, player_arena_handle, seed_event_participants
+from bot.services.pod_join_button import build_join_view
+from bot.services.pod_link_dm import build_link_dm, format_thread_ref, send_lobby_link_dms, try_dm
 from bot.sets import active_set_code
 from bot.services.pod_format import format_display
 from bot.services.pod_pairing_select import DEFAULT_PAIRING_MODE, pairing_label
@@ -41,6 +43,7 @@ from bot.services.pod_seating_select import seating_mode_label
 from bot.services.player_stats import rank_players_for_set
 from bot import emojis
 from bot.commands.messages import MSG_LOBBY_FULL_PROMPT
+from bot.tasks.pod_draft_reminder import build_lobby_open_body
 from bot.commands.pod_draft import build_seeding_image_message_from_names, post_manual_seating_table, post_table
 from bot.commands.pod_table import build_table_view
 from bot.commands.test_group import register_test_fallback
@@ -375,6 +378,95 @@ async def _start_live_test_pod(ctx, mode: str, count: int = 8) -> None:
     ACTIVE_POD_MANAGERS[event_id] = manager
     log.info(f"[testlobby] live {mode} pod seeded event={event_id} channel={channel_id}")
     await start_tournament(manager)
+
+
+async def _preview_link_dms(ctx) -> None:
+    """The `dmlink` path: DM the caller both lobby-open DM strings (linked + unlinked) against this
+    channel, so every string can be reviewed in one inbox regardless of link state."""
+    session_id = f"{active_set_code()}-TestOpen"
+    thread_ref = format_thread_ref(ctx.channel)
+    handle = await asyncio.to_thread(_arena_handle_for, str(ctx.author.id))
+    linked_body, linked_view = build_link_dm(
+        session_id=session_id, thread_ref=thread_ref,
+        arena_name=handle or "YourArena#12345", rsvp="yes",
+    )
+    unlinked_body, unlinked_view = build_link_dm(
+        session_id=session_id, thread_ref=thread_ref, arena_name=None, rsvp="maybe",
+    )
+    landed = 0
+    for body, view in ((linked_body, linked_view), (unlinked_body, unlinked_view)):
+        if await try_dm(ctx.bot, str(ctx.author.id), body, view):
+            landed += 1
+    if landed:
+        note = "" if handle else " (no Arena linked, so the linked DM used a placeholder handle)"
+        await ctx.send(f"🧪 Sent {landed}/2 link DMs to your DMs.{note}")
+    else:
+        await ctx.send("⚠️ Couldn't DM you — open DMs from server members and try again.")
+
+
+_TEST_LOBBY_THREAD_NAME = "Pod Draft — Test"
+
+
+async def _preview_full_lobby(ctx) -> None:
+    """The `lobby` path: replicate a real lobby open end to end. Clear prior test threads, create a fresh
+    thread, post the lobby-open message + Join Draft button inside it, then run the real DM path with the
+    caller as the only recipient — so they receive exactly the one DM their own link state earns."""
+    session_id = f"{active_set_code()}-TestOpen"
+    parent = ctx.channel.parent if isinstance(ctx.channel, discord.Thread) else ctx.channel
+    await _clear_test_lobby_threads(parent)
+    thread = await parent.create_thread(
+        name=f"{active_set_code()} {_TEST_LOBBY_THREAD_NAME}", type=discord.ChannelType.public_thread,
+    )
+    body = build_lobby_open_body(draftmancer_url_for(session_id), ctx.author.mention)
+    await thread.send(
+        body, view=build_join_view(session_id),
+        allowed_mentions=discord.AllowedMentions(users=True),
+    )
+    sent = await send_lobby_link_dms(
+        ctx.bot, session_id=session_id, thread=thread,
+        recipients=[(str(ctx.author.id), ctx.author.display_name, "yes")],
+    )
+    if sent:
+        await ctx.send(f"🧪 Opened {thread.mention} and sent your lobby DM.")
+    else:
+        await ctx.send(f"🧪 Opened {thread.mention}. No DM sent — Draft DMs off or your DMs are closed.")
+
+
+async def _clear_test_lobby_threads(parent) -> None:
+    """Delete threads left by prior `!test lobby` runs so repeated previews don't pile up. Matched by the
+    test thread name, so real pod threads are never touched; sweeps active and recently archived threads."""
+    stale = [t for t in parent.threads if _TEST_LOBBY_THREAD_NAME in t.name]
+    try:
+        async for archived in parent.archived_threads(limit=100):
+            if _TEST_LOBBY_THREAD_NAME in archived.name:
+                stale.append(archived)
+    except discord.HTTPException:
+        pass
+    for thread in stale:
+        try:
+            await thread.delete()
+        except discord.HTTPException:
+            pass
+
+
+def _arena_handle_for(discord_id: str) -> str | None:
+    with SessionLocal() as session:
+        return player_arena_handle(session, discord_id)
+
+
+def _unlink_arena(discord_id: str) -> bool:
+    """Clear the caller's Arena handle and aliases so the unlinked Join Draft nudge can be replayed.
+    Returns whether anything was cleared."""
+    with SessionLocal() as session:
+        player = session.execute(
+            select(Player).where(Player.discord_id == discord_id)
+        ).scalar_one_or_none()
+        if player is None or (player.arena_name is None and not player.arena_aliases):
+            return False
+        player.arena_name = None
+        player.arena_aliases = []
+        session.commit()
+        return True
 
 
 async def _start_live_test_lobby(ctx) -> None:
@@ -720,7 +812,8 @@ _LINKED_EIGHT: list[tuple[str, str]] = [
 _VALID_STATES = (
     "empty", "partial", "linked", "unlinked", "ready", "notready", "cancelled", "left", "superseded",
     "readyunlinked", "readycancel",
-    "drafting", "complete", "submit", "podbracket", "podswiss", "podrandom", "podteam", "podlobby",
+    "drafting", "complete", "submit", "lobby", "lobbyopen", "dmlink", "unlink", "podbracket", "podswiss", "podrandom",
+    "podteam", "podlobby",
     "format", "seeding", "trophyhype", "round1", "round2", "round3", "voicelink", "review", "table",
     "teams", "teamstandings", "teamchamp", "teamhype", "teamvote", "linkpicker",
 )
@@ -928,8 +1021,13 @@ async def setup(bot: commands.Bot) -> None:
         """Owner-only. Render the pod-draft lobby embed in this channel.
 
         `state` ∈ empty | partial | linked | unlinked | ready | notready | cancelled | left | superseded |
-        readyunlinked | drafting | complete | submit | podbracket | podswiss | podrandom | podteam | podlobby |
-        format | seeding | trophyhype | round1 | round2 | round3 | voicelink | linkpicker.
+        readyunlinked | drafting | complete | submit | lobbyopen | podbracket | podswiss | podrandom | podteam |
+        podlobby | format | seeding | trophyhype | round1 | round2 | round3 | voicelink | linkpicker.
+        `lobbyopen` posts the real lobby-open message and its Join Draft button — click it to get the
+        ephemeral link with your Arena name pre-filled, or the Link Arena nudge when unlinked.
+        `dmlink` DMs you both lobby-open link DMs (linked + unlinked) and the opt-in test DM, so every
+        DM string can be reviewed in a real inbox without a live lobby. `unlink` clears your own Arena
+        handle so the unlinked Join Draft nudge can be replayed; re-link with the Link Arena button.
         `linkpicker` posts the Link Players picker on its own — pick a seat, the member dropdown and
         Confirm button appear below it, and the link commits only on Confirm.
         `podteam [6|8|10]` seeds a real team draft at that player count (default 6; seat 1 = you,
@@ -964,6 +1062,31 @@ async def setup(bot: commands.Bot) -> None:
             mode = _LIVE_POD_MODES[state]
             default_count = 6 if mode == "team" else 8
             await _start_live_test_pod(ctx, mode, int(extra) if extra else default_count)
+            return
+
+        if state == "lobby":
+            await _preview_full_lobby(ctx)
+            return
+
+        if state == "lobbyopen":
+            session_id = f"{active_set_code()}-TestOpen"
+            body = build_lobby_open_body(draftmancer_url_for(session_id), ctx.author.mention)
+            await ctx.send(
+                body, view=build_join_view(session_id),
+                allowed_mentions=discord.AllowedMentions(users=True),
+            )
+            return
+
+        if state == "dmlink":
+            await _preview_link_dms(ctx)
+            return
+
+        if state == "unlink":
+            cleared = await asyncio.to_thread(_unlink_arena, str(ctx.author.id))
+            await ctx.send(
+                "🧪 Arena unlinked — Join Draft now shows the unlinked nudge."
+                if cleared else "No linked Arena to clear.",
+            )
             return
 
         if state == "podlobby":

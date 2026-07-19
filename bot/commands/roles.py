@@ -7,6 +7,7 @@ derived from role names) and registered at startup so buttons keep dispatching a
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import discord
@@ -15,6 +16,8 @@ from discord.ext import commands
 
 from bot.commands import descriptions as desc
 from bot.config import settings
+from bot.database import SessionLocal
+from bot.discord_helpers import extract_avatar_hash
 from bot.services.ping_roles import (
     PING_ROLES,
     announce_onboarding_welcome,
@@ -22,6 +25,8 @@ from bot.services.ping_roles import (
     button_custom_id,
     display_emoji,
 )
+from bot.services.pod_drafts import dm_draft_link_enabled, toggle_dm_draft_link
+from bot.services.pod_link_dm import dm_pref_embed
 from bot.services.pod_roles import (
     consume_bot_umbrella_grant,
     find_role,
@@ -38,6 +43,9 @@ MSG_INTRO = "Toggle your notifications. Green means subscribed. Times shown in y
 MSG_NO_GUILD = "Run `/roles` in the server to manage your notifications."
 MSG_ROLE_MISSING = "That role isn't set up on the server. Ask an admin."
 MSG_ROLE_TOGGLE_FAILED = "Couldn't update that role. The bot is missing the Manage Roles permission."
+MSG_DM_PREF_LABEL = "Draft Link DMs"
+MSG_DM_PREF_LINE = "**Draft Link DMs:** your Draftmancer link when a Pod is ready to start"
+DM_PREF_CUSTOM_ID = "pod_dm_draft_link"
 
 
 class _RoleToggleButton(discord.ui.Button):
@@ -75,7 +83,34 @@ class _RoleToggleButton(discord.ui.Button):
                 held.add(POD_DRAFTERS_ROLE_NAME)
         if not new_state and self.role_name == POD_DRAFTERS_ROLE_NAME:
             held -= {spec.name for spec in PING_ROLES}
-        await interaction.response.edit_message(view=RolesView(held, guild, in_guild=interaction.guild is not None))
+        dm_opt_in = await asyncio.to_thread(_dm_opt_in_for, str(member.id))
+        await interaction.response.edit_message(
+            view=RolesView(held, guild, in_guild=interaction.guild is not None, dm_opt_in=dm_opt_in),
+        )
+
+
+class _DmPrefToggleButton(discord.ui.Button):
+    """Toggles the lobby-open link DM. Not a Discord role, so it reads and flips the DB preference
+    directly, re-renders the panel, and confirms the new state with an ephemeral embed."""
+
+    def __init__(self, held: bool) -> None:
+        super().__init__(
+            label=MSG_DM_PREF_LABEL,
+            emoji="✉️",
+            custom_id=DM_PREF_CUSTOM_ID,
+            style=discord.ButtonStyle.success if held else discord.ButtonStyle.secondary,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        user = interaction.user
+        avatar_hash = extract_avatar_hash(user)
+        new_state = await asyncio.to_thread(_toggle_dm_pref, str(user.id), user.name, user.display_name, avatar_hash)
+        member, guild = await _resolve_member(interaction)
+        held = {role.name for role in getattr(member, "roles", [])} if member else set()
+        await interaction.response.edit_message(
+            view=RolesView(held, guild, in_guild=interaction.guild is not None, dm_opt_in=new_state),
+        )
+        await interaction.followup.send(embed=dm_pref_embed(new_state), ephemeral=True)
 
 
 class RolesView(discord.ui.LayoutView):
@@ -84,6 +119,7 @@ class RolesView(discord.ui.LayoutView):
 
     def __init__(
         self, held: set[str] | None = None, guild: discord.Guild | None = None, *, in_guild: bool = True,
+        dm_opt_in: bool = True,
     ) -> None:
         super().__init__(timeout=None)
         held = held or set()
@@ -94,6 +130,9 @@ class RolesView(discord.ui.LayoutView):
             label = role.mention if role and in_guild else f"**{spec.name}:**"
             line = f"{label} {blurb_with_time(spec)}"
             self.add_item(discord.ui.Section(discord.ui.TextDisplay(line), accessory=button))
+        self.add_item(discord.ui.Section(
+            discord.ui.TextDisplay(MSG_DM_PREF_LINE), accessory=_DmPrefToggleButton(dm_opt_in),
+        ))
 
 
 async def _resolve_member(
@@ -111,6 +150,21 @@ async def _resolve_member(
         except discord.HTTPException:
             return None, None
     return member, guild
+
+
+def _dm_opt_in_for(discord_id: str) -> bool:
+    with SessionLocal() as session:
+        return dm_draft_link_enabled(session, discord_id)
+
+
+def _toggle_dm_pref(discord_id: str, username: str, display_name: str, avatar_hash: str | None) -> bool:
+    with SessionLocal() as session:
+        new_state = toggle_dm_draft_link(
+            session, discord_id=discord_id, discord_username=username, display_name=display_name,
+            avatar_hash=avatar_hash,
+        )
+        session.commit()
+        return new_state
 
 
 class Roles(commands.Cog):
@@ -153,8 +207,9 @@ class Roles(commands.Cog):
             await interaction.response.send_message(MSG_NO_GUILD, ephemeral=True)
             return
         held = {role.name for role in member.roles}
+        dm_opt_in = await asyncio.to_thread(_dm_opt_in_for, str(member.id))
         await interaction.response.send_message(
-            view=RolesView(held, guild, in_guild=interaction.guild is not None),
+            view=RolesView(held, guild, in_guild=interaction.guild is not None, dm_opt_in=dm_opt_in),
             ephemeral=(interaction.guild is not None),
             allowed_mentions=discord.AllowedMentions.none(),
         )

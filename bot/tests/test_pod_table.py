@@ -1,4 +1,5 @@
 import asyncio
+import re
 from datetime import date, datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
@@ -36,6 +37,13 @@ def _seed_source(session, *, name="MSH Pod Draft #8", set_code="MSH", pairing="s
     return source
 
 
+def _session_base(session_id: str) -> str:
+    """The readable base of a Draftmancer session id, asserting the unguessable 4-letter random tail."""
+    match = re.match(r"^(?P<base>.+)-(?P<suffix>[a-z]{4})$", session_id)
+    assert match is not None, f"{session_id!r} lacks a 4-letter suffix"
+    return match["base"]
+
+
 def test_table_base_name_strips_trailing_table():
     assert table_base_name("MSH Pod Draft #8 - Jun 8 - Table 2") == "MSH Pod Draft #8 - Jun 8"
     assert table_base_name("MSH Pod Draft #8 Table 2") == "MSH Pod Draft #8"
@@ -63,7 +71,7 @@ def test_record_table_event_clones_source_into_table_two(session):
     assert table_two.event_date == source.event_date
     assert table_two.pairing_mode == "swiss"
     assert table_two.seating_mode == "leaderboard"
-    assert table_two.draftmancer_session == "LLU-MSH-D8-T2"
+    assert _session_base(table_two.draftmancer_session) == "LLU-MSH-D8-T2"
 
 
 def test_second_table_advances_to_table_three(session):
@@ -74,7 +82,7 @@ def test_second_table_advances_to_table_three(session):
     table_three = record_table_event(session, source_event_id=source.id)
 
     assert table_three.name == "MSH Pod Draft #8 - Table 3"
-    assert table_three.draftmancer_session == "LLU-MSH-D8-T3"
+    assert _session_base(table_three.draftmancer_session) == "LLU-MSH-D8-T3"
 
 
 def test_table_off_a_table_bases_on_the_original_pod(session):

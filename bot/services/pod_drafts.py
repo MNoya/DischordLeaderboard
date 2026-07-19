@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import logging
 import re
+import secrets
+import string
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import NamedTuple, Sequence
+from urllib.parse import quote
 
 from sqlalchemy import any_, delete, func, select
 from sqlalchemy.orm import Session
@@ -83,11 +86,32 @@ def _lookup_set_id(session: Session, set_code: str) -> str | None:
     ).scalar_one_or_none()
 
 
+_SESSION_SUFFIX_LEN = 4
+
+
+def _session_suffix() -> str:
+    """Random lowercase tail that makes a Draftmancer session id unguessable, so nobody can enter and
+    seize lobby ownership before the bot connects, and no two pods ever share a session."""
+    return "".join(secrets.choice(string.ascii_lowercase) for _ in range(_SESSION_SUFFIX_LEN))
+
+
+def _session_id_off_base(session: Session, base: str) -> str:
+    """A `<base>-<rand4>` session id not already taken by another event with the same base."""
+    taken = set(session.execute(
+        select(PodDraftEvent.draftmancer_session).where(PodDraftEvent.draftmancer_session.like(f"{base}-%"))
+    ).scalars().all())
+    while True:
+        candidate = f"{base}-{_session_suffix()}"
+        if candidate not in taken:
+            return candidate
+
+
 def _build_draftmancer_session(session: Session, parsed: ParsedSeshEvent) -> str:
-    """Compose a stable session id; prefer #N from the title, fall back to Month-Day; suffix collisions A/B/C.
+    """Compose a session id with a readable base and an unguessable random tail; prefer #N from the
+    title, fall back to Month-Day.
 
     Custom formats drop the LLU prefix and lead with their own slug instead of a set code. The Set
-    Championship gets a fixed `-Championship` base so its lobby URL stays clean across re-creates.
+    Championship leads with a `-Championship` base.
     """
     slug = pod_format.session_slug_for(parsed.set_code)
     if slug is not None:
@@ -103,20 +127,7 @@ def _build_draftmancer_session(session: Session, parsed: ParsedSeshEvent) -> str
     else:
         base = f"{head}-{parsed.event_date:%b}-{parsed.event_date.day}"
 
-    taken = set(session.execute(
-        select(PodDraftEvent.draftmancer_session).where(PodDraftEvent.draftmancer_session.like(f"{base}%"))
-    ).scalars().all())
-    if base not in taken:
-        return base
-    for i in range(26):
-        candidate = f"{base}-{chr(ord('A') + i)}"
-        if candidate not in taken:
-            return candidate
-    # >26 collisions is implausible; fall back to a numeric suffix beyond Z
-    n = 27
-    while f"{base}-{n}" in taken:
-        n += 1
-    return f"{base}-{n}"
+    return _session_id_off_base(session, base)
 
 
 _ARENA_ID_RE = re.compile(r"#[0-9?]+$")
@@ -378,6 +389,55 @@ def full_arena_handle(name: str | None) -> bool:
     return "#" in (name or "")
 
 
+def dm_draft_link_enabled(session: Session, discord_id: str) -> bool:
+    """Whether `discord_id` receives the lobby-open link DM. Defaults on for a player with no row yet,
+    matching the column default, so a drafter who never touched `/roles` still gets the DM."""
+    enabled = session.execute(
+        select(Player.dm_draft_link).where(Player.discord_id == discord_id)
+    ).scalar_one_or_none()
+    return True if enabled is None else enabled
+
+
+def set_dm_draft_link(
+    session: Session, *, discord_id: str, discord_username: str, display_name: str,
+    avatar_hash: str | None, enabled: bool,
+) -> None:
+    """Persist the lobby-open DM preference, creating a lightweight player row when none exists so an
+    onboarding-only member's choice sticks. Mirrors the row `attach_arena_alias` seeds, minus the handle."""
+    player = session.execute(
+        select(Player).where(Player.discord_id == discord_id)
+    ).scalar_one_or_none()
+    if player is None:
+        taken_slugs = set(session.execute(select(Player.slug)).scalars().all())
+        player = Player(
+            slug=disambiguate_slug(slugify(display_name), taken_slugs),
+            discord_id=discord_id,
+            discord_username=discord_username,
+            display_name=display_name,
+            avatar_hash=avatar_hash,
+            active=True,
+            leaderboard_opt_in=False,
+            dm_draft_link=enabled,
+        )
+        session.add(player)
+    else:
+        player.dm_draft_link = enabled
+    session.flush()
+
+
+def toggle_dm_draft_link(
+    session: Session, *, discord_id: str, discord_username: str, display_name: str, avatar_hash: str | None,
+) -> bool:
+    """Flip the DM preference off its stored value and return the new state, creating a lightweight row
+    when none exists. Shared by the `/roles` toggle and the in-DM toggle button so they can't drift."""
+    new_state = not dm_draft_link_enabled(session, discord_id)
+    set_dm_draft_link(
+        session, discord_id=discord_id, discord_username=discord_username, display_name=display_name,
+        avatar_hash=avatar_hash, enabled=new_state,
+    )
+    return new_state
+
+
 def player_arena_handle(session: Session, discord_id: str) -> str | None:
     """The full Arena handle stored for `discord_id`, or None when the player is unknown or holds only
     a bare Draftmancer nickname. Drives the welcome's link gate and the returning card's handle line."""
@@ -428,22 +488,10 @@ def record_mock_event(
 
 
 def build_ondemand_session(session: Session, set_code: str, event_date: date) -> str:
-    """`LLU-<SET>-<Mon>-<Day>` for a poll/queue-born pod, suffixing A/B/… on collision so two
-    on-demand pods the same day never share a Draftmancer lobby."""
+    """`LLU-<SET>-<Mon>-<Day>-<rand4>` for a poll/queue-born pod. The random tail keeps the session id
+    unguessable so nobody can seize lobby ownership before the bot, and no two pods share a lobby."""
     base = f"{settings.pod_draft_session_prefix}-{set_code.upper()}-{event_date:%b}-{event_date.day}"
-    taken = set(session.execute(
-        select(PodDraftEvent.draftmancer_session).where(PodDraftEvent.draftmancer_session.like(f"{base}%"))
-    ).scalars().all())
-    if base not in taken:
-        return base
-    for i in range(26):
-        candidate = f"{base}-{chr(ord('A') + i)}"
-        if candidate not in taken:
-            return candidate
-    n = 27
-    while f"{base}-{n}" in taken:
-        n += 1
-    return f"{base}-{n}"
+    return _session_id_off_base(session, base)
 
 
 def record_ondemand_event(
@@ -490,21 +538,10 @@ def next_table_index(session: Session, base_name: str) -> int:
 
 
 def build_table_session(session: Session, source_session_id: str, table_index: int) -> str:
-    """`<source session>-T<index>`, suffixing A/B/… on collision so re-creates never share a lobby."""
+    """`<source session>-T<index>-<rand4>` for a second table off a pod. The random tail keeps it
+    unguessable and unshared even to players who know the source lobby's id."""
     base = f"{source_session_id}-T{table_index}"
-    taken = set(session.execute(
-        select(PodDraftEvent.draftmancer_session).where(PodDraftEvent.draftmancer_session.like(f"{base}%"))
-    ).scalars().all())
-    if base not in taken:
-        return base
-    for i in range(26):
-        candidate = f"{base}-{chr(ord('A') + i)}"
-        if candidate not in taken:
-            return candidate
-    n = 27
-    while f"{base}-{n}" in taken:
-        n += 1
-    return f"{base}-{n}"
+    return _session_id_off_base(session, base)
 
 
 def record_table_event(session: Session, *, source_event_id: str) -> PodDraftEvent:
@@ -548,10 +585,15 @@ def preview_table_target_sync(source_event_id: str) -> tuple[str, int] | None:
         return base, next_table_index(session, base)
 
 
-def draftmancer_url_for(session_id: str) -> str:
+def draftmancer_url_for(session_id: str, user_name: str | None = None) -> str:
     """Compose the player-facing session URL from current settings at send time, so a host change
-    reaches already-recorded events instead of fossilizing in the row."""
-    return f"{settings.draftmancer_web_url}/?session={session_id}"
+    reaches already-recorded events instead of fossilizing in the row. A `user_name` appends
+    `&userName=`, which Draftmancer reads to pre-fill the lobby name so pairing resolves without the
+    player renaming by hand."""
+    url = f"{settings.draftmancer_web_url}/?session={session_id}"
+    if user_name:
+        url += f"&userName={quote(user_name, safe='')}"
+    return url
 
 
 def record_event(session: Session, parsed: ParsedSeshEvent) -> PodDraftEvent:

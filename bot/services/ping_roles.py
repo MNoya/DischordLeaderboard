@@ -8,6 +8,7 @@ when a name moves to `aliases`. To rename a role, set the new `name` and list th
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from dataclasses import dataclass
@@ -21,13 +22,20 @@ from bot.commands.messages import (
     MSG_ARENA_HANDLE_LINE,
     MSG_ARENA_LINK_CTA,
     MSG_ARENA_LINKED,
+    MSG_JOIN_LINE,
     MSG_POD_ROLE_GRANTED,
     MSG_POD_WELCOME,
 )
 from bot.commands.pod_guide import render_pod_guide_embed_body
 from bot.database import SessionLocal
 from bot.discord_helpers import extract_avatar_hash, post_welcome, send_welcome
-from bot.services.pod_drafts import attach_arena_alias, player_arena_handle
+from bot.services.pod_active_lobby import active_lobby_link_for
+from bot.services.pod_drafts import (
+    attach_arena_alias,
+    dm_draft_link_enabled,
+    draftmancer_url_for,
+    player_arena_handle,
+)
 from bot.services.pod_schedule import (
     EARLY_POD_ROLE_NAME,
     LATE_POD_ROLE_NAME,
@@ -252,11 +260,44 @@ class _ManageRolesButton(discord.ui.Button):
         from bot.commands.roles import RolesView
 
         held = {role.name for role in getattr(interaction.user, "roles", [])}
+        dm_opt_in = await asyncio.to_thread(_dm_opt_in_for, str(interaction.user.id))
         await interaction.response.send_message(
-            view=RolesView(held, interaction.guild, in_guild=interaction.guild is not None),
+            view=RolesView(held, interaction.guild, in_guild=interaction.guild is not None, dm_opt_in=dm_opt_in),
             ephemeral=True,
             allowed_mentions=discord.AllowedMentions.none(),
         )
+
+
+def _dm_opt_in_for(discord_id: str) -> bool:
+    with SessionLocal() as session:
+        return dm_draft_link_enabled(session, discord_id)
+
+
+async def submit_arena_link(interaction: discord.Interaction, arena_name: str) -> str | None:
+    """Validate and store an Arena handle from a modal, replying only on rejection (bad format or
+    collision). Returns the linked handle on success without a response, so the caller owns the success
+    reply — the in-channel announcement, or a DM's in-place re-render. Shared so validation can't drift."""
+    if not _ARENA_HANDLE_RE.match(arena_name):
+        await interaction.response.send_message(MSG_ARENA_BAD_FORMAT, ephemeral=True)
+        return None
+    with SessionLocal() as session:
+        player_id, collision_id = attach_arena_alias(
+            session,
+            discord_id=str(interaction.user.id),
+            discord_username=interaction.user.name,
+            display_name=interaction.user.display_name,
+            avatar_hash=extract_avatar_hash(interaction.user),
+            arena_name=arena_name,
+            overwrite=True,
+        )
+        if collision_id is not None:
+            await interaction.response.send_message(
+                MSG_ARENA_COLLISION.format(arena_name=arena_name), ephemeral=True,
+            )
+            return None
+        session.commit()
+    log.info(f"pod-welcome-link: {interaction.user} linked {arena_name} (player_id={player_id})")
+    return arena_name
 
 
 class _LinkArenaModal(discord.ui.Modal, title="Link Arena Handle"):
@@ -268,34 +309,62 @@ class _LinkArenaModal(discord.ui.Modal, title="Link Arena Handle"):
         required=True,
     )
 
+    def __init__(self, after_link=None) -> None:
+        super().__init__()
+        self.after_link = after_link
+
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        arena_name = str(self.handle.value).strip()
-        if not _ARENA_HANDLE_RE.match(arena_name):
-            await interaction.response.send_message(MSG_ARENA_BAD_FORMAT, ephemeral=True)
+        arena_name = await submit_arena_link(interaction, str(self.handle.value).strip())
+        if arena_name is None:
             return
-        with SessionLocal() as session:
-            player_id, collision_id = attach_arena_alias(
-                session,
-                discord_id=str(interaction.user.id),
-                discord_username=interaction.user.name,
-                display_name=interaction.user.display_name,
-                avatar_hash=extract_avatar_hash(interaction.user),
-                arena_name=arena_name,
-                overwrite=True,
-            )
-            if collision_id is not None:
-                await interaction.response.send_message(
-                    MSG_ARENA_COLLISION.format(arena_name=arena_name), ephemeral=True,
-                )
-                return
-            session.commit()
-        log.info(f"pod-welcome-link: {interaction.user} linked {arena_name} (player_id={player_id})")
+        if self.after_link is not None:
+            await self.after_link(interaction, arena_name)
+            return
         await interaction.response.send_message(
             MSG_ARENA_LINKED.format(
                 emoji=emojis.get("mtga"), mention=interaction.user.mention, arena_name=arena_name,
             ),
             allowed_mentions=discord.AllowedMentions(users=False, everyone=False, roles=False),
         )
+        await _handoff_active_lobby_link(interaction)
+
+
+def format_join_line(session_id: str, arena_name: str) -> str:
+    """The one-line join call to action shared by the lobby DM, the in-thread Join Draft reply, and the
+    post-link handoff: the personalized Draftmancer link plus the Arena identity, mtga emoji first when
+    the app emoji resolves."""
+    emoji = emojis.get("mtga")
+    identity = f"{emoji} **{arena_name}**" if emoji else f"**{arena_name}**"
+    return MSG_JOIN_LINE.format(url=draftmancer_url_for(session_id, arena_name), identity=identity)
+
+
+async def _handoff_active_lobby_link(interaction: discord.Interaction) -> None:
+    """Right after a link, hand back the personalized session link for a live lobby the player is in, so
+    linking from the Join Draft nudge (or anywhere during a lobby) needs no second Join Draft click."""
+    lobby = active_lobby_link_for(str(interaction.user.id))
+    if lobby is None:
+        return
+    session_id, arena_name = lobby
+    await interaction.followup.send(format_join_line(session_id, arena_name), ephemeral=True)
+
+
+def build_link_arena_button() -> discord.ui.Button:
+    """The registered Link Arena button, for embedding in the Join Draft nudge and the unlinked lobby
+    DM. Shares the registered custom_id so clicks dispatch after a restart."""
+    return _LinkArenaButton()
+
+
+def build_link_arena_view() -> discord.ui.View:
+    view = discord.ui.View(timeout=None)
+    view.add_item(build_link_arena_button())
+    return view
+
+
+def build_link_arena_modal(after_link=None) -> discord.ui.Modal:
+    """The Link Arena modal with an optional `after_link(interaction, arena_name)` step run on a
+    successful link in place of the default in-channel announcement — the lobby DM uses it to re-render
+    itself with the personalized link."""
+    return _LinkArenaModal(after_link=after_link)
 
 
 async def _linked_arena_handle(discord_id: str) -> str | None:

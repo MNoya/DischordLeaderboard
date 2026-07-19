@@ -239,6 +239,8 @@ class PodDraftManager:
         self.desired_seating: list[str] | None = None
         self.bot_user_id: str | None = None
         self.owner_claimed = False
+        self.is_owner = False
+        self.ownership_ready = asyncio.Event()
         self._closed = False
         self.ready_check_active = False
         self.ready_users: set[str] = set()
@@ -478,9 +480,18 @@ class PodDraftManager:
         try:
             await self.sio.emit("setSessionOwner", self.bot_user_id)
             await asyncio.sleep(0.3)
+            self.is_owner = await self._enable_spectators_and_share_link()
+            if not self.is_owner:
+                log.error(f"[LIFECYCLE] ownership_lost event={self.event_id} bot_user={self.bot_user_id}")
+                await bot_log_mod.get(self.bot).post(
+                    f"Bot did not hold Draftmancer ownership for event `{self.event_id}`. Owner-only "
+                    f"settings were not applied and the lobby may be misconfigured. Check the session.",
+                    fingerprint=f"ownership_lost:{self.event_id}",
+                    tag="LIFECYCLE",
+                )
+                return
             await self._emit_session_settings()
             await self.apply_seating_mode()
-            await self._enable_spectators_and_share_link()
             log.info(f"[LIFECYCLE] ownership_applied event={self.event_id} bot_user={self.bot_user_id}")
         except Exception:
             log.exception(f"[LIFECYCLE] ownership_failed event={self.event_id}")
@@ -489,6 +500,18 @@ class PodDraftManager:
                 fingerprint=f"ownership_failed:{self.event_id}",
                 tag="LIFECYCLE",
             )
+        finally:
+            self.ownership_ready.set()
+
+    async def await_ownership(self, timeout_s: float = 10.0) -> bool:
+        """Block until the ownership claim resolves so a launch path reveals the Draftmancer link only
+        after the bot holds the empty session. Returns whether the bot became owner."""
+        try:
+            await asyncio.wait_for(self.ownership_ready.wait(), timeout=timeout_s)
+        except asyncio.TimeoutError:
+            log.warning(f"[LIFECYCLE] ownership_wait_timeout event={self.event_id}")
+            return False
+        return self.is_owner
 
     async def _emit_session_settings(self) -> None:
         await self._emit_format()
@@ -523,19 +546,23 @@ class PodDraftManager:
         moment the draft ends. Tournament pods stay 'delayed' so the table can't be scouted mid-event."""
         return "everyone" if self.kind == "mock" else "delayed"
 
-    async def _enable_spectators_and_share_link(self) -> None:
+    async def _enable_spectators_and_share_link(self) -> bool:
+        """Enable spectators and store the spectate link. Doubles as the ownership probe: the ack carries
+        a spectateKey only when the bot holds the session, so a missing key means ownership was lost."""
         result = await self._emit_with_ack("setAllowSpectators", True)
         spectate_key = result.get("spectateKey") if isinstance(result, dict) else None
         if not spectate_key:
             error_text = _ack_error_text(result)
             log.warning(f"[LIFECYCLE] spectators.enable_failed event={self.event_id} error={error_text!r}")
-            return
+            return False
+        self.is_owner = True
         self.spectate_url = f"{self.draftmancer_url}&spectate={spectate_key}"
         if self.reconnect:
-            return
+            return True
         await self._refresh_lobby_status()
         log.info(f"[LIFECYCLE] spectators.enabled event={self.event_id}")
         notify_seeding_repost(self.bot, self.event_id)
+        return True
 
     async def _emit_format(self) -> str | None:
         """
@@ -912,7 +939,7 @@ class PodDraftManager:
                     self.lobby_status_message = adopted
                     log.info(f"[LIFECYCLE] rehydrate_lobby.adopted_card event={self.event_id} msg={adopted.id}")
             if self.lobby_status_message is None:
-                if not suppress_empty_reconnect:
+                if not suppress_empty_reconnect and (self.is_owner or self.reconnect):
                     try:
                         self.lobby_status_message = await thread.send(embed=embed, view=view)
                         try:

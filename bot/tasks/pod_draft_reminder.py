@@ -18,14 +18,17 @@ from discord.ext import commands
 from sqlalchemy import select
 
 from bot import emojis
-from bot.commands.messages import MSG_LOBBY_HEADLINE_NOW, MSG_LOBBY_HEADLINE_SOON, MSG_LOBBY_OPEN
+from bot.commands.messages import MSG_LOBBY_HEADLINE, MSG_LOBBY_OPEN
 from bot.config import settings
 from bot.database import SessionLocal
+from bot.discord_helpers import BLANK_LINE
 from bot.models import PodDraftEvent, PodSignal, PodSignalMember
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_signals import RSVP_MAYBE, RSVP_YES
 from bot.services.pod_draft_manager import start_manager
 from bot.services.pod_drafts import draftmancer_url_for
+from bot.services.pod_join_button import build_join_view
+from bot.services.pod_link_dm import send_lobby_link_dms
 from bot.services.sesh_parser import parse_sesh_embed
 
 
@@ -77,12 +80,23 @@ async def fire_reminder(event_id: str, *, early: bool = False) -> None:
     mention_block = await _resolve_mentions(thread.guild, attendees) if attendees else ""
     expected_attendee_count = len(attendees)
 
-    body = build_lobby_open_body(
-        draftmancer_url, mention_block, imminent_minutes=None if early else REMINDER_LEAD_MIN,
+    manager = await start_manager(
+        _bot, event_id, draftmancer_session, thread_id, set_code, expected_attendee_count,
+        event_name=event_name,
+        draftmancer_url=draftmancer_url,
+        rsvps_yes=list(attendees),
+        rsvps_maybe=list(maybe_attendees),
     )
+    if manager is not None:
+        await manager.await_ownership()
+
+    body = build_lobby_open_body(draftmancer_url, mention_block)
     log.info(f"fire_reminder body repr for {event_id} (early={early}): {body!r}")
     try:
-        await thread.send(body, allowed_mentions=discord.AllowedMentions(users=True))
+        await thread.send(
+            body, view=build_join_view(draftmancer_session),
+            allowed_mentions=discord.AllowedMentions(users=True),
+        )
     except discord.HTTPException:
         log.warning(f"fire_reminder: could not post in thread {thread_id}", exc_info=True)
         return
@@ -94,6 +108,11 @@ async def fire_reminder(event_id: str, *, early: bool = False) -> None:
             event.socket_status = "reminded"
             session.commit()
 
+    recipients = await _link_dm_recipients(thread.guild, attendees, maybe_attendees)
+    await send_lobby_link_dms(
+        _bot, session_id=draftmancer_session, thread=thread, recipients=recipients,
+    )
+
     if early:
         scheduler = getattr(_bot, "pod_scheduler", None)
         if scheduler is not None:
@@ -102,14 +121,6 @@ async def fire_reminder(event_id: str, *, early: bool = False) -> None:
                 log.info(f"early-open cancelled pending reminder job for {event_id}")
             except Exception:
                 log.info(f"no pending reminder job to cancel for {event_id}", exc_info=True)
-
-    await start_manager(
-        _bot, event_id, draftmancer_session, thread_id, set_code, expected_attendee_count,
-        event_name=event_name,
-        draftmancer_url=draftmancer_url,
-        rsvps_yes=list(attendees),
-        rsvps_maybe=list(maybe_attendees),
-    )
 
 
 def schedule_roster_reminder(scheduler, event_id: str, event_time: datetime) -> None:
@@ -385,6 +396,20 @@ async def _resolve_attendee_names(guild: discord.Guild | None, attendees: Sequen
     return resolved
 
 
+async def _link_dm_recipients(
+    guild: discord.Guild | None, yes_tokens: Sequence[str], maybe_tokens: Sequence[str],
+) -> list[tuple[str, str, str]]:
+    """(discord_id, display_name, rsvp) for the sesh attendees the link DM can reach. Sesh tokens that
+    aren't `<@id>` mentions carry no id, so they drop out — the DM can't find them anyway."""
+    recipients: list[tuple[str, str, str]] = []
+    for rsvp, tokens in (("yes", yes_tokens), ("maybe", maybe_tokens)):
+        for token in tokens:
+            member = await _member_from_mention(guild, token)
+            if member is not None:
+                recipients.append((str(member.id), member.display_name, rsvp))
+    return recipients
+
+
 async def _member_from_mention(guild: discord.Guild | None, token: str) -> discord.Member | None:
     if guild is None:
         return None
@@ -401,19 +426,16 @@ async def _member_from_mention(guild: discord.Guild | None, token: str) -> disco
         return None
 
 
-def build_lobby_open_body(
-    draftmancer_url: str, mention_block: str, *, imminent_minutes: int | None = None,
-) -> str:
+def build_lobby_open_body(draftmancer_url: str, mention_block: str) -> str:
     """The lobby-open post shared by sesh reminders (fire_reminder) and bot-native opens
-    (open_ondemand_lobby). `imminent_minutes` set → 'starts in N minutes'; None → 'opening now'."""
-    if imminent_minutes is None:
-        headline = MSG_LOBBY_HEADLINE_NOW
-    else:
-        headline = MSG_LOBBY_HEADLINE_SOON.format(minutes=imminent_minutes)
+    (open_ondemand_lobby). The lobby is joinable the moment the link posts and the start is gated on the
+    ready-check, so the headline is 'Lobby opened' in every path, with no countdown."""
     mentions = f"\n\n{mention_block}" if mention_block else ""
-    return MSG_LOBBY_OPEN.format(
-        draftmancer=emojis.get("draftmancer"), headline=headline, url=draftmancer_url, mentions=mentions,
+    body = MSG_LOBBY_OPEN.format(
+        draftmancer=emojis.get("draftmancer"), headline=MSG_LOBBY_HEADLINE, url=draftmancer_url,
+        mentions=mentions,
     )
+    return f"{body}\n{BLANK_LINE}"
 
 
 def build_roster_embed(

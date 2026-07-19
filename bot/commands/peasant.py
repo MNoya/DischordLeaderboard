@@ -7,7 +7,7 @@ import discord
 from discord.ext import commands
 
 from bot import emojis
-from bot.discord_helpers import NBSP, ZWSP
+from bot.discord_helpers import BLANK_LINE, NBSP
 from bot.services.pod_format import PEASANT_CODE, cube_id_for
 
 EM_SPACE = "\u2003"
@@ -75,4 +75,4 @@ def _cube_message(link: CubeLink, owner_mention: str) -> str:
             f"📝{NBSP}[{bold_underline('Changelog')}](<https://cubecobra.com/cube/about/{cube_id}?view=blog>)",
         )
     )
-    return f"{overview_link}\n\n{shortcuts}\n{NBSP}{ZWSP}"
+    return f"{overview_link}\n\n{shortcuts}\n{BLANK_LINE}"

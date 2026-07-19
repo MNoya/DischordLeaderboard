@@ -143,6 +143,34 @@ def test_max_players_rejected_below_current_occupancy():
     assert mgr.max_players == before
 
 
+def test_await_ownership_returns_true_once_claim_marks_owner():
+    mgr = _manager()
+    mgr.is_owner = True
+    mgr.ownership_ready.set()
+
+    result = asyncio.run(mgr.await_ownership(timeout_s=1.0))
+
+    assert result is True
+
+
+def test_await_ownership_returns_false_when_claim_resolved_without_ownership():
+    mgr = _manager()
+    mgr.is_owner = False
+    mgr.ownership_ready.set()
+
+    result = asyncio.run(mgr.await_ownership(timeout_s=1.0))
+
+    assert result is False
+
+
+def test_await_ownership_times_out_when_claim_never_resolves():
+    mgr = _manager()
+
+    result = asyncio.run(mgr.await_ownership(timeout_s=0.05))
+
+    assert result is False
+
+
 def _manager() -> PodDraftManager:
     mgr = PodDraftManager(object(), "evt", "sid", 123, "SOS", 8)
     mgr.sio = _FakeSio()

@@ -956,6 +956,15 @@ async def open_ondemand_lobby(bot: commands.Bot, event_id: str) -> None:
         return
 
     mention_block = " ".join(f"<@{did}>" for did, _ in roster)
+
+    manager = await start_manager(
+        bot, event_id, session_id, thread_id, set_code, len(display_names),
+        event_name=event_name, draftmancer_url=draftmancer_url,
+        rsvps_yes=display_names, rsvps_maybe=maybe_names,
+    )
+    if manager is not None:
+        await manager.await_ownership()
+
     body = build_lobby_open_body(draftmancer_url, mention_block)
     try:
         await thread.send(
@@ -978,14 +987,9 @@ async def open_ondemand_lobby(bot: commands.Bot, event_id: str) -> None:
         + [(did, name, "maybe") for did, name in maybe_roster]
     )
     await send_lobby_link_dms(
-        bot, event_name=event_name, session_id=session_id, thread=thread, recipients=recipients,
+        bot, session_id=session_id, thread=thread, recipients=recipients,
     )
 
-    manager = await start_manager(
-        bot, event_id, session_id, thread_id, set_code, len(display_names),
-        event_name=event_name, draftmancer_url=draftmancer_url,
-        rsvps_yes=display_names, rsvps_maybe=maybe_names,
-    )
     if manager is not None:
         manager.arm_team_vote_offer(len(display_names))
         pick_timer = await asyncio.to_thread(scheduled_pick_timer_for_event_sync, event_id)

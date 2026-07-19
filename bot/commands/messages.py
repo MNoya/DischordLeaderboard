@@ -31,12 +31,37 @@ MSG_BOT_RECONNECTED = "🤖 Bot reconnected — back to managing the lobby."
 
 MSG_LOBBY_OPEN = (
     "{draftmancer} {headline}\n"
-    "**Join the Draftmancer session:** <{url}>\n"
-    "Set your Arena Name (e.g., `ArenaID#12345`) as your name in Draftmancer so pairings work smoothly."
+    "**Join the Draftmancer session:** <{url}>\n\n"
+    "Set your **Arena name** (like `YourName#12345`) as your Draftmancer name or use **Join Draft** "
+    "below for your personal link."
     "{mentions}"
 )
-MSG_LOBBY_HEADLINE_NOW = "Lobby opening now!"
-MSG_LOBBY_HEADLINE_SOON = "Pod Draft starts in {minutes} minutes!"
+MSG_JOIN_DRAFT_BUTTON = "Join Draft"
+MSG_JOIN_LINE = (
+    "Open this [**Draftmancer Link**](<{url}>) to join the draft as {identity}"
+)
+MSG_LINK_ARENA_PROMPT = "Please click **Link Arena** below so the bot recognizes you."
+
+MSG_DM_RSVP_YES = "✅ You replied **Yes** to {thread}"
+MSG_DM_RSVP_MAYBE = "🤷 You replied **Maybe** to {thread}"
+MSG_DM_LOBBY_HEADER = "🔔 **Pod Draft Ready Check**"
+MSG_DM_LOBBY_LINK = (
+    MSG_DM_LOBBY_HEADER + "\n\n"
+    "{rsvp}\n\n"
+    "{join_line}"
+)
+MSG_DM_LOBBY_LINK_UNLINKED = (
+    MSG_DM_LOBBY_HEADER + "\n\n"
+    "{rsvp}\n\n"
+    + MSG_LINK_ARENA_PROMPT
+)
+MSG_DM_NOTIFY_TOGGLE_LABEL = "Draft DMs"
+MSG_DM_NOTIFY_HINT = "-# Manage your notifications with this button or with `/roles`"
+MSG_DM_PREF_ON_TITLE = "🔔 Draft DMs On"
+MSG_DM_PREF_ON_BODY = "You'll get your Draftmancer link by DM when a Pod Draft is ready"
+MSG_DM_PREF_OFF_TITLE = "🔕 Draft DMs Off"
+MSG_DM_PREF_OFF_BODY = "You won't get your Draftmancer link by DM anymore.\nRun `/roles` to manage your notifications."
+MSG_LOBBY_HEADLINE = "Lobby opened!"
 MSG_DRAFTMANCER_LINK_LEAD = "Draftmancer link will be posted {lead} minutes before."
 
 MSG_DRAFT_STARTED_ANNOUNCE = "{name} started!"

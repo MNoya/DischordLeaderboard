@@ -1,3 +1,4 @@
+import re
 from datetime import date, datetime, timedelta, timezone
 
 import pytest
@@ -11,6 +12,8 @@ from bot.services.pod_drafts import (
     ParsedSeshEvent,
     active_event_for_discord_user_in_dm,
     capture_deck_screenshot,
+    dm_draft_link_enabled,
+    draftmancer_url_for,
     finalize_champion,
     get_participant_deck_state,
     is_championship,
@@ -20,10 +23,21 @@ from bot.services.pod_drafts import (
     record_event,
     record_match,
     seed_event_participants,
+    set_dm_draft_link,
     set_participant_deck_colors,
     update_event_time_if_changed,
     upsert_participant,
 )
+
+
+_SESSION_RE = re.compile(r"^(?P<base>.+)-(?P<suffix>[a-z]{4})$")
+
+
+def _session_base(session_id: str) -> str:
+    """The readable base of a Draftmancer session id, asserting the unguessable 4-letter random tail."""
+    match = _SESSION_RE.match(session_id)
+    assert match is not None, f"{session_id!r} lacks a 4-letter suffix"
+    return match["base"]
 
 
 def _seed_set(session, code="SOS"):
@@ -69,7 +83,7 @@ def test_record_event_persists_and_links_known_attendees(session, monkeypatch):
     event = record_event(session, _parsed_event(attendees=("Alice", "Stranger")))
 
     assert event.socket_status == "pending"
-    assert event.draftmancer_session == "LLU-SOS-May-13"
+    assert _session_base(event.draftmancer_session) == "LLU-SOS-May-13"
     assert event.set_id is not None
 
     participants = session.execute(
@@ -80,15 +94,15 @@ def test_record_event_persists_and_links_known_attendees(session, monkeypatch):
     assert by_name["Stranger"].player_id is None
 
 
-def test_record_event_same_day_collision_appends_letter_suffix(session, monkeypatch):
+def test_record_event_same_day_pods_share_base_but_get_distinct_sessions(session, monkeypatch):
     monkeypatch.setattr(settings, "pod_draft_session_prefix", "LLU")
     _seed_set(session)
     e1 = record_event(session, _parsed_event(attendees=()))
     e2 = record_event(session, _parsed_event(attendees=()))
     e3 = record_event(session, _parsed_event(attendees=()))
-    assert e1.draftmancer_session == "LLU-SOS-May-13"
-    assert e2.draftmancer_session == "LLU-SOS-May-13-A"
-    assert e3.draftmancer_session == "LLU-SOS-May-13-B"
+    sessions = [e1.draftmancer_session, e2.draftmancer_session, e3.draftmancer_session]
+    assert [_session_base(s) for s in sessions] == ["LLU-SOS-May-13"] * 3
+    assert len(set(sessions)) == 3
 
 
 def test_is_championship_detects_name_case_insensitively():
@@ -106,7 +120,7 @@ def test_record_event_championship_uses_fixed_session_and_leaderboard_seats(sess
 
     event = record_event(session, _parsed_event(attendees=(), name="SOS Community Championship Pod Draft"))
 
-    assert event.draftmancer_session == "LLU-SOS-Championship"
+    assert _session_base(event.draftmancer_session) == "LLU-SOS-Championship"
     assert event.seating_mode == "leaderboard"
 
 
@@ -117,8 +131,9 @@ def test_record_event_championship_session_collision_appends_suffix(session, mon
     e1 = record_event(session, _parsed_event(attendees=(), name="SOS Championship"))
     e2 = record_event(session, _parsed_event(attendees=(), name="SOS Championship"))
 
-    assert e1.draftmancer_session == "LLU-SOS-Championship"
-    assert e2.draftmancer_session == "LLU-SOS-Championship-A"
+    assert _session_base(e1.draftmancer_session) == "LLU-SOS-Championship"
+    assert _session_base(e2.draftmancer_session) == "LLU-SOS-Championship"
+    assert e1.draftmancer_session != e2.draftmancer_session
 
 
 def test_record_event_with_event_number_uses_n_in_session(session, monkeypatch):
@@ -126,29 +141,31 @@ def test_record_event_with_event_number_uses_n_in_session(session, monkeypatch):
     _seed_set(session)
     e1 = record_event(session, _parsed_event(attendees=(), event_number=10))
     e2 = record_event(session, _parsed_event(attendees=(), event_number=10))
-    assert e1.draftmancer_session == "LLU-SOS-10"
-    assert e2.draftmancer_session == "LLU-SOS-10-A"
+    assert _session_base(e1.draftmancer_session) == "LLU-SOS-10"
+    assert _session_base(e2.draftmancer_session) == "LLU-SOS-10"
+    assert e1.draftmancer_session != e2.draftmancer_session
 
 
 def test_record_event_custom_format_uses_slug_and_drops_prefix(session, monkeypatch):
     monkeypatch.setattr(settings, "pod_draft_session_prefix", "LLU")
     event = record_event(session, _parsed_event(set_code="PEASANT", attendees=(), event_number=4))
-    assert event.draftmancer_session == "Peasant-26-D4"
+    assert _session_base(event.draftmancer_session) == "Peasant-26-D4"
     assert event.format_label == "Peasant Cube"
 
 
 def test_record_event_custom_format_falls_back_to_month_day(session, monkeypatch):
     monkeypatch.setattr(settings, "pod_draft_session_prefix", "LLU")
     event = record_event(session, _parsed_event(set_code="PEASANT", attendees=()))
-    assert event.draftmancer_session == "Peasant-26-May-13"
+    assert _session_base(event.draftmancer_session) == "Peasant-26-May-13"
 
 
-def test_record_event_custom_format_collision_appends_letter_suffix(session, monkeypatch):
+def test_record_event_custom_format_same_number_gets_distinct_sessions(session, monkeypatch):
     monkeypatch.setattr(settings, "pod_draft_session_prefix", "LLU")
     e1 = record_event(session, _parsed_event(set_code="PEASANT", attendees=(), event_number=4))
     e2 = record_event(session, _parsed_event(set_code="PEASANT", attendees=(), event_number=4))
-    assert e1.draftmancer_session == "Peasant-26-D4"
-    assert e2.draftmancer_session == "Peasant-26-D4-A"
+    assert _session_base(e1.draftmancer_session) == "Peasant-26-D4"
+    assert _session_base(e2.draftmancer_session) == "Peasant-26-D4"
+    assert e1.draftmancer_session != e2.draftmancer_session
 
 
 def test_record_event_with_no_matching_set_leaves_set_id_null(session):
@@ -782,3 +799,48 @@ def test_capture_deck_screenshot_gating(
     else:
         assert result is None
         assert stored.deck_screenshot_url == existing_url
+
+
+def test_draftmancer_url_for_base_has_no_username():
+    url = draftmancer_url_for("LLU-SOS-1")
+
+    assert url == f"{settings.draftmancer_web_url}/?session=LLU-SOS-1"
+    assert "userName" not in url
+
+
+@pytest.mark.parametrize("user_name", [None, ""])
+def test_draftmancer_url_for_blank_username_returns_base(user_name):
+    assert draftmancer_url_for("LLU-SOS-1", user_name) == draftmancer_url_for("LLU-SOS-1")
+
+
+def test_draftmancer_url_for_encodes_arena_handle():
+    url = draftmancer_url_for("LLU-SOS-1", "Tarmogoyf#99921")
+
+    assert url == f"{settings.draftmancer_web_url}/?session=LLU-SOS-1&userName=Tarmogoyf%2399921"
+
+
+def test_dm_draft_link_enabled_defaults_true_for_unknown(session):
+    assert dm_draft_link_enabled(session, "999") is True
+
+
+def test_set_dm_draft_link_creates_lightweight_row(session):
+    set_dm_draft_link(
+        session, discord_id="42", discord_username="ann", display_name="Ann",
+        avatar_hash=None, enabled=False,
+    )
+
+    assert dm_draft_link_enabled(session, "42") is False
+    player = session.execute(select(Player).where(Player.discord_id == "42")).scalar_one()
+    assert player.arena_name is None
+    assert player.leaderboard_opt_in is False
+
+
+def test_set_dm_draft_link_updates_existing_row(session):
+    _seed_player(session, discord_id="7", username="bo", display_name="Bo")
+
+    set_dm_draft_link(
+        session, discord_id="7", discord_username="bo", display_name="Bo",
+        avatar_hash=None, enabled=False,
+    )
+
+    assert dm_draft_link_enabled(session, "7") is False

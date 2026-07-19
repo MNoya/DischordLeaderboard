@@ -59,6 +59,7 @@ class Player(Base):
                                   onupdate=func.now())
     token_invalid        = Column(Boolean, nullable=False, default=False)
     leaderboard_opt_in   = Column(Boolean, nullable=False, default=True)
+    dm_draft_link        = Column(Boolean, nullable=False, server_default="true", default=True)
 
     stats = relationship(
         "PlayerStats",
