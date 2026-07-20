@@ -1,7 +1,7 @@
 """Rebuild public_p0p1_ballots off a private voter table, off auth.users
 
 Revision ID: h1v2o3t4e5r6
-Revises: g8h9i0j1k2l3
+Revises: d2e3f4a5b6c7
 Create Date: 2026-07-16
 
 The API-exposed public_p0p1_ballots view joined auth.users, which trips
@@ -24,7 +24,7 @@ from alembic import op
 
 
 revision: str = "h1v2o3t4e5r6"
-down_revision: Union[str, None] = "g8h9i0j1k2l3"
+down_revision: Union[str, None] = "d2e3f4a5b6c7"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
