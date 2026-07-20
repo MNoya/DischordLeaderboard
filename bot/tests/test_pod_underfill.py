@@ -34,9 +34,9 @@ def test_nudge_ping_role_silent_when_check_hour_not_in_ping_set(monkeypatch):
     assert role is None
 
 
-def test_nudge_ping_role_silent_when_one_short_gate_on_and_count_is_not_one_short(monkeypatch):
+def test_nudge_ping_role_silent_when_far_from_the_aim(monkeypatch):
     monkeypatch.setattr(settings, "pod_underfill_ping_hours", "1")
-    monkeypatch.setattr(settings, "pod_underfill_ping_one_short_only", True)
+    monkeypatch.setattr(settings, "pod_underfill_ping_close_gap", 2)
     channel = _Channel(_Guild([_Role("Late Pod")]))
 
     role = _nudge_ping_role(channel, WEDNESDAY_LATE, yes_count=4, hours_before=1)
@@ -44,14 +44,27 @@ def test_nudge_ping_role_silent_when_one_short_gate_on_and_count_is_not_one_shor
     assert role is None
 
 
-def test_nudge_ping_role_resolves_slot_role_when_one_short_at_a_ping_hour(monkeypatch):
+def test_nudge_ping_role_silent_when_already_at_the_aim(monkeypatch):
     monkeypatch.setattr(settings, "pod_underfill_ping_hours", "1")
+    monkeypatch.setattr(settings, "pod_draft_target_players", 8)
     channel = _Channel(_Guild([_Role("Late Pod")]))
 
-    role = _nudge_ping_role(channel, WEDNESDAY_LATE, yes_count=7, hours_before=1)
+    role = _nudge_ping_role(channel, WEDNESDAY_LATE, yes_count=8, hours_before=1)
 
-    assert role is not None
-    assert role.name == "Late Pod"
+    assert role is None
+
+
+def test_nudge_ping_role_resolves_slot_role_when_close_to_the_aim(monkeypatch):
+    monkeypatch.setattr(settings, "pod_underfill_ping_hours", "1")
+    monkeypatch.setattr(settings, "pod_draft_target_players", 8)
+    monkeypatch.setattr(settings, "pod_underfill_ping_close_gap", 2)
+    channel = _Channel(_Guild([_Role("Late Pod")]))
+
+    needs_one = _nudge_ping_role(channel, WEDNESDAY_LATE, yes_count=7, hours_before=1)
+    needs_two = _nudge_ping_role(channel, WEDNESDAY_LATE, yes_count=6, hours_before=1)
+
+    assert needs_one is not None and needs_one.name == "Late Pod"
+    assert needs_two is not None and needs_two.name == "Late Pod"
 
 
 def test_nudge_ping_role_silent_for_an_off_grid_event(monkeypatch):

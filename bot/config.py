@@ -57,9 +57,9 @@ class Settings(BaseSettings):
     pod_draft_start_ping_ttl_minutes: int = 120
     pod_signal_fire_threshold: int = 6
     pod_queue_inactivity_minutes: int = 180
-    pod_underfill_check_hours: str = "24,3,1"
+    pod_underfill_check_hours: str = "3,2,1"
     pod_underfill_ping_hours: str = "1"
-    pod_underfill_ping_one_short_only: bool = True
+    pod_underfill_ping_close_gap: int = 2
     pod_nudge_in_chat: bool = True
 
     @property

@@ -10,7 +10,7 @@ import asyncio
 import contextlib
 import logging
 import re
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime, timedelta, timezone
 
 import discord
@@ -46,12 +46,20 @@ ROSTER_SEARCH_LIMIT = 50
 log = logging.getLogger(__name__)
 
 _bot: commands.Bot | None = None
+_underfill_clear: "Callable[[commands.Bot, str], Awaitable[None]] | None" = None
 
 
 def init_reminder(bot: commands.Bot) -> None:
     """Wire the bot reference so the APScheduler callback can dispatch Discord work."""
     global _bot
     _bot = bot
+
+
+def register_underfill_clear(clear: "Callable[[commands.Bot, str], Awaitable[None]]") -> None:
+    """Wire the underfill-nudge cleaner so the sesh lobby-open path can drop the recruiting nudge without
+    pod_underfill importing this module back (the module already depends on the RSVP reads here)."""
+    global _underfill_clear
+    _underfill_clear = clear
 
 
 async def fire_reminder(event_id: str, *, early: bool = False) -> None:
@@ -112,6 +120,9 @@ async def fire_reminder(event_id: str, *, early: bool = False) -> None:
         if event is not None and event.socket_status == "pending":
             event.socket_status = "reminded"
             session.commit()
+
+    if _underfill_clear is not None:
+        await _underfill_clear(_bot, event_id)
 
     recipients = await _link_dm_recipients(thread.guild, attendees, maybe_attendees)
     await send_lobby_link_dms(

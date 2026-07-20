@@ -75,6 +75,11 @@ MSG_UNDERFILL = (
     "- [**Sign up here**]({jump_url}) {manat}"
 )
 
+MSG_UNDERFILL_READY = (
+    "{hello}**{name}** is ready to draft <t:{unix}:R> "
+    "- [**Sign up here**]({jump_url}) {manat}"
+)
+
 SLOT_EMOJI_AMERICAS = "🌎"
 SLOT_EMOJI_EU = "🇪🇺"
 SLOT_EMOJI_SATURDAY = "🪐"
@@ -82,13 +87,14 @@ SLOT_EMOJI_SATURDAY = "🪐"
 POD_DRAFTERS_ROLE_NAME = "Pod Drafters"
 EARLY_POD_ROLE_NAME = "Early Pod"
 LATE_POD_ROLE_NAME = "Late Pod"
-WEEKEND_POD_ROLE_NAME = "Weekend Pod"
+WEEKEND_EARLY_POD_ROLE_NAME = "Weekend Early Pod"
+WEEKEND_LATE_POD_ROLE_NAME = "Weekend Late Pod"
 POD_QUEUE_ROLE_NAME = "Pod Draft Queue"
 
 CREATE_MENTIONS = f"@{POD_DRAFTERS_ROLE_NAME}"
 CREATE_MENTIONS_EARLY = f"@{EARLY_POD_ROLE_NAME}"
 CREATE_MENTIONS_LATE = f"@{LATE_POD_ROLE_NAME}"
-CREATE_MENTIONS_WEEKEND = f"@{WEEKEND_POD_ROLE_NAME}"
+CREATE_MENTIONS_WEEKEND = f"@{WEEKEND_EARLY_POD_ROLE_NAME}"
 CREATE_DESCRIPTION = f"{SLOT_EMOJI_AMERICAS} Please RSVP"
 CREATE_DESCRIPTION_EARLY = f"{SLOT_EMOJI_EU} Early Draft! Please RSVP"
 CREATE_DESCRIPTION_SAT = f"{SLOT_EMOJI_SATURDAY} Weekend Draft! Please RSVP"
@@ -379,8 +385,19 @@ def build_underfill_message(
     event_time: datetime,
     jump_url: str,
 ) -> str:
-    """Plain count-toward-target nudge copy. Never carries a role mention — pinging is the caller's call."""
+    """Plain count-toward-target nudge copy, or the ready line once the aim is met. The ready line keeps
+    the signup link since the pod stays open past the aim. Never carries a role mention — pinging is the
+    caller's call."""
     needed = target - yes_count
+    if needed <= 0:
+        body = MSG_UNDERFILL_READY.format(
+            hello=emojis.prefix("chordoHello"),
+            name=short_event_name(thread_name),
+            unix=int(event_time.timestamp()),
+            jump_url=jump_url,
+            manat=emojis.get("manat"),
+        )
+        return body.rstrip()
     body = MSG_UNDERFILL.format(
         hello=emojis.prefix("chordoHello"),
         name=short_event_name(thread_name),

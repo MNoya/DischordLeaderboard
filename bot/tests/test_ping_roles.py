@@ -5,7 +5,8 @@ from types import SimpleNamespace
 from bot.services.ping_roles import (
     EARLY_POD_ROLE_NAME,
     LATE_POD_ROLE_NAME,
-    WEEKEND_POD_ROLE_NAME,
+    WEEKEND_EARLY_POD_ROLE_NAME,
+    WEEKEND_LATE_POD_ROLE_NAME,
     _first_welcome_for,
     auto_grant_spec_for_event,
     blurb_with_time,
@@ -19,13 +20,21 @@ from bot.services.pod_schedule import POD_DRAFTERS_ROLE_NAME, SCHEDULE_TZ
 def test_auto_grant_maps_timed_weekday_slots_to_their_roles():
     thursday = datetime(2026, 6, 11, 14, 0, tzinfo=SCHEDULE_TZ)
     wednesday = datetime(2026, 6, 10, 20, 0, tzinfo=SCHEDULE_TZ)
-    saturday = datetime(2026, 6, 13, 15, 0, tzinfo=SCHEDULE_TZ)
     off_grid = datetime(2026, 6, 9, 11, 0, tzinfo=SCHEDULE_TZ)
 
     assert auto_grant_spec_for_event(thursday).name == EARLY_POD_ROLE_NAME
     assert auto_grant_spec_for_event(wednesday).name == LATE_POD_ROLE_NAME
-    assert auto_grant_spec_for_event(saturday).name == WEEKEND_POD_ROLE_NAME
     assert auto_grant_spec_for_event(off_grid) is None
+
+
+def test_auto_grant_splits_weekend_daytime_from_evening():
+    saturday_morning = datetime(2026, 6, 13, 10, 0, tzinfo=SCHEDULE_TZ)
+    saturday_afternoon = datetime(2026, 6, 13, 15, 0, tzinfo=SCHEDULE_TZ)
+    saturday_evening = datetime(2026, 6, 13, 20, 0, tzinfo=SCHEDULE_TZ)
+
+    assert auto_grant_spec_for_event(saturday_morning).name == WEEKEND_EARLY_POD_ROLE_NAME
+    assert auto_grant_spec_for_event(saturday_afternoon).name == WEEKEND_EARLY_POD_ROLE_NAME
+    assert auto_grant_spec_for_event(saturday_evening).name == WEEKEND_LATE_POD_ROLE_NAME
 
 
 def test_button_custom_id_is_a_stable_slug():
@@ -38,10 +47,12 @@ def test_blurb_with_time_pairs_a_weekday_slot_with_its_local_time():
     assert "<t:" in blurb and ":t>" in blurb
 
 
-def test_blurb_with_time_lists_all_three_weekend_slots():
-    blurb = blurb_with_time(_spec_named(WEEKEND_POD_ROLE_NAME))
+def test_blurb_with_time_lists_only_the_role_s_own_weekend_slots():
+    early = blurb_with_time(_spec_named(WEEKEND_EARLY_POD_ROLE_NAME))
+    late = blurb_with_time(_spec_named(WEEKEND_LATE_POD_ROLE_NAME))
 
-    assert blurb.count("<t:") == 3
+    assert early.count("<t:") == 2
+    assert late.count("<t:") == 1
 
 
 def test_first_welcome_fires_once_until_forgotten():

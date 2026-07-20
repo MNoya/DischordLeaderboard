@@ -41,7 +41,7 @@ from bot.tasks.pod_draft_reminder import (
     schedule_team_vote_offer,
     signal_rsvps_sync,
 )
-from bot.tasks.pod_underfill import schedule_underfill_checks
+from bot.tasks.pod_underfill import clear_underfill_nudge, schedule_underfill_checks
 
 
 log = logging.getLogger(__name__)
@@ -980,6 +980,8 @@ async def open_ondemand_lobby(bot: commands.Bot, event_id: str) -> None:
         if event is not None and event.socket_status == "pending":
             event.socket_status = "reminded"
             session.commit()
+
+    await clear_underfill_nudge(bot, event_id)
 
     maybe_roster = await asyncio.to_thread(maybe_roster_for_event_sync, event_id)
     recipients = (

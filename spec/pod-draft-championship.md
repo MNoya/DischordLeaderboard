@@ -17,6 +17,43 @@ it is a normal `PodDraftEvent` that the bot recognizes by name and configures fo
   the qualified 8. Unranked walk-ins sort to the bottom automatically.
 - **Guaranteed 8.** The under-fill / fewer-than-8 case is out of scope.
 
+## Automation (supersedes the manual Sesh flow)
+
+The championship is **no longer a manually-created Sesh event, and its announcement is no longer a manual paste**. The bot creates and announces it on its own. Everything below this section (detection, auto-applied rules, seeding, crown embed, Swiss/results) is unchanged — the bot-created pod carries "Championship" in its name, so the existing name-based detection and auto-config apply exactly as before.
+
+- **Bot-created.** At the scheduled championship time the bot posts the pod through the same scheduled-card path the weekly slots use (`post_scheduled_card`), named so `is_championship` matches. No human runs a Sesh `/create`.
+- **Auto-announced.** The bot sends the announcement itself; the old manual template at `prompts/championship-announcement.md` is superseded. Copy is iterated in code, not mirrored here.
+- **Timing rule: the weekend before the incoming set's prerelease.** The championship always lands on the Saturday before the next set's tabletop prerelease window opens. This is encoded as the incoming set's `championship_date` in `UPCOMING_RELEASES` (`bot/services/pod_schedule.py`), which currently drives only the "final week" Monday blurb and must also drive the auto-create.
+- **MSH → HOB:** HOB prerelease runs **Aug 7–13, 2026**, so the MSH Set Championship is **Saturday Aug 1, 2026, ~2–3 PM ET**. The HOB entry in `UPCOMING_RELEASES` has no `championship_date` yet; it needs Aug 1 filled in.
+
+Still to design/implement: the exact auto-create trigger (a dated job off `championship_date`, mirroring the weekly card jobs), and the announcement copy + where it posts.
+
+### Prior announcement (reference for the auto-version)
+
+The last championship (SOS) was Sesh-created and used the text below. It is recorded here as the content model the automated announcement should follow; the real copy lives in code and is iterated there. Title in Discord was `🗓️👑 SOS Set Championship`.
+
+```
+Closing off Secrets of Strixhaven!
+The leaderboard decides who plays for the championship, and the winner is crowned @Set Champion
+
+📊 Standings: https://dischord.pages.dev/leaderboard/SOS
+📺 Streamed live: https://twitch.tv/GatoDelFuego
+
+How it works
+• RSVP here if you can make it. The eight highest-ranked players who show up take the seats, the rest are alternates for no-shows.
+• Best of 3, Swiss, three rounds, one Champion.
+
+Marvel Super Heroes arrives <in a month>
+```
+
+What must become dynamic in the auto-version:
+- Outgoing set name in the title and the "Closing off …" line (SOS → MSH → …).
+- The standings set code in the URL, **and the domain**: the site is now `limitedlevelups.com`, so it is `https://limitedlevelups.com/leaderboard/<SET>`, not the old `dischord.pages.dev` preview.
+- The `@Set Champion` role mention and the streamer link.
+- The closing "<incoming set> arrives <relative time>" line (Marvel Super Heroes → The Hobbit, with a live countdown to its Arena release).
+
+For MSH → HOB that resolves to: "Closing off Marvel Super Heroes!", standings `…/leaderboard/MSH`, and "The Hobbit arrives <t:…:R>" counting to Aug 11, 2026.
+
 ## Detection
 
 A pod is the championship when its name contains `"championship"` (case-insensitive). One helper in

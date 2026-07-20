@@ -38,8 +38,8 @@ from bot.services.pod_format import (
 from bot.services.pod_format_select import WRITE_IN_VALUE, set_select_option, write_in_option
 from bot.services.pod_pairing_select import SELECT_PLACEHOLDER as PAIRING_PLACEHOLDER
 from bot.services.pod_pairing_select import pairing_options
-from bot.services.ping_roles import QUEUE_GRANT_PING, announce_pod_grant, spec_named
-from bot.services.pod_roles import find_role, grant_pod_drafters, grant_role
+from bot.services.ping_roles import announce_pod_grant
+from bot.services.pod_roles import find_role, grant_pod_drafters
 from bot.services.pod_schedule import POD_QUEUE_ROLE_NAME
 from bot.services.pod_slot import pod_display_name, queue_display_name
 from bot.services.pod_settings_view import TIMER_MAX, TIMER_MIN, pick_timer_label
@@ -310,16 +310,13 @@ async def _claim_fire_if_ready(result) -> bool:
 
 
 async def _post_join_followups(interaction: discord.Interaction, result, fired: bool) -> None:
-    granted_role = None
     first_pod = False
     if result.joined and isinstance(interaction.user, discord.Member):
         await _add_to_discussion_thread(interaction)
         first_pod = await grant_pod_drafters(interaction.user)
-        granted_role = await _grant_queue_role(interaction)
     await announce_pod_grant(
-        interaction, first_pod=first_pod, granted_role=granted_role,
-        welcome_role=find_role(interaction.guild, POD_QUEUE_ROLE_NAME),
-        spec=spec_named(POD_QUEUE_ROLE_NAME), ping=QUEUE_GRANT_PING,
+        interaction, first_pod=first_pod, granted_role=None,
+        welcome_role=None, spec=None, ping=None,
     )
     if result.joined and not fired:
         await _maybe_nudge(interaction, result.state)
@@ -412,19 +409,6 @@ async def _maybe_nudge(interaction: discord.Interaction, state) -> None:
         )
     except discord.HTTPException:
         log.warning("queue nudge send failed", exc_info=True)
-
-
-async def _grant_queue_role(interaction: discord.Interaction) -> discord.Role | None:
-    """Subscribe a joiner to future queue pings. Returns the role only on a fresh grant, so the
-    caller's ephemeral confirmation fires once per user ever; leaving never removes the role."""
-    member = interaction.user
-    if not isinstance(member, discord.Member):
-        return None
-    role = find_role(interaction.guild, POD_QUEUE_ROLE_NAME)
-    if role is None:
-        return None
-    granted = await grant_role(member, role)
-    return role if granted else None
 
 
 async def _apply_queue_presets(event_id: str, presets) -> None:

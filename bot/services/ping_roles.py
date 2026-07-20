@@ -43,14 +43,14 @@ from bot.services.pod_schedule import (
     POD_DRAFTERS_ROLE_NAME,
     POD_QUEUE_ROLE_NAME,
     SATURDAY,
-    SLOT_EMOJI_SATURDAY,
     THURSDAY,
     WEDNESDAY,
-    WEEKEND_POD_ROLE_NAME,
+    WEEKEND_EARLY_POD_ROLE_NAME,
+    WEEKEND_LATE_POD_ROLE_NAME,
     next_slot_datetime,
     slot_by_weekday,
 )
-from bot.services.pod_signals import WEEKEND_BUCKETS, slot_event_time, slot_role_name_for_event_time
+from bot.services.pod_signals import slot_event_time, slot_role_name_for_event_time
 
 
 log = logging.getLogger(__name__)
@@ -68,6 +68,7 @@ class PingRole:
     slot_weekday: int | None = None
     auto_grant: bool = False
     grant_when: str = "at this time of day"
+    weekend_bucket_keys: tuple[str, ...] = ()
 
 
 PING_ROLES: tuple[PingRole, ...] = (
@@ -81,9 +82,14 @@ PING_ROLES: tuple[PingRole, ...] = (
         aliases=("Late Pods", "Late Pod Drafters"), slot_weekday=WEDNESDAY, auto_grant=True,
     ),
     PingRole(
-        WEEKEND_POD_ROLE_NAME, SLOT_EMOJI_SATURDAY, "", color="#D2B48C",
-        aliases=("Weekend Pods", "Weekend Pod Drafters"), slot_weekday=SATURDAY, auto_grant=True,
-        grant_when="on weekends",
+        WEEKEND_EARLY_POD_ROLE_NAME, "🌅", "", color="#D2B48C",
+        aliases=("Weekend Early Pods",), slot_weekday=SATURDAY, auto_grant=True,
+        grant_when="on weekends", weekend_bucket_keys=("MORNING", "AFTERNOON"),
+    ),
+    PingRole(
+        WEEKEND_LATE_POD_ROLE_NAME, "🎆", "", color="#7E6FD1",
+        aliases=("Weekend Late Pods",), slot_weekday=SATURDAY, auto_grant=True,
+        grant_when="on weekends", weekend_bucket_keys=("EVENING",),
     ),
     PingRole(POD_QUEUE_ROLE_NAME, "⚡", "Daily Draft Sign-Ups", color="#FFAC33"),
 )
@@ -101,16 +107,17 @@ def button_custom_id(spec: PingRole) -> str:
 
 
 def blurb_with_time(spec: PingRole) -> str:
-    """A slot role pairs its blurb with its recurring local times: one for a weekday slot, all three
-    weekend buckets for the weekend role. Roles with no slot show their blurb alone."""
+    """A slot role pairs its blurb with its recurring local times: one for a weekday slot, and for a
+    weekend role only the buckets it covers (`weekend_bucket_keys`). Roles with no slot show their
+    blurb alone."""
     if spec.slot_weekday is None:
         return spec.blurb
     slot = slot_by_weekday(spec.slot_weekday)
     if slot is None:
         return spec.blurb
     slot_date = next_slot_datetime(slot).date()
-    if spec.slot_weekday >= SATURDAY:
-        stamps = [slot_event_time(slot_date, bucket.key) for bucket in WEEKEND_BUCKETS]
+    if spec.weekend_bucket_keys:
+        stamps = [slot_event_time(slot_date, key) for key in spec.weekend_bucket_keys]
     else:
         stamps = [next_slot_datetime(slot)]
     times = ", ".join(f"<t:{int(stamp.timestamp())}:t>" for stamp in stamps)

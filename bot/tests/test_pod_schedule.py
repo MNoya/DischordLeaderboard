@@ -342,6 +342,26 @@ def test_underfill_message_one_short_uses_singular_plain_count():
     assert "1 more players" not in body
 
 
+def test_underfill_message_at_the_aim_shows_ready_and_keeps_the_signup_link():
+    event_time = datetime(2026, 6, 24, 0, 0, tzinfo=timezone.utc)
+    jump_url = "https://discord.com/channels/1/2/3"
+
+    body = build_underfill_message("FIN Pod Draft #1 - Jun 24", 8, 8, event_time, jump_url)
+
+    assert "more player" not in body
+    assert "ready" in body.lower()
+    assert f"]({jump_url})" in body
+
+
+def test_underfill_message_past_the_aim_still_reads_ready_not_a_negative_count():
+    event_time = datetime(2026, 6, 24, 0, 0, tzinfo=timezone.utc)
+
+    body = build_underfill_message("Pod", 9, 8, event_time, "url")
+
+    assert "-1" not in body
+    assert "ready" in body.lower()
+
+
 @pytest.mark.parametrize(
     ("name", "expected"),
     [
