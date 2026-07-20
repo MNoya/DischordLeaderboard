@@ -17,6 +17,7 @@ import discord
 
 from bot import emojis
 from bot.commands.messages import (
+    MSG_ARENA_ALREADY_LINKED_NOTE,
     MSG_ARENA_BAD_FORMAT,
     MSG_ARENA_COLLISION,
     MSG_ARENA_HANDLE_LINE,
@@ -231,7 +232,8 @@ class _LinkArenaButton(discord.ui.Button):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        await interaction.response.send_modal(_LinkArenaModal())
+        existing = await _linked_arena_handle(str(interaction.user.id))
+        await interaction.response.send_modal(_LinkArenaModal(existing=existing))
 
 
 class _PodGuideButton(discord.ui.Button):
@@ -309,9 +311,14 @@ class _LinkArenaModal(discord.ui.Modal, title="Link Arena Handle"):
         required=True,
     )
 
-    def __init__(self, after_link=None) -> None:
+    def __init__(self, after_link=None, existing: str | None = None) -> None:
         super().__init__()
         self.after_link = after_link
+        if existing:
+            self.remove_item(self.handle)
+            note = MSG_ARENA_ALREADY_LINKED_NOTE.format(emoji=emojis.get("mtga"), arena_name=existing)
+            self.add_item(discord.ui.TextDisplay(note))
+            self.add_item(self.handle)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         arena_name = await submit_arena_link(interaction, str(self.handle.value).strip())
