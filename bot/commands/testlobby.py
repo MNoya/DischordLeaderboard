@@ -950,32 +950,31 @@ def _build_ready_progress(state: str) -> list[tuple[discord.Embed, discord.ui.Vi
     if state == "ready":
         embed = render_ready_check_progress(
             _THREAD_NAME, in_session, state="ready",
-            draftmancer_url=_DRAFTMANCER_URL, ready_arena_names={arena for arena, _ in _LINKED_EIGHT[:3]},
+            ready_arena_names={arena for arena, _ in _LINKED_EIGHT[:3]},
             initiated_by=initiator, **_preview_settings_labels(),
         )
         return [(embed, active_view)]
     if state in ("notready", "cancelled", "left"):
         decliner = _LINKED_EIGHT[3][0] if state == "notready" else None
         embed = render_ready_check_progress(
-            _THREAD_NAME, in_session, state="notready", draftmancer_url=_DRAFTMANCER_URL,
+            _THREAD_NAME, in_session, state="notready",
             decliner_name=decliner, cancel_reason=_preview_cancel_reason(state),
             initiated_by=initiator, ready_count=3, total_count=8, **_preview_settings_labels(),
         )
         return [(embed, None)]
     if state == "superseded":
         collapsed = render_ready_check_progress(
-            _THREAD_NAME, in_session, state="notready", draftmancer_url=_DRAFTMANCER_URL,
+            _THREAD_NAME, in_session, state="notready",
             decliner_name=_LINKED_EIGHT[3][0], superseded=True, ready_count=3, total_count=8,
             **_preview_settings_labels(),
         )
         active = render_ready_check_progress(
-            _THREAD_NAME, in_session, state="ready",
-            draftmancer_url=_DRAFTMANCER_URL, ready_arena_names=set(),
+            _THREAD_NAME, in_session, state="ready", ready_arena_names=set(),
             initiated_by=initiator, **_preview_settings_labels(),
         )
         return [(collapsed, None), (active, active_view)]
     embed = render_ready_check_progress(
-        _THREAD_NAME, in_session, state=state, draftmancer_url=_DRAFTMANCER_URL,
+        _THREAD_NAME, in_session, state=state,
         **_preview_settings_labels(),
     )
     return [(embed, None)]

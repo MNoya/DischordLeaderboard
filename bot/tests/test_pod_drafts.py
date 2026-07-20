@@ -83,7 +83,7 @@ def test_record_event_persists_and_links_known_attendees(session, monkeypatch):
     event = record_event(session, _parsed_event(attendees=("Alice", "Stranger")))
 
     assert event.socket_status == "pending"
-    assert _session_base(event.draftmancer_session) == "LLU-SOS-May-13"
+    assert _session_base(event.draftmancer_session) == "LLU-May-13"
     assert event.set_id is not None
 
     participants = session.execute(
@@ -101,7 +101,7 @@ def test_record_event_same_day_pods_share_base_but_get_distinct_sessions(session
     e2 = record_event(session, _parsed_event(attendees=()))
     e3 = record_event(session, _parsed_event(attendees=()))
     sessions = [e1.draftmancer_session, e2.draftmancer_session, e3.draftmancer_session]
-    assert [_session_base(s) for s in sessions] == ["LLU-SOS-May-13"] * 3
+    assert [_session_base(s) for s in sessions] == ["LLU-May-13"] * 3
     assert len(set(sessions)) == 3
 
 
@@ -120,7 +120,7 @@ def test_record_event_championship_uses_fixed_session_and_leaderboard_seats(sess
 
     event = record_event(session, _parsed_event(attendees=(), name="SOS Community Championship Pod Draft"))
 
-    assert _session_base(event.draftmancer_session) == "LLU-SOS-Championship"
+    assert _session_base(event.draftmancer_session) == "LLU-Championship"
     assert event.seating_mode == "leaderboard"
 
 
@@ -131,8 +131,8 @@ def test_record_event_championship_session_collision_appends_suffix(session, mon
     e1 = record_event(session, _parsed_event(attendees=(), name="SOS Championship"))
     e2 = record_event(session, _parsed_event(attendees=(), name="SOS Championship"))
 
-    assert _session_base(e1.draftmancer_session) == "LLU-SOS-Championship"
-    assert _session_base(e2.draftmancer_session) == "LLU-SOS-Championship"
+    assert _session_base(e1.draftmancer_session) == "LLU-Championship"
+    assert _session_base(e2.draftmancer_session) == "LLU-Championship"
     assert e1.draftmancer_session != e2.draftmancer_session
 
 
@@ -141,8 +141,8 @@ def test_record_event_with_event_number_uses_n_in_session(session, monkeypatch):
     _seed_set(session)
     e1 = record_event(session, _parsed_event(attendees=(), event_number=10))
     e2 = record_event(session, _parsed_event(attendees=(), event_number=10))
-    assert _session_base(e1.draftmancer_session) == "LLU-SOS-10"
-    assert _session_base(e2.draftmancer_session) == "LLU-SOS-10"
+    assert _session_base(e1.draftmancer_session) == "LLU-10"
+    assert _session_base(e2.draftmancer_session) == "LLU-10"
     assert e1.draftmancer_session != e2.draftmancer_session
 
 

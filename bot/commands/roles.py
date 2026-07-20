@@ -44,7 +44,7 @@ MSG_NO_GUILD = "Run `/roles` in the server to manage your notifications."
 MSG_ROLE_MISSING = "That role isn't set up on the server. Ask an admin."
 MSG_ROLE_TOGGLE_FAILED = "Couldn't update that role. The bot is missing the Manage Roles permission."
 MSG_DM_PREF_LABEL = "Draft Link DMs"
-MSG_DM_PREF_LINE = "**Draft Link DMs:** your Draftmancer link when a Pod is ready to start"
+MSG_DM_PREF_LINE = "**Draft Link DMs:** your Draftmancer link when Pod is ready to start"
 DM_PREF_CUSTOM_ID = "pod_dm_draft_link"
 
 

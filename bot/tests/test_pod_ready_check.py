@@ -62,6 +62,30 @@ def test_initiate_blocks_odd_player_count():
     assert "even" in err
 
 
+def test_leaving_arms_grace_without_immediate_cancel():
+    mgr, _ = _ready_manager([str(i) for i in range(8)])
+    mgr.bot_user_id = "bot"
+    aborts: list[str] = []
+
+    async def _record(kind, *, decliner_name=None, detail=None):
+        aborts.append(kind)
+
+    async def _async_noop(*args, **kwargs):
+        return None
+
+    mgr._invalidate_ready_check = _record
+    mgr._refresh_lobby_status = _async_noop
+    mgr._refresh_mock_lobby = lambda *args, **kwargs: None
+    mgr._sync_leaderboard_seeding = lambda *args, **kwargs: None
+
+    remaining = [{"userID": str(i), "userName": str(i)} for i in range(7)]
+    asyncio.run(mgr._on_session_users(remaining))
+
+    assert aborts == []
+    assert mgr.ready_check_active is True
+    assert mgr._ready_grace_task is not None
+
+
 def test_grace_aborts_when_player_stays_gone(monkeypatch):
     monkeypatch.setattr(pod_draft_manager, "_READY_GRACE_S", 0)
     mgr, _ = _ready_manager([str(i) for i in range(8)])

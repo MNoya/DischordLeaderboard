@@ -105,6 +105,32 @@ def test_lobby_card_shows_overview_not_split_during_ready():
     assert _field(embed, "⏳ Pending") is None
 
 
+def test_lobby_card_hides_link_during_ready_check_but_shows_it_otherwise():
+    url = "https://draftmancer.com/?session=X"
+
+    linked = render(
+        title="Pod Draft", rsvps_yes=[], rsvps_maybe=[], in_session=[], state="linked",
+        draftmancer_url=url,
+    )
+    ready = render(
+        title="Pod Draft", rsvps_yes=[], rsvps_maybe=[], in_session=[], state="ready",
+        draftmancer_url=url,
+    )
+
+    assert url in (linked.description or "")
+    assert url not in (ready.description or "")
+
+
+def test_ready_progress_card_never_shows_the_link():
+    in_session = [(f"P{i}#000{i}", f"Player{i}") for i in range(8)]
+
+    embed = render_ready_check_progress(
+        "Pod Draft", in_session, state="ready", ready_arena_names=set(),
+    )
+
+    assert "draftmancer.com" not in (embed.description or "")
+
+
 def test_ready_progress_drafting_marks_everyone_ready():
     in_session = [(f"P{i}#000{i}", f"Player{i}") for i in range(8)]
     embed = render_ready_check_progress("Pod Draft", in_session, state="drafting")
@@ -150,7 +176,6 @@ def test_ready_progress_declined_collapses_to_tally():
     in_session = [(f"P{i}#000{i}", f"Player{i}") for i in range(8)]
     embed = render_ready_check_progress(
         "Pod Draft", in_session, state="notready",
-        draftmancer_url="https://draftmancer.com/?session=X",
         decliner_name="Player3#0003", ready_count=3, total_count=8,
     )
     assert "Player3#0003" in embed.description

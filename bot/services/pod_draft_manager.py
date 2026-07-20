@@ -104,7 +104,7 @@ _BACKOFF_MAX_RETRIES = 8
 LOBBY_REHYDRATE_WINDOW = timedelta(hours=12)
 _READY_TIMEOUT_S = 90
 _READY_DEBOUNCE_S = 2.0
-_READY_GRACE_S = 20
+_READY_GRACE_S = 5
 _LOBBY_FULL_THRESHOLD = 8
 _LOBBY_HALF_THRESHOLD = _LOBBY_FULL_THRESHOLD // 2
 _LOBBY_FULL_PROMPT_DELAY_S = 10
@@ -756,7 +756,6 @@ class PodDraftManager:
                 title=self.event_name,
                 in_session=classified,
                 state="notready",
-                draftmancer_url=self.draftmancer_url,
                 decliner_name=prior_decliner,
                 cancel_reason=prior_cancel,
                 superseded=True,
@@ -773,7 +772,6 @@ class PodDraftManager:
             title=self.event_name,
             in_session=classified,
             state="ready",
-            draftmancer_url=self.draftmancer_url,
             ready_arena_names=set(),
             initiated_by=self.initiated_by,
             **self._settings_labels(),
@@ -967,7 +965,6 @@ class PodDraftManager:
                 title=self.event_name,
                 in_session=classified,
                 state=state,
-                draftmancer_url=self.draftmancer_url,
                 ready_arena_names=ready_arena_names,
                 decliner_name=self.last_decliner_name,
                 cancel_reason=self.last_cancel_reason,
@@ -1283,7 +1280,7 @@ class PodDraftManager:
     async def _maybe_complete_ready_check(self) -> None:
         """Complete only when every player present at the check's start is still in the lobby and
         ready. ready_users is pruned to the current lobby first, so a player who readied then left
-        can't satisfy the count — the check holds until they return, or the timeout cancels it."""
+        can't satisfy the count — the check holds through the grace window, or the timeout cancels it."""
         if not self.ready_check_active:
             return
         present = {u.get("userID") for u in self.player_session_users()}
@@ -1961,24 +1958,30 @@ class PodDraftManager:
 
     async def _ready_grace_countdown(self) -> None:
         """A player who leaves mid-check gets _READY_GRACE_S to rejoin before the check aborts, so a
-        brief disconnect or a seat swap doesn't force a restart. Auto-resumes if they return."""
+        brief Draftmancer disconnect doesn't force a restart. Auto-resumes if they return."""
         try:
             await asyncio.sleep(_READY_GRACE_S)
         except asyncio.CancelledError:
             return
-        if not self.ready_check_active:
-            return
-        present = {u.get("userID") for u in self.player_session_users()}
-        if self.expected_user_ids <= present:
-            return
-        missing_names = [self.expected_user_names.get(uid) for uid in (self.expected_user_ids - present)]
-        missing_names = [name for name in missing_names if name]
-        await self._invalidate_ready_check("left", detail=_roster_change_detail(missing_names, "left"))
+        try:
+            if not self.ready_check_active:
+                return
+            present = {u.get("userID") for u in self.player_session_users()}
+            if self.expected_user_ids <= present:
+                return
+            await self._invalidate_ready_check("left", detail=self._left_detail(self.expected_user_ids - present))
+        except Exception:
+            log.warning(f"[READY] grace_abort_failed event={self.event_id}", exc_info=True)
 
     def _joined_detail(self, joined_ids: set[str]) -> str:
         names = [u.get("userName") for u in self.session_users if u.get("userID") in joined_ids]
         names = [name for name in names if name]
         return _roster_change_detail(names, "joined")
+
+    def _left_detail(self, left_ids: set[str]) -> str:
+        names = [self.expected_user_names.get(uid) for uid in left_ids]
+        names = [name for name in names if name]
+        return _roster_change_detail(names, "left")
 
     async def _announce_start_in_channel(self, thread) -> None:
         """Post the sesh-style 'starting now' embed into the coordination channel so the community sees

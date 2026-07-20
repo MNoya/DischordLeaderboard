@@ -329,7 +329,8 @@ def render(
 ) -> discord.Embed:
     """Lobby embed. `title` is the thread/event name; `rsvps_yes` / `rsvps_maybe` are sesh display
     names by RSVP type; `in_session` is Draftmancer sessionUsers as (arena_name,
-    linked_display_name_or_None). `draftmancer_url` appears under the header.
+    linked_display_name_or_None). `draftmancer_url` appears under the header, hidden once the ready
+    check fires so a latecomer can't join mid-check and break the roster.
 
     Buckets: In Draftmancer (counts every session user; lists the linked ones), Unrecognized (in
     session, no Player row), Waiting on (Yes RSVP not in session), Maybe (Maybe RSVP not in session).
@@ -361,7 +362,7 @@ def render(
     )
 
     header_lines: list[str] = []
-    if draftmancer_url:
+    if draftmancer_url and state != "ready":
         header_lines.append(f"### {draftmancer_url}")
     header_lines.extend(status_lines)
     description = "\n".join(header_lines) if header_lines else None
@@ -453,7 +454,6 @@ def render_ready_check_progress(
     *,
     state: str,
     set_code: str | None = None,
-    draftmancer_url: str | None = None,
     ready_arena_names: set[str] | None = None,
     decliner_name: str | None = None,
     cancel_reason: str | None = None,
@@ -486,8 +486,7 @@ def render_ready_check_progress(
     )
     if not status_lines:
         status_lines = ["### Ready Check"]
-    header_lines = [f"### {draftmancer_url}"] if draftmancer_url and not declined else []
-    header_lines.extend(status_lines)
+    header_lines = list(status_lines)
     if declined and ready_count is not None and total_count is not None:
         header_lines.append(f"### ✅ {ready_count}/{total_count} Ready")
     embed = discord.Embed(title=title, description="\n".join(header_lines), color=color)

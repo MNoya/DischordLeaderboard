@@ -110,14 +110,15 @@ def _build_draftmancer_session(session: Session, parsed: ParsedSeshEvent) -> str
     """Compose a session id with a readable base and an unguessable random tail; prefer #N from the
     title, fall back to Month-Day.
 
-    Custom formats drop the LLU prefix and lead with their own slug instead of a set code. The Set
-    Championship leads with a `-Championship` base.
+    A plain set omits its code from the id so a format change before the draft never desyncs the shown
+    URL. Custom formats drop the LLU prefix and lead with their own slug. The Set Championship leads
+    with a `-Championship` base.
     """
     slug = pod_format.session_slug_for(parsed.set_code)
     if slug is not None:
         head = f"{slug}-{parsed.event_date:%y}"
     else:
-        head = f"{settings.pod_draft_session_prefix}-{parsed.set_code}"
+        head = settings.pod_draft_session_prefix
 
     if is_championship(parsed.name):
         base = f"{head}-Championship"
@@ -487,10 +488,11 @@ def record_mock_event(
     return event
 
 
-def build_ondemand_session(session: Session, set_code: str, event_date: date) -> str:
-    """`LLU-<SET>-<Mon>-<Day>-<rand4>` for a poll/queue-born pod. The random tail keeps the session id
+def build_ondemand_session(session: Session, event_date: date) -> str:
+    """`LLU-<Mon>-<Day>-<rand4>` for a poll/queue-born pod. The id omits the set code so a format
+    change before the draft never desyncs the shown URL. The random tail keeps the session id
     unguessable so nobody can seize lobby ownership before the bot, and no two pods share a lobby."""
-    base = f"{settings.pod_draft_session_prefix}-{set_code.upper()}-{event_date:%b}-{event_date.day}"
+    base = f"{settings.pod_draft_session_prefix}-{event_date:%b}-{event_date.day}"
     return _session_id_off_base(session, base)
 
 
@@ -508,7 +510,7 @@ def record_ondemand_event(
         set_code=code,
         format_label=pod_format.label_for(code),
         name=name,
-        draftmancer_session=build_ondemand_session(session, code, event_time.date()),
+        draftmancer_session=build_ondemand_session(session, event_time.date()),
         discord_thread_id=discord_thread_id,
         sesh_message_id=None,
         socket_status="pending",
