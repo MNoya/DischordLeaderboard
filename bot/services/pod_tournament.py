@@ -1414,7 +1414,7 @@ class FixPairingView(ui.View):
         url = self.round_message.jump_url if self.round_message is not None else None
         label = f"[__Round {self.round_num}__]({url})" if url else f"[Round {self.round_num}]"
 
-        if await self._regenerate_bracket_after_result(choice, result_meta):
+        if await self._regenerate_bracket_after_result(choice, result_meta, a_disp, b_disp):
             return
         if result_meta is not None:
             phrase = f"**{label}** Result corrected by Organizer: {self._result_phrase(choice, a_disp, b_disp)}"
@@ -1443,11 +1443,12 @@ class FixPairingView(ui.View):
         if winner_name == SKIPPED_SENTINEL:
             return f"{a_disp} vs {b_disp} marked not played"
         if winner_name == CLEAR_SENTINEL:
-            return format_result_change(self.selected_a, self.selected_b, None, None)
-        return format_result_change(self.selected_a, self.selected_b, winner_name, score)
+            return format_result_change(self.selected_a, self.selected_b, None, None, a_disp, b_disp)
+        return format_result_change(self.selected_a, self.selected_b, winner_name, score, a_disp, b_disp)
 
     async def _regenerate_bracket_after_result(self, choice: tuple[str, str] | None,
-                                               result_meta: dict | None) -> bool:
+                                               result_meta: dict | None,
+                                               a_disp: str, b_disp: str) -> bool:
         """Rebuild downstream bracket rounds when a corrected result changed the winner. Posts its own
         thread note, so the caller skips the plain announcement. Returns whether it ran."""
         if result_meta is None or not result_meta.get("winner_changed"):
@@ -1460,6 +1461,7 @@ class FixPairingView(ui.View):
         phrase = format_result_change(
             self.selected_a, self.selected_b,
             winner_name if settled else None, score if settled else None,
+            a_disp, b_disp,
         )
         await bracket_regenerate_downstream(manager, self.round_num, phrase)
         return True
@@ -1486,17 +1488,28 @@ def apply_pairing_swap(match_id: str, new_a: str, new_b: str) -> dict | None:
 
 
 def _load_round_roster(event_id: str) -> list[tuple[str, str]]:
-    """(draftmancer_name, display label) for every participant, feeding the pairing-editor selects."""
+    """(draftmancer_name, Discord display) for every participant, feeding the pairing-editor selects.
+    Prefers the linked player's Discord display over the participant row's stored handle, which can
+    carry a stale Arena-style name that reads as a different person to the organizer."""
     with SessionLocal() as session:
         rows = session.execute(
-            select(PodDraftParticipant.draftmancer_name, PodDraftParticipant.display_name)
+            select(
+                PodDraftParticipant.draftmancer_name,
+                PodDraftParticipant.display_name,
+                DbPlayer.display_name,
+            )
+            .outerjoin(DbPlayer, DbPlayer.id == PodDraftParticipant.player_id)
             .where(
                 PodDraftParticipant.event_id == event_id,
                 PodDraftParticipant.draftmancer_name.is_not(None),
             )
             .order_by(PodDraftParticipant.seat_index.nulls_last(), PodDraftParticipant.draftmancer_name)
         ).all()
-    return [(name, display or name) for name, display in rows]
+    roster = []
+    for draftmancer_name, participant_display, player_display in rows:
+        raw = player_display or participant_display or draftmancer_name
+        roster.append((draftmancer_name, strip_arena_suffix(raw)))
+    return roster
 
 
 def _roster_display(roster: list[tuple[str, str]], name: str | None) -> str:
@@ -1557,6 +1570,9 @@ async def _handle_result_submission(interaction: discord.Interaction, value: str
 
     round_num = result["round"]
     event_id = result["event_id"]
+    displays = await asyncio.to_thread(load_participant_displays, event_id)
+    a_disp = _discord_display(displays, result["a_name"])
+    b_disp = _discord_display(displays, result["b_name"])
     manager = ACTIVE_POD_MANAGERS.get(event_id)
     bracket = manager is not None and manager.pairing_mode == "bracket"
     match_states = await asyncio.to_thread(render_round_states, event_id, round_num, bracket=bracket)
@@ -1596,7 +1612,7 @@ async def _handle_result_submission(interaction: discord.Interaction, value: str
             exclude_channel_id=str(interaction.channel.id) if interaction.channel else None,
         ))
         if bracket and round_num < TOTAL_ROUNDS and manager is not None and result.get("winner_changed"):
-            phrase = format_result_change(result["a_name"], result["b_name"], None, None)
+            phrase = format_result_change(result["a_name"], result["b_name"], None, None, a_disp, b_disp)
             await bracket_regenerate_downstream(manager, round_num, phrase)
         return
 
@@ -1638,7 +1654,7 @@ async def _handle_result_submission(interaction: discord.Interaction, value: str
     await _maybe_advance(
         interaction.client, event_id, round_num,
         is_edit=bool(result.get("was_reported") and result.get("winner_changed")),
-        result_phrase=format_result_change(result["a_name"], result["b_name"], winner_name, score),
+        result_phrase=format_result_change(result["a_name"], result["b_name"], winner_name, score, a_disp, b_disp),
     )
     if round_num >= TOTAL_ROUNDS:
         asyncio.create_task(send_final_submit_deck_dms(
@@ -2140,6 +2156,15 @@ async def _resolve_discord_mention(event_id: str, draftmancer_name: str) -> str 
                 return None
             return f"<@{player.discord_id}>"
     return await asyncio.to_thread(_query)
+
+
+def _discord_display(displays: dict[str, dict], name: str) -> str:
+    """Discord display for a raw Draftmancer/Arena name, falling back to the arena-stripped name when
+    the participant has no linked player."""
+    info = displays.get(normalize_player_name(name))
+    if info and info.get("display_name"):
+        return info["display_name"]
+    return strip_arena_suffix(name)
 
 
 def register_persistent_views(bot) -> None:
@@ -4304,10 +4329,14 @@ async def _relock_prior_rounds(manager, current_round: int) -> None:
             log.warning(f"could not relock round {r}", exc_info=True)
 
 
-def format_result_change(a_name: str, b_name: str, winner_name: str | None, score: str | None) -> str:
+def format_result_change(a_name: str, b_name: str, winner_name: str | None, score: str | None,
+                         a_disp: str | None = None, b_disp: str | None = None) -> str:
     """The corrected result as plain text for the regenerate notice: 'Bob wins 2-1 vs Alice', or a
-    cleared/no-result fallback. Shared by prod and testlobby so both word it identically."""
-    a_disp, b_disp = strip_arena_suffix(a_name), strip_arena_suffix(b_name)
+    cleared/no-result fallback. Shared by prod and testlobby so both word it identically. Winner side
+    is decided from the raw names; a_disp/b_disp override how each player is shown so callers can lead
+    with the Discord display instead of the Arena/Draftmancer handle."""
+    a_disp = a_disp if a_disp is not None else strip_arena_suffix(a_name)
+    b_disp = b_disp if b_disp is not None else strip_arena_suffix(b_name)
     if winner_name and winner_name not in (SKIPPED_SENTINEL, CLEAR_SENTINEL):
         winner_is_a = winner_name.lower() == a_name.lower()
         winner_disp, loser_disp = (a_disp, b_disp) if winner_is_a else (b_disp, a_disp)
