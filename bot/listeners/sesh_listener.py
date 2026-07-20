@@ -29,11 +29,18 @@ from bot.services.pod_drafts import (
     record_event,
     update_event_time_if_changed,
 )
+from bot.commands.messages import MSG_DRAFTMANCER_LINK_LEAD
 from bot.services.ping_roles import auto_grant_spec_for_event, build_grant_embed
-from bot.services.pod_roles import find_role, grant_role, resolve_member
+from bot.services.pod_roles import find_role, grant_pod_drafters, grant_role, resolve_member
 from bot.services.sesh_parser import ParsedSeshFields, parse_sesh_embed
 from bot.sets import active_set_code
-from bot.tasks.pod_draft_reminder import REMINDER_LEAD_MIN, fire_reminder, schedule_roster_reminder
+from bot.tasks.pod_draft_reminder import (
+    REMINDER_LEAD_MIN,
+    fire_reminder,
+    refresh_roster_reminder,
+    schedule_roster_reminder,
+    schedule_team_vote_offer,
+)
 from bot.tasks.pod_underfill import refresh_underfill_nudge, schedule_underfill_checks
 
 
@@ -96,6 +103,11 @@ class SeshListener(commands.Cog):
             await refresh_underfill_nudge(self.bot, str(message.id), len(fields.attendees))
         except Exception:
             log.exception(f"underfill nudge refresh failed for message {message.id}")
+
+        try:
+            await refresh_roster_reminder(self.bot, str(message.id))
+        except Exception:
+            log.exception(f"roster reminder refresh failed for message {message.id}")
 
         try:
             thread = await self._resolve_thread(message.guild, str(message.id))
@@ -223,8 +235,8 @@ class SeshListener(commands.Cog):
             await thread.send(embed=discord.Embed(
                 title="🕐 Pod Draft rescheduled",
                 description=(
-                    f"New time: <t:{unix}:F> (<t:{unix}:R>).\n"
-                    f"Draftmancer link will be posted {REMINDER_LEAD_MIN} minutes before the event starts."
+                    f"New time: <t:{unix}:F> (<t:{unix}:R>)\n"
+                    f"{MSG_DRAFTMANCER_LINK_LEAD.format(lead=REMINDER_LEAD_MIN)}"
                 ),
                 color=discord.Color.blue(),
             ))
@@ -293,6 +305,7 @@ class SeshListener(commands.Cog):
         )
         log.info(f"scheduled pod-draft reminder for event {event_id} at {run_at.isoformat()}")
         schedule_roster_reminder(scheduler, event_id, event_time)
+        schedule_team_vote_offer(scheduler, event_id, event_time)
 
     def _schedule_underfill(self, event_id: str, event_time: datetime, created_at: datetime) -> None:
         scheduler = getattr(self.bot, "pod_scheduler", None)
@@ -303,23 +316,26 @@ class SeshListener(commands.Cog):
     async def _grant_subscription_roles(
         self, guild: discord.Guild | None, thread: discord.Thread | None, event_time: datetime, attendees,
     ) -> None:
-        """Sticky-grant a slot's subscription role to everyone RSVP'd Yes to a time-specific pod.
+        """Sticky-grant the Pod Drafters umbrella to every RSVP, plus a slot's subscription role when
+        the pod maps to a weekly slot.
 
         Sesh hands the full attendee list on every RSVP edit with no delta, so the loop re-runs over
         everyone and relies on `grant_role` to no-op those already subscribed. The announcement is
         deduped per (thread, member) rather than on `grant_role` alone: back-to-back edits can both
         re-add before the member-role cache reflects the first add, which would double-announce.
         """
+        if guild is None:
+            return
         spec = auto_grant_spec_for_event(event_time)
-        if guild is None or spec is None:
-            return
-        role = find_role(guild, spec.name)
-        if role is None:
-            log.info(f"{spec.name!r} role missing in {guild.name}; skipping auto-grant")
-            return
+        role = find_role(guild, spec.name) if spec is not None else None
+        if spec is not None and role is None:
+            log.info(f"{spec.name!r} role missing in {guild.name}; granting only the umbrella")
         for token in attendees:
             member = await resolve_member(guild, token)
             if member is None:
+                continue
+            await grant_pod_drafters(member)
+            if role is None:
                 continue
             granted = await grant_role(member, role)
             if not granted or thread is None:
@@ -328,14 +344,14 @@ class SeshListener(commands.Cog):
             if key in self._announced_grants:
                 continue
             self._announced_grants.add(key)
-            await self._announce_grant(thread, member, role, spec.emoji)
+            await self._announce_grant(thread, member, role, spec)
 
     async def _announce_grant(
-        self, thread: discord.Thread, member: discord.Member, role: discord.Role, emoji: str,
+        self, thread: discord.Thread, member: discord.Member, role: discord.Role, spec,
     ) -> None:
         try:
             await thread.send(
-                embed=build_grant_embed(member.mention, role, emoji),
+                embed=build_grant_embed(member.mention, role, spec),
                 allowed_mentions=discord.AllowedMentions.none(),
             )
         except discord.HTTPException:
@@ -390,6 +406,8 @@ def reschedule_pending_events(bot: commands.Bot) -> None:
             select(PodDraftEvent).where(PodDraftEvent.socket_status == "pending")
         ).scalars().all()
         for event in pending:
+            if event.sesh_message_id is None:
+                continue
             run_at = event.event_time - timedelta(minutes=REMINDER_LEAD_MIN)
             if event.event_time < now - timedelta(minutes=30):
                 continue
@@ -405,6 +423,7 @@ def reschedule_pending_events(bot: commands.Bot) -> None:
             )
             schedule_underfill_checks(scheduler, event.id, event.event_time, event.created_at)
             schedule_roster_reminder(scheduler, event.id, event.event_time)
+            schedule_team_vote_offer(scheduler, event.id, event.event_time)
             rearmed += 1
     if rearmed:
         log.info(f"startup sweep re-armed {rearmed} pending pod-draft reminder(s)")

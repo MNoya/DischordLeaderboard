@@ -24,12 +24,12 @@ Talk about the latest Limited formats and improving your game.
 For more in-depth feedback and analysis.
 • {#draft-log-review} — post your 17Lands draft log for feedback from other players.
 • {#high-stakes-deck-help} — threads for Qualifiers, Directs and other important events.
-• 3rd tier Patrons receive video responses from Alex:
-    {#submissions-for-video-draft-log-reviews} | {#submissions-for-gameplay-video-review}
 
 **Odds and Ends**
 Talk other games and more importantly {#pet-pics}
 
 **LLU Patreon/Stream Sub Exclusive:**
 The area for patrons and subs to get 1 on 1 advice, get help with deck techs, direct contact with Alex, and level-up their game!
-• _Patron note_: Haven't linked Patreon to Discord yet? If you need the <@216303189073461248> role, message <@507301384979349526>.
+• 3rd tier Patrons receive video responses from Alex:
+    {#submissions-for-video-draft-log-reviews} | {#submissions-for-gameplay-video-review}
+• _Patron note_: Haven't linked Patreon to Discord yet? If you need the <@&775845635395813388> role, message <@507301384979349526>.

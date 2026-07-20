@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import logging
 import re
+import secrets
+import string
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import NamedTuple, Sequence
+from urllib.parse import quote
 
 from sqlalchemy import any_, delete, func, select
 from sqlalchemy.orm import Session
@@ -21,6 +24,9 @@ from bot.models import (
     PodDraftParticipant,
 )
 from bot.services import pod_format
+from bot.services.pod_schedule import highest_event_number
+from bot.services.pod_slot import next_collision_index
+from bot.services.sesh_parser import NUM_RE
 from bot.slug import disambiguate_slug, slugify
 
 
@@ -32,6 +38,9 @@ DM_KIND_SUBMIT_DECK = "submit_deck"
 DM_KIND_SUBMIT_DECK_FINAL = "submit_deck_final"
 
 FINALIZED_STATUSES = ("draft_done", "complete")
+
+BOT_USER_NAME = "DisChordBot"
+AI_BOT_NAME_RE = re.compile(r"^Bot #\d+$")
 
 
 @dataclass(frozen=True)
@@ -58,9 +67,10 @@ class ParsedSeshEvent:
 
 @dataclass(frozen=True)
 class FinalStanding:
-    """One participant's outcome at champion finalization."""
+    """One participant's outcome at champion finalization. Team pods carry no placement — a team
+    draft has no individual champion, so their trophies stay record-only."""
     draftmancer_name: str
-    placement: int
+    placement: int | None
     record: str
     eliminated_round: int | None
 
@@ -76,17 +86,39 @@ def _lookup_set_id(session: Session, set_code: str) -> str | None:
     ).scalar_one_or_none()
 
 
-def _build_draftmancer_session(session: Session, parsed: ParsedSeshEvent) -> str:
-    """Compose a stable session id; prefer #N from the title, fall back to Month-Day; suffix collisions A/B/C.
+_SESSION_SUFFIX_LEN = 4
 
-    Custom formats drop the LLU prefix and lead with their own slug instead of a set code. The Set
-    Championship gets a fixed `-Championship` base so its lobby URL stays clean across re-creates.
+
+def _session_suffix() -> str:
+    """Random lowercase tail that makes a Draftmancer session id unguessable, so nobody can enter and
+    seize lobby ownership before the bot connects, and no two pods ever share a session."""
+    return "".join(secrets.choice(string.ascii_lowercase) for _ in range(_SESSION_SUFFIX_LEN))
+
+
+def _session_id_off_base(session: Session, base: str) -> str:
+    """A `<base>-<rand4>` session id not already taken by another event with the same base."""
+    taken = set(session.execute(
+        select(PodDraftEvent.draftmancer_session).where(PodDraftEvent.draftmancer_session.like(f"{base}-%"))
+    ).scalars().all())
+    while True:
+        candidate = f"{base}-{_session_suffix()}"
+        if candidate not in taken:
+            return candidate
+
+
+def _build_draftmancer_session(session: Session, parsed: ParsedSeshEvent) -> str:
+    """Compose a session id with a readable base and an unguessable random tail; prefer #N from the
+    title, fall back to Month-Day.
+
+    A plain set omits its code from the id so a format change before the draft never desyncs the shown
+    URL. Custom formats drop the LLU prefix and lead with their own slug. The Set Championship leads
+    with a `-Championship` base.
     """
     slug = pod_format.session_slug_for(parsed.set_code)
     if slug is not None:
         head = f"{slug}-{parsed.event_date:%y}"
     else:
-        head = f"{settings.pod_draft_session_prefix}-{parsed.set_code}"
+        head = settings.pod_draft_session_prefix
 
     if is_championship(parsed.name):
         base = f"{head}-Championship"
@@ -96,20 +128,7 @@ def _build_draftmancer_session(session: Session, parsed: ParsedSeshEvent) -> str
     else:
         base = f"{head}-{parsed.event_date:%b}-{parsed.event_date.day}"
 
-    taken = set(session.execute(
-        select(PodDraftEvent.draftmancer_session).where(PodDraftEvent.draftmancer_session.like(f"{base}%"))
-    ).scalars().all())
-    if base not in taken:
-        return base
-    for i in range(26):
-        candidate = f"{base}-{chr(ord('A') + i)}"
-        if candidate not in taken:
-            return candidate
-    # >26 collisions is implausible; fall back to a numeric suffix beyond Z
-    n = 27
-    while f"{base}-{n}" in taken:
-        n += 1
-    return f"{base}-{n}"
+    return _session_id_off_base(session, base)
 
 
 _ARENA_ID_RE = re.compile(r"#[0-9?]+$")
@@ -228,6 +247,10 @@ def players_for_names(session: Session, names: Sequence[str]) -> list[tuple[str,
 def player_for_name(session: Session, name: str) -> Player | None:
     """Resolve a Draftmancer/Discord name to a Player.
 
+    Active players win; a retired or exiled player is matched only as a fallback, so pod
+    attribution keeps recognizing someone who has since left the board without a stale row
+    shadowing an active player who reused the same handle.
+
     Matching tiers (first hit wins):
       1. Exact match against any arena_aliases entry (normalized).
       2. Longest-prefix match against arena_aliases.
@@ -238,18 +261,19 @@ def player_for_name(session: Session, name: str) -> Player | None:
     norm = normalize_player_name(name)
     if not norm:
         return None
+    return _match_player(session, norm, Player.active.is_(True)) \
+        or _match_player(session, norm, Player.active.is_(False))
 
+
+def _match_player(session: Session, norm: str, active_filter) -> Player | None:
+    """Run the matching tiers over the player subset selected by `active_filter`."""
     found = session.execute(
-        select(Player)
-        .where(Player.active.is_(True), norm == any_(Player.arena_aliases))
-        .limit(1)
+        select(Player).where(active_filter, norm == any_(Player.arena_aliases)).limit(1)
     ).scalar_one_or_none()
     if found is not None:
         return found
 
-    candidates = session.execute(
-        select(Player).where(Player.active.is_(True))
-    ).scalars().all()
+    candidates = session.execute(select(Player).where(active_filter)).scalars().all()
 
     best: tuple[Player, str] | None = None
     for p in candidates:
@@ -261,13 +285,11 @@ def player_for_name(session: Session, name: str) -> Player | None:
         return best[0]
 
     found = session.execute(
-        select(Player)
-        .where(
-            Player.active.is_(True),
+        select(Player).where(
+            active_filter,
             (_normalized_column(Player.display_name) == norm)
             | (_normalized_column(Player.discord_username) == norm),
-        )
-        .limit(1)
+        ).limit(1)
     ).scalar_one_or_none()
     if found is not None:
         return found
@@ -368,6 +390,66 @@ def full_arena_handle(name: str | None) -> bool:
     return "#" in (name or "")
 
 
+def dm_draft_link_enabled(session: Session, discord_id: str) -> bool:
+    """Whether `discord_id` receives the lobby-open link DM. Defaults on for a player with no row yet,
+    matching the column default, so a drafter who never touched `/roles` still gets the DM."""
+    enabled = session.execute(
+        select(Player.dm_draft_link).where(Player.discord_id == discord_id)
+    ).scalar_one_or_none()
+    return True if enabled is None else enabled
+
+
+def set_dm_draft_link(
+    session: Session, *, discord_id: str, discord_username: str, display_name: str,
+    avatar_hash: str | None, enabled: bool,
+) -> None:
+    """Persist the lobby-open DM preference, creating a lightweight player row when none exists so an
+    onboarding-only member's choice sticks. Mirrors the row `attach_arena_alias` seeds, minus the handle."""
+    player = session.execute(
+        select(Player).where(Player.discord_id == discord_id)
+    ).scalar_one_or_none()
+    if player is None:
+        taken_slugs = set(session.execute(select(Player.slug)).scalars().all())
+        player = Player(
+            slug=disambiguate_slug(slugify(display_name), taken_slugs),
+            discord_id=discord_id,
+            discord_username=discord_username,
+            display_name=display_name,
+            avatar_hash=avatar_hash,
+            active=True,
+            leaderboard_opt_in=False,
+            dm_draft_link=enabled,
+        )
+        session.add(player)
+    else:
+        player.dm_draft_link = enabled
+    session.flush()
+
+
+def toggle_dm_draft_link(
+    session: Session, *, discord_id: str, discord_username: str, display_name: str, avatar_hash: str | None,
+) -> bool:
+    """Flip the DM preference off its stored value and return the new state, creating a lightweight row
+    when none exists. Shared by the `/roles` toggle and the in-DM toggle button so they can't drift."""
+    new_state = not dm_draft_link_enabled(session, discord_id)
+    set_dm_draft_link(
+        session, discord_id=discord_id, discord_username=discord_username, display_name=display_name,
+        avatar_hash=avatar_hash, enabled=new_state,
+    )
+    return new_state
+
+
+def player_arena_handle(session: Session, discord_id: str) -> str | None:
+    """The full Arena handle stored for `discord_id`, or None when the player is unknown or holds only
+    a bare Draftmancer nickname. Drives the welcome's link gate and the returning card's handle line."""
+    player = session.execute(
+        select(Player).where(Player.discord_id == discord_id)
+    ).scalar_one_or_none()
+    if player is None or not full_arena_handle(player.arena_name):
+        return None
+    return player.arena_name
+
+
 def build_mock_session(session: Session, set_code: str) -> tuple[str, int]:
     """`LLU-<SET>-Mock-<N>` with N the next free per-set mock number. Collisions bump N, so two
     mocks opened back to back never share a Draftmancer lobby."""
@@ -406,57 +488,75 @@ def record_mock_event(
     return event
 
 
+def build_ondemand_session(session: Session, event_date: date) -> str:
+    """`LLU-<Mon>-<Day>-<rand4>` for a poll/queue-born pod. The id omits the set code so a format
+    change before the draft never desyncs the shown URL. The random tail keeps the session id
+    unguessable so nobody can seize lobby ownership before the bot, and no two pods share a lobby."""
+    base = f"{settings.pod_draft_session_prefix}-{event_date:%b}-{event_date.day}"
+    return _session_id_off_base(session, base)
+
+
+def record_ondemand_event(
+    session: Session, *, set_code: str, event_time: datetime, name: str, discord_thread_id: str,
+) -> PodDraftEvent:
+    """Insert a kind='tournament' pod with no sesh post — the shared creation path for the daily poll
+    and /pod-queue. The roster is seeded by the caller from the signal's members; rounds and champion
+    finalize exactly like a sesh-born tournament."""
+    code = set_code.upper()
+    event = PodDraftEvent(
+        event_date=event_time.date(),
+        event_time=event_time,
+        set_id=_lookup_set_id(session, code),
+        set_code=code,
+        format_label=pod_format.label_for(code),
+        name=name,
+        draftmancer_session=build_ondemand_session(session, event_time.date()),
+        discord_thread_id=discord_thread_id,
+        sesh_message_id=None,
+        socket_status="pending",
+        kind="tournament",
+    )
+    session.add(event)
+    session.flush()
+    return event
+
+
 _TABLE_SUFFIX_RE = re.compile(r"\s+(?:[-–]\s+)?Table\s+\d+\s*$", re.IGNORECASE)
+_TABLE_INDEX_RE = re.compile(r"Table\s+(\d+)\s*$", re.IGNORECASE)
 
 
-def split_base_name(name: str) -> str:
-    """The event name with any trailing ` - Table N` stripped, so splitting a Table 2 still bases new
-    tables on the original pod name rather than nesting `... Table 2 - Table 3`."""
+def table_base_name(name: str) -> str:
+    """The event name with any trailing ` - Table N` stripped, so opening a table off a Table 2 still
+    bases new tables on the original pod name rather than nesting `... Table 2 - Table 3`."""
     return _TABLE_SUFFIX_RE.sub("", name).strip()
 
 
 def next_table_index(session: Session, base_name: str) -> int:
-    """Next free table number for `base_name`; the original pod is table 1, so the first split is 2."""
+    """Next free table number for `base_name`; the original pod is table 1, so the first new table is 2."""
     names = session.execute(
         select(PodDraftEvent.name).where(PodDraftEvent.name.ilike(f"{base_name}%Table %"))
     ).scalars().all()
-    highest = 1
-    for name in names:
-        match = re.search(r"Table\s+(\d+)\s*$", name or "", re.IGNORECASE)
-        if match:
-            highest = max(highest, int(match.group(1)))
-    return highest + 1
+    return next_collision_index(names, _TABLE_INDEX_RE)
 
 
-def build_split_session(session: Session, source_session_id: str, table_index: int) -> str:
-    """`<source session>-T<index>`, suffixing A/B/… on collision so re-creates never share a lobby."""
+def build_table_session(session: Session, source_session_id: str, table_index: int) -> str:
+    """`<source session>-T<index>-<rand4>` for a second table off a pod. The random tail keeps it
+    unguessable and unshared even to players who know the source lobby's id."""
     base = f"{source_session_id}-T{table_index}"
-    taken = set(session.execute(
-        select(PodDraftEvent.draftmancer_session).where(PodDraftEvent.draftmancer_session.like(f"{base}%"))
-    ).scalars().all())
-    if base not in taken:
-        return base
-    for i in range(26):
-        candidate = f"{base}-{chr(ord('A') + i)}"
-        if candidate not in taken:
-            return candidate
-    n = 27
-    while f"{base}-{n}" in taken:
-        n += 1
-    return f"{base}-{n}"
+    return _session_id_off_base(session, base)
 
 
-def record_split_event(session: Session, *, source_event_id: str) -> PodDraftEvent:
-    """Insert a kind='tournament' overflow table cloned from `source_event_id` — same set, format,
+def record_table_event(session: Session, *, source_event_id: str) -> PodDraftEvent:
+    """Insert a kind='tournament' table cloned from `source_event_id` — same set, format,
     pairings, seating, and event date, but its own Draftmancer session and no sesh RSVP. The roster
     arrives from the new lobby. `discord_thread_id` is a placeholder the caller overwrites once the
     thread exists (as record_mock_event does)."""
     source = session.get(PodDraftEvent, source_event_id)
     if source is None:
         raise ValueError(f"source pod event {source_event_id} not found")
-    base_name = split_base_name(source.name)
+    base_name = table_base_name(source.name)
     table_index = next_table_index(session, base_name)
-    session_id = build_split_session(session, source.draftmancer_session, table_index)
+    session_id = build_table_session(session, source.draftmancer_session, table_index)
     event = PodDraftEvent(
         event_date=source.event_date,
         event_time=datetime.now(timezone.utc),
@@ -477,20 +577,25 @@ def record_split_event(session: Session, *, source_event_id: str) -> PodDraftEve
     return event
 
 
-def preview_split_target_sync(source_event_id: str) -> tuple[str, int] | None:
-    """(base name, next table index) for the split claim card, or None when the source is gone."""
+def preview_table_target_sync(source_event_id: str) -> tuple[str, int] | None:
+    """(base name, next table index) for the table claim card, or None when the source is gone."""
     with SessionLocal() as session:
         source = session.get(PodDraftEvent, source_event_id)
         if source is None:
             return None
-        base = split_base_name(source.name)
+        base = table_base_name(source.name)
         return base, next_table_index(session, base)
 
 
-def draftmancer_url_for(session_id: str) -> str:
+def draftmancer_url_for(session_id: str, user_name: str | None = None) -> str:
     """Compose the player-facing session URL from current settings at send time, so a host change
-    reaches already-recorded events instead of fossilizing in the row."""
-    return f"{settings.draftmancer_web_url}/?session={session_id}"
+    reaches already-recorded events instead of fossilizing in the row. A `user_name` appends
+    `&userName=`, which Draftmancer reads to pre-fill the lobby name so pairing resolves without the
+    player renaming by hand."""
+    url = f"{settings.draftmancer_web_url}/?session={session_id}"
+    if user_name:
+        url += f"&userName={quote(user_name, safe='')}"
+    return url
 
 
 def record_event(session: Session, parsed: ParsedSeshEvent) -> PodDraftEvent:
@@ -556,15 +661,40 @@ def update_event_time_if_changed(
     return event, True, was_active
 
 
-def update_event_format(session: Session, event_id: str, code: str) -> bool:
-    """Repoint a pre-draft pod event's set_code, set_id and format label; False if missing or already finalized."""
+def update_event_format(session: Session, event_id: str, code: str) -> str | None:
+    """Repoint a pre-draft pod event's set_code, set_id and format label, swapping the leading set
+    token in its name to match. Returns the (possibly renamed) event name, or None if missing or
+    already finalized."""
     event = session.get(PodDraftEvent, event_id)
     if event is None or event.socket_status in FINALIZED_STATUSES:
-        return False
+        return None
+    next_number = highest_event_number(_set_event_names(session, code)) + 1
+    event.name = renamed_for_format(event.name, event.set_code, code, next_number)
     event.set_code = code
     event.set_id = _lookup_set_id(session, code)
     event.format_label = pod_format.label_for(code)
-    return True
+    return event.name
+
+
+def _set_event_names(session: Session, code: str) -> list[str]:
+    return list(session.execute(
+        select(PodDraftEvent.name).where(PodDraftEvent.set_code == code.upper())
+    ).scalars())
+
+
+def renamed_for_format(name: str, old_code: str | None, new_code: str, next_number: int) -> str:
+    """Rebuild a `SET Pod Draft #N - date` name for the new format: swap the leading format label and
+    renumber to the new set's next slot, keeping the date suffix. Since pods are counted per set,
+    switching MSH → SOS moves `#14` to SOS's own next number. Labels come from `format_display`, so a
+    cube reads as its proper name (Peasant Cube) on both sides. Names that don't lead with the old
+    format's label are returned unchanged."""
+    if not old_code:
+        return name
+    prefix = f"{pod_format.format_display(old_code)} "
+    if not name.upper().startswith(prefix.upper()):
+        return name
+    renumbered = NUM_RE.sub(f"#{next_number}", name[len(prefix):], count=1)
+    return f"{pod_format.format_display(new_code)} {renumbered}"
 
 
 def load_event_set_code_sync(event_id: str) -> str | None:
@@ -644,6 +774,13 @@ def load_event_thread_id_sync(event_id: str) -> str | None:
         ).scalar_one_or_none()
 
 
+def load_event_time_sync(event_id: str) -> datetime | None:
+    with SessionLocal() as session:
+        return session.execute(
+            select(PodDraftEvent.event_time).where(PodDraftEvent.id == event_id)
+        ).scalar_one_or_none()
+
+
 def load_event_seeding_context_sync(event_id: str) -> tuple[str | None, str | None, str]:
     """(seating_mode, thread_id, name) in one query — the fields the seeding-table refresh reads on every
     fire. name falls back to 'Pod Draft', the others to None when the event is missing."""
@@ -673,6 +810,33 @@ def seed_event_participants(session: Session, event_id: str, roster: list[str]) 
     duplicated."""
     for name in roster:
         upsert_participant(session, event_id, display_name=name, draftmancer_name=name)
+
+
+def apply_seat_indexes(session: Session, event_id: str, seats: list[str]) -> None:
+    if not seats:
+        return
+    rows = session.execute(
+        select(PodDraftParticipant).where(PodDraftParticipant.event_id == event_id)
+    ).scalars().all()
+    by_dm: dict[str, PodDraftParticipant] = {}
+    by_display: dict[str, PodDraftParticipant] = {}
+    for row in rows:
+        if row.draftmancer_name:
+            by_dm[normalize_player_name(row.draftmancer_name)] = row
+        if row.display_name:
+            by_display[normalize_player_name(row.display_name)] = row
+    matched = 0
+    for i, name in enumerate(seats):
+        if not name or name == BOT_USER_NAME or AI_BOT_NAME_RE.match(name):
+            continue
+        key = normalize_player_name(name)
+        row = by_dm.get(key) or by_display.get(key)
+        if row is None:
+            log.info(f"seat_index: no participant matching {name!r} in {event_id}")
+            continue
+        row.seat_index = i
+        matched += 1
+    log.info(f"seat_index: applied to {matched}/{len(seats)} seats for {event_id}")
 
 
 def _add_attendee(session: Session, event_id: str, display_name: str) -> PodDraftParticipant:
@@ -734,11 +898,36 @@ def upsert_participant(
         candidate = player_for_name(session, draftmancer_name or display_name)
         if candidate is None and draftmancer_name:
             candidate = player_for_name(session, display_name)
+        if candidate is not None and _player_already_seated(rows, candidate.id, found):
+            candidate = None
         if candidate is not None:
             found.player_id = candidate.id
+            _adopt_session_arena_handle(candidate, draftmancer_name)
 
     session.flush()
     return found
+
+
+def _player_already_seated(
+    rows: list[PodDraftParticipant], player_id, exclude: PodDraftParticipant,
+) -> bool:
+    """Whether another seat in this event already holds `player_id`. Two Draftmancer names can resolve
+    to one Player (e.g. a prefix-alias match), but uq_pod_participant_event_player allows a player a
+    single seat; the second name stays unlinked instead of crashing the tournament seed."""
+    return any(row is not exclude and row.player_id == player_id for row in rows)
+
+
+def _adopt_session_arena_handle(player: Player, draftmancer_name: str | None) -> None:
+    """Record the Draftmancer session handle on a matched Player that lacks one. Players who joined
+    through 17lands carry no Arena handle (17lands exposes none), so their first pod — played under a
+    full ArenaID#12345 name — is where we learn it. A handle already stored is never overwritten."""
+    if not full_arena_handle(draftmancer_name):
+        return
+    if not full_arena_handle(player.arena_name):
+        player.arena_name = draftmancer_name
+    normalized = normalize_player_name(draftmancer_name)
+    if normalized and normalized not in player.arena_aliases:
+        player.arena_aliases = [*player.arena_aliases, normalized]
 
 
 def add_pairing(
@@ -923,6 +1112,12 @@ def submit_deck_dm_for_participant(session: Session, participant_id: str) -> Pod
             PodDraftDmMessage.kind == DM_KIND_SUBMIT_DECK,
         )
     ).scalar_one_or_none()
+
+
+def delete_submit_deck_dm(session: Session, participant_id: str) -> None:
+    row = submit_deck_dm_for_participant(session, participant_id)
+    if row is not None:
+        session.delete(row)
 
 
 def final_submit_deck_dm_for_participant(
@@ -1217,7 +1412,8 @@ def get_participant_deck_state(
 class PodSetSummary(NamedTuple):
     """A player's pod results for one set. ``trophies`` counts a 3-0 record OR a pod win
     (placement 1) — multiple per large pod, and a small pod's 2-1 winner still earns one.
-    A 2-1 that won the pod is a trophy, not a ``wins_2_1``."""
+    A 2-1 that won the pod is a trophy, not a ``wins_2_1``. Team pods write no placement,
+    so their trophies come from 3-0 records alone."""
     events: int
     wins: int
     losses: int
@@ -1235,7 +1431,7 @@ def pod_scoring_counts(session: Session, set_code: str) -> dict[str, tuple[int, 
         .where(
             PodDraftEvent.set_code == set_code,
             Player.active.is_(True),
-            PodDraftParticipant.placement.isnot(None),
+            PodDraftParticipant.record.isnot(None),
         )
     ).all()
     by_player: dict[str, list[tuple[str | None, int | None]]] = {}
@@ -1252,7 +1448,7 @@ def pod_summary_by_set_for_player(session: Session, player_id: str) -> dict[str,
         .join(PodDraftParticipant, PodDraftParticipant.event_id == PodDraftEvent.id)
         .where(
             PodDraftParticipant.player_id == player_id,
-            PodDraftParticipant.placement.isnot(None),
+            PodDraftParticipant.record.isnot(None),
         )
     ).all()
     by_set: dict[str, list[tuple[str | None, int | None]]] = {}

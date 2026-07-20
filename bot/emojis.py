@@ -20,10 +20,24 @@ def get_emoji(name: str) -> discord.Emoji | None:
     return _EMOJIS.get(name)
 
 
+def set_symbol(code: str) -> discord.Emoji | None:
+    """The keyrune set-symbol app emoji for a set code, looked up case-insensitively."""
+    return _EMOJIS.get(code.lower()) or _EMOJIS.get(code.upper())
+
+
 def prefix(name: str) -> str:
     """Custom emoji followed by a space for inlining before text, or '' if not loaded."""
     e = _EMOJIS.get(name)
     return f"{e} " if e else ""
+
+
+def resolve(token: str) -> str | None:
+    """An application-emoji name resolves to its glyph, a unicode glyph passes through, and an
+    application name that isn't loaded yet resolves to None."""
+    e = _EMOJIS.get(token)
+    if e:
+        return str(e)
+    return None if token.isalnum() else token
 
 
 def mana_number(n: int) -> str:

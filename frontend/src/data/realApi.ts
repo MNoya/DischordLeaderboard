@@ -1437,6 +1437,9 @@ function adaptPodEvent(row: Record<string, unknown>): PodEventSummary {
     participantCount: (row.participant_count ?? 0) as number,
     isFinalized: (row.is_finalized ?? false) as boolean,
     seshMessageId: (row.sesh_message_id ?? null) as string | null,
+    ordinal: (row.ordinal ?? null) as number | null,
+    tableIndex: (row.table_index ?? 1) as number,
+    isTeamDraft: (row.is_team_draft ?? false) as boolean,
   };
 }
 

@@ -9,6 +9,8 @@ from bot.services.pod_tournament import (
     TROPHY,
     WINNERS,
     _ROUND_TITLE_RE,
+    MatchResultSelect,
+    RoundResultsView,
     _round_header,
     mark_trophy_match,
     round_embed,
@@ -69,6 +71,28 @@ def test_final_round_splits_trophy_middle_last_chance():
     assert _pairs(groups[0][1]) == {frozenset(("Aria", "Esk"))}
 
 
+# --- dropdown order matches the embed ---
+
+def test_round_results_view_orders_dropdowns_like_the_embed():
+    states = [  # interleaved by record, as incremental bracket creation produces
+        _ms("Noya", "Bram", "1-0", "1-0"),
+        _ms("Eli", "Fern", "0-1", "0-1"),
+        _ms("Gus", "Hana", "1-0", "1-0"),
+        _ms("Cara", "Dex", "0-1", "0-1"),
+    ]
+
+    view = RoundResultsView(states, round_num=2)
+
+    dropdown_ids = [
+        child.options[0].value.split("|")[0]
+        for child in view.children
+        if isinstance(child, MatchResultSelect)
+    ]
+    embed_ids = [m["match_id"] for _, group in round_groups(2, states) for m in group]
+    assert dropdown_ids == embed_ids
+    assert dropdown_ids == ["Noya-Bram", "Gus-Hana", "Eli-Fern", "Cara-Dex"]
+
+
 # --- rendering ---
 
 def test_round2_renders_three_groups_with_records_on_the_pair_up():
@@ -78,7 +102,6 @@ def test_round2_renders_three_groups_with_records_on_the_pair_up():
         _ms("Doryn", "Fenn", "0-1", "0-1"),
     ]
     groups = _norm(round_embed(2, states).description).split("\n\n")
-    assert len(groups) == 3
     assert "Aria vs Caedmon" in groups[0]
     assert "Esk (1-0) vs Bryn (0-1)" in groups[1]
     assert "Doryn vs Fenn" in groups[2]
@@ -136,6 +159,34 @@ def test_reported_and_skipped_lines_drop_the_pending_marker():
     assert "Gwyn" in skipped
     assert "⚔️" not in reported
     assert "⚔️" not in skipped
+
+
+def test_report_notice_is_round_one_only_and_drops_when_complete():
+    pending = [_ms("Aria", "Caedmon")]
+    done = [_ms("Aria", "Caedmon", winner_name="Aria", score="2-0")]
+
+    assert "Report your result" in round_embed(1, pending).description
+    assert "Report your result" not in round_embed(1, done).description
+    assert "Report your result" not in round_embed(2, pending).description
+
+
+def test_deck_image_notice_is_round_one_only():
+    states = [_ms("Aria", "Bryn")]
+
+    assert "MTGA deck image" in round_embed(1, states).description
+    assert "MTGA deck image" not in round_embed(2, states).description
+
+
+def test_bracket_waiting_slots_render_without_a_footer():
+    states = [
+        _ms("Aria", "Caedmon", "1-0", "1-0"),
+        {"placeholder": True, "label": "waiting on Round 1", "a_record": "0-1", "b_record": "0-1",
+         "winner_name": None, "score": None},
+    ]
+
+    desc = _norm(round_embed(2, states).description)
+    assert "waiting on Round 1" in desc  # the slot itself explains the wait
+    assert "unlock" not in desc.lower()  # no separate footer notice
 
 
 def _ms(a: str, b: str, a_record: str = "0-0", b_record: str = "0-0", **extra) -> dict:

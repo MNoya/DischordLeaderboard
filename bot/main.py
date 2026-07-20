@@ -32,10 +32,11 @@ from bot.commands.leaderboard import (
 from bot.commands.pod_backfill import setup as setup_pod_backfill
 from bot.commands.mock_draft import setup as setup_mock_draft
 from bot.commands.pod_draft import setup as setup_pod_draft
+from bot.commands.pod_queue import PodQueueView, setup as setup_pod_queue
 from bot.commands.pod_guide import setup as setup_pod_guide
 from bot.commands.roles import RolesView, setup as setup_roles
-from bot.commands.pod_schedule import setup as setup_pod_schedule
-from bot.commands.pod_split import setup as setup_pod_split
+from bot.commands.pod_table import setup as setup_pod_table
+from bot.commands.peasant import setup as setup_peasant
 from bot.commands.preview_season_awards import setup as setup_preview_season_awards
 from bot.commands.save_resource import setup as setup_save_resource
 from bot.commands.set_awards import setup as setup_set_awards
@@ -53,6 +54,8 @@ from bot.commands.testchampionship import setup as setup_testchampionship
 from bot.commands.testcomponent import setup as setup_testcomponent
 from bot.commands.testlobby import setup as setup_testlobby
 from bot.commands.testschedule import setup as setup_testschedule
+from bot.commands.testthreadintro import setup as setup_testthreadintro
+from bot.commands.testpolls import setup as setup_testpolls
 from bot.commands.testformatschedule import setup as setup_testformatschedule
 from bot.commands.testscribe import setup as setup_testscribe
 from bot.listeners.auto_link_listener import setup as setup_auto_link_listener
@@ -64,23 +67,31 @@ from bot.models import LeaderboardMessage, Player, PodDraftEvent
 from bot.services.bot_log import BotLog
 from bot.services.lobby_embed import LobbyReadyButtonView
 from bot.services.pod_draft_manager import rehydrate_active_lobbies
+from bot.services.pod_team_board import TeamReportButton
+from bot.services.pod_join_button import JoinDraftButton
+from bot.services.pod_link_dm import DmLinkArenaButton, DmNotifyToggleButton
+from bot.services.pod_team_vote import TeamVoteButton
 from bot.services.pod_tournament import (
     reconcile_unannounced_championships,
     register_persistent_views as register_pod_views,
     rehydrate_active_tournaments,
 )
 from bot.services.media_sync import sync_media, sync_recent, SyncResult
-from bot.services.ping_roles import reconcile_ping_roles
+from bot.services.ping_roles import persistent_pod_card_view, reconcile_ping_roles
 from bot.services.active_set import resolve_active_set
 from bot.services.refresh import refresh_active_players
 from bot.services.refresh_report import build_refresh_report, format_elapsed
 from bot.services.seventeenlands import MinIntervalLimiter, SeventeenLandsClient
 from bot.sets import active_set_code
+from bot.commands.pod_rsvp import PodRsvpView
 from bot.tasks.pod_draft_reminder import init_reminder
+from bot.tasks.pod_daily_poll import PodPollView, init_daily_poll
+from bot.services.pod_launch import init_launch, rearm_signals
 from bot.tasks.format_schedule_post import init_format_schedule
 from bot.tasks.pod_schedule_post import init_schedule_post
 from bot.tasks.set_awards_post import init_set_awards_schedule
 from bot.tasks.pod_underfill import init_underfill
+from bot.tasks.pod_thread_cleanup import init_thread_cleanup
 
 
 log = logging.getLogger("bot.main")
@@ -180,6 +191,9 @@ def build_bot(guild_id: int) -> commands.Bot:
         init_schedule_post(bot)
         init_format_schedule(bot)
         init_set_awards_schedule(bot)
+        init_launch(bot)
+        init_daily_poll(bot)
+        init_thread_cleanup(bot)
 
         # Load cogs into memory and mirror to the guild tree so dispatch works.
         # Discord-side sync is handled by the owner-only `!sync` text command, not on startup.
@@ -196,12 +210,13 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_link_17lands(bot)
         await setup_leaderboard_visibility(bot)
         await setup_pod_draft(bot)
+        await setup_pod_queue(bot)
         await setup_pod_guide(bot)
         await setup_roles(bot)
         await setup_mock_draft(bot)
         await setup_pod_backfill(bot)
-        await setup_pod_schedule(bot)
-        await setup_pod_split(bot)
+        await setup_pod_table(bot)
+        await setup_peasant(bot)
         await setup_preview_season_awards(bot)
         await setup_set_awards(bot)
         await setup_sesh_listener(bot)
@@ -214,11 +229,19 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_testcomponent(bot)
         await setup_testawards(bot)
         await setup_testschedule(bot)
+        await setup_testthreadintro(bot)
+        await setup_testpolls(bot)
         await setup_testscribe(bot)
         await setup_testformatschedule(bot)
         await setup_testchampionship(bot)
         reschedule_pending_events(bot)
+        await rearm_signals(bot)
         register_pod_views(bot)
+        bot.add_dynamic_items(TeamReportButton)
+        bot.add_dynamic_items(TeamVoteButton)
+        bot.add_dynamic_items(JoinDraftButton)
+        bot.add_dynamic_items(DmNotifyToggleButton)
+        bot.add_dynamic_items(DmLinkArenaButton)
         _log_startup_summary()
         bot.tree.copy_global_to(guild=guild)
 
@@ -227,6 +250,10 @@ def build_bot(guild_id: int) -> commands.Bot:
         bot.add_view(LeaderboardView())
         bot.add_view(LobbyReadyButtonView(show_force_start=True))
         bot.add_view(RolesView())
+        bot.add_view(persistent_pod_card_view())
+        bot.add_view(PodPollView())
+        bot.add_view(PodQueueView())
+        bot.add_view(PodRsvpView())
 
         log.info("setup_hook: cogs loaded; run `!sync` to publish slash commands to Discord")
 
@@ -520,7 +547,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         log.info(f"logged in as {bot.user} (id={bot.user.id if bot.user else '?'})")
         await bot.change_presence(activity=discord.Activity(
             type=discord.ActivityType.competing,
-            name="dischord.pages.dev | /join",
+            name="limitedlevelups.com | /join",
         ))
         if not bot.startup_announced:
             bot.startup_announced = True

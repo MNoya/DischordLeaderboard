@@ -205,6 +205,11 @@ const resolveMeta = async (pathname: string): Promise<RouteMeta> => {
   if (section === "pods") {
     if (rest[0]) {
       const setCodes = await fetchSetCodes();
+      const code = rest[0].toUpperCase();
+      if (setCodes.has(code)) {
+        const setName = await fetchSetName(code);
+        return page(`${code} Pod Drafts`, `${setName} pod draft results and standings.`, { kind: "setSymbol", code });
+      }
       return page(titleCaseSlug(rest[0], setCodes), "Check seats, logs & replays for this pod draft.");
     }
     return page("Pod Drafts", "Check community pod draft results and standings.");

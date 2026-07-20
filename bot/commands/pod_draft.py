@@ -12,17 +12,21 @@ from discord.ext import commands
 
 from bot import audit, emojis
 from bot.commands import descriptions as desc
-from bot.commands.messages import MSG_ADMIN_ONLY
+from bot.commands.messages import MSG_ADMIN_ONLY, MSG_ARENA_BAD_FORMAT, MSG_ARENA_COLLISION, MSG_ARENA_LINKED
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.discord_helpers import display_width, extract_avatar_hash, player_url
+from bot.services.lobby_embed import guard_ready_check
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_draft_manager import (
     cancel_pod_event,
     set_event_format,
+    set_event_max_players,
     set_event_pairing_mode,
+    set_event_pick_timer,
     set_event_seating,
     set_event_seating_mode,
+    set_card_refresh_hook,
     set_seeding_refresh_hook,
     set_seeding_repost_hook,
 )
@@ -41,6 +45,8 @@ from bot.services.pod_drafts import (
     lobby_match_status,
     search_event_names_sync,
 )
+from bot.commands.pod_rsvp import fetch_channel, reflect_format_change, refresh_scheduled_card, reschedule_event
+from bot.services import pod_launch
 from bot.services.player_stats import SeededAttendee, rank_ordered_names, seed_attendees, seated_ring_order
 from bot.services.pod_seating_select import SEATING_ORDER_MARKER, seating_change_message
 from bot.services.pod_seating_image import drop_unrenderable, render_octagon_png
@@ -61,6 +67,7 @@ from bot.services.pod_tournament import (
     post_trophy_hype_for_event,
     refresh_round_pairing_messages,
 )
+from bot.services.pod_team_showcase import build_team_championship_view_for_event
 
 
 log = logging.getLogger(__name__)
@@ -114,8 +121,13 @@ class PodDraft(commands.Cog):
         thread = interaction.channel
         log.info(f"ready-check: {interaction.user} in thread {interaction.channel_id}")
         await interaction.response.defer(ephemeral=True, thinking=False)
+        actor = actor_label(interaction)
+        if await guard_ready_check(
+            interaction, manager, thread, initiated_by=actor, min_players=MANUAL_READY_MIN_PLAYERS,
+        ):
+            return
         err = await manager.initiate_ready_check(
-            thread, initiated_by=actor_label(interaction), min_players=MANUAL_READY_MIN_PLAYERS,
+            thread, initiated_by=actor, min_players=MANUAL_READY_MIN_PLAYERS,
         )
         if err is not None:
             log.warning(f"ready-check: failed — {err}")
@@ -139,6 +151,22 @@ class PodDraft(commands.Cog):
             await interaction.followup.send(f"⚠️ {err}", ephemeral=True)
         else:
             await interaction.followup.send("Force-starting the draft, watch the thread.", ephemeral=True)
+
+    @app_commands.command(name="pod-team", description=desc.POD_TEAM)
+    @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def pod_team(self, interaction: discord.Interaction) -> None:
+        manager = _find_manager_for_thread(interaction)
+        if manager is None:
+            await interaction.response.send_message(MSG_NO_ACTIVE_POD, ephemeral=True)
+            return
+        log.info(f"pod-team: {interaction.user} offering team vote in thread {interaction.channel_id}")
+        await interaction.response.defer(ephemeral=True, thinking=False)
+        err = await manager.offer_team_vote_manual()
+        if err is not None:
+            await interaction.followup.send(f"⚠️ {err}", ephemeral=True)
+        else:
+            await interaction.followup.send("Team-Draft vote posted — check the thread.", ephemeral=True)
 
     @app_commands.command(name="pod-pause", description=desc.POD_PAUSE)
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
@@ -274,10 +302,7 @@ class PodDraft(commands.Cog):
 
         if not _ARENA_INPUT_RE.match(arena_name):
             audit.event("pod_link_arena_bad_format", user_id=user_id, arena_name=arena_name)
-            await interaction.response.send_message(
-                "❌ Use the full MTG Arena handle: `ArenaID#12345`",
-                ephemeral=True,
-            )
+            await interaction.response.send_message(MSG_ARENA_BAD_FORMAT, ephemeral=True)
             return
 
         with SessionLocal() as session:
@@ -294,9 +319,7 @@ class PodDraft(commands.Cog):
                 audit.event("pod_link_arena_collision", user_id=user_id, arena_name=arena_name,
                             collides_with=collision_id)
                 await interaction.response.send_message(
-                    f"❌ `{arena_name}` is already linked to another player. "
-                    "If this is your account, ask an admin for help.",
-                    ephemeral=True,
+                    MSG_ARENA_COLLISION.format(arena_name=arena_name), ephemeral=True,
                 )
                 return
             session.commit()
@@ -304,7 +327,7 @@ class PodDraft(commands.Cog):
         audit.event("pod_link_arena_success", user_id=user_id, player_id=player_id)
         log.info(f"pod-link-arena: {interaction.user} linked {arena_name} (player_id={player_id})")
         await interaction.response.send_message(
-            f"{emojis.get('mtga')} {mention} is **{arena_name}** on Arena.",
+            MSG_ARENA_LINKED.format(emoji=emojis.get("mtga"), mention=mention, arena_name=arena_name),
             allowed_mentions=no_pings,
         )
 
@@ -365,8 +388,10 @@ class PodDraft(commands.Cog):
                 await interaction.followup.send(MSG_SEEDING_NO_RSVPS, ephemeral=True)
                 return
 
+            live = ACTIVE_POD_MANAGERS.get(event_id)
+            seat_cap = live.max_players if live is not None else settings.pod_draft_max_players
             file, embed = await asyncio.to_thread(
-                build_seeding_image_message_from_names, yes, maybe, seat_cap=settings.pod_draft_max_players,
+                build_seeding_image_message_from_names, yes, maybe, seat_cap=seat_cap,
             )
         log.info(f"pod-seeding: {interaction.user} for event_id={event_id} (mode={seating_mode})")
         if file is not None:
@@ -456,9 +481,11 @@ class PodDraft(commands.Cog):
                 )
                 return
 
-        view = await build_champion_announcement_view_for_event(
-            event_id, guild_id=interaction.guild_id,
-        )
+        pairing_mode = await asyncio.to_thread(load_event_pairing_mode_sync, event_id)
+        if pairing_mode == "team":
+            view = await build_team_championship_view_for_event(event_id, guild_id=interaction.guild_id)
+        else:
+            view = await build_champion_announcement_view_for_event(event_id, guild_id=interaction.guild_id)
         if view is None:
             await interaction.followup.send(
                 "Champion announcement isn't ready — trophy match has no winner on record yet.",
@@ -468,7 +495,7 @@ class PodDraft(commands.Cog):
 
         log.info(f"pod-champion: {interaction.user} re-posted champion announcement for event_id={event_id}")
         await interaction.followup.send(view=view)
-        await post_trophy_hype_for_event(event_id, interaction.guild)
+        await post_trophy_hype_for_event(interaction.client, event_id, interaction.guild)
 
     @pod_champion.autocomplete("event")
     async def _pod_champion_event_autocomplete(
@@ -780,16 +807,24 @@ async def delete_stale_seeding_messages(
 
 async def build_pod_settings_view(bot, event_id: str, *, is_owner: bool) -> PodSettingsView:
     """Settings panel wired for `event_id`. Shared by /pod-settings and the lobby Settings button.
-    Kick Player and Link Players appear when a Draftmancer session is live; Cancel Draft only for the
-    bot owner."""
+    Link Players appears once a Draftmancer session is live and stays through the draft so an unlinked
+    seat can be fixed mid-draft; the format/pairing/seats/pick-timer controls and Kick Player are
+    pre-draft only and drop away once drafting starts. Cancel Draft is bot-owner only."""
     current_code = await asyncio.to_thread(load_event_set_code_sync, event_id)
     current_mode = await asyncio.to_thread(load_event_pairing_mode_sync, event_id)
     current_seating = await asyncio.to_thread(load_event_seating_mode_sync, event_id)
     event_name = await asyncio.to_thread(load_event_name_sync, event_id)
     manager = ACTIVE_POD_MANAGERS.get(event_id)
+    drafting = manager is not None and (manager.drafting or manager.draft_complete)
+    scheduled = await asyncio.to_thread(pod_launch.scheduled_card_ref_sync, event_id) is not None
+    thread_id = await asyncio.to_thread(load_event_thread_id_sync, event_id)
+    notice_channel = await fetch_channel(bot, thread_id) if thread_id else None
 
     async def on_format(inter: discord.Interaction, code: str) -> str | None:
-        return await set_event_format(event_id, code)
+        err = await set_event_format(bot, event_id, code)
+        if err is None:
+            await reflect_format_change(bot, event_id)
+        return err
 
     async def on_pairing(inter: discord.Interaction, mode: str) -> str | None:
         return await set_event_pairing_mode(event_id, mode)
@@ -803,39 +838,62 @@ async def build_pod_settings_view(bot, event_id: str, *, is_owner: bool) -> PodS
     async def on_seated(inter: discord.Interaction, labels: list[str]) -> None:
         await post_manual_seating_table(bot, inter.channel, labels, actor_label(inter))
 
+    async def on_timer(inter: discord.Interaction, value: str) -> str | None:
+        return await set_event_pick_timer(event_id, int(value))
+
+    async def on_max_players(inter: discord.Interaction, value: str) -> str | None:
+        return await set_event_max_players(event_id, int(value))
+
     on_seating = None
     seat_order_provider = None
     kick_targets_provider = None
     on_kick = None
+    current_timer = None
+    current_max_players = None
     link_targets_provider = None
     on_link = None
     if manager is not None:
-        async def on_seating(inter: discord.Interaction, ordered_user_names: list[str]) -> str | None:
-            return await set_event_seating(event_id, ordered_user_names)
-        seat_order_provider = manager.seating_lobby_order
-        kick_targets_provider = manager.kick_targets
         link_targets_provider = manager.unrecognized_lobby_names
-
-        async def on_kick(inter: discord.Interaction, user_id: str) -> str | None:
-            return await manager.kick_player(user_id)
 
         async def on_link(inter: discord.Interaction, arena_name: str, member: discord.abc.User) -> str | None:
             return await manager.link_seat(member, arena_name)
+
+        if not drafting:
+            current_timer = manager.pick_timer
+            current_max_players = manager.max_players
+            seat_order_provider = manager.seating_lobby_order
+            kick_targets_provider = manager.kick_targets
+
+            async def on_seating(inter: discord.Interaction, ordered_user_names: list[str]) -> str | None:
+                return await set_event_seating(event_id, ordered_user_names)
+
+            async def on_kick(inter: discord.Interaction, user_id: str) -> str | None:
+                return await manager.kick_player(user_id)
 
     on_cancel = None
     if is_owner:
         async def on_cancel(inter: discord.Interaction) -> str | None:
             return await cancel_pod_event(event_id, actor=actor_label(inter))
 
+    on_reschedule = None
+    if scheduled and not drafting:
+        async def on_reschedule(inter: discord.Interaction, raw: str) -> str | None:
+            return await reschedule_event(
+                inter.client, event_id, raw, guild=inter.guild, actor_id=str(inter.user.id))
+
     return PodSettingsView(
-        on_format=on_format, on_pairing=on_pairing,
+        on_format=None if drafting else on_format, on_pairing=None if drafting else on_pairing,
         current_code=current_code, current_mode=current_mode,
-        on_seating_mode=on_seating_mode, current_seating=current_seating,
+        on_seating_mode=None if drafting else on_seating_mode, current_seating=current_seating,
         on_seating=on_seating, seat_order_provider=seat_order_provider,
-        on_seating_table=on_seating_table, on_seated=on_seated,
+        on_seating_table=None if drafting else on_seating_table, on_seated=on_seated,
+        on_timer=on_timer if current_timer is not None else None, current_timer=current_timer,
+        on_max_players=on_max_players if current_max_players is not None else None,
+        current_max_players=current_max_players,
         kick_targets_provider=kick_targets_provider, on_kick=on_kick,
         link_targets_provider=link_targets_provider, on_link=on_link,
-        on_cancel=on_cancel, event_name=event_name,
+        on_cancel=on_cancel, on_reschedule=on_reschedule, event_name=event_name,
+        notice_channel=notice_channel,
     )
 
 
@@ -1100,4 +1158,5 @@ def _live_lobby_names() -> list[str]:
 async def setup(bot: commands.Bot) -> None:
     set_seeding_refresh_hook(refresh_seeding_table)
     set_seeding_repost_hook(repost_seeding_table)
+    set_card_refresh_hook(refresh_scheduled_card)
     await bot.add_cog(PodDraft(bot))

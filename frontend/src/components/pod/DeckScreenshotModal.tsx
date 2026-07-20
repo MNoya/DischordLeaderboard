@@ -62,7 +62,9 @@ export function DeckScreenshotModal({ participant, initialTab = "screenshot", br
   const showPanelToggle = hasScreenshot && hasDecklist;
   const showDraftLogTab = !hideDraftLog;
   const hasTabs = showPanelToggle || showDraftLogTab;
-  const showTabBar = hasTabs || !!onPrev || !!onNext;
+  const hasSourceLink = !!participant.deckSourceUrl;
+  const panelHasControls = hasTabs || !!onPrev || !!onNext;
+  const showTabBar = panelHasControls || hasSourceLink;
 
   const { url: resolvedUrl, resolving: isResolving } = useResolvedDeckUrl(participant);
   const [imgLoaded, setImgLoaded] = useState(false);
@@ -226,39 +228,15 @@ export function DeckScreenshotModal({ participant, initialTab = "screenshot", br
             </div>
           </Link>
         )}
-        {participant.deckSourceUrl ? (
-          <a
-            href={participant.deckSourceUrl}
-            target="_blank"
-            rel="noreferrer"
+        {participant.deckScreenshotCaption && (
+          <div
             className={cn(
-              "group flex items-center gap-3 px-4 py-3 lg:gap-4 lg:pl-9 lg:pr-5 lg:py-4 border-t border-border shrink-0 bg-surface no-underline hover:bg-green/5 transition-colors",
+              "px-4 py-3 lg:pl-9 lg:pr-5 lg:py-4 text-muted text-[15px] font-body italic leading-snug border-t border-border shrink-0 bg-surface",
               breakdownHref && "lg:hidden",
             )}
           >
-            {participant.deckScreenshotCaption ? (
-              <span className="min-w-0 flex-1 text-muted text-[15px] font-body italic leading-snug">
-                {participant.deckScreenshotCaption}
-              </span>
-            ) : (
-              <span className="flex-1" />
-            )}
-            <span className="shrink-0 inline-flex items-center gap-2 text-muted group-hover:text-text font-display tracking-[0.14em] text-[13px] transition-colors">
-              <span className="hidden lg:inline">VIEW ON DISCORD</span>
-              <SiDiscord size={18} />
-            </span>
-          </a>
-        ) : (
-          participant.deckScreenshotCaption && (
-            <div
-              className={cn(
-                "px-4 py-3 lg:pl-9 lg:pr-5 lg:py-4 text-muted text-[15px] font-body italic leading-snug border-t border-border shrink-0 bg-surface",
-                breakdownHref && "lg:hidden",
-              )}
-            >
-              {participant.deckScreenshotCaption}
-            </div>
-          )
+            {participant.deckScreenshotCaption}
+          </div>
         )}
       </div>
       <div className="flex-1 min-h-0 w-full max-w-[1400px] flex flex-col items-center justify-center gap-10 px-4 md:px-0">
@@ -266,12 +244,26 @@ export function DeckScreenshotModal({ participant, initialTab = "screenshot", br
         <div
           onClick={(e) => e.stopPropagation()}
           className={cn(
-            "shrink-0 w-full lg:w-auto flex items-center justify-between gap-2 lg:gap-4",
-            hasTabs && "rounded-2xl bg-surface border border-border shadow-lg px-3 py-2 lg:px-4",
+            "shrink-0 flex items-center rounded-2xl bg-surface border border-border shadow-lg px-3 py-2 lg:px-4",
+            hasTabs
+              ? "w-full lg:w-auto justify-between gap-2 lg:gap-4"
+              : "justify-center gap-2 lg:gap-3",
           )}
         >
-          {onPrev ? <PanelChevron side="left" onClick={onPrev} /> : <span className="w-10 shrink-0" />}
+          {onPrev ? <PanelChevron side="left" onClick={onPrev} /> : hasTabs ? <span className="w-10 shrink-0" /> : null}
           <div className="flex items-center gap-1.5">
+            {hasSourceLink && (
+              <a
+                href={participant.deckSourceUrl!}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-2 rounded-full border border-border bg-surface2 text-muted hover:text-text px-4 py-2.5 font-display tracking-[0.14em] no-underline transition-colors"
+                style={{ fontSize: 14 }}
+              >
+                <SiDiscord size={16} />
+                VIEW ON DISCORD
+              </a>
+            )}
             {showPanelToggle && (
               <PanelTab
                 active={effectiveTab === "screenshot"}
@@ -302,7 +294,7 @@ export function DeckScreenshotModal({ participant, initialTab = "screenshot", br
               </PanelTab>
             )}
           </div>
-          {onNext ? <PanelChevron side="right" onClick={onNext} /> : <span className="w-10 shrink-0" />}
+          {onNext ? <PanelChevron side="right" onClick={onNext} /> : hasTabs ? <span className="w-10 shrink-0" /> : null}
         </div>
         )}
         {breakdownHref && (
@@ -333,9 +325,9 @@ function PanelChevron({ side, onClick }: { side: "left" | "right"; onClick: () =
         onClick();
       }}
       aria-label={side === "left" ? "Previous deck" : "Next deck"}
-      className="shrink-0 inline-flex items-center justify-center w-10 h-10 rounded-full bg-surface2 border border-border text-green/90 hover:text-green hover:border-green/50 transition-colors cursor-pointer outline-none focus:outline-none focus-visible:outline-none"
+      className="shrink-0 inline-flex items-center justify-center w-10 h-10 rounded-full bg-surface2 border border-border text-muted hover:text-text hover:border-border2 transition-colors cursor-pointer outline-none focus:outline-none focus-visible:outline-none"
     >
-      <Chevron size={24} strokeWidth={2.5} />
+      <Chevron size={22} strokeWidth={2.25} />
     </button>
   );
 }
@@ -501,7 +493,7 @@ function DecklistView({ mainboard, warmedImages }: { mainboard: Mainboard; warme
 }
 
 const CARD_CLASS =
-  "w-full overflow-hidden rounded-[5px] [outline-style:solid] outline-1 -outline-offset-1 outline-white/10 shadow-[0_-2px_6px_rgba(0,0,0,0.6)] transition-[outline-color] group-hover:outline-white/50 hover:outline-white/50";
+  "w-full overflow-hidden rounded-[4.5%/3.2%] [outline-style:solid] outline-1 -outline-offset-1 outline-white/10 shadow-[0_-2px_6px_rgba(0,0,0,0.6)] transition-[outline-color] group-hover:outline-white/50 hover:outline-white/50";
 
 // Cards fan top-to-bottom with each one absolutely overlapping the previous, so only a revealed sliver
 // of the upper cards shows and their bottom edge is covered — the bottom card sits in normal flow and

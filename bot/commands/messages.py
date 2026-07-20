@@ -26,15 +26,65 @@ MSG_MOCK_LOBBY_OPEN = (
 )
 MSG_MOCK_COMPLETE = "✅ **{event_name} complete!** [Draft Recap here](<{url}>) {manat}"
 MSG_MOCK_LOBBY_COUNTER = " 👥 {count}/8"
-MSG_LOBBY_FULL_PROMPT = "8️⃣ Players locked in! Initiate Ready Check?"
+MSG_LOBBY_FULL_PROMPT = "{count} Players locked in! Initiate Ready Check?"
 MSG_BOT_RECONNECTED = "🤖 Bot reconnected — back to managing the lobby."
 
-MSG_SPLIT_NO_SOURCE = "Run `/pod-split` in a pod-draft thread, or pass an `event` to pick the pod to split."
-MSG_SPLIT_UNKNOWN_EVENT = "No pod-draft event named `{event}`."
-MSG_SPLIT_INTRO = "Second table for anyone not already in the first draft."
-MSG_SPLIT_GATHERING = "New thread and Draftmancer lobby will be created once {threshold} players join."
-MSG_SPLIT_CREATED = "{name} created"
-MSG_SPLIT_JOINED = "Players ({count})"
-MSG_SPLIT_BUTTON = "Join Table {table}"
-MSG_SPLIT_GOTO = "Go to Table {table}"
-MSG_SPLIT_LOBBY_STARTER = "{draftmancer_emoji} **{event_name}** created."
+MSG_LOBBY_OPEN = (
+    "{draftmancer} {headline}\n"
+    "**Join the Draftmancer session:** <{url}>\n\n"
+    "Set your **Arena name** (like `YourName#12345`) as your Draftmancer name or use **Join Draft** "
+    "below for your personal link."
+    "{mentions}"
+)
+MSG_JOIN_DRAFT_BUTTON = "Join Draft"
+MSG_JOIN_LINE = (
+    "Open this [**Draftmancer Link**](<{url}>) to join the draft as {identity}"
+)
+MSG_LINK_ARENA_PROMPT = "Please click **Link Arena** below so the bot recognizes you."
+
+MSG_DM_RSVP_YES = "✅ You replied **Yes** to {thread}"
+MSG_DM_RSVP_MAYBE = "🤷 You replied **Maybe** to {thread}"
+MSG_DM_LOBBY_HEADER = "🔔 **Pod Draft Ready Check**"
+MSG_DM_LOBBY_LINK = (
+    MSG_DM_LOBBY_HEADER + "\n\n"
+    "{rsvp}\n\n"
+    "{join_line}"
+)
+MSG_DM_LOBBY_LINK_UNLINKED = (
+    MSG_DM_LOBBY_HEADER + "\n\n"
+    "{rsvp}\n\n"
+    + MSG_LINK_ARENA_PROMPT
+)
+MSG_DM_NOTIFY_TOGGLE_LABEL = "Draft DMs"
+MSG_DM_NOTIFY_HINT = "-# Manage your notifications with this button or with `/roles`"
+MSG_DM_PREF_ON_TITLE = "🔔 Draft DMs On"
+MSG_DM_PREF_ON_BODY = "You'll get your Draftmancer link by DM when a Pod Draft is ready"
+MSG_DM_PREF_OFF_TITLE = "🔕 Draft DMs Off"
+MSG_DM_PREF_OFF_BODY = "You won't get your Draftmancer link by DM anymore.\nRun `/roles` to manage your notifications."
+MSG_LOBBY_HEADLINE = "Lobby opened!"
+MSG_DRAFTMANCER_LINK_LEAD = "Draftmancer link will be posted {lead} minutes before."
+
+MSG_DRAFT_STARTED_ANNOUNCE = "{name} started!"
+MSG_DRAFT_STARTED_LINK = "[**Event Details**]({url})"
+
+MSG_POD_WELCOME = "### 👋 Welcome {user} to {pod_drafters}\n\n{grant}"
+MSG_ARENA_BAD_FORMAT = "❌ Expected a full MTG Arena handle: `ArenaID#12345`"
+MSG_ARENA_COLLISION = (
+    "❌ `{arena_name}` is already linked to another player. If this is your account, ask an admin for help."
+)
+MSG_ARENA_LINKED = "{emoji} {mention} is **{arena_name}** on Arena"
+MSG_ARENA_HANDLE_LINE = "{emoji} You're **{arena_name}** on Arena"
+MSG_ARENA_LINK_CTA = "Please link your Arena handle so the bot knows it's you when joining the lobby"
+MSG_POD_ROLE_GRANTED = "{subject} now on {role} and will be notified {ping}"
+
+MSG_TABLE_NO_SOURCE = "Run `/pod-table` in a pod-draft thread, or pass an `event` to pick the pod."
+MSG_TABLE_UNKNOWN_EVENT = "No pod-draft event named `{event}`."
+MSG_TABLE_INTRO = "New draft table off this pod."
+MSG_LOBBY_GATHERING = "Event thread and Draftmancer lobby will be created once {threshold} players join"
+MSG_TABLE_CREATED = "{name} created"
+MSG_PLAYERS_JOINED = "Players ({count})"
+MSG_TABLE_BUTTON = "Join Table {table}"
+MSG_TABLE_SUPERSEDED = "Reopened further down the channel. Join the newer Table {table} card."
+MSG_TABLE_GOTO = "Go to Table {table}"
+MSG_TABLE_LOBBY_STARTER = "{draftmancer_emoji} **{event_name}** created"
+MSG_SECOND_TABLE_OFFER = "🔥 The first pod filled up. Click Join to fire a second table."

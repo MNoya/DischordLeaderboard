@@ -18,6 +18,7 @@ interface Props {
   onSelect: (seat: number | null) => void;
   onShowDeck?: (p: PodSeat) => void;
   eventLabel: string;
+  teamDraft?: boolean;
   eventSlug: string;
   hasDraftLog?: boolean;
   setCode: string;
@@ -45,6 +46,7 @@ export function PodTable({
   onSelect,
   onShowDeck,
   eventLabel,
+  teamDraft = false,
   eventSlug,
   hasDraftLog = false,
   setCode,
@@ -98,7 +100,13 @@ export function PodTable({
       </div>
 
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <CenterMedallion eventLabel={eventLabel} setCode={setCode} formatLabel={formatLabel} date={date} />
+        <CenterMedallion
+          eventLabel={eventLabel}
+          teamDraft={teamDraft}
+          setCode={setCode}
+          formatLabel={formatLabel}
+          date={date}
+        />
       </div>
 
       <PassDirectionArrows seatCount={sorted.length} />
@@ -345,10 +353,17 @@ function PassDirectionArrows({ seatCount }: { seatCount: number }) {
 
 function CenterMedallion({
   eventLabel,
+  teamDraft = false,
   setCode,
   formatLabel,
   date,
-}: { eventLabel: string; setCode: string; formatLabel?: string | null; date: string }) {
+}: {
+  eventLabel: string;
+  teamDraft?: boolean;
+  setCode: string;
+  formatLabel?: string | null;
+  date: string;
+}) {
   const { weekday, date: dateLabel } = formatDateParts(date);
   const labelFontSize = medallionFontSize(eventLabel);
   const glyphCode = formatLabel ? "CUBE" : setCode;
@@ -357,11 +372,21 @@ function CenterMedallion({
       className="flex flex-col items-center justify-center text-center select-none"
       style={{ gap: "2.2cqw" }}
     >
-      <div
-        className="font-display text-text leading-none px-2"
-        style={{ fontSize: labelFontSize, letterSpacing: "0.02em" }}
-      >
-        {highlightEventLabel(eventLabel)}
+      <div className="flex flex-col items-center" style={{ gap: "1cqw" }}>
+        <div
+          className="font-display text-text leading-none px-2"
+          style={{ fontSize: labelFontSize, letterSpacing: "0.02em" }}
+        >
+          {highlightEventLabel(eventLabel)}
+        </div>
+        {teamDraft && (
+          <div
+            className="font-display text-muted leading-none"
+            style={{ fontSize: "3cqw", letterSpacing: "0.28em" }}
+          >
+            TEAM DRAFT
+          </div>
+        )}
       </div>
       <div className="flex items-center" style={{ gap: "2.2cqw" }}>
         <i

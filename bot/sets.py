@@ -138,6 +138,14 @@ def upcoming_sets(when: datetime | None = None) -> tuple[SetSeed, ...]:
     return ALL_SETS[codes.index(active) + 1:]
 
 
+def recent_released_sets(limit: int = 8, when: datetime | None = None) -> tuple[SetSeed, ...]:
+    """Released sets other than the active one, newest first, capped at `limit` — the pool a set
+    picker offers below the active set. Unreleased upcoming sets are excluded (no card pool to draft)."""
+    active = active_set_code(when)
+    others = [seed for seed in released_sets(when) if seed.code != active]
+    return tuple(others[:limit])
+
+
 def is_known_set(code: str) -> bool:
     return any(s.code == code.upper() for s in ALL_SETS)
 

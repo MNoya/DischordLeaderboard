@@ -3,9 +3,9 @@ from datetime import date, datetime, timedelta, timezone
 import pytest
 
 from bot.services.pod_schedule import (
+    CARD_LEAD_HOURS,
     CREATE_DESCRIPTION,
-    CREATE_LEAD_HOURS,
-    CREATE_MENTIONS_EURO,
+    CREATE_MENTIONS_EARLY,
     MONDAY_KIND_CHAMPIONSHIP_WEEK,
     MONDAY_KIND_NORMAL,
     MONDAY_KIND_RELEASE_WEEK,
@@ -17,7 +17,7 @@ from bot.services.pod_schedule import (
     build_underfill_message,
     compose_monday_message,
     compose_schedule_message,
-    create_command_send_time,
+    card_send_time,
     format_clock,
     highest_event_number,
     monday_blurb,
@@ -220,9 +220,9 @@ def test_build_create_command_carries_the_year_in_the_datetime_not_the_title():
 def test_build_create_command_uses_supplied_mentions():
     slot = datetime(2026, 6, 25, 14, 0, tzinfo=SCHEDULE_TZ)
 
-    command = build_create_command("MSH", 6, slot, CREATE_DESCRIPTION, CREATE_MENTIONS_EURO)
+    command = build_create_command("MSH", 6, slot, CREATE_DESCRIPTION, CREATE_MENTIONS_EARLY)
 
-    assert CREATE_MENTIONS_EURO in command
+    assert CREATE_MENTIONS_EARLY in command
 
 
 @pytest.mark.parametrize(
@@ -252,20 +252,30 @@ def test_off_grid_time_has_no_slot():
     assert slot_for_event_time(datetime(2026, 6, 9, 11, 0, tzinfo=SCHEDULE_TZ)) is None
 
 
-def test_americas_create_command_sends_monday_noon_eastern():
+def test_americas_card_sends_monday_noon_eastern():
     monday = date(2026, 7, 6)
     slot = WEEKLY_SLOTS[0]
 
-    send_at = create_command_send_time(slot, monday)
+    send_at = card_send_time(slot, monday)
 
     assert send_at == datetime(2026, 7, 6, 12, 0, tzinfo=SCHEDULE_TZ)
 
 
-def test_euro_create_commands_send_a_fixed_lead_before_the_event():
+def test_euro_card_sends_a_fixed_lead_before_the_event():
     monday = date(2026, 7, 6)
+    slot = WEEKLY_SLOTS[1]
+    start = slots_for_week(monday)[1]
 
-    for slot, start in zip(WEEKLY_SLOTS[1:], slots_for_week(monday)[1:]):
-        assert create_command_send_time(slot, monday) == start - timedelta(hours=CREATE_LEAD_HOURS)
+    assert card_send_time(slot, monday) == start - timedelta(hours=CARD_LEAD_HOURS)
+
+
+def test_saturday_card_sends_after_the_thursday_pod():
+    monday = date(2026, 7, 6)
+    slot = WEEKLY_SLOTS[2]
+
+    send_at = card_send_time(slot, monday)
+
+    assert send_at == datetime(2026, 7, 9, 17, 0, tzinfo=SCHEDULE_TZ)
 
 
 def test_compose_monday_message_marks_each_slot_with_its_emoji():
@@ -305,11 +315,11 @@ def test_underfill_message_interpolates_name_count_time_and_signup_link():
     event_time = datetime(2026, 6, 24, 0, 0, tzinfo=timezone.utc)
     jump_url = "https://discord.com/channels/1/2/3"
 
-    body = build_underfill_message("FIN Pod Draft #1 - Jun 24", 5, 8, event_time, jump_url)
+    body = build_underfill_message("FIN Pod Draft #1 - Jun 24", 4, 8, event_time, jump_url)
 
     assert "FIN Pod Draft #1" in body
     assert "Jun 24" not in body
-    assert "3 more players" in body
+    assert "4 more players" in body
     assert f"<t:{int(event_time.timestamp())}:R>" in body
     assert ":F>" not in body
     assert f"]({jump_url})" in body
@@ -321,7 +331,15 @@ def test_underfill_message_never_pings_a_role():
     body = build_underfill_message("Pod", 7, 8, event_time, "url")
 
     assert "<@&" not in body
+
+
+def test_underfill_message_one_short_uses_singular_plain_count():
+    event_time = datetime(2026, 6, 24, 0, 0, tzinfo=timezone.utc)
+
+    body = build_underfill_message("Pod", 7, 8, event_time, "url")
+
     assert "1 more player" in body
+    assert "1 more players" not in body
 
 
 @pytest.mark.parametrize(

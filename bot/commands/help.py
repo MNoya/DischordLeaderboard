@@ -9,7 +9,7 @@ from discord.ext import commands
 from bot import audit
 from bot.commands import descriptions as desc
 from bot.config import settings
-from bot.discord_helpers import command_line, in_pod_coordination
+from bot.discord_helpers import command_line, in_pod_chat, in_pod_coordination, posts_publicly
 
 logger = logging.getLogger(__name__)
 
@@ -39,12 +39,14 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
 
 POD_HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
     ("🚀 Pod Drafts", [
+        ("/draft", desc.POD_QUEUE),
         ("/pod-seeding", desc.POD_SEEDING),
         ("/pod-ready", desc.POD_READY),
         ("/pod-start", desc.POD_START),
         ("/pod-pause", desc.POD_PAUSE),
         ("/pod-unpause", desc.POD_UNPAUSE),
         ("/pod-settings", desc.POD_SETTINGS),
+        ("/pod-team", desc.POD_TEAM),
         ("/pod-takeover", desc.POD_TAKEOVER),
         ("/pod-standings", desc.POD_STANDINGS),
         ("/pod-review", desc.POD_REVIEW),
@@ -56,11 +58,10 @@ POD_HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         ("/link-arena", desc.LINK_ARENA),
     ]),
     ("⚙️ Admin", [
-        ("/pod-split", desc.POD_SPLIT.removeprefix("[Admin] ")),
+        ("/pod-table", desc.POD_TABLE.removeprefix("[Admin] ")),
         ("/pod-restart", desc.POD_RESTART.removeprefix("[Admin] ")),
         ("/pod-champion", desc.POD_CHAMPION.removeprefix("[Admin] ")),
         ("/pod-backfill", desc.POD_BACKFILL.removeprefix("[Admin] ")),
-        ("/pod-schedule", desc.POD_SCHEDULE.removeprefix("[Admin] ")),
     ]),
 ]
 
@@ -110,9 +111,11 @@ class Help(commands.Cog):
     @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
     async def help(self, interaction: discord.Interaction) -> None:
-        sections = POD_HELP_SECTIONS if in_pod_coordination(interaction.channel) else HELP_SECTIONS
+        in_pod_context = in_pod_coordination(interaction.channel) or in_pod_chat(interaction.channel)
+        sections = POD_HELP_SECTIONS if in_pod_context else HELP_SECTIONS
         audit.event("help_invoked", user_id=str(interaction.user.id))
-        await interaction.response.send_message(embed=render_help_embed(sections), view=HelpView(), ephemeral=False)
+        ephemeral = not posts_publicly(interaction)
+        await interaction.response.send_message(embed=render_help_embed(sections), view=HelpView(), ephemeral=ephemeral)
 
 
 async def setup(bot: commands.Bot) -> None:

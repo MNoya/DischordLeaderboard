@@ -383,8 +383,42 @@ function synthDraftEvents(slug: string): PlayerDraftEvent[] {
   return out;
 }
 
+const TABLE_RE = /\s+(?:[-–]\s+)?Table\s+(\d+)\s*$/i;
+
+const tableIndexOf = (name: string): number => {
+  const m = name.match(TABLE_RE);
+  return m ? Number(m[1]) : 1;
+};
+
+// Mirror the public_pod_draft_events projection so mock mode numbers #N the same way the view does:
+// per set, each pod that has already run gets its own execution-ordered number; mock drafts are skipped.
+const withPodOrdinals = (events: PodEventSummary[]): PodEventSummary[] => {
+  const now = Date.now();
+  const ordinalByEventId = new Map<string, number>();
+  const bySet = new Map<string, PodEventSummary[]>();
+  for (const e of events) {
+    bySet.set(e.setCode, [...(bySet.get(e.setCode) ?? []), e]);
+  }
+  for (const list of bySet.values()) {
+    list
+      .filter((e) => e.kind !== "mock" && new Date(e.eventTime).getTime() <= now)
+      .sort(
+        (a, b) =>
+          new Date(a.eventTime).getTime() - new Date(b.eventTime).getTime() ||
+          tableIndexOf(a.name) - tableIndexOf(b.name) ||
+          a.eventId.localeCompare(b.eventId),
+      )
+      .forEach((e, i) => ordinalByEventId.set(e.eventId, i + 1));
+  }
+  return events.map((e) => ({
+    ...e,
+    ordinal: ordinalByEventId.get(e.eventId) ?? null,
+    tableIndex: tableIndexOf(e.name),
+  }));
+};
+
 export const fetchPodEvents = (setCode: string): Promise<PodEventSummary[]> => {
-  return wait(podEventsFixture.filter((e) => e.setCode === setCode));
+  return wait(withPodOrdinals(podEventsFixture).filter((e) => e.setCode === setCode));
 };
 
 export const fetchPodEventParticipants = (
@@ -398,7 +432,7 @@ export const fetchPodDraftArtifact = (eventId: string): Promise<PodDraftArtifact
 };
 
 export const fetchPodEventBySlug = (slug: string): Promise<PodEventSummary | null> => {
-  return wait(podEventsFixture.find((e) => e.slug === slug) ?? null);
+  return wait(withPodOrdinals(podEventsFixture).find((e) => e.slug === slug) ?? null);
 };
 
 export const fetchPodEventMatches = (eventId: string): Promise<PodEventMatchRow[]> => {

@@ -2,10 +2,10 @@ from bot.services.pod_format_select import WRITE_IN_VALUE, format_options
 from bot.sets import active_set_code
 
 
-def test_write_in_launcher_is_always_offered():
+def test_write_in_launcher_is_offered_first():
     values = [option.value for option in format_options(None)]
 
-    assert WRITE_IN_VALUE in values
+    assert values[0] == WRITE_IN_VALUE
 
 
 def test_active_set_is_default_when_no_current_code():

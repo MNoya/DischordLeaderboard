@@ -16,6 +16,7 @@ from bot.services.pod_drafts import (
     lobby_match_status,
     normalize_player_name,
     player_for_name,
+    player_arena_handle,
     classify_lobby_names,
     strip_arena_suffix,
     suggest_lobby_name,
@@ -111,6 +112,24 @@ def test_has_arena_suffix(raw, present):
 
 # --- player_for_name priority ---
 
+def test_player_arena_handle_returns_full_handle(session):
+    _seed_player(session, discord_id="10", username="dana", display_name="Dana", arena_name="Dana#4242")
+
+    assert player_arena_handle(session, "10") == "Dana#4242"
+
+
+def test_player_arena_handle_none_when_unset_or_partial(session):
+    _seed_player(session, discord_id="11", username="evan", display_name="Evan", arena_name=None)
+    _seed_player(session, discord_id="12", username="finn", display_name="Finn", arena_name="Finn")
+
+    assert player_arena_handle(session, "11") is None
+    assert player_arena_handle(session, "12") is None
+
+
+def test_player_arena_handle_none_for_unknown_discord_id(session):
+    assert player_arena_handle(session, "does-not-exist") is None
+
+
 def test_exact_arena_name_wins_over_display_name(session):
     _seed_player(session, discord_id="1", username="alice", display_name="Alice", arena_name="MagicAlice#9999")
     _seed_player(session, discord_id="2", username="magicalice", display_name="MagicAlice")
@@ -150,9 +169,26 @@ def test_returns_none_when_no_match(session):
     assert player_for_name(session, "ghost#1234") is None
 
 
-def test_ignores_inactive_players(session):
-    _seed_player(session, discord_id="7", username="retired", display_name="Retired", active=False)
-    assert player_for_name(session, "retired") is None
+def test_matches_inactive_player_as_fallback(session):
+    _seed_player(session, discord_id="7", username="retired", display_name="Retired",
+                 arena_name="retired#4242", active=False)
+
+    found = player_for_name(session, "retired#4242")
+
+    assert found is not None
+    assert found.discord_id == "7"
+
+
+def test_active_player_wins_over_inactive_sharing_handle(session):
+    _seed_player(session, discord_id="70", username="oldowner", display_name="Old Owner",
+                 arena_name="sharedhandle#111", active=False)
+    _seed_player(session, discord_id="71", username="newowner", display_name="New Owner",
+                 arena_name="sharedhandle#222", active=True)
+
+    found = player_for_name(session, "sharedhandle#333")
+
+    assert found is not None
+    assert found.discord_id == "71"
 
 
 def test_display_name_wins_over_discord_username_when_both_match(session):

@@ -206,7 +206,7 @@ function CardPreviewOverlay({ card, grade }: { card: ArtifactCard; grade: TierCa
             alt={card.n ?? ""}
             draggable={false}
             onError={onError}
-            className="h-[54vh] max-h-[500px] w-auto rounded-xl shadow-2xl outline outline-1 -outline-offset-1 outline-white/20"
+            className="h-[54vh] max-h-[500px] w-auto rounded-[4.5%/3.2%] shadow-2xl outline outline-1 -outline-offset-1 outline-white/20"
           />
         ) : (
           <div className="flex h-[54vh] max-h-[500px] w-[39vh] max-w-[360px] items-center justify-center rounded-xl bg-surface2 p-6 shadow-2xl">

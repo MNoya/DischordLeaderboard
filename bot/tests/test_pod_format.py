@@ -8,7 +8,7 @@ from bot.models import PodDraftEvent
 from bot.services import pod_format
 from bot.services.pod_format import PEASANT_CODE, PEASANT_CUBE_ID, PEASANT_LABEL
 from bot.services.pod_draft_manager import PodDraftManager, _persist_format, set_event_format
-from bot.services.pod_drafts import update_event_format
+from bot.services.pod_drafts import renamed_for_format, update_event_format
 
 
 def test_cube_id_for_registered_cube():
@@ -67,14 +67,32 @@ def test_emit_format_restricts_to_set_for_plain_code():
     assert "importCube" not in mgr.sio.events()
 
 
+# --- name swap on format change ---
+
+def test_renamed_for_format_swaps_token_and_renumbers():
+    assert renamed_for_format("MSH Pod Draft #14 - Jul 14", "MSH", "SOS", 6) == "SOS Pod Draft #6 - Jul 14"
+
+
+def test_renamed_for_format_uppercases_new_token():
+    assert renamed_for_format("MSH Pod Draft #1", "msh", "sos", 3) == "SOS Pod Draft #3"
+
+
+def test_renamed_for_format_leaves_untokenized_name_untouched():
+    assert renamed_for_format("Friday Night Pod", "MSH", "SOS", 9) == "Friday Night Pod"
+
+
+def test_renamed_for_format_swaps_scheduled_card_name_to_cube():
+    assert renamed_for_format("MSH Jul 18 Early Pod", "MSH", PEASANT_CODE, 1) == "Peasant Cube Jul 18 Early Pod"
+
+
 # --- persistence + pre-draft guard ---
 
-def _seed_event(session, socket_status="reminded", set_code="SOS"):
+def _seed_event(session, socket_status="reminded", set_code="SOS", name="SOS Pod Draft"):
     event = PodDraftEvent(
         event_date=date(2026, 5, 13),
         event_time=datetime(2026, 5, 13, tzinfo=timezone.utc),
         set_code=set_code,
-        name="SOS Pod Draft",
+        name=name,
         draftmancer_session="LLU-SOS-1",
         discord_thread_id="thread-1",
         sesh_message_id="msg-1",
@@ -87,14 +105,28 @@ def _seed_event(session, socket_status="reminded", set_code="SOS"):
 
 def test_update_event_format_repoints_set_code(session):
     event = _seed_event(session)
-    assert update_event_format(session, event.id, PEASANT_CODE) is True
+
+    new_name = update_event_format(session, event.id, PEASANT_CODE)
+
     assert event.set_code == PEASANT_CODE
     assert event.format_label == PEASANT_LABEL
+    assert new_name == "Peasant Cube Pod Draft"
+    assert event.name == "Peasant Cube Pod Draft"
+
+
+def test_update_event_format_renumbers_against_target_set(session):
+    _seed_event(session, set_code="SOS", name="SOS Pod Draft #1 - May 1")
+    _seed_event(session, set_code="SOS", name="SOS Pod Draft #2 - May 8")
+    event = _seed_event(session, set_code="MSH", name="MSH Pod Draft #14 - Jul 1")
+
+    new_name = update_event_format(session, event.id, "SOS")
+
+    assert new_name == "SOS Pod Draft #3 - Jul 1"
 
 
 def test_update_event_format_blocked_once_finalized(session):
     event = _seed_event(session, socket_status="complete")
-    assert update_event_format(session, event.id, PEASANT_CODE) is False
+    assert update_event_format(session, event.id, PEASANT_CODE) is None
     session.refresh(event)
     assert event.set_code == "SOS"
 
@@ -103,7 +135,7 @@ def test_persist_format_commits(session, monkeypatch):
     import bot.services.pod_draft_manager as mod
     event = _seed_event(session)
     monkeypatch.setattr(mod, "SessionLocal", _session_factory(session))
-    assert _persist_format(event.id, PEASANT_CODE) is True
+    assert _persist_format(event.id, PEASANT_CODE) == "Peasant Cube Pod Draft"
     assert session.get(PodDraftEvent, event.id).set_code == PEASANT_CODE
 
 
@@ -111,7 +143,7 @@ def test_set_event_format_rejects_finalized_event(session, monkeypatch):
     import bot.services.pod_draft_manager as mod
     event = _seed_event(session, socket_status="draft_done")
     monkeypatch.setattr(mod, "SessionLocal", _session_factory(session))
-    err = asyncio.run(set_event_format(event.id, PEASANT_CODE))
+    err = asyncio.run(set_event_format(None, event.id, PEASANT_CODE))
     assert err == pod_format.FORMAT_LOCKED_MSG
 
 

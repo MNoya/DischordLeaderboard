@@ -8,7 +8,7 @@ from typing import Callable
 import discord
 from discord import app_commands
 from discord.ext import commands
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session
 
 from bot import audit, emojis
@@ -620,7 +620,8 @@ def process_leaderboard_for_mtgo(session: Session, set_code: str, top_n: int = 2
 def _pod_board(
     session: Session, viewer_discord_id: str | None, top_n: int, set_code: str, set_name: str,
 ) -> LeaderboardData:
-    trophy_expr = func.coalesce(func.sum(case((PodDraftParticipant.placement == 1, 1), else_=0)), 0)
+    is_trophy = or_(PodDraftParticipant.record == "3-0", PodDraftParticipant.placement == 1)
+    trophy_expr = func.coalesce(func.sum(case((is_trophy, 1), else_=0)), 0)
     events_expr = func.count(PodDraftParticipant.id)
 
     rows = session.execute(
@@ -633,7 +634,7 @@ def _pod_board(
         .join(PodDraftEvent, PodDraftEvent.id == PodDraftParticipant.event_id)
         .where(
             Player.active.is_(True),
-            PodDraftParticipant.placement.is_not(None),
+            PodDraftParticipant.record.is_not(None),
             func.upper(PodDraftEvent.set_code) == set_code.upper(),
         )
         .group_by(Player.id, Player.slug, Player.display_name, Player.discord_id)

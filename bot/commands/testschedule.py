@@ -1,13 +1,13 @@
 """Owner-only `!test` triggers for the pod-draft scheduler, each reusing the production path.
 
-`underfill` renders the underfill nudge with sample numbers. `reminder` renders the roster reminder
-embed with sample rosters. `createsend` fires the real per-event /create DM for a week. `rolegrant`
-posts the auto-grant announcement embed so its look can be checked.
-The Monday schedule package itself is exercised through the real `/pod-schedule` command.
+`underfill` renders the scheduled-pod underfill nudge with sample numbers. `pollnudge` renders the
+launcher-slot nudge. `reminder` renders the roster reminder embed with sample rosters. `rolegrant`
+posts the auto-grant announcement embed so its look can be checked. The Monday schedule package itself
+is exercised through the real `/pod-schedule` command; the scheduled RSVP card through `!test rsvp`.
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 
 import discord
 from discord.ext import commands
@@ -16,19 +16,12 @@ from bot.commands.test_group import test_group
 from bot.config import settings
 from bot.services.ping_roles import PING_ROLES, build_grant_embed
 from bot.services.pod_roles import find_role
-from bot.services.pod_schedule import (
-    MONDAY_KIND_NORMAL,
-    SCHEDULE_TZ,
-    WEEKLY_SLOTS,
-    build_underfill_message,
-    monday_kind,
-    slots_for_week,
-)
+from bot.services.pod_launch import ondemand_event_name_sync
+from bot.services.pod_schedule import SCHEDULE_TZ, build_underfill_message, slots_for_week
+from bot.services.pod_signals import bucket_by_key
+from bot.sets import active_set_code
+from bot.tasks.pod_daily_poll import build_poll_nudge
 from bot.tasks.pod_draft_reminder import ROSTER_REMINDER_LEAD_MIN, build_roster_embed
-from bot.tasks.pod_schedule_post import fire_create_command, upcoming_monday
-
-
-MSG_BAD_WEEK = "Couldn't read that week — use `YYYY-MM-DD`, or leave it blank for the upcoming week."
 
 
 async def setup(bot: commands.Bot) -> None:
@@ -42,6 +35,19 @@ async def setup(bot: commands.Bot) -> None:
         )
         await ctx.send(body, allowed_mentions=discord.AllowedMentions.none())
 
+    @test_group.command(name="pollnudge")
+    @commands.is_owner()
+    async def test_pollnudge(ctx: commands.Context) -> None:
+        """Owner-only. Post a sample launcher-slot nudge in this channel — no DB or signals lookup."""
+        slot = _next_slot()
+        bucket = bucket_by_key("LATE")
+        role = find_role(ctx.guild, bucket.role_name) if ctx.guild else None
+        mention = role.mention if role is not None else f"@{bucket.name}"
+        link = f"- [**Sign up here**]({ctx.message.jump_url}) "
+        name = ondemand_event_name_sync(active_set_code(), slot)
+        body = build_poll_nudge(name, 1, slot, link, mention)
+        await ctx.send(body, allowed_mentions=discord.AllowedMentions.none())
+
     @test_group.command(name="reminder")
     @commands.is_owner()
     async def test_reminder(ctx: commands.Context) -> None:
@@ -52,26 +58,6 @@ async def setup(bot: commands.Bot) -> None:
         maybe = ["Ajani Goldmane", "Kaya Bala"]
         embed = build_roster_embed(name, starts_at, yes, maybe)
         await ctx.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
-
-    @test_group.command(name="createsend")
-    @commands.is_owner()
-    async def test_createsend(ctx: commands.Context, week: str = "") -> None:
-        """Owner-only. DM yourself the per-event /create messages for a week via the real fire path."""
-        monday = upcoming_monday()
-        if week:
-            try:
-                parsed = date.fromisoformat(week)
-            except ValueError:
-                await ctx.send(MSG_BAD_WEEK)
-                return
-            monday = parsed - timedelta(days=parsed.weekday())
-        kind, _ = monday_kind(monday)
-        if kind != MONDAY_KIND_NORMAL:
-            await ctx.send(f"Week of {monday.isoformat()} is a {kind} week — no pods to send. Pass a normal week.")
-            return
-        for slot in WEEKLY_SLOTS:
-            await fire_create_command(monday.isoformat(), slot.weekday)
-        await ctx.send(f"DMed {len(WEEKLY_SLOTS)} /create message(s) for the week of {monday.isoformat()}.")
 
     @test_group.command(name="rolegrant")
     @commands.is_owner()
@@ -89,7 +75,7 @@ async def setup(bot: commands.Bot) -> None:
             if role is None:
                 await ctx.send(f"No `{spec.name}` role on **{guild.name}** — create it first.")
                 continue
-            embed = build_grant_embed(ctx.author.mention, role, spec.emoji)
+            embed = build_grant_embed(ctx.author.mention, role, spec)
             await ctx.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
             posted += 1
         if posted == 0:

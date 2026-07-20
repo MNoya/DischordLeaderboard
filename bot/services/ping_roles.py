@@ -8,33 +8,53 @@ when a name moves to `aliases`. To rename a role, set the new `name` and list th
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+import re
 from dataclasses import dataclass
 
 import discord
 
+from bot import emojis
+from bot.commands.messages import (
+    MSG_ARENA_BAD_FORMAT,
+    MSG_ARENA_COLLISION,
+    MSG_ARENA_HANDLE_LINE,
+    MSG_ARENA_LINK_CTA,
+    MSG_ARENA_LINKED,
+    MSG_JOIN_LINE,
+    MSG_POD_ROLE_GRANTED,
+    MSG_POD_WELCOME,
+)
+from bot.commands.pod_guide import render_pod_guide_embed_body
+from bot.database import SessionLocal
+from bot.discord_helpers import extract_avatar_hash, post_welcome, send_welcome
+from bot.services.pod_active_lobby import active_lobby_link_for
+from bot.services.pod_drafts import (
+    attach_arena_alias,
+    dm_draft_link_enabled,
+    draftmancer_url_for,
+    player_arena_handle,
+)
 from bot.services.pod_schedule import (
-    EURO_POD_DRAFTERS_ROLE_NAME,
+    EARLY_POD_ROLE_NAME,
+    LATE_POD_ROLE_NAME,
     POD_DRAFTERS_ROLE_NAME,
+    POD_QUEUE_ROLE_NAME,
     SATURDAY,
-    SLOT_EMOJI_AMERICAS,
-    SLOT_EMOJI_EU,
     SLOT_EMOJI_SATURDAY,
     THURSDAY,
     WEDNESDAY,
-    WEEKEND_POD_DRAFTERS_ROLE_NAME,
+    WEEKEND_POD_ROLE_NAME,
     next_slot_datetime,
     slot_by_weekday,
-    slot_for_event_time,
 )
+from bot.services.pod_signals import WEEKEND_BUCKETS, slot_event_time, slot_role_name_for_event_time
 
 
 log = logging.getLogger(__name__)
 
-MSG_ROLE_GRANTED = (
-    "{emoji} {user} you're now on {role} and will be pinged for drafts at this time of day. "
-    "Run `/roles` to manage your notifications."
-)
+QUEUE_GRANT_PING = "when it opens or needs more players"
 
 
 @dataclass(frozen=True)
@@ -46,19 +66,33 @@ class PingRole:
     aliases: tuple[str, ...] = ()
     slot_weekday: int | None = None
     auto_grant: bool = False
+    grant_when: str = "at this time of day"
 
 
 PING_ROLES: tuple[PingRole, ...] = (
-    PingRole(POD_DRAFTERS_ROLE_NAME, SLOT_EMOJI_AMERICAS, "Late weekday pods", slot_weekday=WEDNESDAY),
+    PingRole(POD_DRAFTERS_ROLE_NAME, "llu", "Server-Wide Pod Announcements", color="#C0C0C0"),
     PingRole(
-        EURO_POD_DRAFTERS_ROLE_NAME, SLOT_EMOJI_EU, "Early weekday pods",
-        slot_weekday=THURSDAY, auto_grant=True,
+        EARLY_POD_ROLE_NAME, "💫", "Weekdays", color="#5CA8E0",
+        aliases=("Early Pods", "Early Pod Drafters", "Euro Pod Drafters"), slot_weekday=THURSDAY, auto_grant=True,
     ),
     PingRole(
-        WEEKEND_POD_DRAFTERS_ROLE_NAME, SLOT_EMOJI_SATURDAY, "Weekend pods",
-        color="#D2B48C", slot_weekday=SATURDAY, auto_grant=True,
+        LATE_POD_ROLE_NAME, "☄️", "Weekdays", color="#9B8AE6",
+        aliases=("Late Pods", "Late Pod Drafters"), slot_weekday=WEDNESDAY, auto_grant=True,
     ),
+    PingRole(
+        WEEKEND_POD_ROLE_NAME, SLOT_EMOJI_SATURDAY, "", color="#D2B48C",
+        aliases=("Weekend Pods", "Weekend Pod Drafters"), slot_weekday=SATURDAY, auto_grant=True,
+        grant_when="on weekends",
+    ),
+    PingRole(POD_QUEUE_ROLE_NAME, "⚡", "Daily Draft Sign-Ups", color="#FFAC33"),
 )
+
+
+def spec_named(name: str) -> PingRole | None:
+    for spec in PING_ROLES:
+        if spec.name == name:
+            return spec
+    return None
 
 
 def button_custom_id(spec: PingRole) -> str:
@@ -66,36 +100,351 @@ def button_custom_id(spec: PingRole) -> str:
 
 
 def blurb_with_time(spec: PingRole) -> str:
+    """A slot role pairs its blurb with its recurring local times: one for a weekday slot, all three
+    weekend buckets for the weekend role. Roles with no slot show their blurb alone."""
     if spec.slot_weekday is None:
         return spec.blurb
     slot = slot_by_weekday(spec.slot_weekday)
     if slot is None:
         return spec.blurb
-    unix = int(next_slot_datetime(slot).timestamp())
-    return f"{spec.blurb}: <t:{unix}:t>"
+    slot_date = next_slot_datetime(slot).date()
+    if spec.slot_weekday >= SATURDAY:
+        stamps = [slot_event_time(slot_date, bucket.key) for bucket in WEEKEND_BUCKETS]
+    else:
+        stamps = [next_slot_datetime(slot)]
+    times = ", ".join(f"<t:{int(stamp.timestamp())}:t>" for stamp in stamps)
+    return f"{spec.blurb} at {times}" if spec.blurb else f"at {times}"
 
 
-def build_grant_embed(user_mention: str, role: discord.Role, emoji: str) -> discord.Embed:
-    """The embed announcing a fresh auto-grant in the event thread. Shared by the listener and tests.
+def display_emoji(spec: PingRole) -> str | None:
+    return emojis.resolve(spec.emoji)
+
+
+def slot_grant_ping(spec: PingRole) -> str:
+    return f"for drafts {spec.grant_when}"
+
+
+def pod_role_grant_text(
+    role_mention: str, ping: str, *, emoji: str = "", member_mention: str | None = None,
+) -> str:
+    """One role-grant line for every surface: `member_mention` set addresses a member by mention for a
+    public thread post, unset addresses the clicker for an ephemeral reply."""
+    if member_mention:
+        subject = f"{emoji} {member_mention} you're".strip()
+    else:
+        subject = f"{emoji} You're".strip()
+    return MSG_POD_ROLE_GRANTED.format(subject=subject, role=role_mention, ping=ping)
+
+
+def build_grant_embed(
+    user_mention: str, role: discord.Role, spec: PingRole, *, ping: str | None = None,
+) -> discord.Embed:
+    """The public embed announcing a fresh auto-grant in an event thread, used by the sesh listener.
 
     A role mention inside an embed never pings (only message content does), so the role tag is safe;
     it renders as the colored role pill from the viewer's role cache.
     """
+    message = pod_role_grant_text(
+        role.mention, ping or slot_grant_ping(spec),
+        emoji=display_emoji(spec) or "", member_mention=user_mention,
+    )
     return discord.Embed(
-        description=MSG_ROLE_GRANTED.format(emoji=emoji, user=user_mention, role=role.mention),
+        description=message,
         color=role.color if role.color.value else discord.Color.blurple(),
     )
 
 
-def auto_grant_spec_for_event(event_time) -> PingRole | None:
-    """The ping role auto-granted to RSVPs of the pod at this time, or None."""
-    slot = slot_for_event_time(event_time)
-    if slot is None:
+def build_welcome_view(
+    guild: discord.Guild, user_mention: str, slot_role: discord.Role | None, *, ping: str | None = None,
+) -> discord.ui.LayoutView:
+    """First-pod welcome as a Components V2 container: a green accent card whose text block behaves as
+    message content, so the newcomer mention pings where an embed mention would stay silent. Folds in
+    the role grant for a one-message welcome; returning drafters get `build_grant_view` instead."""
+    umbrella = discord.utils.get(guild.roles, name=POD_DRAFTERS_ROLE_NAME)
+    pod_drafters = umbrella.mention if umbrella is not None else POD_DRAFTERS_ROLE_NAME
+    if slot_role is not None and ping is not None:
+        grant = f"You're now on {slot_role.mention} and will be notified {ping}"
+    else:
+        grant = "Use the buttons below to link your Arena handle, read the Pod Guide and manage Notifications"
+    message = MSG_POD_WELCOME.format(user=user_mention, pod_drafters=pod_drafters, grant=grant).rstrip()
+    return _PodButtonCard(message)
+
+
+def build_grant_view(
+    role: discord.Role, spec: PingRole, *, ping: str | None = None, arena_name: str | None = None,
+) -> discord.ui.LayoutView:
+    """The ephemeral card a returning drafter gets on a fresh slot grant: the grant line plus the same
+    Pod Guide and Notifications buttons as the welcome. No self-mention — the card is ephemeral, so the
+    reader is the subject. When linked, it shows their Arena handle and drops the Link Arena button;
+    when unlinked it offers Link Arena so they can link before joining the lobby. Accented with the
+    granted role's color."""
+    grant_line = pod_role_grant_text(
+        role.mention, ping or slot_grant_ping(spec), emoji=display_emoji(spec) or "",
+    )
+    if arena_name is not None:
+        handle_line = MSG_ARENA_HANDLE_LINE.format(emoji=emojis.get("mtga"), arena_name=arena_name)
+        text = f"{grant_line}\n{handle_line}"
+    else:
+        text = f"{grant_line}\n{MSG_ARENA_LINK_CTA}"
+    accent = role.color if role.color.value else discord.Color.blurple()
+    return _PodButtonCard(text, accent=accent, show_link_button=arena_name is None)
+
+
+def persistent_pod_card_view() -> discord.ui.LayoutView:
+    """A component-only instance for `bot.add_view` so the welcome and grant-card buttons keep
+    dispatching after a restart; the placeholder text is never shown — registration routes on the
+    button custom_ids, which both cards share."""
+    return _PodButtonCard("welcome")
+
+
+class _PodButtonCard(discord.ui.LayoutView):
+    """The shared Components V2 card behind both the welcome and the returning grant notice: a text
+    block over the Link Arena / Pod Guide / Notifications button row. The accent defaults to green;
+    the grant card overrides it with the granted role's color."""
+
+    def __init__(self, text: str, *, accent: discord.Color | None = None, show_link_button: bool = True) -> None:
+        super().__init__(timeout=None)
+        container = discord.ui.Container(accent_colour=accent or discord.Color.green())
+        container.add_item(discord.ui.TextDisplay(text))
+        row = discord.ui.ActionRow()
+        if show_link_button:
+            row.add_item(_LinkArenaButton())
+        row.add_item(_PodGuideButton())
+        row.add_item(_ManageRolesButton())
+        container.add_item(row)
+        self.add_item(container)
+
+
+LINK_ARENA_BUTTON_ID = "pod_welcome_link_arena"
+POD_GUIDE_BUTTON_ID = "pod_welcome_guide"
+MANAGE_ROLES_BUTTON_ID = "pod_welcome_roles"
+_ARENA_HANDLE_RE = re.compile(r"^.+#\d+$")
+
+
+class _LinkArenaButton(discord.ui.Button):
+    def __init__(self) -> None:
+        super().__init__(
+            label="Link Arena",
+            style=discord.ButtonStyle.primary,
+            emoji=emojis.get("mtga"),
+            custom_id=LINK_ARENA_BUTTON_ID,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(_LinkArenaModal())
+
+
+class _PodGuideButton(discord.ui.Button):
+    def __init__(self) -> None:
+        super().__init__(
+            label="Pod Guide", style=discord.ButtonStyle.success, emoji="📖", custom_id=POD_GUIDE_BUTTON_ID,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        role = discord.utils.get(interaction.guild.roles, name=POD_DRAFTERS_ROLE_NAME) if interaction.guild else None
+        mention = role.mention if role is not None else f"@{POD_DRAFTERS_ROLE_NAME}"
+        await interaction.response.send_message(
+            embed=discord.Embed(description=render_pod_guide_embed_body(mention), color=discord.Color.green()),
+            ephemeral=True,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+
+class _ManageRolesButton(discord.ui.Button):
+    def __init__(self) -> None:
+        super().__init__(
+            label="Notifications", style=discord.ButtonStyle.secondary, emoji="🔔", custom_id=MANAGE_ROLES_BUTTON_ID,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        from bot.commands.roles import RolesView
+
+        held = {role.name for role in getattr(interaction.user, "roles", [])}
+        dm_opt_in = await asyncio.to_thread(_dm_opt_in_for, str(interaction.user.id))
+        await interaction.response.send_message(
+            view=RolesView(held, interaction.guild, in_guild=interaction.guild is not None, dm_opt_in=dm_opt_in),
+            ephemeral=True,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+
+def _dm_opt_in_for(discord_id: str) -> bool:
+    with SessionLocal() as session:
+        return dm_draft_link_enabled(session, discord_id)
+
+
+async def submit_arena_link(interaction: discord.Interaction, arena_name: str) -> str | None:
+    """Validate and store an Arena handle from a modal, replying only on rejection (bad format or
+    collision). Returns the linked handle on success without a response, so the caller owns the success
+    reply — the in-channel announcement, or a DM's in-place re-render. Shared so validation can't drift."""
+    if not _ARENA_HANDLE_RE.match(arena_name):
+        await interaction.response.send_message(MSG_ARENA_BAD_FORMAT, ephemeral=True)
         return None
-    for spec in PING_ROLES:
-        if spec.auto_grant and spec.slot_weekday == slot.weekday:
-            return spec
-    return None
+    with SessionLocal() as session:
+        player_id, collision_id = attach_arena_alias(
+            session,
+            discord_id=str(interaction.user.id),
+            discord_username=interaction.user.name,
+            display_name=interaction.user.display_name,
+            avatar_hash=extract_avatar_hash(interaction.user),
+            arena_name=arena_name,
+            overwrite=True,
+        )
+        if collision_id is not None:
+            await interaction.response.send_message(
+                MSG_ARENA_COLLISION.format(arena_name=arena_name), ephemeral=True,
+            )
+            return None
+        session.commit()
+    log.info(f"pod-welcome-link: {interaction.user} linked {arena_name} (player_id={player_id})")
+    return arena_name
+
+
+class _LinkArenaModal(discord.ui.Modal, title="Link Arena Handle"):
+    handle = discord.ui.TextInput(
+        label="MTG Arena Handle",
+        placeholder="ArenaID#12345",
+        min_length=3,
+        max_length=40,
+        required=True,
+    )
+
+    def __init__(self, after_link=None) -> None:
+        super().__init__()
+        self.after_link = after_link
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        arena_name = await submit_arena_link(interaction, str(self.handle.value).strip())
+        if arena_name is None:
+            return
+        if self.after_link is not None:
+            await self.after_link(interaction, arena_name)
+            return
+        await interaction.response.send_message(
+            MSG_ARENA_LINKED.format(
+                emoji=emojis.get("mtga"), mention=interaction.user.mention, arena_name=arena_name,
+            ),
+            allowed_mentions=discord.AllowedMentions(users=False, everyone=False, roles=False),
+        )
+        await _handoff_active_lobby_link(interaction)
+
+
+def format_join_line(session_id: str, arena_name: str) -> str:
+    """The one-line join call to action shared by the lobby DM, the in-thread Join Draft reply, and the
+    post-link handoff: the personalized Draftmancer link plus the Arena identity, mtga emoji first when
+    the app emoji resolves."""
+    emoji = emojis.get("mtga")
+    identity = f"{emoji} **{arena_name}**" if emoji else f"**{arena_name}**"
+    return MSG_JOIN_LINE.format(url=draftmancer_url_for(session_id, arena_name), identity=identity)
+
+
+async def _handoff_active_lobby_link(interaction: discord.Interaction) -> None:
+    """Right after a link, hand back the personalized session link for a live lobby the player is in, so
+    linking from the Join Draft nudge (or anywhere during a lobby) needs no second Join Draft click."""
+    lobby = active_lobby_link_for(str(interaction.user.id))
+    if lobby is None:
+        return
+    session_id, arena_name = lobby
+    await interaction.followup.send(format_join_line(session_id, arena_name), ephemeral=True)
+
+
+def build_link_arena_button() -> discord.ui.Button:
+    """The registered Link Arena button, for embedding in the Join Draft nudge and the unlinked lobby
+    DM. Shares the registered custom_id so clicks dispatch after a restart."""
+    return _LinkArenaButton()
+
+
+def build_link_arena_view() -> discord.ui.View:
+    view = discord.ui.View(timeout=None)
+    view.add_item(build_link_arena_button())
+    return view
+
+
+def build_link_arena_modal(after_link=None) -> discord.ui.Modal:
+    """The Link Arena modal with an optional `after_link(interaction, arena_name)` step run on a
+    successful link in place of the default in-channel announcement — the lobby DM uses it to re-render
+    itself with the personalized link."""
+    return _LinkArenaModal(after_link=after_link)
+
+
+async def _linked_arena_handle(discord_id: str) -> str | None:
+    with SessionLocal() as session:
+        return player_arena_handle(session, discord_id)
+
+
+_welcomed_member_ids: set[int] = set()
+
+
+def _first_welcome_for(member_id: int) -> bool:
+    """True the first time a member would be welcomed, False after — so re-gaining Pod Drafters (a
+    Customize re-toggle, or a drop-and-return) never re-posts the public welcome. In-memory, so it
+    re-arms on restart; a member only picks the role once in normal use, so the reset is harmless."""
+    if member_id in _welcomed_member_ids:
+        return False
+    _welcomed_member_ids.add(member_id)
+    return True
+
+
+def forget_welcome(member_id: int) -> None:
+    """Drop a member's welcomed mark so `!test reset` can replay the first-pod welcome for the tester."""
+    _welcomed_member_ids.discard(member_id)
+
+
+async def announce_pod_grant(
+    interaction: discord.Interaction, *, first_pod: bool,
+    granted_role: discord.Role | None, welcome_role: discord.Role | None,
+    spec: PingRole | None, ping: str | None,
+) -> None:
+    """The post-join notice every signal surface shares: a first-ever drafter with no linked Arena
+    handle gets the public welcome in pod-draft-chat, folding in `welcome_role`; anyone already linked
+    is treated as a returning drafter, since reaching `/link-arena` means they already found pods —
+    they get only the ephemeral grant card if they freshly picked up a slot role, else nothing.
+    `granted_role` gates the returning case on an actual fresh grant, so a re-click never re-announces."""
+    user = interaction.user
+    arena_name = await _linked_arena_handle(str(user.id))
+    wants_welcome = first_pod and arena_name is None
+    if wants_welcome and _first_welcome_for(user.id):
+        welcome = build_welcome_view(interaction.guild, user.mention, welcome_role, ping=ping)
+        await post_welcome(interaction, welcome)
+        log.info(f"posted first-pod welcome for {user}")
+    elif granted_role is not None:
+        grant = build_grant_view(granted_role, spec, ping=ping, arena_name=arena_name)
+        await interaction.followup.send(
+            view=grant, ephemeral=True, allowed_mentions=discord.AllowedMentions.none(),
+        )
+        log.info(f"posted returning grant card for {user} (linked={arena_name is not None})")
+    else:
+        log.info(
+            f"no pod-grant notice for {user}: first_pod={first_pod} linked={arena_name is not None} "
+            f"granted_role={granted_role.name if granted_role else None}"
+        )
+
+
+async def announce_onboarding_welcome(client: discord.Client, member: discord.Member) -> None:
+    """The welcome for a drafter who picked up Pod Drafters through Discord's onboarding question,
+    which bypasses every interaction path. Posted publicly in pod-draft-chat with no slot role to fold
+    in, since onboarding grants only the umbrella. Anyone already linked is skipped — they found pods
+    on their own, and with no interaction there's no ephemeral to fall back to."""
+    if await _linked_arena_handle(str(member.id)) is not None:
+        log.info(f"onboarding welcome skipped for {member}: already linked")
+        return
+    if not _first_welcome_for(member.id):
+        log.info(f"onboarding welcome skipped for {member}: already welcomed")
+        return
+    welcome = build_welcome_view(member.guild, member.mention, None)
+    posted = await send_welcome(client, member, welcome)
+    log.info(f"onboarding welcome {'posted' if posted else 'failed to post'} for {member}")
+
+
+def auto_grant_spec_for_event(event_time) -> PingRole | None:
+    """The ping role auto-granted to RSVPs of the pod at this time, or None. Resolves off the poll
+    buckets (weekend + time-of-day), so a launcher pod and a weekly-schedule pod at the same slot map
+    to the same role regardless of weekday."""
+    role_name = slot_role_name_for_event_time(event_time)
+    if role_name is None:
+        return None
+    spec = spec_named(role_name)
+    return spec if spec is not None and spec.auto_grant else None
 
 
 async def reconcile_ping_roles(bot: discord.Client) -> None:
@@ -107,6 +456,42 @@ async def reconcile_ping_roles(bot: discord.Client) -> None:
             continue
         for spec in PING_ROLES:
             await _ensure_role(guild, spec)
+        await _keep_umbrella_on_top(guild)
+
+
+async def strip_pod_roles(member: discord.Member) -> int:
+    """Remove the auto-granted pod ping roles — the slot roles plus the Pod Drafters umbrella — from
+    one member. Backs `!test reset` so the tester's own re-test starts with no leftover grants; the
+    opt-in-only Pod Queue role is left alone. Returns the number of roles removed."""
+    target_names = {POD_DRAFTERS_ROLE_NAME} | {spec.name for spec in PING_ROLES if spec.auto_grant}
+    roles = [role for role in member.roles if role.name in target_names]
+    if not roles:
+        return 0
+    try:
+        await member.remove_roles(*roles, reason="test reset")
+    except discord.HTTPException:
+        log.warning(f"could not strip pod roles from {member.id} in {member.guild.name}", exc_info=True)
+        return 0
+    return len(roles)
+
+
+async def _keep_umbrella_on_top(guild: discord.Guild) -> None:
+    """Members wear the gray Pod Drafters umbrella for their name color; every other ping role must
+    sit below it in the hierarchy so its color stays a cosmetic mention-pill color."""
+    umbrella = discord.utils.get(guild.roles, name=POD_DRAFTERS_ROLE_NAME)
+    if umbrella is None:
+        return
+    for spec in PING_ROLES:
+        if spec.name == POD_DRAFTERS_ROLE_NAME:
+            continue
+        role = discord.utils.get(guild.roles, name=spec.name)
+        if role is None or role.position < umbrella.position:
+            continue
+        try:
+            await role.edit(position=umbrella.position, reason="ping-role reorder below umbrella")
+            log.info(f"moved {spec.name!r} below {POD_DRAFTERS_ROLE_NAME!r} in {guild.name}")
+        except discord.HTTPException:
+            log.warning(f"could not reorder {spec.name!r} in {guild.name}", exc_info=True)
 
 
 async def _ensure_role(guild: discord.Guild, spec: PingRole) -> None:
@@ -114,6 +499,9 @@ async def _ensure_role(guild: discord.Guild, spec: PingRole) -> None:
     if role is None:
         await _create_role(guild, spec)
         return
+    for alias in spec.aliases:
+        if discord.utils.get(guild.roles, name=alias) is not None:
+            log.warning(f"both {spec.name!r} and stale alias {alias!r} exist in {guild.name}; delete the alias role")
     if spec.color is not None:
         wanted = discord.Colour.from_str(spec.color)
         if role.colour != wanted:

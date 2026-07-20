@@ -78,6 +78,99 @@ def test_end_draft_swallowed_after_restart_stop():
     assert mgr.draft_complete is False
 
 
+def test_pick_timer_sets_value_and_emits_pre_draft():
+    mgr = _manager()
+
+    err = asyncio.run(mgr.apply_pick_timer(45))
+
+    assert err is None
+    assert mgr.pick_timer == 45
+    assert mgr.sio.emitted == ["setPickTimer"]
+
+
+def test_pick_timer_rejected_once_drafting():
+    mgr = _manager()
+    mgr.drafting = True
+    before = mgr.pick_timer
+
+    err = asyncio.run(mgr.apply_pick_timer(45))
+
+    assert err is not None
+    assert mgr.pick_timer == before
+    assert mgr.sio.emitted == []
+
+
+def test_pick_timer_rejected_when_disconnected():
+    mgr = _manager()
+    mgr.sio.connected = False
+    before = mgr.pick_timer
+
+    err = asyncio.run(mgr.apply_pick_timer(45))
+
+    assert err is not None
+    assert mgr.pick_timer == before
+    assert mgr.sio.emitted == []
+
+
+def test_max_players_sets_value_pre_draft():
+    mgr = _manager()
+
+    err = asyncio.run(mgr.apply_max_players(10))
+
+    assert err is None
+    assert mgr.max_players == 10
+
+
+def test_max_players_rejected_once_drafting():
+    mgr = _manager()
+    mgr.drafting = True
+    before = mgr.max_players
+
+    err = asyncio.run(mgr.apply_max_players(10))
+
+    assert err is not None
+    assert mgr.max_players == before
+
+
+def test_max_players_rejected_below_current_occupancy():
+    mgr = _manager()
+    mgr.player_session_users = lambda: [{}] * 9
+    before = mgr.max_players
+
+    err = asyncio.run(mgr.apply_max_players(8))
+
+    assert err is not None
+    assert mgr.max_players == before
+
+
+def test_await_ownership_returns_true_once_claim_marks_owner():
+    mgr = _manager()
+    mgr.is_owner = True
+    mgr.ownership_ready.set()
+
+    result = asyncio.run(mgr.await_ownership(timeout_s=1.0))
+
+    assert result is True
+
+
+def test_await_ownership_returns_false_when_claim_resolved_without_ownership():
+    mgr = _manager()
+    mgr.is_owner = False
+    mgr.ownership_ready.set()
+
+    result = asyncio.run(mgr.await_ownership(timeout_s=1.0))
+
+    assert result is False
+
+
+def test_await_ownership_times_out_when_claim_never_resolves():
+    mgr = _manager()
+
+    result = asyncio.run(mgr.await_ownership(timeout_s=0.05))
+
+    assert result is False
+
+
 def _manager() -> PodDraftManager:
     mgr = PodDraftManager(object(), "evt", "sid", 123, "SOS", 8)
     mgr.sio = _FakeSio()

@@ -11,13 +11,14 @@ from typing import Awaitable, Callable
 import discord
 from discord import ui
 
+from bot import emojis
 from bot.services.pod_format import (
     CUSTOM_FORMATS,
     SELECT_PLACEHOLDER,
     custom_formats,
     format_applied_message,
 )
-from bot.sets import active_set_code, upcoming_sets
+from bot.sets import active_set_code, recent_released_sets
 
 
 ApplyFormatCallback = Callable[[discord.Interaction, str], Awaitable[str | None]]
@@ -25,45 +26,58 @@ ApplyFormatCallback = Callable[[discord.Interaction, str], Awaitable[str | None]
 WRITE_IN_VALUE = "__format_write_in__"
 
 
+def set_select_option(
+    code: str, *, label: str, description: str, default: bool = False,
+) -> discord.SelectOption:
+    """A set-picker row carrying the set's keyrune symbol when its app emoji is loaded. Shared by the
+    /draft launcher set picker and the pod Settings format picker so both render set rows identically."""
+    return discord.SelectOption(
+        label=label, value=code, description=description,
+        emoji=emojis.set_symbol(code), default=default,
+    )
+
+
+def write_in_option(label_prefix: str) -> discord.SelectOption:
+    """The 'write in any set code' launcher row, shared by the /draft set picker and the Settings
+    format picker so its copy stays identical; `label_prefix` is 'Set' or 'Format' to match the picker."""
+    return discord.SelectOption(
+        label=f"{label_prefix}: Write-in Code", value=WRITE_IN_VALUE, description="Draft any other set",
+    )
+
+
 def format_options(current_code: str | None) -> list[discord.SelectOption]:
-    """The format dropdown options (active set + upcoming sets + custom cubes + a write-in launcher),
-    with the current one defaulted. Labels are prefixed with 'Format:' so the collapsed dropdown reads
-    e.g. 'Format: SOS', matching the Pairings and Seats dropdowns and the lobby footer. Upcoming sets
-    (e.g. MSH before it rotates in) let a pod preview-draft a set the bot serves via setRestriction; the
-    write-in option drafts any other set code the user types."""
+    """The format dropdown options (active set + custom cubes + recent released sets + a write-in
+    launcher), with the current one defaulted. Custom cubes sit right under the active set, matching
+    the /draft set picker. Labels are prefixed with 'Format:' so the collapsed dropdown reads e.g.
+    'Format: SOS', matching the Pairings and Seats dropdowns and the lobby footer. Unreleased upcoming
+    sets are left out — they have no card pool to draft; the write-in option still drafts any set code
+    the user types, so a preview draft stays possible on purpose."""
     cur = (current_code or "").upper()
     active = active_set_code()
-    upcoming_codes = {s.code for s in upcoming_sets()}
-    known = {active} | upcoming_codes | set(CUSTOM_FORMATS)
-    options = [discord.SelectOption(
-        label=f"Format: {active}",
-        value=active,
-        description=f"Draft the latest set ({active})",
-        default=cur in ("", active),
-    )]
-    for seed in upcoming_sets():
-        options.append(discord.SelectOption(
-            label=f"Format: {seed.code}",
-            value=seed.code,
-            description=f"Preview draft: {seed.name}",
-            default=(cur == seed.code),
+    recent = recent_released_sets()
+    known = {active} | {seed.code for seed in recent} | set(CUSTOM_FORMATS)
+    options = [write_in_option("Format")]
+    if cur and cur not in known:
+        options.append(set_select_option(
+            cur, label=f"Format: {cur}", description="Written-in set code", default=True,
         ))
+    options.append(set_select_option(
+        active, label=f"Format: {active}",
+        description=f"Draft the latest set ({active})", default=cur in ("", active),
+    ))
     for fmt in custom_formats():
         options.append(discord.SelectOption(
             label=f"Format: {fmt.label}",
             value=fmt.code,
             description=f"CubeCobra: {fmt.cube_id}",
+            emoji=emojis.get_emoji("cube"),
             default=(cur == fmt.code.upper()),
         ))
-    if cur and cur not in known:
-        options.append(discord.SelectOption(
-            label=f"Format: {cur}", value=cur, description="Written-in set code", default=True,
+    for seed in recent:
+        options.append(set_select_option(
+            seed.code, label=f"Format: {seed.code}",
+            description=f"Draft {seed.name}", default=(cur == seed.code),
         ))
-    options.append(discord.SelectOption(
-        label="Format: Write in…",
-        value=WRITE_IN_VALUE,
-        description="Type any set code the bot will try to draft",
-    ))
     return options
 
 

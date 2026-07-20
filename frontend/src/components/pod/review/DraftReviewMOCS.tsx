@@ -639,33 +639,30 @@ function Header({
     />
   );
 
+  const backClass = "flex min-w-0 items-center gap-2.5 text-left transition-colors hover:text-green";
+  const backContent = (
+    <>
+      <ChevronIcon dir="left" />
+      <SetSymbol src={setSymbol} className="h-7 w-7 shrink-0" />
+      <span className="truncate font-display text-[19px] tracking-[0.08em]">
+        {highlightEventLabel(eventTitle)}
+      </span>
+    </>
+  );
+
   return (
     <header className="hidden h-[60px] shrink-0 items-center gap-5 border-b border-border bg-surface px-5 lg:flex">
-      {backHref ? (
-        <Link
-          to={backHref}
-          className="flex min-w-0 flex-1 items-center gap-2.5 text-left transition-colors hover:text-green"
-          aria-label="Back to pod"
-        >
-          <ChevronIcon dir="left" />
-          <SetSymbol src={setSymbol} className="h-7 w-7 shrink-0" />
-          <span className="truncate font-display text-[19px] tracking-[0.08em]">
-            {highlightEventLabel(eventTitle)}
-          </span>
-        </Link>
-      ) : (
-        <button
-          onClick={onClose}
-          className="flex min-w-0 flex-1 items-center gap-2.5 text-left transition-colors hover:text-green"
-          aria-label="Back to pod"
-        >
-          <ChevronIcon dir="left" />
-          <SetSymbol src={setSymbol} className="h-7 w-7 shrink-0" />
-          <span className="truncate font-display text-[19px] tracking-[0.08em]">
-            {highlightEventLabel(eventTitle)}
-          </span>
-        </button>
-      )}
+      <div className="flex min-w-0 flex-1 items-center">
+        {backHref ? (
+          <Link to={backHref} className={backClass} aria-label="Back to pod">
+            {backContent}
+          </Link>
+        ) : (
+          <button onClick={onClose} className={backClass} aria-label="Back to pod">
+            {backContent}
+          </button>
+        )}
+      </div>
 
       {viewMode === "step" && (
         <div className="flex items-center gap-5">
@@ -876,7 +873,7 @@ function BoosterCard({ card, picked }: { card: ArtifactCard; picked: boolean }) 
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-[5px] [outline-style:solid] outline-1 -outline-offset-1 outline-white/10 shadow-[0_-2px_6px_rgba(0,0,0,0.6)] transition-transform duration-150 hover:z-10 hover:scale-[1.04]",
+        "overflow-hidden rounded-[4.5%/3.2%] [outline-style:solid] outline-1 -outline-offset-1 outline-white/10 shadow-[0_-2px_6px_rgba(0,0,0,0.6)] transition-transform duration-150 hover:z-10 hover:scale-[1.04]",
         picked && "p0p1-card-selected z-10 scale-[1.03] hover:scale-[1.05]",
       )}
     >
@@ -1664,7 +1661,7 @@ function OrderStrip({
               <div
                 key={di}
                 className={cn(
-                  "absolute w-full overflow-hidden rounded-[5px] [outline-style:solid] outline-1 -outline-offset-1 outline-white/10 shadow-[0_-2px_6px_rgba(0,0,0,0.6)]",
+                  "absolute w-full overflow-hidden rounded-[4.5%/3.2%] [outline-style:solid] outline-1 -outline-offset-1 outline-white/10 shadow-[0_-2px_6px_rgba(0,0,0,0.6)]",
                   glowStrip && ri === lastRow && i === lastCol && "review-last-pick z-10",
                 )}
                 style={{ top: di * reveal }}
@@ -1685,7 +1682,7 @@ function OrderStrip({
             <div
               key={di}
               className={cn(
-                "absolute w-full overflow-hidden rounded-[5px] [outline-style:solid] outline-1 -outline-offset-1 outline-white/10 shadow-[0_-2px_6px_rgba(0,0,0,0.6)]",
+                "absolute w-full overflow-hidden rounded-[4.5%/3.2%] [outline-style:solid] outline-1 -outline-offset-1 outline-white/10 shadow-[0_-2px_6px_rgba(0,0,0,0.6)]",
                 markLast && lastPickInSideboard && di === sideboard.length - 1 && "review-last-pick z-10",
               )}
               style={{ top: di * reveal }}
@@ -1705,7 +1702,7 @@ const POOL_PAD = 8;
 const POOL_GAP = 4;
 const SIDE_COLUMN_GAP_RATIO = 0.1;
 const POOL_CARD_CLASS =
-  "overflow-hidden rounded-[5px] [outline-style:solid] outline-1 -outline-offset-1 outline-white/10 shadow-[0_-2px_6px_rgba(0,0,0,0.6)] transition-[outline-color] group-hover:outline-white/50 hover:outline-white/50";
+  "overflow-hidden rounded-[4.5%/3.2%] [outline-style:solid] outline-1 -outline-offset-1 outline-white/10 shadow-[0_-2px_6px_rgba(0,0,0,0.6)] transition-[outline-color] group-hover:outline-white/50 hover:outline-white/50";
 
 function Pool({
   cards,
@@ -1898,12 +1895,21 @@ function PassArrow({ dir }: { dir: "up" | "down" | "left" | "right" }) {
 
 // Two columns of four seats laid out so the arrows trace the pack-pass loop around the table: across the
 // top, down one column, across the bottom, up the other. The loop reverses for the right-to-left packs.
-const RING: { left: number; right: number; top?: boolean; bottom?: boolean }[] = [
-  { left: 0, right: 1, top: true },
-  { left: 7, right: 2 },
-  { left: 6, right: 3 },
-  { left: 5, right: 4, bottom: true },
-];
+type RingRow = { left: number; right: number | null; top: boolean; bottom: boolean };
+
+// Seats fold into two columns around a table: seat 0 at top-left, the right column
+// running down 1..⌊n/2⌋, the left column running back up the rest. Odd pods leave the
+// bottom-right cell empty. Clockwise ring order 0..n-1 drives the pass arrows.
+function buildRing(n: number): RingRow[] {
+  const rows = Math.ceil(n / 2);
+  const rightCount = Math.floor(n / 2);
+  const ring: RingRow[] = [];
+  for (let r = 0; r < rows; r++) {
+    const right = r + 1 <= rightCount ? r + 1 : null;
+    ring.push({ left: r === 0 ? 0 : n - r, right, top: r === 0, bottom: r === rows - 1 });
+  }
+  return ring;
+}
 
 function PlayerGrid({
   seats,
@@ -1916,21 +1922,25 @@ function PlayerGrid({
   onSelect: (i: number) => void;
   passRight: boolean;
 }) {
+  const ring = buildRing(seats.length);
   const topDir = passRight ? "right" : "left";
   const bottomDir = passRight ? "left" : "right";
   const leftColDir = passRight ? "up" : "down";
   const rightColDir = passRight ? "down" : "up";
   const arrowRiseToAvatar = 20;
-  const tile = (i: number) => (
-    <PlayerTile seat={seats[i]} active={i === activeSeat} onClick={() => onSelect(i)} />
-  );
+  const tile = (i: number | null) =>
+    i == null || !seats[i] ? (
+      <div className="flex-1" />
+    ) : (
+      <PlayerTile seat={seats[i]} active={i === activeSeat} onClick={() => onSelect(i)} />
+    );
   return (
     <div className="flex h-full flex-col px-1.5 py-2">
-      {RING.map((row, i) => (
+      {ring.map((row, i) => (
         <div key={i} className="relative flex flex-1 items-stretch">
           {tile(row.left)}
           {tile(row.right)}
-          {(row.top || row.bottom) && (
+          {(row.top || (row.bottom && row.right != null)) && (
             <span
               className="pointer-events-none absolute left-1/2 top-1/2"
               style={{ transform: `translate(-50%, calc(-50% - ${arrowRiseToAvatar}px))` }}
@@ -1938,14 +1948,16 @@ function PlayerGrid({
               <PassArrow dir={row.top ? topDir : bottomDir} />
             </span>
           )}
-          {i < RING.length - 1 && (
+          {i < ring.length - 1 && (
             <>
               <span className="pointer-events-none absolute bottom-0 left-1/4 -translate-x-1/2 translate-y-1/2">
                 <PassArrow dir={leftColDir} />
               </span>
-              <span className="pointer-events-none absolute bottom-0 left-3/4 -translate-x-1/2 translate-y-1/2">
-                <PassArrow dir={rightColDir} />
-              </span>
+              {ring[i + 1].right != null && (
+                <span className="pointer-events-none absolute bottom-0 left-3/4 -translate-x-1/2 translate-y-1/2">
+                  <PassArrow dir={rightColDir} />
+                </span>
+              )}
             </>
           )}
         </div>
@@ -1980,7 +1992,7 @@ function PlayerTile({
       >
         {seat.name}
       </span>
-      <Pips colors={seat.colors} size={14} flat />
+      <Pips colors={seat.colors} size={14} />
     </button>
   );
 }

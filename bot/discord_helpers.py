@@ -10,11 +10,12 @@ import re
 import unicodedata
 from typing import TYPE_CHECKING, Iterable
 
+import discord
+
 from bot.config import settings
 
 
 if TYPE_CHECKING:
-    import discord
     from sqlalchemy.orm import Session
     from discord.ext import commands
 
@@ -24,11 +25,22 @@ logger = logging.getLogger(__name__)
 
 NBSP = "\u00a0"  # Discord collapses runs of regular spaces; non-breaking spaces survive
 ZWSP = "\u200b"  # anchors a -# subtext line so Discord keeps the NBSP indent that follows
+BLANK_LINE = f"{NBSP}{ZWSP}"  # a line Discord won't collapse, for spacing before a trailing button
 
 
 def command_line(cmd: str, blurb: str) -> str:
     """One `/command` + description line, shared by /help and the lobby embed."""
     return f"`{cmd}` - {blurb}"
+
+
+def posts_publicly(interaction: "discord.Interaction") -> bool:
+    """A moderator (Manage Messages) posts to the channel for everyone; everyone else gets an ephemeral
+    copy. Permission rather than a role name so it holds across guilds. In a DM there is no one to shield
+    it from, so the reply is never ephemeral."""
+    if interaction.guild is None:
+        return True
+    permissions = getattr(interaction.user, "guild_permissions", None)
+    return bool(permissions and permissions.manage_messages)
 
 
 def in_pod_coordination(channel: "discord.interactions.InteractionChannel | None") -> bool:
@@ -37,6 +49,61 @@ def in_pod_coordination(channel: "discord.interactions.InteractionChannel | None
     if channel.id == settings.pod_draft_channel_id:
         return True
     return getattr(channel, "parent_id", None) == settings.pod_draft_channel_id
+
+
+async def send_welcome(
+    client: "commands.Bot", member: "discord.abc.User", view: "discord.ui.LayoutView",
+) -> bool:
+    """Post the welcome publicly in pod-draft-chat so the community sees a new drafter, pinging the
+    newcomer — a Components V2 text block notifies where an embed mention would not, and role pills
+    stay silent. False when the channel can't be resolved or the send fails."""
+    channel = resolve_pod_chat_channel(client)
+    if channel is None:
+        return False
+    mentions = discord.AllowedMentions(users=[member], roles=False, everyone=False)
+    try:
+        await channel.send(view=view, allowed_mentions=mentions)
+        return True
+    except discord.HTTPException:
+        logger.warning("could not post welcome in pod-draft-chat", exc_info=True)
+        return False
+
+
+async def post_welcome(interaction: "discord.Interaction", view: "discord.ui.LayoutView") -> None:
+    """The interaction-path welcome: public in pod-draft-chat, falling back to an ephemeral reply when
+    the channel can't be resolved."""
+    if not await send_welcome(interaction.client, interaction.user, view):
+        await interaction.followup.send(view=view, ephemeral=True)
+
+
+def in_pod_chat(channel: "discord.interactions.InteractionChannel | None") -> bool:
+    name = getattr(channel, "name", "") or ""
+    return settings.pod_draft_chat_channel_name.lower() in name.lower()
+
+
+def channel_matching_name(guild: "discord.Guild", name_fragment: str) -> "discord.abc.GuildChannel | None":
+    """First text channel in guild whose name contains name_fragment, case-insensitively."""
+    fragment = name_fragment.lower()
+    for channel in guild.text_channels:
+        if fragment in channel.name.lower():
+            return channel
+    return None
+
+
+def resolve_pod_chat_channel(bot: "commands.Bot") -> "discord.abc.Messageable | None":
+    """The pod-draft-chat channel, falling back to the coordination channel when it isn't present.
+
+    Resolved by name so a mod can create the channel without a config change. The underfill nudges
+    and the weekly schedule post land here, keeping the coordination channel to signups and event
+    threads only.
+    """
+    guild_id = settings.discord_guild_id
+    guild = bot.get_guild(guild_id) if guild_id else None
+    if guild is not None:
+        chat = channel_matching_name(guild, settings.pod_draft_chat_channel_name)
+        if chat is not None:
+            return chat
+    return bot.get_channel(settings.pod_draft_channel_id)
 
 def extract_avatar_hash(user: "discord.abc.User | discord.User | discord.Member | None") -> str | None:
     """Return the Discord avatar hash for a user, or None if they use the default avatar.
@@ -105,6 +172,11 @@ def player_url(slug: str, set_code: str | None = None) -> str:
     """Public site URL for a player's page, set-scoped when set_code is given."""
     base = settings.player_base_url
     return f"{base}/{slug}/{set_code}" if set_code else f"{base}/{slug}"
+
+
+def player_deck_url(slug: str, set_code: str, source_message_id: str) -> str:
+    """Set-scoped player URL that opens a specific saved deck in the profile popup."""
+    return f"{player_url(slug, set_code)}?deck={source_message_id}"
 
 
 async def resolve_display_name(bot: "commands.Bot", user: "discord.User") -> str:

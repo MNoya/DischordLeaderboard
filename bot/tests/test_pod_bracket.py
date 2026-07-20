@@ -154,6 +154,24 @@ def test_padding_pairs_two_waiting_players_in_one_slot():
     assert slots[0] == ((2, 0), "p0", "p2")  # trophy slot names both finalists
 
 
+def test_padding_stays_anonymous_for_a_held_rematch_prone_group():
+    # p5 and p6 reach 1-1 first, but p0 & p1 (who met in R1) can still land at 1-1, so the group is
+    # held. The preview must not name p5-p6 as a match — that is the bait that let players start a
+    # pairing the lock later moved. Both 1-1 slots stay anonymous until the group locks.
+    roster = players(8)
+    completed = [
+        match(1, "p0", "p1", "p0"), match(1, "p2", "p3", "p2"),
+        match(1, "p4", "p5", "p4"), match(1, "p6", "p7", "p6"),
+        match(2, "p5", "p7", "p5"),  # p5 → 1-1
+        match(2, "p4", "p6", "p4"),  # p6 → 1-1
+    ]
+    slots = pod_bracket.padding_slots(roster, completed, real_records=[], paired_names=[], round_num=3)
+
+    one_one = [s for s in slots if s[0] == (1, 1)]
+    assert one_one == [((1, 1), None, None), ((1, 1), None, None)]
+    assert ((1, 1), "p5", "p6") not in slots
+
+
 def test_padding_empty_for_unsupported_round():
     roster = players(8)
     assert pod_bracket.padding_slots(roster, [], [], [], 1) == []

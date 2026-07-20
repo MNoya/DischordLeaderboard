@@ -283,6 +283,50 @@ export function cleanPodEventName(name: string, setCode: string): string {
   return (withoutCode || cleaned) + tableSuffix;
 }
 
+// The slot phrase alone (`Early Pod`, `Late Pod`), stripped of set code, date, baked number, and any
+// Table suffix. Legacy pods with no slot in the name fall back to `Pod Draft`. The date lives in the
+// row's date box and the Table suffix renders separately, so neither belongs here.
+export function podSlotName(name: string, setCode: string): string {
+  const escaped = setCode.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const slot = name
+    .replace(/\s*[-–]?\s*Table\s+\d+\s*$/i, "")
+    .replace(/#\d+/g, "")
+    .replace(/\s+[-–]\s+[A-Z][a-z]+\.?\s+\d{1,2}\s*$/, "")
+    .replace(new RegExp(`\\b${escaped}\\b`, "gi"), "")
+    .replace(/^\s*[A-Z][a-z]+\.?\s+\d{1,2}\s+/, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  return /\bpod$/i.test(slot) ? `${slot} Draft` : slot;
+}
+
+// Plain-string title (medallions, aria): `#15 Early Pod - Table 2` once run, the slot alone upcoming.
+// PodEventTitle renders the styled version. Number is the execution-ordered ordinal, not any baked #N.
+export function podEventTitle(
+  event: {
+    ordinal?: number | null;
+    tableIndex?: number;
+    isTeamDraft?: boolean;
+    name: string;
+    setCode: string;
+  },
+  opts: { teamAsSuffix?: boolean } = {},
+): string {
+  const slot = podSlotName(event.name, event.setCode);
+  const teamAsSuffix = opts.teamAsSuffix ?? true;
+  const qualifier = podEventQualifier({ ...event, isTeamDraft: teamAsSuffix && event.isTeamDraft });
+  if (event.ordinal != null) {
+    return `#${event.ordinal} ${slot}${qualifier}`;
+  }
+  return slot;
+}
+
+// A team draft outranks the table suffix, so a second-table team draft still reads as a team draft
+export function podEventQualifier(event: { tableIndex?: number; isTeamDraft?: boolean }): string {
+  if (event.isTeamDraft) return " - Team Draft";
+  if ((event.tableIndex ?? 1) > 1) return ` - Table ${event.tableIndex}`;
+  return "";
+}
+
 // Set codes are uppercase in the data; URLs are case-insensitive.
 export function canonicalSetCode(raw: string, sets: SetSummary[] | undefined): string {
   const known = sets?.find((s) => s.code.toLowerCase() === raw.toLowerCase());

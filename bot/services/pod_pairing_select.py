@@ -13,8 +13,9 @@ from bot.services.pod_format import settings_change_message
 
 PAIRING_MODES = (
     ("swiss", "Swiss Tournament", "Three rounds, each paired after the previous fully finishes."),
-    ("bracket", "Fast Bracket", "Pairs players the moment two reach the same record. 8p only"),
+    ("bracket", "Fast Bracket", "Pairs players the moment two reach the same record. 8p"),
     ("random", "Random", "Round 1 randomized ignoring seats. Later rounds by record."),
+    ("team", "Team Draft", "Group players into teams. Team with best score wins. 6p"),
 )
 DEFAULT_PAIRING_MODE = "bracket"
 SELECT_PLACEHOLDER = "Choose pairing mode"
@@ -39,6 +40,7 @@ def pairing_options(current_mode: str | None) -> list[discord.SelectOption]:
     Seats dropdowns and disambiguating its Random option from the Seats one."""
     cur = (current_mode or DEFAULT_PAIRING_MODE).lower()
     return [
-        discord.SelectOption(label=f"Pairings: {label}", value=code, description=desc, default=(cur == code))
+        discord.SelectOption(
+            label=f"Pairings: {label}", value=code, description=desc, emoji="👥", default=(cur == code))
         for code, label, desc in PAIRING_MODES
     ]

@@ -21,6 +21,7 @@ from bot.services.format_schedule import (
     next_rotation,
     previous_window_start,
     set_seed_for_channel,
+    set_tracking_todo_index,
 )
 from bot.sets import ALL_SETS
 from bot.tasks.format_schedule_post import announcement_for
@@ -108,6 +109,32 @@ def test_channel_for_set_matches_name_within_strategy_category():
     match = channel_for_set(channels, sos)
 
     assert match.name == "secrets-of-strixhaven"
+
+
+class _TodoChannel:
+    def __init__(self, channel_id, name):
+        self.id = channel_id
+        self.name = name
+
+
+def test_set_tracking_todo_index_picks_the_action_linked_to_a_set_channel():
+    channels = [
+        _TodoChannel("overview", "channel-overview"),
+        _TodoChannel("ecl", "lorwyn-eclipsed"),
+    ]
+    actions = [
+        {"channel_id": "overview", "title": "Explore the server"},
+        {"channel_id": "ecl", "title": "See what people are discussing"},
+    ]
+
+    assert set_tracking_todo_index(actions, channels) == 1
+
+
+def test_set_tracking_todo_index_is_none_when_no_action_links_a_set_channel():
+    channels = [_TodoChannel("overview", "channel-overview")]
+    actions = [{"channel_id": "overview", "title": "Explore the server"}]
+
+    assert set_tracking_todo_index(actions, channels) is None
 
 
 def test_set_pin_routes_by_latest_set_category():

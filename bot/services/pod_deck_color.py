@@ -17,6 +17,8 @@ from typing import Awaitable, Callable
 import discord
 from discord import ui
 
+from bot import emojis
+
 
 class NotInPodError(Exception):
     """Raised by lookup/submit callbacks when the interaction user isn't a participant."""
@@ -64,13 +66,64 @@ OTHER_VALUE = "__other__"
 
 NOT_IN_POD_MSG = "You are not registered as a player in this pod"
 
-SAVED_MSG = "Choices saved. Adjust or dismiss below"
+SAVED_MSG = "Deck Color saved!"
 
 
 def color_label(code: str) -> str:
     if code in GUILD_LABEL:
         return f"{GUILD_LABEL[code]} ({code})"
     return code
+
+
+def format_deck_color_emojis(code: str | None) -> str:
+    """Render deck color string as Mana font application emojis.
+
+    Main colors render first using guild-pair / pentacolor / WUBRG-order rules. Splash colors
+    (lowercase in `code`) render after, separated by '/'.
+
+    - "WR"   → :manarw:                        (guild pair, no splash)
+    - "URG"  → :manau::manar::manag:           (3 main, no splash)
+    - "WUBRG"→ :manawubrg:                     (5 main, no splash)
+    - "BGw"  → :manab::manag:/:manaw:          (BG main, W splash)
+    - "URw"  → :manaur:/:manaw:                (UR guild pair main, W splash)
+    """
+    if not code:
+        return ""
+    main: set[str] = set()
+    splash: set[str] = set()
+    for c in code:
+        u = c.upper()
+        if u not in "WUBRG":
+            continue
+        (main if c.isupper() else splash).add(u)
+    if not main and splash:
+        main, splash = splash, set()
+    if not main:
+        return ""
+
+    main_glyph = _emojis_for_color_set(main)
+    if not splash:
+        return main_glyph
+    return f"{main_glyph}/{_emojis_for_color_set(splash)}"
+
+
+def _emojis_for_color_set(colors: set[str]) -> str:
+    if len(colors) == 2:
+        emoji_name = PAIR_EMOJI_NAME.get(frozenset(colors))
+        if emoji_name:
+            glyph = emojis.get(emoji_name)
+            if glyph:
+                return glyph
+    if len(colors) == 5:
+        glyph = emojis.get("manawubrg")
+        if glyph:
+            return glyph
+    out = []
+    for c in "WUBRG":
+        if c in colors:
+            glyph = emojis.get(f"mana{c.lower()}") or c
+            out.append(glyph)
+    return "".join(out)
 
 
 def _sanitize(raw: str) -> str | None:
@@ -107,7 +160,7 @@ class SubmitDeckButton(ui.Button):
         on_organizer: OrganizerCallback | None = None,
     ) -> None:
         super().__init__(
-            label="Submit Deck",
+            label="Submit Colors",
             style=discord.ButtonStyle.primary,
             custom_id="poddecksubmit",
             emoji="🎨",
@@ -140,51 +193,83 @@ class SubmitDeckButton(ui.Button):
             pass
 
 
+LIVE_COLOR_CUSTOM_ID = "poddeckselect-color"
+
+
+def _dm_ephemeral(interaction: discord.Interaction) -> bool:
+    return interaction.guild is not None
+
+
+def _build_color_options(current_value: str | None) -> list[discord.SelectOption]:
+    guild_codes = {code for code, _ in GUILDS}
+    is_write_in = current_value is not None and current_value not in guild_codes
+    options = [discord.SelectOption(
+        label=f"Other ({current_value})" if is_write_in else "Other (write-in)",
+        value=OTHER_VALUE,
+        description="Mono, 3-color, splash, etc.",
+        emoji=emojis.get_emoji("manax"),
+        default=is_write_in,
+    )]
+    options.extend(
+        discord.SelectOption(
+            label=f"{name} ({code})",
+            value=code,
+            default=(current_value == code),
+            emoji=emojis.get_emoji(PAIR_EMOJI_NAME[frozenset(code)]),
+        )
+        for code, name in GUILDS
+    )
+    return options
+
+
+async def _report_not_in_pod(interaction: discord.Interaction, *, persistent: bool) -> None:
+    if persistent:
+        await interaction.followup.send(NOT_IN_POD_MSG, ephemeral=_dm_ephemeral(interaction))
+    else:
+        await interaction.edit_original_response(content=NOT_IN_POD_MSG, view=None)
+
+
 class DeckColorSelectView(ui.View):
-    def __init__(self, on_submit: SubmitCallback, current_value: str | None) -> None:
-        super().__init__(timeout=300)
-        self.add_item(DeckColorSelect(on_submit, current_value))
+    """Deck-color dropdown. The default ephemeral form is one-shot and re-renders itself in place after a
+    save. persistent=True is the DM direct-dropdown flow: a stable custom_id so it survives restarts, and
+    the select stays silent on save so the parent module's refresh helper re-renders the message."""
+
+    def __init__(
+        self, on_submit: SubmitCallback, current_value: str | None = None, *, persistent: bool = False,
+    ) -> None:
+        super().__init__(timeout=None if persistent else 300)
+        self.add_item(DeckColorSelect(on_submit, current_value, persistent=persistent))
 
 
 class DeckColorSelect(ui.Select):
-    def __init__(self, on_submit: SubmitCallback, current_value: str | None) -> None:
-        from bot import emojis as _emojis
-        guild_codes = {code for code, _ in GUILDS}
-        is_write_in = current_value is not None and current_value not in guild_codes
-        options = [discord.SelectOption(
-            label=f"Other ({current_value})" if is_write_in else "Other (write-in)",
-            value=OTHER_VALUE,
-            description="Mono, 3-color, splash, etc.",
-            emoji=_emojis.get_emoji("manax"),
-            default=is_write_in,
-        )]
-        options.extend(
-            discord.SelectOption(
-                label=f"{name} ({code})",
-                value=code,
-                default=(current_value == code),
-                emoji=_emojis.get_emoji(PAIR_EMOJI_NAME[frozenset(code)]),
-            )
-            for code, name in GUILDS
+    def __init__(
+        self, on_submit: SubmitCallback, current_value: str | None, *, persistent: bool = False,
+    ) -> None:
+        super().__init__(
+            custom_id=LIVE_COLOR_CUSTOM_ID if persistent else discord.utils.MISSING,
+            placeholder="Choose your deck colors",
+            options=_build_color_options(current_value),
+            min_values=1, max_values=1,
         )
-        super().__init__(placeholder="Choose your deck colors", options=options, min_values=1, max_values=1)
         self._submit = on_submit
+        self._persistent = persistent
 
     async def callback(self, interaction: discord.Interaction) -> None:
         value = self.values[0]
         if value == OTHER_VALUE:
-            await interaction.response.send_modal(DeckColorWriteInModal(self._submit))
+            await interaction.response.send_modal(DeckColorWriteInModal(self._submit, persistent=self._persistent))
             return
         await interaction.response.defer()
         try:
             await self._submit(interaction, value)
         except NotInPodError:
-            await interaction.edit_original_response(content=NOT_IN_POD_MSG, view=None)
+            await _report_not_in_pod(interaction, persistent=self._persistent)
             return
-        await interaction.edit_original_response(
-            content=SAVED_MSG,
-            view=DeckColorSelectView(self._submit, current_value=value),
-        )
+        if not self._persistent:
+            await interaction.edit_original_response(
+                content=SAVED_MSG,
+                view=DeckColorSelectView(self._submit, current_value=value),
+            )
 
 
 class DeckColorWriteInModal(ui.Modal, title="Deck colors"):
@@ -196,110 +281,34 @@ class DeckColorWriteInModal(ui.Modal, title="Deck colors"):
         required=True,
     )
 
-    def __init__(self, on_submit: SubmitCallback) -> None:
+    def __init__(self, on_submit: SubmitCallback, *, persistent: bool = False) -> None:
         super().__init__()
         self._submit = on_submit
+        self._persistent = persistent
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         cleaned = _sanitize(self.colors.value)
         if cleaned is None:
+            await self._report_invalid(interaction)
+            return
+        await interaction.response.defer()
+        try:
+            await self._submit(interaction, cleaned)
+        except NotInPodError:
+            await _report_not_in_pod(interaction, persistent=self._persistent)
+            return
+        if not self._persistent:
+            await interaction.edit_original_response(
+                content=SAVED_MSG,
+                view=DeckColorSelectView(self._submit, current_value=cleaned),
+            )
+
+    async def _report_invalid(self, interaction: discord.Interaction) -> None:
+        warning = f"⚠️ `{self.colors.value}` isn't valid — use only W/U/B/R/G letters, 1–5 chars."
+        if self._persistent:
+            await interaction.response.send_message(warning, ephemeral=_dm_ephemeral(interaction))
+        else:
             await interaction.response.edit_message(
-                content=f"⚠️ `{self.colors.value}` isn't valid — use only W/U/B/R/G letters, 1–5 chars.",
+                content=warning,
                 view=DeckColorSelectView(self._submit, current_value=None),
             )
-            return
-        await interaction.response.defer()
-        try:
-            await self._submit(interaction, cleaned)
-        except NotInPodError:
-            await interaction.edit_original_response(content=NOT_IN_POD_MSG, view=None)
-            return
-        await interaction.edit_original_response(
-            content=SAVED_MSG,
-            view=DeckColorSelectView(self._submit, current_value=cleaned),
-        )
-
-
-LIVE_COLOR_CUSTOM_ID = "poddeckselect-color"
-
-
-class LiveDeckColorSelectView(ui.View):
-    """Persistent direct-dropdown view for the DM Submit Deck flow — the select is visible on the message
-    itself, so players don't need to click a button first. Interactions defer silently and rely on the
-    parent module's refresh helper to re-render the message after persistence."""
-
-    def __init__(self, on_submit: SubmitCallback, current_value: str | None = None) -> None:
-        super().__init__(timeout=None)
-        self.add_item(LiveDeckColorSelect(on_submit, current_value))
-
-
-def _dm_ephemeral(interaction: discord.Interaction) -> bool:
-    return interaction.guild is not None
-
-
-class LiveDeckColorSelect(ui.Select):
-    def __init__(self, on_submit: SubmitCallback, current_value: str | None) -> None:
-        from bot import emojis as _emojis
-        guild_codes = {code for code, _ in GUILDS}
-        is_write_in = current_value is not None and current_value not in guild_codes
-        options = [discord.SelectOption(
-            label=f"Other ({current_value})" if is_write_in else "Other (write-in)",
-            value=OTHER_VALUE,
-            description="Mono, 3-color, splash, etc.",
-            emoji=_emojis.get_emoji("manax"),
-            default=is_write_in,
-        )]
-        options.extend(
-            discord.SelectOption(
-                label=f"{name} ({code})",
-                value=code,
-                default=(current_value == code),
-                emoji=_emojis.get_emoji(PAIR_EMOJI_NAME[frozenset(code)]),
-            )
-            for code, name in GUILDS
-        )
-        super().__init__(
-            custom_id=LIVE_COLOR_CUSTOM_ID,
-            placeholder="Choose your deck colors",
-            options=options, min_values=1, max_values=1,
-        )
-        self._submit = on_submit
-
-    async def callback(self, interaction: discord.Interaction) -> None:
-        value = self.values[0]
-        if value == OTHER_VALUE:
-            await interaction.response.send_modal(LiveDeckColorWriteInModal(self._submit))
-            return
-        await interaction.response.defer()
-        try:
-            await self._submit(interaction, value)
-        except NotInPodError:
-            await interaction.followup.send(NOT_IN_POD_MSG, ephemeral=_dm_ephemeral(interaction))
-
-
-class LiveDeckColorWriteInModal(ui.Modal, title="Deck colors"):
-    colors = ui.TextInput(
-        label="Colors (e.g. URg, WUBR, WUBRG)",
-        placeholder="Uppercase = main, lowercase = splash",
-        min_length=1,
-        max_length=5,
-        required=True,
-    )
-
-    def __init__(self, on_submit: SubmitCallback) -> None:
-        super().__init__()
-        self._submit = on_submit
-
-    async def on_submit(self, interaction: discord.Interaction) -> None:
-        cleaned = _sanitize(self.colors.value)
-        if cleaned is None:
-            await interaction.response.send_message(
-                f"⚠️ `{self.colors.value}` isn't valid — use only W/U/B/R/G letters, 1–5 chars.",
-                ephemeral=_dm_ephemeral(interaction),
-            )
-            return
-        await interaction.response.defer()
-        try:
-            await self._submit(interaction, cleaned)
-        except NotInPodError:
-            await interaction.followup.send(NOT_IN_POD_MSG, ephemeral=_dm_ephemeral(interaction))

@@ -17,6 +17,7 @@ import {
 import { Pip, Pips } from "../components/ManaPips";
 import { ImageIcon } from "../components/Icons";
 import { DeckScreenshotModal } from "../components/pod/DeckScreenshotModal";
+import { highlightEventLabel } from "../components/pod/EventLabel";
 import { StatChip } from "../components/StatChip";
 import { PointsBreakdown } from "../components/PointsBreakdown";
 import { FilterDropdown } from "../components/FilterDropdown";
@@ -171,6 +172,7 @@ export function PlayerPage() {
   const sibling: SiblingNav = { setCode, prevSlug, nextSlug };
 
   const topQs = topSearchParams.toString();
+  const deckModalOpen = topSearchParams.has("deck");
 
   const onChangeSet = (newCode: string) => {
     navigate({ pathname: playerPath(slug, newCode), search: topQs });
@@ -179,6 +181,7 @@ export function PlayerPage() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      if (deckModalOpen) return;
       const t = e.target;
       if (t instanceof HTMLElement) {
         if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable) return;
@@ -193,7 +196,7 @@ export function PlayerPage() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [prevSlug, nextSlug, setCode, navigate, topQs]);
+  }, [prevSlug, nextSlug, setCode, navigate, topQs, deckModalOpen]);
 
   if (error) {
     return (
@@ -885,8 +888,9 @@ function TrophyDeckModal({
   onClose: () => void;
 }) {
   const index = trophies.findIndex((t) => t.sourceMessageId === trophy.sourceMessageId);
-  const prev = index > 0 ? trophies[index - 1] : null;
-  const next = index >= 0 && index < trophies.length - 1 ? trophies[index + 1] : null;
+  const canCycle = trophies.length > 1;
+  const prev = canCycle ? trophies[(index - 1 + trophies.length) % trophies.length] : null;
+  const next = canCycle ? trophies[(index + 1) % trophies.length] : null;
   return (
     <DeckScreenshotModal
       participant={{
@@ -1586,7 +1590,7 @@ function EventLogRow({
       : { name: "", splash: "" };
     const deckContent = (
       <span className="grid items-center" style={{ gridTemplateColumns: "100px 60px 1fr" }}>
-        <Pips colors={e.colors} size={14} flat />
+        <Pips colors={e.colors} size={14} />
         <span
           className="text-[13px] text-muted"
           style={deckSplash ? undefined : { gridColumn: "span 2" }}
@@ -1603,7 +1607,7 @@ function EventLogRow({
         </span>
         <span className="text-[13px] text-muted text-center">{fmtShortDate(eventDate(e))}</span>
         <span className="flex items-center gap-2 min-w-0 pr-4">
-          <span className="font-display text-[16px] tracking-[0.08em] whitespace-nowrap">{formatLabel}</span>
+          <span className="font-display text-[16px] tracking-[0.08em] whitespace-nowrap">{highlightEventLabel(formatLabel)}</span>
           {e.isTrophy && isArenaChampionshipFormat(e.format) && <ArenaChampBadge size={36} box={22} />}
           <span className="flex-1 flex items-center justify-center">
             {cashPrize && <CashPrizePill amount={cashPrize} />}
@@ -1618,7 +1622,7 @@ function EventLogRow({
               </span>
             ) : (
               <>
-                <Pips colors={e.colors} size={14} flat />
+                <Pips colors={e.colors} size={14} />
                 <span
                   className="text-[13px] text-muted"
                   style={deckSplash ? undefined : { gridColumn: "span 2" }}
@@ -1741,9 +1745,9 @@ function EventLogRow({
       </span>
       <div>
         <div className="flex items-center gap-1.5 flex-wrap">
-          {!podWithoutDeck && <Pips colors={e.colors} size={11} flat />}
+          {!podWithoutDeck && <Pips colors={e.colors} size={11} />}
           <span className="font-display text-[13px] tracking-[0.08em]">
-            {formatLabel}
+            {highlightEventLabel(formatLabel)}
           </span>
           {e.isTrophy && isArenaChampionshipFormat(e.format) && <ArenaChampBadge size={28} box={16} />}
           {cashPrize && <CashPrizePill amount={cashPrize} className="mx-1.5" />}

@@ -64,10 +64,10 @@ def _fetch_white_svg(code: str) -> str | None:
         if e.code == 404:
             return None
         raise
-    return _squarify(raw.replace("#444", "#ffffff"))
+    return squarify(raw.replace("#444", "#ffffff"))
 
 
-def _squarify(svg: str) -> str:
+def squarify(svg: str) -> str:
     """Keyrune glyphs share a height but vary in width; without this the 256x256 export stretches
     a non-square glyph to fill the square. Centering it in a square viewBox keeps its proportions."""
     m = re.search(r'viewBox="(-?[\d.]+) (-?[\d.]+) ([\d.]+) ([\d.]+)"', svg)
@@ -92,14 +92,17 @@ def _squarify(svg: str) -> str:
 
 
 def _rasterize(code: str, svg: str) -> None:
-    """Snap-confined inkscape only resolves absolute paths, so OUTPUT_DIR stays fully resolved."""
-    src = OUTPUT_DIR / f"_src_{code.lower()}.svg"
-    png = OUTPUT_DIR / f"{code.lower()}.png"
+    rasterize(svg, OUTPUT_DIR / f"{code.lower()}.png", SYMBOL_PX)
+
+
+def rasterize(svg: str, png: Path, px: int) -> None:
+    """Snap-confined inkscape only resolves absolute paths, so png must be fully resolved."""
+    src = png.with_name(f"_src_{png.stem}.svg")
     src.write_text(svg, encoding="utf-8")
     try:
         subprocess.run(
             ["inkscape", str(src), "--export-type=png", f"--export-filename={png}",
-             "-w", str(SYMBOL_PX), "-h", str(SYMBOL_PX)],
+             "-w", str(px), "-h", str(px)],
             check=True, capture_output=True,
         )
     finally:

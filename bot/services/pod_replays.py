@@ -19,6 +19,7 @@ log = logging.getLogger(__name__)
 _REPLAY_BASE_URL = "https://www.17lands.com"
 POD_EVENT_NAMES = frozenset({"DirectGameTournamentLimited", "DirectGameLimited"})
 MIN_TURNS = 3
+MAX_GAMES_PER_MATCH = 3
 _EVENT_WINDOW_HOURS = 6
 
 
@@ -77,34 +78,39 @@ def _event_replay_targets_sync(event_id: str) -> list[tuple[str, str, str]]:
 def attribute_games_to_rounds(
     games: Sequence[dict],
     player_matches: Sequence[PodDraftMatch],
-    player_seat_name: str,
+    event_time: datetime | None,
+    claimed_game_ids: frozenset[str] = frozenset(),
 ) -> dict[str, int]:
-    """Assign each 17lands game to the round whose report window it falls in: after the player's
-    previous reported result, up to this one plus a minute of grace. Best-effort, window-only — a
-    player can't be paired into their next match until the previous result is reported (Swiss and
-    bracket alike), so the window is decisive. Reported scores aren't consulted: 17lands drops games
-    and players misreport 2-0 as 2-1, and missing replays cost more than a result reported late
-    enough to file a game under the prior round. Skipped matches (score 0-0) form no window."""
-    usable = filter_and_sort_games(games)
+    """Map game_id -> round for the games that are a real replay of one of this player's reported
+    matches in this event.
+
+    A game qualifies when it is a pod game with at least MIN_TURNS turns (restarts and quick
+    concessions fall out in filter_and_sort_games), inside the event window, not already claimed by an
+    earlier pod (the earliest pod owns a game, so drafting twice in one night doesn't double-count),
+    and it falls in a match's report window: after the previous match's report, up to this one plus a
+    minute of grace. Round 1's window starts at event_time so pre-draft and other-pod games can't leak
+    in through an open-ended lower bound. At most MAX_GAMES_PER_MATCH games are kept per match, earliest
+    first; extras from a rematch or a stray game are dropped. Reported scores aren't consulted — players
+    misreport them and 17lands drops games, so the count is best-effort. Skipped matches form no window.
+    """
+    usable = [g for g in filter_and_sort_games(games) if is_in_event_window(g, event_time)]
     matches_in_round_order = sorted(player_matches, key=lambda m: m.round)
 
     out: dict[str, int] = {}
-    prev_reported_at: datetime | None = None
+    lower = event_time
     for m in matches_in_round_order:
         if m.reported_at is None or not m.winner_name or not m.score or m.score == "0-0":
             continue
-        lower = prev_reported_at
         upper_with_grace = m.reported_at + timedelta(minutes=1)
-        prev_reported_at = upper_with_grace
-        eligible = [
+        window = [
             g for g in usable
-            if (lower is None or parse_game_time(g.get("game_time")) > lower)
+            if extract_game_id(g) not in claimed_game_ids
+            and extract_game_id(g) not in out
+            and (lower is None or parse_game_time(g.get("game_time")) > lower)
             and parse_game_time(g.get("game_time")) <= upper_with_grace
         ]
-        if not eligible:
-            log.info(f"[REPLAYS] attribute.empty_window round={m.round} player={player_seat_name!r}")
-            continue
-        for g in eligible:
+        lower = upper_with_grace
+        for g in window[:MAX_GAMES_PER_MATCH]:
             gid = extract_game_id(g)
             if gid:
                 out[gid] = m.round
@@ -133,15 +139,18 @@ def persist_replays_sync(
             )
         ).scalars().all()
 
-        in_window = [g for g in games if is_in_event_window(g, event.event_time)]
-        attribution = attribute_games_to_rounds(in_window, player_matches, player_seat_name)
+        claimed = _claimed_game_ids_for_player(session, player_id, event.event_time)
+        attribution = attribute_games_to_rounds(games, player_matches, event.event_time, claimed)
+        games_by_id: dict[str, dict] = {}
+        for g in games:
+            gid = extract_game_id(g)
+            if gid:
+                games_by_id.setdefault(gid, g)
 
         count = 0
-        for g in in_window:
-            if g.get("event_name") not in POD_EVENT_NAMES:
-                continue
-            gid = extract_game_id(g)
-            if not gid:
+        for gid, round_num in attribution.items():
+            g = games_by_id.get(gid)
+            if g is None:
                 continue
             gt = parse_game_time(g.get("game_time"))
             if gt is None:
@@ -152,7 +161,6 @@ def persist_replays_sync(
             )
             turns = g.get("turns") if isinstance(g.get("turns"), int) else None
             on_play = g.get("on_play") if isinstance(g.get("on_play"), bool) else None
-            inferred = attribution.get(gid)
 
             existing = session.execute(
                 select(PodDraftReplay).where(
@@ -167,15 +175,34 @@ def persist_replays_sync(
                     event_id=event_id, player_id=player_id, game_id=gid,
                     link=full_link, game_time=gt,
                     won=bool(g.get("won")), turns=turns, on_play=on_play,
-                    inferred_round=inferred,
+                    inferred_round=round_num,
                 ))
                 count += 1
             else:
-                if existing.inferred_round != inferred and inferred is not None:
-                    existing.inferred_round = inferred
+                if existing.inferred_round != round_num:
+                    existing.inferred_round = round_num
                     count += 1
         session.commit()
         return count
+
+
+def _claimed_game_ids_for_player(
+    session, player_id: str, event_time: datetime | None,
+) -> frozenset[str]:
+    """Game ids already stored for this player under a pod that started earlier. The earliest pod owns
+    a game, so a player who drafts a second pod the same night doesn't get its ±6h window re-capturing
+    the first pod's games."""
+    if event_time is None:
+        return frozenset()
+    rows = session.execute(
+        select(PodDraftReplay.game_id)
+        .join(PodDraftEvent, PodDraftEvent.id == PodDraftReplay.event_id)
+        .where(
+            PodDraftReplay.player_id == player_id,
+            PodDraftEvent.event_time < event_time,
+        )
+    ).scalars().all()
+    return frozenset(rows)
 
 
 def filter_and_sort_games(games: Sequence[dict]) -> list[dict]:

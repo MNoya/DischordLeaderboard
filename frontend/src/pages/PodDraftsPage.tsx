@@ -15,6 +15,7 @@ import { CtaPill } from "../components/CtaPill";
 import { ChamferedButton } from "../components/ChamferedButton";
 import { Tooltip } from "../components/Tooltip";
 import { BREAKDOWN_CAPTION, DeckScreenshotModal } from "../components/pod/DeckScreenshotModal";
+import { highlightEventLabel, PodEventTitle } from "../components/pod/EventLabel";
 import { Pips } from "../components/ManaPips";
 import { Record } from "../components/Record";
 import {
@@ -415,7 +416,7 @@ function MockEventRow({ event, index }: { event: PodEventSummary; index: number 
           className="font-display text-text min-w-0 truncate"
           style={{ fontSize: 21, letterSpacing: "0.04em", lineHeight: 1.15 }}
         >
-          {cleanPodEventName(event.name, event.setCode).toUpperCase()}
+          {highlightEventLabel(cleanPodEventName(event.name, event.setCode).toUpperCase())}
         </span>
       </div>
       <div className="flex items-center pr-3 md:pr-4 pl-2 shrink-0 self-center gap-3">
@@ -590,16 +591,21 @@ function DateRail({
 function EventRowBody({ event, nowMs }: { event: PodEventSummary; nowMs: number }) {
   const hasChamp = !!event.championDisplayName;
   const startMs = new Date(event.eventTime).getTime();
-  const inProgress = !hasChamp && startMs <= nowMs;
-  const isUpcoming = !hasChamp && startMs > nowMs;
+  const inProgress = !event.isFinalized && startMs <= nowMs;
+  const isUpcoming = !event.isFinalized && startMs > nowMs;
   const { data: matches } = usePodEventMatches(inProgress ? event.eventId : undefined);
   const currentRound = useMemo(() => {
     if (!matches || matches.length === 0) return null;
+    let earliestUnreported = null;
     let latest = 1;
     for (const m of matches) {
       if (m.round > latest) latest = m.round;
+      if (m.reportedAt == null && (earliestUnreported == null || m.round < earliestUnreported)) {
+        earliestUnreported = m.round;
+      }
     }
-    return Math.min(latest, event.totalRounds);
+    const round = earliestUnreported ?? latest;
+    return Math.min(round, event.totalRounds);
   }, [matches, event.totalRounds]);
   return (
     <div
@@ -617,7 +623,7 @@ function EventRowBody({ event, nowMs }: { event: PodEventSummary; nowMs: number 
         )}
         style={{ fontSize: 21, letterSpacing: "0.04em", lineHeight: 1.15 }}
       >
-        {cleanPodEventName(event.name, event.setCode).toUpperCase()}
+        <PodEventTitle event={event} />
       </span>
       {isUpcoming && <CountdownChip iso={event.eventTime} />}
       {hasChamp && event.championDisplayName && (

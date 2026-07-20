@@ -18,9 +18,17 @@ import logging
 import discord
 from discord import ui
 from discord.ext import commands
+from discord.http import Route
 
 from bot import audit
+from bot.commands.pod_guide import GUIDE_MARKER, render_pod_guide_embed_body
 from bot.config import settings
+from bot.services.format_schedule import (
+    LATEST_SET_CATEGORY,
+    active_set_seed,
+    channel_for_set,
+    set_tracking_todo_index,
+)
 from bot.services.pod_schedule import POD_DRAFTERS_ROLE_NAME
 from bot.services.server_guide import GuideContent, GuidePage, find_channel, pages_by_channel, render_page
 
@@ -41,6 +49,7 @@ SYNC_POSTED = "posted"
 SYNC_NO_CHANNEL = "no-channel"
 SYNC_FORBIDDEN = "forbidden"
 SYNC_FAILED = "failed"
+SYNC_STALE = "stale"
 
 
 async def sync_channel(guild: discord.Guild, channel_name: str,
@@ -75,6 +84,103 @@ async def sync_channel(guild: discord.Guild, channel_name: str,
     except discord.HTTPException:
         log.warning(f"guide: sync failed for #{channel.name}", exc_info=True)
         return SYNC_FAILED, f"⚠️ {channel.mention}: sync failed, see logs"
+
+
+async def sync_set_tracking_todo(guild: discord.Guild, http) -> tuple[str, str]:
+    """Keep the 'See what people are discussing' Server Guide To-Do pointed at the active set's channel:
+    (status, human-readable result line). Discord blocks bots from editing the Server Guide today, so a
+    drift is reported for a mod to fix by hand in Server Settings → Onboarding — the write is still
+    attempted first, so the To-Do self-heals if that restriction is ever lifted."""
+    route = Route("GET", "/guilds/{guild_id}/new-member-welcome", guild_id=guild.id)
+    try:
+        welcome = await http.request(route)
+    except discord.HTTPException:
+        return SYNC_FAILED, "⚠️ Latest channel: could not read the Server Guide"
+    actions = welcome.get("new_member_actions") or []
+    index = set_tracking_todo_index(actions, guild.channels)
+    if index is None:
+        return SYNC_NO_CHANNEL, "⚠️ Latest channel: no set-tracking To-Do found"
+    seed = active_set_seed()
+    target = channel_for_set(guild.channels, seed, LATEST_SET_CATEGORY)
+    if target is None:
+        return SYNC_NO_CHANNEL, f"⚠️ Latest channel: no channel found for the active set {seed.code}"
+    current_id = str(actions[index].get("channel_id"))
+    if current_id == str(target.id):
+        return SYNC_CURRENT, f"✅ Latest channel points to {target.mention}"
+    if await _repoint_set_tracking_todo(guild, http, welcome, actions, index, target):
+        return SYNC_UPDATED, f"🔄 Latest channel → {target.mention}"
+    current = guild.get_channel(int(current_id)) if current_id.isdigit() else None
+    current_ref = current.mention if current is not None else f"`{current_id}`"
+    return SYNC_STALE, (f"⚠️ Latest channel still points to {current_ref} but should be {target.mention}\n"
+                        'Update the "See what people are discussing" To-Do under '
+                        "**Server Settings → Onboarding → Server Guide**.")
+
+
+async def _repoint_set_tracking_todo(guild: discord.Guild, http, welcome, actions, index, target) -> bool:
+    """Write the To-Do's new channel, ``True`` on success. Discord blocks bots from the Server Guide
+    endpoint today so this normally fails; kept so a rotation heals the To-Do on its own if that lifts."""
+    updated = [dict(action) for action in actions]
+    updated[index]["channel_id"] = str(target.id)
+    body = {"enabled": welcome["enabled"], "welcome_message": welcome["welcome_message"],
+            "new_member_actions": updated}
+    try:
+        await http.request(Route("PUT", "/guilds/{guild_id}/new-member-welcome", guild_id=guild.id), json=body)
+        return True
+    except discord.HTTPException:
+        return False
+
+
+async def sync_pod_guide(guild: discord.Guild) -> tuple[str, str]:
+    """Reconcile the pinned Pod Draft guide in the pod-draft coordination channel
+    (settings.pod_draft_channel_id, resolved by id so a rename doesn't matter) by editing the existing
+    message in place — so the now-quiet channel never gets a fresh post — and clearing any stale
+    duplicate pins: (status, human-readable result line)."""
+    channel = guild.get_channel(settings.pod_draft_channel_id)
+    if channel is None:
+        return SYNC_NO_CHANNEL, "⚠️ Pod guide: pod-draft coordination channel not found"
+    body = render_pod_guide_embed_body(_pod_drafters_mention(guild))
+    embed = discord.Embed(description=body, color=GUIDE_COLOR)
+    try:
+        existing = await _pinned_pod_guides(channel, guild.me)
+        if not existing:
+            message = await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+            await message.pin(reason="pod draft guide")
+            return SYNC_POSTED, f"✅ {channel.mention} pod guide posted"
+        primary, duplicates = existing[0], existing[1:]
+        changed = bool(duplicates)
+        for stale in duplicates:
+            await _delete_guide_message(stale, None)
+        if _embed_body(primary) != body:
+            await primary.edit(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+            changed = True
+        word = "updated" if changed else "up to date"
+        return (SYNC_UPDATED if changed else SYNC_CURRENT), f"✅ {channel.mention} pod guide {word}"
+    except discord.Forbidden:
+        return SYNC_FORBIDDEN, (f"⚠️ {channel.mention}: pod guide needs "
+                                "View Channel, Send Messages, Read Message History, Embed Links")
+    except discord.HTTPException:
+        log.warning("guide: pod guide sync failed", exc_info=True)
+        return SYNC_FAILED, f"⚠️ {channel.mention}: pod guide sync failed, see logs"
+
+
+async def _pinned_pod_guides(channel: discord.TextChannel, me: discord.Member) -> list[discord.Message]:
+    """Pinned messages this bot posted that carry the pod guide, oldest-first so the first is the
+    canonical one and the rest are stale duplicates to drop."""
+    pins = await channel.pins()
+    guides = [
+        message for message in pins
+        if message.author.id == me.id
+        and any(GUIDE_MARKER in (embed.description or "") for embed in message.embeds)
+    ]
+    guides.reverse()
+    return guides
+
+
+def _embed_body(message: discord.Message) -> str | None:
+    for embed in message.embeds:
+        if embed.description:
+            return embed.description
+    return None
 
 
 def _build_view(content: GuideContent, show_title: bool = True) -> ui.LayoutView:
@@ -266,7 +372,11 @@ async def setup(bot: commands.Bot) -> None:
             return
         groups = pages_by_channel()
         results = [await sync_channel(guild, channel, pages) for channel, pages in groups]
+        pod_status, pod_line = await sync_pod_guide(guild)
+        todo_status, todo_line = await sync_set_tracking_todo(guild, bot.http)
         audit.event("guide_sync", user_id=str(ctx.author.id),
-                    results={channel: status for (channel, _), (status, _) in zip(groups, results)})
+                    results={channel: status for (channel, _), (status, _) in zip(groups, results)},
+                    pod_guide=pod_status,
+                    set_tracking_todo=todo_status)
         lines = "\n".join(line for _, line in results)
-        await ctx.send(f"Synced <id:guide>\n{lines}")
+        await ctx.send(f"Synced <id:guide>\n{lines}\n{pod_line}\n{todo_line}")
