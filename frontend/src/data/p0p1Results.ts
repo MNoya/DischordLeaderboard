@@ -1,8 +1,9 @@
 // Pure scoring and comparison functions for the P0P1 results phases.
 // All computation happens client-side from the ratings JSON + pick stats/ballots.
 
-import type { Card, P0P1PickStat, SlotKey } from "../types/p0p1";
+import type { Card, P0P1BallotRow, P0P1PickStat, SlotKey } from "../types/p0p1";
 import type { SlotDefinition } from "../types/p0p1";
+import type { P0P1DevSelfPlacement } from "./p0p1DevState";
 
 export type P0P1Phase = "voting" | "postVoting" | "midway" | "finalizing" | "final";
 
@@ -224,8 +225,24 @@ export function buildMidwaySlotVersus(
   });
 }
 
-// ── Rank all ballots by summed GIHWR (descending). ────────────────────────── Partial ballots sink naturally.
-// Returns the same ballots array with rank and percentile attached.
+// Fold flat ballot rows (one per slot) into the grouped shape rankBallots expects.
+export function groupBallotRows(
+  rows: P0P1BallotRow[],
+): Array<{ ballotId: number; name: string; avatarUrl: string | null; picks: Map<SlotKey, string> }> {
+  const byId = new Map<number, { ballotId: number; name: string; avatarUrl: string | null; picks: Map<SlotKey, string> }>();
+  for (const row of rows) {
+    let ballot = byId.get(row.ballotId);
+    if (!ballot) {
+      ballot = { ballotId: row.ballotId, name: row.name, avatarUrl: row.avatarUrl, picks: new Map() };
+      byId.set(row.ballotId, ballot);
+    }
+    ballot.picks.set(row.slot, row.cardName);
+  }
+  return Array.from(byId.values());
+}
+
+// Rank all ballots by summed GIHWR (descending). Partial ballots sink naturally.
+// Returns the same ballots array with rank attached.
 export interface RankedBallot {
   ballotId: number;
   name: string;
@@ -233,7 +250,6 @@ export interface RankedBallot {
   picks: Map<SlotKey, string>;
   score: number;
   rank: number;
-  percentile: number;
 }
 
 export function rankBallots(
@@ -244,84 +260,288 @@ export function rankBallots(
     ...b,
     score: scoreBallot(b.picks, ratingsByName),
     rank: 0,
-    percentile: 0,
   }));
   scored.sort((a, b) => b.score - a.score);
-  const n = scored.length;
-  for (let i = 0; i < n; i++) {
+  for (let i = 0; i < scored.length; i++) {
     scored[i].rank = i + 1;
-    // percentile: what fraction scored strictly worse
-    scored[i].percentile = n > 1 ? Math.round(((n - i - 1) / (n - 1)) * 100) : 100;
   }
   return scored;
 }
 
-export interface SlotRankGap {
+// Dev-only: rewrite the viewer's ballot score so it lands at a chosen standings
+// position, then re-rank. Lets the best-possible badge and medal rows be
+// previewed without waiting for a real submission to earn them.
+export function applyDevSelfPlacement(
+  ranked: RankedBallot[],
+  selfBallotId: number,
+  bestTeam: TeamResult,
+  placement: P0P1DevSelfPlacement,
+): RankedBallot[] {
+  if (placement === "auto") return ranked;
+
+  const self = ranked.find((b) => b.ballotId === selfBallotId);
+  if (!self) return ranked;
+  const others = ranked.filter((b) => b.ballotId !== selfBallotId);
+
+  let targetScore: number;
+  if (placement === "best") {
+    targetScore = bestTeam.score;
+  } else if (placement === "first") {
+    targetScore = (others[0]?.score ?? 0) + 1;
+  } else if (placement === "second") {
+    targetScore = others.length >= 2 ? (others[0].score + others[1].score) / 2 : (others[0]?.score ?? 0) - 1;
+  } else {
+    targetScore =
+      others.length >= 3
+        ? (others[1].score + others[2].score) / 2
+        : (others[others.length - 1]?.score ?? 0) - 1;
+  }
+
+  const rescored = [...others, { ...self, score: targetScore }];
+  rescored.sort((a, b) => b.score - a.score);
+  return rescored.map((b, i) => ({ ...b, rank: i + 1 }));
+}
+
+// Ghost rows for the reference teams, inserted into the standings at their
+// score position. The Best row is hidden when a real ballot ties its score —
+// that ballot earns the badge instead (see bestAchieverIds).
+const BEST_SCORE_EPSILON = 1e-6;
+
+export interface SyntheticStanding {
+  kind: "best" | "crowd";
+  team: TeamResult;
+}
+
+export type StandingsEntry =
+  | { kind: "ballot"; ballot: RankedBallot }
+  | { kind: "synthetic"; standing: SyntheticStanding };
+
+export interface StandingsList {
+  entries: StandingsEntry[];
+  bestAchieverIds: Set<number>;
+}
+
+export function buildStandingsList(
+  rankedBallots: RankedBallot[],
+  bestTeam: TeamResult,
+  crowdTeam: TeamResult,
+): StandingsList {
+  const bestAchieverIds = new Set(
+    rankedBallots
+      .filter((b) => Math.abs(b.score - bestTeam.score) < BEST_SCORE_EPSILON)
+      .map((b) => b.ballotId),
+  );
+
+  const entries: StandingsEntry[] = [];
+  let crowdInserted = false;
+  for (const ballot of rankedBallots) {
+    if (!crowdInserted && ballot.score < crowdTeam.score) {
+      entries.push({ kind: "synthetic", standing: { kind: "crowd", team: crowdTeam } });
+      crowdInserted = true;
+    }
+    entries.push({ kind: "ballot", ballot });
+  }
+  if (!crowdInserted) {
+    entries.push({ kind: "synthetic", standing: { kind: "crowd", team: crowdTeam } });
+  }
+  if (bestAchieverIds.size === 0) {
+    entries.unshift({ kind: "synthetic", standing: { kind: "best", team: bestTeam } });
+  }
+
+  return { entries, bestAchieverIds };
+}
+
+// Locate the viewer's ballot by exact slot→card match (public rows carry no user id).
+// The signed-in viewer's Discord id is embedded in their ballot's avatar_url
+// (cdn.discordapp.com/avatars/<id>/…), so it identifies their row uniquely even
+// when several players submitted the same team. Pick-matching is only a fallback
+// for default-avatar accounts whose url carries no id.
+export function findUserBallot(
+  rankedBallots: RankedBallot[],
+  picksBySlot: Map<string, string>,
+  discordId?: string | null,
+): RankedBallot | null {
+  if (discordId) {
+    const needle = `/avatars/${discordId}/`;
+    for (const ballot of rankedBallots) {
+      if (ballot.avatarUrl?.includes(needle)) return ballot;
+    }
+  }
+  if (picksBySlot.size === 0) return null;
+  for (const ballot of rankedBallots) {
+    if (ballot.picks.size !== picksBySlot.size) continue;
+    let match = true;
+    for (const [slot, cardName] of picksBySlot) {
+      if (ballot.picks.get(slot as SlotKey) !== cardName) { match = false; break; }
+    }
+    if (match) return ballot;
+  }
+  return null;
+}
+
+// ── Highlights feed ─────────────────────────────────────────────────────────
+// Trap / Sleeper awards selected by GIHWR effect size; see
+// spec/p0p1-results.md → Highlights. Sleeper popularity uses team share
+// (fraction of all ballots playing the card in any slot — wildcard slots
+// overlap the color slots); the Trap keeps within-slot share, its cost is slot-local.
+
+const TRAP_SHORTFALL_FLOOR = 0.02;
+const SLEEPER_TEAM_SHARE_CEIL = 0.05;
+
+export interface HighlightVoter {
+  name: string;
+  avatarUrl: string | null;
+}
+
+interface HighlightBase {
   slot: SlotKey;
   slotLabel: string;
   cardName: string;
-  popularityRank: number;
-  gihwrRank: number;
-  gap: number;
-  kind: "overrated" | "underrated";
+  gihwr: number;
+  // within-category normalized drama, (0, 1]; the feed is ordered by this
+  drama: number;
 }
 
-// Per-slot rank gap for the highlights reel.
-// Overrated: high popularity rank, low GIHWR rank (everyone took it; it underperforms).
-// Underrated: low popularity rank, high GIHWR rank (nobody took it; it's secretly strong).
-// Returns top highlights sorted by |gap| descending.
-export function slotRankGaps(
+export interface TrapHighlight extends HighlightBase {
+  kind: "trap";
+  pickCount: number;
+  pickShare: number;
+  slotBestName: string;
+  slotBestGihwr: number;
+}
+
+export interface SleeperHighlight extends HighlightBase {
+  kind: "sleeper";
+  teamCount: number;
+  teamShare: number;
+  crowdFavName: string;
+  crowdFavGihwr: number;
+  voters: HighlightVoter[];
+}
+
+export type Highlight = TrapHighlight | SleeperHighlight;
+
+// Top highlights across all slots: the best Trap and Sleeper are guaranteed
+// a slot (quota), the rest fill by drama normalized within category.
+export function highlightsFeed(
   pickStats: P0P1PickStat[],
+  ballots: P0P1BallotRow[],
+  cards: Card[],
   slots: SlotDefinition[],
   ratingsByName: Map<string, CardRating>,
-  topN = 3,
-): SlotRankGap[] {
-  const slotLabelMap = new Map(slots.map((s) => [s.key, s.label]));
-  const bySlot = new Map<SlotKey, P0P1PickStat[]>();
+  feedSize = 5,
+): Highlight[] {
+  const rated = (name: string): number | null => {
+    const r = ratingsByName.get(name);
+    return r && r.gih >= GIH_SAMPLE_FLOOR && r.gihwr !== null ? r.gihwr : null;
+  };
+
+  const voterIds = new Set(ballots.map((b) => b.ballotId));
+  const voterCount = voterIds.size;
+  if (voterCount === 0) return [];
+  const teamCount = new Map<string, number>();
+  const teamVoters = new Map<string, HighlightVoter[]>();
+  for (const b of ballots) {
+    teamCount.set(b.cardName, (teamCount.get(b.cardName) ?? 0) + 1);
+    const arr = teamVoters.get(b.cardName) ?? [];
+    arr.push({ name: b.name, avatarUrl: b.avatarUrl });
+    teamVoters.set(b.cardName, arr);
+  }
+  const teamShare = (name: string) => (teamCount.get(name) ?? 0) / voterCount;
+
+  const statsBySlot = new Map<SlotKey, P0P1PickStat[]>();
   for (const stat of pickStats) {
-    const arr = bySlot.get(stat.slot) ?? [];
+    const arr = statsBySlot.get(stat.slot) ?? [];
     arr.push(stat);
-    bySlot.set(stat.slot, arr);
+    statsBySlot.set(stat.slot, arr);
   }
 
-  const gaps: SlotRankGap[] = [];
+  const emptyPicked = new Set<string>();
+  const traps: TrapHighlight[] = [];
+  const sleepers: SleeperHighlight[] = [];
 
-  for (const [slotKey, stats] of bySlot) {
-    // Sort by popularity to get popularity ranks
-    const byPop = [...stats].sort((a, b) => b.pickCount - a.pickCount);
-    // Sort by GIHWR to get GIHWR ranks (among above-floor cards only)
-    const byGihwr = [...stats]
-      .filter((s) => {
-        const r = ratingsByName.get(s.cardName);
-        return r && r.gih >= GIH_SAMPLE_FLOOR && r.gihwr !== null;
-      })
-      .sort((a, b) => {
-        const ra = ratingsByName.get(a.cardName)!.gihwr!;
-        const rb = ratingsByName.get(b.cardName)!.gihwr!;
-        return rb - ra;
+  for (const slot of slots) {
+    const pool = cards
+      .filter((c) => slot.filter(c, emptyPicked))
+      .flatMap((c) => {
+        const gihwr = rated(c.name);
+        return gihwr === null ? [] : [{ name: c.name, gihwr }];
       });
+    if (pool.length === 0) continue;
+    const best = pool.reduce((a, b) => (b.gihwr > a.gihwr ? b : a));
 
-    for (let popIdx = 0; popIdx < byPop.length; popIdx++) {
-      const stat = byPop[popIdx];
-      const rating = ratingsByName.get(stat.cardName);
-      if (!rating || rating.gih < GIH_SAMPLE_FLOOR || rating.gihwr === null) continue;
-      const gihwrIdx = byGihwr.findIndex((s) => s.cardName === stat.cardName);
-      if (gihwrIdx === -1) continue;
-      const gap = popIdx - gihwrIdx; // positive = overrated, negative = underrated
-      if (gap === 0) continue;
-      gaps.push({
-        slot: slotKey,
-        slotLabel: slotLabelMap.get(slotKey) ?? slotKey,
+    const stats = statsBySlot.get(slot.key) ?? [];
+    const slotVotes = stats.reduce((sum, s) => sum + s.pickCount, 0);
+
+    for (const stat of stats) {
+      const gihwr = rated(stat.cardName);
+      if (gihwr === null || slotVotes === 0) continue;
+      if (best.gihwr - gihwr < TRAP_SHORTFALL_FLOOR) continue;
+      const pickShare = stat.pickCount / slotVotes;
+      traps.push({
+        kind: "trap",
+        slot: slot.key,
+        slotLabel: slot.label,
         cardName: stat.cardName,
-        popularityRank: popIdx + 1,
-        gihwrRank: gihwrIdx + 1,
-        gap,
-        kind: gap > 0 ? "overrated" : "underrated",
+        gihwr,
+        drama: pickShare * (best.gihwr - gihwr),
+        pickCount: stat.pickCount,
+        pickShare,
+        slotBestName: best.name,
+        slotBestGihwr: best.gihwr,
       });
+    }
+
+    const crowdFavStat = stats.reduce(
+      (a, b) => (b.pickCount > (a?.pickCount ?? 0) ? b : a),
+      null as P0P1PickStat | null,
+    );
+    const crowdFavGihwr = crowdFavStat ? rated(crowdFavStat.cardName) : null;
+    if (crowdFavStat && crowdFavGihwr !== null) {
+      for (const c of pool) {
+        if (teamShare(c.name) > SLEEPER_TEAM_SHARE_CEIL) continue;
+        if (c.gihwr <= crowdFavGihwr) continue;
+        sleepers.push({
+          kind: "sleeper",
+          slot: slot.key,
+          slotLabel: slot.label,
+          cardName: c.name,
+          gihwr: c.gihwr,
+          drama: c.gihwr - crowdFavGihwr,
+          teamCount: teamCount.get(c.name) ?? 0,
+          teamShare: teamShare(c.name),
+          crowdFavName: crowdFavStat.cardName,
+          crowdFavGihwr,
+          voters: teamVoters.get(c.name) ?? [],
+        });
+      }
     }
   }
 
-  return gaps
-    .sort((a, b) => Math.abs(b.gap) - Math.abs(a.gap))
-    .slice(0, topN);
+  // A card qualifying in multiple slots (wildcard overlap) keeps its strongest instance
+  const dedupe = <T extends Highlight>(entries: T[]): T[] => {
+    const byCard = new Map<string, T>();
+    for (const e of entries) {
+      const cur = byCard.get(e.cardName);
+      if (!cur || e.drama > cur.drama) byCard.set(e.cardName, e);
+    }
+    return Array.from(byCard.values()).sort((a, b) => b.drama - a.drama);
+  };
+
+  const categories: Highlight[][] = [dedupe(traps), dedupe(sleepers)];
+  for (const entries of categories) {
+    const max = entries[0]?.drama ?? 1;
+    for (const e of entries) e.drama = e.drama / max;
+  }
+
+  const feed: Highlight[] = categories.flatMap((entries) => entries.slice(0, 1));
+  const rest = categories
+    .flatMap((entries) => entries.slice(1))
+    .sort((a, b) => b.drama - a.drama);
+  for (const e of rest) {
+    if (feed.length >= feedSize) break;
+    feed.push(e);
+  }
+
+  return feed.sort((a, b) => b.drama - a.drama).slice(0, feedSize);
 }

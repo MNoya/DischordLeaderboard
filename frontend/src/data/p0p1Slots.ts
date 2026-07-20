@@ -8,6 +8,9 @@ export const P0P1_SCORING_DATE = new Date(
   P0P1_VOTING_DEADLINE.getTime() + 28 * 24 * 60 * 60 * 1000,
 );
 
+export const P0P1_NEXT_SET_CODE = "HOB";
+export const P0P1_NEXT_SET_NAME = "The Hobbit";
+
 function isBasicLand(card: Card) {
   return card.typeLine.startsWith("Basic Land");
 }

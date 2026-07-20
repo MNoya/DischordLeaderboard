@@ -31,7 +31,7 @@ import type {
   SetSummary,
   TrophyLeaderboardRow,
 } from "../types/leaderboard";
-import type { Card, P0P1Pick, P0P1PickStat, SlotKey } from "../types/p0p1";
+import type { Card, P0P1BallotRow, P0P1Pick, P0P1PickStat, SlotKey } from "../types/p0p1";
 import type { Episode } from "./episodes";
 import {
   podDraftArtifactFixture,
@@ -473,6 +473,7 @@ export const fetchPodSetCodes = (): Promise<PodSetCode[]> => wait(podSetCodesFix
 import { cardsMshFixture } from "./fixtures/cards-msh";
 import type { RatingsSnapshot } from "./p0p1Results";
 import { GIH_SAMPLE_FLOOR } from "./p0p1Results";
+import { syntheticBallotsFromStats } from "./p0p1DevBallots";
 
 const P0P1_SLOT_KEYS: SlotKey[] = [
   "white_common", "blue_common", "black_common", "red_common",
@@ -630,6 +631,11 @@ const syntheticRatings = generateSyntheticRatings();
 
 export const fetchP0P1Ratings = (_setCode: string): Promise<RatingsSnapshot> =>
   wait(syntheticRatings);
+
+const syntheticBallots = syntheticBallotsFromStats(syntheticPickStats, "MSH");
+
+export const fetchP0P1Ballots = (_setCode: string): Promise<P0P1BallotRow[]> =>
+  wait(syntheticBallots);
 
 export const initialAuthUser = {
   id: "mock-user-id",

@@ -1509,7 +1509,7 @@ function adaptPodLeaderboardRow(row: Record<string, unknown>): PodLeaderboardRow
 
 // --- P0P1 contest ---
 
-import type { Card, P0P1Pick, P0P1PickStat, SlotKey } from "../types/p0p1";
+import type { Card, P0P1BallotRow, P0P1Pick, P0P1PickStat, SlotKey } from "../types/p0p1";
 import { cardsMshFixture } from "./fixtures/cards-msh";
 import type { RatingsSnapshot } from "./p0p1Results";
 import ratingsMsh from "./fixtures/p0p1-ratings-msh.json";
@@ -1561,6 +1561,22 @@ export async function deleteAllP0P1Picks(setCode: string): Promise<void> {
     .delete()
     .eq("set_code", setCode);
   if (error) throw error;
+}
+
+export async function fetchP0P1Ballots(setCode: string): Promise<P0P1BallotRow[]> {
+  const { data, error } = await client()
+    .from("public_p0p1_ballots")
+    .select("*")
+    .eq("set_code", setCode);
+  if (error) throw error;
+  return (data ?? []).map((r) => ({
+    setCode: r.set_code as string,
+    ballotId: r.ballot_id as number,
+    name: r.name as string,
+    avatarUrl: r.avatar_url as string | null,
+    slot: r.slot as SlotKey,
+    cardName: r.card_name as string,
+  }));
 }
 
 export async function fetchP0P1PickStats(setCode: string): Promise<P0P1PickStat[]> {

@@ -18,6 +18,7 @@ This is the phase deferred by `spec/p0p1-after-submissions-closed.md` ("Scoring 
 Shown when the ratings JSON is present and `phase === "midway"`. Replaces the popularity display as the page headline.
 
 Personal comparison only — no leaderboard, no highlights reel. Logged-in users see:
+
 - Their current score (summed GIHWR of their picks, based on the snapshot)
 - vs. best-possible team score
 - vs. most-popular team score
@@ -57,14 +58,14 @@ Extends the existing 2-way `PickVersusCard` modal to three columns, now keyed on
 - **Best-possible team** and **most-popular team** are **legal ballots** — they respect the contest's no-duplicate-card-across-slots constraint (a small constrained assignment over the slots, not a per-slot argmax). They are real, attainable ballots, not an unreachable upper bound.
 - Note the distinction: the per-slot comparison's "best pick" is the slot-local best card, which may differ from the card the best-possible _team_ uses for that slot (because the team optimizes across slots under the uniqueness constraint). These are two different "best" numbers by design and must be presented so the difference doesn't read as a bug.
 
-### Highlights — per-slot rank gap (final only)
+### Highlights — award feed (final only)
 
-Within each slot, rank cards by pick-popularity and independently by GIHWR.
+A top-5 mixed feed of two named award types (replaces the earlier generic per-slot rank-gap pair):
 
-- **Overrated**: popular but low winrate-rank (everyone took it, it underperforms).
-- **Underrated**: ignored but high winrate-rank (nobody took it, it's secretly strong).
+- **Traps** — cards many voters picked that underperformed the best card available in their slot.
+- **Sleepers** — cards almost nobody (possibly nobody) picked that outperformed the slot's crowd favorite, computed over each slot's full eligible pool (the card fixture + slot filters, since `public_p0p1_pick_stats` omits zero-vote cards). The only voter-named highlight; personal callouts are **positive-only** — negative stories stay at the card level, never at the person.
 
-Surface the top few across all slots (sorted by gap magnitude).
+Selection metric was chosen empirically by prototyping both candidates against the real MSH data: rank-gap over the full pool labels 0–1-vote cards as "traps" and its magnitudes are tie-noise among the 1-vote tail, while **GIHWR effect-size** surfaces coherent stories. Selection mechanics (drama formulas, thresholds, quota-then-fill) live in `highlightsFeed()` in `frontend/src/data/p0p1Results.ts`.
 
 ## Data approach
 
@@ -91,9 +92,9 @@ The frontend pulls the whole ballots view in one request (~150 voters × 8 ≈ 1
 
 New `frontend/src/data/p0p1Results.ts` (parallel to `frontend/src/data/scoring.ts`):
 
-- per-user summed GIHWR (below-floor cards → 0), rank, percentile;
+- per-user summed GIHWR (below-floor cards → 0) and rank;
 - best-possible and most-popular teams (constrained assignment) and their summed GIHWR;
-- per-slot rank-gap highlights.
+- the Trap/Sleeper highlights feed.
 
 Follows the existing `realApi.ts` / `mockApi.ts` / `api.ts` / `hooks.ts` data pattern. Mock mode generates synthetic ratings over the MSH card fixture.
 

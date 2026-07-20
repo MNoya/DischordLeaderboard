@@ -18,6 +18,7 @@ import { GoToTopButton } from "../GoToTopButton";
 import { SiteFooter } from "../SiteFooter";
 import { ChevronDown } from "../Icons";
 import { MidwayResults } from "./MidwayResults";
+import { FinalResults } from "./FinalResults";
 import type { useP0P1Ballot } from "../../data/useP0P1Ballot";
 import type { P0P1Phase } from "../../data/p0p1Results";
 import {
@@ -150,6 +151,7 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
     selectAdvance,
     phase,
     ratingsSnapshot,
+    ballots,
     p0p1Sets,
   } = ballot;
 
@@ -214,10 +216,17 @@ export function P0P1MobileSelector({ ballot }: { ballot: Ballot }) {
                 />
               ) : null
             ) : phase === "final" ? (
-              resultsDataReady ? (
-                <div className="mt-10 flex items-center justify-center text-2xl font-bold text-yellow-400">
-                  ⚠️ Final Results Page — TO BE IMPLEMENTED
-                </div>
+              resultsDataReady && ratingsSnapshot && cards && pickStats && ballots ? (
+                <FinalResults
+                  ratingsSnapshot={ratingsSnapshot}
+                  pickStats={pickStats}
+                  ballots={ballots}
+                  cards={cards}
+                  cardsByName={cardsByName}
+                  picksBySlot={picksBySlot}
+                  user={user}
+                  hasParticipated={hasParticipated}
+                />
               ) : null
             ) : phase === "postVoting" || phase === "finalizing" ? (
               pickStats && pickStats.length > 0 && (
@@ -523,7 +532,7 @@ const SKEL_NAME_W = [120, 100, 110, 95, 105, 130, 115, 125, 140];
 export function SlotsListSkeleton() {
   return (
     <div className="flex flex-col gap-1.5">
-      {Array.from({ length: 8 }, (_, i) => (
+      {Array.from({ length: SLOTS.length }, (_, i) => (
         <div key={i} className="w-full flex items-center gap-4 px-4 py-3 bg-surface border border-border2">
           <div className="w-20 h-12 bg-surface2 animate-pulse shrink-0" />
           <div className="flex-1 flex flex-col gap-1.5">
@@ -561,7 +570,7 @@ function CountdownStacked({
   if (phase === "final") {
     return (
       <div className="flex flex-col items-end leading-tight whitespace-nowrap shrink-0">
-        <span className="text-green text-[13px]">Showing results</span>
+        <span className="text-green text-[13px]">Results are in!</span>
       </div>
     );
   }

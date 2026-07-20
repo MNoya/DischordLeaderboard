@@ -27,6 +27,7 @@ cache/
 # Claude Code: user-specific settings and transient agent state
 .claude/settings.local.json
 .claude/worktrees/
+CLAUDE.local.md
 
 # wrangler files
 .wrangler
@@ -164,3 +165,5 @@ backups/
 
 # P1P1 quiz spec reference screenshots (DraftBot)
 spec/p1p1-images/
+
+frontend/.claude/skills/verify

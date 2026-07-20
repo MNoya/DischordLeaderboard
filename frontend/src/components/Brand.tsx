@@ -68,6 +68,7 @@ export function AAvatar({
   size?: number;
   green?: boolean;
 }) {
+  const [failed, setFailed] = React.useState(false);
   const initials = displayName
     .split(/[\s\-_().]+/)
     .filter(Boolean)
@@ -76,13 +77,14 @@ export function AAvatar({
     .slice(0, 2)
     .toUpperCase();
   const clip = "polygon(8% 0, 100% 0, 100% 92%, 92% 100%, 0 100%, 0 8%)";
-  if (avatarUrl) {
+  if (avatarUrl && !failed) {
     return (
       <img
         src={avatarUrl}
         alt={displayName}
         width={size}
         height={size}
+        onError={() => setFailed(true)}
         className="block shrink-0 object-cover"
         style={{ clipPath: clip }}
       />

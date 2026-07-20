@@ -14,6 +14,7 @@ import {
   fetchColorsSummary,
   fetchCubeSeasons,
   fetchP0P1Cards,
+  fetchP0P1Ballots,
   fetchP0P1PickStats,
   fetchP0P1Picks,
   fetchFormatColorsLeaderboard,
@@ -45,7 +46,7 @@ import {
 import { fetchEpisodes } from "./episodes";
 import { fetchDiscordStats } from "./discord";
 import { fetchYouTubeVideos, mergeMedia, overlayLiveMedia, toVideoEpisode, type YouTubeVideo } from "./youtube";
-import type { P0P1Pick, SlotKey } from "../types/p0p1";
+import type { P0P1BallotRow, P0P1Pick, SlotKey } from "../types/p0p1";
 import { MULTI, OTHER } from "./filters";
 const THIRTY_MINUTES = 30 * 60 * 1000;
 const ONE_HOUR = 60 * 60 * 1000;
@@ -520,6 +521,15 @@ export function useP0P1PickStats(setCode: string | undefined, enabled: boolean) 
   return useQuery({
     queryKey: ["p0p1-pick-stats", setCode],
     queryFn: () => fetchP0P1PickStats(setCode!),
+    enabled: !!setCode && enabled,
+    staleTime: THIRTY_MINUTES,
+  });
+}
+
+export function useP0P1Ballots(setCode: string | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: ["p0p1-ballots", setCode],
+    queryFn: (): Promise<P0P1BallotRow[]> => fetchP0P1Ballots(setCode!),
     enabled: !!setCode && enabled,
     staleTime: THIRTY_MINUTES,
   });

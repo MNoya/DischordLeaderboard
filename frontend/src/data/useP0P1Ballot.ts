@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../auth/useAuth";
 import {
+  useP0P1Ballots,
   useP0P1Cards,
   useP0P1PickStats,
   useP0P1Picks,
@@ -12,8 +13,9 @@ import {
 import { P0P1_SET_CODE as SET_CODE, P0P1_VOTING_DEADLINE as VOTING_DEADLINE, P0P1_SCORING_DATE as SCORING_DATE, SLOTS } from "./p0p1Slots";
 import { useLocalP0P1Picks, setLocalPick, clearLocalPicks, getLocalPicks } from "./localPicks";
 import { p0p1DevEnabled, p0p1Now, useP0P1DevPreset, type P0P1DevPreset } from "./p0p1DevState";
+import { syntheticBallotsFromStats } from "./p0p1DevBallots";
 import type { AuthUser } from "../auth/AuthContext";
-import type { Card, P0P1PickStat, SlotKey } from "../types/p0p1";
+import type { Card, P0P1BallotRow, P0P1PickStat, SlotKey } from "../types/p0p1";
 import type { P0P1Phase, RatingsSnapshot } from "./p0p1Results";
 
 const ADVANCE_BEAT_MS = 260;
@@ -114,6 +116,35 @@ export function useP0P1Ballot() {
   const midwayDataReady = resultsDataReady && ratingsSnapshot?.phase === "midway";
   const phase = deriveP0P1Phase(isPastDeadline, isPastScoringDate, ratingsSnapshot, resultsDataReady, devViewPreset);
 
+  const devFinal = devActive && phase === "final";
+  const { data: fetchedBallots } = useP0P1Ballots(SET_CODE, phase === "final" && !devFinal);
+  // In dev presets, synthesize ballots from the live pick stats instead of
+  // fetching — the public_p0p1_ballots view may not exist yet in the target DB
+  const ballots = useMemo<P0P1BallotRow[] | undefined>(() => {
+    if (!devFinal) return fetchedBallots;
+    return pickStats ? syntheticBallotsFromStats(pickStats, SET_CODE) : undefined;
+  }, [devFinal, fetchedBallots, pickStats]);
+
+  // In dev results presets, append a ballot row for the viewer so findUserBallot
+  // always resolves regardless of which picks the viewer has selected.
+  const effectiveBallots = useMemo<P0P1BallotRow[] | undefined>(() => {
+    if (!devActive || phase !== "final" || !ballots || effectivePicksBySlot.size === 0) {
+      return ballots;
+    }
+    const youRows: P0P1BallotRow[] = [];
+    for (const [slot, cardName] of effectivePicksBySlot) {
+      youRows.push({
+        setCode: SET_CODE,
+        ballotId: 0,
+        name: user?.username ?? "You",
+        avatarUrl: user?.avatarUrl ?? null,
+        slot: slot as SlotKey,
+        cardName,
+      });
+    }
+    return [...ballots, ...youRows];
+  }, [devActive, phase, ballots, effectivePicksBySlot, user]);
+
   const scoringFilled = SLOTS.filter((s) => effectivePicksBySlot.has(s.key)).length;
   const isComplete = scoringFilled === SLOTS.length;
   const hasParticipated = isPastDeadline && Boolean(user) && scoringFilled > 0;
@@ -180,6 +211,7 @@ export function useP0P1Ballot() {
     pickStats,
     ratingsSnapshot,
     phase,
+    ballots: effectiveBallots,
     persistPick,
     handleClearAll,
     clearPending: useServerPicks ? clearAll.isPending : false,
@@ -201,13 +233,12 @@ const FAKE_DEV_USER: AuthUser = {
 };
 
 function applyDevUser(authUser: AuthUser | null, preset: P0P1DevPreset): AuthUser | null {
-  if (preset === "closedLoggedOut") return null;
+  if (preset === "closedLoggedOut" || preset === "finalLoggedOut") return null;
   if (
     preset === "closedComplete" ||
     preset === "closedDidNotVote" ||
     preset === "midwayScoring" ||
     preset === "midwayDidNotVote" ||
-    preset === "finalizing" ||
     preset === "finalScoring"
   ) return authUser ?? FAKE_DEV_USER;
   return authUser;
@@ -218,13 +249,17 @@ function applyDevPicks(
   pickStats: P0P1PickStat[] | undefined,
   preset: P0P1DevPreset,
 ): Map<string, string> {
-  if (preset === "closedLoggedOut" || preset === "closedDidNotVote" || preset === "midwayDidNotVote") {
+  if (
+    preset === "closedLoggedOut" ||
+    preset === "closedDidNotVote" ||
+    preset === "midwayDidNotVote" ||
+    preset === "finalLoggedOut"
+  ) {
     return new Map();
   }
   if (
     preset === "closedComplete" ||
     preset === "midwayScoring" ||
-    preset === "finalizing" ||
     preset === "finalScoring"
   ) {
     return picksBySlot.size > 0 ? picksBySlot : topPickPerSlot(pickStats);
@@ -243,7 +278,7 @@ function topPickPerSlot(pickStats: P0P1PickStat[] | undefined): Map<string, stri
   return picks;
 }
 
-function deriveP0P1Phase(
+export function deriveP0P1Phase(
   isPastDeadline: boolean,
   isPastScoringDate: boolean,
   snapshot: RatingsSnapshot | undefined,
@@ -251,8 +286,7 @@ function deriveP0P1Phase(
   devPreset: P0P1DevPreset,
 ): P0P1Phase {
   if (devPreset === "midwayScoring" || devPreset === "midwayDidNotVote") return "midway";
-  if (devPreset === "finalizing") return "finalizing";
-  if (devPreset === "finalScoring") return "final";
+  if (devPreset === "finalScoring" || devPreset === "finalLoggedOut") return "final";
   if (
     devPreset === "closedLoggedOut" ||
     devPreset === "closedComplete" ||
@@ -262,12 +296,8 @@ function deriveP0P1Phase(
   if (!isPastDeadline) return "voting";
 
   if (!isPastScoringDate) {
-    if (snapshot?.phase && dataPresent) {
-      if (snapshot.phase === "final") {
-        console.warn("P0P1 ratings fixture is marked final before the scoring date");
-      }
-      return snapshot.phase;
-    }
+    // A fixture already marked final stays hidden until the scoring cutover, so the branch can merge ahead of the reveal
+    if (snapshot?.phase && snapshot.phase !== "final" && dataPresent) return snapshot.phase;
     return "postVoting";
   }
 

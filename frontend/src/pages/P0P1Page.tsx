@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { AppHeader } from "../components/AppHeader";
 import { Crossfade } from "../components/Crossfade";
 import { CtaPill } from "../components/CtaPill";
@@ -14,8 +15,9 @@ import { P0P1MobileSelector } from "../components/p0p1/P0P1MobileView";
 import { GoToTopButton } from "../components/GoToTopButton";
 import { PostVotingStats } from "../components/p0p1/PostVotingStats";
 import { MidwayResults } from "../components/p0p1/MidwayResults";
+import { FinalResults } from "../components/p0p1/FinalResults";
 import { P0P1DevPanel } from "../components/p0p1/P0P1DevPanel";
-import { P0P1BallotScorecard, MidwayBallotScorecard, CHAMFER } from "../components/p0p1/P0P1BallotScorecard";
+import { P0P1BallotScorecard, MidwayBallotScorecard, FinalBallotScorecard, CHAMFER } from "../components/p0p1/P0P1BallotScorecard";
 import { PickGrid } from "../components/p0p1/CommunityGrid";
 import { useIsMobile } from "../lib/use-is-mobile";
 import { useP0P1Ballot } from "../data/useP0P1Ballot";
@@ -51,8 +53,20 @@ export function P0P1Page() {
     selectAdvance,
     phase,
     ratingsSnapshot,
+    ballots,
   } = ballot;
   const isDesktop = !useIsMobile(1024);
+  const heroRef = useRef<HTMLDivElement>(null);
+  const [heroHeight, setHeroHeight] = useState(0);
+  useEffect(() => {
+    const el = heroRef.current;
+    if (!el) return;
+    const measure = () => setHeroHeight(el.getBoundingClientRect().height);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
   const isCompleteEntrant = isPastDeadline && Boolean(user) && isComplete;
   const didNotVote = isPastDeadline && Boolean(user) && !isComplete;
   const groupedStats = hasParticipated && pickStats ? groupBySlot(pickStats) : undefined;
@@ -77,7 +91,16 @@ export function P0P1Page() {
   const showMidway = phase === "midway" || (phase === "finalizing" && midwayDataReady);
   const ballotScorecard =
     user && isPastDeadline && isComplete && pickStats && pickStats.length > 0 ? (
-      (phase === "midway" || phase === "finalizing") && resultsDataReady && ratingsSnapshot && cards ? (
+      phase === "final" && resultsDataReady && ratingsSnapshot && cards && ballots ? (
+        <FinalBallotScorecard
+          ratingsSnapshot={ratingsSnapshot}
+          pickStats={pickStats}
+          ballots={ballots}
+          cards={cards}
+          picksBySlot={picksBySlot}
+          discordId={user.discordId}
+        />
+      ) : (phase === "midway" || phase === "finalizing") && resultsDataReady && ratingsSnapshot && cards ? (
         <MidwayBallotScorecard ratingsSnapshot={ratingsSnapshot} cards={cards} picksBySlot={picksBySlot} />
       ) : (
         <P0P1BallotScorecard pickStats={pickStats} picksBySlot={picksBySlot} />
@@ -102,7 +125,7 @@ export function P0P1Page() {
   return (
     <div className="bg-bg text-text min-h-screen flex flex-col animate-fadeIn">
       <AppHeader subtitle="P0 P1 Challenge" subtitleShort="P0 P1" />
-      <P0P1Hero cta={heroCta} belowIntro={belowIntro} phase={phase} dateRange={ratingsSnapshot?.dateRange} />
+      <P0P1Hero innerRef={heroRef} cta={heroCta} belowIntro={belowIntro} phase={phase} dateRange={ratingsSnapshot?.dateRange} />
 
       <main className="flex-1 px-10 pb-5 pt-5">
         {!isPastDeadline &&
@@ -129,15 +152,23 @@ export function P0P1Page() {
               hasParticipated={hasParticipated}
             />
           ) : (
-            <CardGridSkeleton />
+            <ResultsSkeleton />
           )
         ) : phase === "final" ? (
-          resultsDataReady ? (
-            <div className="mt-10 flex items-center justify-center text-2xl font-bold text-yellow-400">
-              ⚠️ Final Results Page — TO BE IMPLEMENTED
-            </div>
+          resultsDataReady && ratingsSnapshot && cards && pickStats && ballots ? (
+            <FinalResults
+              ratingsSnapshot={ratingsSnapshot}
+              pickStats={pickStats}
+              ballots={ballots}
+              cards={cards}
+              cardsByName={cardsByName}
+              picksBySlot={picksBySlot}
+              user={user}
+              hasParticipated={hasParticipated}
+              stickyTop={heroHeight}
+            />
           ) : (
-            <CardGridSkeleton />
+            <ResultsSkeleton />
           )
         ) : phase === "postVoting" || phase === "finalizing" ? (
           pickStats && pickStats.length > 0 && (
@@ -313,19 +344,41 @@ function RosterTile({
   );
 }
 
+function SkeletonTile() {
+  return (
+    <div className="flex flex-col aspect-square border-t-0 bg-surface border border-border2">
+      <div className="h-1 w-full bg-surface2" />
+      <div className="flex-1 min-h-0 bg-surface2 animate-pulse" />
+      <div className="px-2.5 py-1.5 shrink-0 flex flex-col gap-1">
+        <div className="h-2 w-12 bg-surface2 animate-pulse" />
+        <div className="h-2.5 w-16 bg-surface2 animate-pulse" />
+      </div>
+    </div>
+  );
+}
+
 function RosterStripSkeleton() {
   return (
     <div className="grid grid-cols-8 gap-2">
       {Array.from({ length: SLOTS.length }, (_, i) => (
-        <div key={i} className="flex flex-col aspect-square border-t-0 bg-surface border border-border2">
-          <div className="h-1 w-full bg-surface2" />
-          <div className="flex-1 min-h-0 bg-surface2 animate-pulse" />
-          <div className="px-2.5 py-1.5 shrink-0 flex flex-col gap-1">
-            <div className="h-2 w-12 bg-surface2 animate-pulse" />
-            <div className="h-2.5 w-16 bg-surface2 animate-pulse" />
-          </div>
-        </div>
+        <SkeletonTile key={i} />
       ))}
+    </div>
+  );
+}
+
+function ResultsSkeleton() {
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-col items-center gap-2">
+        <div className="h-5 w-52 bg-surface2 animate-pulse" />
+        <div className="h-3 w-72 bg-surface2 animate-pulse" />
+      </div>
+      <div className="grid grid-cols-8 gap-2">
+        {Array.from({ length: SLOTS.length }, (_, i) => (
+          <SkeletonTile key={i} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -333,11 +386,12 @@ function RosterStripSkeleton() {
 function CardGridSkeleton() {
   return (
     <div>
-      <div className="flex items-center gap-3 mb-3">
-        <div className="h-5 w-40 bg-surface2 animate-pulse" />
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 mb-3">
+        <div />
+        <div className="h-6 w-56 bg-surface2 animate-pulse" />
         <div className="ml-auto h-7 w-60 bg-surface2 animate-pulse" />
       </div>
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-3.5">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3.5">
         {Array.from({ length: 10 }, (_, i) => (
           <div key={i} className="bg-surface2 animate-pulse rounded-[3%]" style={{ aspectRatio: "488 / 680" }} />
         ))}

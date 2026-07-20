@@ -6,9 +6,11 @@ import { ALogo, AWordmark } from "./Brand";
 import { cn } from "../lib/utils";
 import { useIsMobile } from "../lib/use-is-mobile";
 import { useAuth } from "../auth/useAuth";
-import { useP0P1Picks, usePlayerSlugByDiscordId } from "../data/hooks";
-import { P0P1_SET_CODE, P0P1_VOTING_DEADLINE, SLOTS } from "../data/p0p1Slots";
-import { p0p1Now } from "../data/p0p1DevState";
+import { useP0P1Picks, useP0P1Ratings, usePlayerSlugByDiscordId } from "../data/hooks";
+import { P0P1_SCORING_DATE, P0P1_SET_CODE, P0P1_VOTING_DEADLINE, SLOTS } from "../data/p0p1Slots";
+import { p0p1DevEnabled, p0p1Now, useP0P1DevPreset } from "../data/p0p1DevState";
+import { deriveP0P1Phase } from "../data/useP0P1Ballot";
+import type { P0P1Phase } from "../data/p0p1Results";
 
 // Top-of-page chrome shared across the whole community site. The brand mark is
 // the Home link; each section is a nav tab.
@@ -383,22 +385,43 @@ function MobileMenu({
 function useP0P1BadgeState() {
   const { user } = useAuth();
   const { data: picks } = useP0P1Picks(user ? P0P1_SET_CODE : undefined);
+  const { data: snapshot } = useP0P1Ratings(P0P1_SET_CODE);
+  const devPreset = useP0P1DevPreset();
+  const devActive = p0p1DevEnabled && devPreset !== "live";
   const isPastDeadline = p0p1Now() > P0P1_VOTING_DEADLINE.getTime();
+  const isPastScoringDate = p0p1Now() >= P0P1_SCORING_DATE.getTime();
+  const phase = deriveP0P1Phase(
+    isPastDeadline,
+    isPastScoringDate,
+    snapshot,
+    Boolean(snapshot),
+    devActive ? devPreset : "live",
+  );
   const filled = user ? (picks?.length ?? 0) : 0;
-  return { user, isPastDeadline, filled, total: SLOTS.length };
+  return { user, phase, filled, total: SLOTS.length };
+}
+
+// Phase-driven label for post-deadline states, centered and non-corner like
+// PRELIM DATA / RESULTS SOON; null falls through to the voting-progress badge.
+function p0p1BadgeLabel(phase: P0P1Phase): string | null {
+  if (phase === "final") return "RESULTS";
+  if (phase === "finalizing") return "RESULTS SOON";
+  if (phase === "midway" || phase === "postVoting") return "PRELIM DATA";
+  return null;
 }
 
 function P0P1Badge({ active }: { active: boolean }) {
-  const { user, isPastDeadline, filled, total } = useP0P1BadgeState();
+  const { user, phase, filled, total } = useP0P1BadgeState();
 
   const pill = cn(
     "absolute -top-1.5 z-10 rounded-full border border-green px-1.5 py-0.5 text-[9px] leading-none font-sans font-bold tracking-wide",
     active ? "bg-bg text-green" : "bg-green text-bg",
   );
 
-  if (isPastDeadline) {
+  const label = p0p1BadgeLabel(phase);
+  if (label) {
     return (
-      <span className={cn(pill, "left-1/2 -translate-x-1/2 whitespace-nowrap")}>PRELIM DATA</span>
+      <span className={cn(pill, "left-1/2 -translate-x-1/2 whitespace-nowrap")}>{label}</span>
     );
   }
   const corner = cn(pill, "-right-1.5");
@@ -408,14 +431,15 @@ function P0P1Badge({ active }: { active: boolean }) {
 }
 
 function MobileBadgeSlot({ active }: { active: boolean }) {
-  const { user, isPastDeadline, filled, total } = useP0P1BadgeState();
+  const { user, phase, filled, total } = useP0P1BadgeState();
 
   const wrap = cn(
     "ml-3 inline-flex items-center gap-2 text-[14px] font-semibold font-sans tracking-[0.08em]",
     active ? "text-bg" : "text-green",
   );
 
-  if (isPastDeadline) return <span className={wrap}>PRELIM DATA</span>;
+  const label = p0p1BadgeLabel(phase);
+  if (label) return <span className={wrap}>{label}</span>;
   if (!user || filled === 0) return <span className={wrap}>OPEN</span>;
   if (filled === total) return <span className={wrap}>VOTED!</span>;
   return <span className={wrap}>{filled}/{total}</span>;
