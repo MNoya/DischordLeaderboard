@@ -22,6 +22,17 @@ const winRateLink = (
   </a>
 );
 
+const dataLink = (
+  <a
+    href={SEVENTEEN_LANDS_URL}
+    target="_blank"
+    rel="noreferrer"
+    className="text-green hover:underline underline-offset-2"
+  >
+    17Lands data
+  </a>
+);
+
 export function P0P1IntroText({
   phase,
   dateRange,
@@ -80,8 +91,8 @@ function buildSentences(
       ];
     case "final":
       return [
-        <>After {windowText} of {setName}, the dust has settled.</>,
-        <>Check out the final standings, based on 17Lands data{formattedRange && <> from {formattedRange}</>}.</>,
+        <>After {windowText}, {setName} results are in!</>,
+        <>Check out the final standings based on {dataLink}.</>,
       ];
   }
 }

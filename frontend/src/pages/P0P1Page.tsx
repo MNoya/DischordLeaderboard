@@ -98,6 +98,7 @@ export function P0P1Page() {
           ballots={ballots}
           cards={cards}
           picksBySlot={picksBySlot}
+          discordId={user.discordId}
         />
       ) : (phase === "midway" || phase === "finalizing") && resultsDataReady && ratingsSnapshot && cards ? (
         <MidwayBallotScorecard ratingsSnapshot={ratingsSnapshot} cards={cards} picksBySlot={picksBySlot} />

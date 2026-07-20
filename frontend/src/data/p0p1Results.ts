@@ -352,10 +352,21 @@ export function buildStandingsList(
 }
 
 // Locate the viewer's ballot by exact slot→card match (public rows carry no user id).
+// The signed-in viewer's Discord id is embedded in their ballot's avatar_url
+// (cdn.discordapp.com/avatars/<id>/…), so it identifies their row uniquely even
+// when several players submitted the same team. Pick-matching is only a fallback
+// for default-avatar accounts whose url carries no id.
 export function findUserBallot(
   rankedBallots: RankedBallot[],
   picksBySlot: Map<string, string>,
+  discordId?: string | null,
 ): RankedBallot | null {
+  if (discordId) {
+    const needle = `/avatars/${discordId}/`;
+    for (const ballot of rankedBallots) {
+      if (ballot.avatarUrl?.includes(needle)) return ballot;
+    }
+  }
   if (picksBySlot.size === 0) return null;
   for (const ballot of rankedBallots) {
     if (ballot.picks.size !== picksBySlot.size) continue;

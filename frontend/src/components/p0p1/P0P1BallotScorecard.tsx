@@ -233,12 +233,14 @@ export function FinalBallotScorecard({
   ballots,
   cards,
   picksBySlot,
+  discordId,
 }: {
   ratingsSnapshot: RatingsSnapshot;
   pickStats: P0P1PickStat[];
   ballots: P0P1BallotRow[];
   cards: Card[];
   picksBySlot: Map<string, string>;
+  discordId?: string;
 }) {
   const selfPlacement = useP0P1DevSelfPlacement();
   const result = useMemo(() => {
@@ -250,7 +252,7 @@ export function FinalBallotScorecard({
       bestTeam,
       p0p1DevEnabled ? selfPlacement : "auto",
     );
-    const userBallot = findUserBallot(rankedBallots, picksBySlot);
+    const userBallot = findUserBallot(rankedBallots, picksBySlot, discordId);
     const completeScores = rankedBallots
       .filter((b) => b.picks.size === SLOTS.length)
       .map((b) => b.score);
@@ -262,7 +264,7 @@ export function FinalBallotScorecard({
       crowdScore: mostPopularTeam(pickStats, SLOTS, ratingsByName).score,
       floor: completeScores.length > 0 ? Math.min(...completeScores) : 0,
     };
-  }, [ratingsSnapshot, pickStats, ballots, cards, picksBySlot, selfPlacement]);
+  }, [ratingsSnapshot, pickStats, ballots, cards, picksBySlot, selfPlacement, discordId]);
 
   const medal = result.rank !== null && result.rank <= 3 ? (result.rank as 1 | 2 | 3) : null;
   const accent = medal ? MEDAL_COLOR[medal] : GREEN;

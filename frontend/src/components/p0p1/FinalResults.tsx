@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { ArrowDown, ChevronDown } from "lucide-react";
 import { SectionLabel } from "../SectionLabel";
 import { Tooltip } from "../Tooltip";
 import { PickGrid } from "./CommunityGrid";
+import { CardImagePreview } from "./CardImagePreview";
 import { breakdownStripAccent } from "./slotVisuals";
 import { CHAMFER, MEDAL_COLOR } from "./P0P1BallotScorecard";
 import { SLOTS } from "../../data/p0p1Slots";
@@ -40,7 +41,7 @@ function SectionHeading({ title, children }: { title: string; children?: React.R
       <div className="flex justify-center">
         <SectionLabel size={22} className="text-white">{title}</SectionLabel>
       </div>
-      {children && <p className="text-center text-[12.5px] text-muted mt-1.5">{children}</p>}
+      {children && <p className="text-center text-[13.5px] text-subtle mt-1.5">{children}</p>}
     </div>
   );
 }
@@ -200,11 +201,10 @@ function ContributionBar({
         className="absolute top-0 left-0 h-full flex gap-px overflow-hidden"
         style={{ width: `${fillPct}%` }}
       >
-        {activeContribs.map(({ slotKey, card, gihwr, points }) => (
+        {activeContribs.map(({ slotKey, card }) => (
           <div
             key={slotKey}
-            className="relative h-full overflow-hidden"
-            style={{ flexGrow: points, flexBasis: 0 }}
+            className="relative h-full overflow-hidden flex-1 basis-0"
           >
             <div
               className="absolute top-0 left-0 right-0 h-[2px] z-10 pointer-events-none"
@@ -221,11 +221,6 @@ function ContributionBar({
               />
             )}
             <div className="absolute inset-0 bg-black/55 pointer-events-none" />
-            {gihwr !== null && (
-              <span className="relative z-10 flex items-center justify-center h-full text-[7px] lg:text-[8px] font-mono font-semibold text-white/50 pointer-events-none select-none">
-                {(gihwr * 100).toFixed(1)}
-              </span>
-            )}
           </div>
         ))}
       </div>
@@ -246,7 +241,7 @@ function ContributionBar({
             collisionPadding={{ top: stickyTop + 8, bottom: 8, left: 8, right: 8 }}
             className="p-0 bg-transparent border-0 shadow-none"
           >
-            <div className="relative h-full cursor-pointer" style={{ flexGrow: seg.points, flexBasis: 0 }} />
+            <div className="relative h-full cursor-pointer flex-1 basis-0" />
           </Tooltip>
         ))}
       </div>
@@ -431,7 +426,7 @@ function BroadcastTop3({
           </span>
         </div>
         <div
-          className="relative flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 py-3 sm:py-4"
+          className="relative flex flex-row items-center gap-3 sm:gap-4 py-3 sm:py-4"
           style={{ transform: "skewX(6deg)", paddingLeft: 74, paddingRight: 20 }}
         >
           <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
@@ -447,8 +442,8 @@ function BroadcastTop3({
               <div className="font-mono tracking-[0.22em] text-[10px] sm:text-[10.5px] uppercase text-gold">
                 🏆 CHAMPION
               </div>
-              <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 min-w-0">
-                <span className="font-display text-[28px] sm:text-[44px] leading-[0.95] tracking-[0.03em] truncate min-w-0">
+              <div className="flex flex-row items-center gap-1.5 sm:gap-2 min-w-0">
+                <span className="font-display text-[24px] sm:text-[44px] leading-[0.95] tracking-[0.03em] truncate min-w-0">
                   {champion.name.toUpperCase()}
                 </span>
                 {(champion.ballotId === userBallotId || bestAchieverIds.has(champion.ballotId)) && (
@@ -460,7 +455,7 @@ function BroadcastTop3({
               </div>
             </div>
           </div>
-          <div className="text-left sm:text-right shrink-0 sm:pl-4" style={{ borderLeft: "0" }}>
+          <div className="text-right shrink-0 pl-3 sm:pl-4">
             <div className="hidden sm:block" style={{ borderLeft: "2px solid #ffc63a55", paddingLeft: 18 }}>
               <div
                 className="font-mono tabular-nums text-[34px] font-bold leading-[1.05] text-gold"
@@ -468,16 +463,16 @@ function BroadcastTop3({
               >
                 {champion.score.toFixed(1)}
               </div>
-              <div className="font-mono tracking-[0.22em] text-[9.5px] text-muted mt-0.5">FINAL SCORE</div>
+              <div className="font-mono tracking-[0.24em] text-[10.5px] font-semibold text-gold/80 mt-1">FINAL SCORE</div>
             </div>
-            <div className="sm:hidden flex items-baseline gap-2">
+            <div className="sm:hidden">
               <div
-                className="font-mono tabular-nums text-[26px] font-bold leading-[1.05] text-gold"
+                className="font-mono tabular-nums text-[22px] font-bold leading-[1.05] text-gold"
                 style={{ textShadow: "0 0 34px #ffc63a90" }}
               >
                 {champion.score.toFixed(1)}
               </div>
-              <div className="font-mono tracking-[0.2em] text-[9px] text-muted">FINAL SCORE</div>
+              <div className="font-mono tracking-[0.18em] text-[8px] font-semibold text-gold/80">FINAL SCORE</div>
             </div>
           </div>
         </div>
@@ -570,7 +565,7 @@ function BroadcastSubBar({
             fallbackClassName="w-6 h-6 sm:w-7 sm:h-7 rounded-full shrink-0 bg-surface flex items-center justify-center text-[10px] sm:text-[11px] text-muted font-mono"
             style={{ boxShadow: `0 0 0 1.5px ${accent}` }}
           />
-          <span className="flex flex-col sm:flex-row sm:items-center gap-0.5 sm:gap-2 flex-1 min-w-0">
+          <span className="flex flex-row items-center gap-1.5 sm:gap-2 flex-1 min-w-0">
             <span className="font-display text-[16px] sm:text-[20px] tracking-[0.04em] truncate min-w-0">
               {ballot.name.toUpperCase()}
             </span>
@@ -581,7 +576,7 @@ function BroadcastSubBar({
               </span>
             )}
           </span>
-          <span className="font-mono tabular-nums text-[14px] sm:text-[16px] shrink-0" style={{ color: accent }}>
+          <span className="font-mono tabular-nums text-[14px] sm:text-[16px] font-bold shrink-0" style={{ color: accent }}>
             {ballot.score.toFixed(1)}
           </span>
           <ChevronDown
@@ -952,17 +947,10 @@ function Leaderboard({
             <button
               type="button"
               onClick={onSeeAll}
-              className="font-mono tracking-[0.16em] text-[11px] text-subtle hover:text-text transition-colors"
-              style={{
-                transform: "skewX(-6deg)",
-                background: "#1d2330",
-                border: "1px solid #3b4458",
-                padding: "7px 18px",
-              }}
+              className="group inline-flex items-center gap-2 font-mono tracking-[0.16em] text-[11px] text-subtle hover:text-text border border-border2 rounded-sm bg-surface2 hover:bg-surface px-4 py-2 transition-colors"
             >
-              <span className="inline-block" style={{ transform: "skewX(6deg)" }}>
-                SEE FULL STANDINGS →
-              </span>
+              SEE FULL STANDINGS
+              <ArrowDown size={13} className="transition-transform group-hover:translate-y-0.5" />
             </button>
           </div>
         )}
@@ -1046,9 +1034,11 @@ const HIGHLIGHT_STAMP: Record<Highlight["kind"], string> = {
 };
 
 const HIGHLIGHT_STAT_LABEL: Record<Highlight["kind"], string> = {
-  trap: "BEHIND THE SLOT'S BEST",
+  trap: "BEHIND THE BEST CARD",
   sleeper: "OVER THE CROWD FAVORITE",
 };
+
+const TILE_BG = "#181a21";
 
 const VOTER_STACK_MAX = 10;
 
@@ -1076,15 +1066,14 @@ function highlightStory(h: Highlight) {
         <b className="text-subtle font-medium">
           {h.pickCount} {h.pickCount === 1 ? "player" : "players"} ({shareLabel(h.pickShare)})
         </b>{" "}
-        picked it. {h.slotBestName} performed better.
+        picked it
       </>
     );
   }
   if (h.teamCount === 0) {
     return (
       <>
-        <b className="text-subtle font-medium">Everyone</b> missed it. It
-        outperformed {h.crowdFavName}, the slot's most-picked card.
+        <b className="text-subtle font-medium">Everyone</b> missed it
       </>
     );
   }
@@ -1095,7 +1084,7 @@ function highlightStory(h: Highlight) {
         <b className="text-subtle font-medium">
           {joinNames(h.voters.map((v) => v.name))}
         </b>{" "}
-        found it. It outperformed {h.crowdFavName}.
+        found it
       </>
     );
   }
@@ -1104,7 +1093,7 @@ function highlightStory(h: Highlight) {
       <b className="text-subtle font-medium">
         {h.teamCount} players ({shareLabel(h.teamShare)})
       </b>{" "}
-      picked it. It outperformed {h.crowdFavName}.
+      picked it
     </>
   );
 }
@@ -1162,52 +1151,48 @@ function HighlightTile({
   const card = cardsByName.get(highlight.cardName);
   const accent = HIGHLIGHT_ACCENT[highlight.kind];
 
-  return (
-    <article
-      className="group w-full sm:w-[206px] motion-safe:animate-fadeUpIn"
-      style={{
-        clipPath: CHAMFER,
-        padding: 1,
-        background: `linear-gradient(165deg, ${accent} 0%, color-mix(in srgb, ${accent} 28%, #3b4458) 30%, #3b4458 70%, color-mix(in srgb, ${accent} 22%, #3b4458) 100%)`,
-        animationDelay: `${index * 80}ms`,
-      }}
-    >
+  const inner = (
       <div
-        className="relative overflow-hidden flex flex-col bg-surface2 min-h-[150px] sm:min-h-0 sm:h-[348px]"
-        style={{ clipPath: CHAMFER }}
+        className="relative overflow-hidden flex flex-col min-h-[150px] sm:h-full"
+        style={{ clipPath: CHAMFER, background: TILE_BG }}
       >
-        <div className="absolute inset-y-0 left-0 w-[132px] sm:inset-x-0 sm:bottom-auto sm:w-full sm:h-[176px]">
+        <div className="absolute inset-y-0 left-0 w-[168px] sm:right-0 sm:w-auto">
           {card && (
             <img
               src={card.imageArtCrop}
               alt={`${highlight.cardName} art`}
-              className="w-full h-full object-cover saturate-[0.72] contrast-[1.02] group-hover:saturate-100 transition-[filter] duration-[250ms]"
+              className="w-full h-full sm:h-[176px] object-cover saturate-[0.72] contrast-[1.02]"
             />
           )}
           <div
             className="absolute inset-0 sm:hidden"
             style={{
-              background: `linear-gradient(to bottom, #1d2330 0%, color-mix(in srgb, #1d2330 45%, transparent) 10%, transparent 22%), linear-gradient(to top, #1d2330 0%, transparent 14%), linear-gradient(to right, #1d2330 0%, transparent 12%), linear-gradient(to right, transparent 20%, #1d2330 88%)`,
+              background: `linear-gradient(to bottom, ${TILE_BG} 0%, color-mix(in srgb, ${TILE_BG} 45%, transparent) 10%, transparent 22%), linear-gradient(to top, ${TILE_BG} 0%, transparent 14%), linear-gradient(to right, ${TILE_BG} 0%, transparent 12%), linear-gradient(to right, transparent 40%, ${TILE_BG} 92%)`,
             }}
           />
           <div
             className="absolute inset-0 hidden sm:block"
             style={{
-              background: `linear-gradient(to bottom, color-mix(in srgb, ${accent} 14%, transparent) 0%, transparent 38%), linear-gradient(to bottom, transparent 30%, #1d2330 96%)`,
+              background: `linear-gradient(to bottom, color-mix(in srgb, ${accent} 14%, transparent) 0px, transparent 67px), linear-gradient(to bottom, transparent 53px, ${TILE_BG} 169px)`,
             }}
           />
+          {highlight.kind === "sleeper" && highlight.voters.length > 0 && (
+            <div className="absolute bottom-1.5 left-2 sm:left-auto sm:right-2 sm:bottom-auto sm:top-[150px] z-10">
+              <VoterStack voters={highlight.voters} />
+            </div>
+          )}
         </div>
 
-        <div className="relative flex-1 flex flex-col ml-[104px] pt-3 pr-4 pb-3.5 sm:ml-0 sm:mt-[124px] sm:pt-0 sm:px-4 sm:pb-4">
+        <div className="relative flex-1 flex flex-col ml-[148px] pt-3 pr-4 pb-3.5 sm:ml-0 sm:mt-[124px] sm:pt-0 sm:px-5 sm:pb-4">
           <span
-            className="font-display text-[15px] tracking-[0.2em] [text-shadow:none] sm:[text-shadow:0_1px_8px_#0009]"
+            className="font-display text-[17px] tracking-[0.2em] [text-shadow:0_1px_2px_#000,0_0_5px_#000a]"
             style={{ color: accent }}
           >
             {HIGHLIGHT_STAMP[highlight.kind]}
           </span>
 
           <div
-            className="font-mono font-bold tabular-nums leading-none mt-2 sm:mt-1.5 text-[30px] sm:text-[38px] [text-shadow:none] sm:[text-shadow:var(--pp-glow)]"
+            className="font-mono font-bold tabular-nums leading-none mt-2 sm:mt-1.5 text-[30px] sm:text-[38px] [text-shadow:0_1px_2px_#000,0_0_5px_#000a,var(--pp-glow)]"
             style={{
               color: accent,
               ["--pp-glow" as string]: `0 0 16px color-mix(in srgb, ${accent} 30%, transparent)`,
@@ -1216,30 +1201,48 @@ function HighlightTile({
             {ppStat(highlight)}
             <span className="text-[15px] sm:text-[18px]">%</span>
           </div>
-          <div className="font-display text-[11px] tracking-[0.2em] text-muted mt-1">
+          <div className="font-display text-[12px] tracking-[0.2em] text-subtle mt-1">
             {HIGHLIGHT_STAT_LABEL[highlight.kind]}
           </div>
 
           <div className="font-semibold text-[15.5px] leading-tight mt-2 sm:mt-2.5 truncate">
             {highlight.cardName}
           </div>
-          <div className="font-mono text-[10px] text-dim mt-0.5 truncate">
+          <div className="font-mono text-[11px] text-muted mt-0.5 truncate">
             {highlight.slotLabel}, {gihwrLabel(highlight.gihwr)} GIH
           </div>
 
-          <div className="mt-auto pt-2.5">
-            {highlight.kind === "sleeper" && highlight.voters.length > 0 && (
-              <div className="mb-1.5">
-                <VoterStack voters={highlight.voters} />
-              </div>
-            )}
-            <p className="text-[12px] leading-[1.45] text-muted">
+          <div className="mt-2.5">
+            <p className="text-[12.5px] leading-[1.45] text-subtle">
               {highlightStory(highlight)}
             </p>
           </div>
         </div>
       </div>
-    </article>
+  );
+
+  return (
+    <div
+      className="w-full sm:w-[240px] motion-safe:animate-fadeUpIn relative hover:z-10"
+      style={{ animationDelay: `${index * 80}ms` }}
+    >
+      <article
+        className="block sm:h-full transition-transform duration-150 hover:scale-[1.04]"
+        style={{
+          clipPath: CHAMFER,
+          padding: 1,
+          background: `linear-gradient(165deg, ${accent} 0%, color-mix(in srgb, ${accent} 28%, #3b4458) 30%, #3b4458 70%, color-mix(in srgb, ${accent} 22%, #3b4458) 100%)`,
+        }}
+      >
+        {card ? (
+          <CardImagePreview imageUrl={card.imageNormal} alt={card.name} className="block sm:h-full">
+            {inner}
+          </CardImagePreview>
+        ) : (
+          inner
+        )}
+      </article>
+    </div>
   );
 }
 
@@ -1254,9 +1257,7 @@ function HighlightsReel({
 
   return (
     <div className="flex flex-col">
-      <SectionHeading title="CARD HIGHLIGHTS">
-        The biggest traps and sleepers of the set.
-      </SectionHeading>
+      <SectionHeading title="CARD HIGHLIGHTS" />
 
         <div className="flex flex-col sm:flex-row sm:flex-wrap sm:justify-center gap-3.5 px-1 py-3.5 sm:px-3">
           {highlights.map((h, i) => (
@@ -1291,7 +1292,7 @@ export function FinalResults({
   cards: Card[];
   cardsByName: Map<string, Card>;
   picksBySlot: Map<string, string>;
-  user: object | null;
+  user: { discordId?: string } | null;
   hasParticipated: boolean;
   /** Viewport offset (px) below which the FULL RESULTS floating self-row pins — clears sticky page chrome. */
   stickyTop?: number;
@@ -1322,18 +1323,13 @@ export function FinalResults({
     () => highlightsFeed(pickStats, ballots, cards, SLOTS, ratingsByName, HIGHLIGHTS_COUNT),
     [pickStats, ballots, cards, ratingsByName],
   );
-  const voterCount = useMemo(
-    () => new Set(ballots.map((b) => b.ballotId)).size,
-    [ballots],
-  );
-
   const showYourPicks = Boolean(user) && hasParticipated;
 
   const { setCode } = ratingsSnapshot;
 
   const userBallot = useMemo(
-    () => (showYourPicks ? findUserBallot(rankedForDisplay, picksBySlot) : null),
-    [showYourPicks, rankedForDisplay, picksBySlot],
+    () => (showYourPicks ? findUserBallot(rankedForDisplay, picksBySlot, user?.discordId) : null),
+    [showYourPicks, rankedForDisplay, picksBySlot, user],
   );
 
   const fullSectionRef = useRef<HTMLDivElement>(null);
@@ -1343,10 +1339,7 @@ export function FinalResults({
       {/* Top-3 broadcast */}
       {rankedForDisplay.length > 0 && (
         <div className="flex flex-col gap-3">
-          <SectionHeading title="TOP OF THE PACK">
-            The best finishes out of{" "}
-            <b className="text-subtle font-medium">{voterCount} entries</b>.
-          </SectionHeading>
+          <SectionHeading title="PODIUM" />
           <Leaderboard
             rankedBallots={rankedForDisplay}
             bestTeam={bestTeam}
@@ -1365,10 +1358,7 @@ export function FinalResults({
       <SprocketRail />
 
       {/* Highlights reel */}
-      <HighlightsReel
-        highlights={highlights}
-        cardsByName={cardsByName}
-      />
+      <HighlightsReel highlights={highlights} cardsByName={cardsByName} />
 
       <SprocketRail />
 
@@ -1377,10 +1367,10 @@ export function FinalResults({
         <div
           ref={fullSectionRef}
           className="flex flex-col gap-3 pb-24"
-          style={{ scrollMarginTop: stickyTop }}
+          style={{ scrollMarginTop: stickyTop + 20 }}
         >
           <SectionHeading title="FULL STANDINGS">
-            Every player ranked alongside the best possible team and the crowd's picks.
+            Every player ranked alongside the best possible team and the crowd's picks
           </SectionHeading>
           <Leaderboard
             rankedBallots={rankedForDisplay}

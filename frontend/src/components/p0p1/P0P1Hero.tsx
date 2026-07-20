@@ -9,6 +9,8 @@ import {
   P0P1_SET_NAME,
   P0P1_VOTING_DEADLINE as VOTING_DEADLINE,
   P0P1_SCORING_DATE as SCORING_DATE,
+  P0P1_NEXT_SET_CODE,
+  P0P1_NEXT_SET_NAME,
 } from "../../data/p0p1Slots";
 import type { P0P1Phase, RatingsSnapshot } from "../../data/p0p1Results";
 
@@ -37,8 +39,15 @@ export function P0P1Hero({
           </span>
           <span className="font-display text-[22px] text-muted tracking-[0.06em]">{P0P1_SET_NAME.toUpperCase()}</span>
         </div>
-        <div className="mono text-[11px] mt-1">
+        <div className="mono text-[11px] mt-1 flex items-center justify-between gap-x-6">
           <P0P1Countdown deadline={VOTING_DEADLINE} scoringDate={SCORING_DATE} size={11} phase={phase} />
+          {phase === "final" && (
+            <span className="flex items-center gap-1.5 text-muted">
+              NEXT
+              <SetGlyph code={P0P1_NEXT_SET_CODE} size={14} className="text-white" />
+              <span className="text-white">{P0P1_NEXT_SET_NAME}</span>
+            </span>
+          )}
         </div>
         {isPastDeadline && (
           <div className="w-full mt-2">

@@ -570,7 +570,7 @@ function CountdownStacked({
   if (phase === "final") {
     return (
       <div className="flex flex-col items-end leading-tight whitespace-nowrap shrink-0">
-        <span className="text-green text-[13px]">Showing results</span>
+        <span className="text-green text-[13px]">Results are in!</span>
       </div>
     );
   }
