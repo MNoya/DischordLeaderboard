@@ -19,6 +19,19 @@ export function formatRemaining(diff: number): string {
   return pluralizeUnit(minutes, "minute");
 }
 
+export function formatScoringRemaining(diff: number): string {
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  if (days >= 2) {
+    return pluralizeUnit(days, "day");
+  }
+  const totalHours = Math.floor(diff / (1000 * 60 * 60));
+  const minutes = Math.floor((diff / (1000 * 60)) % 60);
+  if (totalHours > 0) {
+    return `${pluralizeUnit(totalHours, "hour")}, ${pluralizeUnit(minutes, "minute")}`;
+  }
+  return pluralizeUnit(minutes, "minute");
+}
+
 export function useTick(intervalMs: number) {
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -70,18 +83,10 @@ export function P0P1Countdown({
   if (scoringDate) {
     const scoringDiff = scoringDate.getTime() - now;
     if (scoringDiff > 0) {
-      const days = Math.floor(scoringDiff / (1000 * 60 * 60 * 24));
-      const hours = Math.floor((scoringDiff / (1000 * 60 * 60)) % 24);
-      const showHours = days < 2;
       return (
         <span className="whitespace-nowrap" style={{ fontSize: size }}>
           <span className="text-muted">Results in </span>
-          <span className="text-green">
-            {showHours
-              ? pluralizeUnit(days * 24 + hours, "hour")
-              : pluralizeUnit(days, "day")
-            }
-          </span>
+          <span className="text-green">{formatScoringRemaining(scoringDiff)}</span>
         </span>
       );
     }
