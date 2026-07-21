@@ -351,7 +351,7 @@ function SyntheticRow({
           className="font-mono tabular-nums text-[13px] lg:text-[14px] font-semibold shrink-0"
           style={{ color: style.color }}
         >
-          {standing.team.score.toFixed(1)}
+          {standing.team.score.toFixed(2)}
         </span>
 
         <ChevronDown
@@ -461,7 +461,7 @@ function BroadcastTop3({
                 className="font-mono tabular-nums text-[34px] font-bold leading-[1.05] text-gold"
                 style={{ textShadow: "0 0 34px #ffc63a90" }}
               >
-                {champion.score.toFixed(1)}
+                {champion.score.toFixed(2)}
               </div>
               <div className="font-mono tracking-[0.24em] text-[10.5px] font-semibold text-gold/80 mt-1">FINAL SCORE</div>
             </div>
@@ -470,7 +470,7 @@ function BroadcastTop3({
                 className="font-mono tabular-nums text-[22px] font-bold leading-[1.05] text-gold"
                 style={{ textShadow: "0 0 34px #ffc63a90" }}
               >
-                {champion.score.toFixed(1)}
+                {champion.score.toFixed(2)}
               </div>
               <div className="font-mono tracking-[0.18em] text-[8px] font-semibold text-gold/80">FINAL SCORE</div>
             </div>
@@ -577,7 +577,7 @@ function BroadcastSubBar({
             )}
           </span>
           <span className="font-mono tabular-nums text-[14px] sm:text-[16px] font-bold shrink-0" style={{ color: accent }}>
-            {ballot.score.toFixed(1)}
+            {ballot.score.toFixed(2)}
           </span>
           <ChevronDown
             size={14}
@@ -677,7 +677,7 @@ function MedalRow({
           className="font-mono tabular-nums text-[13px] lg:text-[14px] font-semibold shrink-0"
           style={{ color: medal.color }}
         >
-          {ballot.score.toFixed(1)}
+          {ballot.score.toFixed(2)}
         </span>
 
         <ChevronDown
@@ -763,7 +763,7 @@ function LeaderboardRow({
         />
 
         <span className="font-mono tabular-nums text-[13px] lg:text-[14px] text-subtle shrink-0">
-          {ballot.score.toFixed(1)}
+          {ballot.score.toFixed(2)}
         </span>
 
         <ChevronDown
@@ -836,7 +836,7 @@ function FloatingSelfRow({
         />
 
         <span className="font-mono tabular-nums text-[13px] lg:text-[14px] text-subtle shrink-0">
-          {ballot.score.toFixed(1)}
+          {ballot.score.toFixed(2)}
         </span>
 
         <ChevronDown

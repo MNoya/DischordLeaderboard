@@ -280,7 +280,7 @@ class PodPollView(discord.ui.View):
 
 
 INTEREST_BUTTON_ID = "pod_poll_interest"
-INTEREST_PLACEHOLDER = "Pick what you would draft"
+INTEREST_PLACEHOLDER = "Select your Format Preference"
 INTEREST_ANY_VALUE = "any"
 INTEREST_DESC_FLASHBACK = "Any Past Set, Rank Your Favorites"
 INTEREST_DESC_ANY = "Fill the Table that needs Players"
