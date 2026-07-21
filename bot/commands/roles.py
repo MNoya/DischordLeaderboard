@@ -101,8 +101,7 @@ class _DmPrefToggleButton(discord.ui.Button):
 
     def __init__(self, held: bool) -> None:
         super().__init__(
-            label=MSG_DM_PREF_LABEL,
-            emoji="✉️",
+            label=f"{MSG_DM_PREF_LABEL} ✉️",
             custom_id=DM_PREF_CUSTOM_ID,
             style=discord.ButtonStyle.success if held else discord.ButtonStyle.secondary,
         )
