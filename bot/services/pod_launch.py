@@ -28,9 +28,18 @@ from sqlalchemy.orm import Session
 from bot.config import PRODUCTION_GUILD_ID, settings
 from bot.database import SessionLocal
 from bot.models import PodDraftEvent, PodSignal, PodSignalMember
+from bot.services import pod_format_interest as fi
 from bot.services import pod_signals
 from bot.services.pod_draft_manager import set_card_cancel_hook, set_card_close_hook, start_manager
-from bot.services.pod_drafts import draftmancer_url_for, record_ondemand_event
+from bot.services.pod_drafts import (
+    draftmancer_url_for,
+    event_member_interests_sync,
+    get_flashback_ranking,
+    get_format_interests,
+    record_ondemand_event,
+    set_flashback_ranking,
+    set_format_interests,
+)
 from bot.services.pod_join_button import build_join_view
 from bot.services.pod_link_dm import send_lobby_link_dms
 from bot.services.pod_signals import SCHEDULE_TZ, slot_event_time
@@ -41,7 +50,12 @@ from bot.tasks.pod_draft_reminder import (
     schedule_team_vote_offer,
     signal_rsvps_sync,
 )
-from bot.tasks.pod_underfill import clear_underfill_nudge, schedule_underfill_checks
+from bot.tasks.pod_underfill import (
+    clear_slot_nudge,
+    clear_underfill_nudge,
+    schedule_slot_underfill_checks,
+    schedule_underfill_checks,
+)
 
 
 log = logging.getLogger(__name__)
@@ -123,6 +137,8 @@ class LauncherSlot:
     thread_id: str | None
     signal_id: str | None
     thread_message_id: str | None = None
+    interests: tuple[tuple[str, ...], ...] = ()
+    set_code: str | None = None
 
 
 def create_poll_signals(
@@ -335,6 +351,7 @@ def set_rsvp(
     if existing is None:
         session.add(PodSignalMember(
             signal_id=signal.id, discord_user_id=discord_user_id, display_name=display_name, rsvp=rsvp,
+            format_interest=get_format_interests(session, discord_user_id),
         ))
         signal.last_activity_at = datetime.now(timezone.utc)
         joined = rsvp == pod_signals.RSVP_YES
@@ -389,6 +406,7 @@ def toggle_member(
     if add and existing is None:
         session.add(PodSignalMember(
             signal_id=signal.id, discord_user_id=discord_user_id, display_name=display_name,
+            format_interest=get_format_interests(session, discord_user_id),
         ))
         signal.last_activity_at = datetime.now(timezone.utc)
         joined = changed = True
@@ -493,10 +511,10 @@ def release_fire_sync(signal_id: str) -> None:
         session.commit()
 
 
-def claim_nudge_sync(signal_id: str, quiet_minutes: int) -> bool:
-    """Atomically claim the one almost-full nudge a signal gets. True only for a still-open signal
-    that is older than the quiet window and hasn't nudged yet, so fast-filling queues stay silent
-    and concurrent joins can't double-ping."""
+def claim_one_more_ping_sync(signal_id: str, quiet_minutes: int) -> bool:
+    """Atomically claim the one one-short-of-firing ping a queue gets. True only for a still-open
+    signal that is older than the quiet window and hasn't pinged yet, so fast-filling queues stay
+    silent and concurrent joins can't double-ping."""
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=quiet_minutes)
     with SessionLocal() as session:
         result = session.execute(
@@ -504,10 +522,10 @@ def claim_nudge_sync(signal_id: str, quiet_minutes: int) -> bool:
             .where(
                 PodSignal.id == signal_id,
                 PodSignal.status == pod_signals.STATUS_OPEN,
-                PodSignal.nudged_at.is_(None),
+                PodSignal.one_more_pinged_at.is_(None),
                 PodSignal.created_at <= cutoff,
             )
-            .values(nudged_at=datetime.now(timezone.utc))
+            .values(one_more_pinged_at=datetime.now(timezone.utc))
         )
         session.commit()
         return result.rowcount == 1
@@ -613,6 +631,30 @@ def launcher_ref_for_date_sync(signal_date: date) -> tuple[str, str] | None:
     return (row[0], row[1]) if row else None
 
 
+def launcher_date_for_message_sync(message_id: str) -> date | None:
+    """The signal_date a launcher message was posted for. `!test poll` posts tomorrow's launcher once
+    today's slots have passed, so the message timestamp is not a safe date source."""
+    with SessionLocal() as session:
+        return session.execute(
+            select(PodSignal.signal_date).where(
+                PodSignal.kind == pod_signals.KIND_POLL, PodSignal.message_id == message_id
+            ).limit(1)
+        ).scalar_one_or_none()
+
+
+def latest_launcher_sync() -> tuple[str, date] | None:
+    """The newest launcher's (message_id, signal_date), for surfaces that open the preference picker
+    without a launcher message in hand."""
+    with SessionLocal() as session:
+        row = session.execute(
+            select(PodSignal.message_id, PodSignal.signal_date)
+            .where(PodSignal.kind == pod_signals.KIND_POLL)
+            .order_by(PodSignal.signal_date.desc(), PodSignal.created_at.desc())
+            .limit(1)
+        ).first()
+    return (row[0], row[1]) if row else None
+
+
 def event_thread_id_sync(event_id: str) -> str | None:
     with SessionLocal() as session:
         event = session.get(PodDraftEvent, event_id)
@@ -661,6 +703,7 @@ def launcher_snapshot_sync(message_id: str, signal_date: date) -> list[LauncherS
             slots.append(LauncherSlot(
                 bucket.key, committed=False, status=_lazy_status(signal.status, signal.slot_time, now),
                 count=len(names), slot_time=signal.slot_time, names=names, thread_id=None, signal_id=signal.id,
+                interests=_member_interests(session, signal.id),
             ))
     return slots
 
@@ -681,11 +724,13 @@ def _committed_slot(session: Session, bucket_key: str, event_id: str) -> Launche
         )
     ).scalar_one_or_none()
     yes_names = _members_by_rsvp(session, signal.id)[pod_signals.RSVP_YES] if signal else []
+    interests = _member_interests(session, signal.id) if signal else ()
     return LauncherSlot(
         bucket_key, committed=True, status=pod_signals.STATUS_FIRED, count=len(yes_names),
         slot_time=event.event_time if event else None,
         names=yes_names, thread_id=event.discord_thread_id if event else None, signal_id=None,
-        thread_message_id=signal.thread_message_id if signal else None,
+        thread_message_id=signal.thread_message_id if signal else None, interests=interests,
+        set_code=event.set_code if event else None,
     )
 
 
@@ -743,7 +788,7 @@ def seed_yes_members_sync(signal_id: str, members: list[tuple[str, str]]) -> Non
                 continue
             session.add(PodSignalMember(
                 signal_id=signal_id, discord_user_id=user_id, display_name=display_name,
-                rsvp=pod_signals.RSVP_YES,
+                rsvp=pod_signals.RSVP_YES, format_interest=get_format_interests(session, user_id),
             ))
         session.commit()
 
@@ -994,6 +1039,9 @@ async def open_ondemand_lobby(bot: commands.Bot, event_id: str) -> None:
 
     if manager is not None:
         manager.arm_team_vote_offer(len(display_names))
+        interests = await asyncio.to_thread(event_member_interests_sync, event_id)
+        if fi.should_offer_format_poll(fi.composition(interests)):
+            await manager.offer_format_poll()
         pick_timer = await asyncio.to_thread(scheduled_pick_timer_for_event_sync, event_id)
         if pick_timer is not None:
             await manager.apply_pick_timer(pick_timer)
@@ -1037,10 +1085,13 @@ def arm_slot_expiry(bot: commands.Bot, signal_id: str, slot_time: datetime) -> N
 
 
 async def fire_slot_expiry(signal_id: str) -> None:
-    """At slot time, close an unfired poll slot. DB-only — its button stays but toggle_member_sync
-    now refuses it, so a late click gets a graceful ephemeral and never joins a dead slot."""
+    """At slot time, close an unfired poll slot and drop its standing nudge — the recruiting window is
+    over. The slot's button stays but toggle_member_sync now refuses it, so a late click gets a graceful
+    ephemeral and never joins a dead slot."""
     if await asyncio.to_thread(expire_signal_sync, signal_id):
         log.info(f"poll slot {signal_id} expired unfired")
+        if _bot is not None:
+            await clear_slot_nudge(_bot, signal_id)
 
 
 def past_pod_cards_sync(now: datetime, since: datetime) -> list[tuple[str, str, str | None, str | None]]:
@@ -1205,18 +1256,20 @@ async def fire_queue_teardown(signal_id: str) -> None:
 
 
 async def rearm_signals(bot: commands.Bot) -> None:
-    """Startup sweep: re-arm slot expiries, on-demand lobby opens, and queue teardowns from the DB so a
-    restart loses nothing. Past-due opens fire immediately; past-due open signals are expired."""
+    """Startup sweep: re-arm slot expiries and underfill beats, on-demand lobby opens, and queue
+    teardowns from the DB so a restart loses nothing. Past-due opens fire immediately; past-due open
+    signals are expired and their standing nudges dropped."""
     now = datetime.now(timezone.utc)
     with SessionLocal() as session:
         signals = session.execute(
             select(PodSignal).where(PodSignal.status.in_([pod_signals.STATUS_OPEN, pod_signals.STATUS_FIRED]))
         ).scalars().all()
         pending = [
-            (s.id, s.kind, s.status, s.slot_time, s.last_activity_at, s.event_id) for s in signals
+            (s.id, s.kind, s.status, s.slot_time, s.last_activity_at, s.event_id, s.created_at)
+            for s in signals
         ]
 
-    for signal_id, kind, status, slot_time, last_activity, event_id in pending:
+    for signal_id, kind, status, slot_time, last_activity, event_id, created_at in pending:
         if status == pod_signals.STATUS_FIRED and event_id is not None:
             scheduled = kind == pod_signals.KIND_SCHEDULED
             if _rearm_open_if_pending(bot, event_id, with_fill_jobs=scheduled):
@@ -1225,9 +1278,11 @@ async def rearm_signals(bot: commands.Bot) -> None:
             continue
         if kind == pod_signals.KIND_POLL and slot_time is not None:
             if slot_time <= now:
-                await asyncio.to_thread(expire_signal_sync, signal_id)
+                if await asyncio.to_thread(expire_signal_sync, signal_id):
+                    await clear_slot_nudge(bot, signal_id)
             else:
                 arm_slot_expiry(bot, signal_id, slot_time)
+                schedule_slot_underfill_checks(bot.pod_scheduler, signal_id, slot_time, created_at)
         elif kind == pod_signals.KIND_QUEUE:
             teardown = pod_signals.teardown_at(last_activity, settings.pod_queue_inactivity_minutes)
             if teardown <= now:
@@ -1307,6 +1362,75 @@ def _member_names(session: Session, signal_id: str) -> list[str]:
         .where(PodSignalMember.signal_id == signal_id)
         .order_by(PodSignalMember.created_at)
     ).scalars().all())
+
+
+def _member_interests(session: Session, signal_id: str) -> tuple[tuple[str, ...], ...]:
+    rows = session.execute(
+        select(PodSignalMember.format_interest)
+        .where(PodSignalMember.signal_id == signal_id)
+        .order_by(PodSignalMember.created_at)
+    ).scalars().all()
+    return tuple(tuple(fi.normalize(interest)) for interest in rows)
+
+
+def player_interest_sync(discord_user_id: str) -> list[str]:
+    with SessionLocal() as session:
+        return get_format_interests(session, discord_user_id)
+
+
+def player_flashback_ranking_sync(discord_user_id: str) -> list[str]:
+    with SessionLocal() as session:
+        return get_flashback_ranking(session, discord_user_id)
+
+
+def set_flashback_ranking_sync(discord_user_id: str, ranking: list[str]) -> None:
+    with SessionLocal() as session:
+        set_flashback_ranking(session, discord_id=discord_user_id, ranking=ranking)
+        session.commit()
+
+
+def set_launcher_interest_sync(
+    message_id: str, discord_user_id: str, discord_username: str, display_name: str,
+    avatar_hash: str | None, interests: list[str], signal_date: date,
+) -> bool:
+    """Set the user's format interest on every slot the launcher shows — its own lazy signals plus the
+    scheduled pods it reflects — and persist it as their standing preference so the next launcher opens
+    pre-seeded. Returns whether any signup moved."""
+    normalized = fi.normalize(interests)
+    with SessionLocal() as session:
+        signal_ids = _launcher_day_signal_ids(session, message_id, signal_date)
+        members = session.execute(
+            select(PodSignalMember).where(
+                PodSignalMember.signal_id.in_(signal_ids),
+                PodSignalMember.discord_user_id == discord_user_id,
+            )
+        ).scalars().all() if signal_ids else []
+        for member in members:
+            member.format_interest = normalized
+        set_format_interests(
+            session, discord_id=discord_user_id, discord_username=discord_username,
+            display_name=display_name, avatar_hash=avatar_hash, interests=normalized,
+        )
+        session.commit()
+        return bool(members)
+
+
+def _launcher_day_signal_ids(session: Session, message_id: str, signal_date: date) -> list[str]:
+    ids = list(session.execute(
+        select(PodSignal.id).where(PodSignal.message_id == message_id)
+    ).scalars().all())
+    for bucket in pod_signals.poll_buckets_for(signal_date):
+        event_id = _event_id_for_slot(session, slot_event_time(signal_date, bucket.key))
+        if event_id is None:
+            continue
+        scheduled_id = session.execute(
+            select(PodSignal.id).where(
+                PodSignal.event_id == event_id, PodSignal.kind == pod_signals.KIND_SCHEDULED
+            )
+        ).scalar_one_or_none()
+        if scheduled_id is not None:
+            ids.append(scheduled_id)
+    return ids
 
 
 def _members_by_rsvp(session: Session, signal_id: str) -> dict[str, list[str]]:

@@ -60,7 +60,6 @@ class Settings(BaseSettings):
     pod_underfill_check_hours: str = "3,2,1"
     pod_underfill_ping_hours: str = "1"
     pod_underfill_ping_close_gap: int = 2
-    pod_nudge_in_chat: bool = True
 
     @property
     def pod_underfill_check_hours_tuple(self) -> tuple[int, ...]:

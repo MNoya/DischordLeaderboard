@@ -26,7 +26,6 @@ from bot.services.pod_schedule import (
     next_unscheduled_slots,
     short_event_name,
     release_unix,
-    slot_for_event_time,
     slot_instant,
     slots_for_week,
     upcoming_slots,
@@ -223,33 +222,6 @@ def test_build_create_command_uses_supplied_mentions():
     command = build_create_command("MSH", 6, slot, CREATE_DESCRIPTION, CREATE_MENTIONS_EARLY)
 
     assert CREATE_MENTIONS_EARLY in command
-
-
-@pytest.mark.parametrize(
-    ("event_time", "expected_weekday"),
-    [
-        (datetime(2026, 6, 10, 20, 0, tzinfo=SCHEDULE_TZ), 2),
-        (datetime(2026, 6, 11, 14, 0, tzinfo=SCHEDULE_TZ), 3),
-        (datetime(2026, 6, 13, 15, 0, tzinfo=SCHEDULE_TZ), 5),
-        (datetime(2026, 6, 13, 20, 0, tzinfo=SCHEDULE_TZ), None),
-    ],
-)
-def test_slot_for_event_time_maps_to_its_slot(event_time, expected_weekday):
-    slot = slot_for_event_time(event_time)
-
-    assert (slot.weekday if slot else None) == expected_weekday
-
-
-def test_slot_for_event_time_converts_utc_to_eastern():
-    eastern = datetime(2026, 6, 11, 14, 0, tzinfo=SCHEDULE_TZ)
-
-    slot = slot_for_event_time(eastern.astimezone(timezone.utc))
-
-    assert slot is not None and slot.weekday == 3
-
-
-def test_off_grid_time_has_no_slot():
-    assert slot_for_event_time(datetime(2026, 6, 9, 11, 0, tzinfo=SCHEDULE_TZ)) is None
 
 
 def test_americas_card_sends_monday_noon_eastern():

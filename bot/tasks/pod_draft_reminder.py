@@ -26,7 +26,12 @@ from bot.models import PodDraftEvent, PodSignal, PodSignalMember
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_signals import RSVP_MAYBE, RSVP_YES
 from bot.services.pod_draft_manager import start_manager
-from bot.services.pod_drafts import draftmancer_url_for, load_event_pairing_mode_sync
+from bot.services import pod_format_interest as fi
+from bot.services.pod_drafts import (
+    draftmancer_url_for,
+    event_member_interests_sync,
+    load_event_pairing_mode_sync,
+)
 from bot.services.pod_join_button import build_join_view
 from bot.services.pod_link_dm import send_lobby_link_dms
 from bot.services.pod_team_vote import (
@@ -102,6 +107,9 @@ async def fire_reminder(event_id: str, *, early: bool = False) -> None:
     )
     if manager is not None:
         await manager.await_ownership()
+        interests = await asyncio.to_thread(event_member_interests_sync, event_id)
+        if fi.should_offer_format_poll(fi.composition(interests)):
+            await manager.offer_format_poll()
 
     body = build_lobby_open_body(draftmancer_url, mention_block)
     log.info(f"fire_reminder body repr for {event_id} (early={early}): {body!r}")

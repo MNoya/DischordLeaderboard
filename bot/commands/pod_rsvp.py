@@ -30,7 +30,7 @@ import discord
 from discord.ext import commands
 
 from bot import audit, emojis
-from bot.commands.messages import MSG_DRAFTMANCER_LINK_LEAD
+from bot.commands.messages import MSG_DRAFT_STARTS, MSG_DRAFTMANCER_LINK_LEAD
 from bot.database import SessionLocal
 from bot.discord_helpers import NBSP
 from bot.services.lobby_embed import SettingsButton
@@ -81,7 +81,6 @@ RSVP_CONFIRM_COLOR = {
 }
 MSG_RSVP_CONFIRMED = "{emoji} RSVP Confirmed"
 MSG_RSVP_REMOVED = "RSVP Removed"
-MSG_DRAFT_STARTS = "Draft scheduled for <t:{unix}:F> (<t:{unix}:R>)"
 MSG_CARD_INACTIVE = "This RSVP card is no longer active."
 MSG_BAD_TIME = "Couldn't read that time. Use `+2h30m`, `21:00` (ET), or `2026-07-18 21:00` (ET), in the future."
 THREAD_NOTE_TITLE = "🕐 Pod Draft Rescheduled by {actor}"
@@ -264,6 +263,7 @@ async def post_scheduled_card(
     preseed_yes: list[tuple[str, str]] | None = None, ping_role: bool = True,
     notify_role_name: str | None = None, description: str | None = None,
     pairing_mode: str | None = None, seating_mode: str | None = None, pick_timer: int | None = None,
+    announcement: str | None = None,
 ) -> str | None:
     """Create a scheduled pod end to end and return its event id, or None when the thread or the
     card could not be posted. The signal is born fired, so the RSVP buttons never close.
@@ -274,13 +274,16 @@ async def post_scheduled_card(
 
     `preseed_yes` is (user_id, display_name) of players who already committed — daily-poll signups
     graduating to a card. They start in the Yes column, are recorded Yes on the signal, and are
-    pulled into the thread; Maybe and No start empty."""
+    pulled into the thread; Maybe and No start empty.
+
+    `announcement` replaces the card's content ping outright — a fired launcher slot's creation
+    announcement, carrying its own role mention."""
     preseed_yes = preseed_yes or []
     rosters = {state: [] for state in RSVP_STATES}
     rosters[RSVP_YES] = [display for _, display in preseed_yes]
     guild = channel.guild
     name = await pod_launch.dedupe_pod_name(channel, name)
-    content = _card_ping(guild, event_time, ping_role, notify_role_name)
+    content = announcement if announcement is not None else _card_ping(guild, event_time, ping_role, notify_role_name)
     try:
         message = await channel.send(
             content=content,
@@ -352,14 +355,12 @@ async def _handle_rsvp(interaction: discord.Interaction, state: str) -> None:
         await interaction.response.send_message(MSG_CARD_INACTIVE, ephemeral=True)
         return
 
-    confirmation = await _confirmation_embed(result)
     if _is_card_surface(interaction.message):
         embed = interaction.message.embeds[0]
         refresh_roster_fields(embed, result.rosters)
         await interaction.response.edit_message(embed=embed)
-        await interaction.followup.send(embed=confirmation, ephemeral=True)
     else:
-        await interaction.response.send_message(embed=confirmation, ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
 
     first_pod = False
     granted_role = None
@@ -370,10 +371,13 @@ async def _handle_rsvp(interaction: discord.Interaction, state: str) -> None:
         slot_ping = slot_grant_ping(slot_spec) if slot_spec is not None else None
         first_pod = await grant_pod_drafters(interaction.user)
         granted_role = await _grant_slot_role(interaction.user, result.state.slot_time)
-    await announce_pod_grant(
+    notice = await announce_pod_grant(
         interaction, first_pod=first_pod, granted_role=granted_role,
         welcome_role=slot_role, spec=slot_spec, ping=slot_ping,
+        card_lead=await _confirmation_card_lead(result),
     )
+    if notice != "grant":
+        await interaction.followup.send(embed=await _confirmation_embed(result), ephemeral=True)
 
     if result.state.event_id is not None:
         if result.rsvp in (RSVP_YES, RSVP_MAYBE):
@@ -429,12 +433,26 @@ async def _confirmation_embed(result: pod_launch.RsvpResult) -> discord.Embed:
     color = RSVP_CONFIRM_COLOR[result.rsvp]
     if result.rsvp == RSVP_NO:
         return discord.Embed(title=title, color=color)
-    description = None
-    if result.state.event_id is not None:
-        event_time = await asyncio.to_thread(load_event_time_sync, result.state.event_id)
-        if event_time is not None:
-            description = MSG_DRAFT_STARTS.format(unix=int(event_time.timestamp()))
-    return discord.Embed(title=title, description=description, color=color)
+    return discord.Embed(title=title, description=await _rsvp_time_line(result), color=color)
+
+
+async def _confirmation_card_lead(result: pod_launch.RsvpResult) -> str | None:
+    """The RSVP acknowledgement as grant-card text, so a click that also grants a role delivers one
+    message instead of an embed plus a card. Only a fresh Yes can grant, so other states return None."""
+    if not result.joined or result.rsvp is None:
+        return None
+    lead = f"### {MSG_RSVP_CONFIRMED.format(emoji=RSVP_EMOJI[result.rsvp])}"
+    time_line = await _rsvp_time_line(result)
+    return f"{lead}\n{time_line}" if time_line else lead
+
+
+async def _rsvp_time_line(result: pod_launch.RsvpResult) -> str | None:
+    if result.state.event_id is None:
+        return None
+    event_time = await asyncio.to_thread(load_event_time_sync, result.state.event_id)
+    if event_time is None:
+        return None
+    return MSG_DRAFT_STARTS.format(unix=int(event_time.timestamp()))
 
 
 async def _set_thread_membership(interaction: discord.Interaction, event_id: str, *, join: bool) -> None:

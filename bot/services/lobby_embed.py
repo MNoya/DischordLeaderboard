@@ -431,7 +431,6 @@ def render(
                 command_line("/link-arena", desc.LINK_ARENA_LOBBY),
                 command_line("/pod-ready", desc.POD_READY),
                 command_line("/pod-start", desc.POD_START),
-                command_line("/pod-takeover", desc.POD_TAKEOVER),
             ]),
             inline=False,
         )

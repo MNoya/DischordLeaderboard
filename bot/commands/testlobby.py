@@ -49,6 +49,7 @@ from bot.commands.pod_draft import build_seeding_image_message_from_names, post_
 from bot.commands.pod_table import build_table_view
 from bot.commands.test_group import register_test_fallback
 from bot.services.pod_format_select import FormatSelectView
+from bot.services import pod_format_poll
 from bot.services.pod_settings_view import PodSettingsView
 from bot.services.pod_drafts import normalize_player_name
 from bot.services import pod_team
@@ -720,6 +721,99 @@ class _TeamVotePreviewView(discord.ui.View):
             embed=build_team_vote_offer_embed(self.team, self.wait, _TEAM_VOTE_POD_SIZE), view=self)
 
 
+class _FormatPollPreviewView(discord.ui.View):
+    """Interactible preview of the multiple-choice flashback format tally: the Add Format button first, then
+    one working button per option. Votes are prefilled so the bars read as a mid-evening tally. No live pod
+    behind it."""
+
+    def __init__(self) -> None:
+        super().__init__(timeout=900)
+        self.options = pod_format_poll.build_options()
+        self.votes: dict[str, list[str]] = {code: [] for code in self.options}
+        self.adders: dict[str, str] = {}
+        self.poll_message: discord.Message | None = None
+        self.votes[pod_format_poll.ANY_FLASHBACK_CODE] = [name for _, name in _LINKED_EIGHT[0:4]]
+        seed_code = self.options[2] if len(self.options) > 2 else self.options[-1]
+        self.votes[seed_code] = [name for _, name in _LINKED_EIGHT[4:7]]
+        self._rebuild()
+
+    def _rebuild(self) -> None:
+        self.clear_items()
+        self.add_item(self._add_button())
+        for code, label_override, row in pod_format_poll.format_poll_button_layout(self.options):
+            self.add_item(self._option_button(code, label_override, row))
+
+    def _option_button(self, code: str, label_override: str | None = None, row: int | None = None) -> discord.ui.Button:
+        label, emoji = pod_format_poll.option_button_face(code)
+        if label_override is not None:
+            label = label_override
+        button = discord.ui.Button(
+            label=label, emoji=emoji, style=discord.ButtonStyle.secondary, row=row,
+        )
+
+        async def callback(interaction: discord.Interaction) -> None:
+            await self._vote(interaction, code)
+
+        button.callback = callback
+        return button
+
+    def _add_button(self) -> discord.ui.Button:
+        button = discord.ui.Button(
+            emoji=pod_format_poll.add_button_emoji(), label=pod_format_poll.ADD_BUTTON_LABEL,
+            style=discord.ButtonStyle.secondary, row=0)
+
+        async def callback(interaction: discord.Interaction) -> None:
+            await interaction.response.send_modal(_AddFormatPreviewModal(self))
+
+        button.callback = callback
+        return button
+
+    def add_write_in(self, code: str, adder: str) -> None:
+        if code not in self.options:
+            self.options.append(code)
+            self.adders[code] = adder
+            self._rebuild()
+
+    def ensure_vote(self, name: str, code: str) -> None:
+        voters = self.votes.setdefault(code, [])
+        if name not in voters:
+            voters.append(name)
+
+    async def refresh(self, interaction: discord.Interaction) -> None:
+        if interaction.message is not None:
+            self.poll_message = interaction.message
+        await interaction.response.edit_message(
+            embed=pod_format_poll.build_format_poll_embed(self.options, self.votes, self.adders),
+            view=self,
+        )
+
+    async def _vote(self, interaction: discord.Interaction, code: str) -> None:
+        pod_format_poll.toggle_vote(self.votes, self.options, interaction.user.display_name, code)
+        await self.refresh(interaction)
+
+
+class _AddFormatPreviewModal(discord.ui.Modal, title=pod_format_poll.ADD_MODAL_TITLE):
+    code = discord.ui.TextInput(
+        label=pod_format_poll.ADD_MODAL_FIELD, placeholder=pod_format_poll.ADD_MODAL_PLACEHOLDER,
+        min_length=2, max_length=100,
+    )
+
+    def __init__(self, view: "_FormatPollPreviewView") -> None:
+        super().__init__()
+        self.preview = view
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        codes = pod_format_poll.normalize_write_ins(str(self.code.value))
+        if not codes:
+            await interaction.response.send_message("Enter set codes like DSK FIN MH3.", ephemeral=True)
+            return
+        name = interaction.user.display_name
+        for code in codes:
+            self.preview.add_write_in(code, name)
+            self.preview.ensure_vote(name, code)
+        await self.preview.refresh(interaction)
+
+
 class _ReadyCheckPreviewView(discord.ui.View):
     """Preview-only Ready Check button for `!test readyunlinked`: drives the real unrecognized-seat
     warn-but-allow confirm ephemerally, exactly as the initiator sees it, with no live pod behind it."""
@@ -814,22 +908,21 @@ _THREAD_NAME = "SOS Pod Draft #3 - May 15"
 _DRAFTMANCER_URL = f"{settings.draftmancer_web_url}/?session=LLUT-SOS-May-15-D"
 _UNLINKED_SEAT = "Stranger#12345"
 _RSVPS_YES = [
-    "Noya", "Bacchus", "NiamhIsTired", "maimslap", "Waveofshadow", "Elfandor",
-    "fullerene60", "whalematron", "springbok7", "jonnietang",
+    "Noya", "Finkel", "LSV", "The Hump", "Paolo", "Shota",
+    "Reid", "Chapin", "Nassif", "Huey",
 ]
-_RSVPS_MAYBE = ["Aristeo", "DongSlinger420", "Oophies"]
-_SPECTATORS = ["Tassagk", "Vesperin"]
-# Seats match the real Pod Draft #3 Draftmancer log (DraftLog_LLUSOS31). Arena tag = log userName;
-# discord display name (second element) is what we show in the announcement.
+_RSVPS_MAYBE = ["Kibler", "Juza", "Levy"]
+_SPECTATORS = ["Nakamura", "Karsten"]
+# Arena handle, then the Discord display name shown in the announcement
 _LINKED_EIGHT: list[tuple[str, str]] = [
     ("Noya#08011", "Noya"),
-    ("Bacchus#23673", "Bacchus"),
-    ("NiamhIsTired#12791", "NiamhIsTired"),
-    ("maimslap#64991", "maimslap"),
-    ("Waveofshadow#17843", "Waveofshadow"),
-    ("Elfandor#43425", "Elfandor"),
-    ("fullerene60#49190", "flutterdev"),
-    ("whalematron#89523", "whalematron"),
+    ("Finkel#00196", "Finkel"),
+    ("LSV#00420", "LSV"),
+    ("TheHump#31337", "The Hump"),
+    ("PVDDR#00777", "Paolo"),
+    ("Shota#08150", "Shota"),
+    ("Reid#02200", "Reid"),
+    ("Chapin#13000", "Chapin"),
 ]
 _VALID_STATES = (
     "empty", "partial", "linked", "unlinked", "ready", "notready", "cancelled", "left", "superseded",
@@ -837,7 +930,7 @@ _VALID_STATES = (
     "drafting", "complete", "submit", "lobby", "lobbyopen", "dmlink", "unlink", "podbracket", "podswiss", "podrandom",
     "podteam", "podlobby",
     "format", "seeding", "trophyhype", "round1", "round2", "round3", "voicelink", "review", "table",
-    "teams", "teamstandings", "teamchamp", "teamhype", "teamvote", "linkpicker",
+    "teams", "teamstandings", "teamchamp", "teamhype", "teamvote", "formatpoll", "linkpicker",
 )
 
 _LIVE_POD_MODES = {
@@ -1061,6 +1154,8 @@ async def setup(bot: commands.Bot) -> None:
         one row per match); its Report buttons are inert — use `podteam` to drive reports.
         `teamvote` shows the Team-Draft offer card with a working 🤝 vote button and three votes
         prefilled — your click is the fourth, locking it to Team Draft and proposing a Ready Check.
+        `formatpoll` shows the flashback format tally with a working button per option and prefilled
+        votes — clicks toggle votes on the card, nothing locks.
         `ready` shows the active ready-check card; clicking its Force Start button previews the ephemeral
         confirm dialog (no live pod needed). `readycancel` posts the lobby card plus the thread lines sent
         when a check is called off — a mid-check join, a leave, and a timeout (a decline posts no line).
@@ -1163,6 +1258,12 @@ async def setup(bot: commands.Bot) -> None:
             seeded = list(_team_vote_seed().values())
             embed = build_team_vote_offer_embed(seeded, [], _TEAM_VOTE_POD_SIZE)
             await ctx.send(embed=embed, view=_TeamVotePreviewView())
+            return
+
+        if state == "formatpoll":
+            preview = _FormatPollPreviewView()
+            embed = pod_format_poll.build_format_poll_embed(preview.options, preview.votes)
+            await ctx.send(embed=embed, view=preview)
             return
 
         if state == "teams":

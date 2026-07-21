@@ -333,15 +333,6 @@ def card_send_time(slot: WeeklySlot, monday: date) -> datetime:
     return slot_start - timedelta(hours=CARD_LEAD_HOURS)
 
 
-def slot_for_event_time(event_time: datetime) -> WeeklySlot | None:
-    """The weekly slot whose local ET (weekday, time) matches this event, or None for an off-grid time."""
-    local = event_time.astimezone(SCHEDULE_TZ)
-    for slot in WEEKLY_SLOTS:
-        if slot.weekday == local.weekday() and slot.start == local.time():
-            return slot
-    return None
-
-
 def slot_by_weekday(weekday: int) -> WeeklySlot | None:
     for slot in WEEKLY_SLOTS:
         if slot.weekday == weekday:

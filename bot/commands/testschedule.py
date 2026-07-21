@@ -18,9 +18,7 @@ from bot.services.ping_roles import PING_ROLES, build_grant_embed
 from bot.services.pod_roles import find_role
 from bot.services.pod_launch import ondemand_event_name_sync
 from bot.services.pod_schedule import SCHEDULE_TZ, build_underfill_message, slots_for_week
-from bot.services.pod_signals import bucket_by_key
 from bot.sets import active_set_code
-from bot.tasks.pod_daily_poll import build_poll_nudge
 from bot.tasks.pod_draft_reminder import ROSTER_REMINDER_LEAD_MIN, build_roster_embed
 
 
@@ -40,12 +38,9 @@ async def setup(bot: commands.Bot) -> None:
     async def test_pollnudge(ctx: commands.Context) -> None:
         """Owner-only. Post a sample launcher-slot nudge in this channel — no DB or signals lookup."""
         slot = _next_slot()
-        bucket = bucket_by_key("LATE")
-        role = find_role(ctx.guild, bucket.role_name) if ctx.guild else None
-        mention = role.mention if role is not None else f"@{bucket.name}"
-        link = f"- [**Sign up here**]({ctx.message.jump_url}) "
         name = ondemand_event_name_sync(active_set_code(), slot)
-        body = build_poll_nudge(name, 1, slot, link, mention)
+        threshold = settings.pod_signal_fire_threshold
+        body = build_underfill_message(name, threshold - 1, threshold, slot, ctx.message.jump_url)
         await ctx.send(body, allowed_mentions=discord.AllowedMentions.none())
 
     @test_group.command(name="reminder")

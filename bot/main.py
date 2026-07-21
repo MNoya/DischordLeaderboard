@@ -71,6 +71,7 @@ from bot.services.pod_team_board import TeamReportButton
 from bot.services.pod_join_button import JoinDraftButton
 from bot.services.pod_link_dm import DmLinkArenaButton, DmNotifyToggleButton
 from bot.services.pod_team_vote import TeamVoteButton
+from bot.services.pod_format_poll import AddFormatButton, FormatPollButton
 from bot.services.pod_tournament import (
     reconcile_unannounced_championships,
     register_persistent_views as register_pod_views,
@@ -239,6 +240,8 @@ def build_bot(guild_id: int) -> commands.Bot:
         register_pod_views(bot)
         bot.add_dynamic_items(TeamReportButton)
         bot.add_dynamic_items(TeamVoteButton)
+        bot.add_dynamic_items(FormatPollButton)
+        bot.add_dynamic_items(AddFormatButton)
         bot.add_dynamic_items(JoinDraftButton)
         bot.add_dynamic_items(DmNotifyToggleButton)
         bot.add_dynamic_items(DmLinkArenaButton)

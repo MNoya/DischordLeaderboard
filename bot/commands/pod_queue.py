@@ -395,7 +395,7 @@ async def _maybe_nudge(interaction: discord.Interaction, state) -> None:
     if state.count != settings.pod_signal_fire_threshold - 1:
         return
     claimed = await asyncio.to_thread(
-        pod_launch.claim_nudge_sync, state.signal_id, QUEUE_NUDGE_QUIET_MINUTES,
+        pod_launch.claim_one_more_ping_sync, state.signal_id, QUEUE_NUDGE_QUIET_MINUTES,
     )
     if not claimed:
         return

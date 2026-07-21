@@ -2530,13 +2530,15 @@ def build_champion_embed(
     header = f"**{_standings_header_text(pending_count)}**"
 
     description = f"{header}\n" + "\n".join(lines)
+    signoff_gap = "\n\n"
     if pending_count == 0 and match_states:
         tiebreakers = _build_tiebreaker_block(standings, match_states, displays)
         if tiebreakers:
             description += f"\n{tiebreakers}"
+            signoff_gap = "\n"
     if include_signoff:
         chordo_love = emojis.get("chordo_love")
-        description += f"\n\n{chordo_love} Thank you for playing!"
+        description += f"{signoff_gap}{chordo_love} Thank you for playing!"
 
     return discord.Embed(
         title=title,

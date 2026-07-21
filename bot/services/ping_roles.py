@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 import discord
@@ -23,18 +24,24 @@ from bot.commands.messages import (
     MSG_ARENA_HANDLE_LINE,
     MSG_ARENA_LINK_CTA,
     MSG_ARENA_LINKED,
+    MSG_FORMAT_PREFERENCE_BUTTON,
     MSG_JOIN_LINE,
     MSG_POD_ROLE_GRANTED,
     MSG_POD_WELCOME,
+    MSG_PREFERENCE_LINE,
+    MSG_YOUR_SETS_LINE,
 )
 from bot.commands.pod_guide import render_pod_guide_embed_body
 from bot.database import SessionLocal
 from bot.discord_helpers import extract_avatar_hash, post_welcome, send_welcome
+from bot.services import pod_format_interest as fi
 from bot.services.pod_active_lobby import active_lobby_link_for
 from bot.services.pod_drafts import (
     attach_arena_alias,
     dm_draft_link_enabled,
     draftmancer_url_for,
+    get_flashback_ranking,
+    get_format_interests,
     player_arena_handle,
 )
 from bot.services.pod_schedule import (
@@ -92,6 +99,8 @@ PING_ROLES: tuple[PingRole, ...] = (
         grant_when="on weekends", weekend_bucket_keys=("EVENING",),
     ),
     PingRole(POD_QUEUE_ROLE_NAME, "⚡", "Daily Draft Sign-Ups", color="#FFAC33"),
+    PingRole(fi.LATEST_SET_ROLE_NAME, "🆕", "Pods drafting the Latest Set", color="#FFFFFF"),
+    PingRole(fi.FLASHBACK_ROLE_NAME, "flashback", "Pods drafting any Past Sets", color="#B0C4DE"),
 )
 
 
@@ -125,6 +134,9 @@ def blurb_with_time(spec: PingRole) -> str:
 
 
 def display_emoji(spec: PingRole) -> str | None:
+    """The Latest Set role wears the active set's symbol, so it rotates with the board."""
+    if spec.name == fi.LATEST_SET_ROLE_NAME:
+        return str(fi.latest_emoji())
     return emojis.resolve(spec.emoji)
 
 
@@ -180,37 +192,52 @@ def build_welcome_view(
 
 def build_grant_view(
     role: discord.Role, spec: PingRole, *, ping: str | None = None, arena_name: str | None = None,
+    interests: list[str] | None = None, ranking: list[str] | None = None, card_lead: str | None = None,
 ) -> discord.ui.LayoutView:
     """The ephemeral card a returning drafter gets on a fresh slot grant: the grant line plus the same
     Pod Guide and Notifications buttons as the welcome. No self-mention — the card is ephemeral, so the
-    reader is the subject. When linked, it shows their Arena handle and drops the Link Arena button;
-    when unlinked it offers Link Arena so they can link before joining the lobby. Accented with the
-    granted role's color."""
+    reader is the subject. When linked, it shows their Arena handle, their format preference with a
+    Format Preference button to change it, and drops the Link Arena button; when unlinked it offers
+    Link Arena so they can link before joining the lobby. `card_lead` folds the caller's join
+    confirmation into the card, so a grant and an RSVP acknowledgement arrive as one message. Accented
+    with the granted role's color."""
     grant_line = pod_role_grant_text(
         role.mention, ping or slot_grant_ping(spec), emoji=display_emoji(spec) or "",
     )
+    if card_lead:
+        grant_line = f"{card_lead}\n{grant_line}"
     if arena_name is not None:
         handle_line = MSG_ARENA_HANDLE_LINE.format(emoji=emojis.get("mtga"), arena_name=arena_name)
-        text = f"{grant_line}\n{handle_line}"
+        lines = [grant_line, handle_line]
+        lines.append(f"✨ {MSG_PREFERENCE_LINE.format(choice=fi.preference_display(interests))}")
+        if fi.has_flashback(interests) and ranking:
+            lines.append(MSG_YOUR_SETS_LINE.format(ranking=fi.ranking_display(ranking)))
+        text = "\n".join(lines)
     else:
         text = f"{grant_line}\n{MSG_ARENA_LINK_CTA}"
     accent = role.color if role.color.value else discord.Color.blurple()
-    return _PodButtonCard(text, accent=accent, show_link_button=arena_name is None)
+    return _PodButtonCard(
+        text, accent=accent, show_link_button=arena_name is None,
+        show_format_button=arena_name is not None,
+    )
 
 
 def persistent_pod_card_view() -> discord.ui.LayoutView:
     """A component-only instance for `bot.add_view` so the welcome and grant-card buttons keep
     dispatching after a restart; the placeholder text is never shown — registration routes on the
     button custom_ids, which both cards share."""
-    return _PodButtonCard("welcome")
+    return _PodButtonCard("welcome", show_format_button=True)
 
 
 class _PodButtonCard(discord.ui.LayoutView):
     """The shared Components V2 card behind both the welcome and the returning grant notice: a text
-    block over the Link Arena / Pod Guide / Notifications button row. The accent defaults to green;
-    the grant card overrides it with the granted role's color."""
+    block over the Link Arena / Pod Guide / Notifications / Format Preference button row. The accent
+    defaults to green; the grant card overrides it with the granted role's color."""
 
-    def __init__(self, text: str, *, accent: discord.Color | None = None, show_link_button: bool = True) -> None:
+    def __init__(
+        self, text: str, *, accent: discord.Color | None = None, show_link_button: bool = True,
+        show_format_button: bool = False,
+    ) -> None:
         super().__init__(timeout=None)
         container = discord.ui.Container(accent_colour=accent or discord.Color.green())
         container.add_item(discord.ui.TextDisplay(text))
@@ -219,6 +246,8 @@ class _PodButtonCard(discord.ui.LayoutView):
             row.add_item(_LinkArenaButton())
         row.add_item(_PodGuideButton())
         row.add_item(_ManageRolesButton())
+        if show_format_button:
+            row.add_item(_FormatPreferenceButton())
         container.add_item(row)
         self.add_item(container)
 
@@ -226,7 +255,34 @@ class _PodButtonCard(discord.ui.LayoutView):
 LINK_ARENA_BUTTON_ID = "pod_welcome_link_arena"
 POD_GUIDE_BUTTON_ID = "pod_welcome_guide"
 MANAGE_ROLES_BUTTON_ID = "pod_welcome_roles"
+FORMAT_PREFERENCE_BUTTON_ID = "pod_welcome_format"
+MSG_PICKER_UNAVAILABLE = "The preference picker is not available right now."
 _ARENA_HANDLE_RE = re.compile(r"^.+#\d+$")
+
+FormatPreferenceOpener = Callable[[discord.Interaction], Awaitable[None]]
+
+_format_preference_opener: FormatPreferenceOpener | None = None
+
+
+def register_format_preference_opener(handler: FormatPreferenceOpener) -> None:
+    """Wire the preference-picker launch. The daily-poll task registers it at import so this module
+    stays free of a task import and the button works on any card."""
+    global _format_preference_opener
+    _format_preference_opener = handler
+
+
+class _FormatPreferenceButton(discord.ui.Button):
+    def __init__(self) -> None:
+        super().__init__(
+            label=MSG_FORMAT_PREFERENCE_BUTTON, style=discord.ButtonStyle.primary,
+            emoji=fi.FLEXIBLE_EMOJI, custom_id=FORMAT_PREFERENCE_BUTTON_ID,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if _format_preference_opener is None:
+            await interaction.response.send_message(MSG_PICKER_UNAVAILABLE, ephemeral=True)
+            return
+        await _format_preference_opener(interaction)
 
 
 class _LinkArenaButton(discord.ui.Button):
@@ -280,6 +336,11 @@ class _ManageRolesButton(discord.ui.Button):
 def _dm_opt_in_for(discord_id: str) -> bool:
     with SessionLocal() as session:
         return dm_draft_link_enabled(session, discord_id)
+
+
+def _preference_snapshot(discord_id: str) -> tuple[list[str], list[str]]:
+    with SessionLocal() as session:
+        return get_format_interests(session, discord_id), get_flashback_ranking(session, discord_id)
 
 
 async def submit_arena_link(interaction: discord.Interaction, arena_name: str) -> str | None:
@@ -407,13 +468,16 @@ def forget_welcome(member_id: int) -> None:
 async def announce_pod_grant(
     interaction: discord.Interaction, *, first_pod: bool,
     granted_role: discord.Role | None, welcome_role: discord.Role | None,
-    spec: PingRole | None, ping: str | None,
-) -> None:
+    spec: PingRole | None, ping: str | None, card_lead: str | None = None,
+) -> str | None:
     """The post-join notice every signal surface shares: a first-ever drafter with no linked Arena
     handle gets the public welcome in pod-draft-chat, folding in `welcome_role`; anyone already linked
     is treated as a returning drafter, since reaching `/link-arena` means they already found pods —
     they get only the ephemeral grant card if they freshly picked up a slot role, else nothing.
-    `granted_role` gates the returning case on an actual fresh grant, so a re-click never re-announces."""
+    `granted_role` gates the returning case on an actual fresh grant, so a re-click never re-announces.
+    `card_lead` is folded into the grant card so the caller's join confirmation and the grant arrive as
+    one message. Returns "welcome" or "grant" for the notice posted, None for none, so the caller can
+    decide whether its own confirmation still needs to be sent."""
     user = interaction.user
     arena_name = await _linked_arena_handle(str(user.id))
     wants_welcome = first_pod and arena_name is None
@@ -421,17 +485,23 @@ async def announce_pod_grant(
         welcome = build_welcome_view(interaction.guild, user.mention, welcome_role, ping=ping)
         await post_welcome(interaction, welcome)
         log.info(f"posted first-pod welcome for {user}")
-    elif granted_role is not None:
-        grant = build_grant_view(granted_role, spec, ping=ping, arena_name=arena_name)
+        return "welcome"
+    if granted_role is not None:
+        interests, ranking = await asyncio.to_thread(_preference_snapshot, str(user.id))
+        grant = build_grant_view(
+            granted_role, spec, ping=ping, arena_name=arena_name, interests=interests, ranking=ranking,
+            card_lead=card_lead,
+        )
         await interaction.followup.send(
             view=grant, ephemeral=True, allowed_mentions=discord.AllowedMentions.none(),
         )
         log.info(f"posted returning grant card for {user} (linked={arena_name is not None})")
-    else:
-        log.info(
-            f"no pod-grant notice for {user}: first_pod={first_pod} linked={arena_name is not None} "
-            f"granted_role={granted_role.name if granted_role else None}"
-        )
+        return "grant"
+    log.info(
+        f"no pod-grant notice for {user}: first_pod={first_pod} linked={arena_name is not None} "
+        f"granted_role={granted_role.name if granted_role else None}"
+    )
+    return None
 
 
 async def announce_onboarding_welcome(client: discord.Client, member: discord.Member) -> None:

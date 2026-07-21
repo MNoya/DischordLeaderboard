@@ -42,7 +42,11 @@ def test_committed_slot_without_a_card_links_to_the_thread_itself():
 def test_open_slot_button_is_enabled_a_closed_one_disabled():
     view = PodPollView([_lazy("MORNING", STATUS_EXPIRED), _lazy("EARLY", STATUS_OPEN)])
 
-    disabled = {child.custom_id: child.disabled for child in view.children}
+    disabled = {
+        child.custom_id: child.disabled
+        for child in view.children
+        if child.custom_id.startswith("pod_poll:")
+    }
     assert disabled == {"pod_poll:MORNING": True, "pod_poll:EARLY": False}
 
 
@@ -104,3 +108,30 @@ def test_when_options_shows_custom_time_as_its_own_defaulted_option():
     assert len(defaulted) == 1
     assert defaulted[0].value == WRITE_IN_VALUE
     assert "Schedule for later" not in defaulted[0].label
+
+
+def test_seed_votes_from_rankings_precasts_each_ranked_set():
+    from bot.services.pod_draft_manager import _seed_votes_from_rankings
+
+    options = ["MSH", "FLASH", "NEO"]
+    rankings = (("1", ("NEO", "IKO")), ("2", ("NEO", "MH3")))
+
+    votes = _seed_votes_from_rankings(options, rankings)
+
+    assert options == ["MSH", "FLASH", "NEO", "IKO", "MH3"]
+    assert votes["NEO"] == ["<@1>", "<@2>"]
+    assert votes["IKO"] == ["<@1>"]
+    assert votes["MH3"] == ["<@2>"]
+
+
+def test_seed_votes_from_rankings_respects_the_option_cap():
+    from bot.services import pod_format_poll
+    from bot.services.pod_draft_manager import _seed_votes_from_rankings
+
+    options = [f"S{i}" for i in range(pod_format_poll.MAX_ROWED_OPTIONS)]
+    rankings = (("1", ("NEW1", "NEW2")),)
+
+    votes = _seed_votes_from_rankings(options, rankings)
+
+    assert len(options) == pod_format_poll.MAX_ROWED_OPTIONS
+    assert "NEW1" not in votes

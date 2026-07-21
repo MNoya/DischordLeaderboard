@@ -68,6 +68,8 @@ class Player(Base):
     token_invalid        = Column(Boolean, nullable=False, default=False)
     leaderboard_opt_in   = Column(Boolean, nullable=False, default=True)
     dm_draft_link        = Column(Boolean, nullable=False, server_default="true", default=True)
+    format_interests     = Column(ARRAY(String), nullable=False, server_default="{}")
+    flashback_ranking    = Column(ARRAY(String), nullable=False, server_default="{}")
 
     stats = relationship(
         "PlayerStats",
@@ -361,7 +363,8 @@ class PodSignal(Base):
     event_id         = Column(String, ForeignKey("pod_draft_events.id", ondelete="SET NULL"), nullable=True)
     created_at       = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     last_activity_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    nudged_at        = Column(DateTime(timezone=True), nullable=True)
+    one_more_pinged_at = Column(DateTime(timezone=True), nullable=True)
+    last_call_pinged_at = Column(DateTime(timezone=True), nullable=True)
 
     members = relationship(
         "PodSignalMember",
@@ -384,6 +387,7 @@ class PodSignalMember(Base):
     discord_user_id = Column(String, nullable=False)
     display_name    = Column(String, nullable=False)
     rsvp            = Column(String, nullable=False, server_default="yes")
+    format_interest = Column(ARRAY(String), nullable=False, server_default="{}")
     created_at      = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     signal = relationship("PodSignal", back_populates="members")

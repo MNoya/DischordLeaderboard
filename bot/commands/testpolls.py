@@ -34,9 +34,13 @@ from bot.commands.pod_rsvp import (
 )
 from bot.commands.pod_table import offer_second_table
 from bot.commands.test_group import test_group
+from sqlalchemy import select
+
 from bot.config import PRODUCTION_GUILD_ID
 from bot.database import SessionLocal
-from bot.models import PodDraftEvent
+from bot.models import PodDraftEvent, PodSignal, PodSignalMember
+from bot.services import pod_format_interest as fi
+from bot.services import pod_gathering
 from bot.services import pod_launch
 from bot.services.pod_draft_manager import set_event_pairing_mode
 from bot.services.ping_roles import (
@@ -53,7 +57,7 @@ from bot.services.pod_schedule import POD_QUEUE_ROLE_NAME
 from bot.services.pod_signals import RSVP_YES, SCHEDULE_TZ, poll_buckets_for, slot_event_time
 from bot.services.pod_team_vote import find_team_vote_card, rerender_gathering
 from bot.sets import active_set_code
-from bot.tasks.pod_daily_poll import close_launcher_for_date, post_launcher
+from bot.tasks.pod_daily_poll import PodPollView, build_poll_embed, close_launcher_for_date, post_launcher
 from bot.tasks.pod_draft_reminder import fire_roster_reminder
 
 
@@ -71,7 +75,10 @@ async def _show_welcome_preview(interaction: discord.Interaction, role_name: str
         allowed_mentions=discord.AllowedMentions.none(),
     )
     onboarding = build_welcome_view(guild, interaction.user.mention, None)
-    linked = build_grant_view(preview_role, spec, ping=ping, arena_name="Tester#00000")
+    linked = build_grant_view(
+        preview_role, spec, ping=ping, arena_name="Tester#00000",
+        interests=[fi.FLASHBACK], ranking=["FIN", "DSK", "NEO"],
+    )
     unlinked = build_grant_view(preview_role, spec, ping=ping, arena_name=None)
     await _send_labeled_card(interaction, "**Welcome via onboarding (no slot role):**", onboarding)
     await _send_labeled_card(interaction, "**Returning, picks up a new slot (linked):**", linked)
@@ -119,13 +126,23 @@ class WelcomePreviewView(discord.ui.View):
 async def setup(bot: commands.Bot) -> None:
     @test_group.command(name="poll")
     @commands.is_owner()
-    async def test_poll(ctx: commands.Context) -> None:
+    async def test_poll(ctx: commands.Context, when: str = "") -> None:
         """Owner-only. Post a live daily launcher whose slots are still ahead — today if one remains,
-        otherwise tomorrow — so the buttons are clickable and drive real signals."""
+        otherwise tomorrow — so the buttons are clickable and drive real signals. Prefills fake signups
+        with a mix of Latest / Flashback / Any interests so the roster's format teams show.
+        Pass `am` to post tomorrow, so every slot is fresh and open like a morning post."""
         now = datetime.now(SCHEDULE_TZ)
-        last_slot = slot_event_time(now.date(), poll_buckets_for(now.date())[-1].key)
-        day = now.date() if last_slot is not None and last_slot > now else now.date() + timedelta(days=1)
-        await post_launcher(ctx.bot, ctx.channel, day)
+        if when.lower() == "am":
+            day = now.date() + timedelta(days=1)
+        else:
+            last_slot = slot_event_time(now.date(), poll_buckets_for(now.date())[-1].key)
+            day = now.date() if last_slot is not None and last_slot > now else now.date() + timedelta(days=1)
+        message = await post_launcher(ctx.bot, ctx.channel, day)
+        if message is None:
+            return
+        await asyncio.to_thread(_seed_poll_interests_sync, str(message.id), day)
+        slots = await asyncio.to_thread(pod_launch.launcher_snapshot_sync, str(message.id), day)
+        await message.edit(embed=build_poll_embed(slots, ctx.guild), view=PodPollView(slots, ctx.guild))
 
     @test_group.command(name="launcher")
     @commands.is_owner()
@@ -245,7 +262,7 @@ async def setup(bot: commands.Bot) -> None:
         if event_id is None:
             await ctx.send("Could not create the scheduled card. Check the logs.")
             return
-        names = [f"Tester {i + 1}" for i in range(total)]
+        names = [_roster_name(i) for i in range(total)]
         ref = await asyncio.to_thread(pod_launch.scheduled_card_ref_sync, event_id)
         for i, display in enumerate(names):
             await asyncio.to_thread(pod_launch.set_rsvp_sync, ref[2], f"filltest-{i}", display, RSVP_YES)
@@ -290,6 +307,35 @@ async def setup(bot: commands.Bot) -> None:
             signal_date=today, opened_by=str(ctx.author.id),
         )
 
+    @test_group.command(name="gather")
+    @commands.is_owner()
+    async def test_gather(ctx: commands.Context, scenario: str = "", seats: int = 6) -> None:
+        """Owner-only. Stage the gathering-first pod flow in sequence: a scenario blurb, the anchor
+        gathering card whose pick buttons are the player surface (a click adds one simulated signup with
+        that pick), the card's thread, and a simulator message in the thread whose Ready Check posts the
+        seat-claim card there like the real T-10 job would. Table presses seat fixture players with
+        exclusives first so a flexible player's press lands last; the thread renames when the first table
+        locks. Scenarios: simple, deadlock, swing, split. No signals or lobbies are created."""
+        if not isinstance(ctx.channel, discord.TextChannel):
+            await ctx.send("Run `!test gather` in a server text channel — the preview creates a thread.")
+            return
+        key = scenario.lower()
+        if key not in _GATHER_SCENARIOS:
+            await ctx.send("Scenarios: " + ", ".join(_GATHER_SCENARIOS))
+            return
+        members = [
+            pod_gathering.GatherMember(name, interests, ranking)
+            for name, interests, ranking in _GATHER_SCENARIOS[key]
+        ]
+        slot_time = datetime.now(SCHEDULE_TZ) + timedelta(hours=3)
+        state = _GatherState(members, slot_time, seats)
+        await ctx.send(f"Scenario **{key}**: {_GATHER_BLURBS[key]}")
+        card = await ctx.send(embed=state.gathering_embed(), view=_GatherCardView(state))
+        thread = await card.create_thread(
+            name=pod_gathering.neutral_pod_title(_GATHER_SLOT_LABEL, slot_time),
+        )
+        await thread.send(_GATHER_DIRECTOR_NOTE, view=_GatherDirectorView(state, card))
+
     @test_group.command(name="queueclosed")
     @commands.is_owner()
     async def test_queueclosed(ctx: commands.Context) -> None:
@@ -301,7 +347,7 @@ async def setup(bot: commands.Bot) -> None:
         opened_at = datetime.now(timezone.utc) - timedelta(hours=1)
         opened_by = str(ctx.author.id)
         await ctx.send(view=PodQueueView(
-            names=["Tester One", "Tester Two", "Tester Three"], role_mention=mention,
+            names=list(_ROSTER_NAMES[:3]), role_mention=mention,
             close_reason=queue_inactivity_close_reason(), set_code=set_code,
             opened_at=opened_at, opened_by=opened_by,
         ))
@@ -309,6 +355,338 @@ async def setup(bot: commands.Bot) -> None:
             role_mention=mention, close_reason=QUEUE_CLOSED_MANUAL,
             set_code=set_code, opened_at=opened_at, opened_by=opened_by,
         ))
+
+
+_POLL_SEED_FIRST = [
+    [fi.LATEST], [fi.LATEST], [fi.LATEST],
+    [fi.FLASHBACK], [fi.FLASHBACK],
+    [fi.LATEST, fi.FLASHBACK], [fi.LATEST, fi.FLASHBACK],
+    [],
+]
+_POLL_SEED_REST = [[fi.LATEST], [fi.FLASHBACK], [fi.LATEST, fi.FLASHBACK], []]
+
+_ROSTER_NAMES = (
+    "Finkel", "LSV", "The Hump", "Paolo", "Shota", "Reid", "Chapin", "JED",
+    "Nassif", "Huey", "Kibler", "Levy", "Nakamura", "Karsten", "Juza", "Owen",
+)
+
+
+def _roster_name(index: int) -> str:
+    return _ROSTER_NAMES[index % len(_ROSTER_NAMES)]
+
+
+_GATHER_SLOT_LABEL = "Late"
+_ANY = (fi.LATEST, fi.FLASHBACK)
+_BENCH_RANKINGS = (("DSK",), ("FIN", "DSK"), ("MH3", "DSK"))
+MSG_NO_PRESSER = "No eligible player is waiting."
+
+_GATHER_SCENARIOS: dict[str, list[tuple[str, tuple[str, ...], tuple[str, ...]]]] = {
+    "simple": [
+        ("Noya", (fi.LATEST,), ()),
+        ("Finkel", (fi.LATEST,), ()),
+        ("LSV", (fi.LATEST,), ()),
+        ("Huey", (fi.LATEST,), ()),
+        ("Karsten", (), ()),
+        ("Owen", _ANY, ()),
+    ],
+    "deadlock": [
+        ("Noya", (fi.LATEST,), ()),
+        ("Finkel", (fi.LATEST,), ()),
+        ("LSV", (fi.LATEST,), ()),
+        ("Huey", (fi.LATEST,), ()),
+        ("The Hump", (fi.FLASHBACK,), ("DSK", "FIN")),
+        ("Paolo", (fi.FLASHBACK,), ("DSK", "MH3")),
+        ("Shota", (fi.FLASHBACK,), ("FIN", "DSK")),
+        ("Reid", (fi.FLASHBACK,), ("DSK",)),
+    ],
+    "swing": [
+        ("Noya", (fi.LATEST,), ()),
+        ("Finkel", (fi.LATEST,), ()),
+        ("LSV", (fi.LATEST,), ()),
+        ("Huey", (fi.LATEST,), ()),
+        ("Karsten", (fi.LATEST,), ()),
+        ("The Hump", (fi.FLASHBACK,), ("DSK", "FIN")),
+        ("Paolo", (fi.FLASHBACK,), ("DSK", "MH3")),
+        ("Shota", (fi.FLASHBACK,), ("FIN", "DSK")),
+        ("Reid", (fi.FLASHBACK,), ("DSK",)),
+        ("Nassif", (fi.FLASHBACK,), ("MH3", "DSK")),
+        ("Chapin", _ANY, ("DSK",)),
+    ],
+    "split": [
+        ("Noya", (fi.LATEST,), ()),
+        ("Finkel", (fi.LATEST,), ()),
+        ("LSV", (fi.LATEST,), ()),
+        ("Huey", (fi.LATEST,), ()),
+        ("Karsten", (fi.LATEST,), ()),
+        ("Owen", (fi.LATEST,), ()),
+        ("The Hump", (fi.FLASHBACK,), ("DSK", "FIN")),
+        ("Paolo", (fi.FLASHBACK,), ("DSK", "MH3")),
+        ("Shota", (fi.FLASHBACK,), ("FIN", "DSK")),
+        ("Reid", (fi.FLASHBACK,), ("DSK",)),
+        ("Nassif", (fi.FLASHBACK,), ("MH3", "DSK")),
+        ("Chapin", _ANY, ("DSK",)),
+        ("Levy", _ANY, ("FIN",)),
+    ],
+}
+
+
+_GATHER_BLURBS = {
+    "simple": (
+        "all signups lean Latest, so the card stays a flat list and Ready Check offers a single table. "
+        "This is today's behavior in the new flow."
+    ),
+    "deadlock": (
+        "4 Latest and 4 Flashback, nobody flexible: eight players but no table of 6. "
+        "Ready Check refuses until you add players."
+    ),
+    "swing": (
+        "5 Latest, 5 Flashback and one Any: both formats count 6 but share the flexible player, so only "
+        "one table can lock. The last seat-claim press decides which."
+    ),
+    "split": (
+        "6 Latest, 5 Flashback and two Any: thirteen players, both tables can lock."
+    ),
+}
+_GATHER_DIRECTOR_NOTE = (
+    "**Simulator controls.** The anchor card's buttons are the player surface: one click there adds one "
+    "simulated signup with that pick. Ready Check posts the seat-claim card in this thread, where the "
+    "real T-10 job would. Reset restarts the scenario; earlier ready checks go stale."
+)
+
+
+class _GatherState:
+    """Fixture state behind the gather preview. Every rendered string comes from the pod_gathering
+    builders; this class only tracks who signed, pressed, or no-showed."""
+
+    def __init__(
+        self, members: list[pod_gathering.GatherMember], slot_time: datetime, seats: int,
+    ) -> None:
+        self._initial = list(members)
+        self.members = list(members)
+        self.slot_time = slot_time
+        self.seats = seats
+        self.tables: list[pod_gathering.TableCandidate] = []
+        self.absent: list[str] = []
+
+    def gathering_embed(self) -> discord.Embed:
+        return pod_gathering.build_gathering_embed(_GATHER_SLOT_LABEL, self.slot_time, self.members)
+
+    def ready_embed(self) -> discord.Embed:
+        return pod_gathering.build_ready_embed(
+            _GATHER_SLOT_LABEL, self.slot_time, self.tables, self.waiting(), self.absent, self.seats,
+        )
+
+    def add_member(self, interests: tuple[str, ...]) -> None:
+        added = len(self.members) - len(self._initial)
+        ranking = _BENCH_RANKINGS[added % len(_BENCH_RANKINGS)] if fi.FLASHBACK in interests else ()
+        used = {member.name for member in self.members}
+        name = f"Guest {added + 1}"
+        for candidate in _ROSTER_NAMES:
+            if candidate not in used:
+                name = candidate
+                break
+        self.members.append(pod_gathering.GatherMember(name, interests, ranking))
+
+    def start_ready(self) -> bool:
+        comp = fi.composition([member.interests for member in self.members])
+        tables: list[pod_gathering.TableCandidate] = []
+        if comp.latest_capacity + comp.unstated >= self.seats:
+            tables.append(pod_gathering.latest_table_candidate())
+        if comp.flashback_capacity >= self.seats:
+            tables.append(pod_gathering.flashback_table_candidate())
+        if not tables:
+            return False
+        self.tables = tables
+        return True
+
+    def press(self, index: int) -> pod_gathering.TableCandidate | None:
+        """Seat the next eligible fixture player at the table; the table just locked comes back so the
+        caller can rename the thread."""
+        table = self.tables[index]
+        if table.locked(self.seats):
+            return None
+        member = self._next_presser(table)
+        if member is None:
+            return None
+        table.pressed.append(member.name)
+        if table.locked(self.seats) and table.format_code == fi.FLASHBACK and table.set_code is None:
+            rankings = [m.ranking for m in self.members if m.name in table.pressed]
+            table.set_code = pod_gathering.resolve_flashback_set(rankings)
+        return table if table.locked(self.seats) else None
+
+    def mark_no_show(self) -> bool:
+        waiting = self.waiting()
+        if not waiting:
+            return False
+        self.absent.append(waiting[0])
+        return True
+
+    def reset(self) -> None:
+        self.members = list(self._initial)
+        self.tables = []
+        self.absent = []
+
+    def waiting(self) -> list[str]:
+        pressed = {name for table in self.tables for name in table.pressed}
+        return [
+            member.name for member in self.members
+            if member.name not in pressed and member.name not in self.absent
+        ]
+
+    def _next_presser(self, table: pod_gathering.TableCandidate) -> pod_gathering.GatherMember | None:
+        eligible = []
+        pressed = {name for candidate in self.tables for name in candidate.pressed}
+        for member in self.members:
+            if member.name in pressed or member.name in self.absent:
+                continue
+            codes = fi.normalize(member.interests)
+            if table.format_code == fi.LATEST:
+                fits = fi.FLASHBACK not in codes or fi.LATEST in codes
+            else:
+                fits = fi.FLASHBACK in codes
+            if fits:
+                eligible.append(member)
+        for member in eligible:
+            if not fi.is_flexible(member.interests):
+                return member
+        return eligible[0] if eligible else None
+
+
+class _GatherCardView(discord.ui.View):
+    """The anchor card's player surface. In the preview a click adds one simulated signup with that
+    pick, standing in for a real player pressing it."""
+
+    def __init__(self, state: _GatherState) -> None:
+        super().__init__(timeout=3600)
+        self.state = state
+        self.add_item(_GatherPickButton("Latest", fi.latest_emoji(), (fi.LATEST,)))
+        self.add_item(_GatherPickButton("Flashback", fi.flashback_emoji(), (fi.FLASHBACK,)))
+        self.add_item(_GatherPickButton("Any", fi.FLEXIBLE_EMOJI, _ANY))
+
+
+class _GatherPickButton(discord.ui.Button):
+    def __init__(self, label: str, emoji: object, interests: tuple[str, ...]) -> None:
+        super().__init__(label=label, style=discord.ButtonStyle.secondary, emoji=emoji)
+        self.interests = interests
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view: _GatherCardView = self.view
+        view.state.add_member(self.interests)
+        await interaction.response.edit_message(embed=view.state.gathering_embed(), view=view)
+
+
+class _GatherDirectorView(discord.ui.View):
+    def __init__(self, state: _GatherState, card: discord.Message) -> None:
+        super().__init__(timeout=3600)
+        self.state = state
+        self.card = card
+
+    @discord.ui.button(label="Start Ready Check", style=discord.ButtonStyle.primary)
+    async def ready_check(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not self.state.start_ready():
+            await interaction.response.send_message(
+                pod_gathering.MSG_NO_TABLE_YET.format(seats=self.state.seats), ephemeral=True,
+            )
+            return
+        view = _GatherReadyView(self.state)
+        await interaction.response.send_message(embed=self.state.ready_embed(), view=view)
+
+    @discord.ui.button(label="Reset", style=discord.ButtonStyle.secondary)
+    async def reset(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        self.state.reset()
+        await self.card.edit(embed=self.state.gathering_embed())
+        await interaction.response.send_message("Scenario reset.", ephemeral=True)
+
+
+class _GatherReadyView(discord.ui.View):
+    def __init__(self, state: _GatherState) -> None:
+        super().__init__(timeout=3600)
+        self.state = state
+        self.renamed = False
+        self._rebuild()
+
+    def _rebuild(self) -> None:
+        self.clear_items()
+        for index, table in enumerate(self.state.tables):
+            self.add_item(_GatherPressButton(index, table, self.state.seats))
+        self.add_item(_GatherNoShowButton())
+
+    async def render(self, interaction: discord.Interaction) -> None:
+        self._rebuild()
+        await interaction.response.edit_message(embed=self.state.ready_embed(), view=self)
+
+    async def rename_thread(self, interaction: discord.Interaction, locked: pod_gathering.TableCandidate) -> None:
+        if self.renamed or not isinstance(interaction.channel, discord.Thread):
+            return
+        self.renamed = True
+        title = pod_gathering.neutral_pod_title(_GATHER_SLOT_LABEL, self.state.slot_time)
+        try:
+            await interaction.channel.edit(name=f"{locked.set_code} {title}")
+        except discord.HTTPException:
+            log.warning("gather preview: could not rename the thread", exc_info=True)
+
+
+class _GatherPressButton(discord.ui.Button):
+    def __init__(self, index: int, table: pod_gathering.TableCandidate, seats: int) -> None:
+        emoji = fi.latest_emoji() if table.format_code == fi.LATEST else fi.flashback_emoji()
+        super().__init__(
+            label=pod_gathering.table_button_label(table, seats),
+            style=discord.ButtonStyle.success, emoji=emoji, disabled=table.locked(seats),
+        )
+        self.index = index
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view: _GatherReadyView = self.view
+        before = len(view.state.tables[self.index].pressed)
+        locked = view.state.press(self.index)
+        if len(view.state.tables[self.index].pressed) == before:
+            await interaction.response.send_message(MSG_NO_PRESSER, ephemeral=True)
+            return
+        await view.render(interaction)
+        if locked is not None:
+            await view.rename_thread(interaction, locked)
+
+
+class _GatherNoShowButton(discord.ui.Button):
+    def __init__(self) -> None:
+        super().__init__(label="No Show", style=discord.ButtonStyle.secondary)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view: _GatherReadyView = self.view
+        if not view.state.mark_no_show():
+            await interaction.response.send_message(MSG_NO_PRESSER, ephemeral=True)
+            return
+        await view.render(interaction)
+
+
+def _seed_poll_interests_sync(message_id: str, day) -> None:
+    """Insert fake signups on the launcher's open lazy slots with a spread of format interests, so `!test
+    poll` shows the format teams without needing live clickers. The first open slot gets the full Latest /
+    Flashback / Any / no-preference mix, the rest a lighter one; slots already past stay empty."""
+    now = datetime.now(SCHEDULE_TZ)
+    first_open = True
+    next_name = 0
+    with SessionLocal() as session:
+        for bucket in poll_buckets_for(day):
+            slot_time = slot_event_time(day, bucket.key)
+            if slot_time is not None and slot_time <= now:
+                continue
+            interest_sets = _POLL_SEED_FIRST if first_open else _POLL_SEED_REST
+            first_open = False
+            signal = session.execute(
+                select(PodSignal).where(PodSignal.message_id == message_id, PodSignal.bucket == bucket.key)
+            ).scalar_one_or_none()
+            if signal is None:
+                continue
+            for seat, codes in enumerate(interest_sets):
+                session.add(PodSignalMember(
+                    signal_id=signal.id,
+                    discord_user_id=f"polltest-{bucket.key}-{seat}",
+                    display_name=_roster_name(next_name + seat),
+                    format_interest=fi.normalize(codes),
+                ))
+            next_name += len(interest_sets)
+        session.commit()
 
 
 async def _seed_fake_yes(
@@ -323,7 +701,7 @@ async def _seed_fake_yes(
     rosters = None
     for i in range(count):
         result = await asyncio.to_thread(
-            pod_launch.set_rsvp_sync, message_id, f"filltest-{i}", f"Tester {i + 1}", RSVP_YES)
+            pod_launch.set_rsvp_sync, message_id, f"filltest-{i}", _roster_name(i), RSVP_YES)
         if result is not None:
             rosters = result.rosters
     if rosters is None:

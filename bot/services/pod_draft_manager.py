@@ -51,6 +51,7 @@ from bot.services import pod_format
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_pairing_select import pairing_label
 from bot.services.pod_seating_select import seating_mode_label
+from bot.services import pod_format_poll
 from bot.services.pod_team_vote import (
     SIDE_TEAM,
     TEAM_VOTE_POD_SIZE,
@@ -69,6 +70,7 @@ from bot.services.pod_drafts import (
     BOT_USER_NAME,
     apply_seat_indexes,
     attach_arena_alias,
+    event_member_rankings_sync,
     full_arena_handle,
     normalize_player_name,
     classify_lobby_names,
@@ -289,6 +291,8 @@ class PodDraftManager:
         self.team_vote_offered = False
         self.team_vote_pending_size: int | None = None
         self.team_vote_size = 0
+        self.format_poll_message: "discord.Message | None" = None
+        self.format_poll_offered = False
         self.scheduled_start: datetime | None = None
         self._last_seating_signature: tuple[str, ...] | None = None
         self.standings_message = None
@@ -1425,6 +1429,7 @@ class PodDraftManager:
         self._schedule_end_watchdog()
         await self._retire_lobby_full_prompt()
         await self._retire_team_vote_offer()
+        await self._retire_format_poll_offer()
         await asyncio.to_thread(self._seed_participants_at_draft_start)
         notify_second_table_offer(self.bot, self.event_id)
         if self.pairing_mode == "team":
@@ -1736,6 +1741,54 @@ class PodDraftManager:
             await message.delete()
         except discord.HTTPException:
             log.info(f"[TEAM_VOTE] offer_delete_failed event={self.event_id}", exc_info=True)
+
+    async def offer_format_poll(self) -> None:
+        """Post the one-time format tally for a pod with flashback demand, pre-seeded with the present
+        players' standing flashback rankings. No-op once offered or once the draft is under way."""
+        if self.format_poll_offered or self.drafting or self.draft_complete:
+            return
+        thread = await self._fetch_thread()
+        if thread is None:
+            return
+        options = pod_format_poll.build_options()
+        rankings = await asyncio.to_thread(event_member_rankings_sync, self.event_id)
+        votes = _seed_votes_from_rankings(options, rankings)
+        self.format_poll_offered = True
+        try:
+            self.format_poll_message = await thread.send(
+                embed=pod_format_poll.build_format_poll_embed(options, votes),
+                view=pod_format_poll.build_format_poll_view(self.event_id, options),
+            )
+        except discord.HTTPException:
+            self.format_poll_offered = False
+            log.warning(f"[FORMAT_POLL] offer_post_failed event={self.event_id}", exc_info=True)
+
+    async def adopt_existing_format_poll(self) -> None:
+        """Take over a format poll card already posted before this manager existed, or left by a restart, so
+        the at-start tick posts no duplicate. The card's own buttons drive the poll; the tally lives on the
+        message."""
+        if self.format_poll_offered or self.drafting or self.draft_complete:
+            return
+        thread = await self._fetch_thread()
+        if thread is None:
+            return
+        card = await pod_format_poll.find_format_poll_card(thread, self.event_id)
+        if card is None:
+            return
+        self.format_poll_message = card
+        self.format_poll_offered = True
+        log.info(f"[FORMAT_POLL] adopted existing card event={self.event_id}")
+
+    async def _retire_format_poll_offer(self) -> None:
+        """Delete the poll card so its buttons can't outlive the offer. Best-effort."""
+        message = self.format_poll_message
+        self.format_poll_message = None
+        if message is None:
+            return
+        try:
+            await message.delete()
+        except discord.HTTPException:
+            log.info(f"[FORMAT_POLL] offer_delete_failed event={self.event_id}", exc_info=True)
 
     async def apply_seating_mode(self) -> None:
         """Push the current seating_mode to the live table. Leaderboard recomputes the seeded order
@@ -2116,6 +2169,7 @@ async def start_manager(
         f"registry_size={len(ACTIVE_POD_MANAGERS)}"
     )
     await manager.adopt_existing_team_vote()
+    await manager.adopt_existing_format_poll()
     ok = await manager.connect()
     if not ok:
         ACTIVE_POD_MANAGERS.pop(event_id, None)
@@ -2245,6 +2299,129 @@ async def handle_team_vote_click(interaction: "discord.Interaction", event_id: s
 
 
 register_team_vote_click_handler(handle_team_vote_click)
+
+
+_format_poll_click_locks: dict[str, asyncio.Lock] = {}
+
+
+def _apply_format_poll_vote(
+    event_id: str, embed: "discord.Embed", mention: str, code: str,
+) -> tuple["discord.Embed", "discord.ui.View"]:
+    """Toggle one voter's vote for one option against the card embed. The tally stays open — it decides
+    nothing."""
+    votes = pod_format_poll.votes_from_embed(embed)
+    options = pod_format_poll.options_from_embed(embed)
+    adders = pod_format_poll.adders_from_embed(embed)
+    pod_format_poll.toggle_vote(votes, options, mention, code)
+    return (
+        pod_format_poll.rerender_gathering(embed, options, votes, adders),
+        pod_format_poll.build_format_poll_view(event_id, options),
+    )
+
+
+def _seed_votes_from_rankings(
+    options: list[str], rankings: "tuple[tuple[str, tuple[str, ...]], ...]",
+) -> dict[str, list[str]]:
+    """Pre-cast each present player's standing flashback ranking onto a fresh poll: a vote for every set they
+    ranked, adding the set as an option up to the cap. Mutates ``options`` with any new codes, best first.
+    Players can still change their votes on the card."""
+    votes: dict[str, list[str]] = {}
+    for discord_id, ranking in rankings:
+        mention = f"<@{discord_id}>"
+        for code in ranking:
+            if code not in options:
+                if len(options) >= pod_format_poll.MAX_ROWED_OPTIONS:
+                    continue
+                options.append(code)
+            voters = votes.setdefault(code, [])
+            if mention not in voters:
+                voters.append(mention)
+    return votes
+
+
+async def handle_format_poll_click(interaction: "discord.Interaction", event_id: str, code: str) -> None:
+    """Toggle the clicker's vote for one format option against the card message. Multiple choice, so a
+    player can back several formats. The card message is the tally, so this works whether or not a live
+    manager backs the pod. Serialized per pod so rapid clicks can't race.
+
+    Registered as the poll-button handler at import, keeping pod_format_poll free of a manager import."""
+    lock = _format_poll_click_locks.setdefault(event_id, asyncio.Lock())
+    async with lock:
+        if not interaction.message.embeds:
+            await interaction.response.defer()
+            return
+        manager = ACTIVE_POD_MANAGERS.get(event_id)
+        if manager is not None and (manager.drafting or manager.draft_complete):
+            await interaction.response.defer()
+            return
+        new_embed, new_view = _apply_format_poll_vote(
+            event_id, interaction.message.embeds[0], interaction.user.mention, code,
+        )
+        try:
+            await interaction.response.edit_message(embed=new_embed, view=new_view)
+        except discord.HTTPException:
+            log.warning(f"[FORMAT_POLL] edit_failed event={event_id}", exc_info=True)
+
+
+def _apply_format_poll_write_ins(
+    event_id: str, embed: "discord.Embed", mention: str, codes: list[str], adder_name: str,
+) -> tuple["discord.Embed", "discord.ui.View", list[str]]:
+    """Vote the player for each code: an existing option gains their vote, a new one is added with an "added
+    by" credit and their first vote, up to the option cap. Never retracts, so re-submitting a code the player
+    already backs is a no-op. Returns the re-render and the codes actually applied."""
+    votes = pod_format_poll.votes_from_embed(embed)
+    options = pod_format_poll.options_from_embed(embed)
+    adders = pod_format_poll.adders_from_embed(embed)
+    applied: list[str] = []
+    for code in codes:
+        if code not in options:
+            if len(options) >= pod_format_poll.MAX_ROWED_OPTIONS:
+                continue
+            options.append(code)
+            adders[code] = adder_name
+        voters = votes.setdefault(code, [])
+        if mention not in voters:
+            voters.append(mention)
+        applied.append(code)
+    return (
+        pod_format_poll.rerender_gathering(embed, options, votes, adders),
+        pod_format_poll.build_format_poll_view(event_id, options),
+        applied,
+    )
+
+
+async def handle_format_poll_add(
+    interaction: "discord.Interaction", event_id: str, raw_code: str, message: "discord.Message",
+) -> None:
+    """Add one or more player-typed set codes to the poll and vote the player for each, then re-render the
+    card. Codes can be comma or space separated. Unparseable input is refused ephemerally."""
+    codes = pod_format_poll.normalize_write_ins(raw_code)
+    if not codes:
+        await interaction.response.send_message("Enter set codes like DSK FIN MH3.", ephemeral=True)
+        return
+    lock = _format_poll_click_locks.setdefault(event_id, asyncio.Lock())
+    async with lock:
+        if not message.embeds:
+            await interaction.response.send_message("This poll is no longer active.", ephemeral=True)
+            return
+        new_embed, new_view, applied = _apply_format_poll_write_ins(
+            event_id, message.embeds[0], interaction.user.mention, codes, interaction.user.display_name,
+        )
+        if not applied:
+            full = "This poll already has the most formats it can hold."
+            await interaction.response.send_message(full, ephemeral=True)
+            return
+        try:
+            await message.edit(embed=new_embed, view=new_view)
+        except discord.HTTPException:
+            log.warning(f"[FORMAT_POLL] add_edit_failed event={event_id}", exc_info=True)
+            await interaction.response.send_message("Could not update the poll.", ephemeral=True)
+            return
+        await interaction.response.send_message(f"Voted for {', '.join(applied)}.", ephemeral=True)
+
+
+pod_format_poll.register_format_poll_click_handler(handle_format_poll_click)
+pod_format_poll.register_format_poll_add_handler(handle_format_poll_add)
 
 
 async def set_event_seating_mode(event_id: str, mode: str) -> str | None:

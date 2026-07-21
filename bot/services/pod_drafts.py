@@ -22,8 +22,11 @@ from bot.models import (
     PodDraftEvent,
     PodDraftMatch,
     PodDraftParticipant,
+    PodSignal,
+    PodSignalMember,
 )
 from bot.services import pod_format
+from bot.services import pod_format_interest
 from bot.services.pod_schedule import highest_event_number
 from bot.services.pod_slot import next_collision_index
 from bot.services.sesh_parser import NUM_RE
@@ -437,6 +440,96 @@ def toggle_dm_draft_link(
         avatar_hash=avatar_hash, enabled=new_state,
     )
     return new_state
+
+
+def event_member_interests_sync(event_id: str) -> tuple[tuple[str, ...], ...]:
+    """The format interest each signup brought to the pod this event grew from, read off the signal that
+    created it, for deciding whether the opening lobby earns a format poll."""
+    with SessionLocal() as session:
+        signal = session.execute(
+            select(PodSignal).where(PodSignal.event_id == event_id)
+        ).scalar_one_or_none()
+        if signal is None:
+            return ()
+        rows = session.execute(
+            select(PodSignalMember.format_interest)
+            .where(PodSignalMember.signal_id == signal.id)
+            .order_by(PodSignalMember.created_at)
+        ).scalars().all()
+        return tuple(tuple(pod_format_interest.normalize(interest)) for interest in rows)
+
+
+def get_format_interests(session: Session, discord_id: str) -> list[str]:
+    """The player's standing draft-format preference, empty when unset or the player has no row yet."""
+    stored = session.execute(
+        select(Player.format_interests).where(Player.discord_id == discord_id)
+    ).scalar_one_or_none()
+    return pod_format_interest.normalize(stored)
+
+
+def set_format_interests(
+    session: Session, *, discord_id: str, discord_username: str, display_name: str,
+    avatar_hash: str | None, interests: list[str],
+) -> None:
+    """Persist the standing format preference, creating a lightweight player row when none exists so an
+    onboarding-only member's choice sticks. Mirrors the row set_dm_draft_link seeds."""
+    normalized = pod_format_interest.normalize(interests)
+    player = session.execute(
+        select(Player).where(Player.discord_id == discord_id)
+    ).scalar_one_or_none()
+    if player is None:
+        taken_slugs = set(session.execute(select(Player.slug)).scalars().all())
+        player = Player(
+            slug=disambiguate_slug(slugify(display_name), taken_slugs),
+            discord_id=discord_id,
+            discord_username=discord_username,
+            display_name=display_name,
+            avatar_hash=avatar_hash,
+            active=True,
+            leaderboard_opt_in=False,
+            format_interests=normalized,
+        )
+        session.add(player)
+    else:
+        player.format_interests = normalized
+    session.flush()
+
+
+def get_flashback_ranking(session: Session, discord_id: str) -> list[str]:
+    """The player's ranked flashback preference, best first, empty when unset or the player has no row."""
+    stored = session.execute(
+        select(Player.flashback_ranking).where(Player.discord_id == discord_id)
+    ).scalar_one_or_none()
+    return list(stored) if stored else []
+
+
+def set_flashback_ranking(session: Session, *, discord_id: str, ranking: list[str]) -> None:
+    """Persist the ranked flashback preference on an existing player row. The interest save creates the row,
+    so this only updates; a missing player is a no-op."""
+    player = session.execute(
+        select(Player).where(Player.discord_id == discord_id)
+    ).scalar_one_or_none()
+    if player is not None:
+        player.flashback_ranking = ranking
+        session.flush()
+
+
+def event_member_rankings_sync(event_id: str) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    """Each signup's Discord id paired with their ranked flashback preference, for pre-seeding a fresh pod's
+    format poll from standing rankings. Members with no ranking are omitted."""
+    with SessionLocal() as session:
+        signal = session.execute(
+            select(PodSignal).where(PodSignal.event_id == event_id)
+        ).scalar_one_or_none()
+        if signal is None:
+            return ()
+        rows = session.execute(
+            select(PodSignalMember.discord_user_id, Player.flashback_ranking)
+            .join(Player, Player.discord_id == PodSignalMember.discord_user_id)
+            .where(PodSignalMember.signal_id == signal.id)
+            .order_by(PodSignalMember.created_at)
+        ).all()
+        return tuple((discord_id, tuple(ranking)) for discord_id, ranking in rows if ranking)
 
 
 def player_arena_handle(session: Session, discord_id: str) -> str | None:
