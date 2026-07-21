@@ -3,6 +3,9 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from bot.commands.pod_rsvp import (
+    CARD_INTRO,
+    CARD_STATUS_DRAFTING,
+    CARD_STATUS_PLAYING,
     MULTIPOD_NOTICE,
     POD_CAPACITY,
     build_rsvp_embed,
@@ -234,6 +237,36 @@ def test_refresh_never_stacks_the_multipod_notice():
         refresh_roster_fields(embed, {RSVP_YES: [f"p{i}" for i in range(count)]})
 
     assert embed.description.count(MULTIPOD_NOTICE) == 1
+
+
+def test_status_line_replaces_the_rsvp_intro_and_notice():
+    event_time = datetime(2026, 7, 18, 16, 0, tzinfo=timezone.utc)
+    full_yes = {RSVP_YES: [f"p{i}" for i in range(POD_CAPACITY)]}
+
+    embed = build_rsvp_embed(
+        "Early Pod", event_time, full_yes, description="bring snacks", status_line=CARD_STATUS_DRAFTING,
+    )
+
+    assert CARD_STATUS_DRAFTING in embed.description
+    assert MULTIPOD_NOTICE not in embed.description
+    assert CARD_INTRO.format(emoji="").strip() not in embed.description
+    assert "> bring snacks" in embed.description
+
+
+def test_refresh_swaps_status_across_phases_and_keeps_the_note():
+    event_time = datetime(2026, 7, 18, 16, 0, tzinfo=timezone.utc)
+    full_yes = {RSVP_YES: [f"p{i}" for i in range(POD_CAPACITY)]}
+    embed = build_rsvp_embed("Early Pod", event_time, full_yes, description="bring snacks")
+    title_line = embed.description.split("\n")[0]
+
+    refresh_roster_fields(embed, full_yes, CARD_STATUS_DRAFTING)
+    refresh_roster_fields(embed, full_yes, CARD_STATUS_PLAYING)
+
+    assert embed.description.split("\n")[0] == title_line
+    assert CARD_STATUS_DRAFTING not in embed.description
+    assert embed.description.count(CARD_STATUS_PLAYING) == 1
+    assert MULTIPOD_NOTICE not in embed.description
+    assert "> bring snacks" in embed.description
 
 
 CURRENT = datetime(2026, 7, 15, 20, 0, tzinfo=SCHEDULE_TZ)

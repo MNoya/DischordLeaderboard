@@ -29,30 +29,9 @@ from bot.services import pod_format
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_drafts import draftmancer_url_for, record_mock_event
 from bot.services.pod_draft_manager import start_manager
-from bot.sets import ALL_SETS, active_set_code, is_known_set
 
 
 log = logging.getLogger(__name__)
-
-
-def _format_choices() -> list[tuple[str, str]]:
-    """(label, code) the set option offers: the active set, every other supported set, then custom cubes."""
-    active = active_set_code()
-    choices = [(f"{active} (current)", active)]
-    for seed in reversed(ALL_SETS):
-        if seed.code != active:
-            choices.append((f"{seed.code} — {seed.name}", seed.code))
-    for fmt in pod_format.custom_formats():
-        choices.append((fmt.label, fmt.code))
-    return choices
-
-
-def _resolve_code(value: str | None) -> str | None:
-    """Normalize a set option to a stored code, or None when it isn't a registered set/cube."""
-    code = (value or active_set_code()).strip().upper()
-    if is_known_set(code) or pod_format.is_custom(code):
-        return code
-    return None
 
 
 class MockDraft(commands.Cog):
@@ -64,7 +43,7 @@ class MockDraft(commands.Cog):
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)
     async def mock_draft(self, interaction: discord.Interaction, set: str | None = None) -> None:
-        code = _resolve_code(set)
+        code = pod_format.resolve_format_code(set)
         if code is None:
             await interaction.response.send_message(
                 MSG_MOCK_UNKNOWN_SET.format(code=(set or "").strip().upper()), ephemeral=True,
@@ -120,7 +99,7 @@ class MockDraft(commands.Cog):
         self, interaction: discord.Interaction, current: str,
     ) -> list[app_commands.Choice[str]]:
         cur = current.strip().lower()
-        choices = _format_choices()
+        choices = pod_format.format_choices()
         matched = [(label, code) for label, code in choices if cur in label.lower() or cur in code.lower()]
         return [app_commands.Choice(name=label, value=code) for label, code in matched[:25]]
 

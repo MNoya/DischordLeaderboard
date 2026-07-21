@@ -27,7 +27,7 @@ from bot.slug import slugify
 from bot.database import SessionLocal
 from bot.models import Player as DbPlayer, PodDraftEvent, PodDraftMatch, PodDraftParticipant
 from bot.services import bot_log as bot_log_mod, pod_bracket, pod_swiss
-from bot.services.pod_active import ACTIVE_POD_MANAGERS
+from bot.services.pod_active import ACTIVE_POD_MANAGERS, notify_card_phase
 from bot.services.pod_deck_color import (
     SAVED_MSG,
     DeckColorSelectView,
@@ -3257,6 +3257,9 @@ async def _send_champion_thread_ping(manager, champions, player_colors) -> None:
         named.append((mention, player_colors.get(normalize_player_name(s.player_name))))
     if not named:
         return
+    manager.card_result_line = f"🏆 {_format_champion_thread_callout(named)}"
+    manager.card_result_url = announcement.jump_url
+    notify_card_phase(manager.bot, manager.event_id)
     view = ui.View(timeout=None)
     view.add_item(ui.Button(
         label="Championship Post",

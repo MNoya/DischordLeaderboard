@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from bot.sets import active_set_code
+from bot.sets import ALL_SETS, active_set_code, is_known_set
 
 
 @dataclass(frozen=True)
@@ -41,6 +41,27 @@ EVENT_MISSING_MSG = "Pod-draft event not found."
 
 def custom_formats() -> list[PodFormat]:
     return list(CUSTOM_FORMATS.values())
+
+
+def format_choices() -> list[tuple[str, str]]:
+    """(label, code) for a set-or-cube slash option: the active set, every other supported set newest
+    first, then custom cubes. Shared by the /mock-draft and /pod-table autocompletes."""
+    active = active_set_code()
+    choices = [(f"{active} (current)", active)]
+    for seed in reversed(ALL_SETS):
+        if seed.code != active:
+            choices.append((f"{seed.code} — {seed.name}", seed.code))
+    for fmt in custom_formats():
+        choices.append((fmt.label, fmt.code))
+    return choices
+
+
+def resolve_format_code(value: str | None) -> str | None:
+    """Normalize a set option to a stored code, or None when it isn't a registered set/cube."""
+    code = (value or active_set_code()).strip().upper()
+    if is_known_set(code) or is_custom(code):
+        return code
+    return None
 
 
 def is_custom(code: str | None) -> bool:

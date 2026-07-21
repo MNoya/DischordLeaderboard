@@ -35,6 +35,7 @@ from bot.services import pod_launch
 from bot.services.ping_roles import (
     announce_pod_grant,
     register_format_preference_opener,
+    send_join_confirmation_card,
     slot_grant_ping,
     spec_named,
 )
@@ -288,7 +289,6 @@ MSG_INTEREST_PROMPT = (
     "**Save** your preference, or **Confirm** to also join that time slot today"
 )
 MSG_INTEREST_SAVED = f"### ✨ Saved\n{MSG_PREFERENCE_LINE}"
-MSG_INTEREST_JOINED = "**Joined {slot}.** Your preference is {choice}."
 MSG_SLOT_ADDED = "✅ Added to {name}"
 MSG_SLOT_REMOVED = "❌ Removed from {name}"
 SAVE_BUTTON_LABEL = "Save"
@@ -452,6 +452,15 @@ class InterestPromptView(discord.ui.LayoutView):
         await interaction.edit_original_response(view=done)
         self.stop()
 
+    async def _dismiss(self, interaction: discord.Interaction) -> None:
+        """Drop the picker without a closing message — for a Confirm whose grant card already carries
+        the join confirmation and the saved preference, so the click ends with one message, not two."""
+        try:
+            await interaction.delete_original_response()
+        except discord.HTTPException:
+            log.warning("could not delete the preference picker", exc_info=True)
+        self.stop()
+
     async def _on_save(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer()
         ranking = await self._persist(interaction.user)
@@ -468,23 +477,22 @@ class InterestPromptView(discord.ui.LayoutView):
         return callback
 
     async def _on_confirm_slot(self, interaction: discord.Interaction, bucket_key: str) -> None:
+        """Save the preference and join the slot. The join feedback is the grant card or the full
+        confirmation card out of `_apply_slot_join`, both of which carry the saved preference, so the
+        picker itself closes silently instead of adding a second message."""
         await interaction.response.defer()
-        ranking = await self._persist(interaction.user)
+        await self._persist(interaction.user)
         launcher_message = await _fetch_launcher_message(interaction.channel, self.launcher_message_id)
         err = MSG_POLL_INACTIVE
         if launcher_message is not None:
-            err = await _apply_slot_join(
+            err, _ = await _apply_slot_join(
                 interaction, launcher_message=launcher_message, signal_date=self.signal_date,
-                bucket_key=bucket_key, action="join",
+                bucket_key=bucket_key, action="join", notify_effect=True,
             )
         if err:
             await self._finish(interaction, err)
             return
-        joined = MSG_INTEREST_JOINED.format(
-            slot=_slot_short_name(bucket_key), choice=fi.preference_display(self.values))
-        if ranking:
-            joined = f"{joined}\n{MSG_YOUR_SETS_LINE.format(ranking=fi.ranking_display(ranking))}"
-        await self._finish(interaction, joined)
+        await self._dismiss(interaction)
 
 
 class _RankModal(discord.ui.Modal, title=RANK_MODAL_TITLE):
@@ -569,20 +577,22 @@ async def _fetch_launcher_message(
 async def _apply_slot_join(
     interaction: discord.Interaction, *, launcher_message: discord.Message, signal_date: date,
     bucket_key: str, action: str, notify_effect: bool = False,
-) -> str | None:
+) -> tuple[str | None, str | None]:
     """Join or toggle a launcher slot for the clicker, then run the shared fire, launcher re-render, role
-    grant, announce, and nudge-refresh steps. Returns an error string when the slot is gone or closed,
-    else None. Shared by the launcher slot buttons (toggle) and the Format Preference Confirm buttons
-    (join). `notify_effect` confirms the add or removal ephemerally when no grant notice already did."""
+    grant, announce, and nudge-refresh steps. Returns (error, notice): an error string when the slot is
+    gone or closed, and the grant/welcome notice that was posted, so a caller with its own confirmation
+    can skip it instead of doubling up. Shared by the launcher slot buttons (toggle) and the Format
+    Preference Confirm buttons (join). `notify_effect` confirms the add or removal ephemerally when no
+    grant notice already did."""
     message_id = str(launcher_message.id)
     result = await asyncio.to_thread(
         pod_launch.toggle_member_sync,
         message_id, bucket_key, str(interaction.user.id), interaction.user.display_name, action,
     )
     if result is None:
-        return MSG_POLL_INACTIVE
+        return MSG_POLL_INACTIVE, None
     if result.closed:
-        return MSG_SLOT_CLOSED
+        return MSG_SLOT_CLOSED, None
     fired = (
         result.joined
         and should_fire(result.state.count, settings.pod_signal_fire_threshold)
@@ -608,20 +618,25 @@ async def _apply_slot_join(
         interaction, first_pod=first_pod, granted_role=granted_role,
         welcome_role=granted_role, spec=spec, ping=ping, card_lead=card_lead,
     )
-    if notify_effect and result.changed and not (result.joined and notice):
-        embed = _slot_effect_embed(bucket_key, joined=result.joined, slot_time=result.state.slot_time)
-        await interaction.followup.send(embed=embed, ephemeral=True)
+    if notify_effect and not notice:
+        if result.joined and (result.changed or action == "join"):
+            await send_join_confirmation_card(
+                interaction, lead=_slot_effect_lead(bucket_key, result.state.slot_time),
+                accent=discord.Color.green(),
+            )
+        elif result.changed:
+            await interaction.followup.send(embed=_slot_removed_embed(bucket_key), ephemeral=True)
     if fired:
         asyncio.create_task(_launch_slot(interaction.client, result.state, message_id))
     elif result.changed:
         await refresh_slot_nudge(interaction.client, result.state.signal_id)
-    return None
+    return None, notice
 
 
 async def _handle_poll_click(interaction: discord.Interaction, bucket_key: str) -> None:
     await interaction.response.defer()
     signal_date = await _launcher_signal_date(interaction.message)
-    err = await _apply_slot_join(
+    err, _ = await _apply_slot_join(
         interaction, launcher_message=interaction.message, signal_date=signal_date,
         bucket_key=bucket_key, action="toggle", notify_effect=True,
     )
@@ -630,8 +645,8 @@ async def _handle_poll_click(interaction: discord.Interaction, bucket_key: str) 
 
 
 def _slot_effect_lead(bucket_key: str, slot_time: datetime | None) -> str:
-    """The join confirmation as grant-card text, folded in when a fresh role grant rides the same
-    click."""
+    """The join confirmation as card text: folded into the grant card when a fresh role grant rides
+    the same click, else the lead of the plain confirmation card."""
     bucket = bucket_by_key(bucket_key)
     name = bucket.name if bucket else bucket_key
     lead = f"### {MSG_SLOT_ADDED.format(name=name)}"
@@ -640,19 +655,12 @@ def _slot_effect_lead(bucket_key: str, slot_time: datetime | None) -> str:
     return lead
 
 
-def _slot_effect_embed(bucket_key: str, *, joined: bool, slot_time: datetime | None) -> discord.Embed:
-    """Per-click confirmation mirroring the scheduled card's RSVP embeds: an add is green and carries
-    the slot's start time, a removal is red and bare."""
+def _slot_removed_embed(bucket_key: str) -> discord.Embed:
+    """The bare red removal note, mirroring the scheduled card's No acknowledgement — the start time
+    and the pod controls are moot once you're out. An add answers with the full confirmation card."""
     bucket = bucket_by_key(bucket_key)
     name = bucket.name if bucket else bucket_key
-    if not joined:
-        return discord.Embed(title=MSG_SLOT_REMOVED.format(name=name), color=discord.Color.red())
-    description = None
-    if slot_time is not None:
-        description = MSG_DRAFT_STARTS.format(unix=int(slot_time.timestamp()))
-    return discord.Embed(
-        title=MSG_SLOT_ADDED.format(name=name), description=description, color=discord.Color.green(),
-    )
+    return discord.Embed(title=MSG_SLOT_REMOVED.format(name=name), color=discord.Color.red())
 
 
 def _fire_announcement(guild: discord.Guild | None, name: str, slot_time: datetime) -> str | None:

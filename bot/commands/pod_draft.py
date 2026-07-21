@@ -17,7 +17,7 @@ from bot.config import settings
 from bot.database import SessionLocal
 from bot.discord_helpers import display_width, extract_avatar_hash, player_url
 from bot.services.lobby_embed import guard_ready_check
-from bot.services.pod_active import ACTIVE_POD_MANAGERS
+from bot.services.pod_active import ACTIVE_POD_MANAGERS, set_card_phase_hook
 from bot.services.pod_draft_manager import (
     cancel_pod_event,
     set_event_format,
@@ -45,7 +45,13 @@ from bot.services.pod_drafts import (
     lobby_match_status,
     search_event_names_sync,
 )
-from bot.commands.pod_rsvp import fetch_channel, reflect_format_change, refresh_scheduled_card, reschedule_event
+from bot.commands.pod_rsvp import (
+    fetch_channel,
+    reflect_format_change,
+    refresh_card_phase,
+    refresh_scheduled_card,
+    reschedule_event,
+)
 from bot.services import pod_launch
 from bot.services.player_stats import SeededAttendee, rank_ordered_names, seed_attendees, seated_ring_order
 from bot.services.pod_seating_select import SEATING_ORDER_MARKER, seating_change_message
@@ -1159,4 +1165,5 @@ async def setup(bot: commands.Bot) -> None:
     set_seeding_refresh_hook(refresh_seeding_table)
     set_seeding_repost_hook(repost_seeding_table)
     set_card_refresh_hook(refresh_scheduled_card)
+    set_card_phase_hook(refresh_card_phase)
     await bot.add_cog(PodDraft(bot))

@@ -206,20 +206,27 @@ def build_grant_view(
     )
     if card_lead:
         grant_line = f"{card_lead}\n{grant_line}"
-    if arena_name is not None:
-        handle_line = MSG_ARENA_HANDLE_LINE.format(emoji=emojis.get("mtga"), arena_name=arena_name)
-        lines = [grant_line, handle_line]
-        lines.append(f"✨ {MSG_PREFERENCE_LINE.format(choice=fi.preference_display(interests))}")
-        if fi.has_flashback(interests) and ranking:
-            lines.append(MSG_YOUR_SETS_LINE.format(ranking=fi.ranking_display(ranking)))
-        text = "\n".join(lines)
-    else:
-        text = f"{grant_line}\n{MSG_ARENA_LINK_CTA}"
+    text = _card_body(grant_line, arena_name=arena_name, interests=interests, ranking=ranking)
     accent = role.color if role.color.value else discord.Color.blurple()
     return _PodButtonCard(
         text, accent=accent, show_link_button=arena_name is None,
         show_format_button=arena_name is not None,
     )
+
+
+def _card_body(
+    lead: str, *, arena_name: str | None, interests: list[str] | None, ranking: list[str] | None,
+) -> str:
+    """The card text below its lead, shared by the grant card and the RSVP confirmation card: the
+    linked reader sees their Arena handle and format preference, the unlinked reader the link prompt."""
+    if arena_name is None:
+        return f"{lead}\n{MSG_ARENA_LINK_CTA}"
+    handle_line = MSG_ARENA_HANDLE_LINE.format(emoji=emojis.get("mtga"), arena_name=arena_name)
+    lines = [lead, handle_line]
+    lines.append(f"✨ {MSG_PREFERENCE_LINE.format(choice=fi.preference_display(interests))}")
+    if fi.has_flashback(interests) and ranking:
+        lines.append(MSG_YOUR_SETS_LINE.format(ranking=fi.ranking_display(ranking)))
+    return "\n".join(lines)
 
 
 def persistent_pod_card_view() -> discord.ui.LayoutView:
@@ -502,6 +509,23 @@ async def announce_pod_grant(
         f"granted_role={granted_role.name if granted_role else None}"
     )
     return None
+
+
+async def send_join_confirmation_card(
+    interaction: discord.Interaction, *, lead: str, accent: discord.Color,
+) -> None:
+    """A join acknowledgement (RSVP Yes/Maybe, launcher slot add, picker Confirm) as a full pod card:
+    the confirmation lead over the same Link Arena / Pod Guide / Notifications / Format Preference row
+    the grant card carries, so every join click offers the self-service controls, not only the click
+    that granted a role."""
+    user_id = str(interaction.user.id)
+    arena_name = await _linked_arena_handle(user_id)
+    interests, ranking = await asyncio.to_thread(_preference_snapshot, user_id)
+    card = _PodButtonCard(
+        _card_body(lead, arena_name=arena_name, interests=interests, ranking=ranking),
+        accent=accent, show_link_button=arena_name is None, show_format_button=arena_name is not None,
+    )
+    await interaction.followup.send(view=card, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
 
 async def announce_onboarding_welcome(client: discord.Client, member: discord.Member) -> None:

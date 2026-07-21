@@ -27,8 +27,9 @@ from bot.models import (
 )
 from bot.services import pod_format
 from bot.services import pod_format_interest
+from bot.services import pod_signals
 from bot.services.pod_schedule import highest_event_number
-from bot.services.pod_slot import next_collision_index
+from bot.services.pod_slot import next_collision_index, pod_display_name
 from bot.services.sesh_parser import NUM_RE
 from bot.slug import disambiguate_slug, slugify
 
@@ -459,6 +460,27 @@ def event_member_interests_sync(event_id: str) -> tuple[tuple[str, ...], ...]:
         return tuple(tuple(pod_format_interest.normalize(interest)) for interest in rows)
 
 
+def event_signal_crowd_sync(event_id: str) -> list[str]:
+    """Discord ids of everyone gathered on the signal that created this pod — Yes and Maybe alike,
+    since the pre-start window is exactly when a roster member may choose a second table's seat
+    instead. Empty for pods with no signal (sesh pods), which never carry a format tally."""
+    with SessionLocal() as session:
+        signal = session.execute(
+            select(PodSignal).where(PodSignal.event_id == event_id)
+        ).scalar_one_or_none()
+        if signal is None:
+            return []
+        rows = session.execute(
+            select(PodSignalMember.discord_user_id)
+            .where(
+                PodSignalMember.signal_id == signal.id,
+                PodSignalMember.rsvp.in_((pod_signals.RSVP_YES, pod_signals.RSVP_MAYBE)),
+            )
+            .order_by(PodSignalMember.created_at)
+        ).scalars().all()
+        return list(rows)
+
+
 def get_format_interests(session: Session, discord_id: str) -> list[str]:
     """The player's standing draft-format preference, empty when unset or the player has no row yet."""
     stored = session.execute(
@@ -639,24 +661,36 @@ def build_table_session(session: Session, source_session_id: str, table_index: i
     return _session_id_off_base(session, base)
 
 
-def record_table_event(session: Session, *, source_event_id: str) -> PodDraftEvent:
-    """Insert a kind='tournament' table cloned from `source_event_id` — same set, format,
-    pairings, seating, and event date, but its own Draftmancer session and no sesh RSVP. The roster
-    arrives from the new lobby. `discord_thread_id` is a placeholder the caller overwrites once the
-    thread exists (as record_mock_event does)."""
+def record_table_event(session: Session, *, source_event_id: str, format_code: str | None = None) -> PodDraftEvent:
+    """Insert a kind='tournament' table cloned from `source_event_id` — same pairings, seating, and
+    event date, but its own Draftmancer session and no sesh RSVP. The roster arrives from the new
+    lobby. `discord_thread_id` is a placeholder the caller overwrites once the thread exists (as
+    record_mock_event does). By default the table keeps the source's format and the ` - Table N`
+    lineage name; a `format_code` differing from the source repoints set, label, and set id, and the
+    table is named as its own pod of that format instead."""
     source = session.get(PodDraftEvent, source_event_id)
     if source is None:
         raise ValueError(f"source pod event {source_event_id} not found")
+    code = (format_code or source.set_code or "").upper()
+    same_format = code == (source.set_code or "").upper()
     base_name = table_base_name(source.name)
     table_index = next_table_index(session, base_name)
     session_id = build_table_session(session, source.draftmancer_session, table_index)
+    if same_format:
+        name = f"{base_name} - Table {table_index}"
+        set_id, set_code, format_label = source.set_id, source.set_code, source.format_label
+    else:
+        name = dedupe_event_name(session, pod_display_name(code, source.event_time))
+        set_id = _lookup_set_id(session, code)
+        set_code = code
+        format_label = pod_format.label_for(code)
     event = PodDraftEvent(
         event_date=source.event_date,
         event_time=datetime.now(timezone.utc),
-        set_id=source.set_id,
-        set_code=source.set_code,
-        format_label=source.format_label,
-        name=f"{base_name} - Table {table_index}",
+        set_id=set_id,
+        set_code=set_code,
+        format_label=format_label,
+        name=name,
         draftmancer_session=session_id,
         discord_thread_id="pending",
         sesh_message_id=None,
@@ -670,14 +704,34 @@ def record_table_event(session: Session, *, source_event_id: str) -> PodDraftEve
     return event
 
 
-def preview_table_target_sync(source_event_id: str) -> tuple[str, int] | None:
-    """(base name, next table index) for the table claim card, or None when the source is gone."""
+def dedupe_event_name(session: Session, base: str) -> str:
+    """`base`, or `base #N` when an event of that name already exists — two format tables opened off
+    different pods in the same slot would otherwise collide on the slot-derived name."""
+    names = session.execute(
+        select(PodDraftEvent.name).where(PodDraftEvent.name.ilike(f"{base}%"))
+    ).scalars().all()
+    if base not in names:
+        return base
+    return f"{base} #{next_collision_index(names)}"
+
+
+class TableTarget(NamedTuple):
+    source_name: str
+    table_index: int
+    set_code: str | None
+    event_time: datetime
+
+
+def preview_table_target_sync(source_event_id: str) -> TableTarget | None:
+    """What the table claim card needs to render before anything is inserted: the source's base name
+    and next table index for lineage naming, plus its set and event time so a format-preset card can
+    show the name the table will materialize under. None when the source is gone."""
     with SessionLocal() as session:
         source = session.get(PodDraftEvent, source_event_id)
         if source is None:
             return None
         base = table_base_name(source.name)
-        return base, next_table_index(session, base)
+        return TableTarget(base, next_table_index(session, base), source.set_code, source.event_time)
 
 
 def draftmancer_url_for(session_id: str, user_name: str | None = None) -> str:

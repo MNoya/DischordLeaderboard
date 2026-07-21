@@ -5,13 +5,14 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from bot.commands.pod_table import ACTIVE_TABLE_VIEWS, TableClaimView
+from bot.commands.pod_table import ACTIVE_TABLE_VIEWS, TableClaimView, _format_offer_handoff
 from bot.models import MagicSet, PodDraftEvent
 from bot.services.pod_drafts import (
     next_table_index,
     record_table_event,
     table_base_name,
 )
+from bot.services.pod_slot import pod_display_name
 
 
 def _seed_source(session, *, name="MSH Pod Draft #8", set_code="MSH", pairing="swiss", seating="leaderboard"):
@@ -94,6 +95,43 @@ def test_table_off_a_table_bases_on_the_original_pod(session):
     assert table_three.name == "MSH Pod Draft #8 - Table 3"
 
 
+def test_format_table_materializes_as_its_own_pod(session):
+    source = _seed_source(session)
+    fin = MagicSet(code="FIN", name="Final Fantasy", start_date=date(2025, 6, 10))
+    session.add(fin)
+    session.flush()
+
+    table = record_table_event(session, source_event_id=source.id, format_code="FIN")
+
+    assert table.name == pod_display_name("FIN", source.event_time)
+    assert " - Table" not in table.name
+    assert table.set_code == "FIN"
+    assert table.set_id == fin.id
+    assert table.format_label is None
+    assert table.pairing_mode == source.pairing_mode
+    assert _session_base(table.draftmancer_session) == "LLU-MSH-D8-T2"
+
+
+def test_format_table_matching_the_source_set_keeps_lineage_naming(session):
+    source = _seed_source(session)
+
+    table = record_table_event(session, source_event_id=source.id, format_code="msh")
+
+    assert table.name == "MSH Pod Draft #8 - Table 2"
+    assert table.set_id == source.set_id
+
+
+def test_colliding_format_table_names_gain_an_index(session):
+    source = _seed_source(session)
+    session.add(MagicSet(code="FIN", name="Final Fantasy", start_date=date(2025, 6, 10)))
+    session.flush()
+
+    first = record_table_event(session, source_event_id=source.id, format_code="FIN")
+    second = record_table_event(session, source_event_id=source.id, format_code="FIN")
+
+    assert second.name == f"{first.name} #2"
+
+
 @pytest.fixture
 def clean_table_registry():
     ACTIVE_TABLE_VIEWS.clear()
@@ -145,6 +183,28 @@ def test_superseded_card_ignores_further_claims(clean_table_registry):
 
     assert view.claims == {}
     interaction.response.defer.assert_awaited_once()
+
+
+def test_format_offer_handoff_carries_unseated_claims(clean_table_registry):
+    view, _ = _claim_card()
+    view.format_code = "FIN"
+    view.claims = {11: "Ava", 12: "Bram", 13: "Cara"}
+    asyncio.run(view.activate())
+
+    code, carried = _format_offer_handoff("src-1", seated_ids={"12"})
+
+    assert code == "FIN"
+    assert carried == [(11, "Ava"), (13, "Cara")]
+
+
+def test_format_offer_handoff_ignores_plain_and_settled_cards(clean_table_registry):
+    plain, _ = _claim_card()
+    asyncio.run(plain.activate())
+    assert _format_offer_handoff("src-1", seated_ids=set()) == (None, [])
+
+    plain.format_code = "FIN"
+    plain.materialized = True
+    assert _format_offer_handoff("src-1", seated_ids=set()) == (None, [])
 
 
 def test_materialized_table_deregisters_from_the_table_registry(clean_table_registry):

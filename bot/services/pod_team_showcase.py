@@ -21,6 +21,7 @@ import discord
 from discord import ui
 
 from bot.services import pod_swiss, pod_team
+from bot.services.pod_active import notify_card_phase
 from bot.services.pod_drafts import normalize_player_name
 from bot.services.pod_team_board import load_team_board_data
 from bot.services.pod_team_flow import (
@@ -119,15 +120,27 @@ async def maybe_post_team_championship(manager: "PodDraftManager", *, force: boo
     )
     manager.champion_announced = True
     try:
-        await target.send(view=view)
+        posted = await target.send(view=view)
         await asyncio.to_thread(mark_championship_posted_sync, event_id)
         log.info(f"[TEAM] champion.posted event={event_id} forced={force} missing={incomplete}")
     except Exception:
         manager.champion_announced = False
         log.warning(f"[TEAM] champion.post_error event={event_id}", exc_info=True)
         return
+    manager.card_result_line = _team_result_line(standings, teams)
+    manager.card_result_url = posted.jump_url
+    notify_card_phase(manager.bot, event_id)
     if not force and manager.championship_task is not None and not manager.championship_task.done():
         manager.championship_task.cancel()
+
+
+def _team_result_line(standings, teams: dict[str, str]) -> str:
+    """The scheduled card's final status for a team pod, mirroring the championship headline."""
+    a_wins, b_wins = team_scores(standings, teams)
+    winner = pod_team.team_winner(a_wins, b_wins)
+    if winner is None:
+        return "🤝 Team draft ends in a draw"
+    return f"🏆 {pod_team.team_label(winner)} wins the draft {max(a_wins, b_wins)}-{min(a_wins, b_wins)}"
 
 
 def build_team_championship_view(

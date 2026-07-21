@@ -48,7 +48,7 @@ from bot.services.lobby_embed import (
     render_ready_check_progress,
 )
 from bot.services import pod_format
-from bot.services.pod_active import ACTIVE_POD_MANAGERS
+from bot.services.pod_active import ACTIVE_POD_MANAGERS, notify_card_phase
 from bot.services.pod_pairing_select import pairing_label
 from bot.services.pod_seating_select import seating_mode_label
 from bot.services import pod_format_poll
@@ -71,6 +71,7 @@ from bot.services.pod_drafts import (
     apply_seat_indexes,
     attach_arena_alias,
     event_member_rankings_sync,
+    event_signal_crowd_sync,
     full_arena_handle,
     normalize_player_name,
     classify_lobby_names,
@@ -117,6 +118,7 @@ _RESTART_READY_MIN_PLAYERS = 2
 _SEEDING_REFRESH_HOOK = None
 _SEEDING_REPOST_HOOK = None
 _SECOND_TABLE_HOOK = None
+_FORMAT_TABLE_HOOK = None
 _CARD_CLOSE_HOOK = None
 _CARD_CANCEL_HOOK = None
 _CARD_REFRESH_HOOK = None
@@ -170,6 +172,20 @@ def notify_second_table_offer(bot, event_id: str) -> None:
     seated roster is locked; the offer itself decides whether enough players are left over to bother."""
     if _SECOND_TABLE_HOOK is not None:
         asyncio.create_task(_SECOND_TABLE_HOOK(bot, event_id))
+
+
+def set_format_table_hook(callback) -> None:
+    """The table layer registers its format-preset table offer here, for the same reason as the
+    second-table hook: the tally lives in this module, the claim card in the command module."""
+    global _FORMAT_TABLE_HOOK
+    _FORMAT_TABLE_HOOK = callback
+
+
+def notify_format_table_offer(bot, event_id: str, code: str, supporter_ids: list[str]) -> None:
+    """Post the format-preset second-table offer (no-op if unset). Fired when the format tally first
+    shows `code` can seat a table while table 1 keeps a full pod."""
+    if _FORMAT_TABLE_HOOK is not None:
+        asyncio.create_task(_FORMAT_TABLE_HOOK(bot, event_id, code, supporter_ids))
 
 
 def set_seeding_refresh_hook(callback) -> None:
@@ -293,6 +309,7 @@ class PodDraftManager:
         self.team_vote_size = 0
         self.format_poll_message: "discord.Message | None" = None
         self.format_poll_offered = False
+        self.format_table_offered = False
         self.scheduled_start: datetime | None = None
         self._last_seating_signature: tuple[str, ...] | None = None
         self.standings_message = None
@@ -304,10 +321,13 @@ class PodDraftManager:
         self.champion_announced = False
         self.trophy_hype_posted = False
         self.champion_announcement_message = None
+        self.card_result_line: str | None = None
+        self.card_result_url: str | None = None
         self.champion_discord_ids: set[str] = set()
         self.championship_task: asyncio.Task | None = None
         self._end_watchdog_task: asyncio.Task | None = None
         self._start_ping_delete_task: asyncio.Task | None = None
+        self._start_ping_message: "discord.Message | None" = None
         self.sio = socketio.AsyncClient(reconnection=False, logger=False, engineio_logger=False)
         self.sio.on("connect", self._on_connect)
         self.sio.on("disconnect", self._on_disconnect)
@@ -1046,6 +1066,8 @@ class PodDraftManager:
         self._cancel_end_watchdog()
         await self._mark_socket_status("draft_done")
         notify_card_close(self.bot, self.event_id)
+        notify_card_phase(self.bot, self.event_id)
+        await self._retire_start_ping()
         self.tournament_roster = self._snapshot_tournament_roster()
         log.info(
             f"[DRAFT] roster_snapshot event={self.event_id} roster_size={len(self.tournament_roster)}"
@@ -1383,6 +1405,7 @@ class PodDraftManager:
         await asyncio.sleep(_RESTART_SETTLE_S)
         self.draft_logs = {}
         await self._mark_socket_status("connected")
+        notify_card_phase(self.bot, self.event_id)
         await self.refresh_lobby_now()
         ready_err = await self.initiate_ready_check(
             thread, initiated_by=initiated_by, min_players=_RESTART_READY_MIN_PLAYERS,
@@ -1432,6 +1455,7 @@ class PodDraftManager:
         await self._retire_format_poll_offer()
         await asyncio.to_thread(self._seed_participants_at_draft_start)
         notify_second_table_offer(self.bot, self.event_id)
+        notify_card_phase(self.bot, self.event_id)
         if self.pairing_mode == "team":
             await assign_teams_at_draft_start(self)
         await self.refresh_lobby_now()
@@ -1754,14 +1778,17 @@ class PodDraftManager:
         rankings = await asyncio.to_thread(event_member_rankings_sync, self.event_id)
         votes = _seed_votes_from_rankings(options, rankings)
         self.format_poll_offered = True
+        embed = pod_format_poll.build_format_poll_embed(options, votes)
         try:
             self.format_poll_message = await thread.send(
-                embed=pod_format_poll.build_format_poll_embed(options, votes),
+                embed=embed,
                 view=pod_format_poll.build_format_poll_view(self.event_id, options),
             )
         except discord.HTTPException:
             self.format_poll_offered = False
             log.warning(f"[FORMAT_POLL] offer_post_failed event={self.event_id}", exc_info=True)
+            return
+        await _maybe_offer_format_table(self.bot, self.event_id, embed)
 
     async def adopt_existing_format_poll(self) -> None:
         """Take over a format poll card already posted before this manager existed, or left by a restart, so
@@ -1778,6 +1805,8 @@ class PodDraftManager:
         self.format_poll_message = card
         self.format_poll_offered = True
         log.info(f"[FORMAT_POLL] adopted existing card event={self.event_id}")
+        if card.embeds:
+            await _maybe_offer_format_table(self.bot, self.event_id, card.embeds[0])
 
     async def _retire_format_poll_offer(self) -> None:
         """Delete the poll card so its buttons can't outlive the offer. Best-effort."""
@@ -2041,8 +2070,9 @@ class PodDraftManager:
 
     async def _announce_start_in_channel(self, thread) -> None:
         """Post the sesh-style 'starting now' embed into the coordination channel so the community sees
-        a pod fired without opening the thread, then self-delete it after a fixed window. Skipped for mock
-        drafts, which never touch the shared channel."""
+        a pod fired without opening the thread. Deleted the moment picks end; the fixed window is the
+        fallback for a draft that never reaches endDraft. Skipped for mock drafts, which never touch
+        the shared channel."""
         if self.kind == "mock" or thread is None:
             return
         channel = self.bot.get_channel(settings.pod_draft_channel_id)
@@ -2061,6 +2091,7 @@ class PodDraftManager:
         except discord.HTTPException:
             log.warning(f"[DRAFT] start_announce.post_error event={self.event_id}", exc_info=True)
             return
+        self._start_ping_message = message
         self._start_ping_delete_task = asyncio.create_task(self._delete_start_ping(message))
 
     async def _delete_start_ping(self, message) -> None:
@@ -2068,6 +2099,19 @@ class PodDraftManager:
         try:
             await asyncio.sleep(window_s)
         except asyncio.CancelledError:
+            return
+        with contextlib.suppress(discord.HTTPException):
+            await message.delete()
+
+    async def _retire_start_ping(self) -> None:
+        """Delete the channel's 'Draft started!' embed the moment picks end — its job is pulling
+        spectators into a live draft, and it reads stale once the matches begin."""
+        if self._start_ping_delete_task is not None and not self._start_ping_delete_task.done():
+            self._start_ping_delete_task.cancel()
+        self._start_ping_delete_task = None
+        message = self._start_ping_message
+        self._start_ping_message = None
+        if message is None:
             return
         with contextlib.suppress(discord.HTTPException):
             await message.delete()
@@ -2342,7 +2386,8 @@ def _seed_votes_from_rankings(
 async def handle_format_poll_click(interaction: "discord.Interaction", event_id: str, code: str) -> None:
     """Toggle the clicker's vote for one format option against the card message. Multiple choice, so a
     player can back several formats. The card message is the tally, so this works whether or not a live
-    manager backs the pod. Serialized per pod so rapid clicks can't race.
+    manager backs the pod. Serialized per pod so rapid clicks can't race. Every applied vote re-checks
+    whether a concrete set has earned the second-table offer.
 
     Registered as the poll-button handler at import, keeping pod_format_poll free of a manager import."""
     lock = _format_poll_click_locks.setdefault(event_id, asyncio.Lock())
@@ -2361,6 +2406,8 @@ async def handle_format_poll_click(interaction: "discord.Interaction", event_id:
             await interaction.response.edit_message(embed=new_embed, view=new_view)
         except discord.HTTPException:
             log.warning(f"[FORMAT_POLL] edit_failed event={event_id}", exc_info=True)
+            return
+        await _maybe_offer_format_table(interaction.client, event_id, new_embed)
 
 
 def _apply_format_poll_write_ins(
@@ -2418,6 +2465,29 @@ async def handle_format_poll_add(
             await interaction.response.send_message("Could not update the poll.", ephemeral=True)
             return
         await interaction.response.send_message(f"Voted for {', '.join(applied)}.", ephemeral=True)
+        await _maybe_offer_format_table(interaction.client, event_id, new_embed)
+
+
+async def _maybe_offer_format_table(bot: "commands.Bot", event_id: str, embed: "discord.Embed") -> None:
+    """Fire the format-preset second-table offer the first time the tally supports one. The gate is
+    cannibalization-proof: `pick_second_table` splits the gathered crowd by their votes and requires
+    both resulting tables at the fire threshold. Once per pod — the offer card posted, whatever happens
+    to it afterward, votes never move it (re-offer policy is deliberately deferred to prod data)."""
+    manager = ACTIVE_POD_MANAGERS.get(event_id)
+    if manager is None or manager.format_table_offered or manager.drafting or manager.draft_complete:
+        return
+    votes = pod_format_poll.votes_from_embed(embed)
+    options = pod_format_poll.options_from_embed(embed)
+    crowd = await asyncio.to_thread(event_signal_crowd_sync, event_id)
+    pick = pod_format_poll.pick_second_table(options, votes, crowd, (manager.set_code or "").upper())
+    if pick is None:
+        return
+    manager.format_table_offered = True
+    log.info(
+        f"[FORMAT_TABLE] gate passed event={event_id} code={pick.code} explicit={pick.explicit_votes} "
+        f"split={len(pick.latest_team)}/{len(pick.flashback_team)}"
+    )
+    notify_format_table_offer(bot, event_id, pick.code, pick.flashback_team)
 
 
 pod_format_poll.register_format_poll_click_handler(handle_format_poll_click)
