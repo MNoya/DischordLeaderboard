@@ -41,6 +41,7 @@ from bot.services import bot_log as bot_log_mod
 from bot.services.lobby_embed import (
     LobbyReadyButtonView,
     build_drafting_view,
+    build_not_ready_view,
     event_title,
     ready_cancel_notice,
     render as render_lobby_embed,
@@ -975,7 +976,9 @@ class PodDraftManager:
             )
             if state == "drafting":
                 progress_view = build_drafting_view(self.spectate_url)
-            elif state in ("complete", "notready"):
+            elif state == "notready":
+                progress_view = build_not_ready_view()
+            elif state == "complete":
                 progress_view = None
             else:
                 progress_view = LobbyReadyButtonView(

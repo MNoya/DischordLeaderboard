@@ -62,7 +62,7 @@ class LobbyReadyButtonView(discord.ui.View):
             ))
 
     @discord.ui.button(
-        label="Ready Check", style=discord.ButtonStyle.success,
+        label="Start Ready Check", style=discord.ButtonStyle.success,
         custom_id=READY_CHECK_CUSTOM_ID,
     )
     async def ready_check(
@@ -185,7 +185,7 @@ def ready_cancel_notice(kind: str, *, detail: str | None = None, retry_url: str 
     roster-change 'joined'/'left' carrying `detail`. The call-out links to the lobby card's Ready
     Check button when `retry_url` is given. Shared by the live cancel path and the `!test` preview so
     the copy never drifts."""
-    ready_check = f"[Ready Check]({retry_url})" if retry_url else "Ready Check"
+    ready_check = f"[Start Ready Check]({retry_url})" if retry_url else "Start Ready Check"
     headline = "⚠️ **Ready Check timed out!**" if kind == "timeout" else \
         f"⚠️ **Ready Check canceled!** {detail}"
     return f"{headline}\n🔄 Click **{ready_check}** when all players are present"
@@ -225,7 +225,7 @@ class ReadyCheckUnlinkedConfirmView(discord.ui.View):
         targets = await self.manager.unrecognized_lobby_names()
         if not targets:
             await interaction.response.edit_message(
-                content="Everyone's linked now. Press Ready Check again to start.", view=None,
+                content="Everyone's linked now. Press Start Ready Check again.", view=None,
             )
             return
         manager = self.manager
@@ -286,6 +286,15 @@ async def open_settings_panel(interaction: discord.Interaction) -> None:
         view=await build_pod_settings_view(interaction.client, event_id, is_owner=is_owner),
         ephemeral=True,
     )
+
+
+def build_not_ready_view() -> discord.ui.View:
+    """Controls on the collapsed Not Ready card so the retry doesn't require scrolling back to the
+    pinned lobby card. The resume button carries the persistent Ready Check custom_id, so clicks
+    dispatch through the registered view."""
+    view = LobbyReadyButtonView()
+    view.ready_check.label = "Resume Ready Check"
+    return view
 
 
 def build_drafting_view(spectate_url: str | None) -> discord.ui.View | None:
@@ -473,8 +482,8 @@ def render_ready_check_progress(
     falls through to a neutral header otherwise.
 
     A declined card ('notready', including the `superseded` stale variant) collapses to two lines —
-    `❌ <name> is Not Ready` + `✅ ready_count/total_count Ready` — with no link, buttons, or roster,
-    since the retry controls live on the main lobby card.
+    `❌ <name> is Not Ready` + `✅ ready_count/total_count Ready` — with no link or roster. The live
+    declined card carries the Resume Ready Check + Settings view; a superseded card carries none.
     """
     title = event_title(set_code, title)
     roster = _seat_rows(in_session)
@@ -534,7 +543,7 @@ def ready_status_banner(
     if state == "complete":
         return [f"### {emojis.get('draftmancer')} Draft complete!"], discord.Color.green()
     if state == "notready":
-        retry = "! Click Ready Check to retry" if retry_hint else ""
+        retry = "! Click Start Ready Check to retry" if retry_hint else ""
         reason = f"`{decliner_name}` is Not Ready" if decliner_name else (cancel_reason or "Ready Check canceled")
         lines = [f"### ❌ {reason}{retry}"]
         if initiated_by:

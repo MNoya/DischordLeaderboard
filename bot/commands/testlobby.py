@@ -23,6 +23,7 @@ from bot.services.lobby_embed import (
     LobbyReadyButtonView,
     ReadyCheckUnlinkedConfirmView,
     build_drafting_view,
+    build_not_ready_view,
     ready_cancel_notice,
     ready_check_unlinked_text,
     register_force_start_preview,
@@ -726,7 +727,7 @@ class _ReadyCheckPreviewView(discord.ui.View):
     def __init__(self) -> None:
         super().__init__(timeout=900)
 
-    @discord.ui.button(label="Ready Check", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="Start Ready Check", style=discord.ButtonStyle.success)
     async def ready_check(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await interaction.response.send_message(
             ready_check_unlinked_text([_UNLINKED_SEAT]),
@@ -939,7 +940,8 @@ def _build(state: str) -> tuple[discord.Embed, discord.ui.View | None]:
 def _build_ready_progress(state: str) -> list[tuple[discord.Embed, discord.ui.View | None]]:
     """Preview the ready-check progress card(s) for the states where one is posted in prod. Returns a
     list: `superseded` mirrors a real retry — the collapsed old receipt plus the fresh active check
-    below it — every other state is a single card. Buttons live only on an active check."""
+    below it — every other state is a single card. An active check carries the ready-check buttons,
+    a declined card the resume + Settings pair; a superseded receipt carries none."""
     if state not in _PROGRESS_STATES:
         return []
     in_session = list(_LINKED_EIGHT)
@@ -961,7 +963,7 @@ def _build_ready_progress(state: str) -> list[tuple[discord.Embed, discord.ui.Vi
             decliner_name=decliner, cancel_reason=_preview_cancel_reason(state),
             initiated_by=initiator, ready_count=3, total_count=8, **_preview_settings_labels(),
         )
-        return [(embed, None)]
+        return [(embed, build_not_ready_view())]
     if state == "superseded":
         collapsed = render_ready_check_progress(
             _THREAD_NAME, in_session, state="notready",
