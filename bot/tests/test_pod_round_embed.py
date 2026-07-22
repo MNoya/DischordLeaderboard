@@ -12,6 +12,7 @@ from bot.services.pod_tournament import (
     MatchResultSelect,
     RoundResultsView,
     _round_header,
+    _waiting_footer_line,
     mark_trophy_match,
     round_embed,
     round_groups,
@@ -183,16 +184,12 @@ def _waiting_placeholder(pending: int = 1, prev_round: int = 1, url: str | None 
             "winner_name": None, "score": None}
 
 
-def _footer_lines(desc: str) -> list[str]:
-    return [ln for ln in desc.splitlines() if ln.startswith("-#")]
-
-
 def test_bracket_footer_present_only_when_slots_wait():
     waiting = [_ms("Aria", "Caedmon", "1-0", "1-0"), _waiting_placeholder()]
     settled = [_ms("Aria", "Caedmon", "1-0", "0-1")]
 
-    assert len(_footer_lines(round_embed(2, waiting).description)) == 1
-    assert _footer_lines(round_embed(2, settled).description) == []
+    assert _waiting_footer_line(waiting) is not None
+    assert _waiting_footer_line(settled) is None
 
 
 def test_bracket_footer_links_previous_round_when_url_known():
