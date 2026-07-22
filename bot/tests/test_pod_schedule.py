@@ -2,6 +2,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
+from bot.services import pod_format_interest as fi
 from bot.services.pod_schedule import (
     CARD_LEAD_HOURS,
     CREATE_DESCRIPTION,
@@ -332,6 +333,23 @@ def test_underfill_message_past_the_aim_still_reads_ready_not_a_negative_count()
 
     assert "-1" not in body
     assert "ready" in body.lower()
+
+
+def test_underfill_message_branches_by_yes_plus_maybe_without_crashing():
+    event_time = datetime(2026, 6, 24, 0, 0, tzinfo=timezone.utc)
+    interests = [(fi.LATEST,)] * 7 + [(fi.FLASHBACK,)] * 3 + [(fi.LATEST, fi.FLASHBACK)] * 4 + [()] * 2
+
+    plain = build_underfill_message("Pod", 9, 8, event_time, "url", maybe_count=6)
+    overflow = build_underfill_message(
+        "Pod", 10, 8, event_time, "url", maybe_count=6, composition=fi.composition(interests),
+    )
+    overflow_no_signal = build_underfill_message(
+        "Pod", 10, 8, event_time, "url", maybe_count=6, composition=fi.composition([None] * 16),
+    )
+
+    assert plain and overflow and overflow_no_signal
+    assert overflow != plain
+    assert overflow_no_signal != overflow
 
 
 @pytest.mark.parametrize(

@@ -39,6 +39,7 @@ from bot.services.ping_roles import (
     slot_grant_ping,
     spec_named,
 )
+from bot.services.pod_reminder_copy import SLOT_FIRE_PING
 from bot.services.pod_roles import find_role, grant_pod_drafters, grant_role
 from bot.services.pod_signals import (
     ALL_BUCKETS,
@@ -72,7 +73,6 @@ POLL_CLOSED_LABEL = "🔒 Signups Closed - Opens Daily 11AM ET"
 MARKER_CLOSED = "Closed"
 MSG_POLL_INACTIVE = "This poll is no longer active."
 MSG_SLOT_CLOSED = "This slot is closed."
-POLL_FIRE_ANNOUNCE = "{hello}**{name}** starts <t:{unix}:R> {manat} {mention}"
 LAUNCHER_CLOSE_LOOKBACK_DAYS = 3
 
 
@@ -663,7 +663,7 @@ def _slot_removed_embed(bucket_key: str) -> discord.Embed:
     return discord.Embed(title=MSG_SLOT_REMOVED.format(name=name), color=discord.Color.red())
 
 
-def _fire_announcement(guild: discord.Guild | None, name: str, slot_time: datetime) -> str | None:
+def _fire_announcement(guild: discord.Guild | None, slot_time: datetime) -> str | None:
     """The @slot creation announcement carried on a fired slot's card, or None to post the card
     silently. Numberless, so it never goes stale as players join — the card's roster carries the count.
     Gated to a fire close to the draft time: an earlier fire posts silently and the underfill checks
@@ -674,13 +674,7 @@ def _fire_announcement(guild: discord.Guild | None, name: str, slot_time: dateti
     role = find_role(guild, slot_role_name_for_event_time(slot_time) or "")
     if role is None:
         return None
-    return POLL_FIRE_ANNOUNCE.format(
-        hello=emojis.prefix("chordoHello"),
-        name=name,
-        unix=int(slot_time.timestamp()),
-        manat=emojis.get("manat"),
-        mention=role.mention,
-    )
+    return SLOT_FIRE_PING.format(unix=int(slot_time.timestamp()), mention=role.mention)
 
 
 async def _launch_slot(bot: commands.Bot, state, message_id: str) -> None:
@@ -695,7 +689,7 @@ async def _launch_slot(bot: commands.Bot, state, message_id: str) -> None:
     channel = _poll_channel(bot)
     event_id = None
     if isinstance(channel, discord.TextChannel):
-        announcement = _fire_announcement(channel.guild, name, slot_time)
+        announcement = _fire_announcement(channel.guild, slot_time)
         event_id = await post_scheduled_card(
             bot, channel, set_code=set_code, event_time=slot_time, name=name, preseed_yes=signups,
             ping_role=False, announcement=announcement,

@@ -12,11 +12,10 @@ the buttons work before any live manager exists.
 """
 from __future__ import annotations
 
-import random
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 
 import discord
 from discord import ui
@@ -25,25 +24,22 @@ from bot import emojis
 from bot.config import settings
 from bot.discord_helpers import NBSP
 from bot.services import pod_format_interest as fi
-from bot.sets import ALL_SETS, active_set_code, set_name_for
+from bot.sets import active_set_code, set_name_for
 
 
 FORMAT_POLL_PROMPT = "🗳️ Format Vote!"
 FORMAT_POLL_GATHERING = "Vote for anything you would play"
+FORMAT_POLL_CLOSED = "Voting closed. The tally below is final"
 ANY_FLASHBACK_CODE = "FLASH"
 ANY_FLASHBACK_LABEL = "Any Flashback"
 LATEST_BUTTON_LABEL = "Latest"
-FLASHBACK_YEAR_OFFSETS = (1, 2, 3, 4)
-FLASHBACK_OPTION_COUNT = len(FLASHBACK_YEAR_OFFSETS) + 1
-EXCLUDED_FLASHBACK_CODES = frozenset({"SPM", "FDN", "CUBE", "PEASANT"})
 ADDED_BY_TEMPLATE = "[_added by {name}_]"
-YEAR_TAG_TEMPLATE = "[_{year}_]"
 VOTE_BUTTON_PREFIX = "podformatpoll"
 ADD_BUTTON_PREFIX = "podformataddfmt"
 ADD_BUTTON_LABEL = "Add Format"
 ADD_BUTTON_EMOJI_NAME = "plus"
 ADD_BUTTON_EMOJI_FALLBACK = "➕"
-ADD_MODAL_TITLE = "Add a Format"
+ADD_MODAL_TITLE = "Add Format(s)"
 ADD_MODAL_FIELD = "Set Codes"
 ADD_MODAL_PLACEHOLDER = "e.g. DSK FIN MH3"
 ROW_WIDTH = 5
@@ -62,39 +58,24 @@ _ADDED_BY_RE = re.compile(r"\[_added by (.+?)_\]")
 
 def build_options(when: datetime | None = None) -> list[str]:
     """The default options the poll opens with: the latest set so "stay on the latest set" is always a
-    choice, the Any-Flashback signal, and one random flashback set per era — one from each of the last four
-    years and one from everything older — so the spread reaches across the game's history instead of
-    clustering. Randomized per open, but a restart adopts the existing card and reads its options back off
-    the embed, so the shuffle never desyncs a live poll."""
-    latest = active_set_code(when)
-    options = [latest, ANY_FLASHBACK_CODE]
-    options.extend(_flashback_year_picks(exclude={latest}, when=when))
-    return options
+    choice, and the Any-Flashback signal. Every other set enters the tally by a player's vote or write-in,
+    and the highest-voted set floats to the top by ``order_options``."""
+    return [active_set_code(when), ANY_FLASHBACK_CODE]
 
 
-def _flashback_year_picks(exclude: set[str], when: datetime | None = None) -> list[str]:
-    """One random set per flashback era: the year Year-1 through Year-4 buckets plus a final pick from every
-    set older than that. A bucket with no fresh set is skipped, so the poll opens with up to five picks."""
-    now = when or datetime.now(timezone.utc)
-    chosen = set(exclude) | EXCLUDED_FLASHBACK_CODES
-    picks: list[str] = []
-    for offset in FLASHBACK_YEAR_OFFSETS:
-        target_year = now.year - offset
-        candidates = [s.code for s in ALL_SETS if s.start_date.year == target_year and s.code not in chosen]
-        pick = _sample_one(candidates)
-        if pick is not None:
-            picks.append(pick)
-            chosen.add(pick)
-    oldest_bucket_year = now.year - FLASHBACK_YEAR_OFFSETS[-1]
-    rest = [s.code for s in ALL_SETS if s.start_date.year < oldest_bucket_year and s.code not in chosen]
-    pick = _sample_one(rest)
-    if pick is not None:
-        picks.append(pick)
-    return picks
-
-
-def _sample_one(candidates: list[str]) -> str | None:
-    return random.choice(candidates) if candidates else None
+def order_options(options: list[str], votes: dict[str, list[str]]) -> list[str]:
+    """The card order: the latest set first and the Any-Flashback signal second, both pinned, then every
+    other option by descending vote count so the best-voted set sits right below them, ties keeping their
+    current card order."""
+    if not options:
+        return []
+    latest = options[0]
+    pinned = [latest]
+    if ANY_FLASHBACK_CODE in options:
+        pinned.append(ANY_FLASHBACK_CODE)
+    rest = [code for code in options if code not in pinned]
+    rest.sort(key=lambda code: len(votes.get(code, [])), reverse=True)
+    return pinned + rest
 
 
 def option_display_name(code: str) -> str:
@@ -155,6 +136,14 @@ def rerender_gathering(
     return fresh
 
 
+def close_format_poll_embed(embed: discord.Embed) -> discord.Embed:
+    """The tally frozen when the draft starts: the same fields, the description swapped to the closed note so
+    the final vote stays on the thread instead of the card being deleted."""
+    fresh = discord.Embed.from_dict(embed.to_dict())
+    fresh.description = FORMAT_POLL_CLOSED
+    return fresh
+
+
 def _set_options(
     embed: discord.Embed, options: list[str], votes: dict[str, list[str]], adders: dict[str, str] | None = None,
 ) -> None:
@@ -179,23 +168,9 @@ def _option_name(code: str, adder: str | None = None) -> str:
         label = f"{_emoji_prefix(code)}[{code}]"
         if name and name != code:
             label = f"{label} {name}"
-        year_tag = _flashback_year_tag(code)
-        if year_tag:
-            label = f"{label} {year_tag}"
     if adder:
         label = f"{label} {ADDED_BY_TEMPLATE.format(name=adder)}"
     return label
-
-
-def _flashback_year_tag(code: str) -> str | None:
-    """The italic year credit for a flashback pick, mirroring the write-in credit: the set's release year
-    when it is not the current year, so each older option reads as the era it comes from. The latest set and
-    any same-year option carry none."""
-    current_year = datetime.now(timezone.utc).year
-    for seed in ALL_SETS:
-        if seed.code == code and seed.start_date.year != current_year:
-            return YEAR_TAG_TEMPLATE.format(year=seed.start_date.year)
-    return None
 
 
 def _emoji_prefix(code: str) -> str:
@@ -503,4 +478,22 @@ def build_format_poll_view(event_id: str, options: list[str]) -> ui.View:
     view.add_item(AddFormatButton(event_id))
     for code, label_override, row in format_poll_button_layout(options):
         view.add_item(FormatPollButton(event_id, code, label_override=label_override, row=row))
+    return view
+
+
+def build_closed_format_poll_view(options: list[str]) -> ui.View:
+    """The card's buttons after the draft starts: the same layout, every button disabled, so the final tally
+    stays readable but no further votes land."""
+    view = ui.View(timeout=None)
+    view.add_item(ui.Button(
+        style=discord.ButtonStyle.secondary, emoji=add_button_emoji(), label=ADD_BUTTON_LABEL,
+        disabled=True, row=0,
+    ))
+    for code, label_override, row in format_poll_button_layout(options):
+        label, emoji = option_button_face(code)
+        if label_override is not None:
+            label = label_override
+        view.add_item(ui.Button(
+            style=discord.ButtonStyle.secondary, label=label, emoji=emoji, disabled=True, row=row,
+        ))
     return view

@@ -33,7 +33,7 @@ from bot.commands.pod_rsvp import (
     refresh_scheduled_card,
 )
 from bot.commands.pod_table import offer_second_table
-from bot.commands.test_group import test_group
+from bot.commands.test_group import HALL_OF_FAME, test_group
 from sqlalchemy import select
 
 from bot.config import PRODUCTION_GUILD_ID
@@ -58,6 +58,7 @@ from bot.services.pod_signals import RSVP_YES, SCHEDULE_TZ, poll_buckets_for, sl
 from bot.services.pod_team_vote import find_team_vote_card, rerender_gathering
 from bot.sets import active_set_code
 from bot.tasks.pod_daily_poll import PodPollView, build_poll_embed, close_launcher_for_date, post_launcher
+from bot.tasks.pod_thread_cleanup import archive_inactive_threads
 from bot.tasks.pod_draft_reminder import fire_roster_reminder
 
 
@@ -184,21 +185,23 @@ async def setup(bot: commands.Bot) -> None:
         """Owner-only. Clear this guild's on-demand pod signals (poll / queue / scheduled) and the
         bot-native pods they staged so the `!test` surfaces start from a clean slate — every slot goes
         back to lazy — delete the bot's scheduled events off the Events calendar, and strip the
-        auto-granted pod ping roles. Finalized played pods and sesh pods are kept, as is any live lobby."""
+        auto-granted pod ping roles. Finalized played pods and sesh pods are kept, as is any live lobby.
+        Threads with no activity for over 3 hours are archived; live conversations stay open."""
         if ctx.guild is None or ctx.guild.id == PRODUCTION_GUILD_ID:
             await ctx.send("`!test reset` is disabled on the production guild — run it in a test server.")
             return
         guild_id = str(ctx.guild.id)
         counts = await asyncio.to_thread(pod_launch.reset_ondemand_signals_sync, guild_id)
         purged = await purge_native_events(ctx.guild, ctx.bot.user.id) if ctx.guild else 0
+        threads_archived = await archive_inactive_threads(ctx.guild)
         roles_removed = 0
         if isinstance(ctx.author, discord.Member):
             roles_removed = await strip_pod_roles(ctx.author)
             forget_welcome(ctx.author.id)
         await ctx.send(
             f"Cleared on-demand pod signals: {counts['signals']} signals, {counts['members']} members, "
-            f"{counts['events']} bot-native pods. Removed {purged} scheduled events from the calendar and "
-            f"stripped {roles_removed} of your pod roles."
+            f"{counts['events']} bot-native pods. Removed {purged} scheduled events from the calendar, "
+            f"archived {threads_archived} inactive threads, and stripped {roles_removed} of your pod roles."
         )
 
     @test_group.command(name="welcome")
@@ -365,10 +368,7 @@ _POLL_SEED_FIRST = [
 ]
 _POLL_SEED_REST = [[fi.LATEST], [fi.FLASHBACK], [fi.LATEST, fi.FLASHBACK], []]
 
-_ROSTER_NAMES = (
-    "Finkel", "LSV", "The Hump", "Paolo", "Shota", "Reid", "Chapin", "JED",
-    "Nassif", "Huey", "Kibler", "Levy", "Nakamura", "Karsten", "Juza", "Owen",
-)
+_ROSTER_NAMES = HALL_OF_FAME
 
 
 def _roster_name(index: int) -> str:

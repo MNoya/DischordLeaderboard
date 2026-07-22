@@ -120,6 +120,7 @@ class RsvpResult:
     joined: bool
     closed: bool
     yes_changed: bool = False
+    roster_interests: dict[str, list[tuple[str, tuple[str, ...]]]] | None = None
 
 
 @dataclass(frozen=True)
@@ -327,17 +328,21 @@ def scheduled_pick_timer_for_event_sync(event_id: str) -> int | None:
 def set_rsvp(
     session: Session, message_id: str, discord_user_id: str, display_name: str, rsvp: str,
 ) -> RsvpResult | None:
-    """Three-state RSVP on a scheduled card: clicking a state moves the member there; clicking the
-    state they already hold is a no-op, so a double-click can't drop them off the card. `rsvp` in the
-    result is the recorded state; `joined` is True only when the member freshly entered Yes. Scheduled
-    signals are born fired and never expire, so only a stray expired row refuses. Does not commit."""
+    """RSVP on a scheduled card: Yes or Maybe move the member there; No removes their signup entirely,
+    since No is not a tracked roster. Clicking the state they already hold is a no-op. `rsvp` in the
+    result is the recorded state, None once removed; `joined` is True only when the member freshly
+    entered Yes. Scheduled signals are born fired and never expire, so only a stray expired row
+    refuses. Does not commit."""
     signal = _scheduled_signal_by_surface(session, message_id)
     if signal is None:
         return None
     if signal.status == pod_signals.STATUS_EXPIRED:
         rosters = _members_by_rsvp(session, signal.id)
         yes_count = len(rosters[pod_signals.RSVP_YES])
-        return RsvpResult(_state(signal, yes_count), rosters, rsvp=None, joined=False, closed=True)
+        return RsvpResult(
+            _state(signal, yes_count), rosters, rsvp=None, joined=False, closed=True,
+            roster_interests=_members_by_rsvp_with_interest(session, signal.id),
+        )
 
     existing = session.execute(
         select(PodSignalMember).where(
@@ -347,25 +352,31 @@ def set_rsvp(
     ).scalar_one_or_none()
     was_yes = existing is not None and existing.rsvp == pod_signals.RSVP_YES
     joined = False
-    recorded: str | None = rsvp
-    if existing is None:
-        session.add(PodSignalMember(
-            signal_id=signal.id, discord_user_id=discord_user_id, display_name=display_name, rsvp=rsvp,
-            format_interest=get_format_interests(session, discord_user_id),
-        ))
-        signal.last_activity_at = datetime.now(timezone.utc)
-        joined = rsvp == pod_signals.RSVP_YES
-    elif existing.rsvp != rsvp:
-        joined = rsvp == pod_signals.RSVP_YES
-        existing.rsvp = rsvp
-        existing.display_name = display_name
+    if rsvp == pod_signals.RSVP_NO:
+        recorded: str | None = None
+        if existing is not None:
+            session.delete(existing)
+    else:
+        recorded = rsvp
+        if existing is None:
+            session.add(PodSignalMember(
+                signal_id=signal.id, discord_user_id=discord_user_id, display_name=display_name, rsvp=rsvp,
+                format_interest=get_format_interests(session, discord_user_id),
+            ))
+            signal.last_activity_at = datetime.now(timezone.utc)
+            joined = rsvp == pod_signals.RSVP_YES
+        elif existing.rsvp != rsvp:
+            joined = rsvp == pod_signals.RSVP_YES
+            existing.rsvp = rsvp
+            existing.display_name = display_name
     session.flush()
     rosters = _members_by_rsvp(session, signal.id)
+    roster_interests = _members_by_rsvp_with_interest(session, signal.id)
     yes_count = len(rosters[pod_signals.RSVP_YES])
     yes_changed = was_yes != (recorded == pod_signals.RSVP_YES)
     return RsvpResult(
         _state(signal, yes_count), rosters, rsvp=recorded, joined=joined, closed=False,
-        yes_changed=yes_changed,
+        yes_changed=yes_changed, roster_interests=roster_interests,
     )
 
 
@@ -848,6 +859,18 @@ def rsvp_rosters_sync(message_id: str) -> dict[str, list[str]] | None:
         return _members_by_rsvp(session, signal.id)
 
 
+def rsvp_rosters_with_interest_sync(
+    message_id: str,
+) -> dict[str, list[tuple[str, tuple[str, ...]]]] | None:
+    """Interest-carrying twin of `rsvp_rosters_sync` for the card render, so the roster can group by
+    format. None when no surface matches."""
+    with SessionLocal() as session:
+        signal = _scheduled_signal_by_surface(session, message_id)
+        if signal is None:
+            return None
+        return _members_by_rsvp_with_interest(session, signal.id)
+
+
 def scheduled_event_for_message_sync(message_id: str) -> str | None:
     """The pod event behind an RSVP surface, from the card's or the mirror's message id."""
     with SessionLocal() as session:
@@ -1026,8 +1049,6 @@ async def open_ondemand_lobby(bot: commands.Bot, event_id: str) -> None:
             event.socket_status = "reminded"
             session.commit()
 
-    await clear_underfill_nudge(bot, event_id)
-
     maybe_roster = await asyncio.to_thread(maybe_roster_for_event_sync, event_id)
     recipients = (
         [(did, name, "yes") for did, name in roster]
@@ -1149,8 +1170,11 @@ async def cancel_event_card(event_id: str) -> None:
     """Retire a canceled pod's card: grey it, stamp it canceled, and drop its buttons on both the
     channel card and the thread mirror. Fired from `cancel_pod_event` before the event row is deleted,
     so the card surfaces still resolve; a no-op for pods without a card."""
+    if _bot is None:
+        return
+    await clear_underfill_nudge(_bot, event_id)
     surfaces = await asyncio.to_thread(event_card_surfaces_sync, event_id)
-    if surfaces is None or _bot is None:
+    if surfaces is None:
         return
     channel_id, message_id, thread_id, thread_message_id = surfaces
     await _mark_card_canceled(int(channel_id), int(message_id))
@@ -1442,6 +1466,22 @@ def _members_by_rsvp(session: Session, signal_id: str) -> dict[str, list[str]]:
     rosters: dict[str, list[str]] = {state: [] for state in pod_signals.RSVP_STATES}
     for state, name in rows:
         rosters.setdefault(state, []).append(name)
+    return rosters
+
+
+def _members_by_rsvp_with_interest(
+    session: Session, signal_id: str,
+) -> dict[str, list[tuple[str, tuple[str, ...]]]]:
+    """Each member's (display name, format-interest codes) per RSVP state, so the card can group the
+    roster by format. Same rows as `_members_by_rsvp`, carrying the interest the member signed up with."""
+    rows = session.execute(
+        select(PodSignalMember.rsvp, PodSignalMember.display_name, PodSignalMember.format_interest)
+        .where(PodSignalMember.signal_id == signal_id)
+        .order_by(PodSignalMember.created_at)
+    ).all()
+    rosters: dict[str, list[tuple[str, tuple[str, ...]]]] = {state: [] for state in pod_signals.RSVP_STATES}
+    for state, name, interest in rows:
+        rosters.setdefault(state, []).append((name, tuple(interest or ())))
     return rosters
 
 

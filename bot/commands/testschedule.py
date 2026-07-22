@@ -1,7 +1,11 @@
 """Owner-only `!test` triggers for the pod-draft scheduler, each reusing the production path.
 
-`underfill` renders the scheduled-pod underfill nudge with sample numbers. `pollnudge` renders the
-launcher-slot nudge. `reminder` renders the roster reminder embed with sample rosters. `rolegrant`
+`reminders` posts every pod-chat reminder surface into the pod-draft-chat channel at once: the
+recruiting nudge across its states, the launcher slot nudge and fire ping, and each fired-record
+variant. `underfill`, `pollnudge`, `firenudge` and `overflow` render those same surfaces one at a time
+in the current channel, with arguments for targeted checks. `cardformat` renders the scheduled card
+with a mixed sample roster to eyeball the format split. `reminder` renders the roster reminder embed.
+`rolegrant`
 posts the auto-grant announcement embed so its look can be checked. The Monday schedule package itself
 is exercised through the real `/pod-schedule` command; the scheduled RSVP card through `!test rsvp`.
 """
@@ -12,14 +16,27 @@ from datetime import datetime, timedelta
 import discord
 from discord.ext import commands
 
-from bot.commands.test_group import test_group
+from bot.commands.pod_rsvp import build_rsvp_embed
+from bot.commands.test_group import HALL_OF_FAME, test_group
 from bot.config import settings
 from bot.services.ping_roles import PING_ROLES, build_grant_embed
-from bot.services.pod_roles import find_role
 from bot.services.pod_launch import ondemand_event_name_sync
-from bot.services.pod_schedule import SCHEDULE_TZ, build_underfill_message, slots_for_week
+from bot.services.pod_reminder_copy import SLOT_FIRE_PING
+from bot.services.pod_roles import find_role
+from bot.services.pod_schedule import (
+    SCHEDULE_TZ,
+    build_underfill_fired_message,
+    build_underfill_message,
+    slots_for_week,
+)
+from bot.services import pod_format_interest as fi
+from bot.services.pod_signals import RSVP_MAYBE, RSVP_YES, slot_role_name_for_event_time
 from bot.sets import active_set_code
-from bot.tasks.pod_draft_reminder import ROSTER_REMINDER_LEAD_MIN, build_roster_embed
+from bot.tasks.pod_draft_reminder import (
+    ROSTER_REMINDER_LEAD_MIN,
+    build_lobby_open_body,
+    build_roster_embed,
+)
 
 
 async def setup(bot: commands.Bot) -> None:
@@ -42,6 +59,65 @@ async def setup(bot: commands.Bot) -> None:
         threshold = settings.pod_signal_fire_threshold
         body = build_underfill_message(name, threshold - 1, threshold, slot, ctx.message.jump_url)
         await ctx.send(body, allowed_mentions=discord.AllowedMentions.none())
+
+    @test_group.command(name="firenudge")
+    @commands.is_owner()
+    async def test_firenudge(ctx: commands.Context) -> None:
+        """Owner-only. Post the launcher-slot fire ping for the next slot, so its wording can be checked
+        without waiting for a slot to graduate near game time. Does not actually ping the role."""
+        slot = _next_slot()
+        role = find_role(ctx.guild, slot_role_name_for_event_time(slot) or "") if ctx.guild else None
+        mention = role.mention if role is not None else "@Early Pod"
+        body = SLOT_FIRE_PING.format(unix=int(slot.timestamp()), mention=mention)
+        await ctx.send(body, allowed_mentions=discord.AllowedMentions.none())
+
+    @test_group.command(name="overflow")
+    @commands.is_owner()
+    async def test_overflow(ctx: commands.Context) -> None:
+        """Owner-only. Render the live second-table overflow nudge through the production builder, with
+        sample counts at the trigger boundary (10 Yes + 6 Maybe = 16) three hours out."""
+        event_time = datetime.now(SCHEDULE_TZ) + timedelta(hours=3)
+        interests = (
+            [(fi.LATEST,)] * 7 + [(fi.FLASHBACK,)] * 3 + [(fi.LATEST, fi.FLASHBACK)] * 4 + [()] * 2
+        )
+        body = build_underfill_message(
+            "MSH Jul 21 Early Pod", 10, settings.pod_draft_target_players, event_time,
+            ctx.message.jump_url, maybe_count=6, composition=fi.composition(interests),
+        )
+        await ctx.send(body, allowed_mentions=discord.AllowedMentions.none())
+
+    @test_group.command(name="reminders")
+    @commands.is_owner()
+    async def test_reminders(ctx: commands.Context) -> None:
+        """Owner-only. Post the whole pod reminder timeline in this channel, in the order a pod hits it,
+        each message through its production builder. Reviews the voice across every reminder surface in
+        one place. Each preview carries a small subtext label; none of them ping."""
+        await ctx.send("-# Pod reminder timeline. Constants live in `bot/services/pod_reminder_copy.py`")
+        for label, body, embed in _reminder_timeline(ctx):
+            await ctx.send(
+                content=f"-# {label}\n{body}" if body else f"-# {label}",
+                embed=embed, allowed_mentions=discord.AllowedMentions.none(),
+            )
+
+    @test_group.command(name="cardformat")
+    @commands.is_owner()
+    async def test_cardformat(ctx: commands.Context) -> None:
+        """Owner-only. Post the scheduled RSVP card through the production builder with a mixed sample
+        roster, so the live format-split layout can be eyeballed."""
+        event_time = datetime.now(SCHEDULE_TZ) + timedelta(hours=1)
+        names = iter(HALL_OF_FAME)
+        yes_interests = ((fi.LATEST,), (fi.LATEST, fi.FLASHBACK), (fi.FLASHBACK,), (fi.LATEST,), (), (fi.FLASHBACK,))
+        maybe_interests = ((fi.LATEST, fi.FLASHBACK), (fi.FLASHBACK,), (fi.LATEST,))
+        roster_interests = {
+            RSVP_YES: [(next(names), codes) for codes in yes_interests],
+            RSVP_MAYBE: [(next(names), codes) for codes in maybe_interests],
+        }
+        rosters = {state: [name for name, _ in members] for state, members in roster_interests.items()}
+        embed = build_rsvp_embed(
+            "MSH Jul 21 Late Pod", event_time, rosters, set_code=active_set_code(),
+            roster_interests=roster_interests,
+        )
+        await ctx.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
 
     @test_group.command(name="reminder")
     @commands.is_owner()
@@ -85,3 +161,44 @@ def _next_slot() -> datetime:
         if slot > now:
             return slot
     return candidates[-1]
+
+
+def _reminder_timeline(ctx: commands.Context) -> list[tuple[str, str | None, discord.Embed | None]]:
+    """The pod reminder timeline in lifecycle order, each entry built through its production builder with
+    sample numbers, as (label, body, embed). The recruiting nudge across its three states, the launcher
+    slot fire ping, the roster reminder embed, the lobby-open post, and the fired record. Each label
+    names the constant(s) in pod_reminder_copy.py so the copy can be edited straight from the preview."""
+    slot = _next_slot()
+    unix = int(slot.timestamp())
+    target = settings.pod_draft_target_players
+    url = ctx.message.jump_url
+    pod_name = "MSH Late Pod - Jul 21"
+
+    role = find_role(ctx.guild, slot_role_name_for_event_time(slot) or "") if ctx.guild else None
+    mention = role.mention if role is not None else "@Early Pod"
+    overflow_interests = (
+        [(fi.LATEST,)] * 7 + [(fi.FLASHBACK,)] * 3 + [(fi.LATEST, fi.FLASHBACK)] * 4 + [()] * 2
+    )
+    yes = list(HALL_OF_FAME[:5])
+    maybe = list(HALL_OF_FAME[5:7])
+    roster_embed = build_roster_embed(pod_name, slot, yes, maybe)
+
+    def text(const: str, desc: str, body: str) -> tuple[str, str | None, discord.Embed | None]:
+        return (f"`{const}` ({desc})", body, None)
+
+    return [
+        text("RECRUITING_NEEDS_MORE", "needs more",
+             build_underfill_message(pod_name, target - 2, target, slot, url)),
+        text("RECRUITING_READY", "target met",
+             build_underfill_message(pod_name, target, target, slot, url)),
+        text("RECRUITING_OVERFLOW + RECRUITING_OVERFLOW_SPLIT", "second table", build_underfill_message(
+            pod_name, 10, target, slot, url, maybe_count=6, composition=fi.composition(overflow_interests),
+        )),
+        text("SLOT_FIRE_PING", "launcher slot fires", SLOT_FIRE_PING.format(unix=unix, mention=mention)),
+        ("`ROSTER_REMINDER_TITLE` + `ROSTER_REMINDER_LINE` (T-60 reminder)", None, roster_embed),
+        text("LOBBY_OPEN + LOBBY_OPEN_HEADLINE", "Draftmancer link posted",
+             build_lobby_open_body("https://draftmancer.com/?session=Sample", "")),
+        text("DRAFT_STARTED", "Team Draft shows through the linked thread",
+             build_underfill_fired_message(pod_name, 8, url)),
+    ]
+

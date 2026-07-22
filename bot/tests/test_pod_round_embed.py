@@ -177,16 +177,28 @@ def test_deck_image_notice_is_round_one_only():
     assert "MTGA deck image" not in round_embed(2, states).description
 
 
-def test_bracket_waiting_slots_render_without_a_footer():
-    states = [
-        _ms("Aria", "Caedmon", "1-0", "1-0"),
-        {"placeholder": True, "label": "waiting on Round 1", "a_record": "0-1", "b_record": "0-1",
-         "winner_name": None, "score": None},
-    ]
+def _waiting_placeholder(pending: int = 1, prev_round: int = 1, url: str | None = None) -> dict:
+    return {"placeholder": True, "label": f"waiting on Round {prev_round}", "waiting_prev_round": prev_round,
+            "waiting_pending": pending, "waiting_prev_url": url, "a_record": "0-1", "b_record": "0-1",
+            "winner_name": None, "score": None}
 
-    desc = _norm(round_embed(2, states).description)
-    assert "waiting on Round 1" in desc  # the slot itself explains the wait
-    assert "unlock" not in desc.lower()  # no separate footer notice
+
+def _footer_lines(desc: str) -> list[str]:
+    return [ln for ln in desc.splitlines() if ln.startswith("-#")]
+
+
+def test_bracket_footer_present_only_when_slots_wait():
+    waiting = [_ms("Aria", "Caedmon", "1-0", "1-0"), _waiting_placeholder()]
+    settled = [_ms("Aria", "Caedmon", "1-0", "0-1")]
+
+    assert len(_footer_lines(round_embed(2, waiting).description)) == 1
+    assert _footer_lines(round_embed(2, settled).description) == []
+
+
+def test_bracket_footer_links_previous_round_when_url_known():
+    states = [_ms("Aria", "Caedmon", "1-0", "1-0"), _waiting_placeholder(url="https://discord.test/r1")]
+
+    assert "https://discord.test/r1" in round_embed(2, states).description
 
 
 def _ms(a: str, b: str, a_record: str = "0-0", b_record: str = "0-0", **extra) -> dict:

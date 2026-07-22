@@ -16,6 +16,14 @@ from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from bot import emojis
+from bot.services.pod_format_interest import flashback_emoji, latest_emoji
+from bot.services.pod_reminder_copy import (
+    DRAFT_STARTED,
+    RECRUITING_NEEDS_MORE,
+    RECRUITING_OVERFLOW,
+    RECRUITING_OVERFLOW_SPLIT,
+    RECRUITING_READY,
+)
 from bot.services.sesh_parser import NUM_RE
 from bot.sets import ALL_SETS
 
@@ -68,16 +76,6 @@ MSG_CHAMPIONSHIP_WEEK = (
 MSG_SEASON_OVER = (
     "🏁 That's a wrap on **{set_code}** — the champion's crowned and the season's done.\n"
     "Regular pods are paused until **{next_name}** drops <t:{unix}:R>."
-)
-
-MSG_UNDERFILL = (
-    "{hello}**{name}** looking for **{needed} more player{plural}** <t:{unix}:R> "
-    "- [**Sign up here**]({jump_url}) {manat}"
-)
-
-MSG_UNDERFILL_READY = (
-    "{hello}**{name}** is ready to draft <t:{unix}:R> "
-    "- [**Sign up here**]({jump_url}) {manat}"
 )
 
 SLOT_EMOJI_AMERICAS = "🌎"
@@ -375,30 +373,58 @@ def build_underfill_message(
     target: int,
     event_time: datetime,
     jump_url: str,
+    maybe_count: int = 0,
+    composition=None,
 ) -> str:
-    """Plain count-toward-target nudge copy, or the ready line once the aim is met. The ready line keeps
-    the signup link since the pod stays open past the aim. Never carries a role mention — pinging is the
-    caller's call."""
+    """Plain count-toward-target nudge copy; the ready line once the aim is met; or the overflow line
+    once Yes plus Maybe reach a second table's worth, which quantifies the RSVPs and the format split.
+    The link stays live since the pod stays open past the aim. Never carries a role mention — pinging
+    is the caller's call."""
+    name = short_event_name(thread_name)
+    unix = int(event_time.timestamp())
     needed = target - yes_count
-    if needed <= 0:
-        body = MSG_UNDERFILL_READY.format(
-            hello=emojis.prefix("chordoHello"),
-            name=short_event_name(thread_name),
-            unix=int(event_time.timestamp()),
-            jump_url=jump_url,
-            manat=emojis.get("manat"),
+    if needed > 0:
+        body = RECRUITING_NEEDS_MORE.format(
+            hello=emojis.prefix("chordoHello"), name=name, needed=needed,
+            plural="s" if needed != 1 else "", unix=unix, jump_url=jump_url, manat=emojis.get("manat"),
         )
         return body.rstrip()
-    body = MSG_UNDERFILL.format(
-        hello=emojis.prefix("chordoHello"),
-        name=short_event_name(thread_name),
-        needed=needed,
-        plural="s" if needed != 1 else "",
-        unix=int(event_time.timestamp()),
-        jump_url=jump_url,
+    if yes_count + maybe_count >= 2 * target:
+        return _underfill_overflow_message(name, unix, yes_count, maybe_count, jump_url, composition)
+    body = RECRUITING_READY.format(
+        hello=emojis.prefix("chordoHello"), name=name, unix=unix, jump_url=jump_url,
         manat=emojis.get("manat"),
     )
     return body.rstrip()
+
+
+def build_underfill_fired_message(name: str, player_count: int, thread_url: str) -> str:
+    """The terminal form of the recruiting nudge once the draft starts: a fired record linking the pod
+    thread. Carries no signup link, so `clear_underfill_nudge` cannot match it and a later cancel leaves
+    the record standing. A Team Draft shows through the linked thread, which the bot renames on lock, so
+    the copy stays one line for every pod."""
+    players = "players" if player_count != 1 else "player"
+    return DRAFT_STARTED.format(
+        hello=emojis.prefix("chordoHello"), name=short_event_name(name), count=player_count,
+        players=players, thread_url=thread_url, manat=emojis.get("manat"),
+    )
+
+
+def _underfill_overflow_message(name, unix, yes_count, maybe_count, jump_url, composition) -> str:
+    return RECRUITING_OVERFLOW.format(
+        hello=emojis.prefix("chordoHello"), name=name, unix=unix, yes=yes_count, maybe=maybe_count,
+        split=_overflow_split_clause(composition), jump_url=jump_url, manat=emojis.get("manat"),
+    ).rstrip()
+
+
+def _overflow_split_clause(composition) -> str:
+    """The format-preference tail on the overflow line, empty when no signup stated a preference."""
+    if composition is None or not composition.has_signal:
+        return ""
+    return RECRUITING_OVERFLOW_SPLIT.format(
+        latest=composition.latest_only, seticon=latest_emoji(),
+        flashback=composition.flashback_only, flashback_emoji=flashback_emoji(),
+    )
 
 
 def format_clock(slot_start: datetime) -> str:

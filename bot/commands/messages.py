@@ -29,13 +29,6 @@ MSG_MOCK_LOBBY_COUNTER = " 👥 {count}/8"
 MSG_LOBBY_FULL_PROMPT = "{count} Players locked in! Initiate Ready Check?"
 MSG_BOT_RECONNECTED = "🤖 Bot reconnected — back to managing the lobby."
 
-MSG_LOBBY_OPEN = (
-    "{draftmancer} {headline}\n"
-    "**Join the Draftmancer session:** <{url}>\n\n"
-    "Set your **Arena name** (like `YourName#12345`) as your Draftmancer name or use **Join Draft** "
-    "below for your personal link."
-    "{mentions}"
-)
 MSG_JOIN_DRAFT_BUTTON = "Join Draft"
 MSG_JOIN_LINE = (
     "Open this [**Draftmancer Link**](<{url}>) to join the draft as {identity}"
@@ -61,11 +54,7 @@ MSG_DM_PREF_ON_TITLE = "🔔 Draft DMs On"
 MSG_DM_PREF_ON_BODY = "You'll get your Draftmancer link by DM when a Pod Draft is ready"
 MSG_DM_PREF_OFF_TITLE = "🔕 Draft DMs Off"
 MSG_DM_PREF_OFF_BODY = "You won't get your Draftmancer link by DM anymore.\nRun `/roles` to manage your notifications."
-MSG_LOBBY_HEADLINE = "Lobby opened!"
 MSG_DRAFTMANCER_LINK_LEAD = "Draftmancer link will be posted {lead} minutes before."
-
-MSG_DRAFT_STARTED_ANNOUNCE = "{name} started!"
-MSG_DRAFT_STARTED_LINK = "[**Event Details**]({url})"
 
 MSG_POD_WELCOME = "### 👋 Welcome {user} to {pod_drafters}\n\n{grant}"
 MSG_ARENA_BAD_FORMAT = "❌ Expected a full MTG Arena handle: `ArenaID#12345`"

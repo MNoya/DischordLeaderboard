@@ -37,12 +37,19 @@ from bot.config import settings
 from bot.database import SessionLocal
 from bot.discord_helpers import resolve_pod_chat_channel
 from bot.models import PodDraftEvent, PodSignal
+from bot.services import pod_format_interest as fi
+from bot.services.pod_drafts import event_member_interests_sync
 from bot.services.pod_roles import find_role
-from bot.services.pod_schedule import build_underfill_message, short_event_name
+from bot.services.pod_draft_manager import set_underfill_fired_hook
+from bot.services.pod_schedule import (
+    build_underfill_fired_message,
+    build_underfill_message,
+    short_event_name,
+)
 from bot.services.pod_signals import KIND_SCHEDULED, STATUS_OPEN, slot_role_name_for_event_time
 from bot.services.pod_slot import pod_display_name
 from bot.sets import active_set_code
-from bot.tasks.pod_draft_reminder import event_rsvps, fetch_sesh_rsvps, register_underfill_clear
+from bot.tasks.pod_draft_reminder import event_rsvps, fetch_sesh_rsvps
 
 
 NUDGE_SEARCH_LIMIT = 100
@@ -57,7 +64,7 @@ def init_underfill(bot: commands.Bot) -> None:
     """Wire the bot reference so the APScheduler callbacks can dispatch Discord work."""
     global _bot
     _bot = bot
-    register_underfill_clear(clear_underfill_nudge)
+    set_underfill_fired_hook(mark_underfill_fired)
 
 
 def schedule_underfill_checks(scheduler, event_id: str, event_time: datetime, created_at: datetime) -> None:
@@ -151,6 +158,7 @@ async def fire_underfill(event_id: str, hours_before: int, resurface: bool = Fal
             log.info(f"fire_underfill: no scheduled card for event {event_id}; skipping")
             return
     yes_count = len(rsvps[0])
+    maybe_count = len(rsvps[1])
     target = settings.pod_draft_target_players
 
     channel = resolve_pod_chat_channel(_bot)
@@ -160,7 +168,8 @@ async def fire_underfill(event_id: str, hours_before: int, resurface: bool = Fal
 
     nudge = await _find_nudge(channel, jump_url)
 
-    body = build_underfill_message(name, yes_count, target, event_time, jump_url)
+    composition = await _overflow_composition(event_id, yes_count, maybe_count)
+    body = build_underfill_message(name, yes_count, target, event_time, jump_url, maybe_count, composition)
     if resurface and nudge is not None:
         await _safe_delete(nudge)
         nudge = None
@@ -232,20 +241,25 @@ async def refresh_underfill_nudge(bot: commands.Bot, sesh_message_id: str, yes_c
     await _sync_nudge(bot, loaded, _sesh_jump_url(str(sesh_message_id)), yes_count)
 
 
-async def refresh_underfill_nudge_for_event(bot: commands.Bot, event_id: str, yes_count: int) -> None:
-    """Signal-keyed twin of refresh_underfill_nudge, fed the Yes count by the RSVP card handler."""
+async def refresh_underfill_nudge_for_event(
+    bot: commands.Bot, event_id: str, yes_count: int, maybe_count: int = 0,
+) -> None:
+    """Signal-keyed twin of refresh_underfill_nudge, fed the Yes and Maybe counts by the RSVP card
+    handler. The format split on the overflow line is read only when the counts reach it."""
     loaded = await asyncio.to_thread(_load_event_by_id_for_nudge, event_id)
     if loaded is None:
         return
     jump_url = await asyncio.to_thread(_card_jump_url, event_id)
     if jump_url is None:
         return
-    await _sync_nudge(bot, loaded, jump_url, yes_count)
+    composition = await _overflow_composition(event_id, yes_count, maybe_count)
+    await _sync_nudge(bot, loaded, jump_url, yes_count, maybe_count, composition)
 
 
 async def clear_underfill_nudge(bot: commands.Bot, event_id: str) -> None:
-    """Delete the standing underfill nudge when the pod starts. Called from both lobby-open paths
-    (card-born `open_ondemand_lobby`, sesh-born `fire_reminder`). No-op when no nudge is up."""
+    """Delete a still-recruiting underfill nudge when its pod is canceled. A fired nudge carries no
+    signup link, so `_find_nudge` cannot match it and the fired record survives the cancel. No-op when
+    no recruiting nudge is up."""
     jump_url = await asyncio.to_thread(_jump_url_for_event, event_id)
     if jump_url is None:
         return
@@ -255,6 +269,27 @@ async def clear_underfill_nudge(bot: commands.Bot, event_id: str) -> None:
     nudge = await _find_nudge(channel, jump_url)
     if nudge is not None:
         await _safe_delete(nudge)
+
+
+async def mark_underfill_fired(
+    bot: commands.Bot, event_id: str, player_count: int, thread_url: str,
+) -> None:
+    """Flip the standing recruiting nudge to a fired record at draft start, keeping the recruiting hook
+    alive through the lobby-open window and leaving pod-chat a lightweight record of the pod firing.
+    No-op when no nudge is up."""
+    loaded = await asyncio.to_thread(_load_event_by_id_for_nudge, event_id)
+    signup_url = await asyncio.to_thread(_jump_url_for_event, event_id)
+    if loaded is None or signup_url is None:
+        return
+    name, _event_time, _status = loaded
+    channel = resolve_pod_chat_channel(bot)
+    if channel is None:
+        return
+    nudge = await _find_nudge(channel, signup_url)
+    if nudge is None:
+        return
+    body = build_underfill_fired_message(name, player_count, thread_url)
+    await _safe_edit(nudge, body)
 
 
 async def refresh_slot_nudge(bot: commands.Bot, signal_id: str) -> None:
@@ -293,6 +328,7 @@ async def clear_slot_nudge(bot: commands.Bot, signal_id: str) -> None:
 
 async def _sync_nudge(
     bot: commands.Bot, loaded: tuple[str, datetime, str], jump_url: str, yes_count: int,
+    maybe_count: int = 0, composition=None,
 ) -> None:
     name, event_time, status = loaded
     if status != "pending":
@@ -307,8 +343,17 @@ async def _sync_nudge(
         return
 
     target = settings.pod_draft_target_players
-    body = build_underfill_message(name, yes_count, target, event_time, jump_url)
+    body = build_underfill_message(name, yes_count, target, event_time, jump_url, maybe_count, composition)
     await _safe_edit(nudge, body)
+
+
+async def _overflow_composition(event_id: str, yes_count: int, maybe_count: int):
+    """The signup format-preference breakdown, read only when Yes plus Maybe reach a second table's
+    worth — the sole case the overflow line needs it — so a routine RSVP change skips the query."""
+    if yes_count + maybe_count < 2 * settings.pod_draft_target_players:
+        return None
+    interests = await asyncio.to_thread(event_member_interests_sync, event_id)
+    return fi.composition(interests)
 
 
 @dataclass(frozen=True)

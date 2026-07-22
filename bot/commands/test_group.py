@@ -13,6 +13,11 @@ from typing import Awaitable, Callable
 from discord.ext import commands
 
 
+HALL_OF_FAME = (
+    "Finkel", "LSV", "The Hump", "Paolo", "Shota", "Reid", "Chapin", "JED",
+    "Nassif", "Huey", "Kibler", "Levy", "Nakamura", "Karsten", "Juza", "Owen",
+)
+
 TestFallback = Callable[[commands.Context, str, str], Awaitable[None]]
 
 _fallback: TestFallback | None = None

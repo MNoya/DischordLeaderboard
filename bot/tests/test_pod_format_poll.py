@@ -1,7 +1,6 @@
 from datetime import datetime, timezone
 
 from bot.services import pod_format_poll as poll
-from bot.sets import ALL_SETS
 
 
 def _mentions(*ids: str) -> list[str]:
@@ -188,25 +187,34 @@ def test_normalize_write_ins_splits_on_spaces_and_commas():
     assert poll.normalize_write_ins("FIN not-a-code MH3") == ["FIN", "MH3"]
 
 
-def test_build_options_leads_with_latest_flashback_signal_then_one_set_per_era():
+def test_build_options_opens_with_only_latest_and_the_flashback_signal():
     when = datetime(2026, 7, 20, tzinfo=timezone.utc)
 
     options = poll.build_options(when)
 
-    assert options[0] == poll.active_set_code(when)
-    assert options[1] == poll.ANY_FLASHBACK_CODE
-    assert len(options) == len(set(options))
+    assert options == [poll.active_set_code(when), poll.ANY_FLASHBACK_CODE]
 
-    year_picks = options[2:]
-    years = [next(s for s in ALL_SETS if s.code == code).start_date.year for code in year_picks]
-    assert len(year_picks) == poll.FLASHBACK_OPTION_COUNT
-    assert years[:4] == [2025, 2024, 2023, 2022]
-    assert years[4] < 2022
+
+def test_order_options_floats_the_best_voted_set_below_latest_and_the_signal():
+    options = ["MSH", poll.ANY_FLASHBACK_CODE, "KHM", "FIN", "NEO"]
+    votes = {"KHM": _mentions("1"), "FIN": _mentions("2", "3", "4"), "NEO": _mentions("5", "6")}
+
+    ordered = poll.order_options(options, votes)
+
+    assert ordered == ["MSH", poll.ANY_FLASHBACK_CODE, "FIN", "NEO", "KHM"]
+
+
+def test_order_options_keeps_card_order_on_a_vote_tie():
+    options = ["MSH", poll.ANY_FLASHBACK_CODE, "KHM", "FIN"]
+    votes = {"KHM": _mentions("1"), "FIN": _mentions("2")}
+
+    ordered = poll.order_options(options, votes)
+
+    assert ordered == ["MSH", poll.ANY_FLASHBACK_CODE, "KHM", "FIN"]
 
 
 def test_button_layout_puts_latest_and_flashback_in_top_row_and_rest_below():
-    when = datetime(2026, 7, 20, tzinfo=timezone.utc)
-    options = poll.build_options(when)
+    options = ["MSH", poll.ANY_FLASHBACK_CODE, "FIN", "NEO"]
 
     layout = poll.format_poll_button_layout(options)
 

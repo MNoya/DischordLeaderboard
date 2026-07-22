@@ -34,9 +34,13 @@ from bot.commands.messages import MSG_DRAFT_STARTS, MSG_DRAFTMANCER_LINK_LEAD
 from bot.database import SessionLocal
 from bot.discord_helpers import NBSP
 from bot.services.lobby_embed import SettingsButton
+from sqlalchemy import select
+
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.models import PodDraftEvent
+from bot.services import pod_format_interest as fi
 from bot.services import pod_launch
+from bot.services.pod_tournament import champion_card_line
 from bot.services.ping_roles import (
     announce_pod_grant,
     auto_grant_spec_for_event,
@@ -72,11 +76,10 @@ POD_CAPACITY = 8
 CARD_INTRO = "{emoji} Please RSVP"
 MULTIPOD_NOTICE = "🔥 Keep signing up to fire a second table"
 CARD_STATUS_DRAFTING = "🎉 **Draft started!**"
-CARD_STATUS_PLAYING = "⚔️ **Matches in progress**"
+CARD_STATUS_PLAYING = "⚔️ **Matches In Progress**"
 TIME_LABEL = "Time"
 NATIVE_EVENT_SIGNUP = "**Event Details and Signup Link: {jump_url}**"
 RSVP_EMOJI = {RSVP_YES: "✅", RSVP_MAYBE: "🤷", RSVP_NO: "❌"}
-RSVP_WORDS = {RSVP_YES: "Yes", RSVP_MAYBE: "Maybe", RSVP_NO: "No"}
 RSVP_LABELS = {RSVP_YES: "Sign Up", RSVP_MAYBE: "Maybe", RSVP_NO: "Can't"}
 RSVP_CONFIRM_COLOR = {
     RSVP_YES: discord.Color.green(),
@@ -157,6 +160,7 @@ def build_rsvp_embed(
     name: str, event_time: datetime, rosters: dict[str, list[str]], role_time: datetime | None = None,
     description: str | None = None, set_code: str | None = None, team_draft: bool = False,
     status_line: str | None = None,
+    roster_interests: dict[str, list[tuple[str, tuple[str, ...]]]] | None = None,
 ) -> discord.Embed:
     """The RSVP surface. Time and the roster columns are embed fields so sesh's vertical breathing
     room comes for free. `role_time` keys the slot emoji; it defaults to `event_time` and callers
@@ -181,7 +185,7 @@ def build_rsvp_embed(
     )
     time_value = f"<t:{unix}:F> (<t:{unix}:R>) [[+]](<{calendar_url}>)"
     embed.add_field(name=TIME_LABEL, value=time_value, inline=False)
-    add_rsvp_fields(embed, rosters)
+    _add_roster_fields(embed, rosters, roster_interests)
     return embed
 
 
@@ -207,16 +211,60 @@ def google_calendar_url(name: str, event_time: datetime) -> str:
     return f"https://www.google.com/calendar/event?{query}"
 
 
-def add_rsvp_fields(embed: discord.Embed, rosters: dict[str, list[str]]) -> None:
-    for state in RSVP_STATES:
+_ATTENDANCE = ((RSVP_YES, "✅", "Yes"), (RSVP_MAYBE, "🤷", "Maybe"))
+
+
+def _add_roster_fields(
+    embed: discord.Embed, rosters: dict[str, list[str]],
+    roster_interests: dict[str, list[tuple[str, tuple[str, ...]]]] | None,
+) -> None:
+    """Yes / Maybe columns, grouped by format once a signup wants flashback, plain otherwise. No is
+    never a column — the ❌ button removes the signup instead of tracking a decline."""
+    if roster_interests is None:
+        _add_plain_rsvp_fields(embed, rosters)
+        return
+    yes = roster_interests.get(RSVP_YES) or []
+    maybe = roster_interests.get(RSVP_MAYBE) or []
+    comp = fi.composition([codes for _, codes in yes] + [codes for _, codes in maybe])
+    if comp.flashback_only > 0:
+        _add_format_split_fields(embed, yes, maybe)
+    else:
+        _add_plain_rsvp_fields(embed, rosters)
+
+
+def _add_plain_rsvp_fields(embed: discord.Embed, rosters: dict[str, list[str]]) -> None:
+    for state, emoji, word in _ATTENDANCE:
         names = rosters.get(state) or []
         value = "\n".join(f"> {name}" for name in names) if names else "-"
-        header = f"{RSVP_EMOJI[state]} {RSVP_WORDS[state]} ({len(names)})"
-        embed.add_field(name=header, value=value, inline=True)
+        embed.add_field(name=f"{emoji} {word} ({len(names)})", value=value, inline=True)
+
+
+def _add_format_split_fields(
+    embed: discord.Embed, yes: list[tuple[str, tuple[str, ...]]], maybe: list[tuple[str, tuple[str, ...]]],
+) -> None:
+    """Latest Set / Flashback columns, each sub-grouped into Yes then Maybe with counts. Flexible
+    players carry the ✦ marker and fill whichever team needs bodies, same as the launcher board."""
+    tagged = [(name, state, codes) for state, members in ((RSVP_YES, yes), (RSVP_MAYBE, maybe))
+              for name, codes in members]
+    latest_team, flashback_team = fi.format_teams([(entry, entry[2]) for entry in tagged])
+    for emoji, label, team in (
+        (fi.latest_emoji(), "Latest Set", latest_team), (fi.flashback_emoji(), "Flashback", flashback_team),
+    ):
+        blocks = []
+        for state, status_emoji, word in _ATTENDANCE:
+            members = [(name, codes) for (name, st, codes) in team if st == state]
+            if members:
+                lines = "\n".join(
+                    f"> {fi.FLEXIBLE_MARKER + ' ' if fi.is_flexible(codes) else ''}{name}"
+                    for name, codes in members
+                )
+                blocks.append(f"{status_emoji} {word} ({len(members)})\n{lines}")
+        embed.add_field(name=f"{emoji} {label} ({len(team)})", value="\n".join(blocks) or "-", inline=True)
 
 
 def refresh_roster_fields(
     embed: discord.Embed, rosters: dict[str, list[str]], status_line: str | None = None,
+    roster_interests: dict[str, list[tuple[str, tuple[str, ...]]]] | None = None,
 ) -> None:
     """Swap the roster columns on a fetched surface while keeping its Time field untouched, so a
     click never needs a DB round trip for the event row. The multi-pod notice toggles with the Yes
@@ -230,7 +278,7 @@ def refresh_roster_fields(
     embed.clear_fields()
     if time_field is not None:
         embed.add_field(name=TIME_LABEL, value=time_field.value, inline=False)
-    add_rsvp_fields(embed, rosters)
+    _add_roster_fields(embed, rosters, roster_interests)
     if status_line is not None:
         embed.description = _swap_status_line(embed.description or "", status_line)
     else:
@@ -256,7 +304,8 @@ def _swap_status_line(description: str, status_line: str) -> str:
 def card_status_line(event_id: str | None) -> str | None:
     """The lifecycle status the card shows in place of the RSVP intro once the pod is past gathering:
     Drafting during picks, Playing through the match rounds, the champion headline at the end. None
-    while RSVPs still matter — a draft restart lands back here and the card reverts on its own."""
+    while RSVPs still matter — a draft restart lands back here and the card reverts on its own. Reads
+    the live manager only; `resolve_card_status_line` adds the persisted fallback for finished pods."""
     if event_id is None:
         return None
     manager = ACTIVE_POD_MANAGERS.get(event_id)
@@ -269,6 +318,42 @@ def card_status_line(event_id: str | None) -> str | None:
     if manager.drafting:
         return CARD_STATUS_DRAFTING
     return None
+
+
+async def resolve_card_status_line(event_id: str | None) -> str | None:
+    """Card lifecycle status from the live manager while one exists, else rebuilt from the persisted
+    event row. Without this fallback a finished pod or a post-restart card drops back to the RSVP intro
+    once its manager is gone, since the status was memory-only."""
+    if event_id is None:
+        return None
+    if ACTIVE_POD_MANAGERS.get(event_id) is not None:
+        return card_status_line(event_id)
+    return await _persisted_card_status_line(event_id)
+
+
+async def _persisted_card_status_line(event_id: str) -> str | None:
+    row = await asyncio.to_thread(_load_card_lifecycle_sync, event_id)
+    if row is None:
+        return None
+    socket_status, championship_posted = row
+    if championship_posted or socket_status == "complete":
+        return await champion_card_line(event_id)
+    if socket_status == "draft_done":
+        return CARD_STATUS_PLAYING
+    if socket_status == "connected":
+        return CARD_STATUS_DRAFTING
+    return None
+
+
+def _load_card_lifecycle_sync(event_id: str) -> tuple[str, bool] | None:
+    with SessionLocal() as session:
+        row = session.execute(
+            select(PodDraftEvent.socket_status, PodDraftEvent.championship_posted_at)
+            .where(PodDraftEvent.id == event_id)
+        ).one_or_none()
+    if row is None:
+        return None
+    return row[0], row[1] is not None
 
 
 def slot_role_mention(guild: discord.Guild | None, event_time: datetime) -> str | None:
@@ -394,7 +479,10 @@ async def _handle_rsvp(interaction: discord.Interaction, state: str) -> None:
 
     if _is_card_surface(interaction.message):
         embed = interaction.message.embeds[0]
-        refresh_roster_fields(embed, result.rosters, card_status_line(result.state.event_id))
+        refresh_roster_fields(
+            embed, result.rosters, await resolve_card_status_line(result.state.event_id),
+            result.roster_interests,
+        )
         await interaction.response.edit_message(embed=embed)
     else:
         await interaction.response.defer(ephemeral=True)
@@ -423,15 +511,15 @@ async def _handle_rsvp(interaction: discord.Interaction, state: str) -> None:
             await interaction.followup.send(embed=await _confirmation_embed(result), ephemeral=True)
 
     if result.state.event_id is not None:
-        if result.rsvp in (RSVP_YES, RSVP_MAYBE):
-            await _set_thread_membership(interaction, result.state.event_id, join=True)
-        elif result.rsvp == RSVP_NO:
-            await _set_thread_membership(interaction, result.state.event_id, join=False)
-        await _sync_other_surfaces(interaction.client, result.state.event_id, message_id, result.rosters)
+        join = result.rsvp in (RSVP_YES, RSVP_MAYBE)
+        await _set_thread_membership(interaction, result.state.event_id, join=join)
+        await _sync_other_surfaces(
+            interaction.client, result.state.event_id, message_id, result.rosters, result.roster_interests,
+        )
         await _sync_native_event_tally(interaction.guild, message_id, result.rosters)
         yes = result.rosters.get(RSVP_YES) or []
         maybe = result.rosters.get(RSVP_MAYBE) or []
-        await refresh_underfill_nudge_for_event(interaction.client, result.state.event_id, len(yes))
+        await refresh_underfill_nudge_for_event(interaction.client, result.state.event_id, len(yes), len(maybe))
         await refresh_roster_reminder_for_event(interaction.client, result.state.event_id, yes, maybe)
         if result.yes_changed:
             await _refresh_launcher(interaction.client, result.state.slot_time)
@@ -534,6 +622,7 @@ async def _resolve_event_thread(bot: commands.Bot, event_id: str | None) -> disc
 
 async def _sync_other_surfaces(
     bot: commands.Bot, event_id: str, clicked_message_id: str, rosters: dict[str, list[str]],
+    roster_interests: dict[str, list[tuple[str, tuple[str, ...]]]] | None = None,
 ) -> None:
     """Re-render the channel card when a thread-side button was clicked. The card is the thread
     starter, so editing it updates the thread view too; the registered embed carries no card fields
@@ -544,11 +633,12 @@ async def _sync_other_surfaces(
     _, _, message_id, _ = card
     if message_id == clicked_message_id:
         return
-    await _render_channel_card(bot, event_id, rosters)
+    await _render_channel_card(bot, event_id, rosters, roster_interests)
 
 
 async def _render_channel_card(
     bot: commands.Bot, event_id: str, rosters: dict[str, list[str]],
+    roster_interests: dict[str, list[tuple[str, tuple[str, ...]]]] | None = None,
 ) -> None:
     card = await asyncio.to_thread(pod_launch.scheduled_card_ref_sync, event_id)
     if card is None:
@@ -564,7 +654,7 @@ async def _render_channel_card(
     if not _is_card_surface(message):
         return
     embed = message.embeds[0]
-    refresh_roster_fields(embed, rosters, card_status_line(event_id))
+    refresh_roster_fields(embed, rosters, await resolve_card_status_line(event_id), roster_interests)
     try:
         await message.edit(embed=embed)
     except discord.HTTPException:
@@ -585,7 +675,9 @@ def native_event_description(rosters: dict[str, list[str]], jump_url: str) -> st
     """The native event's body: a live RSVP tally over the card's link. Discord exposes no read/write
     interest API for a guild scheduled event, so this text is the only surface that can carry the
     counts the card holds."""
-    tally = " ".join(f"{RSVP_EMOJI[state]} {len(rosters.get(state) or [])}" for state in RSVP_STATES)
+    tally = " ".join(
+        f"{RSVP_EMOJI[state]} {len(rosters.get(state) or [])}" for state in (RSVP_YES, RSVP_MAYBE)
+    )
     return f"{tally}\n\n{NATIVE_EVENT_SIGNUP.format(jump_url=jump_url)}"
 
 
@@ -714,9 +806,10 @@ async def _edit_scheduled_card(bot: commands.Bot, event_id: str, name: str, even
     if ref is None:
         return
     _, channel_id, message_id, slot_time = ref
-    rosters = await asyncio.to_thread(pod_launch.rsvp_rosters_sync, message_id)
-    if rosters is None:
+    roster_interests = await asyncio.to_thread(pod_launch.rsvp_rosters_with_interest_sync, message_id)
+    if roster_interests is None:
         return
+    rosters = {state: [name for name, _ in members] for state, members in roster_interests.items()}
     channel = await fetch_channel(bot, channel_id)
     if channel is None:
         return
@@ -727,7 +820,8 @@ async def _edit_scheduled_card(bot: commands.Bot, event_id: str, name: str, even
         message = await channel.fetch_message(int(message_id))
         await message.edit(embed=build_rsvp_embed(
             name, event_time, rosters, slot_time, description, set_code=set_code,
-            team_draft=pairing_mode == "team", status_line=card_status_line(event_id)))
+            team_draft=pairing_mode == "team", status_line=await resolve_card_status_line(event_id),
+            roster_interests=roster_interests))
     except discord.HTTPException:
         log.warning(f"could not edit scheduled card {message_id}", exc_info=True)
 
@@ -757,6 +851,29 @@ async def refresh_card_phase(bot: commands.Bot, event_id: str) -> None:
     name, event_time, _status, _thread_id, _native_event_id, _created_at = loaded
     await _edit_scheduled_card(bot, event_id, name, event_time)
     await _attach_result_link(bot, event_id)
+
+
+HEAL_LOOKBACK_DAYS = 3
+
+
+async def heal_finished_cards(bot: commands.Bot) -> None:
+    """Re-render recently finished pods' channel cards on startup so any that reverted to the RSVP
+    intro while their manager was gone pick up the persisted status. No-op for pods without a card."""
+    event_ids = await asyncio.to_thread(_recent_finished_event_ids_sync)
+    for event_id in event_ids:
+        await refresh_card_phase(bot, event_id)
+
+
+def _recent_finished_event_ids_sync() -> list[str]:
+    cutoff = datetime.now(timezone.utc) - timedelta(days=HEAL_LOOKBACK_DAYS)
+    with SessionLocal() as session:
+        rows = session.execute(
+            select(PodDraftEvent.id).where(
+                PodDraftEvent.socket_status.in_(("connected", "draft_done", "complete")),
+                PodDraftEvent.event_time >= cutoff,
+            )
+        ).all()
+    return [row[0] for row in rows]
 
 
 RESULT_LINK_LABEL = "Championship Post"
@@ -854,7 +971,7 @@ async def _update_native_event(
 async def _refresh_live_messages(bot: commands.Bot, event_id: str) -> None:
     """The posted underfill nudge and roster reminder carry the old time; re-render them in place."""
     yes, maybe = await event_rsvps(event_id, None)
-    await refresh_underfill_nudge_for_event(bot, event_id, len(yes))
+    await refresh_underfill_nudge_for_event(bot, event_id, len(yes), len(maybe))
     await refresh_roster_reminder_for_event(bot, event_id, yes, maybe)
 
 

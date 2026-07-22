@@ -33,7 +33,7 @@ from bot.commands.messages import (
 )
 from bot.commands.pod_guide import render_pod_guide_embed_body
 from bot.database import SessionLocal
-from bot.discord_helpers import extract_avatar_hash, post_welcome, send_welcome
+from bot.discord_helpers import extract_avatar_hash, is_pod_coordination_channel, post_welcome, send_welcome
 from bot.services import pod_format_interest as fi
 from bot.services.pod_active_lobby import active_lobby_link_for
 from bot.services.pod_drafts import (
@@ -99,7 +99,7 @@ PING_ROLES: tuple[PingRole, ...] = (
         grant_when="on weekends", weekend_bucket_keys=("EVENING",),
     ),
     PingRole(POD_QUEUE_ROLE_NAME, "⚡", "Daily Draft Sign-Ups", color="#FFAC33"),
-    PingRole(fi.LATEST_SET_ROLE_NAME, "🆕", "Pods drafting the Latest Set", color="#FFFFFF"),
+    PingRole(fi.LATEST_SET_ROLE_NAME, "🆕", "Pods drafting the Latest Set", color="#e8e8e8"),
     PingRole(fi.FLASHBACK_ROLE_NAME, "flashback", "Pods drafting any Past Sets", color="#B0C4DE"),
 )
 
@@ -406,6 +406,7 @@ class _LinkArenaModal(discord.ui.Modal, title="Link Arena Handle"):
             MSG_ARENA_LINKED.format(
                 emoji=emojis.get("mtga"), mention=interaction.user.mention, arena_name=arena_name,
             ),
+            ephemeral=is_pod_coordination_channel(interaction.channel),
             allowed_mentions=discord.AllowedMentions(users=False, everyone=False, roles=False),
         )
         await _handoff_active_lobby_link(interaction)

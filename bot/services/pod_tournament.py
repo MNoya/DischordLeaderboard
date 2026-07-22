@@ -2358,6 +2358,30 @@ def _join_champion_names(names_with_colors: list[tuple[str, str | None]]) -> str
     return ", ".join(chunks[:-1]) + f", and {chunks[-1]}"
 
 
+def _load_champions_sync(event_id: str) -> list[tuple[str, str | None]]:
+    """(mention-or-name, deck colors) for the pod's placement-1 finishers, for rebuilding the card's
+    champion line without a live manager. Linked players render as a mention, others by display name."""
+    with SessionLocal() as session:
+        rows = session.execute(
+            select(PodDraftParticipant.display_name, PodDraftParticipant.deck_colors, DbPlayer.discord_id)
+            .join(DbPlayer, PodDraftParticipant.player_id == DbPlayer.id, isouter=True)
+            .where(PodDraftParticipant.event_id == event_id, PodDraftParticipant.placement == 1)
+        ).all()
+    champions: list[tuple[str, str | None]] = []
+    for display_name, deck_colors, discord_id in rows:
+        champions.append((f"<@{discord_id}>" if discord_id else display_name, deck_colors))
+    return champions
+
+
+async def champion_card_line(event_id: str) -> str | None:
+    """The 🏆 winner line for a finished pod, rebuilt from persisted placements so the scheduled card
+    can show it after the live manager is gone. None when the event has no recorded champion."""
+    champions = await asyncio.to_thread(_load_champions_sync, event_id)
+    if not champions:
+        return None
+    return f"🏆 {_format_champion_thread_callout(champions)}"
+
+
 def build_champion_announcement_view(
     standings: list[pod_swiss.Standing],
     *,
@@ -3866,11 +3890,18 @@ def format_reported_result(m: dict) -> str:
     return f"{winner_disp} wins {m['score']} vs {loser_disp}"
 
 
+def round_link_label(round_num: int, pairings_url: str | None = None) -> str:
+    """Bold round label, linked to that round's pairings message and underlined to signal the link
+    when the URL is known ('**[__Round 2__](url)**'); a bare bold label otherwise. Shared by the
+    per-result announcement and the waiting-slot footer so their round labels can't drift."""
+    if pairings_url:
+        return f"**[__Round {round_num}__]({pairings_url})**"
+    return f"**Round {round_num}**"
+
+
 def format_round_announcement(round_num: int, m: dict, pairings_url: str | None = None) -> str:
-    """The per-result thread announcement, round-labelled: '**[__Round 2__]** Marlo wins 2-1 vs Bob'. The
-    label links back to that round's pairings embed when its jump URL is known; the underline signals it."""
-    label = f"[__Round {round_num}__]({pairings_url})" if pairings_url else f"[Round {round_num}]"
-    return f"**{label}** {format_reported_result(m)}"
+    """The per-result thread announcement, round-labelled: '**[__Round 2__]** Marlo wins 2-1 vs Bob'."""
+    return f"{round_link_label(round_num, pairings_url)} {format_reported_result(m)}"
 
 
 def _match_line(m: dict, *, seat_label: str | None = None, show_arena: bool = False) -> str:
@@ -3990,6 +4021,19 @@ def _grouped_lines(round_num: int, match_states: list[dict]) -> list[str]:
     return lines
 
 
+def _waiting_footer_line(match_states: list[dict]) -> str | None:
+    """Subtext hint under a partial bracket round naming how many of the previous round's matches are
+    still unreported before the waiting slots pair up, linking to that round when its URL is known."""
+    for m in match_states:
+        pending = m.get("waiting_pending") if m.get("placeholder") else None
+        if not pending:
+            continue
+        noun = "Match" if pending == 1 else "Matches"
+        link = round_link_label(m["waiting_prev_round"], m.get("waiting_prev_url"))
+        return f"⏱️ **{pending}** {noun} Remaining in {link}"
+    return None
+
+
 def round_embed(round_num: int, match_states: list[dict]) -> discord.Embed:
     all_done = all(m["winner_name"] for m in match_states)
     if round_num == 1:
@@ -4001,6 +4045,9 @@ def round_embed(round_num: int, match_states: list[dict]) -> discord.Embed:
         title = _round_header(round_num, all_done)
         lines = _grouped_lines(round_num, match_states)
     lines = lines + _round_notice_lines(round_num, match_states)
+    footer = _waiting_footer_line(match_states)
+    if footer is not None:
+        lines = lines + ["", footer]
     return discord.Embed(
         title=title,
         description="\n".join(lines),
@@ -4089,8 +4136,9 @@ def bracket_placeholder_states(event_id: str, round_num: int, real: list[dict] |
     """Waiting-match states padding a bracket round to its full fixed slate, so the round always
     renders the same number of dropdowns. A known waiting player is named ('Alice vs 1-0'); a slot
     with no known side reads 'waiting on Round N' in the embed (the record comes from the group
-    header) and '1-1 Match waiting on Round N' in the dropdown (no header there). `real` is this
-    round's reportable matches."""
+    header) and '1-1 Match waiting on Round N' in the dropdown (no header there). Each state carries
+    the previous round's still-unreported count so the embed can footer 'how many matches remain
+    before these pairings are set'. `real` is this round's reportable matches."""
     if round_num < 2:
         return []
     if real is None:
@@ -4100,6 +4148,9 @@ def bracket_placeholder_states(event_id: str, round_num: int, real: list[dict] |
     players = [Player(id=n, name=n) for n in _load_pod_player_names(event_id)]
     completed = load_matches(event_id)
     displays = load_participant_displays(event_id)
+    prev_round = round_num - 1
+    prev_pending = bracket_pending_in_round(event_id, prev_round, len(players))
+    prev_url = _resolve_pairings_url(event_id, prev_round)
 
     def disp(name: str) -> str:
         return displays.get(normalize_player_name(name), {}).get("display_name") or name
@@ -4112,12 +4163,15 @@ def bracket_placeholder_states(event_id: str, round_num: int, real: list[dict] |
         elif a:
             label = dropdown_label = f"{disp(a)} vs {rec}"
         else:
-            label = f"waiting on Round {round_num - 1}"
-            dropdown_label = f"{rec} Match waiting on Round {round_num - 1}"
+            label = f"waiting on Round {prev_round}"
+            dropdown_label = f"{rec} Match waiting on Round {prev_round}"
         out.append({
             "placeholder": True,
             "label": label,
             "dropdown_label": dropdown_label,
+            "waiting_prev_round": prev_round,
+            "waiting_pending": prev_pending,
+            "waiting_prev_url": prev_url,
             "a_record": rec,
             "b_record": rec,
             "winner_name": None,

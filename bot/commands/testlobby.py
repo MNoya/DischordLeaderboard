@@ -24,7 +24,6 @@ from bot.services.lobby_embed import (
     ReadyCheckUnlinkedConfirmView,
     build_drafting_view,
     build_not_ready_view,
-    ready_cancel_notice,
     ready_check_unlinked_text,
     register_force_start_preview,
     register_settings_preview,
@@ -33,7 +32,7 @@ from bot.services.lobby_embed import (
 )
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.services.pod_deck_color import SubmitDeckView
-from bot.services.pod_draft_manager import PodDraftManager, start_manager
+from bot.services.pod_draft_manager import PodDraftManager, roster_change_detail, start_manager
 from bot.services.pod_drafts import draftmancer_url_for, player_arena_handle, seed_event_participants
 from bot.services.pod_join_button import build_join_view
 from bot.services.pod_link_dm import build_link_dm, format_thread_ref, send_lobby_link_dms, try_dm
@@ -732,12 +731,30 @@ class _FormatPollPreviewView(discord.ui.View):
         self.votes: dict[str, list[str]] = {code: [] for code in self.options}
         self.adders: dict[str, str] = {}
         self.poll_message: discord.Message | None = None
-        self.votes[pod_format_poll.ANY_FLASHBACK_CODE] = [name for _, name in _LINKED_EIGHT[0:4]]
-        seed_code = self.options[2] if len(self.options) > 2 else self.options[-1]
-        self.votes[seed_code] = [name for _, name in _LINKED_EIGHT[4:7]]
+        self._seed_demo_tally()
         self._rebuild()
 
+    def _seed_demo_tally(self) -> None:
+        """Prefill a mid-evening tally that shows every grouping case: a clear leader, a two-set tie sharing
+        one bar, and a run of unvoted sets sharing the closing bar. One set carries an "added by" credit so
+        the write-in attribution stays visible."""
+        names = [name for _, name in _LINKED_EIGHT]
+        self.votes[pod_format_poll.ANY_FLASHBACK_CODE] = [names[1], names[2], names[4]]
+        seeds = {
+            "FIN": [names[0], names[1], names[2], names[3]],
+            "ECL": [names[6], names[7]],
+            "TLA": [names[5]],
+            "SOS": [names[6]],
+            "MH3": [],
+            "WOE": [],
+        }
+        for code, voters in seeds.items():
+            self.options.append(code)
+            self.votes[code] = voters
+        self.adders["SOS"] = names[5]
+
     def _rebuild(self) -> None:
+        self.options = pod_format_poll.order_options(self.options, self.votes)
         self.clear_items()
         self.add_item(self._add_button())
         for code, label_override, row in pod_format_poll.format_poll_button_layout(self.options):
@@ -789,6 +806,7 @@ class _FormatPollPreviewView(discord.ui.View):
 
     async def _vote(self, interaction: discord.Interaction, code: str) -> None:
         pod_format_poll.toggle_vote(self.votes, self.options, interaction.user.display_name, code)
+        self._rebuild()
         await self.refresh(interaction)
 
 
@@ -970,22 +988,10 @@ def _preview_settings_labels() -> dict:
 def _preview_cancel_reason(state: str) -> str | None:
     """Representative cancel reasons matching the runtime paths: a mid-check join and a mid-check leave."""
     if state == "cancelled":
-        return f"`{_UNLINKED_SEAT}` joined the lobby"
+        return roster_change_detail([_UNLINKED_SEAT], "joined")
     if state == "left":
-        return f"`{_LINKED_EIGHT[4][0]}` left the lobby"
+        return roster_change_detail([_LINKED_EIGHT[4][0]], "left")
     return None
-
-
-def _ready_cancel_notice_previews(retry_url: str) -> list[str]:
-    """The thread lines posted when a ready check is called off, one per runtime path, through the
-    prod builder so the copy can't drift from what players actually see. `retry_url` links the
-    Ready Check call-out to the lobby card just above, mirroring the live cancel. A decline is not
-    included — it posts no thread line, only the card's Not Ready banner."""
-    return [
-        ready_cancel_notice("joined", detail=f"`{_UNLINKED_SEAT}` joined the lobby", retry_url=retry_url),
-        ready_cancel_notice("left", detail=f"`{_LINKED_EIGHT[4][0]}` left the lobby", retry_url=retry_url),
-        ready_cancel_notice("timeout", detail="timed out", retry_url=retry_url),
-    ]
 
 
 def _build(state: str) -> tuple[discord.Embed, discord.ui.View | None]:
@@ -1157,8 +1163,9 @@ async def setup(bot: commands.Bot) -> None:
         `formatpoll` shows the flashback format tally with a working button per option and prefilled
         votes — clicks toggle votes on the card, nothing locks.
         `ready` shows the active ready-check card; clicking its Force Start button previews the ephemeral
-        confirm dialog (no live pod needed). `readycancel` posts the lobby card plus the thread lines sent
-        when a check is called off — a mid-check join, a leave, and a timeout (a decline posts no line).
+        confirm dialog (no live pod needed). `readycancel` posts each way a check ends — a decline, a
+        roster-change join, and a timeout — as the progress card plus (for the non-decline cases) the
+        thread notice, so the resume surfaces can be compared.
         `round1`/`round2`/`round3` are no-DB snapshots of each round
         embed (`round1 random` for the random-pairing header).
         No arg → posts the beginning lobby state. Every invocation posts fresh messages.
@@ -1216,10 +1223,20 @@ async def setup(bot: commands.Bot) -> None:
             return
 
         if state == "readycancel":
-            embed, view = _build("linked")
-            lobby_msg = await ctx.send(embed=embed, view=view)
-            for notice in _ready_cancel_notice_previews(lobby_msg.jump_url):
-                await ctx.send(notice, allowed_mentions=discord.AllowedMentions.none())
+            initiator = _LINKED_EIGHT[0][1]
+            scenarios = [
+                ("Decline — player pressed Not Ready", {"decliner_name": _LINKED_EIGHT[3][0]}),
+                ("Roster change — someone joined", {"cancel_reason": _preview_cancel_reason("cancelled")}),
+                ("Roster change — someone left", {"cancel_reason": _preview_cancel_reason("left")}),
+                ("Timeout", {"timed_out": True}),
+            ]
+            for label, banner in scenarios:
+                await ctx.send(f"__**{label}**__")
+                card = render_ready_check_progress(
+                    _THREAD_NAME, [], state="notready", initiated_by=initiator,
+                    ready_count=6, total_count=8, **banner, **_preview_settings_labels(),
+                )
+                await ctx.send(embed=card, view=build_not_ready_view())
             return
 
         if state == "table":

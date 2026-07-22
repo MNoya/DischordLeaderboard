@@ -84,7 +84,7 @@ from bot.services.refresh import refresh_active_players
 from bot.services.refresh_report import build_refresh_report, format_elapsed
 from bot.services.seventeenlands import MinIntervalLimiter, SeventeenLandsClient
 from bot.sets import active_set_code
-from bot.commands.pod_rsvp import PodRsvpView
+from bot.commands.pod_rsvp import PodRsvpView, heal_finished_cards
 from bot.tasks.pod_draft_reminder import init_reminder
 from bot.tasks.pod_daily_poll import PodPollView, init_daily_poll
 from bot.services.pod_launch import init_launch, rearm_signals
@@ -557,6 +557,7 @@ def build_bot(guild_id: int) -> commands.Bot:
             await bot.bot_log.post_plain(_deploy_announcement())
             await rehydrate_active_tournaments(bot)
             await rehydrate_active_lobbies(bot)
+            await heal_finished_cards(bot)
             await reconcile_unannounced_championships(bot)
             try:
                 await reconcile_ping_roles(bot)

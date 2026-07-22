@@ -99,11 +99,14 @@ def test_yes_changed_flags_only_yes_membership_transitions(session, scheduled_si
     assert result.yes_changed is expected
 
 
-def test_a_no_click_never_joins(session, scheduled_signal):
+def test_a_no_click_removes_the_signup_from_every_roster(session, scheduled_signal):
+    set_rsvp(session, MESSAGE_ID, "u1", "Nissa Revane", pod_signals.RSVP_YES)
+
     result = set_rsvp(session, MESSAGE_ID, "u1", "Nissa Revane", pod_signals.RSVP_NO)
 
     assert not result.joined
-    assert result.rosters[pod_signals.RSVP_NO] == ["Nissa Revane"]
+    assert result.rsvp is None
+    assert all("Nissa Revane" not in names for names in result.rosters.values())
     assert result.state.count == 0
 
 

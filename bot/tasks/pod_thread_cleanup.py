@@ -23,6 +23,7 @@ from bot.services.pod_signals import QUEUE_BUCKET, STATUS_OPEN
 CLEANUP_HOUR_ET = 2
 LOOKBACK_DAYS = 2
 ACTIVITY_GRACE = timedelta(hours=2)
+RESET_INACTIVITY = timedelta(hours=3)
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +55,23 @@ async def archive_past_threads() -> None:
             archived += 1
     total = len(event_thread_ids) + len(queue_thread_ids)
     log.info(f"pod thread cleanup: archived {archived} of {total} past threads")
+
+
+async def archive_inactive_threads(guild: discord.Guild, grace: timedelta = RESET_INACTIVITY) -> int:
+    """Archive the guild's active threads with no activity inside `grace`, leaving live conversations
+    open. Used by `!test reset` to clear stale draft rooms off a test server."""
+    now = datetime.now(timezone.utc)
+    archived = 0
+    for thread in list(guild.threads):
+        if thread.archived or _last_activity(thread) > now - grace:
+            continue
+        try:
+            await thread.edit(archived=True, reason="!test reset cleanup")
+        except discord.HTTPException as e:
+            log.warning(f"test reset: archive({thread.id}) failed: {e}")
+            continue
+        archived += 1
+    return archived
 
 
 def _past_event_thread_ids(now: datetime) -> list[int]:

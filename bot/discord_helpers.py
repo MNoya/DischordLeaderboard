@@ -51,6 +51,11 @@ def in_pod_coordination(channel: "discord.interactions.InteractionChannel | None
     return getattr(channel, "parent_id", None) == settings.pod_draft_channel_id
 
 
+def is_pod_coordination_channel(channel: "discord.interactions.InteractionChannel | None") -> bool:
+    """The coordination channel itself, excluding its threads."""
+    return channel is not None and channel.id == settings.pod_draft_channel_id
+
+
 async def send_welcome(
     client: "commands.Bot", member: "discord.abc.User", view: "discord.ui.LayoutView",
 ) -> bool:

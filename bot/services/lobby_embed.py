@@ -178,19 +178,6 @@ def ready_check_unlinked_text(unlinked: list[str]) -> str:
     )
 
 
-def ready_cancel_notice(kind: str, *, detail: str | None = None, retry_url: str | None = None) -> str:
-    """Thread line posted when a ready check is called off by a roster change or timeout — the lobby
-    embed edit alone is easy to miss when players are looking at Draftmancer. A decline is not
-    announced here; the lobby card's Not Ready banner already carries it. `kind` is 'timeout' or a
-    roster-change 'joined'/'left' carrying `detail`. The call-out links to the lobby card's Ready
-    Check button when `retry_url` is given. Shared by the live cancel path and the `!test` preview so
-    the copy never drifts."""
-    ready_check = f"[Start Ready Check]({retry_url})" if retry_url else "Start Ready Check"
-    headline = "⚠️ **Ready Check timed out!**" if kind == "timeout" else \
-        f"⚠️ **Ready Check canceled!** {detail}"
-    return f"{headline}\n🔄 Click **{ready_check}** when all players are present"
-
-
 class ReadyCheckUnlinkedConfirmView(discord.ui.View):
     """Ephemeral warn-but-allow gate shown to the initiator when a ready check would include unrecognized
     seats — proceeds on confirm so nobody drafts a scoring-blind seat without seeing it first."""
@@ -467,6 +454,7 @@ def render_ready_check_progress(
     cancel_reason: str | None = None,
     superseded: bool = False,
     initiated_by: str | None = None,
+    timed_out: bool = False,
     ready_count: int | None = None,
     total_count: int | None = None,
     format_label: str | None = None,
@@ -480,24 +468,31 @@ def render_ready_check_progress(
     `state` mirrors the lobby state machine: 'ready', 'notready', 'drafting', 'complete', and
     falls through to a neutral header otherwise.
 
-    A declined card ('notready', including the `superseded` stale variant) collapses to two lines —
-    `❌ <name> is Not Ready` + `✅ ready_count/total_count Ready` — with no link or roster. The live
-    declined card carries the Resume Ready Check + Settings view; a superseded card carries none.
+    A declined card ('notready', including the `superseded` stale variant) titles `Ready Check
+    Canceled` with an `❌ <reason>` line + `✅ ready_count/total_count Ready`; the `timed_out` variant
+    titles `Ready Check Timed Out` and drops the reason line. The live declined card carries the
+    Resume Ready Check + Settings view; a superseded card carries none.
     """
     title = event_title(set_code, title)
     roster = _seat_rows(in_session)
 
     declined = state == "notready"
-    status_lines, color = ready_status_banner(
-        state, decliner_name=decliner_name, cancel_reason=cancel_reason,
-        initiated_by=initiated_by, retry_hint=False if declined else not superseded,
-    )
-    if not status_lines:
-        status_lines = ["### Ready Check"]
-    header_lines = list(status_lines)
+    resume = declined and not superseded
+    if declined and timed_out:
+        header_lines = _started_subtext(initiated_by, resume=resume)
+        color = discord.Color.red()
+        card_title = "⚠️ Ready Check Timed Out"
+    else:
+        status_lines, color = ready_status_banner(
+            state, decliner_name=decliner_name, cancel_reason=cancel_reason,
+            initiated_by=initiated_by, retry_hint=False if declined else not superseded,
+            resume_hint=resume,
+        )
+        header_lines = list(status_lines) if status_lines else ["### Ready Check"]
+        card_title = "⚠️ Ready Check Canceled" if declined else title
     if declined and ready_count is not None and total_count is not None:
         header_lines.append(f"### ✅ {ready_count}/{total_count} Ready")
-    embed = discord.Embed(title=title, description="\n".join(header_lines), color=color)
+    embed = discord.Embed(title=card_title, description="\n".join(header_lines), color=color)
     _set_settings_footer(embed, format_label, pairing_label, seating_label)
 
     if declined or superseded:
@@ -521,6 +516,21 @@ def render_ready_check_progress(
     return embed
 
 
+READY_RESUME_HINT = "Resume when all players are present"
+
+
+def _started_subtext(initiated_by: str | None, *, resume: bool) -> list[str]:
+    """The `-# Started by <name>` subtext, with the resume hint appended on a live declined card."""
+    tail = READY_RESUME_HINT if resume else ""
+    if initiated_by and tail:
+        return [f"-# Started by {initiated_by}. {tail}"]
+    if initiated_by:
+        return [f"-# Started by {initiated_by}"]
+    if tail:
+        return [f"-# {tail}"]
+    return []
+
+
 def ready_status_banner(
     state: str,
     *,
@@ -528,10 +538,12 @@ def ready_status_banner(
     cancel_reason: str | None = None,
     initiated_by: str | None = None,
     retry_hint: bool = True,
+    resume_hint: bool = False,
 ) -> tuple[list[str], discord.Color]:
     """Status banner lines + color shared by the lobby card and the ready-check progress card so
     their wording never drifts. `retry_hint` appends the retry tail on a live failed check; pass
-    False on a stale superseded card. Returns ([], blurple) for states with no banner."""
+    False on a stale superseded card. `resume_hint` appends the resume line to the Started-by subtext
+    on a live declined card. Returns ([], blurple) for states with no banner."""
     if state == "ready":
         lines = ["### 🔔 Ready Check initiated! Accept on Draftmancer to start the draft"]
         if initiated_by:
@@ -543,10 +555,12 @@ def ready_status_banner(
         return [f"### {emojis.get('draftmancer')} Draft complete!"], discord.Color.green()
     if state == "notready":
         retry = "! Click Start Ready Check to retry" if retry_hint else ""
-        reason = f"`{decliner_name}` is Not Ready" if decliner_name else (cancel_reason or "Ready Check canceled")
-        lines = [f"### ❌ {reason}{retry}"]
-        if initiated_by:
-            lines.append(f"-# Started by {initiated_by}")
+        if decliner_name:
+            reason = f"❌ `{decliner_name}` is Not Ready"
+        else:
+            reason = cancel_reason or "❌ Ready Check canceled"
+        lines = [f"### {reason}{retry}"]
+        lines.extend(_started_subtext(initiated_by, resume=resume_hint))
         return lines, discord.Color.red()
     if state == "has_unlinked":
         return ["### ⚠️ Some players aren't recognized yet"], discord.Color.orange()

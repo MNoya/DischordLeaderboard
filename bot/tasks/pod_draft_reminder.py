@@ -10,7 +10,7 @@ import asyncio
 import contextlib
 import logging
 import re
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 
 import discord
@@ -18,12 +18,17 @@ from discord.ext import commands
 from sqlalchemy import select
 
 from bot import emojis
-from bot.commands.messages import MSG_LOBBY_HEADLINE, MSG_LOBBY_OPEN
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.discord_helpers import BLANK_LINE
 from bot.models import PodDraftEvent, PodSignal, PodSignalMember
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
+from bot.services.pod_reminder_copy import (
+    LOBBY_OPEN,
+    LOBBY_OPEN_HEADLINE,
+    ROSTER_REMINDER_LINE,
+    ROSTER_REMINDER_TITLE,
+)
 from bot.services.pod_signals import RSVP_MAYBE, RSVP_YES
 from bot.services.pod_draft_manager import start_manager
 from bot.services import pod_format_interest as fi
@@ -44,27 +49,18 @@ from bot.services.sesh_parser import parse_sesh_embed
 
 REMINDER_LEAD_MIN = 10
 ROSTER_REMINDER_LEAD_MIN = 60
-ROSTER_EMBED_TITLE = "🔔 Pod Draft Starting Soon"
 ROSTER_SEARCH_LIMIT = 50
 
 
 log = logging.getLogger(__name__)
 
 _bot: commands.Bot | None = None
-_underfill_clear: "Callable[[commands.Bot, str], Awaitable[None]] | None" = None
 
 
 def init_reminder(bot: commands.Bot) -> None:
     """Wire the bot reference so the APScheduler callback can dispatch Discord work."""
     global _bot
     _bot = bot
-
-
-def register_underfill_clear(clear: "Callable[[commands.Bot, str], Awaitable[None]]") -> None:
-    """Wire the underfill-nudge cleaner so the sesh lobby-open path can drop the recruiting nudge without
-    pod_underfill importing this module back (the module already depends on the RSVP reads here)."""
-    global _underfill_clear
-    _underfill_clear = clear
 
 
 async def fire_reminder(event_id: str, *, early: bool = False) -> None:
@@ -128,9 +124,6 @@ async def fire_reminder(event_id: str, *, early: bool = False) -> None:
         if event is not None and event.socket_status == "pending":
             event.socket_status = "reminded"
             session.commit()
-
-    if _underfill_clear is not None:
-        await _underfill_clear(_bot, event_id)
 
     recipients = await _link_dm_recipients(thread.guild, attendees, maybe_attendees)
     await send_lobby_link_dms(
@@ -331,7 +324,7 @@ async def _find_roster_reminder(thread: discord.Thread) -> discord.Message | Non
             if message.author.id != _bot.user.id:
                 continue
             for embed in message.embeds:
-                if embed.title == ROSTER_EMBED_TITLE:
+                if embed.title == ROSTER_REMINDER_TITLE:
                     return message
     except discord.HTTPException:
         log.warning(f"could not scan thread {thread.id} for the roster reminder", exc_info=True)
@@ -480,8 +473,8 @@ def build_lobby_open_body(draftmancer_url: str, mention_block: str) -> str:
     (open_ondemand_lobby). The lobby is joinable the moment the link posts and the start is gated on the
     ready-check, so the headline is 'Lobby opened' in every path, with no countdown."""
     mentions = f"\n\n{mention_block}" if mention_block else ""
-    body = MSG_LOBBY_OPEN.format(
-        draftmancer=emojis.get("draftmancer"), headline=MSG_LOBBY_HEADLINE, url=draftmancer_url,
+    body = LOBBY_OPEN.format(
+        draftmancer=emojis.get("draftmancer"), headline=LOBBY_OPEN_HEADLINE, url=draftmancer_url,
         mentions=mentions,
     )
     return f"{body}\n{BLANK_LINE}"
@@ -492,8 +485,8 @@ def build_roster_embed(
 ) -> discord.Embed:
     unix = int(event_time.timestamp())
     embed = discord.Embed(
-        title=ROSTER_EMBED_TITLE,
-        description=f"**{event_name}** begins <t:{unix}:R>",
+        title=ROSTER_REMINDER_TITLE,
+        description=ROSTER_REMINDER_LINE.format(name=event_name, unix=unix),
         color=discord.Color.green(),
     )
     embed.add_field(
