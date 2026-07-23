@@ -773,14 +773,17 @@ class PodDraftManager:
         self.last_ready_summary = None
         log.info(
             f"[READY] start event={self.event_id} expected={len(self.expected_user_ids)} "
-            f"timeout_s={_READY_TIMEOUT_S}"
+            f"team_draft={self.pairing_mode == 'team'} timeout_s={_READY_TIMEOUT_S} "
+            f"expected_ids={self.expected_user_ids}"
         )
-        try:
-            await self.sio.emit("readyCheck")
-        except Exception:
+        ack = await self._emit_with_ack("readyCheck")
+        ack_error = _ack_error_text(ack)
+        if ack_error:
             self.ready_check_active = False
-            log.exception(f"[READY] emit_failed event={self.event_id}")
-            return "Could not start ready check — see logs."
+            log.warning(f"[READY] rejected event={self.event_id} ack_error={ack_error!r}")
+            return f"Draftmancer rejected the ready check: {ack_error}."
+        if ack is None:
+            log.warning(f"[READY] no_ack event={self.event_id} — starting timer without confirmation")
         self._ready_timeout_task = asyncio.create_task(self._ready_timeout())
 
         non_bot_names = [u.get("userName") for u in non_bot if u.get("userName")]
@@ -1302,9 +1305,13 @@ class PodDraftManager:
         return True
 
     async def _on_set_ready(self, user_id, ready_state) -> None:
+        ready = _is_ready_state(ready_state)
+        log.info(
+            f"[READY] set_ready event={self.event_id} user={user_id} state={ready_state!r} "
+            f"parsed={ready} active={self.ready_check_active} expected={user_id in self.expected_user_ids}"
+        )
         if not self.ready_check_active:
             return
-        ready = _is_ready_state(ready_state)
         if ready:
             self.ready_users.add(user_id)
         else:
@@ -2031,7 +2038,11 @@ class PodDraftManager:
             await asyncio.sleep(_READY_TIMEOUT_S)
         except asyncio.CancelledError:
             return
-        log.warning(f"[READY] timeout event={self.event_id} timeout_s={_READY_TIMEOUT_S}")
+        log.warning(
+            f"[READY] timeout event={self.event_id} timeout_s={_READY_TIMEOUT_S} "
+            f"ready={len(self.ready_users)}/{len(self.expected_user_ids)} "
+            f"missing={self.expected_user_ids - self.ready_users}"
+        )
         await bot_log_mod.get(self.bot).post(
             f"Ready check timed out for event `{self.event_id}` — draft did not start.",
             fingerprint=f"ready_check_timeout:{self.event_id}",
@@ -2057,36 +2068,32 @@ class PodDraftManager:
         self.last_decliner_name = decliner_name
         self.last_cancel_reason = None if decliner_name is not None else detail
         self.ready_check_timed_out = kind == "timeout"
-        await self._repost_declined_progress_card()
+        await self._flip_progress_card_to_declined()
         await self.refresh_lobby_now()
 
-    async def _repost_declined_progress_card(self) -> None:
-        """Lock the active ready-check card and post a fresh declined card at the bottom of the thread,
-        so the Resume Ready Check control lands below whatever chat piled up during the check instead
-        of scrolling away with the card the check opened on."""
+    async def _flip_progress_card_to_declined(self) -> None:
+        """Flip the live ready-check card to the Not Ready state in place, keeping the enabled Resume Ready
+        Check button on the message players are already looking at. A timed-out check that instead locked
+        this card and posted a fresh one stranded a dead greyed button on the card the check ran on while
+        the working control sat lower in the thread, so players couldn't restart it themselves."""
         thread = await self._fetch_thread()
         if thread is None:
             return
         ready_count = self.last_ready_summary[0] if self.last_ready_summary else None
         total_count = self.last_ready_summary[1] if self.last_ready_summary else None
-        prior = self.ready_check_progress_message
-        self.ready_check_progress_message = None
-        if prior is not None:
-            locked = render_ready_check_progress(
-                self.event_name, [], state="notready", decliner_name=self.last_decliner_name,
-                cancel_reason=self.last_cancel_reason, superseded=True, timed_out=self.ready_check_timed_out,
-                ready_count=ready_count, total_count=total_count, **self._settings_labels(),
-            )
-            try:
-                await prior.edit(embed=locked, view=None)
-            except Exception:
-                log.warning("could not lock prior ready-check card", exc_info=True)
         embed = render_ready_check_progress(
             self.event_name, [], state="notready", decliner_name=self.last_decliner_name,
             cancel_reason=self.last_cancel_reason, initiated_by=self.initiated_by,
             timed_out=self.ready_check_timed_out,
             ready_count=ready_count, total_count=total_count, **self._settings_labels(),
         )
+        card = self.ready_check_progress_message
+        if card is not None:
+            try:
+                await card.edit(embed=embed, view=build_not_ready_view())
+                return
+            except Exception:
+                log.warning(f"[READY] declined_card_edit_failed event={self.event_id}", exc_info=True)
         try:
             self.ready_check_progress_message = await thread.send(embed=embed, view=build_not_ready_view())
         except Exception:
@@ -2179,17 +2186,20 @@ def _is_ready_state(state) -> bool:
 
 
 def _ack_error_text(ack) -> str | None:
-    """Pull a human error string out of Draftmancer's SocketAck/SocketError shape, or None on success."""
-    if ack is None:
+    """Pull a human error string out of Draftmancer's SocketAck/SocketError shape, or None on success.
+    A failure carries code != 0 and a nested error object {title, text}; success is code 0."""
+    if not isinstance(ack, dict) or not ack.get("code"):
         return None
-    if isinstance(ack, dict):
-        if ack.get("code") and ack.get("code") != 0:
-            title = ack.get("title") or "Error"
-            text = ack.get("text") or ack.get("error") or ""
-            return f"{title}: {text}".strip(": ")
-        if ack.get("error"):
-            return str(ack["error"])
-    return None
+    error = ack.get("error")
+    if isinstance(error, dict):
+        title = error.get("title") or "Error"
+        text = error.get("text") or ""
+        return f"{title}: {text}".strip(": ")
+    if error:
+        return str(error)
+    title = ack.get("title") or "Error"
+    text = ack.get("text") or ""
+    return f"{title}: {text}".strip(": ")
 
 
 async def start_manager(

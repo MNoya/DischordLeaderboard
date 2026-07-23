@@ -276,9 +276,9 @@ async def open_settings_panel(interaction: discord.Interaction) -> None:
 
 
 def build_not_ready_view() -> discord.ui.View:
-    """Controls on the collapsed Not Ready card so the retry doesn't require scrolling back to the
-    pinned lobby card. The resume button carries the persistent Ready Check custom_id, so clicks
-    dispatch through the registered view."""
+    """Controls on the Not Ready card so the retry doesn't require scrolling back to the pinned lobby
+    card. The resume button carries the persistent Ready Check custom_id, so clicks dispatch through
+    the registered view."""
     view = LobbyReadyButtonView()
     view.ready_check.label = "Resume Ready Check"
     return view
