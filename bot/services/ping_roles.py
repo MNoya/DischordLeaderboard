@@ -5,6 +5,10 @@ role is tied to (for showing its local time and auto-granting on RSVP). `reconci
 makes every guild match this list — creating missing roles, recoloring drift, and renaming in place
 when a name moves to `aliases`. To rename a role, set the new `name` and list the old name in
 `aliases`; the reconcile finds the existing role by the alias and renames it instead of orphaning it.
+
+`MANAGED_ROLES` are bot-kept roles the same reconcile keeps present and correctly colored, but which
+are never offered in the self-serve menu nor pushed below the Pod Drafters umbrella — their color is
+meant to show on the wearer's name (the Set Champion award).
 """
 from __future__ import annotations
 
@@ -101,6 +105,19 @@ PING_ROLES: tuple[PingRole, ...] = (
     PingRole(POD_QUEUE_ROLE_NAME, "⚡", "Daily Draft Sign-Ups", color="#FFAC33"),
     PingRole(fi.LATEST_SET_ROLE_NAME, "🆕", "Pods drafting the Latest Set", color="#e8e8e8"),
     PingRole(fi.FLASHBACK_ROLE_NAME, "flashback", "Pods drafting any Past Sets", color="#B0C4DE"),
+)
+
+
+@dataclass(frozen=True)
+class ManagedRole:
+    name: str
+    color: str
+
+
+SET_CHAMPION_ROLE_NAME = "Set Champion"
+
+MANAGED_ROLES: tuple[ManagedRole, ...] = (
+    ManagedRole(SET_CHAMPION_ROLE_NAME, "#82CBFF"),
 )
 
 
@@ -568,6 +585,8 @@ async def reconcile_ping_roles(bot: discord.Client) -> None:
         for spec in PING_ROLES:
             await _ensure_role(guild, spec)
         await _keep_umbrella_on_top(guild)
+        for managed in MANAGED_ROLES:
+            await _ensure_managed_role(guild, managed)
 
 
 async def strip_pod_roles(member: discord.Member) -> int:
@@ -621,6 +640,24 @@ async def _ensure_role(guild: discord.Guild, spec: PingRole) -> None:
                 log.info(f"recolored {spec.name!r} in {guild.name}")
             except discord.HTTPException:
                 log.warning(f"could not recolor {spec.name!r} in {guild.name}", exc_info=True)
+
+
+async def _ensure_managed_role(guild: discord.Guild, spec: ManagedRole) -> None:
+    wanted = discord.Colour.from_str(spec.color)
+    role = discord.utils.get(guild.roles, name=spec.name)
+    if role is None:
+        try:
+            await guild.create_role(name=spec.name, colour=wanted, reason="managed-role create")
+            log.info(f"created {spec.name!r} in {guild.name}")
+        except discord.HTTPException:
+            log.warning(f"could not create {spec.name!r} in {guild.name}", exc_info=True)
+        return
+    if role.colour != wanted:
+        try:
+            await role.edit(colour=wanted, reason="managed-role recolor")
+            log.info(f"recolored {spec.name!r} in {guild.name}")
+        except discord.HTTPException:
+            log.warning(f"could not recolor {spec.name!r} in {guild.name}", exc_info=True)
 
 
 async def _adopt_alias(guild: discord.Guild, spec: PingRole) -> discord.Role | None:

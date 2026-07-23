@@ -10,8 +10,10 @@ from bot import emojis
 from bot.services.lobby_embed import SettingsButton
 from bot.services.pod_format import format_display
 from bot.services.pod_pairing_select import pairing_label
+from bot.services.pod_roles import role_holder_mention
 from bot.services.pod_seating_select import seating_mode_label
-from bot.sets import set_name_for
+from bot.services.ping_roles import SET_CHAMPION_ROLE_NAME
+from bot.sets import previous_set_code, set_name_for
 from bot.tasks.pod_draft_reminder import REMINDER_LEAD_MIN
 
 log = logging.getLogger("bot.pod_registration_embed")
@@ -30,11 +32,15 @@ class RegisteredSettingsView(discord.ui.View):
         self.add_item(SettingsButton())
 
 
-def championship_flavor(set_code: str) -> str:
-    return (
-        f"**{set_name_for(set_code)}** Season!\n"
-        "Eight seats to the highest-ranked players who claim them."
-    )
+def championship_flavor(set_code: str, reigning_champion: str | None = None) -> str:
+    lines = [
+        f"**{set_name_for(set_code)}** Season!",
+        "Eight seats to the highest-ranked players who claim them.",
+    ]
+    if reigning_champion:
+        lines.append("")
+        lines.append(f"**Reigning Set Champion:** {_previous_set_symbol(set_code)}{reigning_champion}")
+    return "\n".join(lines)
 
 
 def rsvp_hint_line(channel_post_url: str | None) -> str:
@@ -50,12 +56,15 @@ def rsvp_hint_line(channel_post_url: str | None) -> str:
 def build_registered_embed(
     set_code: str, pairing_mode: str | None, seating_mode: str | None = None,
     *, championship: bool = False, rsvp_hint: bool = False, channel_post_url: str | None = None,
+    guild: discord.Guild | None = None,
 ) -> discord.Embed:
     """`rsvp_hint` is on only for the bot-native scheduled card, which carries the RSVP buttons and a
-    channel post; sesh pods reuse this embed as a config panel with neither, so they leave it off."""
+    channel post; sesh pods reuse this embed as a config panel with neither, so they leave it off.
+    `guild` resolves the reigning Set Champion mention for the championship flavor when known."""
     body = LINK_POSTED_LINE.format(lead=REMINDER_LEAD_MIN)
     if championship:
-        body = f"{championship_flavor(set_code)}\n\n{body}"
+        reigning_champion = role_holder_mention(guild, SET_CHAMPION_ROLE_NAME)
+        body = f"{championship_flavor(set_code, reigning_champion)}\n\n{body}"
     title = CHAMPIONSHIP_TITLE if championship else f"{emojis.prefix(set_code.lower())}{REGISTERED_TITLE_TEXT}"
     embed = discord.Embed(title=title, description=body, color=discord.Color.green())
     embed.add_field(name="Format", value=format_display(set_code), inline=True)
@@ -78,16 +87,22 @@ async def update_registered_embed(
     """Walk the thread for the bot's registration embed and re-render it with the current settings."""
     if channel is None or client_user is None:
         return
+    guild = getattr(channel, "guild", None)
     try:
         async for msg in channel.history(limit=HISTORY_SCAN_LIMIT, oldest_first=True):
             if msg.author.id == client_user.id and msg.embeds and _is_registered_title(msg.embeds[0].title):
                 rsvp_hint = any(RSVP_HINT_LEAD in (f.value or "") for f in msg.embeds[0].fields)
                 await msg.edit(embed=build_registered_embed(
                     set_code, pairing_mode, seating_mode, championship=championship,
-                    rsvp_hint=rsvp_hint, channel_post_url=_card_url_from_thread(channel)))
+                    rsvp_hint=rsvp_hint, channel_post_url=_card_url_from_thread(channel), guild=guild))
                 return
     except discord.HTTPException:
         log.warning("could not update Pod Draft registered embed", exc_info=True)
+
+
+def _previous_set_symbol(set_code: str) -> str:
+    prev = previous_set_code(set_code)
+    return emojis.prefix(prev.lower()) if prev else ""
 
 
 def _card_url_from_thread(channel: discord.abc.Messageable) -> str | None:

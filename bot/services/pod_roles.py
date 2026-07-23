@@ -37,6 +37,15 @@ def find_role(guild: discord.Guild | None, name: str) -> discord.Role | None:
     return discord.utils.get(guild.roles, name=name)
 
 
+def role_holder_mention(guild: discord.Guild | None, name: str) -> str | None:
+    """Mention of the first member holding `name`, or None when the role is missing or unheld. In an
+    embed a mention renders the member's handle without pinging."""
+    role = find_role(guild, name)
+    if role is None or not role.members:
+        return None
+    return role.members[0].mention
+
+
 async def grant_role(member: discord.Member, role: discord.Role) -> bool:
     """Add the role if the member lacks it; True when a grant actually happened."""
     if role in member.roles:

@@ -43,7 +43,7 @@ If you like flashback, you can also **rank your favorite sets** (up to three). W
 
 In the hour before a pod, a few things happen in the thread:
 
-- The bot reposts the roster so everyone can see who is in.
+- The bot posts a reminder that lists the roster grouped by format, Latest Set and Flashback. The reminder carries Sign Up and Can't buttons to confirm whether you are still playing, and a Format Preference button to change what you want to draft. There is no Maybe at this point: you are confirming a yes or a no.
 - If a slot needs more players, the bot nudges the channel, and closer to start it pings the slot's role.
 - If the group is leaning flashback, the format vote appears so the table can lock in what to draft.
 

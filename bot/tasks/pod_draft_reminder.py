@@ -9,6 +9,7 @@ import asyncio
 import contextlib
 import logging
 from datetime import datetime, timedelta, timezone
+from typing import Callable
 
 import discord
 from discord.ext import commands
@@ -25,6 +26,7 @@ from bot.services.pod_reminder_copy import (
     ROSTER_REMINDER_LINE,
     ROSTER_REMINDER_TITLE,
 )
+from bot.services.pod_roster_fields import add_roster_fields
 from bot.services.pod_signals import RSVP_MAYBE, RSVP_YES
 from bot.services.pod_drafts import load_event_pairing_mode_sync
 from bot.services.pod_team_vote import (
@@ -43,11 +45,22 @@ log = logging.getLogger(__name__)
 
 _bot: commands.Bot | None = None
 
+ReminderViewBuilder = Callable[[str], "discord.ui.View"]
+_reminder_view_builder: ReminderViewBuilder | None = None
+
 
 def init_reminder(bot: commands.Bot) -> None:
     """Wire the bot reference so the APScheduler callback can dispatch Discord work."""
     global _bot
     _bot = bot
+
+
+def register_reminder_view_builder(builder: ReminderViewBuilder) -> None:
+    """Inject the roster reminder's button view (Sign Up / Can't / Format Preference). It is built in
+    pod_daily_poll, which owns the RSVP buttons and the preference picker; registering it keeps this
+    module clear of that import cycle."""
+    global _reminder_view_builder
+    _reminder_view_builder = builder
 
 
 def schedule_roster_reminder(scheduler, event_id: str, event_time: datetime) -> None:
@@ -102,13 +115,14 @@ async def fire_roster_reminder(event_id: str) -> None:
         log.warning(f"fire_roster_reminder: could not fetch thread {thread_id}")
         return
 
-    yes, maybe = await event_rsvps(event_id)
-    embed = build_roster_embed(event_name, event_time, yes, maybe)
+    rosters, roster_interests = await event_rsvp_rosters(event_id)
+    embed = build_roster_embed(event_name, event_time, rosters, roster_interests)
+    view = _reminder_view_builder(event_id) if _reminder_view_builder is not None else None
     try:
-        await thread.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+        await thread.send(embed=embed, view=view, allowed_mentions=discord.AllowedMentions.none())
     except discord.HTTPException:
         log.warning(f"fire_roster_reminder: could not post in thread {thread_id}", exc_info=True)
-    await maybe_offer_prelobby_team_vote(thread, event_id, len(yes))
+    await maybe_offer_prelobby_team_vote(thread, event_id, len(rosters.get(RSVP_YES, [])))
 
 
 def _prelobby_team_vote_size(yes_count: int) -> int | None:
@@ -194,21 +208,22 @@ async def fire_team_vote_offer(event_id: str) -> None:
     await manager.offer_team_vote_if_eligible()
 
 
-async def refresh_roster_reminder_for_event(
-    bot: commands.Bot, event_id: str, yes: list[str], maybe: list[str],
-) -> None:
-    """Re-render the posted roster reminder in place, fed the rosters by the RSVP card handler."""
+async def refresh_roster_reminder_for_event(event_id: str) -> None:
+    """Re-render the posted roster reminder in place off the current signal roster."""
     loaded = await asyncio.to_thread(_load_event_for_roster_by_id, event_id)
     if loaded is None:
         return
     thread_id, event_time, event_name, status = loaded
     if status != "pending":
         return
-    await _edit_roster_reminder(thread_id, event_name, event_time, yes, maybe)
+    rosters, roster_interests = await event_rsvp_rosters(event_id)
+    await _edit_roster_reminder(thread_id, event_name, event_time, rosters, roster_interests)
 
 
 async def _edit_roster_reminder(
-    thread_id: int, event_name: str, event_time: datetime, yes: list[str], maybe: list[str],
+    thread_id: int, event_name: str, event_time: datetime,
+    rosters: dict[str, list[str]],
+    roster_interests: dict[str, list[tuple[str, tuple[str, ...]]]] | None,
 ) -> None:
     thread = await _fetch_thread(thread_id)
     if thread is None:
@@ -216,7 +231,7 @@ async def _edit_roster_reminder(
     reminder = await _find_roster_reminder(thread)
     if reminder is None:
         return
-    embed = build_roster_embed(event_name, event_time, yes, maybe)
+    embed = build_roster_embed(event_name, event_time, rosters, roster_interests)
     try:
         await reminder.edit(embed=embed, allowed_mentions=discord.AllowedMentions.none())
     except discord.HTTPException:
@@ -260,9 +275,34 @@ async def event_rsvps(event_id: str) -> tuple[list[str], list[str]]:
     return rsvps or ([], [])
 
 
+async def event_rsvp_rosters(
+    event_id: str,
+) -> tuple[dict[str, list[str]], dict[str, list[tuple[str, tuple[str, ...]]]] | None]:
+    """The reminder's roster in the shape the shared field renderer wants: (names-only rosters,
+    interest-carrying rosters). The interests are None when the pod has no signal, which renders a
+    plain Yes / Maybe pair instead of a format split."""
+    loaded = await asyncio.to_thread(signal_rsvp_rosters_sync, event_id)
+    if loaded is None:
+        return {RSVP_YES: [], RSVP_MAYBE: []}, None
+    return loaded
+
+
 def signal_rsvps_sync(event_id: str) -> tuple[list[str], list[str]] | None:
     """Yes / Maybe display names off the signal that created this pod, in join order; None when the
     pod has no signal. Poll and queue members are implicit Yes."""
+    loaded = signal_rsvp_rosters_sync(event_id)
+    if loaded is None:
+        return None
+    rosters, _ = loaded
+    return rosters[RSVP_YES], rosters[RSVP_MAYBE]
+
+
+def signal_rsvp_rosters_sync(
+    event_id: str,
+) -> tuple[dict[str, list[str]], dict[str, list[tuple[str, tuple[str, ...]]]]] | None:
+    """Interest-carrying twin of `signal_rsvps_sync`: Yes / Maybe rosters off the signal that created
+    the pod, each member paired with the format interest they signed up with, so the reminder can group
+    by format the same way the card does. None when the pod has no signal."""
     with SessionLocal() as session:
         signal = session.execute(
             select(PodSignal).where(PodSignal.event_id == event_id)
@@ -270,13 +310,16 @@ def signal_rsvps_sync(event_id: str) -> tuple[list[str], list[str]] | None:
         if signal is None:
             return None
         rows = session.execute(
-            select(PodSignalMember.rsvp, PodSignalMember.display_name)
+            select(PodSignalMember.rsvp, PodSignalMember.display_name, PodSignalMember.format_interest)
             .where(PodSignalMember.signal_id == signal.id)
             .order_by(PodSignalMember.created_at)
         ).all()
-    yes = [name for state, name in rows if state == RSVP_YES]
-    maybe = [name for state, name in rows if state == RSVP_MAYBE]
-    return yes, maybe
+    interests: dict[str, list[tuple[str, tuple[str, ...]]]] = {RSVP_YES: [], RSVP_MAYBE: []}
+    for state, name, interest in rows:
+        if state in interests:
+            interests[state].append((name, tuple(interest or ())))
+    rosters = {state: [name for name, _ in members] for state, members in interests.items()}
+    return rosters, interests
 
 
 def build_lobby_open_body(draftmancer_url: str, mention_block: str) -> str:
@@ -291,20 +334,16 @@ def build_lobby_open_body(draftmancer_url: str, mention_block: str) -> str:
 
 
 def build_roster_embed(
-    event_name: str, event_time: datetime, yes: list[str], maybe: list[str],
+    event_name: str, event_time: datetime, rosters: dict[str, list[str]],
+    roster_interests: dict[str, list[tuple[str, tuple[str, ...]]]] | None = None,
 ) -> discord.Embed:
+    """Same roster columns the scheduled card renders, so the T-60 reminder mirrors the card: a plain
+    Yes / Maybe pair until a signup wants flashback, then a Latest Set / Flashback split."""
     unix = int(event_time.timestamp())
     embed = discord.Embed(
         title=ROSTER_REMINDER_TITLE,
         description=ROSTER_REMINDER_LINE.format(name=event_name, unix=unix),
         color=discord.Color.green(),
     )
-    embed.add_field(
-        name=f"✅ Yes ({len(yes)})",
-        value="\n".join(f"> {name}" for name in yes) if yes else "None yet",
-        inline=True,
-    )
-    if maybe:
-        maybe_list = "\n".join(f"> {name}" for name in maybe)
-        embed.add_field(name=f"🤷 Maybe ({len(maybe)})", value=maybe_list, inline=True)
+    add_roster_fields(embed, rosters, roster_interests)
     return embed

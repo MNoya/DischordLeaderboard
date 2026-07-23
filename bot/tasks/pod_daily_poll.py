@@ -27,7 +27,13 @@ from bot.commands.messages import (
     MSG_YOUR_SETS_LINE,
 )
 from bot.commands.pod_queue import queue_role_mention
-from bot.commands.pod_rsvp import apply_card_rsvp, post_scheduled_card, register_launcher_refresh
+from bot.commands.pod_rsvp import (
+    ReminderRsvpButton,
+    apply_card_rsvp,
+    post_scheduled_card,
+    refresh_event_rsvp_surfaces,
+    register_launcher_refresh,
+)
 from bot.config import settings
 from bot.discord_helpers import NBSP, ZWSP
 from bot.services import pod_format
@@ -57,6 +63,7 @@ from bot.services.pod_signals import (
     slot_role_name_for_event_time,
 )
 from bot.sets import active_set_code, set_name_for
+from bot.tasks.pod_draft_reminder import register_reminder_view_builder
 from bot.tasks.pod_underfill import clear_slot_nudge, refresh_slot_nudge, schedule_slot_underfill_checks
 
 
@@ -76,6 +83,10 @@ MARKER_CLOSED = "Closed"
 MSG_POLL_INACTIVE = "This poll is no longer active."
 MSG_SLOT_CLOSED = "This slot is closed."
 LAUNCHER_CLOSE_LOOKBACK_DAYS = 3
+
+CHAMPIONSHIP_SLOT_LABEL = "Set Championship"
+CHAMPIONSHIP_CROWN = "👑"
+CHAMPIONSHIP_POINTER_TOP = 8
 
 
 def init_daily_poll(bot: commands.Bot) -> None:
@@ -144,8 +155,8 @@ def build_poll_embed(
     slots: list[pod_launch.LauncherSlot], guild: discord.Guild | None = None, closed: bool = False,
 ) -> discord.Embed:
     """`closed` renders the day's terminal state: signups shut, buttons gone (the caller drops the view),
-    greyed, and committed slots show their fired roster without a thread link — the thread is archived by
-    then and the link renders as #unknown."""
+    greyed. A committed slot links to its coordination card by name through `_committed_card_link`, which
+    survives the thread archiving, so the link stays live in both the open and the closed render."""
     slot_times = [slot.slot_time for slot in slots if slot.slot_time is not None]
     day = slot_times[0].astimezone(SCHEDULE_TZ) if slot_times else None
     title = f"{POLL_TITLE} - {day:%b %-d}" if day else POLL_TITLE
@@ -163,27 +174,45 @@ def build_poll_embed(
         bucket = bucket_by_key(slot.bucket_key)
         if bucket is None:
             continue
-        slot_emoji = emojis.resolve(bucket.emoji)
         when = f"<t:{int(slot.slot_time.timestamp())}:t>" if slot.slot_time else ""
         count_part = f"**({slot.count})**" if slot.count else ""
-        role = find_role(guild, bucket_role_name(slot.bucket_key) or "")
-        label = role.mention if role else bucket.name
         check = "✅" if slot.committed or slot.status == STATUS_FIRED else ""
-        header = " ".join(part for part in (slot_emoji, label, when, count_part, check) if part)
-        link = f"<#{slot.thread_id}>" if slot.committed and not closed and slot.thread_id else None
-        roster = _roster_lines(slot.names, slot.interests, link, _slot_pod_format(slot), guild)
-        if slot.committed:
-            body = roster or "-"
-        elif slot.status == STATUS_EXPIRED:
-            body = MARKER_CLOSED
-        elif slot.names:
-            body = roster
+        if slot.championship:
+            symbol = emojis.get(slot.set_code.lower()) if slot.set_code else ""
+            label = f"**{CHAMPIONSHIP_SLOT_LABEL}**"
+            header = " ".join(part for part in (CHAMPIONSHIP_CROWN, symbol, label, when) if part)
+            body = _championship_body(slot, guild)
         else:
-            body = "-"
+            slot_emoji = emojis.resolve(bucket.emoji)
+            role = find_role(guild, bucket_role_name(slot.bucket_key) or "")
+            label = role.mention if role else bucket.name
+            header = " ".join(part for part in (slot_emoji, label, when, count_part, check) if part)
+            link = _committed_card_link(guild, slot) if slot.committed else None
+            roster = _roster_lines(slot.names, slot.interests, link, _slot_pod_format(slot), guild)
+            if slot.committed:
+                body = roster or "-"
+            elif slot.status == STATUS_EXPIRED:
+                body = MARKER_CLOSED
+            elif slot.names:
+                body = roster
+            else:
+                body = "-"
         embed.add_field(name=ZWSP, value=f"{header}\n{body}", inline=True)
     if closed:
         embed.set_footer(text=POLL_CLOSED_LABEL)
     return embed
+
+
+def _championship_body(slot: pod_launch.LauncherSlot, guild: discord.Guild | None) -> str:
+    """The championship lane on the launcher: a link into the thread and the current top Yes RSVPs,
+    read-only. Signup happens in the thread, so this lane carries no join toggle."""
+    lines: list[str] = []
+    link = _committed_card_link(guild, slot)
+    if link:
+        lines.append(link)
+    for index, name in enumerate(slot.names[:CHAMPIONSHIP_POINTER_TOP], 1):
+        lines.append(f"> {index}. {name}")
+    return "\n".join(lines) if lines else "-"
 
 
 def _roster_lines(
@@ -232,10 +261,25 @@ def _team_block(icon: object, label: str, team: list[str]) -> str:
     return "\n".join([header] + [f"> {name}" for name in team])
 
 
-def _thread_url(guild: discord.Guild | None, thread_id: str, message_id: str | None = None) -> str:
+def _jump_url(guild: discord.Guild | None, channel_id: str, message_id: str | None = None) -> str:
     scope = guild.id if guild is not None else "@me"
-    base = f"https://discord.com/channels/{scope}/{thread_id}"
+    base = f"https://discord.com/channels/{scope}/{channel_id}"
     return f"{base}/{message_id}" if message_id else base
+
+
+def _committed_card_link(guild: discord.Guild | None, slot: pod_launch.LauncherSlot) -> str | None:
+    """A committed pod's named link to its coordination card. A markdown link, not a `<#thread>` mention:
+    the mention renders as #unknown once the thread archives, while a card jump link survives. Falls back
+    to the thread when no card is tracked, as on the championship lane whose signup lives in the thread."""
+    if not slot.thread_name:
+        return None
+    if slot.card_channel_id and slot.card_message_id:
+        url = _jump_url(guild, slot.card_channel_id, slot.card_message_id)
+    elif slot.thread_id:
+        url = _jump_url(guild, slot.thread_id, slot.thread_message_id)
+    else:
+        return None
+    return f"[__**{slot.thread_name}**__]({url})"
 
 
 class PodPollView(discord.ui.View):
@@ -260,12 +304,18 @@ class PodPollView(discord.ui.View):
             bucket = bucket_by_key(slot.bucket_key)
             if bucket is None:
                 continue
-            if slot.committed and slot.card_message_id:
+            if slot.committed and slot.championship and slot.thread_id:
+                self.add_item(discord.ui.Button(
+                    style=discord.ButtonStyle.link,
+                    url=_jump_url(guild, slot.thread_id, slot.thread_message_id),
+                    label=CHAMPIONSHIP_SLOT_LABEL, emoji=CHAMPIONSHIP_CROWN,
+                ))
+            elif slot.committed and slot.card_message_id:
                 self.add_item(_slot_rsvp_button(slot.bucket_key))
             elif slot.committed and slot.thread_id:
                 self.add_item(discord.ui.Button(
                     style=discord.ButtonStyle.link,
-                    url=_thread_url(guild, slot.thread_id, slot.thread_message_id),
+                    url=_jump_url(guild, slot.thread_id, slot.thread_message_id),
                     label=bucket.name, emoji=emojis.resolve(bucket.emoji),
                 ))
             elif not slot.committed:
@@ -342,21 +392,79 @@ async def open_interest_prompt_from_card(interaction: discord.Interaction) -> No
 
 async def _send_interest_prompt(
     interaction: discord.Interaction, launcher_message_id: str, signal_date: date,
+    event_id: str | None = None,
 ) -> None:
+    """A picker opened from a committed pod (`event_id` set) carries no per-slot Confirm buttons — the
+    player is already in that pod, so it saves the preference only and re-renders that pod's surfaces."""
     user_id = str(interaction.user.id)
     current = await asyncio.to_thread(pod_launch.player_interest_sync, user_id)
     ranking = await asyncio.to_thread(pod_launch.player_flashback_ranking_sync, user_id)
     cubes = await asyncio.to_thread(pod_launch.player_cube_choices_sync, user_id)
-    slots = await asyncio.to_thread(pod_launch.launcher_snapshot_sync, launcher_message_id, signal_date)
-    slot_states = [
-        (slot.bucket_key, not slot.committed and slot.status != STATUS_EXPIRED)
-        for slot in slots if bucket_by_key(slot.bucket_key) is not None
-    ]
-    view = InterestPromptView(launcher_message_id, signal_date, current, ranking, cubes, slot_states)
+    if event_id is None:
+        slots = await asyncio.to_thread(pod_launch.launcher_snapshot_sync, launcher_message_id, signal_date)
+        slot_states = [
+            (slot.bucket_key, slot.status != STATUS_EXPIRED, slot.committed)
+            for slot in slots if bucket_by_key(slot.bucket_key) is not None
+        ]
+    else:
+        slot_states = []
+    view = InterestPromptView(
+        launcher_message_id, signal_date, current, ranking, cubes, slot_states, event_id,
+    )
     await interaction.followup.send(view=view, ephemeral=True)
 
 
+REMINDER_FORMAT_PREFIX = "podremindfmt"
+
+
+class ReminderFormatPreferenceButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=rf"{REMINDER_FORMAT_PREFIX}:(?P<event_id>.+)",
+):
+    """Format Preference on the T-60 roster reminder. Opens the same picker as the launcher, minus the
+    per-slot Confirm buttons, so there is only Save. The event id rides in the custom_id so Save can
+    re-render this pod's card and reminder, and so it keeps working after a restart."""
+
+    def __init__(self, event_id: str) -> None:
+        super().__init__(discord.ui.Button(
+            label=MSG_FORMAT_PREFERENCE_BUTTON, style=discord.ButtonStyle.primary,
+            emoji=fi.FLEXIBLE_EMOJI, custom_id=f"{REMINDER_FORMAT_PREFIX}:{event_id}",
+        ))
+        self.event_id = event_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(match["event_id"])
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await open_interest_prompt_from_reminder(interaction, self.event_id)
+
+
+async def open_interest_prompt_from_reminder(interaction: discord.Interaction, event_id: str) -> None:
+    """The picker opened from a pod's roster reminder: Save only, no per-slot Confirm. Resolves the day's
+    launcher so Save still updates the launcher board and the player's standing preference, and carries
+    the event id so Save re-renders this pod's card and reminder."""
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    launcher = await asyncio.to_thread(pod_launch.latest_launcher_sync)
+    if launcher is not None:
+        launcher_message_id, signal_date = launcher
+    else:
+        launcher_message_id, signal_date = "", datetime.now(SCHEDULE_TZ).date()
+    await _send_interest_prompt(interaction, launcher_message_id, signal_date, event_id=event_id)
+
+
+def build_reminder_view(event_id: str) -> discord.ui.View:
+    """The roster reminder's controls: Sign Up / Can't recording against the pod, and Format Preference
+    opening the Save-only picker. All three carry the event id so they resolve the pod after a restart."""
+    view = discord.ui.View(timeout=None)
+    view.add_item(ReminderRsvpButton(RSVP_YES, event_id))
+    view.add_item(ReminderRsvpButton(RSVP_NO, event_id))
+    view.add_item(ReminderFormatPreferenceButton(event_id))
+    return view
+
+
 register_format_preference_opener(open_interest_prompt_from_card)
+register_reminder_view_builder(build_reminder_view)
 
 
 def _slot_short_name(bucket_key: str) -> str:
@@ -372,7 +480,7 @@ class InterestPromptView(discord.ui.LayoutView):
 
     def __init__(
         self, launcher_message_id: str, signal_date: date, current: list[str], ranking: list[str],
-        cubes: list[str], slot_states: list[tuple[str, bool]],
+        cubes: list[str], slot_states: list[tuple[str, bool, bool]], event_id: str | None = None,
     ) -> None:
         super().__init__(timeout=300)
         self.launcher_message_id = launcher_message_id
@@ -381,6 +489,7 @@ class InterestPromptView(discord.ui.LayoutView):
         self.ranking = list(ranking)
         self.cubes = list(cubes)
         self.slot_states = slot_states
+        self.event_id = event_id
         self._rebuild()
 
     def _rebuild(self) -> None:
@@ -412,7 +521,7 @@ class InterestPromptView(discord.ui.LayoutView):
                                  emoji=SAVE_BUTTON_EMOJI)
         save.callback = self._on_save
         button_row.add_item(save)
-        for bucket_key, is_open in self.slot_states:
+        for bucket_key, is_open, committed in self.slot_states:
             bucket = bucket_by_key(bucket_key)
             if bucket is None:
                 continue
@@ -422,7 +531,7 @@ class InterestPromptView(discord.ui.LayoutView):
                 emoji=emojis.resolve(bucket.emoji), disabled=not is_open,
             )
             if is_open:
-                button.callback = self._make_confirm_slot(bucket_key)
+                button.callback = self._make_confirm_slot(bucket_key, committed)
             button_row.add_item(button)
         container.add_item(button_row)
         self.add_item(container)
@@ -481,18 +590,36 @@ class InterestPromptView(discord.ui.LayoutView):
     async def _on_save(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer()
         await self._persist(interaction.user)
+        if self.event_id is not None:
+            await self._finish(interaction, self._saved_text())
+            await self._resync_committed_pod(interaction.client)
+            return
         await _rerender_poll(
             interaction.client, self.launcher_message_id, self.signal_date, interaction.channel)
+        await self._finish(interaction, self._saved_text())
+
+    def _saved_text(self) -> str:
         saved = MSG_INTEREST_SAVED.format(choice=fi.preference_display(self.values))
         if fi.FLASHBACK in self.values and self.ranking:
             saved = f"{saved}\n{MSG_YOUR_SETS_LINE.format(ranking=fi.ranking_display(self.ranking))}"
         if fi.CUBE in self.values and self.cubes:
             saved = f"{saved}\n{MSG_YOUR_CUBES_LINE.format(cubes=_cube_display(self.cubes))}"
-        await self._finish(interaction, saved)
+        return saved
 
-    def _make_confirm_slot(self, bucket_key: str):
+    async def _resync_committed_pod(self, bot: commands.Bot) -> None:
+        """Run after the Saved ack so the click never waits on the edits: re-render the launcher board and
+        this pod's card and reminder off the fresh roster. Called only from the reminder's Save."""
+        await asyncio.gather(
+            _rerender_poll(bot, self.launcher_message_id, self.signal_date),
+            refresh_event_rsvp_surfaces(bot, self.event_id),
+        )
+
+    def _make_confirm_slot(self, bucket_key: str, committed: bool):
         async def callback(interaction: discord.Interaction) -> None:
-            await self._on_confirm_slot(interaction, bucket_key)
+            if committed:
+                await self._on_confirm_committed(interaction, bucket_key)
+            else:
+                await self._on_confirm_slot(interaction, bucket_key)
         return callback
 
     async def _on_confirm_slot(self, interaction: discord.Interaction, bucket_key: str) -> None:
@@ -511,6 +638,23 @@ class InterestPromptView(discord.ui.LayoutView):
         if err:
             await self._finish(interaction, err)
             return
+        await self._dismiss(interaction)
+
+    async def _on_confirm_committed(self, interaction: discord.Interaction, bucket_key: str) -> None:
+        """A slot whose pod already committed joins through the pod's scheduled card, not the launcher
+        poll signal, so the row lands on the live roster and the card, thread, and launcher re-render in
+        step. Confirm always sets Yes; already-Yes stays Yes. `apply_card_rsvp` posts the join card and
+        refreshes the board, so the picker deletes itself once done."""
+        await self._persist(interaction.user)
+        ref = await asyncio.to_thread(
+            pod_launch.committed_slot_rsvp_ref_sync, self.signal_date, bucket_key, str(interaction.user.id),
+        )
+        if ref is None:
+            await interaction.response.defer()
+            await self._finish(interaction, MSG_SLOT_CLOSED)
+            return
+        card_message_id, _current = ref
+        await apply_card_rsvp(interaction, card_message_id, RSVP_YES)
         await self._dismiss(interaction)
 
 
@@ -761,7 +905,7 @@ async def _launch_slot(bot: commands.Bot, state, message_id: str) -> None:
         announcement = _fire_announcement(channel.guild, slot_time)
         event_id = await post_scheduled_card(
             bot, channel, set_code=set_code, event_time=slot_time, name=name, preseed_yes=signups,
-            ping_role=False, announcement=announcement,
+            ping_role=False, content_override=announcement,
         )
     if event_id is None:
         await asyncio.to_thread(pod_launch.release_fire_sync, state.signal_id)

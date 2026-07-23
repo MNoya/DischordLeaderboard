@@ -87,7 +87,7 @@ Note the current firing seam: `format_at_fire` (`pod_format_interest.py`) delibe
 
 Target headcount is 8 for scheduled cards (`pod_draft_target_players`), 6 for unfired launcher slots (the fire threshold). The nudge is deleted on lobby open and flipped to a "started" record at fire.
 
-**Roster reminder** (`bot/tasks/pod_draft_reminder.py`) — at T-60 (`ROSTER_REMINDER_LEAD_MIN`), reposts the Yes/Maybe roster into the thread, while the socket is still pending.
+**Roster reminder** (`bot/tasks/pod_draft_reminder.py`) — at T-60 (`ROSTER_REMINDER_LEAD_MIN`), posts the roster into the thread while the socket is still pending, grouped into Latest Set / Flashback columns through the shared `pod_roster_fields.add_roster_fields` (the same split the card renders). It carries Sign Up / Can't and Format Preference buttons (`ReminderRsvpButton`, `ReminderFormatPreferenceButton`), all keyed by event id: the RSVP buttons record against the pod's card through `_apply_surface_rsvp`, and the picker is Save-only (no per-slot Confirm), acking fast then re-rendering the launcher, card, and reminder in the background (`refresh_event_rsvp_surfaces`). The view builder is injected from `pod_daily_poll` via `register_reminder_view_builder` to avoid the import cycle.
 
 **Team-vote pre-offer** — also at T-60, `maybe_offer_prelobby_team_vote` offers a Team Draft card when the Yes roster is exactly 6. A second team-vote offer fires at the o'clock start time. There is **no separate T-1h "rally repost"** today beyond the underfill resurface and the roster reminder.
 

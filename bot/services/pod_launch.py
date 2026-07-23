@@ -37,6 +37,7 @@ from bot.services.pod_drafts import (
     get_cube_choices,
     get_flashback_ranking,
     get_format_interests,
+    is_championship,
     record_ondemand_event,
     set_cube_choices,
     set_flashback_ranking,
@@ -44,6 +45,7 @@ from bot.services.pod_drafts import (
 )
 from bot.services.pod_join_button import build_join_view
 from bot.services.pod_link_dm import send_lobby_link_dms
+from bot.services.player_stats import rank_ordered_names
 from bot.services.pod_signals import SCHEDULE_TZ, slot_event_time
 from bot.services.pod_slot import COLLISION_INDEX_RE, next_collision_index, pod_display_name
 from bot.tasks.pod_draft_reminder import (
@@ -140,8 +142,11 @@ class LauncherSlot:
     signal_id: str | None
     thread_message_id: str | None = None
     card_message_id: str | None = None
+    card_channel_id: str | None = None
+    thread_name: str | None = None
     interests: tuple[tuple[str, ...], ...] = ()
     set_code: str | None = None
+    championship: bool = False
 
 
 def create_poll_signals(
@@ -331,9 +336,10 @@ def set_rsvp(
     session: Session, message_id: str, discord_user_id: str, display_name: str, rsvp: str,
 ) -> RsvpResult | None:
     """RSVP on a scheduled card: Yes or Maybe move the member there; No removes their signup entirely,
-    since No is not a tracked roster. Clicking the state they already hold is a no-op. `rsvp` in the
-    result is the recorded state, None once removed; `joined` is True only when the member freshly
-    entered Yes. Scheduled signals are born fired and never expire, so only a stray expired row
+    since No is not a tracked roster. A Set Championship is the exception — it keeps No as a tracked
+    state so the card can show who already declined. Clicking the state they already hold is a no-op.
+    `rsvp` in the result is the recorded state, None once removed; `joined` is True only when the member
+    freshly entered Yes. Scheduled signals are born fired and never expire, so only a stray expired row
     refuses. Does not commit."""
     signal = _scheduled_signal_by_surface(session, message_id)
     if signal is None:
@@ -346,6 +352,7 @@ def set_rsvp(
             roster_interests=_members_by_rsvp_with_interest(session, signal.id),
         )
 
+    tracks_no = _signal_is_championship(session, signal)
     existing = session.execute(
         select(PodSignalMember).where(
             PodSignalMember.signal_id == signal.id,
@@ -354,7 +361,7 @@ def set_rsvp(
     ).scalar_one_or_none()
     was_yes = existing is not None and existing.rsvp == pod_signals.RSVP_YES
     joined = False
-    if rsvp == pod_signals.RSVP_NO:
+    if rsvp == pod_signals.RSVP_NO and not tracks_no:
         recorded: str | None = None
         if existing is not None:
             session.delete(existing)
@@ -389,6 +396,13 @@ def set_rsvp_sync(
         result = set_rsvp(session, message_id, discord_user_id, display_name, rsvp)
         session.commit()
         return result
+
+
+def _signal_is_championship(session: Session, signal: PodSignal) -> bool:
+    if signal.event_id is None:
+        return False
+    event = session.get(PodDraftEvent, signal.event_id)
+    return is_championship(event.name if event else None)
 
 
 def toggle_member(
@@ -734,15 +748,22 @@ def _committed_slot(session: Session, bucket_key: str, event_id: str) -> Launche
             PodSignal.event_id == event_id, PodSignal.kind == pod_signals.KIND_SCHEDULED
         )
     ).scalar_one_or_none()
-    yes_names = _members_by_rsvp(session, signal.id)[pod_signals.RSVP_YES] if signal else []
-    interests = _member_interests(session, signal.id) if signal else ()
+    yes_roster = _members_by_rsvp_with_interest(session, signal.id)[pod_signals.RSVP_YES] if signal else []
+    yes_names = [name for name, _ in yes_roster]
+    interests = tuple(tuple(fi.normalize(interest)) for _, interest in yes_roster)
+    championship = is_championship(event.name if event else None)
+    if championship:
+        yes_names = rank_ordered_names(session, yes_names)
     return LauncherSlot(
         bucket_key, committed=True, status=pod_signals.STATUS_FIRED, count=len(yes_names),
         slot_time=event.event_time if event else None,
         names=yes_names, thread_id=event.discord_thread_id if event else None, signal_id=None,
         thread_message_id=signal.thread_message_id if signal else None,
-        card_message_id=signal.message_id if signal else None, interests=interests,
+        card_message_id=signal.message_id if signal else None,
+        card_channel_id=signal.channel_id if signal else None,
+        thread_name=event.name if event else None, interests=interests,
         set_code=event.set_code if event else None,
+        championship=championship,
     )
 
 
@@ -803,6 +824,22 @@ def _roster_for_event_sync(event_id: str, rsvp: str) -> list[tuple[str, str]]:
             .order_by(PodSignalMember.created_at)
         ).all()
         return [(did, name) for did, name in rows]
+
+
+def rsvp_state_by_user_sync(event_id: str) -> dict[str, str]:
+    """{discord_user_id: rsvp_state} for everyone who has answered this pod's signal, any state, so a
+    caller can tell who already RSVP'd."""
+    with SessionLocal() as session:
+        signal = session.execute(
+            select(PodSignal).where(PodSignal.event_id == event_id)
+        ).scalar_one_or_none()
+        if signal is None:
+            return {}
+        rows = session.execute(
+            select(PodSignalMember.discord_user_id, PodSignalMember.rsvp)
+            .where(PodSignalMember.signal_id == signal.id)
+        ).all()
+        return {discord_user_id: rsvp for discord_user_id, rsvp in rows}
 
 
 def poll_yes_members_sync(signal_id: str) -> list[tuple[str, str]]:

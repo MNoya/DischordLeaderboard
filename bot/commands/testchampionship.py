@@ -1,9 +1,11 @@
-"""Owner-only `!test championship` — preview the championship copy in Discord.
+"""Owner-only `!test championship` — stage the whole Set Championship flow in Discord.
 
-Renders the crown registration embed and the seeding embed in both phases (projected from standings, then
-live-from-Draftmancer) against the current leaderboard's top names, so the headlines and the 8-cut can be
-eyeballed before a real event. Shares the production embed builders — this owns only the roster it feeds in.
-The full announcement promo is a manual paste-ready file (prompts/championship-announcement.md), not here.
+Posts a real card and event thread in the pod-draft coordination channel (with the @Pod Drafters
+mention), then sends every follow-on message inside that thread in order, each titled with when the
+live flow would post it: the frozen standings, the three invite waves with the Confirm / Maybe / Can't
+row, the Yes-tally seeding table, and finally the Daily Pod Launcher in the channel. Shares the
+production builders (`championship_copy`, `pod_draft` seeding, `pod_rsvp`); it owns only the synthetic
+roster it feeds in and the staging titles. Meant for a test server, since it creates a real card.
 """
 from __future__ import annotations
 
@@ -14,20 +16,30 @@ from discord import ui
 from discord.ext import commands
 from sqlalchemy import select
 
+from datetime import datetime, timedelta
+
 from bot.commands.pod_draft import (
     CHAMPIONSHIP_CUT,
     SEEDING_CUT_ALTERNATES,
-    SEEDING_CUT_OVER_CAP,
-    SEEDING_PHASE_LIVE,
+    build_leaderboard_standings_embed,
     build_seeding_image_message_from_names,
     seeding_phase_projected,
 )
+from bot.commands.pod_rsvp import build_championship_wave_view, post_scheduled_card
 from bot.commands.test_group import test_group
+from bot.config import settings
 from bot.database import SessionLocal
 from bot.models import MagicSet
+from bot.services import championship
+from bot.services import championship_copy as cc
 from bot.services import pod_swiss
-from bot.services.player_stats import rank_players_for_set
-from bot.services.pod_registration_embed import build_registered_embed
+from bot.services.ping_roles import SET_CHAMPION_ROLE_NAME
+from bot.services.player_stats import SeededAttendee, rank_players_for_set
+from bot.services.pod_launch import LauncherSlot, event_thread_id_sync, scheduled_card_ref_sync
+from bot.services.pod_roles import find_role
+from bot.services.pod_schedule import POD_DRAFTERS_ROLE_NAME, SCHEDULE_TZ
+from bot.services.pod_signals import RSVP_MAYBE, RSVP_NO, RSVP_YES, STATUS_FIRED, STATUS_OPEN
+from bot.tasks.pod_daily_poll import PodPollView, build_poll_embed
 from bot.services.pod_swiss import MatchOutcome
 from bot.services.pod_tournament import (
     TOTAL_ROUNDS,
@@ -39,32 +51,101 @@ from bot.services.pod_tournament import (
 )
 from bot.sets import active_set_code
 
-PREVIEW_ROSTER_SIZE = 10
-MSG_NO_PLAYERS = "No ranked players on the active set yet — seed some locally to preview the seeding cut."
+MSG_NO_SUCCESSOR = "No successor set is registered, so there is no championship date to derive yet."
+MSG_NO_COORDINATION_CHANNEL = "The pod-draft coordination channel is not set up, so nothing was staged."
+MSG_CARD_FAILED = "Could not post the championship card."
+MSG_THREAD_FAILED = "Could not resolve the championship thread."
+
+_FALLBACK_PLAYERS: list[tuple[str, float]] = [
+    (name, 130.0 - index * 3.5)
+    for index, name in enumerate((
+        "Jace Beleren", "Liliana Vess", "Chandra Nalaar", "Nissa Revane", "Gideon Jura",
+        "Teferi Akosa", "Kaya Ghost", "Vraska Golgari", "Ajani Goldmane", "Sorin Markov",
+        "Ral Zarek", "Kiora Atua", "Domri Rade", "Ashiok Nightmare", "Tamiyo Moon",
+        "Narset Reversal", "Dovin Baan", "Saheeli Rai", "Angrath Flame", "Karn Silver",
+    ))
+]
 
 
 async def setup(bot: commands.Bot) -> None:
     @test_group.command(name="championship")
     @commands.is_owner()
     async def test_championship(ctx: commands.Context) -> None:
-        """Owner-only. Preview the crown registration embed and both seeding phases."""
-        names = await asyncio.to_thread(_top_player_names_sync, PREVIEW_ROSTER_SIZE)
-        await ctx.send(embed=build_registered_embed(
-            active_set_code(), "swiss", "leaderboard", championship=True))
-        if not names:
-            await ctx.send(MSG_NO_PLAYERS)
+        """Owner-only. Stage the full Set Championship flow in the pod-draft coordination channel."""
+        plan = championship.plan_for()
+        if plan is None:
+            await ctx.send(MSG_NO_SUCCESSOR)
+            return
+        channel = ctx.bot.get_channel(settings.pod_draft_channel_id)
+        if not isinstance(channel, discord.TextChannel):
+            await ctx.send(MSG_NO_COORDINATION_CHANNEL)
+            return
+        players = await asyncio.to_thread(_preview_players_sync, championship.INVITE_DEPTH) or _FALLBACK_PLAYERS
+        names = [name for name, _ in players]
+        event_at = plan.event_at
+        champion_role = find_role(channel.guild, SET_CHAMPION_ROLE_NAME)
+
+        card_body = cc.card_content(
+            set_name=plan.set_name, set_code=plan.set_code, next_set_name=plan.next_set_name,
+            next_set_code=plan.next_set_code, next_release_at=plan.next_release_at,
+            champion_mention=cc.card_champion_mention(champion_role),
+        )
+        event_id = await post_scheduled_card(
+            ctx.bot, channel, set_code=plan.set_code, event_time=event_at,
+            name=f"👑 {plan.set_code} Set Championship", notify_role_name=POD_DRAFTERS_ROLE_NAME,
+            pairing_mode="swiss", seating_mode="leaderboard", card_body=card_body,
+        )
+        if event_id is None:
+            await ctx.send(MSG_CARD_FAILED)
+            return
+        thread = await _resolve_preview_thread(ctx.bot, event_id)
+        if thread is None:
+            await ctx.send(MSG_THREAD_FAILED)
             return
 
-        projected_file, projected_embed = await asyncio.to_thread(
+        attendees = await asyncio.to_thread(championship.standings_seed_attendees_sync, plan.set_code)
+        if not attendees:
+            attendees = [
+                SeededAttendee(slug=None, display_name=name, rank=rank, score=score, trophies=max(0, 22 - rank))
+                for rank, (name, score) in enumerate(players, 1)
+            ]
+        await _stage(thread, "Posted right after the card")
+        await thread.send(embed=build_leaderboard_standings_embed(attendees, timestamp=datetime.now(SCHEDULE_TZ)))
+
+        post_url = _card_post_url(thread.guild.id, await asyncio.to_thread(scheduled_card_ref_sync, event_id))
+        preview_rsvps = _preview_rsvp_states(names)
+        wave_when = ("10 minutes after the card", "2 hours after the card", "4 hours after the card")
+        for wave_index, (low, high) in enumerate(championship.INVITE_WAVE_TIERS):
+            tier = names[low:high]
+            if not tier:
+                continue
+            await _stage(thread, f"Posted {wave_when[wave_index]}")
+            tokens = [
+                cc.wave_recipient_line(preview_rsvps.get(name), mention=f"**@{name}**", display_name=name)
+                for name in tier
+            ]
+            await thread.send(
+                content=cc.wave_invite_ping(
+                    wave_index, plan.set_code, tokens, event_at, post_url,
+                    cc.champion_mention_for_wave(wave_index, champion_role),
+                ),
+                view=build_championship_wave_view(event_id),
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+
+        await _stage(thread, "Posted 1 hour after the last wave")
+        seeding_file, seeding_embed = await asyncio.to_thread(
             build_seeding_image_message_from_names, names, None,
             seat_cap=CHAMPIONSHIP_CUT, header=seeding_phase_projected(), cut_label=SEEDING_CUT_ALTERNATES,
         )
-        live_file, live_embed = await asyncio.to_thread(
-            build_seeding_image_message_from_names, names, None,
-            seat_cap=CHAMPIONSHIP_CUT, header=SEEDING_PHASE_LIVE, cut_label=SEEDING_CUT_OVER_CAP,
+        await _thread_send(thread, seeding_file, seeding_embed)
+
+        await _stage(channel, "Posted on the Daily Pod Launcher, championship day")
+        slots = _preview_launcher_slots(plan.set_code, event_at, names, str(thread.id))
+        await channel.send(
+            embed=build_poll_embed(slots, channel.guild), view=PodPollView(slots, channel.guild),
+            allowed_mentions=discord.AllowedMentions.none(),
         )
-        await _send(ctx, projected_file, projected_embed)
-        await _send(ctx, live_file, live_embed)
 
     @test_group.command(name="tiebreakers")
     @commands.is_owner()
@@ -92,8 +173,60 @@ async def setup(bot: commands.Bot) -> None:
         )
 
 
-async def _send(ctx: commands.Context, file, embed) -> None:
-    await ctx.send(embed=embed, file=file) if file else await ctx.send(embed=embed)
+def _preview_launcher_slots(
+    set_code: str, event_at: datetime, names: list[str], thread_id: str,
+) -> list[LauncherSlot]:
+    """Championship-day launcher slots for the preview: the Early lane overridden to the committed
+    championship pointer, the Late lane a normal open weekend slot."""
+    top_yes = names[: championship.SEAT_COUNT]
+    afternoon = LauncherSlot(
+        bucket_key="AFTERNOON", committed=True, status=STATUS_FIRED, count=len(top_yes),
+        slot_time=event_at, names=top_yes, thread_id=thread_id, signal_id=None,
+        set_code=set_code, championship=True,
+    )
+    evening = LauncherSlot(
+        bucket_key="EVENING", committed=False, status=STATUS_OPEN, count=0,
+        slot_time=event_at + timedelta(hours=6), names=[], thread_id=None, signal_id="preview",
+    )
+    return [afternoon, evening]
+
+
+def _preview_rsvp_states(names: list[str]) -> dict[str, str]:
+    """A few synthetic RSVPs so the staged waves show the already-answered treatment: the top names
+    stand in as Yes, Maybe, and Can't, the rest still get a fresh ping."""
+    states: dict[str, str] = {}
+    for name, state in zip(names, (RSVP_YES, RSVP_MAYBE, RSVP_NO)):
+        states[name] = state
+    return states
+
+
+async def _stage(destination, when: str) -> None:
+    """A staging title marking when the next message would post in the live flow."""
+    await destination.send(f"### ⏱ {when}", allowed_mentions=discord.AllowedMentions.none())
+
+
+async def _thread_send(thread: discord.Thread, file, embed) -> None:
+    await thread.send(embed=embed, file=file) if file else await thread.send(embed=embed)
+
+
+async def _resolve_preview_thread(bot: commands.Bot, event_id: str) -> discord.Thread | None:
+    thread_id = await asyncio.to_thread(event_thread_id_sync, event_id)
+    if thread_id is None:
+        return None
+    thread = bot.get_channel(int(thread_id))
+    if thread is None:
+        try:
+            thread = await bot.fetch_channel(int(thread_id))
+        except discord.HTTPException:
+            return None
+    return thread if isinstance(thread, discord.Thread) else None
+
+
+def _card_post_url(guild_id: int, card: tuple | None) -> str:
+    if card is None:
+        return ""
+    _, channel_id, message_id, _ = card
+    return f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"
 
 
 def _tiebreaker_preview_scenario():
@@ -127,11 +260,11 @@ def _tiebreaker_preview_scenario():
     return standings, match_states
 
 
-def _top_player_names_sync(limit: int) -> list[str]:
+def _preview_players_sync(limit: int) -> list[tuple[str, float]]:
     with SessionLocal() as session:
         set_id = session.execute(
             select(MagicSet.id).where(MagicSet.code == active_set_code())
         ).scalar_one_or_none()
         if set_id is None:
             return []
-        return [p.display_name for p in rank_players_for_set(session, set_id)[:limit]]
+        return [(p.display_name, p.score) for p in rank_players_for_set(session, set_id)[:limit]]

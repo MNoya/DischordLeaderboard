@@ -125,9 +125,15 @@ async def setup(bot: commands.Bot) -> None:
         """Owner-only. Post a sample roster reminder embed in this channel — no DB or sesh lookup."""
         name = ctx.channel.name if isinstance(ctx.channel, discord.Thread) else "Sample Pod Draft - Jun 25"
         starts_at = datetime.now(SCHEDULE_TZ) + timedelta(minutes=ROSTER_REMINDER_LEAD_MIN)
-        yes = ["Nissa Revane", "Chandra Nalaar", "Jace Beleren", "Liliana Vess", "Gideon Jura"]
-        maybe = ["Ajani Goldmane", "Kaya Bala"]
-        embed = build_roster_embed(name, starts_at, yes, maybe)
+        yes_interests = ((fi.LATEST,), (fi.FLASHBACK,), (fi.LATEST, fi.FLASHBACK), (fi.LATEST,), ())
+        maybe_interests = ((fi.FLASHBACK,), (fi.LATEST,))
+        names = iter(HALL_OF_FAME)
+        roster_interests = {
+            RSVP_YES: [(next(names), codes) for codes in yes_interests],
+            RSVP_MAYBE: [(next(names), codes) for codes in maybe_interests],
+        }
+        rosters = {state: [name for name, _ in members] for state, members in roster_interests.items()}
+        embed = build_roster_embed(name, starts_at, rosters, roster_interests)
         await ctx.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
 
     @test_group.command(name="rolegrant")
@@ -181,7 +187,14 @@ def _reminder_timeline(ctx: commands.Context) -> list[tuple[str, str | None, dis
     )
     yes = list(HALL_OF_FAME[:5])
     maybe = list(HALL_OF_FAME[5:7])
-    roster_embed = build_roster_embed(pod_name, slot, yes, maybe)
+    yes_interests = ((fi.LATEST,), (fi.FLASHBACK,), (fi.LATEST, fi.FLASHBACK), (fi.LATEST,), ())
+    maybe_interests = ((fi.FLASHBACK,), (fi.LATEST,))
+    roster_interests = {
+        RSVP_YES: list(zip(yes, yes_interests)),
+        RSVP_MAYBE: list(zip(maybe, maybe_interests)),
+    }
+    rosters = {RSVP_YES: yes, RSVP_MAYBE: maybe}
+    roster_embed = build_roster_embed(pod_name, slot, rosters, roster_interests)
 
     def text(const: str, desc: str, body: str) -> tuple[str, str | None, discord.Embed | None]:
         return (f"`{const}` ({desc})", body, None)

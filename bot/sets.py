@@ -121,6 +121,20 @@ def active_set_code(when: datetime | None = None) -> str:
     return (released or ALL_SETS[-1]).code
 
 
+def previous_set_code(code: str) -> str | None:
+    """The leaderboard set active immediately before `code` released — the season whose championship
+    most recently crowned the reigning champion. None when `code` is unknown or the earliest set."""
+    upper = code.upper()
+    codes = [s.code for s in ALL_SETS]
+    if upper not in codes:
+        return None
+    seed = ALL_SETS[codes.index(upper)]
+    just_before = release_instant(seed.start_date) - timedelta(seconds=1)
+    if just_before < release_instant(ALL_SETS[0].start_date):
+        return None
+    return active_set_code(just_before)
+
+
 def released_sets(when: datetime | None = None) -> tuple[SetSeed, ...]:
     """Sets whose Arena release instant has passed, newest first."""
     now = when or datetime.now(timezone.utc)

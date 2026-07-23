@@ -6,7 +6,7 @@ from bot.commands.pod_queue import _preset_slot_time, _when_options
 from bot.services.pod_format_select import WRITE_IN_VALUE
 from bot.services.pod_launch import LauncherSlot, _lazy_status
 from bot.services.pod_signals import STATUS_EXPIRED, STATUS_FIRED, STATUS_OPEN
-from bot.tasks.pod_daily_poll import PodPollView
+from bot.tasks.pod_daily_poll import PodPollView, _committed_card_link, build_reminder_view
 
 
 BEFORE_EARLY = datetime(2026, 7, 14, 10, 0, tzinfo=timezone.utc)
@@ -37,6 +37,45 @@ def test_committed_slot_without_a_card_links_to_the_thread_itself():
     view = PodPollView([_committed("EARLY", "555", None)], guild=None)
 
     assert view.children[0].url.endswith("/555")
+
+
+def _committed_named(thread_name, card_channel_id, card_message_id, thread_id="555", thread_message_id="777"):
+    return LauncherSlot(
+        "EARLY", committed=True, status=STATUS_FIRED, count=1, slot_time=None,
+        names=["p"], thread_id=thread_id, signal_id=None, thread_message_id=thread_message_id,
+        card_message_id=card_message_id, card_channel_id=card_channel_id, thread_name=thread_name,
+    )
+
+
+def test_committed_card_link_targets_the_coordination_card_by_name():
+    name = "MSH Jul 21 Early Pod"
+    slot = _committed_named(name, "111", "222")
+
+    link = _committed_card_link(None, slot)
+
+    assert link == f"[__**{name}**__](https://discord.com/channels/@me/111/222)"
+
+
+def test_committed_card_link_falls_back_to_the_thread_without_a_card():
+    name = "MSH Jul 21 Early Pod"
+    slot = _committed_named(name, None, None)
+
+    link = _committed_card_link(None, slot)
+
+    assert link == f"[__**{name}**__](https://discord.com/channels/@me/555/777)"
+
+
+def test_committed_card_link_is_none_without_a_thread_name():
+    slot = _committed_named(None, "111", "222")
+
+    assert _committed_card_link(None, slot) is None
+
+
+def test_reminder_view_confirms_yes_or_no_and_opens_format_preference():
+    view = build_reminder_view("EVT9")
+
+    custom_ids = [child.custom_id for child in view.children]
+    assert custom_ids == ["podreminderrsvp:yes:EVT9", "podreminderrsvp:no:EVT9", "podremindfmt:EVT9"]
 
 
 def test_open_slot_button_is_enabled_a_closed_one_disabled():
@@ -132,3 +171,21 @@ def test_seed_options_from_rankings_respects_the_option_cap():
 
     assert len(options) == pod_format_poll.MAX_ROWED_OPTIONS
     assert "NEW1" not in options
+
+
+def _committed_championship(thread_id="555", card_message_id="900"):
+    return LauncherSlot(
+        "AFTERNOON", committed=True, status=STATUS_FIRED, count=8, slot_time=None,
+        names=["a", "b"], thread_id=thread_id, signal_id=None, thread_message_id="777",
+        card_message_id=card_message_id, championship=True,
+    )
+
+
+def test_championship_slot_is_a_link_not_an_rsvp_toggle():
+    view = PodPollView([_committed_championship()], guild=None)
+
+    custom_ids = [child.custom_id for child in view.children if getattr(child, "custom_id", None)]
+    link_buttons = [child for child in view.children if getattr(child, "url", None)]
+
+    assert not any(cid.startswith("pod_slot_rsvp") for cid in custom_ids)
+    assert link_buttons and link_buttons[0].url.endswith("/555/777")

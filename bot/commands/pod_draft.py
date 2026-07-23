@@ -5,6 +5,7 @@ import asyncio
 import io
 import logging
 import re
+from datetime import datetime, timedelta
 
 import discord
 from discord import app_commands
@@ -16,6 +17,7 @@ from bot.commands.messages import MSG_ADMIN_ONLY, MSG_ARENA_BAD_FORMAT, MSG_AREN
 from bot.config import settings
 from bot.database import SessionLocal
 from bot.discord_helpers import display_width, extract_avatar_hash, player_url
+from bot.services import championship as championship_service
 from bot.services.lobby_embed import guard_ready_check
 from bot.services.pod_active import ACTIVE_POD_MANAGERS, set_card_phase_hook
 from bot.services.pod_draft_manager import (
@@ -582,6 +584,28 @@ def build_seeding_image_message_for_pool(
     return file, embed
 
 
+CHAMPIONSHIP_STANDINGS_MAX = 60
+CHAMPIONSHIP_STANDINGS_BUDGET = 3800
+
+
+def build_leaderboard_standings_embed(attendees: list[SeededAttendee], *, timestamp: datetime) -> discord.Embed:
+    """The full leaderboard as the shared ranked table (Rnk / Player / Pts / 🏆), as deep as one embed
+    holds, under the seeding header — no seats, no Yes grouping, no ring. Backs the locked standings
+    snapshot a Set Championship posts in its thread. `timestamp` dates the footer."""
+    header = seeding_phase_projected()
+    shown = attendees[:CHAMPIONSHIP_STANDINGS_MAX]
+    description = header
+    while shown:
+        candidate = f"{header}\n\n{_seeding_block(shown)}"
+        if len(candidate) <= CHAMPIONSHIP_STANDINGS_BUDGET:
+            description = candidate
+            break
+        shown = shown[:-1]
+    embed = discord.Embed(description=description, color=discord.Color.green())
+    embed.set_footer(text=f"Timestamped {timestamp:%B} {timestamp.day}, {timestamp.year}")
+    return embed
+
+
 _OPEN_SEAT = SeededAttendee(slug=None, display_name="(open)", rank=None, score=None, trophies=None)
 
 
@@ -993,30 +1017,30 @@ async def _resolve_seeding_render(bot, event_id: str):
     return channel, file, embed, championship
 
 
+CHAMPIONSHIP_REPOST_INTERVAL = timedelta(hours=1)
+
+
 async def refresh_seeding_table(bot, event_id: str) -> None:
     """Keep the leaderboard seeding table current as the pool changes. Fires on Draftmancer joins/leaves
-    (live phase) and on sesh RSVP edits (projected phase). Edits the posted table(s) in place; for the
-    championship it also auto-creates one so the organizer never has to post it. Other pods only update a
-    table that was posted on demand, and non-leaderboard pods are left alone."""
+    and on RSVP edits; non-leaderboard pods are left alone. Refreshing edits the posted table(s) in place;
+    a championship also moves its table to the bottom once the current one has aged past the repost
+    interval, so the latest standings resurface without jumping on every single RSVP."""
     async with _seeding_lock(event_id):
         resolved = await _resolve_seeding_render(bot, event_id)
         if resolved is None:
             return
         channel, file, embed, championship = resolved
-        existing = await _find_seeding_messages(channel, bot.user)
-        if existing:
-            png = file.fp.read() if file is not None else None
-            for message in existing:
-                attachments = [discord.File(io.BytesIO(png), "seating.png")] if png is not None else []
-                try:
-                    await message.edit(embed=embed, attachments=attachments)
-                except discord.HTTPException:
-                    log.warning("could not refresh the seeding table in place", exc_info=True)
-            log.info(f"pod-seeding: refreshed {len(existing)} seeding table(s) for event {event_id}")
+        if championship and championship_service.invites_pending(event_id):
             return
-        if championship:
-            await post_table(bot, channel, file, embed)
-            log.info(f"pod-seeding: posted championship seeding table for event {event_id}")
+        existing = await _find_seeding_messages(channel, bot.user)
+        if championship and not _within_repost_interval(existing):
+            await _repost_seeding_at_bottom(bot, channel, file, embed, pin=False)
+            log.info(f"pod-seeding: reposted championship seeding table for event {event_id}")
+            return
+        if not existing:
+            return
+        await _edit_seeding_in_place(existing, file, embed)
+        log.info(f"pod-seeding: refreshed {len(existing)} seeding table(s) for event {event_id}")
 
 
 async def repost_seeding_table(bot, event_id: str) -> None:
@@ -1028,9 +1052,43 @@ async def repost_seeding_table(bot, event_id: str) -> None:
         if resolved is None:
             return
         channel, file, embed, _ = resolved
-        if isinstance(channel, (discord.Thread, discord.TextChannel)) and bot.user:
-            await delete_stale_seeding_messages(channel, bot.user, include_pinned=True)
+        await _repost_seeding_at_bottom(bot, channel, file, embed, pin=True)
+
+
+async def _repost_seeding_at_bottom(bot, channel, file, embed, *, pin: bool) -> None:
+    """Clear every existing table (the pinned anchor included) and post a fresh one at the bottom.
+    Lock-free — the caller holds the seeding lock. `pin` anchors the live-lobby table; the gathering-phase
+    repost stays unpinned to keep the thread quiet."""
+    if isinstance(channel, (discord.Thread, discord.TextChannel)) and bot.user:
+        await delete_stale_seeding_messages(channel, bot.user, include_pinned=True)
+    if pin:
         await post_table(bot, channel, file, embed)
+    elif file is not None:
+        await channel.send(embed=embed, file=file)
+    else:
+        await channel.send(embed=embed)
+
+
+def _within_repost_interval(existing: list[discord.Message]) -> bool:
+    """True while the newest posted table is younger than the championship repost interval, so a refresh
+    edits it in place instead of moving it to the bottom. Reads only the already-fetched messages."""
+    newest = None
+    for message in existing:
+        if newest is None or message.created_at > newest:
+            newest = message.created_at
+    if newest is None:
+        return False
+    return discord.utils.utcnow() - newest < CHAMPIONSHIP_REPOST_INTERVAL
+
+
+async def _edit_seeding_in_place(existing: list[discord.Message], file, embed) -> None:
+    png = file.fp.read() if file is not None else None
+    for message in existing:
+        attachments = [discord.File(io.BytesIO(png), "seating.png")] if png is not None else []
+        try:
+            await message.edit(embed=embed, attachments=attachments)
+        except discord.HTTPException:
+            log.warning("could not refresh the seeding table in place", exc_info=True)
 
 
 def _championship_waiting_embed() -> discord.Embed:

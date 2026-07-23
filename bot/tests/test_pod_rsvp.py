@@ -13,7 +13,9 @@ from bot.commands.pod_rsvp import (
     refresh_roster_fields,
 )
 from bot.models import PodDraftEvent, PodSignal
+from bot.services import pod_format_interest as fi
 from bot.services import pod_signals
+from bot.services.pod_drafts import set_format_interests
 from bot.services.pod_launch import _committed_slot, _event_id_for_slot, set_rsvp
 from bot.services.pod_schedule import SCHEDULE_TZ
 from bot.services.pod_signals import RSVP_YES
@@ -204,6 +206,36 @@ def test_committed_slot_projects_the_yes_roster_off_the_card(session):
     assert slot.count == 2
     assert slot.thread_id == "tid-1"
     assert slot.names == ["Nissa Revane", "Chandra Nalaar"]
+
+
+def _standing_interest(session, discord_user_id: str, name: str, interests: list[str]) -> None:
+    set_format_interests(
+        session, discord_id=discord_user_id, discord_username=name, display_name=name,
+        avatar_hash=None, interests=interests,
+    )
+
+
+def test_committed_slot_keeps_each_name_bound_to_its_own_interest(session):
+    slot_time = datetime.now(timezone.utc) + timedelta(days=1)
+    event_id = _pod_event(session, slot_time)
+    signal = PodSignal(
+        kind=pod_signals.KIND_SCHEDULED, bucket=pod_signals.SCHEDULED_BUCKET, guild_id="1",
+        channel_id="2", message_id="card-1", signal_date=slot_time.date(), slot_time=slot_time,
+        status=pod_signals.STATUS_FIRED, event_id=event_id,
+    )
+    session.add(signal)
+    session.flush()
+    _standing_interest(session, "u0", "Latest Player", [fi.LATEST])
+    _standing_interest(session, "u1", "Maybe Player", [fi.LATEST])
+    _standing_interest(session, "u2", "Flashback Player", [fi.FLASHBACK])
+    set_rsvp(session, "card-1", "u0", "Latest Player", pod_signals.RSVP_YES)
+    set_rsvp(session, "card-1", "u1", "Maybe Player", pod_signals.RSVP_MAYBE)
+    set_rsvp(session, "card-1", "u2", "Flashback Player", pod_signals.RSVP_YES)
+
+    slot = _committed_slot(session, "AFTERNOON", event_id)
+
+    assert slot.names == ["Latest Player", "Flashback Player"]
+    assert slot.interests == (("latest",), ("flashback",))
 
 
 def test_refresh_never_stacks_the_multipod_notice():

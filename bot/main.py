@@ -82,12 +82,19 @@ from bot.services.refresh import refresh_active_players
 from bot.services.refresh_report import build_refresh_report, format_elapsed
 from bot.services.seventeenlands import MinIntervalLimiter, SeventeenLandsClient
 from bot.sets import active_set_code
-from bot.commands.pod_rsvp import PodRsvpView, heal_finished_cards
+from bot.commands.pod_rsvp import (
+    ChampionshipConfirmButton,
+    ChampionshipRsvpButton,
+    PodRsvpView,
+    ReminderRsvpButton,
+    heal_finished_cards,
+)
 from bot.tasks.pod_draft_reminder import init_reminder
-from bot.tasks.pod_daily_poll import PodPollView, init_daily_poll
+from bot.tasks.pod_daily_poll import PodPollView, ReminderFormatPreferenceButton, init_daily_poll
 from bot.services.pod_launch import init_launch, rearm_signals
 from bot.tasks.format_schedule_post import init_format_schedule
 from bot.tasks.set_awards_post import init_set_awards_schedule
+from bot.tasks.championship_post import init_championship_schedule
 from bot.tasks.pod_underfill import init_underfill
 from bot.tasks.pod_thread_cleanup import init_thread_cleanup
 
@@ -188,6 +195,7 @@ def build_bot(guild_id: int) -> commands.Bot:
         init_underfill(bot)
         init_format_schedule(bot)
         init_set_awards_schedule(bot)
+        init_championship_schedule(bot)
         init_launch(bot)
         init_daily_poll(bot)
         init_thread_cleanup(bot)
@@ -238,6 +246,10 @@ def build_bot(guild_id: int) -> commands.Bot:
         bot.add_dynamic_items(JoinDraftButton)
         bot.add_dynamic_items(DmNotifyToggleButton)
         bot.add_dynamic_items(DmLinkArenaButton)
+        bot.add_dynamic_items(ChampionshipConfirmButton)
+        bot.add_dynamic_items(ChampionshipRsvpButton)
+        bot.add_dynamic_items(ReminderRsvpButton)
+        bot.add_dynamic_items(ReminderFormatPreferenceButton)
         _log_startup_summary()
         bot.tree.copy_global_to(guild=guild)
 

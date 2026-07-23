@@ -37,6 +37,7 @@ RSVP_YES = "yes"
 RSVP_MAYBE = "maybe"
 RSVP_NO = "no"
 RSVP_STATES = (RSVP_YES, RSVP_MAYBE, RSVP_NO)
+RSVP_EMOJI = {RSVP_YES: "✅", RSVP_MAYBE: "🤷", RSVP_NO: "❌"}
 
 
 @dataclass(frozen=True)

@@ -5,6 +5,7 @@ from sqlalchemy import (
     Column,
     Date,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -329,6 +330,31 @@ class PodDraftReplay(Base):
         UniqueConstraint("event_id", "player_id", "game_id", name="uq_pod_draft_replay_event_player_game"),
         Index("ix_pod_draft_replays_event_player", "event_id", "player_id"),
         Index("ix_pod_draft_replays_event_time", "event_id", "game_time"),
+    )
+
+
+class PodChampionshipSeed(Base):
+    """Frozen leaderboard standings for a Set Championship, snapshotted when the event is created so
+    seeds lock in. One row per ranked player down to the invite depth; the seat cut, the invite waves,
+    and round-1 seeding read rank off these rows instead of live standings."""
+
+    __tablename__ = "pod_championship_seeds"
+
+    id           = Column(String, primary_key=True, default=lambda: str(uuid4()))
+    event_id     = Column(String, ForeignKey("pod_draft_events.id", ondelete="CASCADE"), nullable=False)
+    player_id    = Column(String, ForeignKey("players.id"), nullable=True)
+    discord_id   = Column(String, nullable=True)
+    display_name = Column(String, nullable=False)
+    rank         = Column(Integer, nullable=False)
+    score        = Column(Float, nullable=False)
+    created_at   = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    event  = relationship("PodDraftEvent")
+    player = relationship("Player")
+
+    __table_args__ = (
+        UniqueConstraint("event_id", "rank", name="uq_pod_championship_seed_event_rank"),
+        Index("ix_pod_championship_seeds_event", "event_id"),
     )
 
 
