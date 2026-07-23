@@ -132,13 +132,16 @@ class WelcomePreviewView(discord.ui.View):
 async def setup(bot: commands.Bot) -> None:
     @test_group.command(name="poll")
     @commands.is_owner()
-    async def test_poll(ctx: commands.Context, when: str = "") -> None:
+    async def test_poll(ctx: commands.Context, *args: str) -> None:
         """Owner-only. Post a live daily launcher whose slots are still ahead — today if one remains,
         otherwise tomorrow — so the buttons are clickable and drive real signals. Prefills fake signups
-        with a mix of Latest / Flashback / Any interests so the roster's format teams show.
-        Pass `am` to post tomorrow, so every slot is fresh and open like a morning post."""
+        with a mix of Latest / Flashback / Any interests so the roster's format teams show. Args are
+        order-free: `am` posts tomorrow so every slot is fresh and open like a morning post; `held` seeds
+        the first open slot as 3 Latest-only plus 3 Flashback-only, the split that reaches six heads but
+        fills no single format, so the slot holds unfired and reads like any still-gathering slot."""
+        lowered = {arg.lower() for arg in args}
         now = datetime.now(SCHEDULE_TZ)
-        if when.lower() == "am":
+        if "am" in lowered:
             day = now.date() + timedelta(days=1)
         else:
             last_slot = slot_event_time(now.date(), poll_buckets_for(now.date())[-1].key)
@@ -146,7 +149,7 @@ async def setup(bot: commands.Bot) -> None:
         message = await post_launcher(ctx.bot, ctx.channel, day)
         if message is None:
             return
-        await asyncio.to_thread(_seed_poll_interests_sync, str(message.id), day)
+        await asyncio.to_thread(_seed_poll_interests_sync, str(message.id), day, "held" in lowered)
         slots = await asyncio.to_thread(pod_launch.launcher_snapshot_sync, str(message.id), day)
         await message.edit(embed=build_poll_embed(slots, ctx.guild), view=PodPollView(slots, ctx.guild))
 
@@ -422,6 +425,7 @@ _POLL_SEED_FIRST = [
     [],
 ]
 _POLL_SEED_REST = [[fi.LATEST], [fi.FLASHBACK], [fi.LATEST, fi.FLASHBACK], []]
+_POLL_SEED_HELD = [[fi.LATEST]] * 3 + [[fi.FLASHBACK]] * 3
 
 _ROSTER_NAMES = HALL_OF_FAME
 
@@ -714,19 +718,22 @@ class _GatherNoShowButton(discord.ui.Button):
         await view.render(interaction)
 
 
-def _seed_poll_interests_sync(message_id: str, day) -> None:
+def _seed_poll_interests_sync(message_id: str, day, held: bool = False) -> None:
     """Insert fake signups on the launcher's open lazy slots with a spread of format interests, so `!test
     poll` shows the format teams without needing live clickers. The first open slot gets the full Latest /
-    Flashback / Any / no-preference mix, the rest a lighter one; slots already past stay empty."""
+    Flashback / Any / no-preference mix, the rest a lighter one; slots already past stay empty. `held`
+    swaps the first slot's mix for a 3 Latest-only plus 3 Flashback-only split, the case that reaches six
+    heads yet fires no format."""
     now = datetime.now(SCHEDULE_TZ)
     first_open = True
     next_name = 0
+    first_seed = _POLL_SEED_HELD if held else _POLL_SEED_FIRST
     with SessionLocal() as session:
         for bucket in poll_buckets_for(day):
             slot_time = slot_event_time(day, bucket.key)
             if slot_time is not None and slot_time <= now:
                 continue
-            interest_sets = _POLL_SEED_FIRST if first_open else _POLL_SEED_REST
+            interest_sets = first_seed if first_open else _POLL_SEED_REST
             first_open = False
             signal = session.execute(
                 select(PodSignal).where(PodSignal.message_id == message_id, PodSignal.bucket == bucket.key)

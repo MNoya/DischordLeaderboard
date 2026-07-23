@@ -84,7 +84,7 @@ def interest_summary(values: Iterable[str] | None) -> str:
     codes = normalize(values)
     if not codes:
         return "No preference"
-    if is_flexible(codes) and CUBE not in codes:
+    if is_flexible(codes):
         return FLEXIBLE_LABEL
     return " and ".join(INTEREST_LABEL[code] for code in codes)
 
@@ -104,7 +104,7 @@ def interest_summary_with_emoji(values: Iterable[str] | None) -> str:
     codes = normalize(values)
     if not codes:
         return interest_summary(codes)
-    if is_flexible(codes) and CUBE not in codes:
+    if is_flexible(codes):
         return f"{FLEXIBLE_MARKER} {FLEXIBLE_LABEL}"
     return " and ".join(f"{interest_emoji(code)} {INTEREST_LABEL[code]}" for code in codes)
 
@@ -139,6 +139,13 @@ class Composition:
     @property
     def latest_capacity(self) -> int:
         return self.latest_only + self.flexible
+
+    @property
+    def latest_seated(self) -> int:
+        """Bodies that fill the latest table when a slot fires: dedicated Latest, Any, and no-preference.
+        Unlike ``latest_capacity`` this folds in ``unstated`` — a clicker with no preference drafts the
+        latest set. Flashback-only players are excluded; they wait for a flashback table."""
+        return self.latest_only + self.flexible + self.unstated
 
     @property
     def flashback_capacity(self) -> int:
@@ -211,6 +218,14 @@ def should_offer_format_poll(comp: Composition, minimum: int = DEFAULT_FLASHBACK
     """A freshly opened pod earns a format poll only when enough of its roster leans flashback. An
     all-latest weekday pod stays untouched and never sees the poll."""
     return comp.flashback_capacity >= minimum and comp.flashback_only > 0
+
+
+def slot_fires_latest(comp: Composition, threshold: int) -> bool:
+    """A launcher slot graduates only when the latest-set table can seat a full pod. Latest-only, Any,
+    and no-preference players all seat it; flashback-only players never fire the latest pod on their own.
+    Firing opens the latest set today, so a slot that reaches the raw threshold on flashback-only bodies
+    holds instead of graduating into a set nobody there wanted."""
+    return comp.latest_seated >= threshold
 
 
 def format_at_fire(member_interests: Iterable[Iterable[str] | None]) -> str:

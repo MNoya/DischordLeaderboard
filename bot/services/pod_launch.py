@@ -92,6 +92,7 @@ class ToggleResult:
     joined: bool
     changed: bool
     closed: bool
+    composition: fi.Composition | None = None
 
 
 @dataclass(frozen=True)
@@ -442,8 +443,10 @@ def toggle_member(
         changed = True
     session.flush()
     names = _member_names(session, signal.id)
+    composition = fi.composition(_member_interests(session, signal.id))
     return ToggleResult(
         _state(signal, len(names)), names, joined=joined, changed=changed, closed=False,
+        composition=composition,
     )
 
 

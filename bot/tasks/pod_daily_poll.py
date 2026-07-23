@@ -59,7 +59,6 @@ from bot.services.pod_signals import (
     POST_HOUR_ET,
     bucket_by_key,
     bucket_role_name,
-    should_fire,
     slot_role_name_for_event_time,
 )
 from bot.sets import active_set_code, set_name_for
@@ -785,7 +784,8 @@ async def _apply_slot_join(
         return MSG_SLOT_CLOSED, None
     fired = (
         result.joined
-        and should_fire(result.state.count, settings.pod_signal_fire_threshold)
+        and result.composition is not None
+        and fi.slot_fires_latest(result.composition, settings.pod_signal_fire_threshold)
         and await asyncio.to_thread(pod_launch.claim_fire_sync, result.state.signal_id)
     )
     guild = getattr(launcher_message.channel, "guild", None) or interaction.guild
