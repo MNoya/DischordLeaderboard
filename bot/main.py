@@ -87,7 +87,6 @@ from bot.tasks.pod_draft_reminder import init_reminder
 from bot.tasks.pod_daily_poll import PodPollView, init_daily_poll
 from bot.services.pod_launch import init_launch, rearm_signals
 from bot.tasks.format_schedule_post import init_format_schedule
-from bot.tasks.pod_schedule_post import init_schedule_post
 from bot.tasks.set_awards_post import init_set_awards_schedule
 from bot.tasks.pod_underfill import init_underfill
 from bot.tasks.pod_thread_cleanup import init_thread_cleanup
@@ -187,7 +186,6 @@ def build_bot(guild_id: int) -> commands.Bot:
         bot.pod_scheduler.start()
         init_reminder(bot)
         init_underfill(bot)
-        init_schedule_post(bot)
         init_format_schedule(bot)
         init_set_awards_schedule(bot)
         init_launch(bot)

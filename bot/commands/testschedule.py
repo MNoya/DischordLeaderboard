@@ -6,8 +6,8 @@ variant. `underfill`, `pollnudge`, `firenudge` and `overflow` render those same 
 in the current channel, with arguments for targeted checks. `cardformat` renders the scheduled card
 with a mixed sample roster to eyeball the format split. `reminder` renders the roster reminder embed.
 `rolegrant`
-posts the auto-grant announcement embed so its look can be checked. The Monday schedule package itself
-is exercised through the real `/pod-schedule` command; the scheduled RSVP card through `!test rsvp`.
+posts the auto-grant announcement embed so its look can be checked. The scheduled RSVP card is
+exercised through `!test rsvp`.
 """
 from __future__ import annotations
 
