@@ -674,7 +674,7 @@ def _seed_pod_event(session, set_code, name):
     event = PodDraftEvent(
         event_date=date(2026, 5, 1), event_time=datetime(2026, 5, 1, tzinfo=timezone.utc),
         set_code=set_code, name=name, draftmancer_session=f"{name}-sess",
-        discord_thread_id=f"{name}-thread", sesh_message_id=f"{name}-msg", socket_status="complete",
+        discord_thread_id=f"{name}-thread", socket_status="complete",
     )
     session.add(event)
     session.flush()

@@ -22,12 +22,6 @@ export const DISCORD_GUILD_ID = "775371722065051658";
 export const DISCORD_INVITE_CODE = "XWNVT9mxvU";
 export const POD_DRAFT_CHANNEL_ID = "1028072146645295125";
 
-// Deep-link the sesh RSVP post itself, not the Discord scheduled event — RSVP "Yes" lives on the
-// message; the scheduled event's "Interested" button does nothing for pod signups.
-export function podDraftMessageLink(messageId: string): string {
-  return `https://discord.com/channels/${DISCORD_GUILD_ID}/${POD_DRAFT_CHANNEL_ID}/${messageId}`;
-}
-
 // Alex-approved copy — the canonical blurbs. SITE_BLURB is the brand identity
 // (YouTube + podcast + Discord); DISCORD_BLURB is the server-specific invite.
 export const SITE_BLURB =

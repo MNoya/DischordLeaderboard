@@ -32,9 +32,7 @@ from bot.services.pod_draft_manager import (
     set_event_pick_timer,
     set_event_seating_mode,
 )
-from bot.services.pod_format import (
-    PEASANT_CODE, PEASANT_CUBE_ID, PEASANT_LABEL, default_pick_timer_for, format_display,
-)
+from bot.services.pod_format import custom_formats, default_pick_timer_for, format_display
 from bot.services.pod_format_select import WRITE_IN_VALUE, set_select_option, write_in_option
 from bot.services.pod_pairing_select import SELECT_PLACEHOLDER as PAIRING_PLACEHOLDER
 from bot.services.pod_pairing_select import pairing_options
@@ -463,8 +461,8 @@ class DraftLauncherView(discord.ui.View):
 
 
 def _set_options(current: str | None) -> list[discord.SelectOption]:
-    """The set dropdown: the active set (default), Peasant Cube, the most recent released sets, then a
-    write-in for any other code — each carrying its keyrune emoji when one is loaded. Peasant Cube is
+    """The set dropdown: the active set (default), the registered cubes, the most recent released sets,
+    then a write-in for any other code — each carrying its keyrune emoji when one is loaded. Cubes are
     always offered right under the latest set. Unreleased upcoming sets are left out; they have no card
     pool to draft. A written-in current outside the known list shows as its own defaulted option so it
     survives re-render."""
@@ -472,7 +470,8 @@ def _set_options(current: str | None) -> list[discord.SelectOption]:
     active_upper = active.upper()
     chosen = (current or active).upper()
     recent = [seed.code for seed in recent_released_sets()]
-    known = {active_upper, PEASANT_CODE} | {code.upper() for code in recent}
+    cubes = custom_formats()
+    known = {active_upper} | {fmt.code for fmt in cubes} | {code.upper() for code in recent}
 
     options: list[discord.SelectOption] = [write_in_option("Set")]
     if chosen not in known:
@@ -480,9 +479,10 @@ def _set_options(current: str | None) -> list[discord.SelectOption]:
             chosen, label=f"Set: {chosen}", description=set_name_for(chosen), default=True))
     options.append(set_select_option(
         active, label=f"Set: {active}", description="The latest set", default=(chosen == active_upper)))
-    options.append(discord.SelectOption(
-        label=f"Set: {PEASANT_LABEL}", value=PEASANT_CODE, description=f"CubeCobra: {PEASANT_CUBE_ID}",
-        emoji=emojis.get_emoji("cube"), default=(chosen == PEASANT_CODE)))
+    for fmt in cubes:
+        options.append(discord.SelectOption(
+            label=f"Set: {fmt.label}", value=fmt.code, description=f"CubeCobra: {fmt.cube_id}",
+            emoji=emojis.get_emoji("cube"), default=(chosen == fmt.code)))
     for code in recent:
         options.append(set_select_option(
             code, label=f"Set: {code}", description=set_name_for(code), default=(chosen == code)))

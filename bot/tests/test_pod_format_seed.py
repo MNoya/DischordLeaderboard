@@ -3,6 +3,7 @@ from datetime import date, datetime, timedelta, timezone
 from bot.models import Player, PodDraftEvent, PodSignal
 from bot.services import pod_format_interest as fi
 from bot.services import pod_signals
+from bot.services.pod_drafts import get_flashback_ranking, set_flashback_ranking
 from bot.services.pod_launch import _launcher_day_signal_ids, _member_interests, set_rsvp, toggle_member
 
 
@@ -79,3 +80,15 @@ def test_launcher_day_signals_include_the_reflected_scheduled_pod(session):
     ids = _launcher_day_signal_ids(session, lazy.message_id, date(2026, 7, 20))
 
     assert set(ids) == {lazy.id, scheduled.id}
+
+
+def test_flashback_ranking_is_capped_at_the_max(session):
+    session.add(Player(slug="reid-1", discord_id="u9", display_name="Reid"))
+    session.flush()
+    overflow = ["FIN", "NEO", "DMU", "DSK", "MOM", "BRO", "IKO"]
+
+    set_flashback_ranking(session, discord_id="u9", ranking=overflow)
+
+    stored = get_flashback_ranking(session, "u9")
+    assert stored == overflow[: fi.FLASHBACK_RANKING_MAX]
+    assert len(stored) == fi.FLASHBACK_RANKING_MAX

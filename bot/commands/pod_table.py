@@ -54,14 +54,12 @@ from bot.services.pod_drafts import (
     draftmancer_url_for,
     load_event_id_by_name_sync,
     load_event_id_by_thread_sync,
-    load_event_sesh_message_id_sync,
     load_event_thread_id_sync,
     preview_table_target_sync,
     record_table_event,
     search_event_names_sync,
 )
 from bot.services.pod_slot import pod_display_name
-from bot.tasks.pod_draft_reminder import fetch_sesh_rsvp_ids
 
 
 log = logging.getLogger(__name__)
@@ -285,7 +283,7 @@ async def offer_second_table(
     claims (the prior card is superseded by `activate`), and it posts regardless of leftover count — a
     forming table keeps recruiting rather than dying because table 1 seated its crowd."""
     format_code, carried = _format_offer_handoff(source_event_id, seated_ids)
-    candidates = await _second_table_candidates(bot, source_event_id)
+    candidates = await _second_table_candidates(source_event_id)
     if not candidates and format_code is None:
         return None
     carried_ids = {str(user_id) for user_id, _ in carried}
@@ -358,16 +356,9 @@ async def _source_thread(bot: commands.Bot, source_event_id: str) -> "discord.Th
     return thread if isinstance(thread, discord.Thread) else None
 
 
-async def _second_table_candidates(bot: commands.Bot, event_id: str) -> list[tuple[str, str]]:
-    """(discord_id, display_name) Yes-then-Maybe pool to offer a follow-up table to: the signal roster
-    for bot-native pods, else the sesh embed's mentioned attendees for sesh pods."""
-    candidates = await asyncio.to_thread(pod_launch.second_table_candidates_sync, event_id)
-    if candidates:
-        return candidates
-    sesh_message_id = await asyncio.to_thread(load_event_sesh_message_id_sync, event_id)
-    if sesh_message_id is None:
-        return []
-    return await fetch_sesh_rsvp_ids(bot, sesh_message_id) or []
+async def _second_table_candidates(event_id: str) -> list[tuple[str, str]]:
+    """(discord_id, display_name) Yes-then-Maybe pool to offer a follow-up table to, off the signal roster."""
+    return await asyncio.to_thread(pod_launch.second_table_candidates_sync, event_id)
 
 
 async def _second_table_hook(bot: commands.Bot, event_id: str) -> None:

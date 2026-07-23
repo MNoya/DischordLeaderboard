@@ -135,12 +135,26 @@ async def maybe_post_team_championship(manager: "PodDraftManager", *, force: boo
 
 
 def _team_result_line(standings, teams: dict[str, str]) -> str:
-    """The scheduled card's final status for a team pod, mirroring the championship headline."""
+    """The scheduled card's final status for a team pod. The winning team's members are named in bold
+    since the card is an embed, where a `<@id>` mention would render as raw text."""
     a_wins, b_wins = team_scores(standings, teams)
     winner = pod_team.team_winner(a_wins, b_wins)
     if winner is None:
         return "🤝 Team draft ends in a draw"
-    return f"🏆 {pod_team.team_label(winner)} wins the draft {max(a_wins, b_wins)}-{min(a_wins, b_wins)}"
+    normalized = {normalize_player_name(name): team for name, team in teams.items()}
+    members = [f"**{s.player_name}**" for s in standings
+               if normalized.get(normalize_player_name(s.player_name)) == winner]
+    roster = _join_names(members)
+    verb = "wins" if len(members) == 1 else "win"
+    return f"🏆 {roster} {verb} the draft {max(a_wins, b_wins)}-{min(a_wins, b_wins)}"
+
+
+def _join_names(names: list[str]) -> str:
+    if len(names) == 1:
+        return names[0]
+    if len(names) == 2:
+        return f"{names[0]} and {names[1]}"
+    return ", ".join(names[:-1]) + f", and {names[-1]}"
 
 
 def build_team_championship_view(

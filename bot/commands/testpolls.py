@@ -27,6 +27,9 @@ from bot.commands.pod_queue import (
     queue_role_mention,
 )
 from bot.commands.pod_rsvp import (
+    CARD_STATUS_DRAFTING,
+    CARD_STATUS_PLAYING,
+    DraftedPlayer,
     build_rsvp_embed,
     post_scheduled_card,
     purge_native_events,
@@ -42,7 +45,9 @@ from bot.models import PodDraftEvent, PodSignal, PodSignalMember
 from bot.services import pod_format_interest as fi
 from bot.services import pod_gathering
 from bot.services import pod_launch
+from bot.services.pod_deck_color import format_deck_color_emojis
 from bot.services.pod_draft_manager import set_event_pairing_mode
+from bot.services.pod_tournament import build_replays_link_button
 from bot.services.ping_roles import (
     PING_ROLES,
     QUEUE_GRANT_PING,
@@ -245,6 +250,48 @@ async def setup(bot: commands.Bot) -> None:
         if team.lower() == "team":
             await set_event_pairing_mode(event_id, "team")
             await refresh_scheduled_card(ctx.bot, event_id)
+
+    @test_group.command(name="lockroster")
+    @commands.is_owner()
+    async def test_lockroster(ctx: commands.Context, minutes: int = 60) -> None:
+        """Owner-only. Preview the locked-roster card across its three post-gathering states — draft
+        started, matches in progress, final standings — as three static embeds from fixture drafters.
+        Look-only: no thread, event, or timed jobs. Shows what replaces the RSVP columns once the draft
+        starts, and that the Draft Recap button rides only the completed card. `minutes` sets how long
+        ago the pod started, since a locked card is always a draft already in flight."""
+        event_time = datetime.now(SCHEDULE_TZ) - timedelta(minutes=minutes)
+        set_code = active_set_code()
+        name = await asyncio.to_thread(pod_launch.ondemand_event_name_sync, set_code, event_time)
+        colors = ["WU", "BR", "URg", "WBg", "GW", "UB", "RG", "WUBRG"]
+        records = ["3-0", "2-1", "2-1", "2-1", "1-2", "1-2", "1-2", "0-3"]
+
+        started = [DraftedPlayer(display_name=_roster_name(i), seat_index=i) for i in range(8)]
+        playing = [
+            DraftedPlayer(display_name=_roster_name(i), seat_index=i, deck_colors=colors[i],
+                          record="1-0" if i < 4 else "0-1")
+            for i in range(8)
+        ]
+        complete = [
+            DraftedPlayer(display_name=_roster_name(i), seat_index=i, deck_colors=colors[i],
+                          record=records[i], placement=i + 1)
+            for i in range(8)
+        ]
+        champion_line = f"🏆 **{_roster_name(0)}** wins the draft with {format_deck_color_emojis(colors[0])}"
+
+        for status_line, roster, done in (
+            (CARD_STATUS_DRAFTING, started, False),
+            (CARD_STATUS_PLAYING, playing, False),
+            (champion_line, complete, True),
+        ):
+            embed = build_rsvp_embed(
+                name, event_time, {}, set_code=set_code, status_line=status_line,
+                locked_roster=roster, draft_complete=done,
+            )
+            view = None
+            if done:
+                view = discord.ui.View(timeout=None)
+                view.add_item(build_replays_link_button(name))
+            await ctx.send(embed=embed, view=view)
 
     @test_group.command(name="secondtable")
     @commands.is_owner()

@@ -70,6 +70,7 @@ class Player(Base):
     dm_draft_link        = Column(Boolean, nullable=False, server_default="true", default=True)
     format_interests     = Column(ARRAY(String), nullable=False, server_default="{}")
     flashback_ranking    = Column(ARRAY(String), nullable=False, server_default="{}")
+    cube_choices         = Column(ARRAY(String), nullable=False, server_default="{}")
 
     stats = relationship(
         "PlayerStats",
@@ -215,7 +216,6 @@ class PodDraftEvent(Base):
     description         = Column(String, nullable=True)
     draftmancer_session = Column(String, nullable=False)
     discord_thread_id   = Column(String, nullable=False)
-    sesh_message_id     = Column(String, nullable=True)
     socket_status       = Column(String, nullable=False)
     kind                = Column(String, nullable=False, server_default="tournament")
     pairing_mode        = Column(String, nullable=False, server_default="bracket")

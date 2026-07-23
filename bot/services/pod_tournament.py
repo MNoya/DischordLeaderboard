@@ -32,7 +32,6 @@ from bot.services.pod_deck_color import (
     SAVED_MSG,
     DeckColorSelectView,
     NotInPodError,
-    OrganizerCallback,
     SubmitDeckButton,
     SubmitDeckView,
     format_deck_color_emojis,
@@ -61,6 +60,7 @@ from bot.services.pod_drafts import (
     final_submit_deck_dm_for_participant,
     finalize_champion as finalize_db,
     get_participant_deck_state,
+    list_event_participants_sync,
     load_event_id_by_thread_sync,
     load_event_name_sync,
     load_event_pairing_mode_sync,
@@ -72,6 +72,7 @@ from bot.services.pod_drafts import (
     seed_event_participants,
     set_match_result,
     set_participant_deck_colors,
+    set_participant_deck_colors_by_id_sync,
     submit_deck_dm_for_participant,
     upsert_dm_message,
 )
@@ -605,6 +606,15 @@ async def live_deck_color_submit(interaction: discord.Interaction, color: str) -
         return
     event_name = await asyncio.to_thread(load_event_name_sync, event_id)
     log.info(f"[{event_name}] {actor} saved deck colors: {color} (from {surface})")
+    await _refresh_standings_after_deck_change(interaction.client, event_id, thread_id)
+    asyncio.create_task(_refresh_submit_deck_dm(interaction.client, event_id, discord_id))
+
+
+async def _refresh_standings_after_deck_change(
+    client: discord.Client, event_id: str, thread_id: str,
+) -> None:
+    """Re-render the live standings after a deck color changes, on whichever surface owns them: a live
+    manager's team or individual standings, else the persisted standings rebuild for the thread."""
     manager = ACTIVE_POD_MANAGERS.get(event_id)
     if manager is not None:
         if manager.pairing_mode == "team":
@@ -618,29 +628,83 @@ async def live_deck_color_submit(interaction: discord.Interaction, color: str) -
             await _post_or_update_live_standings(manager)
             await maybe_post_championship(manager)
     else:
-        await refresh_standings_for_event(interaction.client, event_id, thread_id)
-    asyncio.create_task(_refresh_submit_deck_dm(interaction.client, event_id, discord_id))
+        await refresh_standings_for_event(client, event_id, thread_id)
 
 
-ORGANIZER_DECK_OVERRIDE: OrganizerCallback | None = None
-
-
-def set_organizer_deck_override(callback: OrganizerCallback) -> None:
-    """Hook the Submit Deck button for organizers: the callback returns True when it handled the
-    click (e.g. opened the backfill wizard), False to fall through to the personal color flow.
-    Registered by the /pod-backfill command module at setup — a direct import here would cycle."""
-    global ORGANIZER_DECK_OVERRIDE
-    ORGANIZER_DECK_OVERRIDE = callback
-
-
-async def _dispatch_organizer_deck_override(interaction: discord.Interaction) -> bool:
-    if ORGANIZER_DECK_OVERRIDE is None:
+async def open_organizer_color_panel(interaction: discord.Interaction) -> bool:
+    """Submit Colors override for organizers: an admin or moderator clicking the button in a pod thread
+    gets a per-player color picker for the whole roster instead of the personal one, so any player's
+    deck colors can be set from one place. Returns False to fall through to the personal flow — a
+    non-organizer, a click outside a guild, or one outside a pod thread."""
+    if interaction.guild is None:
         return False
-    return await ORGANIZER_DECK_OVERRIDE(interaction)
+    if not await is_pod_organizer(interaction.client, interaction.user):
+        return False
+    event_id, thread_id = await _resolve_event_for_interaction(interaction)
+    if event_id is None or thread_id is None:
+        return False
+    roster = await asyncio.to_thread(list_event_participants_sync, event_id)
+    if not roster:
+        return False
+    await interaction.response.send_message(
+        view=OrganizerColorPanel(event_id, thread_id, roster), ephemeral=True,
+    )
+    return True
+
+
+class OrganizerColorPanel(discord.ui.View):
+    """Ephemeral organizer tool: pick any pod player, then set their deck colors. Per-invocation and
+    short-lived, so it carries no persistent custom_ids."""
+
+    def __init__(
+        self, event_id: str, thread_id: str, roster: list[tuple[str, str, str | None]],
+    ) -> None:
+        super().__init__(timeout=300)
+        self.add_item(_OrganizerPlayerSelect(event_id, thread_id, roster))
+
+
+class _OrganizerPlayerSelect(discord.ui.Select):
+    ORGANIZER_COLOR_PLACEHOLDER = "Choose a Player"
+    NO_COLORS = "No colors yet"
+
+    def __init__(
+        self, event_id: str, thread_id: str, roster: list[tuple[str, str, str | None]],
+    ) -> None:
+        self._event_id = event_id
+        self._thread_id = thread_id
+        self._colors = {pid: colors for pid, _, colors in roster}
+        options = [
+            discord.SelectOption(
+                label=name[:100], value=pid, description=(colors or self.NO_COLORS)[:100],
+            )
+            for pid, name, colors in roster
+        ]
+        super().__init__(
+            placeholder=self.ORGANIZER_COLOR_PLACEHOLDER, min_values=1, max_values=1, options=options,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        participant_id = self.values[0]
+        submit = _organizer_color_submit(self._event_id, self._thread_id, participant_id)
+        await interaction.response.send_message(
+            view=DeckColorSelectView(submit, current_value=self._colors.get(participant_id)),
+            ephemeral=True,
+        )
+
+
+def _organizer_color_submit(event_id: str, thread_id: str, participant_id: str):
+    async def _submit(interaction: discord.Interaction, color: str) -> None:
+        saved = await asyncio.to_thread(set_participant_deck_colors_by_id_sync, participant_id, color)
+        if saved is None:
+            raise NotInPodError()
+        log.info(f"[{event_id}] {actor_label(interaction)} set deck colors for {participant_id}: {color}")
+        await _refresh_standings_after_deck_change(interaction.client, event_id, thread_id)
+
+    return _submit
 
 
 def build_live_submit_deck_view() -> SubmitDeckView:
-    return SubmitDeckView(live_deck_color_submit, live_deck_state_lookup, _dispatch_organizer_deck_override)
+    return SubmitDeckView(live_deck_color_submit, live_deck_state_lookup, open_organizer_color_panel)
 
 
 def build_live_submit_deck_button() -> SubmitDeckButton:
@@ -649,7 +713,7 @@ def build_live_submit_deck_button() -> SubmitDeckButton:
     Shares the persistent custom_id ('poddecksubmit') with build_live_submit_deck_view, so the
     persistent view registered at startup catches the click regardless of which message it came from.
     """
-    return SubmitDeckButton(live_deck_color_submit, live_deck_state_lookup, _dispatch_organizer_deck_override)
+    return SubmitDeckButton(live_deck_color_submit, live_deck_state_lookup, open_organizer_color_panel)
 
 
 def build_live_deck_color_select_view(current_value: str | None = None) -> DeckColorSelectView:
@@ -2359,17 +2423,17 @@ def _join_champion_names(names_with_colors: list[tuple[str, str | None]]) -> str
 
 
 def _load_champions_sync(event_id: str) -> list[tuple[str, str | None]]:
-    """(mention-or-name, deck colors) for the pod's placement-1 finishers, for rebuilding the card's
-    champion line without a live manager. Linked players render as a mention, others by display name."""
+    """(bold display name, deck colors) for the pod's placement-1 finishers, for rebuilding the card's
+    champion line without a live manager. The card is an embed, where a `<@id>` mention renders as raw
+    text, so the winner is named in bold instead."""
     with SessionLocal() as session:
         rows = session.execute(
-            select(PodDraftParticipant.display_name, PodDraftParticipant.deck_colors, DbPlayer.discord_id)
-            .join(DbPlayer, PodDraftParticipant.player_id == DbPlayer.id, isouter=True)
+            select(PodDraftParticipant.display_name, PodDraftParticipant.deck_colors)
             .where(PodDraftParticipant.event_id == event_id, PodDraftParticipant.placement == 1)
         ).all()
     champions: list[tuple[str, str | None]] = []
-    for display_name, deck_colors, discord_id in rows:
-        champions.append((f"<@{discord_id}>" if discord_id else display_name, deck_colors))
+    for display_name, deck_colors in rows:
+        champions.append((f"**{display_name}**", deck_colors))
     return champions
 
 
@@ -3274,16 +3338,20 @@ async def _send_champion_thread_ping(manager, champions, player_colors) -> None:
     if thread is None or announcement is None:
         return
     named: list[tuple[str, str | None]] = []
+    carded: list[tuple[str, str | None]] = []
     for s in champions:
+        color = player_colors.get(normalize_player_name(s.player_name))
+        carded.append((f"**{s.player_name}**", color))
         mention = await _resolve_discord_mention(manager.event_id, s.player_name)
-        if not mention:
-            continue
-        named.append((mention, player_colors.get(normalize_player_name(s.player_name))))
-    if not named:
+        if mention:
+            named.append((mention, color))
+    if not carded:
         return
-    manager.card_result_line = f"🏆 {_format_champion_thread_callout(named)}"
+    manager.card_result_line = f"🏆 {_format_champion_thread_callout(carded)}"
     manager.card_result_url = announcement.jump_url
     notify_card_phase(manager.bot, manager.event_id)
+    if not named:
+        return
     view = ui.View(timeout=None)
     view.add_item(ui.Button(
         label="Championship Post",

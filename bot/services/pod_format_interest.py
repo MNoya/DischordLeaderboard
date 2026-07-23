@@ -39,6 +39,7 @@ FLEXIBLE_EMOJI = "✨"
 FLEXIBLE_MARKER = "✦"
 
 DEFAULT_FLASHBACK_POLL_MIN = 3
+FLASHBACK_RANKING_MAX = 3
 
 
 def latest_emoji() -> "discord.Emoji | str":
@@ -49,6 +50,10 @@ def latest_emoji() -> "discord.Emoji | str":
 
 def flashback_emoji() -> "discord.Emoji | str":
     return emojis.get_emoji("flashback") or INTEREST_EMOJI[FLASHBACK]
+
+
+def cube_emoji() -> "discord.Emoji | str":
+    return emojis.get_emoji("cube") or INTEREST_EMOJI[CUBE]
 
 
 def normalize(values: Iterable[str] | None) -> list[str]:
@@ -89,6 +94,8 @@ def interest_emoji(code: str) -> "discord.Emoji | str":
         return latest_emoji()
     if code == FLASHBACK:
         return flashback_emoji()
+    if code == CUBE:
+        return cube_emoji()
     return INTEREST_EMOJI[code]
 
 

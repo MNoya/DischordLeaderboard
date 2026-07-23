@@ -24,9 +24,10 @@ from bot.services.pod_reminder_copy import (
     RECRUITING_OVERFLOW_SPLIT,
     RECRUITING_READY,
 )
-from bot.services.sesh_parser import NUM_RE
 from bot.sets import ALL_SETS
 
+
+NUM_RE = re.compile(r"#(\d+)")
 
 SCHEDULE_TZ = ZoneInfo("America/New_York")
 

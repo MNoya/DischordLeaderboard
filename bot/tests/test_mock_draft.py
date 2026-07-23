@@ -91,7 +91,6 @@ def test_record_mock_event_fields(session, monkeypatch):
 
     assert event.kind == "mock"
     assert event.set_code == "MSH"
-    assert event.sesh_message_id is None
     assert event.name == "MSH Mock Draft 1"
     assert event.draftmancer_session == "LLU-MSH-Mock-1"
     assert event.set_id is not None
@@ -129,7 +128,7 @@ def test_mock_screenshot_backfills_colors_without_overriding(
     event = PodDraftEvent(
         event_date=date(2026, 6, 23), event_time=datetime(2026, 6, 23, tzinfo=timezone.utc),
         set_code="MSH", name="MSH Mock Draft 1", draftmancer_session="LLU-MSH-Mock-1",
-        discord_thread_id="mock-thread", sesh_message_id=None, socket_status="complete",
+        discord_thread_id="mock-thread", socket_status="complete",
         kind="mock", current_round=None,
     )
     session.add(event)
@@ -156,7 +155,7 @@ def test_mock_screenshot_gate_opens_on_draft_completion(session, socket_status, 
     event = PodDraftEvent(
         event_date=date(2026, 6, 23), event_time=datetime(2026, 6, 23, tzinfo=timezone.utc),
         set_code="MSH", name="MSH Mock Draft 1", draftmancer_session="LLU-MSH-Mock-1",
-        discord_thread_id="mock-thread", sesh_message_id=None, socket_status=socket_status,
+        discord_thread_id="mock-thread", socket_status=socket_status,
         kind="mock", current_round=None,
     )
     session.add(event)

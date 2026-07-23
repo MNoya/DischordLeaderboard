@@ -135,11 +135,11 @@ def test_mirror_message_resolves_the_same_signal(session, scheduled_signal):
     assert result.rosters[pod_signals.RSVP_YES] == ["Nissa Revane", "Chandra Nalaar"]
 
 
-def _pod_event(session, slot_time: datetime, *, sesh: bool = False) -> str:
+def _pod_event(session, slot_time: datetime) -> str:
     event = PodDraftEvent(
         event_date=slot_time.date(), event_time=slot_time, set_code="TST",
         name="TST Pod Draft #1", draftmancer_session="s1", discord_thread_id="tid-1",
-        socket_status="pending", sesh_message_id="sesh-1" if sesh else None,
+        socket_status="pending",
     )
     session.add(event)
     session.flush()
@@ -168,23 +168,9 @@ def test_reflection_binds_a_slot_to_the_pod_at_its_instant(session):
     assert _event_id_for_slot(session, slot_time) == event_id
 
 
-def test_reflection_binds_a_sesh_pod_with_no_signal(session):
+def test_an_off_slot_pod_does_not_occupy_the_slot(session):
     slot_time = datetime.now(timezone.utc) + timedelta(days=1)
-    event_id = _pod_event(session, slot_time, sesh=True)
-
-    assert _event_id_for_slot(session, slot_time) == event_id
-
-
-def test_a_pod_within_the_window_occupies_the_slot(session):
-    slot_time = datetime.now(timezone.utc) + timedelta(days=1)
-    event_id = _scheduled_pod(session, slot_time + timedelta(hours=1), [])
-
-    assert _event_id_for_slot(session, slot_time) == event_id
-
-
-def test_a_neighbouring_slots_pod_leaves_the_slot_open(session):
-    slot_time = datetime.now(timezone.utc) + timedelta(days=1)
-    _scheduled_pod(session, slot_time + timedelta(hours=5), [])
+    _scheduled_pod(session, slot_time + timedelta(hours=1), [])
 
     assert _event_id_for_slot(session, slot_time) is None
 
@@ -218,18 +204,6 @@ def test_committed_slot_projects_the_yes_roster_off_the_card(session):
     assert slot.count == 2
     assert slot.thread_id == "tid-1"
     assert slot.names == ["Nissa Revane", "Chandra Nalaar"]
-
-
-def test_committed_slot_for_a_sesh_pod_shows_no_count_and_no_roster(session):
-    slot_time = datetime.now(timezone.utc) + timedelta(days=1)
-    event_id = _pod_event(session, slot_time, sesh=True)
-
-    slot = _committed_slot(session, "LATE", event_id)
-
-    assert slot.committed
-    assert slot.count == 0
-    assert slot.thread_id == "tid-1"
-    assert slot.names == []
 
 
 def test_refresh_never_stacks_the_multipod_notice():

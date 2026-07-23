@@ -85,7 +85,6 @@ def main() -> None:
             name=_EVENT_NAME,
             draftmancer_session="LLU-SOS-3",
             discord_thread_id="0",
-            sesh_message_id="0",
             socket_status="complete",
         )
         session.add(event)

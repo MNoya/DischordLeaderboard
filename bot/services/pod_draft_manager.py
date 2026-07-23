@@ -1791,8 +1791,10 @@ class PodDraftManager:
             log.info(f"[TEAM_VOTE] offer_delete_failed event={self.event_id}", exc_info=True)
 
     async def offer_format_poll(self) -> None:
-        """Post the one-time format tally for a pod with flashback demand, pre-seeded with the present
-        players' standing flashback rankings. No-op once offered or once the draft is under way."""
+        """Post the one-time format tally for a pod with flashback demand. The present players' standing
+        flashback rankings seed the option buttons so the likely sets are one click away, but no vote is
+        pre-cast — the split gate counts only live clicks, so the tally reads as a real attendance signal.
+        No-op once offered or once the draft is under way."""
         if self.format_poll_offered or self.drafting or self.draft_complete:
             return
         thread = await self._fetch_thread()
@@ -1800,10 +1802,10 @@ class PodDraftManager:
             return
         options = pod_format_poll.build_options()
         rankings = await asyncio.to_thread(event_member_rankings_sync, self.event_id)
-        votes = _seed_votes_from_rankings(options, rankings)
-        options = pod_format_poll.order_options(options, votes)
+        _seed_options_from_rankings(options, rankings)
+        options = pod_format_poll.order_options(options, {})
         self.format_poll_offered = True
-        embed = pod_format_poll.build_format_poll_embed(options, votes)
+        embed = pod_format_poll.build_format_poll_embed(options, {})
         try:
             self.format_poll_message = await thread.send(
                 embed=embed,
@@ -1813,7 +1815,21 @@ class PodDraftManager:
             self.format_poll_offered = False
             log.warning(f"[FORMAT_POLL] offer_post_failed event={self.event_id}", exc_info=True)
             return
-        await _maybe_offer_format_table(self.bot, self.event_id, embed)
+
+    async def assess_format_split(self) -> None:
+        """The one-shot second-table decision at the settle point a few minutes before start: read the live
+        tally off the format poll card and offer the format table when it now supports a split without
+        starving the main pod. Judging once on settled votes replaces firing the instant the poll opened,
+        which split on stale ranking pre-seeds. No-op without an open poll or once the draft is under way."""
+        if not self.format_poll_offered or self.format_table_offered or self.drafting or self.draft_complete:
+            return
+        thread = await self._fetch_thread()
+        if thread is None:
+            return
+        card = await pod_format_poll.find_format_poll_card(thread, self.event_id)
+        if card is None or not card.embeds:
+            return
+        await _maybe_offer_format_table(self.bot, self.event_id, card.embeds[0])
 
     async def adopt_existing_format_poll(self) -> None:
         """Take over a format poll card already posted before this manager existed, or left by a restart, so
@@ -1830,8 +1846,6 @@ class PodDraftManager:
         self.format_poll_message = card
         self.format_poll_offered = True
         log.info(f"[FORMAT_POLL] adopted existing card event={self.event_id}")
-        if card.embeds:
-            await _maybe_offer_format_table(self.bot, self.event_id, card.embeds[0])
 
     async def _retire_format_poll_offer(self) -> None:
         """Close the poll card when the draft starts: keep the final tally on the thread, disable the buttons
@@ -2364,31 +2378,27 @@ def _apply_format_poll_vote(
     )
 
 
-def _seed_votes_from_rankings(
+def _seed_options_from_rankings(
     options: list[str], rankings: "tuple[tuple[str, tuple[str, ...]], ...]",
-) -> dict[str, list[str]]:
-    """Pre-cast each present player's standing flashback ranking onto a fresh poll: a vote for every set they
-    ranked, adding the set as an option up to the cap. Mutates ``options`` with any new codes, best first.
-    Players can still change their votes on the card."""
-    votes: dict[str, list[str]] = {}
-    for discord_id, ranking in rankings:
-        mention = f"<@{discord_id}>"
+) -> None:
+    """Add each present player's standing flashback ranking to the poll as an option, best first, up to the
+    cap — so the likely sets show as one-click buttons. No vote is pre-cast: the split gate counts only live
+    clicks, so the card's tally stays an accurate live signal that a restart recovers straight off the
+    message. Mutates ``options`` in place with any new codes."""
+    for _discord_id, ranking in rankings:
         for code in ranking:
-            if code not in options:
-                if len(options) >= pod_format_poll.MAX_ROWED_OPTIONS:
-                    continue
-                options.append(code)
-            voters = votes.setdefault(code, [])
-            if mention not in voters:
-                voters.append(mention)
-    return votes
+            if code in options:
+                continue
+            if len(options) >= pod_format_poll.MAX_ROWED_OPTIONS:
+                continue
+            options.append(code)
 
 
 async def handle_format_poll_click(interaction: "discord.Interaction", event_id: str, code: str) -> None:
     """Toggle the clicker's vote for one format option against the card message. Multiple choice, so a
     player can back several formats. The card message is the tally, so this works whether or not a live
-    manager backs the pod. Serialized per pod so rapid clicks can't race. Every applied vote re-checks
-    whether a concrete set has earned the second-table offer.
+    manager backs the pod. Serialized per pod so rapid clicks can't race. The second-table decision reads
+    this settled tally once at `assess_format_split`, not on each click.
 
     Registered as the poll-button handler at import, keeping pod_format_poll free of a manager import."""
     lock = _format_poll_click_locks.setdefault(event_id, asyncio.Lock())
@@ -2408,7 +2418,6 @@ async def handle_format_poll_click(interaction: "discord.Interaction", event_id:
         except discord.HTTPException:
             log.warning(f"[FORMAT_POLL] edit_failed event={event_id}", exc_info=True)
             return
-        await _maybe_offer_format_table(interaction.client, event_id, new_embed)
 
 
 def _apply_format_poll_write_ins(
@@ -2467,14 +2476,13 @@ async def handle_format_poll_add(
             await interaction.response.send_message("Could not update the poll.", ephemeral=True)
             return
         await interaction.response.send_message(f"Voted for {', '.join(applied)}.", ephemeral=True)
-        await _maybe_offer_format_table(interaction.client, event_id, new_embed)
 
 
 async def _maybe_offer_format_table(bot: "commands.Bot", event_id: str, embed: "discord.Embed") -> None:
-    """Fire the format-preset second-table offer the first time the tally supports one. The gate is
-    cannibalization-proof: `pick_second_table` splits the gathered crowd by their votes and requires
-    both resulting tables at the fire threshold. Once per pod — the offer card posted, whatever happens
-    to it afterward, votes never move it (re-offer policy is deliberately deferred to prod data)."""
+    """Fire the format-preset second-table offer when the settled tally supports one. The gate is
+    cannibalization-proof: `pick_second_table` splits the gathered crowd by their live votes and requires
+    both resulting tables at the fire threshold. Called once per pod from `assess_format_split` at the
+    settle point, so the split is judged on real attendance rather than a poll-open ranking pre-seed."""
     manager = ACTIVE_POD_MANAGERS.get(event_id)
     if manager is None or manager.format_table_offered or manager.drafting or manager.draft_complete:
         return

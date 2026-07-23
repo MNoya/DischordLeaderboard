@@ -38,7 +38,6 @@ from bot.services.pod_drafts import (
     load_event_pairing_mode_sync,
     load_event_seating_mode_sync,
     load_event_seeding_context_sync,
-    load_event_sesh_message_id_sync,
     load_event_set_code_sync,
     load_event_thread_id_sync,
     attach_arena_alias,
@@ -57,7 +56,7 @@ from bot.services.player_stats import SeededAttendee, rank_ordered_names, seed_a
 from bot.services.pod_seating_select import SEATING_ORDER_MARKER, seating_change_message
 from bot.services.pod_seating_image import drop_unrenderable, render_octagon_png
 from bot.sets import active_set_code
-from bot.tasks.pod_draft_reminder import fetch_sesh_rsvps, fire_reminder
+from bot.tasks.pod_draft_reminder import event_rsvps
 from bot.services.pod_settings_view import PodSettingsView
 from bot.services.pod_tournament import (
     REVIEW_EMOJI,
@@ -107,7 +106,6 @@ def seeding_phase_projected() -> str:
 
 MSG_SEEDING_WAITING = "Waiting for players to confirm attendance."
 MSG_SEEDING_NOT_POD_THREAD = "Run this inside a pod-draft thread."
-MSG_SEEDING_NO_SESH = "Couldn't read the sesh post for this pod — it may have been deleted."
 MSG_SEEDING_NO_RSVPS = f"No {YES_EMOJI} or {MAYBE_EMOJI} RSVPs on this pod yet."
 
 
@@ -271,7 +269,13 @@ class PodDraft(commands.Cog):
             await ctx.reply("Run this inside a pod-draft thread.", mention_author=False)
             return
         log.info(f"!start: {ctx.author} opening lobby early for event_id={event_id}")
-        await fire_reminder(event_id, early=True)
+        scheduler = getattr(self.bot, "pod_scheduler", None)
+        if scheduler is not None:
+            try:
+                scheduler.remove_job(f"pod-ondemand-open-{event_id}")
+            except Exception:
+                log.info(f"no pending open job to cancel for {event_id}", exc_info=True)
+        await pod_launch.open_ondemand_lobby(self.bot, event_id)
 
     @app_commands.command(name="pod-settings", description=desc.POD_SETTINGS)
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
@@ -381,13 +385,7 @@ class PodDraft(commands.Cog):
                 await interaction.followup.send(MSG_SEEDING_NO_RSVPS, ephemeral=True)
                 return
         else:
-            sesh_message_id = await asyncio.to_thread(load_event_sesh_message_id_sync, event_id)
-            rsvps = await fetch_sesh_rsvps(self.bot, sesh_message_id) if sesh_message_id else None
-            if rsvps is None:
-                await interaction.followup.send(MSG_SEEDING_NO_SESH, ephemeral=True)
-                return
-
-            yes, maybe = rsvps
+            yes, maybe = await event_rsvps(event_id)
             seen = {n.casefold() for n in yes}
             maybe = [n for n in maybe if n.casefold() not in seen]
             if not yes and not maybe:
@@ -907,9 +905,7 @@ async def seating_message_for_event(bot, event_id: str) -> tuple[discord.File | 
     """The Leaderboard-seats message — the seeding table embed with the round-table octagon as a PNG
     inside it. Draftmancer session members are locked at the table; Yes RSVPs only fill the seats
     left under the cut and later ones list below it. Returns (file, embed); (None, None) on no data."""
-    sesh_message_id = await asyncio.to_thread(load_event_sesh_message_id_sync, event_id)
-    rsvps = await fetch_sesh_rsvps(bot, sesh_message_id) if sesh_message_id else None
-    yes, maybe = rsvps if rsvps else ([], [])
+    yes, maybe = await event_rsvps(event_id)
     locked, locked_keys = await _locked_table_names(event_id)
     yes = await asyncio.to_thread(_rank_ordered_names_sync, yes)
     pool, overflow = _seating_pool(locked, locked_keys, yes)

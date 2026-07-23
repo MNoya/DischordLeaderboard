@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from dataclasses import dataclass
 from datetime import date, datetime, time as dtime, timedelta, timezone
 from typing import Awaitable, Callable
 from urllib.parse import urlencode
@@ -40,6 +41,7 @@ from bot.services.pod_active import ACTIVE_POD_MANAGERS
 from bot.models import PodDraftEvent
 from bot.services import pod_format_interest as fi
 from bot.services import pod_launch
+from bot.services.pod_deck_color import format_deck_color_emojis
 from bot.services.pod_tournament import champion_card_line
 from bot.services.ping_roles import (
     announce_pod_grant,
@@ -156,11 +158,24 @@ class ScheduledRegisteredView(discord.ui.View):
         self.add_item(settings)
 
 
+@dataclass(frozen=True)
+class DraftedPlayer:
+    """One locked pod participant for the started / playing / complete card. Populated as the draft
+    progresses: seat order at the start, deck colors once decks lock, then the W-L record and final
+    placement once matches run. The card shows who actually drafted, in place of the RSVP columns."""
+    display_name: str
+    seat_index: int | None = None
+    deck_colors: str | None = None
+    record: str | None = None
+    placement: int | None = None
+
+
 def build_rsvp_embed(
     name: str, event_time: datetime, rosters: dict[str, list[str]], role_time: datetime | None = None,
     description: str | None = None, set_code: str | None = None, team_draft: bool = False,
     status_line: str | None = None,
     roster_interests: dict[str, list[tuple[str, tuple[str, ...]]]] | None = None,
+    locked_roster: list[DraftedPlayer] | None = None, draft_complete: bool = False,
 ) -> discord.Embed:
     """The RSVP surface. Time and the roster columns are embed fields so sesh's vertical breathing
     room comes for free. `role_time` keys the slot emoji; it defaults to `event_time` and callers
@@ -168,21 +183,31 @@ def build_rsvp_embed(
     note, shown between the intro and the multi-pod notice so a roster refresh preserves it.
     `set_code` trails the format's keyrune symbol after the name; `team_draft` marks the title once
     the pod locks into teams. `status_line` replaces the RSVP intro and the multi-pod notice once the
-    pod is past gathering, so the card never asks for RSVPs into a draft that already started."""
+    pod is past gathering, so the card never asks for RSVPs into a draft that already started.
+    `locked_roster` replaces the RSVP columns once the draft starts with the actual drafters, which
+    fill in records through to the final standings when `draft_complete`. A locked card drops the
+    absolute time and calendar link — those help someone deciding to sign up, not a draft in flight —
+    and closes on how long ago the pod started, since the pod name already carries the date."""
     unix = int(event_time.timestamp())
-    calendar_url = google_calendar_url(name, event_time)
     note = f"\n> {description}" if description else ""
     symbol = emojis.get(set_code.lower()) if set_code else ""
     suffix = f"{NBSP}{symbol}" if symbol else ""
     title_name = team_aware_pod_name(name, "team" if team_draft else None)
+    title = f"### {NBSP * 2}🗓️ {title_name}{suffix}"
+    if locked_roster is not None:
+        header = f"{title}\n{status_line}" if status_line else title
+        roster_text = _locked_roster_text(locked_roster, draft_complete)
+        embed = discord.Embed(
+            description=f"{header}{note}\n\n{roster_text}\n<t:{unix}:R>",
+            color=discord.Color.green(),
+        )
+        return embed
+    calendar_url = google_calendar_url(name, event_time)
     if status_line is not None:
         middle = f"{status_line}{note}"
     else:
         middle = f"{_intro_line(role_time or event_time)}{note}{_multipod_suffix(rosters)}"
-    embed = discord.Embed(
-        description=f"### {NBSP * 2}🗓️ {title_name}{suffix}\n{middle}",
-        color=discord.Color.green(),
-    )
+    embed = discord.Embed(description=f"{title}\n{middle}", color=discord.Color.green())
     time_value = f"<t:{unix}:F> (<t:{unix}:R>) [[+]](<{calendar_url}>)"
     embed.add_field(name=TIME_LABEL, value=time_value, inline=False)
     _add_roster_fields(embed, rosters, roster_interests)
@@ -214,12 +239,20 @@ def google_calendar_url(name: str, event_time: datetime) -> str:
 _ATTENDANCE = ((RSVP_YES, "✅", "Yes"), (RSVP_MAYBE, "🤷", "Maybe"))
 
 
+LOCKED_DRAFTERS_LABEL = "Drafters"
+LOCKED_STANDINGS_LABEL = "Final Standings"
+_LOCKED_MEDALS = {1: "🥇", 2: "🥈", 3: "🥉"}
+ROSTER_GAP = NBSP * 2
+
+
 def _add_roster_fields(
     embed: discord.Embed, rosters: dict[str, list[str]],
     roster_interests: dict[str, list[tuple[str, tuple[str, ...]]]] | None,
 ) -> None:
-    """Yes / Maybe columns, grouped by format once a signup wants flashback, plain otherwise. No is
-    never a column — the ❌ button removes the signup instead of tracking a decline."""
+    """Yes / Maybe columns while the pod gathers, grouped by format once a signup wants flashback,
+    plain otherwise. No is never a column — the ❌ button removes the signup instead of tracking a
+    decline. Once the draft starts the card drops these columns for the locked-roster block that
+    `build_rsvp_embed` renders straight into the description."""
     if roster_interests is None:
         _add_plain_rsvp_fields(embed, rosters)
         return
@@ -260,6 +293,45 @@ def _add_format_split_fields(
                 )
                 blocks.append(f"{status_emoji} {word} ({len(members)})\n{lines}")
         embed.add_field(name=f"{emoji} {label} ({len(team)})", value="\n".join(blocks) or "-", inline=True)
+
+
+def _locked_roster_text(players: list[DraftedPlayer], draft_complete: bool) -> str:
+    """The locked-roster block the card shows once the draft starts, in place of the RSVP columns:
+    the actual drafters under a bold header. While the pod runs they list unranked in seat order with
+    only the running W-L record — deck colors stay hidden so an opponent can't scout mid-draft. On
+    completion the roster reorders by placement and reads as the final standings, with medals,
+    records, and colors."""
+    ordered = _order_locked_roster(players, draft_complete)
+    if draft_complete:
+        rows = [_final_standings_row(rank, player) for rank, player in enumerate(ordered, 1)]
+        header = f"**{LOCKED_STANDINGS_LABEL}**"
+    else:
+        rows = [_drafter_row(player) for player in ordered]
+        header = f"**{LOCKED_DRAFTERS_LABEL} ({len(ordered)})**"
+    return f"{header}\n" + ("\n".join(rows) or "-")
+
+
+def _order_locked_roster(players: list[DraftedPlayer], draft_complete: bool) -> list[DraftedPlayer]:
+    if draft_complete and all(player.placement is not None for player in players):
+        return sorted(players, key=lambda player: player.placement)
+    return sorted(players, key=lambda player: (player.seat_index is None, player.seat_index or 0))
+
+
+def _drafter_row(player: DraftedPlayer) -> str:
+    record = f"{ROSTER_GAP}{player.record}" if player.record else ""
+    return f"> {player.display_name}{record}"
+
+
+def _final_standings_row(rank: int, player: DraftedPlayer) -> str:
+    medal = _LOCKED_MEDALS.get(rank)
+    prefix = f"{rank}. {medal} " if medal else f"{rank}. "
+    parts = [f"{prefix}{player.display_name}"]
+    if player.record:
+        parts.append(player.record)
+    glyph = format_deck_color_emojis(player.deck_colors)
+    if glyph:
+        parts.append(glyph)
+    return ROSTER_GAP.join(parts)
 
 
 def refresh_roster_fields(
@@ -468,10 +540,22 @@ async def _add_members_to_thread(thread: discord.Thread, members: list[tuple[str
 
 
 async def _handle_rsvp(interaction: discord.Interaction, state: str) -> None:
-    message_id = str(interaction.message.id)
+    await apply_card_rsvp(interaction, str(interaction.message.id), state)
+
+
+async def apply_card_rsvp(
+    interaction: discord.Interaction, surface_message_id: str, state: str,
+    *, refresh_launcher: bool = True,
+) -> None:
+    """Record an RSVP on the card behind `surface_message_id` and run every follow-on: the grant, the
+    confirmation, thread membership, surface re-renders, the native-event tally, and the nudge and
+    launcher refreshes. The clicked surface may be the card, the thread's registered embed, or a
+    launcher slot that resolves to the card, so `surface_message_id` is the card the write targets while
+    `interaction.message` is whatever was clicked. A launcher-slot caller passes `refresh_launcher=False`
+    and re-renders the clicked launcher itself, so the board updates in whatever channel it lives in."""
     result = await asyncio.to_thread(
         pod_launch.set_rsvp_sync,
-        message_id, str(interaction.user.id), interaction.user.display_name, state,
+        surface_message_id, str(interaction.user.id), interaction.user.display_name, state,
     )
     if result is None or result.closed:
         await interaction.response.send_message(MSG_CARD_INACTIVE, ephemeral=True)
@@ -514,14 +598,15 @@ async def _handle_rsvp(interaction: discord.Interaction, state: str) -> None:
         join = result.rsvp in (RSVP_YES, RSVP_MAYBE)
         await _set_thread_membership(interaction, result.state.event_id, join=join)
         await _sync_other_surfaces(
-            interaction.client, result.state.event_id, message_id, result.rosters, result.roster_interests,
+            interaction.client, result.state.event_id, str(interaction.message.id),
+            result.rosters, result.roster_interests,
         )
-        await _sync_native_event_tally(interaction.guild, message_id, result.rosters)
+        await _sync_native_event_tally(interaction.guild, surface_message_id, result.rosters)
         yes = result.rosters.get(RSVP_YES) or []
         maybe = result.rosters.get(RSVP_MAYBE) or []
         await refresh_underfill_nudge_for_event(interaction.client, result.state.event_id, len(yes), len(maybe))
         await refresh_roster_reminder_for_event(interaction.client, result.state.event_id, yes, maybe)
-        if result.yes_changed:
+        if result.yes_changed and refresh_launcher:
             await _refresh_launcher(interaction.client, result.state.slot_time)
 
 
@@ -970,7 +1055,7 @@ async def _update_native_event(
 
 async def _refresh_live_messages(bot: commands.Bot, event_id: str) -> None:
     """The posted underfill nudge and roster reminder carry the old time; re-render them in place."""
-    yes, maybe = await event_rsvps(event_id, None)
+    yes, maybe = await event_rsvps(event_id)
     await refresh_underfill_nudge_for_event(bot, event_id, len(yes), len(maybe))
     await refresh_roster_reminder_for_event(bot, event_id, yes, maybe)
 

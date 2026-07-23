@@ -1,6 +1,14 @@
 from datetime import datetime, timezone
 
+import pytest
+
+from bot.config import settings
 from bot.services import pod_format_poll as poll
+
+
+@pytest.fixture(autouse=True)
+def fire_threshold_of_six(monkeypatch):
+    monkeypatch.setattr(settings, "pod_signal_fire_threshold", 6)
 
 
 def _mentions(*ids: str) -> list[str]:

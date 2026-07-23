@@ -65,7 +65,6 @@ def test_record_table_event_clones_source_into_table_two(session):
 
     assert table_two.name == "MSH Pod Draft #8 - Table 2"
     assert table_two.kind == "tournament"
-    assert table_two.sesh_message_id is None
     assert table_two.set_code == source.set_code
     assert table_two.set_id == source.set_id
     assert table_two.format_label == source.format_label

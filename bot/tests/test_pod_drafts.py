@@ -9,7 +9,6 @@ from bot.models import MagicSet, Player, PodDraftEvent, PodDraftParticipant
 from bot.scripts.draftmancer_log import build_compact
 from bot.services.pod_drafts import (
     FinalStanding,
-    ParsedSeshEvent,
     active_event_for_discord_user_in_dm,
     capture_deck_screenshot,
     dm_draft_link_enabled,
@@ -19,13 +18,13 @@ from bot.services.pod_drafts import (
     is_championship,
     list_champions,
     participant_dm_info,
+    player_for_name,
     pod_summary_by_set_for_player,
-    record_event,
     record_match,
+    record_ondemand_event,
     seed_event_participants,
     set_dm_draft_link,
     set_participant_deck_colors,
-    update_event_time_if_changed,
     upsert_participant,
 )
 
@@ -61,18 +60,23 @@ def _seed_player(session, discord_id="111", username="alice", display_name="Alic
     return p
 
 
-def _parsed_event(set_code="SOS", event_date=date(2026, 5, 13), attendees=("Alice", "Bob", "Carl"),
-                  event_number=None, name=None):
-    return ParsedSeshEvent(
-        event_date=event_date,
-        event_time=datetime(event_date.year, event_date.month, event_date.day, 0, 0, tzinfo=timezone.utc),
-        set_code=set_code,
-        event_number=event_number,
+def _make_event(session, set_code="SOS", event_date=date(2026, 5, 13),
+                attendees=("Alice", "Bob", "Carl"), name=None):
+    """Create a bot-native pod event plus its roster, linking each name to a Player when one matches —
+    the shared factory the pod-draft tests build on."""
+    event_time = datetime(event_date.year, event_date.month, event_date.day, 0, 0, tzinfo=timezone.utc)
+    event = record_ondemand_event(
+        session, set_code=set_code, event_time=event_time,
         name=name or f"{set_code} Pod Draft — {event_date:%b %d}",
-        attendees=list(attendees),
-        sesh_message_id=f"msg-{event_date.isoformat()}-{event_number}",
-        discord_thread_id=f"thread-{event_date.isoformat()}-{event_number}",
+        discord_thread_id=f"thread-{event_date.isoformat()}",
     )
+    for attendee in attendees:
+        player = player_for_name(session, attendee)
+        session.add(PodDraftParticipant(
+            event_id=event.id, display_name=attendee, player_id=player.id if player else None,
+        ))
+    session.flush()
+    return event
 
 
 def test_record_event_persists_and_links_known_attendees(session, monkeypatch):
@@ -80,7 +84,7 @@ def test_record_event_persists_and_links_known_attendees(session, monkeypatch):
     _seed_set(session, "SOS")
     _seed_player(session, discord_id="111", username="alice", display_name="Alice")
 
-    event = record_event(session, _parsed_event(attendees=("Alice", "Stranger")))
+    event = _make_event(session, attendees=("Alice", "Stranger"))
 
     assert event.socket_status == "pending"
     assert _session_base(event.draftmancer_session) == "LLU-May-13"
@@ -97,9 +101,9 @@ def test_record_event_persists_and_links_known_attendees(session, monkeypatch):
 def test_record_event_same_day_pods_share_base_but_get_distinct_sessions(session, monkeypatch):
     monkeypatch.setattr(settings, "pod_draft_session_prefix", "LLU")
     _seed_set(session)
-    e1 = record_event(session, _parsed_event(attendees=()))
-    e2 = record_event(session, _parsed_event(attendees=()))
-    e3 = record_event(session, _parsed_event(attendees=()))
+    e1 = _make_event(session, attendees=())
+    e2 = _make_event(session, attendees=())
+    e3 = _make_event(session, attendees=())
     sessions = [e1.draftmancer_session, e2.draftmancer_session, e3.draftmancer_session]
     assert [_session_base(s) for s in sessions] == ["LLU-May-13"] * 3
     assert len(set(sessions)) == 3
@@ -114,169 +118,15 @@ def test_is_championship_detects_name_case_insensitively():
     assert not is_championship(None)
 
 
-def test_record_event_championship_uses_fixed_session_and_leaderboard_seats(session, monkeypatch):
-    monkeypatch.setattr(settings, "pod_draft_session_prefix", "LLU")
-    _seed_set(session)
-
-    event = record_event(session, _parsed_event(attendees=(), name="SOS Community Championship Pod Draft"))
-
-    assert _session_base(event.draftmancer_session) == "LLU-Championship"
-    assert event.seating_mode == "leaderboard"
-
-
-def test_record_event_championship_session_collision_appends_suffix(session, monkeypatch):
-    monkeypatch.setattr(settings, "pod_draft_session_prefix", "LLU")
-    _seed_set(session)
-
-    e1 = record_event(session, _parsed_event(attendees=(), name="SOS Championship"))
-    e2 = record_event(session, _parsed_event(attendees=(), name="SOS Championship"))
-
-    assert _session_base(e1.draftmancer_session) == "LLU-Championship"
-    assert _session_base(e2.draftmancer_session) == "LLU-Championship"
-    assert e1.draftmancer_session != e2.draftmancer_session
-
-
-def test_record_event_with_event_number_uses_n_in_session(session, monkeypatch):
-    monkeypatch.setattr(settings, "pod_draft_session_prefix", "LLU")
-    _seed_set(session)
-    e1 = record_event(session, _parsed_event(attendees=(), event_number=10))
-    e2 = record_event(session, _parsed_event(attendees=(), event_number=10))
-    assert _session_base(e1.draftmancer_session) == "LLU-10"
-    assert _session_base(e2.draftmancer_session) == "LLU-10"
-    assert e1.draftmancer_session != e2.draftmancer_session
-
-
-def test_record_event_custom_format_uses_slug_and_drops_prefix(session, monkeypatch):
-    monkeypatch.setattr(settings, "pod_draft_session_prefix", "LLU")
-    event = record_event(session, _parsed_event(set_code="PEASANT", attendees=(), event_number=4))
-    assert _session_base(event.draftmancer_session) == "Peasant-26-D4"
-    assert event.format_label == "Peasant Cube"
-
-
-def test_record_event_custom_format_falls_back_to_month_day(session, monkeypatch):
-    monkeypatch.setattr(settings, "pod_draft_session_prefix", "LLU")
-    event = record_event(session, _parsed_event(set_code="PEASANT", attendees=()))
-    assert _session_base(event.draftmancer_session) == "Peasant-26-May-13"
-
-
-def test_record_event_custom_format_same_number_gets_distinct_sessions(session, monkeypatch):
-    monkeypatch.setattr(settings, "pod_draft_session_prefix", "LLU")
-    e1 = record_event(session, _parsed_event(set_code="PEASANT", attendees=(), event_number=4))
-    e2 = record_event(session, _parsed_event(set_code="PEASANT", attendees=(), event_number=4))
-    assert _session_base(e1.draftmancer_session) == "Peasant-26-D4"
-    assert _session_base(e2.draftmancer_session) == "Peasant-26-D4"
-    assert e1.draftmancer_session != e2.draftmancer_session
-
-
 def test_record_event_with_no_matching_set_leaves_set_id_null(session):
-    event = record_event(session, _parsed_event(set_code="CUBE"))
+    event = _make_event(session, set_code="CUBE")
     assert event.set_id is None
     assert event.set_code == "CUBE"
 
 
-def test_update_event_time_if_changed_no_match_returns_none(session):
-    result = update_event_time_if_changed(
-        session,
-        sesh_message_id="nope",
-        new_event_time=datetime(2026, 5, 14, 0, 0, tzinfo=timezone.utc),
-        new_event_date=date(2026, 5, 14),
-    )
-    assert result is None
-
-
-def test_update_event_time_if_changed_skips_completed_event(session):
-    _seed_set(session)
-    event = record_event(session, _parsed_event(attendees=()))
-    event.socket_status = "complete"
-    session.flush()
-
-    result = update_event_time_if_changed(
-        session,
-        sesh_message_id=event.sesh_message_id,
-        new_event_time=datetime(2026, 5, 14, 0, 0, tzinfo=timezone.utc),
-        new_event_date=date(2026, 5, 14),
-    )
-    assert result is None
-
-
-def test_update_event_time_if_changed_no_op_when_time_matches(session):
-    _seed_set(session)
-    event = record_event(session, _parsed_event(attendees=()))
-
-    returned, needs_reschedule, was_active = update_event_time_if_changed(
-        session,
-        sesh_message_id=event.sesh_message_id,
-        new_event_time=event.event_time,
-        new_event_date=event.event_date,
-    )
-    assert returned.id == event.id
-    assert needs_reschedule is False
-    assert was_active is False
-
-
-def test_update_event_time_if_changed_writes_new_time(session):
-    _seed_set(session)
-    event = record_event(session, _parsed_event(attendees=()))
-    new_time = datetime(2026, 5, 14, 18, 30, tzinfo=timezone.utc)
-
-    returned, needs_reschedule, was_active = update_event_time_if_changed(
-        session,
-        sesh_message_id=event.sesh_message_id,
-        new_event_time=new_time,
-        new_event_date=date(2026, 5, 14),
-    )
-    assert needs_reschedule is True
-    assert was_active is False
-    assert returned.event_time == new_time
-    assert returned.event_date == date(2026, 5, 14)
-
-    reread = session.execute(
-        select(PodDraftEvent).where(PodDraftEvent.id == event.id)
-    ).scalar_one()
-    assert reread.event_time == new_time
-    assert reread.event_date == date(2026, 5, 14)
-
-
-def test_update_event_time_if_changed_no_op_when_active_and_time_matches(session):
-    _seed_set(session)
-    event = record_event(session, _parsed_event(attendees=()))
-    event.socket_status = "connected"
-    session.flush()
-
-    returned, needs_reschedule, was_active = update_event_time_if_changed(
-        session,
-        sesh_message_id=event.sesh_message_id,
-        new_event_time=event.event_time,
-        new_event_date=event.event_date,
-    )
-    assert returned.id == event.id
-    assert needs_reschedule is False
-    assert was_active is True
-    assert returned.socket_status == "connected"
-
-
-def test_update_event_time_if_changed_resets_status_when_active(session):
-    _seed_set(session)
-    event = record_event(session, _parsed_event(attendees=()))
-    event.socket_status = "connected"
-    session.flush()
-    new_time = datetime(2026, 5, 14, 18, 30, tzinfo=timezone.utc)
-
-    returned, needs_reschedule, was_active = update_event_time_if_changed(
-        session,
-        sesh_message_id=event.sesh_message_id,
-        new_event_time=new_time,
-        new_event_date=date(2026, 5, 14),
-    )
-    assert needs_reschedule is True
-    assert was_active is True
-    assert returned.socket_status == "pending"
-    assert returned.event_time == new_time
-
-
 def test_upsert_participant_matches_existing_by_display_name(session):
     _seed_set(session)
-    event = record_event(session, _parsed_event(attendees=("Alice",)))
+    event = _make_event(session, attendees=("Alice",))
 
     p = upsert_participant(session, event.id, display_name="alice", draftmancer_name="Alice#1234")
 
@@ -290,7 +140,7 @@ def test_upsert_participant_matches_existing_by_display_name(session):
 
 def test_upsert_participant_matches_existing_by_draftmancer_name(session):
     _seed_set(session)
-    event = record_event(session, _parsed_event(attendees=("Alice",)))
+    event = _make_event(session, attendees=("Alice",))
     upsert_participant(session, event.id, display_name="Alice", draftmancer_name="A#1")
 
     again = upsert_participant(session, event.id, display_name="Different", draftmancer_name="a#1")
@@ -304,7 +154,7 @@ def test_upsert_participant_matches_existing_by_draftmancer_name(session):
 
 def test_upsert_participant_creates_new_row_when_no_match(session):
     _seed_set(session)
-    event = record_event(session, _parsed_event(attendees=("Alice",)))
+    event = _make_event(session, attendees=("Alice",))
     upsert_participant(session, event.id, display_name="Brand New", draftmancer_name="New#9999")
 
     rows = session.execute(
@@ -315,7 +165,7 @@ def test_upsert_participant_creates_new_row_when_no_match(session):
 
 def test_upsert_participant_backfills_player_id(session):
     _seed_set(session)
-    event = record_event(session, _parsed_event(attendees=("Stranger",)))
+    event = _make_event(session, attendees=("Stranger",))
     _seed_player(session, discord_id="222", username="stranger", display_name="Stranger")
 
     upsert_participant(session, event.id, display_name="Stranger")
@@ -328,7 +178,7 @@ def test_upsert_participant_backfills_player_id(session):
 
 def test_upsert_participant_adopts_arena_handle_for_player_without_one(session):
     _seed_set(session)
-    event = record_event(session, _parsed_event(attendees=("Bigmits",)))
+    event = _make_event(session, attendees=("Bigmits",))
     player = _seed_player(session, discord_id="333", username="bigmits", display_name="Bigmits")
     assert player.arena_name is None
 
@@ -341,7 +191,7 @@ def test_upsert_participant_adopts_arena_handle_for_player_without_one(session):
 
 def test_seed_event_participants_leaves_second_name_unlinked_when_player_already_seated(session):
     _seed_set(session)
-    event = record_event(session, _parsed_event(attendees=()))
+    event = _make_event(session, attendees=())
     player = _seed_player(session, discord_id="555", username="noya", display_name="Noya")
     player.arena_aliases = ["noya"]
     session.flush()
@@ -358,7 +208,7 @@ def test_seed_event_participants_leaves_second_name_unlinked_when_player_already
 
 def test_record_match_is_idempotent(session):
     _seed_set(session)
-    event = record_event(session, _parsed_event())
+    event = _make_event(session)
 
     first = record_match(session, event.id, 1, "Alice", "Bob", winner_name="Alice", score="2-1")
     again = record_match(session, event.id, 1, "Alice", "Bob", winner_name="Alice", score="2-0")
@@ -369,7 +219,7 @@ def test_record_match_is_idempotent(session):
 
 def test_finalize_champion_writes_standings_and_marks_complete(session):
     _seed_set(session)
-    event = record_event(session, _parsed_event(attendees=("Alice", "Bob", "Carl")))
+    event = _make_event(session, attendees=("Alice", "Bob", "Carl"))
 
     standings = [
         FinalStanding(draftmancer_name="Alice", placement=1, record="3-0", eliminated_round=None),
@@ -392,7 +242,7 @@ def test_finalize_champion_writes_standings_and_marks_complete(session):
 
 def test_finalize_champion_stamps_finalized_at_and_preserves_it_on_rerun(session):
     _seed_set(session)
-    event = record_event(session, _parsed_event(attendees=("Alice", "Bob")))
+    event = _make_event(session, attendees=("Alice", "Bob"))
     standings = [
         FinalStanding(draftmancer_name="Alice", placement=1, record="3-0", eliminated_round=None),
         FinalStanding(draftmancer_name="Bob", placement=2, record="2-1", eliminated_round=3),
@@ -406,16 +256,15 @@ def test_finalize_champion_stamps_finalized_at_and_preserves_it_on_rerun(session
 
 
 def _seed_linked_event(session, *, discord_id, thread_id, event_time, name="Pod Draft"):
-    parsed = ParsedSeshEvent(
-        event_date=event_time.date(),
-        event_time=event_time,
-        set_code="SOS", event_number=None,
-        name=name,
-        attendees=["Alice"],
-        sesh_message_id=f"msg-{thread_id}",
-        discord_thread_id=thread_id,
+    event = record_ondemand_event(
+        session, set_code="SOS", event_time=event_time, name=name, discord_thread_id=thread_id,
     )
-    return record_event(session, parsed)
+    player = player_for_name(session, "Alice")
+    session.add(PodDraftParticipant(
+        event_id=event.id, display_name="Alice", player_id=player.id if player else None,
+    ))
+    session.flush()
+    return event
 
 
 def test_active_event_resolver_returns_finalized_pod(session):
@@ -457,7 +306,7 @@ def test_list_champions_returns_filtered_and_ordered_by_date(session):
     _seed_set(session, "SOS")
     _seed_set(session, "ECL")
     for set_code, ed in [("SOS", date(2026, 5, 6)), ("SOS", date(2026, 5, 13)), ("ECL", date(2026, 4, 1))]:
-        event = record_event(session, _parsed_event(set_code=set_code, event_date=ed, attendees=()))
+        event = _make_event(session, set_code=set_code, event_date=ed, attendees=())
         standing = FinalStanding(
             draftmancer_name=f"Champ-{set_code}-{ed.isoformat()}", placement=1, record="3-0",
             eliminated_round=None,
@@ -477,11 +326,11 @@ def test_pod_summary_by_set_aggregates_per_set(session):
     _seed_set(session, "ECL")
     player = _seed_player(session, discord_id="777", username="champ", display_name="Champ")
 
-    e1 = record_event(session, _parsed_event(set_code="SOS", event_date=date(2026, 5, 6), attendees=("Champ",)))
+    e1 = _make_event(session, set_code="SOS", event_date=date(2026, 5, 6), attendees=("Champ",))
     finalize_champion(session, e1.id, [
         FinalStanding("Champ", placement=1, record="3-0", eliminated_round=None),
     ])
-    e2 = record_event(session, _parsed_event(set_code="ECL", event_date=date(2026, 4, 1), attendees=("Champ",)))
+    e2 = _make_event(session, set_code="ECL", event_date=date(2026, 4, 1), attendees=("Champ",))
     finalize_champion(session, e2.id, [
         FinalStanding("Champ", placement=2, record="2-1", eliminated_round=3),
     ])
@@ -495,7 +344,7 @@ def test_pod_summary_trophy_from_pod_win_without_3_0(session):
     _seed_set(session, "SOS")
     player = _seed_player(session, discord_id="778", username="smallpod", display_name="SmallPod")
 
-    event = record_event(session, _parsed_event(set_code="SOS", event_date=date(2026, 5, 6), attendees=("SmallPod",)))
+    event = _make_event(session, set_code="SOS", event_date=date(2026, 5, 6), attendees=("SmallPod",))
     finalize_champion(session, event.id, [
         FinalStanding("SmallPod", placement=1, record="2-1", eliminated_round=None),
     ])
@@ -509,11 +358,11 @@ def test_pod_summary_team_finishes_score_by_record_only(session):
     _seed_set(session, "SOS")
     player = _seed_player(session, discord_id="779", username="teamer", display_name="Teamer")
 
-    e1 = record_event(session, _parsed_event(set_code="SOS", event_date=date(2026, 5, 6), attendees=("Teamer",)))
+    e1 = _make_event(session, set_code="SOS", event_date=date(2026, 5, 6), attendees=("Teamer",))
     finalize_champion(session, e1.id, [
         FinalStanding("Teamer", placement=None, record="2-1", eliminated_round=None),
     ])
-    e2 = record_event(session, _parsed_event(set_code="SOS", event_date=date(2026, 5, 20), attendees=("Teamer",)))
+    e2 = _make_event(session, set_code="SOS", event_date=date(2026, 5, 20), attendees=("Teamer",))
     finalize_champion(session, e2.id, [
         FinalStanding("Teamer", placement=None, record="3-0", eliminated_round=None),
     ])
@@ -534,7 +383,7 @@ def test_stats_embed_pod_line_scoped_to_requested_set(session):
     _seed_set(session, "SOS")
     _seed_set(session, "ECL")
     _seed_player(session, discord_id="777", username="champ", display_name="Champ")
-    e = record_event(session, _parsed_event(set_code="SOS", event_date=date(2026, 5, 6), attendees=("Champ",)))
+    e = _make_event(session, set_code="SOS", event_date=date(2026, 5, 6), attendees=("Champ",))
     finalize_champion(session, e.id, [FinalStanding("Champ", placement=1, record="3-0", eliminated_round=None)])
     session.commit()
 
@@ -548,16 +397,16 @@ def test_stats_embed_pod_line_scoped_to_requested_set(session):
 def _seed_pod_for_deck_color_tests(session, thread_id: str = "thread-42") -> tuple[str, str]:
     _seed_set(session, "SOS")
     player = _seed_player(session, discord_id="42", username="alice", display_name="Alice")
-    parsed = ParsedSeshEvent(
-        event_date=date(2026, 5, 13),
-        event_time=datetime(2026, 5, 13, 0, 0, tzinfo=timezone.utc),
-        set_code="SOS", event_number=None,
-        name="Pod Draft #1",
-        attendees=["Alice", "Bob"],
-        sesh_message_id="msg-deck-color",
-        discord_thread_id=thread_id,
+    event = record_ondemand_event(
+        session, set_code="SOS", event_time=datetime(2026, 5, 13, 0, 0, tzinfo=timezone.utc),
+        name="Pod Draft #1", discord_thread_id=thread_id,
     )
-    event = record_event(session, parsed)
+    for attendee in ("Alice", "Bob"):
+        p = player_for_name(session, attendee)
+        session.add(PodDraftParticipant(
+            event_id=event.id, display_name=attendee, player_id=p.id if p else None,
+        ))
+    session.flush()
     return event.id, player.discord_id
 
 
@@ -775,7 +624,7 @@ def test_capture_deck_screenshot_gating(
     event = PodDraftEvent(
         event_date=date(2026, 6, 3), event_time=datetime(2026, 6, 3, tzinfo=timezone.utc),
         set_code="SOS", name="SOS Pod Capture", draftmancer_session="cap-sess",
-        discord_thread_id="cap-thread", sesh_message_id="cap-msg", socket_status="complete",
+        discord_thread_id="cap-thread", socket_status="complete",
         current_round=current_round,
         championship_posted_at=datetime(2026, 6, 3, 23, tzinfo=timezone.utc) if championship_posted else None,
     )

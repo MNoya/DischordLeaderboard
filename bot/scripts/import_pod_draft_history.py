@@ -171,7 +171,6 @@ def main() -> None:
                 format_label=None,
                 draftmancer_session=f"LLU-SOS-historical-{ev['event_date'].isoformat()}",
                 discord_thread_id="0",
-                sesh_message_id="0",
                 socket_status="complete",
                 current_round=3,
             )

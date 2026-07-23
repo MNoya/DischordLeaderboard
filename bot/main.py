@@ -29,7 +29,6 @@ from bot.commands.leaderboard import (
     LeaderboardView,
     setup as setup_leaderboard,
 )
-from bot.commands.pod_backfill import setup as setup_pod_backfill
 from bot.commands.mock_draft import setup as setup_mock_draft
 from bot.commands.pod_draft import setup as setup_pod_draft
 from bot.commands.pod_queue import PodQueueView, setup as setup_pod_queue
@@ -62,7 +61,6 @@ from bot.listeners.auto_link_listener import setup as setup_auto_link_listener
 from bot.listeners.profile_sync_listener import setup as setup_profile_sync_listener
 from bot.listeners.pod_screenshots import setup as setup_pod_screenshots
 from bot.listeners.rotate_image import setup as setup_rotate_image
-from bot.listeners.sesh_listener import reschedule_pending_events, setup as setup_sesh_listener
 from bot.models import LeaderboardMessage, Player, PodDraftEvent
 from bot.services.bot_log import BotLog
 from bot.services.lobby_embed import LobbyReadyButtonView
@@ -215,12 +213,10 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_pod_guide(bot)
         await setup_roles(bot)
         await setup_mock_draft(bot)
-        await setup_pod_backfill(bot)
         await setup_pod_table(bot)
         await setup_peasant(bot)
         await setup_preview_season_awards(bot)
         await setup_set_awards(bot)
-        await setup_sesh_listener(bot)
         await setup_pod_screenshots(bot)
         await setup_rotate_image(bot)
         await setup_auto_link_listener(bot)
@@ -235,7 +231,6 @@ def build_bot(guild_id: int) -> commands.Bot:
         await setup_testscribe(bot)
         await setup_testformatschedule(bot)
         await setup_testchampionship(bot)
-        reschedule_pending_events(bot)
         await rearm_signals(bot)
         register_pod_views(bot)
         bot.add_dynamic_items(TeamReportButton)

@@ -1,0 +1,82 @@
+# Playing Pod Drafts
+
+Pod drafts are community Magic Arena drafts we run together every day. You draft with 6 to 8 other players, then play a few rounds against them. Joining is free, nothing is locked in, and your results count on the leaderboard.
+
+This guide describes how pods work right now. It stays current as the system changes.
+
+## When pods happen
+
+The bot posts a Daily Pod Launcher every day in the pod channel. It lists the day's time slots:
+
+- Weekdays: Early Pod at 2 PM ET, Late Pod at 8 PM ET.
+- Weekends: Morning Pod at 10 AM ET, Early Pod at 3 PM ET, Late Pod at 8 PM ET.
+
+Times are Eastern. The community is global, so pick whichever slot fits your day. Mods can also schedule extra pods at other times, which show up as their own signup posts.
+
+## How to join
+
+Click a slot on the launcher to add yourself to that pod's list. That is all it takes. Clicking is a plan, not a promise: if your day changes you can leave, and if you never show up you just catch the next one.
+
+When a slot reaches 6 people, the pod opens for real. The bot posts a signup card with its own thread, and everyone who clicked the slot is carried over as a Yes.
+
+## Saying if you are coming
+
+The signup card has three buttons:
+
+- **Sign Up** — you plan to play.
+- **Maybe** — you might play.
+- **Can't** — you are out, and you come off the list.
+
+Change your answer any time before the pod starts. Yes and Maybe both put you in the thread, where all the coordination happens.
+
+## Choosing a format
+
+Every pod plays one Magic format. There are two kinds:
+
+- **Latest set** — the current Arena set everyone is drafting.
+- **Flashback** — any older set. Some older sets are community favorites and draw a crowd; some do not.
+
+Use the **Format Preference** button on the launcher to say what you want to draft. You can pick Latest, Flashback, both, or a cube. Picking both means you are happy with either, which helps a pod fill.
+
+If you like flashback, you can also **rank your favorite sets** (up to three). When a pod leans toward flashback, the bot shows a quick format vote in the thread, with your ranked sets ready as one-click buttons. The vote is what settles the format, so click the set you want. A second flashback table only forms when enough people vote for it.
+
+## The lead-up to a pod
+
+In the hour before a pod, a few things happen in the thread:
+
+- The bot reposts the roster so everyone can see who is in.
+- If a slot needs more players, the bot nudges the channel, and closer to start it pings the slot's role.
+- If the group is leaning flashback, the format vote appears so the table can lock in what to draft.
+
+None of this is binding. It is there so you can see whether the pod is going to fire and what it will play.
+
+## When a pod fires
+
+About 10 minutes before the start time, the bot opens the draft lobby on Draftmancer and posts the link in the thread. It can also send you the link by direct message. Open the link, set your name, and wait for the draft to begin.
+
+When enough players are ready the bot runs a quick ready check, then starts the draft. A full table of 8 starts as soon as everyone is ready.
+
+## Table shapes
+
+- **8-player pod** — a full table drafts, then plays a 3-round single-elimination bracket.
+- **6-player team draft** — six players split into two teams of three and draft against each other. This is a different, more social format, so it happens when the group wants it.
+
+On busy nights, once the first table fills, the bot offers a **second table** to the players left over, so more people get to play. A second table can run the latest set or a flashback format of its own. The format split is decided a few minutes before start, from who has actually voted by then, so the split reflects the real crowd instead of forming too early.
+
+## After the draft
+
+Report your results in the thread as you play. Winning games earns pod points on the leaderboard, so a good run in a pod moves you up the standings the same as a strong ladder result. Pod results are always public: you do not need to opt in, and playing pods is enough to appear on the board.
+
+## Your first pod, start to finish
+
+1. See the Daily Pod Launcher post and click a slot that fits your day.
+2. Set your Format Preference once so the bot knows what you like to draft.
+3. When the pod opens, keep your Sign Up on the card if you still plan to play.
+4. About 10 minutes before start, open the Draftmancer link from the thread.
+5. Draft, play your rounds, report results, and check the leaderboard.
+
+## For mods
+
+Beyond the daily launcher, you can schedule a pod at any time with the `/draft` command. Pick "Right now" to open a live lobby immediately, or pick a time to post a scheduled signup card that behaves exactly like a launcher slot. You can preset the set, pairing style, pick timer, and which role gets notified.
+
+Inside a pod thread, the pod controls (ready check, start, team draft, pause, restart, seeding, standings, champion) run the draft. The daily launcher, reminders, format votes, and second-table offers all run on their own, so most pods need no hands-on management.

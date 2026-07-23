@@ -95,7 +95,6 @@ def _seed_event(session, socket_status="reminded", set_code="SOS", name="SOS Pod
         name=name,
         draftmancer_session="LLU-SOS-1",
         discord_thread_id="thread-1",
-        sesh_message_id="msg-1",
         socket_status=socket_status,
     )
     session.add(event)

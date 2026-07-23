@@ -189,7 +189,6 @@ def _seed_live_test_event_sync(
             name="Testlobby Live Pod",
             draftmancer_session=session_id,
             discord_thread_id=str(channel_id),
-            sesh_message_id=f"testlobby-{channel_id}",
             socket_status=_LIVE_TEST_STATUS,
             pairing_mode=mode,
         ))
@@ -255,7 +254,6 @@ def _seed_table_source_sync(channel_id: int) -> str:
             name=_table_test_base_name(),
             draftmancer_session=f"TESTSPLIT-{channel_id}",
             discord_thread_id=str(channel_id),
-            sesh_message_id=None,
             socket_status=_LIVE_TEST_STATUS,
             pairing_mode=DEFAULT_PAIRING_MODE,
         ))

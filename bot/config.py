@@ -68,7 +68,6 @@ class Settings(BaseSettings):
     def pod_underfill_ping_hours_set(self) -> frozenset[int]:
         return frozenset(_int_csv(self.pod_underfill_ping_hours))
 
-    sesh_bot_id: int = 616754792965865495
     draftmancer_ws_url: str = f"wss://{DRAFTMANCER_HOST}"
     draftmancer_web_url: str = f"https://{DRAFTMANCER_HOST}"
 

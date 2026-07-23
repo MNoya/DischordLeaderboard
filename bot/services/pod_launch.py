@@ -5,9 +5,9 @@ Two layers:
   - async Discord orchestration: create the thread + PodDraftEvent and open the Draftmancer lobby
     (now, or armed for a slot time) without any sesh coupling.
 
-`fire_reminder` is sesh-only (it re-parses the sesh embed), so open_ondemand_lobby reimplements the
-lobby-open reading the roster back off the signal. Fire is claimed atomically (UPDATE … WHERE
-status='open') so concurrent clicks or a restart mid-fire can't create two pods for one slot.
+open_ondemand_lobby posts the lobby, reading the roster off the signal. Fire is claimed atomically
+(UPDATE … WHERE status='open') so concurrent clicks or a restart mid-fire can't create two pods for
+one slot.
 
 Signals never close to signups while a pod can still happen: a fired signal keeps accepting joins
 (over-signups cover unexpected drops), and only an expired one — its slot time passed unfired —
@@ -34,9 +34,11 @@ from bot.services.pod_draft_manager import set_card_cancel_hook, set_card_close_
 from bot.services.pod_drafts import (
     draftmancer_url_for,
     event_member_interests_sync,
+    get_cube_choices,
     get_flashback_ranking,
     get_format_interests,
     record_ondemand_event,
+    set_cube_choices,
     set_flashback_ranking,
     set_format_interests,
 )
@@ -46,6 +48,7 @@ from bot.services.pod_signals import SCHEDULE_TZ, slot_event_time
 from bot.services.pod_slot import COLLISION_INDEX_RE, next_collision_index, pod_display_name
 from bot.tasks.pod_draft_reminder import (
     build_lobby_open_body,
+    schedule_format_split_assessment,
     schedule_roster_reminder,
     schedule_team_vote_offer,
     signal_rsvps_sync,
@@ -62,8 +65,6 @@ log = logging.getLogger(__name__)
 
 REMINDER_LEAD_MIN = 10
 CARD_CLOSE_WINDOW_H = 48
-SLOT_OCCUPANCY_WINDOW = timedelta(hours=2)
-TABLE_SUFFIX_SQL_RE = r"Table[[:space:]]+[0-9]+[[:space:]]*$"
 
 
 @dataclass(frozen=True)
@@ -126,9 +127,9 @@ class RsvpResult:
 @dataclass(frozen=True)
 class LauncherSlot:
     """One rendered launcher slot. `committed` is a locked scheduled pod the slot reflects: `count`/
-    `thread_id`/`slot_time` are read off the event and `names` projects the card's Yes roster read-only
-    (empty for sesh pods, which have no signal roster). A lazy slot carries its own poll `signal_id`,
-    roster `names`, and `status`."""
+    `thread_id`/`slot_time` are read off the event, `names` projects the card's Yes roster read-only, and
+    `card_message_id` is the scheduled card the committed-slot button toggles. A lazy slot carries its own
+    poll `signal_id`, roster `names`, and `status`."""
     bucket_key: str
     committed: bool
     status: str
@@ -138,6 +139,7 @@ class LauncherSlot:
     thread_id: str | None
     signal_id: str | None
     thread_message_id: str | None = None
+    card_message_id: str | None = None
     interests: tuple[tuple[str, ...], ...] = ()
     set_code: str | None = None
 
@@ -585,9 +587,7 @@ def reset_ondemand_signals_sync(guild_id: str) -> dict[str, int]:
             ).rowcount
         signals = session.execute(delete(PodSignal).where(PodSignal.guild_id == guild_id)).rowcount
         events = session.execute(
-            delete(PodDraftEvent).where(
-                PodDraftEvent.sesh_message_id.is_(None), PodDraftEvent.finalized_at.is_(None)
-            )
+            delete(PodDraftEvent).where(PodDraftEvent.finalized_at.is_(None))
         ).rowcount
         session.commit()
         return {"signals": signals, "members": members, "events": events}
@@ -690,9 +690,9 @@ def slot_occupied_by_any_pod_sync(slot_time: datetime) -> bool:
 def launcher_snapshot_sync(message_id: str, signal_date: date) -> list[LauncherSlot]:
     """The day's launcher slots in bucket order, each resolved to committed / lazy / expired.
 
-    A slot whose time carries a locked pod reflects it — sesh-created or bot-native: count, thread, and
-    real start time are read off the event (the card is the truth; a little render-time staleness is
-    fine). Otherwise the slot is lazy — its own poll signal, or an empty open slot before signals exist.
+    A slot whose scheduled card carries this exact slot time reflects it: count, thread, and real start
+    time are read off the event (the card is the truth; a little render-time staleness is fine).
+    Otherwise the slot is lazy — its own poll signal, or an empty open slot before signals exist.
     Committed wins outright, so a lazy slot that fires and posts its card renders as committed next pass."""
     now = datetime.now(timezone.utc)
     slots: list[LauncherSlot] = []
@@ -740,9 +740,39 @@ def _committed_slot(session: Session, bucket_key: str, event_id: str) -> Launche
         bucket_key, committed=True, status=pod_signals.STATUS_FIRED, count=len(yes_names),
         slot_time=event.event_time if event else None,
         names=yes_names, thread_id=event.discord_thread_id if event else None, signal_id=None,
-        thread_message_id=signal.thread_message_id if signal else None, interests=interests,
+        thread_message_id=signal.thread_message_id if signal else None,
+        card_message_id=signal.message_id if signal else None, interests=interests,
         set_code=event.set_code if event else None,
     )
+
+
+def committed_slot_rsvp_ref_sync(
+    signal_date: date, bucket_key: str, discord_user_id: str,
+) -> tuple[str, str | None] | None:
+    """(scheduled-card message_id, the member's current rsvp) for the locked pod reflected at this
+    slot, or None when no locked pod covers it. The rsvp is None when the member has not signed up, so
+    the launcher's committed-slot button can toggle Yes/No off the card's roster."""
+    slot_time = slot_event_time(signal_date, bucket_key)
+    if slot_time is None:
+        return None
+    with SessionLocal() as session:
+        event_id = _event_id_for_slot(session, slot_time)
+        if event_id is None:
+            return None
+        signal = session.execute(
+            select(PodSignal).where(
+                PodSignal.event_id == event_id, PodSignal.kind == pod_signals.KIND_SCHEDULED
+            )
+        ).scalar_one_or_none()
+        if signal is None:
+            return None
+        current = session.execute(
+            select(PodSignalMember.rsvp).where(
+                PodSignalMember.signal_id == signal.id,
+                PodSignalMember.discord_user_id == discord_user_id,
+            )
+        ).scalar_one_or_none()
+        return signal.message_id, current
 
 
 def roster_for_event_sync(event_id: str) -> list[tuple[str, str]]:
@@ -994,11 +1024,12 @@ async def launch_from_signal(
     else:
         _arm_open(bot, event_id, event_time)
         schedule_team_vote_offer(bot.pod_scheduler, event_id, event_time)
+        schedule_format_split_assessment(bot.pod_scheduler, event_id, event_time)
     return event_id
 
 
 async def open_ondemand_lobby(bot: commands.Bot, event_id: str) -> None:
-    """Sesh-less analogue of fire_reminder: post the Draftmancer link, ping the roster, start_manager."""
+    """Post the Draftmancer link, ping the roster, start the pod manager."""
     with SessionLocal() as session:
         event = session.get(PodDraftEvent, event_id)
         if event is None:
@@ -1075,6 +1106,7 @@ def arm_scheduled_pod_jobs(
     checks, and the roster reminder. Creation, /pod-postpone, and the startup sweep all arm here."""
     _arm_open(bot, event_id, event_time)
     schedule_team_vote_offer(bot.pod_scheduler, event_id, event_time)
+    schedule_format_split_assessment(bot.pod_scheduler, event_id, event_time)
     schedule_underfill_checks(bot.pod_scheduler, event_id, event_time, created_at)
     schedule_roster_reminder(bot.pod_scheduler, event_id, event_time)
 
@@ -1329,6 +1361,7 @@ def _rearm_open_if_pending(bot: commands.Bot, event_id: str, with_fill_jobs: boo
     else:
         _arm_open(bot, event_id, event_time)
         schedule_team_vote_offer(bot.pod_scheduler, event_id, event_time)
+        schedule_format_split_assessment(bot.pod_scheduler, event_id, event_time)
     return True
 
 
@@ -1361,22 +1394,21 @@ def _scheduled_signal_by_surface(session: Session, message_id: str) -> PodSignal
 
 
 def _event_id_for_slot(session: Session, slot_time: datetime) -> str | None:
-    """The pod already sitting at this slot — any set, sesh-created or bot-native — so the launcher
-    reflects it as a jump-link and the weekly card stands down instead of stacking a second pod on top.
-    A pod runs 2-3 hours, so occupancy is a window around the slot, not an exact-minute match; the
-    window stays inside the 5-hour gap between slots so a neighbouring slot's pod never counts. Pods
-    carry no guild and coordination is single-guild, so the match is by time alone. Newest wins when
-    repeated test runs leave several at one slot.
-
-    ` - Table N` spillover pods are excluded: a second table is a child of the pod already reflected
-    here, opened later so its event_time lands in this window, and reflecting it would drop the original
-    pod's roster off the launcher."""
+    """The locked pod the launcher reflects at this slot: the newest event whose scheduled-card signal
+    carries this exact slot_time. A fired slot posts its card with slot_time set to the slot, and a
+    reschedule leaves that slot_time intact, so the reflection stays put even after the pod's start
+    moves. An off-grid /draft pod carries its own time that matches no slot, so it lives as its own card
+    and is never swallowed into a launcher slot. Newest wins when repeated test runs leave several at one
+    slot; a second table has no scheduled-card signal, so it never displaces the pod it spun off."""
     return session.execute(
-        select(PodDraftEvent.id).where(
-            PodDraftEvent.event_time >= slot_time - SLOT_OCCUPANCY_WINDOW,
-            PodDraftEvent.event_time < slot_time + SLOT_OCCUPANCY_WINDOW,
-            PodDraftEvent.name.op("!~*")(TABLE_SUFFIX_SQL_RE),
-        ).order_by(PodDraftEvent.created_at.desc()).limit(1)
+        select(PodSignal.event_id)
+        .join(PodDraftEvent, PodDraftEvent.id == PodSignal.event_id)
+        .where(
+            PodSignal.kind == pod_signals.KIND_SCHEDULED,
+            PodSignal.slot_time == slot_time,
+        )
+        .order_by(PodDraftEvent.created_at.desc())
+        .limit(1)
     ).scalar_one_or_none()
 
 
@@ -1410,6 +1442,17 @@ def player_flashback_ranking_sync(discord_user_id: str) -> list[str]:
 def set_flashback_ranking_sync(discord_user_id: str, ranking: list[str]) -> None:
     with SessionLocal() as session:
         set_flashback_ranking(session, discord_id=discord_user_id, ranking=ranking)
+        session.commit()
+
+
+def player_cube_choices_sync(discord_user_id: str) -> list[str]:
+    with SessionLocal() as session:
+        return get_cube_choices(session, discord_user_id)
+
+
+def set_cube_choices_sync(discord_user_id: str, choices: list[str]) -> None:
+    with SessionLocal() as session:
+        set_cube_choices(session, discord_id=discord_user_id, choices=choices)
         session.commit()
 
 

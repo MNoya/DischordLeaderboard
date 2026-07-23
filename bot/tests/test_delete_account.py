@@ -53,7 +53,7 @@ def test_delete_account_preserves_pod_participation(session):
     event = PodDraftEvent(
         event_date=date(2026, 1, 20), event_time=datetime(2026, 1, 20, tzinfo=timezone.utc),
         set_code="ECL", name="ECL Pod", draftmancer_session="sess-1",
-        discord_thread_id="thread-1", sesh_message_id="msg-1", socket_status="complete",
+        discord_thread_id="thread-1", socket_status="complete",
     )
     session.add(event)
     session.flush()

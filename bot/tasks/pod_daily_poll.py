@@ -4,10 +4,11 @@ Posts every day: weekdays at 11:00 ET with two slots (Early 14:00, Late 20:00), 
 with three (Morning 10:00, Early 15:00, Late 20:00) so the earliest slot has runway. Each lazy
 slot fires a bot-native pod once it reaches the threshold, graduating into a scheduled RSVP card.
 
-A slot whose time already carries a locked scheduled pod is reflected, not reopened: it renders as a
-jump-link into that pod's thread and creates no signal of its own, so the launcher and the scheduled
-card are two live windows on one roster and never a duplicate. The launcher message is the single RSVP
-surface for its lazy slots — buttons carry static custom_ids and PodPollView re-attaches on restart.
+A slot whose time already carries a locked scheduled pod is reflected, not reopened: it renders a
+Yes/No toggle that writes to that pod's scheduled card and creates no signal of its own, so the launcher
+and the card are two live windows on one roster and never a duplicate. The launcher message is the
+single RSVP surface for its lazy slots — buttons carry static custom_ids and PodPollView re-attaches on
+restart.
 """
 from __future__ import annotations
 
@@ -23,12 +24,14 @@ from bot.commands.messages import (
     MSG_DRAFT_STARTS,
     MSG_FORMAT_PREFERENCE_BUTTON,
     MSG_PREFERENCE_LINE,
+    MSG_YOUR_CUBES_LINE,
     MSG_YOUR_SETS_LINE,
 )
 from bot.commands.pod_queue import queue_role_mention
-from bot.commands.pod_rsvp import post_scheduled_card, register_launcher_refresh
+from bot.commands.pod_rsvp import apply_card_rsvp, post_scheduled_card, register_launcher_refresh
 from bot.config import settings
 from bot.discord_helpers import NBSP, ZWSP
+from bot.services import pod_format
 from bot.services import pod_format_interest as fi
 from bot.services import pod_format_poll
 from bot.services import pod_launch
@@ -43,6 +46,8 @@ from bot.services.pod_reminder_copy import SLOT_FIRE_PING
 from bot.services.pod_roles import find_role, grant_pod_drafters, grant_role
 from bot.services.pod_signals import (
     ALL_BUCKETS,
+    RSVP_NO,
+    RSVP_YES,
     SCHEDULE_TZ,
     STATUS_EXPIRED,
     STATUS_FIRED,
@@ -247,11 +252,12 @@ def _thread_url(guild: discord.Guild | None, thread_id: str, message_id: str | N
 
 
 class PodPollView(discord.ui.View):
-    """Persistent. With no slots (the startup registration) it carries every bucket's toggle button so
-    a restart re-attaches the handler for whichever slots a live message shows. Built from a snapshot it
-    carries the day's surface: a toggle button per lazy slot, a link button into the thread per reflected
-    scheduled pod. Bucket emoji are application emoji that can't render in label text, so each button
-    gets its glyph in the emoji slot."""
+    """Persistent. With no slots (the startup registration) it carries every bucket's lazy-toggle and
+    committed-RSVP button so a restart re-attaches the handler for whichever slots a live message shows.
+    Built from a snapshot it carries the day's surface: a lazy slot renders its join toggle, a committed
+    slot renders a Yes/No toggle that writes to its scheduled card. Format Preference always rides along
+    while the board is live. Bucket emoji are application emoji that can't render in label text, so each
+    button gets its glyph in the emoji slot."""
 
     def __init__(
         self, slots: list[pod_launch.LauncherSlot] | None = None, guild: discord.Guild | None = None,
@@ -260,30 +266,30 @@ class PodPollView(discord.ui.View):
         if slots is None:
             for bucket in ALL_BUCKETS:
                 self.add_item(_slot_toggle_button(bucket.key))
+                self.add_item(_slot_rsvp_button(bucket.key))
             self.add_item(_interest_button())
             return
         for slot in slots:
             bucket = bucket_by_key(slot.bucket_key)
             if bucket is None:
                 continue
-            if slot.committed:
-                if slot.thread_id:
-                    self.add_item(discord.ui.Button(
-                        style=discord.ButtonStyle.link,
-                        url=_thread_url(guild, slot.thread_id, slot.thread_message_id),
-                        label=bucket.name, emoji=emojis.resolve(bucket.emoji),
-                    ))
-            else:
+            if slot.committed and slot.card_message_id:
+                self.add_item(_slot_rsvp_button(slot.bucket_key))
+            elif slot.committed and slot.thread_id:
+                self.add_item(discord.ui.Button(
+                    style=discord.ButtonStyle.link,
+                    url=_thread_url(guild, slot.thread_id, slot.thread_message_id),
+                    label=bucket.name, emoji=emojis.resolve(bucket.emoji),
+                ))
+            elif not slot.committed:
                 self.add_item(_slot_toggle_button(slot.bucket_key, closed=slot.status == STATUS_EXPIRED))
-        if any(not slot.committed for slot in slots):
-            self.add_item(_interest_button())
+        self.add_item(_interest_button())
 
 
 INTEREST_BUTTON_ID = "pod_poll_interest"
 INTEREST_PLACEHOLDER = "Select your Format Preference"
-INTEREST_ANY_VALUE = "any"
 INTEREST_DESC_FLASHBACK = "Any Past Set, Rank Your Favorites"
-INTEREST_DESC_ANY = "Fill the Table that needs Players"
+INTEREST_DESC_CUBE = "Choose from the server's cubes"
 MSG_INTEREST_PROMPT = (
     "### Choose what you would prefer to draft\n"
     "**Save** your preference, or **Confirm** to also join that time slot today"
@@ -298,12 +304,13 @@ RANK_BUTTON_LABEL = "Rank Sets"
 RANK_BUTTON_EMOJI = "📊"
 RANK_MODAL_TITLE = "Rank Flashback Sets"
 RANK_MODAL_FIELD = "Set Codes"
-RANK_MODAL_PLACEHOLDER = "e.g. FIN DSK NEO"
+RANK_MODAL_PLACEHOLDER = "e.g. XXX YYY NEO"
 RANK_MODAL_EXPLAINER = (
-    "Set your Flashback preference, best first.\nWhen a pod opens a **Format Vote**, every set on your "
-    "list is pre-filled. Change anytime in the thread."
+    f"Set your Flashback preference, best first, **up to {fi.FLASHBACK_RANKING_MAX} sets**\n\nWhen a pod opens a "
+    "**Format Vote**, your sets are added to the poll options"
 )
 MSG_RANK_EMPTY = "No sets ranked"
+CUBE_SELECT_PLACEHOLDER = "Select Cubes"
 
 
 def _interest_button() -> discord.ui.Button:
@@ -352,12 +359,13 @@ async def _send_interest_prompt(
     user_id = str(interaction.user.id)
     current = await asyncio.to_thread(pod_launch.player_interest_sync, user_id)
     ranking = await asyncio.to_thread(pod_launch.player_flashback_ranking_sync, user_id)
+    cubes = await asyncio.to_thread(pod_launch.player_cube_choices_sync, user_id)
     slots = await asyncio.to_thread(pod_launch.launcher_snapshot_sync, launcher_message_id, signal_date)
-    open_slots = [
-        slot.bucket_key for slot in slots
-        if not slot.committed and slot.status != STATUS_EXPIRED and bucket_by_key(slot.bucket_key) is not None
+    slot_states = [
+        (slot.bucket_key, not slot.committed and slot.status != STATUS_EXPIRED)
+        for slot in slots if bucket_by_key(slot.bucket_key) is not None
     ]
-    view = InterestPromptView(launcher_message_id, signal_date, current, ranking, open_slots)
+    view = InterestPromptView(launcher_message_id, signal_date, current, ranking, cubes, slot_states)
     await interaction.followup.send(view=view, ephemeral=True)
 
 
@@ -371,20 +379,21 @@ def _slot_short_name(bucket_key: str) -> str:
 
 class InterestPromptView(discord.ui.LayoutView):
     """Ephemeral preference picker opened from the launcher's Format Preference button. A Components V2
-    layout: prompt, the interest select, and the Save / Confirm row; a Flashback pick inserts the ranking
-    line above a Rank Sets button plus a separator before the Save row. Short-lived and per-user, so it
-    carries no persistent custom_ids."""
+    layout: prompt, the interest select, and the Save / Confirm row. A Flashback pick inserts the ranking
+    line above a Rank Sets button; a Cube pick inserts the chosen-cubes line above a Choose Cubes button
+    that reveals the server cube list. Short-lived and per-user, so it carries no persistent custom_ids."""
 
     def __init__(
         self, launcher_message_id: str, signal_date: date, current: list[str], ranking: list[str],
-        open_slots: list[str],
+        cubes: list[str], slot_states: list[tuple[str, bool]],
     ) -> None:
         super().__init__(timeout=300)
         self.launcher_message_id = launcher_message_id
         self.signal_date = signal_date
         self.values = fi.normalize(current)
         self.ranking = list(ranking)
-        self.open_slots = open_slots
+        self.cubes = list(cubes)
+        self.slot_states = slot_states
         self._rebuild()
 
     def _rebuild(self) -> None:
@@ -409,40 +418,61 @@ class InterestPromptView(discord.ui.LayoutView):
             rank_row.add_item(rank)
             container.add_item(rank_row)
             container.add_item(discord.ui.Separator())
+        if fi.CUBE in self.values:
+            self._add_cube_section(container)
         button_row = discord.ui.ActionRow()
         save = discord.ui.Button(label=SAVE_BUTTON_LABEL, style=discord.ButtonStyle.success,
                                  emoji=SAVE_BUTTON_EMOJI)
         save.callback = self._on_save
         button_row.add_item(save)
-        for bucket_key in self.open_slots:
+        for bucket_key, is_open in self.slot_states:
             bucket = bucket_by_key(bucket_key)
             if bucket is None:
                 continue
             button = discord.ui.Button(
                 label=CONFIRM_SLOT_LABEL.format(name=_slot_short_name(bucket_key)),
-                style=discord.ButtonStyle.success, emoji=emojis.resolve(bucket.emoji),
+                style=discord.ButtonStyle.success if is_open else discord.ButtonStyle.secondary,
+                emoji=emojis.resolve(bucket.emoji), disabled=not is_open,
             )
-            button.callback = self._make_confirm_slot(bucket_key)
+            if is_open:
+                button.callback = self._make_confirm_slot(bucket_key)
             button_row.add_item(button)
         container.add_item(button_row)
         self.add_item(container)
 
     async def _on_select(self, interaction: discord.Interaction) -> None:
-        self.values = _interest_values(self.select.values)
+        self.values = fi.normalize(self.select.values)
         self._rebuild()
         await interaction.response.edit_message(view=self)
 
     async def _on_rank(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_modal(_RankModal(self))
 
-    async def _persist(self, user: "discord.User | discord.Member") -> list[str]:
+    def _add_cube_section(self, container: discord.ui.Container) -> None:
+        self.cube_select = _cube_menu(self.cubes)
+        self.cube_select.callback = self._on_cube_select
+        cube_row = discord.ui.ActionRow()
+        cube_row.add_item(self.cube_select)
+        container.add_item(cube_row)
+        if self.cubes:
+            container.add_item(discord.ui.TextDisplay(
+                MSG_YOUR_CUBES_LINE.format(cubes=_cube_display(self.cubes))))
+        container.add_item(discord.ui.Separator())
+
+    async def _on_cube_select(self, interaction: discord.Interaction) -> None:
+        picked = set(self.cube_select.values)
+        self.cubes = [fmt.code for fmt in pod_format.custom_formats() if fmt.code in picked]
+        self._rebuild()
+        await interaction.response.edit_message(view=self)
+
+    async def _persist(self, user: "discord.User | discord.Member") -> None:
         await asyncio.to_thread(
             pod_launch.set_launcher_interest_sync,
             self.launcher_message_id, str(user.id), getattr(user, "name", user.display_name),
             user.display_name, None, self.values, self.signal_date,
         )
         await asyncio.to_thread(pod_launch.set_flashback_ranking_sync, str(user.id), self.ranking)
-        return self.ranking if fi.FLASHBACK in self.values else []
+        await asyncio.to_thread(pod_launch.set_cube_choices_sync, str(user.id), self.cubes)
 
     async def _finish(self, interaction: discord.Interaction, text: str) -> None:
         done = discord.ui.LayoutView(timeout=None)
@@ -463,12 +493,14 @@ class InterestPromptView(discord.ui.LayoutView):
 
     async def _on_save(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer()
-        ranking = await self._persist(interaction.user)
+        await self._persist(interaction.user)
         await _rerender_poll(
             interaction.client, self.launcher_message_id, self.signal_date, interaction.channel)
         saved = MSG_INTEREST_SAVED.format(choice=fi.preference_display(self.values))
-        if ranking:
-            saved = f"{saved}\n{MSG_YOUR_SETS_LINE.format(ranking=fi.ranking_display(ranking))}"
+        if fi.FLASHBACK in self.values and self.ranking:
+            saved = f"{saved}\n{MSG_YOUR_SETS_LINE.format(ranking=fi.ranking_display(self.ranking))}"
+        if fi.CUBE in self.values and self.cubes:
+            saved = f"{saved}\n{MSG_YOUR_CUBES_LINE.format(cubes=_cube_display(self.cubes))}"
         await self._finish(interaction, saved)
 
     def _make_confirm_slot(self, bucket_key: str):
@@ -509,43 +541,56 @@ class _RankModal(discord.ui.Modal, title=RANK_MODAL_TITLE):
         self.add_item(self.codes)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        self.prompt.ranking = pod_format_poll.normalize_write_ins(str(self.codes.value))
+        codes = pod_format_poll.normalize_write_ins(str(self.codes.value))
+        self.prompt.ranking = codes[: fi.FLASHBACK_RANKING_MAX]
         self.prompt._rebuild()
         await interaction.response.edit_message(view=self.prompt)
 
 
-def _interest_values(select_values: list[str]) -> list[str]:
-    """The stored interest codes a picked menu value stands for: the Any option holds both draftable-set
-    interests, every other value is its own code."""
-    if INTEREST_ANY_VALUE in select_values:
-        return [fi.LATEST, fi.FLASHBACK]
-    return fi.normalize(select_values)
 
 
 def _interest_menu(selected: list[str]) -> discord.ui.Select:
+    """A multi-select over the three interests, each an independent choice defaulted to the player's saved
+    values. Picking several means "up for any of these"; picking latest and flashback both is the flexible
+    crowd that fills either table."""
     chosen = set(fi.normalize(selected))
-    if fi.LATEST in chosen and fi.FLASHBACK in chosen:
-        current = INTEREST_ANY_VALUE
-    elif fi.LATEST in chosen:
-        current = fi.LATEST
-    elif fi.FLASHBACK in chosen:
-        current = fi.FLASHBACK
-    else:
-        current = None
+    options = [
+        discord.SelectOption(
+            label=fi.INTEREST_LABEL[fi.LATEST], value=fi.LATEST, emoji=fi.latest_emoji(),
+            description=set_name_for(active_set_code()), default=fi.LATEST in chosen),
+        discord.SelectOption(
+            label=fi.INTEREST_LABEL[fi.FLASHBACK], value=fi.FLASHBACK, emoji=fi.flashback_emoji(),
+            description=INTEREST_DESC_FLASHBACK, default=fi.FLASHBACK in chosen),
+        discord.SelectOption(
+            label=fi.INTEREST_LABEL[fi.CUBE], value=fi.CUBE, emoji=fi.interest_emoji(fi.CUBE),
+            description=INTEREST_DESC_CUBE, default=fi.CUBE in chosen),
+    ]
     return discord.ui.Select(
-        placeholder=INTEREST_PLACEHOLDER, min_values=0, max_values=1,
-        options=[
-            discord.SelectOption(
-                label=fi.FLEXIBLE_LABEL, value=INTEREST_ANY_VALUE, emoji=fi.FLEXIBLE_EMOJI,
-                description=INTEREST_DESC_ANY, default=current == INTEREST_ANY_VALUE),
-            discord.SelectOption(
-                label=fi.EXCLUSIVE_LABEL[fi.LATEST], value=fi.LATEST, emoji=fi.latest_emoji(),
-                description=set_name_for(active_set_code()), default=current == fi.LATEST),
-            discord.SelectOption(
-                label=fi.EXCLUSIVE_LABEL[fi.FLASHBACK], value=fi.FLASHBACK, emoji=fi.flashback_emoji(),
-                description=INTEREST_DESC_FLASHBACK, default=current == fi.FLASHBACK),
-        ],
+        placeholder=INTEREST_PLACEHOLDER, min_values=0, max_values=len(options), options=options,
     )
+
+
+def _cube_menu(selected: list[str]) -> discord.ui.Select:
+    """A multi-select over the server's registered cubes, defaulted to the player's saved choices."""
+    chosen = set(selected)
+    options = [
+        discord.SelectOption(label=fmt.pick_label, value=fmt.code, emoji=fi.cube_emoji(), default=fmt.code in chosen)
+        for fmt in pod_format.custom_formats()
+    ]
+    return discord.ui.Select(
+        placeholder=CUBE_SELECT_PLACEHOLDER, min_values=0, max_values=len(options), options=options,
+    )
+
+
+def _cube_display(codes: list[str]) -> str:
+    """The chosen cubes as bold underlined links to their CubeCobra pages, the cube glyph ahead of each,
+    in registry order and spaced apart."""
+    picked = set(codes)
+    links = [
+        f"{fi.cube_emoji()} [__**{fmt.link_text}**__]({fmt.url})"
+        for fmt in pod_format.custom_formats() if fmt.code in picked
+    ]
+    return (NBSP * 3).join(links)
 
 
 def _slot_toggle_button(bucket_key: str, closed: bool = False) -> discord.ui.Button:
@@ -558,6 +603,20 @@ def _slot_toggle_button(bucket_key: str, closed: bool = False) -> discord.ui.But
 
     async def callback(interaction: discord.Interaction) -> None:
         await _handle_poll_click(interaction, bucket_key)
+
+    button.callback = callback
+    return button
+
+
+def _slot_rsvp_button(bucket_key: str) -> discord.ui.Button:
+    bucket = bucket_by_key(bucket_key)
+    button = discord.ui.Button(
+        label=bucket.name, style=discord.ButtonStyle.success,
+        custom_id=f"pod_slot_rsvp:{bucket_key}", emoji=emojis.resolve(bucket.emoji),
+    )
+
+    async def callback(interaction: discord.Interaction) -> None:
+        await _handle_slot_rsvp_click(interaction, bucket_key)
 
     button.callback = callback
     return button
@@ -642,6 +701,29 @@ async def _handle_poll_click(interaction: discord.Interaction, bucket_key: str) 
     )
     if err:
         await interaction.followup.send(err, ephemeral=True)
+
+
+async def _handle_slot_rsvp_click(interaction: discord.Interaction, bucket_key: str) -> None:
+    """A committed slot's button toggles the clicker on its scheduled card: Yes when they were out or
+    Maybe, No when they already held Yes. The write and every follow-on run through the card's shared
+    apply_card_rsvp, so the card, the launcher, and the native event re-render in step."""
+    signal_date = await _launcher_signal_date(interaction.message)
+    ref = await asyncio.to_thread(
+        pod_launch.committed_slot_rsvp_ref_sync, signal_date, bucket_key, str(interaction.user.id),
+    )
+    if ref is None:
+        await interaction.response.send_message(MSG_SLOT_CLOSED, ephemeral=True)
+        return
+    card_message_id, current = ref
+    target = RSVP_NO if current == RSVP_YES else RSVP_YES
+    launcher_message = interaction.message
+    await apply_card_rsvp(interaction, card_message_id, target, refresh_launcher=False)
+    guild = getattr(launcher_message.channel, "guild", None) or interaction.guild
+    slots = await asyncio.to_thread(pod_launch.launcher_snapshot_sync, str(launcher_message.id), signal_date)
+    try:
+        await launcher_message.edit(embed=build_poll_embed(slots, guild), view=PodPollView(slots, guild))
+    except discord.HTTPException:
+        log.warning(f"could not re-render launcher message {launcher_message.id}", exc_info=True)
 
 
 def _slot_effect_lead(bucket_key: str, slot_time: datetime | None) -> str:

@@ -137,7 +137,7 @@ def test_start_assignment_persists_seat_parity_teams(session):
     session.add(PodDraftEvent(
         id=event_id, event_date=now.date(), event_time=now, set_code="SOS",
         name="Team Test Pod", draftmancer_session="TEAM-TEST", discord_thread_id="1",
-        sesh_message_id="team-test", socket_status="test", pairing_mode="team",
+        socket_status="test", pairing_mode="team",
     ))
     session.flush()
     order = ["Ava#11111", "Bram#22222", "Cara#33333", "Dex#44444"]

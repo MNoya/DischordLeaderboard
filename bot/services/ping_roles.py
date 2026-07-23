@@ -402,13 +402,15 @@ class _LinkArenaModal(discord.ui.Modal, title="Link Arena Handle"):
         if self.after_link is not None:
             await self.after_link(interaction, arena_name)
             return
-        await interaction.response.send_message(
-            MSG_ARENA_LINKED.format(
-                emoji=emojis.get("mtga"), mention=interaction.user.mention, arena_name=arena_name,
-            ),
-            ephemeral=is_pod_coordination_channel(interaction.channel),
-            allowed_mentions=discord.AllowedMentions(users=False, everyone=False, roles=False),
+        linked = MSG_ARENA_LINKED.format(
+            emoji=emojis.get("mtga"), mention=interaction.user.mention, arena_name=arena_name,
         )
+        no_pings = discord.AllowedMentions(users=False, everyone=False, roles=False)
+        if is_pod_coordination_channel(interaction.channel):
+            await interaction.response.send_message(linked, ephemeral=True, allowed_mentions=no_pings)
+        else:
+            await interaction.response.defer()
+            await interaction.channel.send(linked, allowed_mentions=no_pings)
         await _handoff_active_lobby_link(interaction)
 
 

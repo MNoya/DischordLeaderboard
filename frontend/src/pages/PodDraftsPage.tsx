@@ -30,7 +30,7 @@ import { useIsMobile } from "../lib/use-is-mobile";
 import { cn } from "../lib/utils";
 import { cleanPodEventName, fmtRange, playerPath, podDiscordName, stripDiscriminator, weekOfSet } from "../data/utils";
 import { ACTIVE_SET_CODE } from "../data/constants";
-import { podDraftMessageLink } from "../data/site";
+import { SITE_LINKS } from "../data/site";
 import {
   usePodDraftArtifact,
   usePodEventMatches,
@@ -446,7 +446,7 @@ function EventRow({
 }) {
   const isUpcoming = !event.championDisplayName && new Date(event.eventTime).getTime() > nowMs;
   const expandable = !isUpcoming;
-  const joinHref = event.seshMessageId ? podDraftMessageLink(event.seshMessageId) : null;
+  const joinHref = isUpcoming ? SITE_LINKS.discord : null;
   const isJoinable = isUpcoming && joinHref !== null;
   const [open, setOpen] = useState(defaultOpen && expandable);
   const headerClass = cn(

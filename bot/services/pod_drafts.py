@@ -28,9 +28,8 @@ from bot.models import (
 from bot.services import pod_format
 from bot.services import pod_format_interest
 from bot.services import pod_signals
-from bot.services.pod_schedule import highest_event_number
+from bot.services.pod_schedule import NUM_RE, highest_event_number
 from bot.services.pod_slot import next_collision_index, pod_display_name
-from bot.services.sesh_parser import NUM_RE
 from bot.slug import disambiguate_slug, slugify
 
 
@@ -54,19 +53,6 @@ class ParticipantDmInfo:
     discord_id: str | None
     display_name: str
     arena_name: str | None
-
-
-@dataclass(frozen=True)
-class ParsedSeshEvent:
-    """Input to record_event. event_number is used only for draftmancer_session naming, not stored."""
-    event_date: date
-    event_time: datetime
-    set_code: str
-    event_number: int | None
-    name: str
-    attendees: Sequence[str]
-    sesh_message_id: str
-    discord_thread_id: str
 
 
 @dataclass(frozen=True)
@@ -108,31 +94,6 @@ def _session_id_off_base(session: Session, base: str) -> str:
         candidate = f"{base}-{_session_suffix()}"
         if candidate not in taken:
             return candidate
-
-
-def _build_draftmancer_session(session: Session, parsed: ParsedSeshEvent) -> str:
-    """Compose a session id with a readable base and an unguessable random tail; prefer #N from the
-    title, fall back to Month-Day.
-
-    A plain set omits its code from the id so a format change before the draft never desyncs the shown
-    URL. Custom formats drop the LLU prefix and lead with their own slug. The Set Championship leads
-    with a `-Championship` base.
-    """
-    slug = pod_format.session_slug_for(parsed.set_code)
-    if slug is not None:
-        head = f"{slug}-{parsed.event_date:%y}"
-    else:
-        head = settings.pod_draft_session_prefix
-
-    if is_championship(parsed.name):
-        base = f"{head}-Championship"
-    elif parsed.event_number is not None:
-        suffix = f"D{parsed.event_number}" if slug is not None else str(parsed.event_number)
-        base = f"{head}-{suffix}"
-    else:
-        base = f"{head}-{parsed.event_date:%b}-{parsed.event_date.day}"
-
-    return _session_id_off_base(session, base)
 
 
 _ARENA_ID_RE = re.compile(r"#[0-9?]+$")
@@ -526,13 +487,33 @@ def get_flashback_ranking(session: Session, discord_id: str) -> list[str]:
 
 
 def set_flashback_ranking(session: Session, *, discord_id: str, ranking: list[str]) -> None:
-    """Persist the ranked flashback preference on an existing player row. The interest save creates the row,
+    """Persist the ranked flashback preference on an existing player row, best first and capped at
+    FLASHBACK_RANKING_MAX so a pod's Format Vote stays reasonable to fill. The interest save creates the row,
     so this only updates; a missing player is a no-op."""
     player = session.execute(
         select(Player).where(Player.discord_id == discord_id)
     ).scalar_one_or_none()
     if player is not None:
-        player.flashback_ranking = ranking
+        player.flashback_ranking = ranking[: pod_format_interest.FLASHBACK_RANKING_MAX]
+        session.flush()
+
+
+def get_cube_choices(session: Session, discord_id: str) -> list[str]:
+    """The player's marked server cubes, unordered, empty when unset or the player has no row."""
+    stored = session.execute(
+        select(Player.cube_choices).where(Player.discord_id == discord_id)
+    ).scalar_one_or_none()
+    return list(stored) if stored else []
+
+
+def set_cube_choices(session: Session, *, discord_id: str, choices: list[str]) -> None:
+    """Persist the marked server cubes on an existing player row. The interest save creates the row, so
+    this only updates; a missing player is a no-op."""
+    player = session.execute(
+        select(Player).where(Player.discord_id == discord_id)
+    ).scalar_one_or_none()
+    if player is not None:
+        player.cube_choices = choices
         session.flush()
 
 
@@ -594,7 +575,6 @@ def record_mock_event(
         name=f"{code} Mock Draft {number}",
         draftmancer_session=session_id,
         discord_thread_id=discord_thread_id,
-        sesh_message_id=None,
         socket_status="pending",
         kind="mock",
     )
@@ -627,7 +607,6 @@ def record_ondemand_event(
         name=name,
         draftmancer_session=build_ondemand_session(session, event_time.date()),
         discord_thread_id=discord_thread_id,
-        sesh_message_id=None,
         socket_status="pending",
         kind="tournament",
     )
@@ -693,7 +672,6 @@ def record_table_event(session: Session, *, source_event_id: str, format_code: s
         name=name,
         draftmancer_session=session_id,
         discord_thread_id="pending",
-        sesh_message_id=None,
         socket_status="pending",
         kind="tournament",
         pairing_mode=source.pairing_mode,
@@ -743,69 +721,6 @@ def draftmancer_url_for(session_id: str, user_name: str | None = None) -> str:
     if user_name:
         url += f"&userName={quote(user_name, safe='')}"
     return url
-
-
-def record_event(session: Session, parsed: ParsedSeshEvent) -> PodDraftEvent:
-    """Insert a pod_draft_event row plus one participant per sesh attendee."""
-    set_id = _lookup_set_id(session, parsed.set_code) if parsed.set_code else None
-    session_id = _build_draftmancer_session(session, parsed)
-
-    event = PodDraftEvent(
-        event_date=parsed.event_date,
-        event_time=parsed.event_time,
-        set_id=set_id,
-        set_code=parsed.set_code,
-        format_label=pod_format.label_for(parsed.set_code),
-        name=parsed.name,
-        draftmancer_session=session_id,
-        discord_thread_id=parsed.discord_thread_id,
-        sesh_message_id=parsed.sesh_message_id,
-        socket_status="pending",
-    )
-    if is_championship(parsed.name):
-        event.seating_mode = "leaderboard"
-    session.add(event)
-    session.flush()
-
-    for attendee in parsed.attendees:
-        _add_attendee(session, event.id, attendee)
-    session.flush()
-    return event
-
-
-def update_event_time_if_changed(
-    session: Session,
-    sesh_message_id: str,
-    new_event_time: datetime,
-    new_event_date: date,
-) -> tuple[PodDraftEvent, bool, bool] | None:
-    """Sync event_time/event_date from a re-parsed sesh embed.
-
-    Returns None if the row is missing or already finalized as draft_done or complete.
-    Otherwise returns (event, needs_reschedule, was_active):
-        - event: the matching PodDraftEvent row.
-        - needs_reschedule: True when the parsed time differs from the stored value.
-            False means the caller can skip the re-arm regardless of status.
-        - was_active: True when the bot had already advanced past 'pending'.
-            Caller must tear down any live manager before re-arming.
-
-    Sesh re-edits the embed at the scheduled start to strip RSVP reactions, and that edit is not a reschedule.
-    """
-    event = session.execute(
-        select(PodDraftEvent).where(PodDraftEvent.sesh_message_id == sesh_message_id)
-    ).scalar_one_or_none()
-    if event is None or event.socket_status in FINALIZED_STATUSES:
-        return None
-    was_active = event.socket_status != "pending"
-    time_changed = event.event_time != new_event_time or event.event_date != new_event_date
-    if not time_changed:
-        return event, False, was_active
-    event.event_time = new_event_time
-    event.event_date = new_event_date
-    if was_active:
-        event.socket_status = "pending"
-    session.flush()
-    return event, True, was_active
 
 
 def update_event_format(session: Session, event_id: str, code: str) -> str | None:
@@ -873,24 +788,6 @@ def load_event_name_sync(event_id: str) -> str:
         return session.execute(
             select(PodDraftEvent.name).where(PodDraftEvent.id == event_id)
         ).scalar_one_or_none() or "Pod Draft"
-
-
-def load_event_sesh_message_id_sync(event_id: str) -> str | None:
-    """sesh message id whose RSVP reactions drive a pod event, or None when missing."""
-    with SessionLocal() as session:
-        return session.execute(
-            select(PodDraftEvent.sesh_message_id).where(PodDraftEvent.id == event_id)
-        ).scalar_one_or_none()
-
-
-def event_for_sesh_message_sync(sesh_message_id: str) -> tuple[str, str] | None:
-    """(event_id, socket_status) for the event tracking this sesh message, or None when none does."""
-    with SessionLocal() as session:
-        row = session.execute(
-            select(PodDraftEvent.id, PodDraftEvent.socket_status)
-            .where(PodDraftEvent.sesh_message_id == sesh_message_id)
-        ).first()
-    return (row[0], row[1]) if row else None
 
 
 def delete_event_sync(event_id: str) -> None:
@@ -984,17 +881,6 @@ def apply_seat_indexes(session: Session, event_id: str, seats: list[str]) -> Non
         row.seat_index = i
         matched += 1
     log.info(f"seat_index: applied to {matched}/{len(seats)} seats for {event_id}")
-
-
-def _add_attendee(session: Session, event_id: str, display_name: str) -> PodDraftParticipant:
-    player = player_for_name(session, display_name)
-    participant = PodDraftParticipant(
-        event_id=event_id,
-        display_name=display_name,
-        player_id=player.id if player else None,
-    )
-    session.add(participant)
-    return participant
 
 
 def upsert_participant(
@@ -1439,6 +1325,31 @@ def set_participant_deck_colors(
     participant.deck_colors = deck_colors
     session.flush()
     return True
+
+
+def list_event_participants_sync(event_id: str) -> list[tuple[str, str, str | None]]:
+    """(participant_id, display_name, deck_colors) for a pod, seat order then name — the roster the
+    organizer color panel lists."""
+    with SessionLocal() as session:
+        rows = session.execute(
+            select(PodDraftParticipant.id, PodDraftParticipant.display_name, PodDraftParticipant.deck_colors)
+            .where(PodDraftParticipant.event_id == event_id)
+            .order_by(PodDraftParticipant.seat_index, PodDraftParticipant.display_name)
+        ).all()
+    return [(pid, name, colors) for pid, name, colors in rows]
+
+
+def set_participant_deck_colors_by_id_sync(participant_id: str, deck_colors: str) -> str | None:
+    """Overwrite one participant's deck_colors by row id — an organizer setting colors for any player.
+    Returns the event_id, or None when the participant is gone."""
+    with SessionLocal() as session:
+        participant = session.get(PodDraftParticipant, participant_id)
+        if participant is None:
+            return None
+        participant.deck_colors = deck_colors
+        event_id = participant.event_id
+        session.commit()
+        return event_id
 
 
 _RECORD_PATTERN = re.compile(r"\b([0-3])\s*[-:\s]\s*([0-3])\b")

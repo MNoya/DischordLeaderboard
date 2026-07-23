@@ -110,28 +110,25 @@ def test_when_options_shows_custom_time_as_its_own_defaulted_option():
     assert "Schedule for later" not in defaulted[0].label
 
 
-def test_seed_votes_from_rankings_precasts_each_ranked_set():
-    from bot.services.pod_draft_manager import _seed_votes_from_rankings
+def test_seed_options_from_rankings_adds_each_ranked_set():
+    from bot.services.pod_draft_manager import _seed_options_from_rankings
 
     options = ["MSH", "FLASH", "NEO"]
     rankings = (("1", ("NEO", "IKO")), ("2", ("NEO", "MH3")))
 
-    votes = _seed_votes_from_rankings(options, rankings)
+    _seed_options_from_rankings(options, rankings)
 
     assert options == ["MSH", "FLASH", "NEO", "IKO", "MH3"]
-    assert votes["NEO"] == ["<@1>", "<@2>"]
-    assert votes["IKO"] == ["<@1>"]
-    assert votes["MH3"] == ["<@2>"]
 
 
-def test_seed_votes_from_rankings_respects_the_option_cap():
+def test_seed_options_from_rankings_respects_the_option_cap():
     from bot.services import pod_format_poll
-    from bot.services.pod_draft_manager import _seed_votes_from_rankings
+    from bot.services.pod_draft_manager import _seed_options_from_rankings
 
     options = [f"S{i}" for i in range(pod_format_poll.MAX_ROWED_OPTIONS)]
     rankings = (("1", ("NEW1", "NEW2")),)
 
-    votes = _seed_votes_from_rankings(options, rankings)
+    _seed_options_from_rankings(options, rankings)
 
     assert len(options) == pod_format_poll.MAX_ROWED_OPTIONS
-    assert "NEW1" not in votes
+    assert "NEW1" not in options

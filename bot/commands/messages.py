@@ -70,6 +70,7 @@ MSG_FORMAT_PREFERENCE_BUTTON = "Format Preference"
 MSG_DRAFT_STARTS = "Draft scheduled for <t:{unix}:F> (<t:{unix}:R>)"
 MSG_PREFERENCE_LINE = "**Your Preference:** {choice}"
 MSG_YOUR_SETS_LINE = "**Your Sets:** {ranking}"
+MSG_YOUR_CUBES_LINE = "**Your Cubes:** {cubes}"
 
 MSG_TABLE_NO_SOURCE = "Run `/pod-table` in a pod-draft thread, or pass an `event` to pick the pod."
 MSG_TABLE_UNKNOWN_EVENT = "No pod-draft event named `{event}`."

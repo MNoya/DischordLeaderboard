@@ -10,7 +10,7 @@ A Discord bot + public website for an MTGA community leaderboard called **LLU**.
 - **Frontend** (`frontend/`): React 18 + Vite + TanStack Query + Tailwind, deployed on Cloudflare Pages at `https://limitedlevelups.com/` (production fed by `master`; `dischord.pages.dev` redirects here, branch previews at `<branch>.dischord.pages.dev`)
 - **Database**: Postgres — local Docker for dev, Supabase (project `yrecdosksgigpceholjl`) for prod
 
-Spec documents live under `spec/` (original project spec, frontend contract, pod-draft design).
+Spec documents live under `spec/` (original project spec, frontend contract, pod-draft design). Two pod docs, kept distinct: `spec/pod-workflow.md` is the engineering map (modules, models, config, the ready-check redesign, open decisions) — read it before touching pod code instead of re-inferring the flow. `spec/pod-coordination.md` is the plain-language player guide describing only live behavior — when a pod behavior change ships, update it in the same commit; it's destined to become a Discord Server Guide page.
 
 ## Common commands
 
