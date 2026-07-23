@@ -26,6 +26,7 @@ from bot.discord_helpers import extract_avatar_hash
 from bot.models import Player
 from bot.services import bot_log
 from bot.services.dm_flows import run_latest_flow, send_token_instructions, wait_for_token_reply
+from bot.services.pod_replays import schedule_recent_pod_replay_capture
 from bot.services.refresh import refresh_one_player_for_all_sets
 from bot.services.seventeenlands import SeventeenLandsClient
 from bot.services.token_link import link_token, outcome_log_suffix
@@ -235,6 +236,7 @@ class Signup(commands.Cog):
         with SessionLocal() as session:
             refresh_one_player_for_all_sets(session, self.client, result.player_id)
             session.commit()
+        schedule_recent_pod_replay_capture(result.player_id, self.client)
         await bot_log.get(self.bot).post_plain(
             f"🆕 **{interaction.user.display_name}** joined the leaderboard"
         )

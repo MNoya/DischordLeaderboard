@@ -11,6 +11,7 @@ from sqlalchemy import or_, select
 
 from bot.database import SessionLocal
 from bot.models import PodDraftEvent, PodDraftMatch, PodDraftParticipant, PodDraftReplay, Player
+from bot.services.pod_drafts import player_for_name
 from bot.services.seventeenlands import SeventeenLandsClient
 
 
@@ -21,6 +22,7 @@ POD_EVENT_NAMES = frozenset({"DirectGameTournamentLimited", "DirectGameLimited"}
 MIN_TURNS = 3
 MAX_GAMES_PER_MATCH = 3
 _EVENT_WINDOW_HOURS = 6
+POD_REPLAY_LOOKBACK = timedelta(days=3)
 
 
 async def fetch_and_persist_replays_for_player(
@@ -60,6 +62,39 @@ async def capture_event_replays(client: SeventeenLandsClient, event_id: str) -> 
     return total
 
 
+async def capture_recent_pod_replays_for_player(
+    client: SeventeenLandsClient,
+    player_id: str,
+    lookback: timedelta = POD_REPLAY_LOOKBACK,
+) -> int:
+    """Pull 17lands replays for any pod this player drafted within `lookback`.
+
+    Fired in the background off /join: a drafter who links their 17lands token after playing gets their
+    recent pods' games captured without a manual backfill. A no-token player is a no-op."""
+    targets = await asyncio.to_thread(_recent_pod_replay_targets_sync, player_id, lookback)
+    total = 0
+    for event_id, seat_name, token in targets:
+        total += await fetch_and_persist_replays_for_player(client, event_id, player_id, seat_name, token)
+    if targets:
+        log.info(f"[REPLAYS] recent_capture player={player_id} events={len(targets)} replays={total}")
+    return total
+
+
+def schedule_recent_pod_replay_capture(
+    player_id: str, client: SeventeenLandsClient | None = None,
+) -> None:
+    """Fire the recent-pod replay pull in the background so /join returns at once."""
+    pull_client = client or SeventeenLandsClient()
+
+    async def _run() -> None:
+        try:
+            await capture_recent_pod_replays_for_player(pull_client, player_id)
+        except Exception:
+            log.warning(f"recent pod replay capture failed for player {player_id}", exc_info=True)
+
+    asyncio.create_task(_run())
+
+
 def _event_replay_targets_sync(event_id: str) -> list[tuple[str, str, str]]:
     """(player_id, draftmancer_name, token) for every participant of the event with a 17lands token."""
     with SessionLocal() as session:
@@ -73,6 +108,55 @@ def _event_replay_targets_sync(event_id: str) -> list[tuple[str, str, str]]:
             .where(PodDraftParticipant.event_id == event_id)
         ).all()
     return [(pid, name, token) for pid, name, token in rows if pid and name and token]
+
+
+def _recent_pod_replay_targets_sync(player_id: str, lookback: timedelta) -> list[tuple[str, str, str]]:
+    with SessionLocal() as session:
+        targets = _recent_pod_replay_targets(session, player_id, lookback)
+        session.commit()
+    return targets
+
+
+def _recent_pod_replay_targets(
+    session, player_id: str, lookback: timedelta,
+) -> list[tuple[str, str, str]]:
+    """(event_id, seat_name, token) for each pod the player joined within `lookback`, token permitting.
+
+    A seat still unlinked (player_id null) but whose name resolves to this player is adopted here, so a
+    first-time joiner's pod seat is linked when they /join and their games get attributed."""
+    player = session.get(Player, player_id)
+    if player is None or not player.seventeenlands_token:
+        return []
+    token = player.seventeenlands_token
+
+    cutoff = datetime.now(timezone.utc) - lookback
+    event_ids = session.execute(
+        select(PodDraftEvent.id).where(PodDraftEvent.event_time >= cutoff)
+    ).scalars().all()
+
+    targets: list[tuple[str, str, str]] = []
+    for event_id in event_ids:
+        seat = _player_seat_in_event(session, event_id, player)
+        if seat is not None:
+            targets.append((event_id, seat.draftmancer_name or seat.display_name, token))
+    return targets
+
+
+def _player_seat_in_event(session, event_id: str, player: Player) -> PodDraftParticipant | None:
+    rows = session.execute(
+        select(PodDraftParticipant).where(PodDraftParticipant.event_id == event_id)
+    ).scalars().all()
+    for row in rows:
+        if row.player_id == player.id:
+            return row
+    for row in rows:
+        if row.player_id is not None:
+            continue
+        matched = player_for_name(session, row.draftmancer_name or row.display_name)
+        if matched is not None and matched.id == player.id:
+            row.player_id = player.id
+            return row
+    return None
 
 
 def attribute_games_to_rounds(

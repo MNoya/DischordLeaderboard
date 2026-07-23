@@ -4,9 +4,10 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 
-from bot.models import PodDraftMatch
+from bot.models import PodDraftEvent, PodDraftMatch, PodDraftParticipant, Player
 from bot.services import pod_replays
 from bot.services.pod_replays import attribute_games_to_rounds
+from bot.services.pod_drafts import normalize_player_name
 
 
 _POD = "DirectGameTournamentLimited"
@@ -28,6 +29,23 @@ def test_capture_event_replays_fetches_each_participant_once(monkeypatch):
 
     assert total == 6
     assert calls == targets
+
+
+def test_capture_recent_pulls_each_recent_pod_for_the_player(monkeypatch):
+    targets = [("evt-a", "Alice#1", "tokenA"), ("evt-b", "Alice#1", "tokenA")]
+    monkeypatch.setattr(pod_replays, "_recent_pod_replay_targets_sync", lambda pid, lookback: targets)
+    calls = []
+
+    async def _fake_fetch(client, event_id, player_id, seat_name, token):
+        calls.append((event_id, player_id, seat_name, token))
+        return 2
+
+    monkeypatch.setattr(pod_replays, "fetch_and_persist_replays_for_player", _fake_fetch)
+
+    total = asyncio.run(pod_replays.capture_recent_pod_replays_for_player(object(), "p1"))
+
+    assert total == 4
+    assert calls == [("evt-a", "p1", "Alice#1", "tokenA"), ("evt-b", "p1", "Alice#1", "tokenA")]
 
 
 def test_attributes_each_match_when_data_is_clean() -> None:
@@ -254,6 +272,89 @@ def test_real_pod3_noya_data_attributes_r2_partially() -> None:
     out = attribute_games_to_rounds(games, matches, t("00:00"))
 
     assert out == {"g0": 1, "g1": 1, "g2": 1, "g3": 2, "g4": 2, "g5": 3, "g6": 3, "g7": 3}
+
+
+def test_recent_targets_includes_recent_seat_and_excludes_stale_pod(session):
+    player = _seed_player(session, token="tok-1", arena_name="Alice#1")
+    recent = _seed_event(session, event_time=_now() - timedelta(hours=3))
+    stale = _seed_event(session, event_time=_now() - timedelta(days=5))
+    _seed_participant(session, recent.id, player_id=player.id, draftmancer_name="Alice#1")
+    _seed_participant(session, stale.id, player_id=player.id, draftmancer_name="Alice#1")
+    session.flush()
+
+    targets = pod_replays._recent_pod_replay_targets(session, player.id, pod_replays.POD_REPLAY_LOOKBACK)
+
+    assert targets == [(recent.id, "Alice#1", "tok-1")]
+
+
+def test_recent_targets_empty_without_token(session):
+    player = _seed_player(session, token=None, arena_name="Alice#1")
+    event = _seed_event(session, event_time=_now() - timedelta(hours=1))
+    _seed_participant(session, event.id, player_id=player.id, draftmancer_name="Alice#1")
+    session.flush()
+
+    targets = pod_replays._recent_pod_replay_targets(session, player.id, pod_replays.POD_REPLAY_LOOKBACK)
+
+    assert targets == []
+
+
+def test_recent_targets_adopts_unlinked_seat_matching_the_player(session):
+    player = _seed_player(session, token="tok-1", arena_name="Alice#1")
+    event = _seed_event(session, event_time=_now() - timedelta(hours=2))
+    seat = _seed_participant(session, event.id, player_id=None, draftmancer_name="Alice#1")
+    session.flush()
+
+    targets = pod_replays._recent_pod_replay_targets(session, player.id, pod_replays.POD_REPLAY_LOOKBACK)
+
+    assert targets == [(event.id, "Alice#1", "tok-1")]
+    assert seat.player_id == player.id
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _seed_player(session, *, token, arena_name):
+    player = Player(
+        slug=f"alice-{arena_name}",
+        discord_id=f"d-{arena_name}",
+        discord_username="alice",
+        display_name="Alice",
+        arena_name=arena_name,
+        arena_aliases=[normalize_player_name(arena_name)],
+        seventeenlands_token=token,
+        active=True,
+    )
+    session.add(player)
+    session.flush()
+    return player
+
+
+def _seed_event(session, *, event_time):
+    event = PodDraftEvent(
+        event_date=event_time.date(),
+        event_time=event_time,
+        set_code="MSH",
+        name=f"Pod {event_time.isoformat()}",
+        draftmancer_session="sess",
+        discord_thread_id=f"thread-{event_time.timestamp()}",
+        socket_status="closed",
+    )
+    session.add(event)
+    session.flush()
+    return event
+
+
+def _seed_participant(session, event_id, *, player_id, draftmancer_name):
+    participant = PodDraftParticipant(
+        event_id=event_id,
+        player_id=player_id,
+        display_name=draftmancer_name,
+        draftmancer_name=draftmancer_name,
+    )
+    session.add(participant)
+    session.flush()
+    return participant
 
 
 def _match(round_num: int, player_a: str, player_b: str, winner: str, score: str,
