@@ -152,14 +152,22 @@ async def setup(bot: commands.Bot) -> None:
 
     @test_group.command(name="launcher")
     @commands.is_owner()
-    async def test_launcher(ctx: commands.Context, fill: int = 5, close: str = "") -> None:
+    async def test_launcher(ctx: commands.Context, *args: str) -> None:
         """Owner-only. Drive the launcher end to end: stage a real scheduled pod at the day's last slot
-        so it reflects as a committed jump-link, seed `fill` Yes RSVPs on it so the committed slot shows
-        its roster, then post the live launcher for that day. The other slots are real lazy signals whose
+        so it reflects as a committed jump-link, seed Yes RSVPs on it so the committed slot shows its
+        roster, then post the live launcher for that day. The other slots are real lazy signals whose
         buttons drive the fire path; set POD_SIGNAL_FIRE_THRESHOLD low to graduate one yourself. Uses
         today when a slot is still ahead, otherwise tomorrow, so the staged pod is always in the future.
-        Pass `close` as the third word to immediately retire it into the closed state (grey, no buttons,
-        no role ping, committed slot shown as its roster) so that surface can be eyeballed."""
+        Args are order-free: a number sets how many Yes RSVPs to seed (default 5), and the word `close`
+        immediately retires it into the closed state (grey, no buttons, no role ping, committed slot
+        shown as its roster) so that surface can be eyeballed."""
+        fill = 5
+        close = False
+        for arg in args:
+            if arg.isdigit():
+                fill = int(arg)
+            elif arg.lower() == "close":
+                close = True
         if not isinstance(ctx.channel, discord.TextChannel):
             await ctx.send("Run `!test launcher` in a server text channel — the pod thread is created there.")
             return
@@ -181,7 +189,7 @@ async def setup(bot: commands.Bot) -> None:
             await _seed_fake_yes(ctx.channel, event_id, slot_time, name, fill)
         await ctx.send(f"Staged **{name}** at {reflect.name}; posting the live launcher for that day.")
         await post_launcher(ctx.bot, ctx.channel, target_day)
-        if close.lower() == "close":
+        if close:
             await close_launcher_for_date(ctx.bot, target_day)
 
     @test_group.command(name="reset")
