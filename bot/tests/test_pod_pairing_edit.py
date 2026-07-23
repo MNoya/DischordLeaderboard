@@ -1,12 +1,13 @@
 from datetime import date, datetime, timezone
 
-from bot.models import PodDraftEvent, PodDraftMatch
+from bot.models import Player, PodDraftEvent, PodDraftMatch, PodDraftParticipant
 from bot.services import pod_tournament
 from bot.services.pod_tournament import (
     CLEAR_SENTINEL,
     RESULT_KEEP,
     SKIPPED_SENTINEL,
     FixPairingView,
+    _load_champions_sync,
     apply_pairing_swap,
 )
 
@@ -151,3 +152,26 @@ def test_current_result_token_keep_when_winner_no_longer_in_slots():
     view.selected_a = "Carol"
 
     assert view._current_result_token() == RESULT_KEEP
+
+
+def _champion(session, event_id, *, seat_name, deck_colors, player=None):
+    session.add(PodDraftParticipant(
+        event_id=event_id, display_name=seat_name, draftmancer_name=seat_name,
+        player_id=player.id if player else None, placement=1, deck_colors=deck_colors,
+    ))
+    session.flush()
+
+
+def test_load_champions_prefers_linked_discord_name_over_seat_name(session, monkeypatch):
+    monkeypatch.setattr(pod_tournament, "SessionLocal", _session_factory(session))
+    event = _event(session)
+    linked = Player(slug="aitch-1", discord_id="1", discord_username="aitch", display_name="Aitch", active=True)
+    session.add(linked)
+    session.flush()
+    _champion(session, event.id, seat_name="Aitch#85794", deck_colors="WU", player=linked)
+    _champion(session, event.id, seat_name="Unlinked#0001", deck_colors="BR", player=None)
+
+    champions = _load_champions_sync(event.id)
+
+    assert ("**Aitch**", "WU") in champions
+    assert ("**Unlinked#0001**", "BR") in champions

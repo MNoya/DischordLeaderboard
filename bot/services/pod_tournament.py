@@ -2424,16 +2424,18 @@ def _join_champion_names(names_with_colors: list[tuple[str, str | None]]) -> str
 
 def _load_champions_sync(event_id: str) -> list[tuple[str, str | None]]:
     """(bold display name, deck colors) for the pod's placement-1 finishers, for rebuilding the card's
-    champion line without a live manager. The card is an embed, where a `<@id>` mention renders as raw
-    text, so the winner is named in bold instead."""
+    champion line without a live manager. Prefers the linked player's Discord display name so the winner
+    reads the same as the card roster, and falls back to the Draftmancer seat name for an unlinked seat.
+    The card is an embed, where a `<@id>` mention renders as raw text, so the winner is named in bold."""
     with SessionLocal() as session:
         rows = session.execute(
-            select(PodDraftParticipant.display_name, PodDraftParticipant.deck_colors)
+            select(PodDraftParticipant.display_name, PodDraftParticipant.deck_colors, DbPlayer.display_name)
+            .outerjoin(DbPlayer, DbPlayer.id == PodDraftParticipant.player_id)
             .where(PodDraftParticipant.event_id == event_id, PodDraftParticipant.placement == 1)
         ).all()
     champions: list[tuple[str, str | None]] = []
-    for display_name, deck_colors in rows:
-        champions.append((f"**{display_name}**", deck_colors))
+    for seat_name, deck_colors, player_display in rows:
+        champions.append((f"**{player_display or seat_name}**", deck_colors))
     return champions
 
 
