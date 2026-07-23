@@ -28,13 +28,13 @@ def test_auto_grant_maps_timed_weekday_slots_to_their_roles():
 
 
 def test_auto_grant_splits_weekend_daytime_from_evening():
-    saturday_morning = datetime(2026, 6, 13, 10, 0, tzinfo=SCHEDULE_TZ)
-    saturday_afternoon = datetime(2026, 6, 13, 15, 0, tzinfo=SCHEDULE_TZ)
+    saturday_early = datetime(2026, 6, 13, 14, 0, tzinfo=SCHEDULE_TZ)
     saturday_evening = datetime(2026, 6, 13, 20, 0, tzinfo=SCHEDULE_TZ)
+    saturday_off_grid = datetime(2026, 6, 13, 10, 0, tzinfo=SCHEDULE_TZ)
 
-    assert auto_grant_spec_for_event(saturday_morning).name == WEEKEND_EARLY_POD_ROLE_NAME
-    assert auto_grant_spec_for_event(saturday_afternoon).name == WEEKEND_EARLY_POD_ROLE_NAME
+    assert auto_grant_spec_for_event(saturday_early).name == WEEKEND_EARLY_POD_ROLE_NAME
     assert auto_grant_spec_for_event(saturday_evening).name == WEEKEND_LATE_POD_ROLE_NAME
+    assert auto_grant_spec_for_event(saturday_off_grid) is None
 
 
 def test_button_custom_id_is_a_stable_slug():
@@ -51,7 +51,7 @@ def test_blurb_with_time_lists_only_the_role_s_own_weekend_slots():
     early = blurb_with_time(_spec_named(WEEKEND_EARLY_POD_ROLE_NAME))
     late = blurb_with_time(_spec_named(WEEKEND_LATE_POD_ROLE_NAME))
 
-    assert early.count("<t:") == 2
+    assert early.count("<t:") == 1
     assert late.count("<t:") == 1
 
 

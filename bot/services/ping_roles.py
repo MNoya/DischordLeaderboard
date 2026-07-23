@@ -91,7 +91,7 @@ PING_ROLES: tuple[PingRole, ...] = (
     PingRole(
         WEEKEND_EARLY_POD_ROLE_NAME, "🌅", "", color="#D2B48C",
         aliases=("Weekend Early Pods",), slot_weekday=SATURDAY, auto_grant=True,
-        grant_when="on weekends", weekend_bucket_keys=("MORNING", "AFTERNOON"),
+        grant_when="on weekends", weekend_bucket_keys=("AFTERNOON",),
     ),
     PingRole(
         WEEKEND_LATE_POD_ROLE_NAME, "🎆", "", color="#7E6FD1",

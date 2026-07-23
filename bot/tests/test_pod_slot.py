@@ -27,10 +27,9 @@ def test_weekday_slot_label(event_time, expected):
 @pytest.mark.parametrize(
     "event_time, expected",
     [
-        (_et(2026, 7, 18, 10, 0), "Morning Pod"),
-        (_et(2026, 7, 18, 15, 0), "Early Pod"),
+        (_et(2026, 7, 18, 14, 0), "Early Pod"),
         (_et(2026, 7, 18, 20, 0), "Late Pod"),
-        (_et(2026, 7, 18, 8, 0), "Morning Pod"),
+        (_et(2026, 7, 18, 8, 0), "Early Pod"),
         (_et(2026, 7, 18, 12, 30), "Early Pod"),
         (_et(2026, 7, 18, 17, 30), "Late Pod"),
     ],

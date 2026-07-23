@@ -10,7 +10,7 @@ A global Discord community plays MTGA pod drafts together across Europe, the Ame
 
 Two table shapes:
 
-- **8 players** → single-elimination bracket, 3 rounds.
+- **8 players** → record-based 3-round pod (winners play winners, losers play losers; everyone plays all 3 rounds). Not single-elimination — the `bracket` pairer is a fast-advance variant of Swiss, standings from `pod_swiss.compute_standings`.
 - **6 players** → 3v3 Team Draft (a different social contract: you coordinate with teammates).
 
 A signup is **never a binding contract**. People click, then don't show. The system leans on having enough people to fire and on the daily cadence as the safety net — if someone is left out tonight, they try again tomorrow. Design for self-correction, not for forcing anyone to honor a click.
@@ -38,14 +38,13 @@ Per-player standing preferences live on `Player`: `format_interests` (array), `f
 
 ### 1. Daily poll (interest collection opens)
 
-Posted by `fire_daily_poll` (`bot/tasks/pod_daily_poll.py`), armed as two APScheduler crons in `init_daily_poll`: weekdays at 11:00 ET, weekends at 08:00 ET (`WEEKDAY_POST_HOUR_ET` / `WEEKEND_POST_HOUR_ET` in `pod_signals.py`, timezone `SCHEDULE_TZ` = America/New_York). Idempotent per day. It posts into the pod coordination channel (`pod_draft_channel_id`), which must be a Text channel, not Announcement.
+Posted by `fire_daily_poll` (`bot/tasks/pod_daily_poll.py`), armed as one APScheduler cron in `init_daily_poll`: every day at 11:00 ET (`POST_HOUR_ET` in `pod_signals.py`, timezone `SCHEDULE_TZ` = America/New_York). Idempotent per day. It posts into the pod coordination channel (`pod_draft_channel_id`), which must be a Text channel, not Announcement.
 
 The embed (`build_poll_embed`, "Daily Pod Launcher") carries one **slot toggle button per bucket** plus one always-present **Format Preference** button. Buckets are defined by `PollBucket` in `pod_signals.py`:
 
-- Weekday: Early Pod 14:00 ET, Late Pod 20:00 ET.
-- Weekend: Morning Pod 10:00 ET, Early Pod 15:00 ET, Late Pod 20:00 ET.
+- Every day, two buckets: Early Pod 14:00 ET, Late Pod 20:00 ET.
 
-Each bucket maps to a ping role (`EARLY_POD_ROLE_NAME` etc. in `pod_schedule.py`). On post, `post_launcher` creates a lazy `PodSignal` (kind `poll`) per open slot and arms slot-expiry + underfill checks.
+Each bucket maps to a ping role resolved by weekend + time-of-day, weekday (`EARLY_POD_ROLE_NAME` / `LATE_POD_ROLE_NAME`) and weekend (`WEEKEND_EARLY_POD_ROLE_NAME` / `WEEKEND_LATE_POD_ROLE_NAME`) variants in `pod_schedule.py`. On post, `post_launcher` creates a lazy `PodSignal` (kind `poll`) per open slot and arms slot-expiry + underfill checks.
 
 ### 2. Interest → fire (a slot graduates)
 

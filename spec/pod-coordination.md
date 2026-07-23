@@ -8,8 +8,7 @@ This guide describes how pods work right now. It stays current as the system cha
 
 The bot posts a Daily Pod Launcher every day in the pod channel. It lists the day's time slots:
 
-- Weekdays: Early Pod at 2 PM ET, Late Pod at 8 PM ET.
-- Weekends: Morning Pod at 10 AM ET, Early Pod at 3 PM ET, Late Pod at 8 PM ET.
+- Every day: Early Pod at 2 PM ET, Late Pod at 8 PM ET.
 
 Times are Eastern. The community is global, so pick whichever slot fits your day. Mods can also schedule extra pods at other times, which show up as their own signup posts.
 
@@ -58,7 +57,7 @@ When enough players are ready the bot runs a quick ready check, then starts the 
 
 ## Table shapes
 
-- **8-player pod** — a full table drafts, then plays a 3-round single-elimination bracket.
+- **8-player pod** — a full table drafts, then plays 3 rounds. Winners play winners and losers play losers, so nobody is knocked out: everyone plays all three rounds and finishes with a record like 3-0 or 2-1. The two unbeaten players meet in a Trophy Match as soon as they both reach 2-0.
 - **6-player team draft** — six players split into two teams of three and draft against each other. This is a different, more social format, so it happens when the group wants it.
 
 On busy nights, once the first table fills, the bot offers a **second table** to the players left over, so more people get to play. A second table can run the latest set or a flashback format of its own. The format split is decided a few minutes before start, from who has actually voted by then, so the split reflects the real crowd instead of forming too early.

@@ -40,14 +40,14 @@ def test_committed_slot_without_a_card_links_to_the_thread_itself():
 
 
 def test_open_slot_button_is_enabled_a_closed_one_disabled():
-    view = PodPollView([_lazy("MORNING", STATUS_EXPIRED), _lazy("EARLY", STATUS_OPEN)])
+    view = PodPollView([_lazy("AFTERNOON", STATUS_EXPIRED), _lazy("EARLY", STATUS_OPEN)])
 
     disabled = {
         child.custom_id: child.disabled
         for child in view.children
         if child.custom_id.startswith("pod_poll:")
     }
-    assert disabled == {"pod_poll:MORNING": True, "pod_poll:EARLY": False}
+    assert disabled == {"pod_poll:AFTERNOON": True, "pod_poll:EARLY": False}
 
 
 @pytest.mark.parametrize(

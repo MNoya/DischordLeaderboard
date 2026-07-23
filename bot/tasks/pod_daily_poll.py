@@ -1,8 +1,7 @@
 """Daily Pod Launcher — the day-of "who's playing today" signup surface.
 
-Posts every day: weekdays at 11:00 ET with two slots (Early 14:00, Late 20:00), weekends at 08:00 ET
-with three (Morning 10:00, Early 15:00, Late 20:00) so the earliest slot has runway. Each lazy
-slot fires a bot-native pod once it reaches the threshold, graduating into a scheduled RSVP card.
+Posts every day at 11:00 ET with the same two slots (Early 14:00, Late 20:00). Each lazy slot
+fires a bot-native pod once it reaches the threshold, graduating into a scheduled RSVP card.
 
 A slot whose time already carries a locked scheduled pod is reflected, not reopened: it renders a
 Yes/No toggle that writes to that pod's scheduled card and creates no signal of its own, so the launcher
@@ -51,11 +50,9 @@ from bot.services.pod_signals import (
     SCHEDULE_TZ,
     STATUS_EXPIRED,
     STATUS_FIRED,
-    WEEKDAY_POST_HOUR_ET,
-    WEEKEND_POST_HOUR_ET,
+    POST_HOUR_ET,
     bucket_by_key,
     bucket_role_name,
-    is_weekend_bucket,
     should_fire,
     slot_role_name_for_event_time,
 )
@@ -86,17 +83,10 @@ def init_daily_poll(bot: commands.Bot) -> None:
     _bot = bot
     register_launcher_refresh(refresh_launcher_for_date)
     bot.pod_scheduler.add_job(
-        fire_daily_poll, "cron", day_of_week="mon-fri", hour=WEEKDAY_POST_HOUR_ET, minute=0,
-        timezone=SCHEDULE_TZ, id="pod-daily-poll-weekday", replace_existing=True,
+        fire_daily_poll, "cron", hour=POST_HOUR_ET, minute=0,
+        timezone=SCHEDULE_TZ, id="pod-daily-poll", replace_existing=True,
     )
-    bot.pod_scheduler.add_job(
-        fire_daily_poll, "cron", day_of_week="sat,sun", hour=WEEKEND_POST_HOUR_ET, minute=0,
-        timezone=SCHEDULE_TZ, id="pod-daily-poll-weekend", replace_existing=True,
-    )
-    log.info(
-        f"scheduled daily pod launcher: weekdays {WEEKDAY_POST_HOUR_ET:02d}:00 ET, "
-        f"weekends {WEEKEND_POST_HOUR_ET:02d}:00 ET"
-    )
+    log.info(f"scheduled daily pod launcher at {POST_HOUR_ET:02d}:00 ET")
 
 
 def _poll_channel(bot: commands.Bot) -> "discord.abc.Messageable | None":
@@ -176,11 +166,8 @@ def build_poll_embed(
         slot_emoji = emojis.resolve(bucket.emoji)
         when = f"<t:{int(slot.slot_time.timestamp())}:t>" if slot.slot_time else ""
         count_part = f"**({slot.count})**" if slot.count else ""
-        if is_weekend_bucket(slot.bucket_key):
-            label = ""
-        else:
-            role = find_role(guild, bucket_role_name(slot.bucket_key) or "")
-            label = role.mention if role else bucket.name
+        role = find_role(guild, bucket_role_name(slot.bucket_key) or "")
+        label = role.mention if role else bucket.name
         check = "✅" if slot.committed or slot.status == STATUS_FIRED else ""
         header = " ".join(part for part in (slot_emoji, label, when, count_part, check) if part)
         link = f"<#{slot.thread_id}>" if slot.committed and not closed and slot.thread_id else None

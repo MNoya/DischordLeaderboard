@@ -20,8 +20,7 @@ from bot.services.pod_schedule import (
 
 SATURDAY = 5
 
-WEEKDAY_POST_HOUR_ET = 11
-WEEKEND_POST_HOUR_ET = 8
+POST_HOUR_ET = 11
 
 KIND_POLL = "poll"
 KIND_QUEUE = "queue"
@@ -54,12 +53,10 @@ WEEKDAY_BUCKETS: tuple[PollBucket, ...] = (
     PollBucket("LATE", "Late Pod", "☄️", time(20, 0), LATE_POD_ROLE_NAME),
 )
 WEEKEND_BUCKETS: tuple[PollBucket, ...] = (
-    PollBucket("MORNING", "Morning Pod", "🌅", time(10, 0), WEEKEND_EARLY_POD_ROLE_NAME),
-    PollBucket("AFTERNOON", "Early Pod", "💫", time(15, 0), WEEKEND_EARLY_POD_ROLE_NAME),
+    PollBucket("AFTERNOON", "Early Pod", "💫", time(14, 0), WEEKEND_EARLY_POD_ROLE_NAME),
     PollBucket("EVENING", "Late Pod", "☄️", time(20, 0), WEEKEND_LATE_POD_ROLE_NAME),
 )
 ALL_BUCKETS: tuple[PollBucket, ...] = WEEKDAY_BUCKETS + WEEKEND_BUCKETS
-WEEKEND_BUCKET_KEYS: frozenset[str] = frozenset(bucket.key for bucket in WEEKEND_BUCKETS)
 
 
 def is_weekend(day: date) -> bool:
@@ -68,15 +65,6 @@ def is_weekend(day: date) -> bool:
 
 def poll_buckets_for(day: date) -> tuple[PollBucket, ...]:
     return WEEKEND_BUCKETS if is_weekend(day) else WEEKDAY_BUCKETS
-
-
-def poll_post_hour_for(day: date) -> int:
-    return WEEKEND_POST_HOUR_ET if is_weekend(day) else WEEKDAY_POST_HOUR_ET
-
-
-def is_weekend_bucket(key: str) -> bool:
-    """Weekend slot headers drop the role mention (three headers across two roles would wrap and repeat)."""
-    return key in WEEKEND_BUCKET_KEYS
 
 
 def bucket_by_key(key: str) -> PollBucket | None:
