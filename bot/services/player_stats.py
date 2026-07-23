@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import NamedTuple, Sequence
+from typing import Mapping, NamedTuple, Sequence
 
 import discord
 from sqlalchemy import func, select, text
@@ -346,12 +346,15 @@ class SeededAttendee:
         return self.rank is not None
 
 
-def seed_attendees(session: Session, names: Sequence[str]) -> list[SeededAttendee]:
+def seed_attendees(
+    session: Session, names: Sequence[str], rank_override: Mapping[str, int] | None = None,
+) -> list[SeededAttendee]:
     """Place sesh RSVP names against the active-set leaderboard, ordered by standing.
 
     Each name is resolved to a Player by the same matching the pod pipeline uses; ranked players
     sort by leaderboard rank, everyone else falls to the bottom by display name. The raw sesh name
-    is shown when no Player matches.
+    is shown when no Player matches. `rank_override` (player_id -> rank) replaces the live rank for
+    its players, so a Set Championship seeds off its frozen snapshot; players outside it keep live.
     """
     active = resolve_active_set(session)
     set_id = active.id if active else None
@@ -366,7 +369,8 @@ def seed_attendees(session: Session, names: Sequence[str]) -> list[SeededAttende
             seen.add(player.id)
         rp = ranked.get(player.id) if player is not None else None
         if rp is not None:
-            seeded.append(SeededAttendee(rp.slug, rp.display_name, rp.rank, rp.score, rp.trophies))
+            rank = rank_override.get(player.id, rp.rank) if rank_override else rp.rank
+            seeded.append(SeededAttendee(rp.slug, rp.display_name, rank, rp.score, rp.trophies))
         else:
             slug = player.slug if player is not None else None
             display = player.display_name if player is not None else name
@@ -391,15 +395,20 @@ def seated_ring_order(ranked: Sequence) -> list:
     return ring
 
 
-def rank_ordered_names(session: Session, names: Sequence[str]) -> list[str]:
+def rank_ordered_names(
+    session: Session, names: Sequence[str], rank_override: Mapping[str, int] | None = None,
+) -> list[str]:
     """The given names sorted by active-set leaderboard rank, best first, unranked trailing by name.
 
     Unranked players (unlinked, opted out, no score, or an unresolvable handle) fall to the end —
-    same treatment as `/pod-seeding`. Returns the original names, just reordered.
+    same treatment as `/pod-seeding`. Returns the original names, just reordered. `rank_override`
+    (player_id -> rank) overlays a frozen snapshot so a Set Championship orders off it.
     """
     active = resolve_active_set(session)
     set_id = active.id if active else None
     ranks = {r.player_id: r.rank for r in rank_players_for_set(session, set_id)} if set_id else {}
+    if rank_override:
+        ranks = {**ranks, **rank_override}
     resolved = players_for_names(session, names)
 
     def sort_key(item: tuple[str, Player | None]) -> tuple:

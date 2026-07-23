@@ -126,6 +126,18 @@ def frozen_seeds_sync(event_id: str) -> list[SeedRow]:
     ]
 
 
+def frozen_rank_by_player_sync(event_id: str) -> dict[str, int]:
+    """The frozen seed rank keyed by player_id, so the seeding table seeds off the snapshot taken at
+    creation instead of live standings. Players outside the snapshot are absent and fall back to their
+    live rank in the seeding path."""
+    with SessionLocal() as session:
+        rows = session.execute(
+            select(PodChampionshipSeed.player_id, PodChampionshipSeed.rank)
+            .where(PodChampionshipSeed.event_id == event_id)
+        ).all()
+    return {row.player_id: row.rank for row in rows if row.player_id is not None}
+
+
 def standings_seed_attendees_sync(set_code: str) -> list[SeededAttendee]:
     """The live leaderboard for `set_code` as seeded attendees, best rank first, for the locked
     standings table the championship posts in its thread."""

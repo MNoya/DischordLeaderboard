@@ -548,9 +548,18 @@ def _seed_rsvps(
         return seed_attendees(session, yes), seed_attendees(session, maybe)
 
 
-def _rank_ordered_names_sync(names: list[str]) -> list[str]:
+def _rank_ordered_names_sync(names: list[str], rank_override: dict[str, int] | None = None) -> list[str]:
     with SessionLocal() as session:
-        return rank_ordered_names(session, names)
+        return rank_ordered_names(session, names, rank_override)
+
+
+def _championship_rank_override_sync(event_id: str) -> dict[str, int] | None:
+    """The frozen seed ranks a championship seeds off, or None for any other pod so regular
+    leaderboard pods stay on live standings."""
+    name = load_event_name_sync(event_id)
+    if not is_championship(name):
+        return None
+    return championship_service.frozen_rank_by_player_sync(event_id)
 
 
 def build_seeding_image_message_from_names(
@@ -569,14 +578,14 @@ def build_seeding_image_message_from_names(
 
 def build_seeding_image_message_for_pool(
     pool: list[str], overflow: list[str], maybe: list[str],
-    *, header: str | None = None, cut_label: str | None = None,
+    *, header: str | None = None, cut_label: str | None = None, rank_override: dict[str, int] | None = None,
 ) -> tuple[discord.File | None, discord.Embed]:
     """Seeding message where `pool` holds the table regardless of rank: pool and overflow are seeded
     separately so a high seed who only RSVP'd can't displace a locked Draftmancer player."""
     with SessionLocal() as session:
-        pool_seeded = seed_attendees(session, pool)
-        overflow_seeded = seed_attendees(session, overflow)
-        maybe_seeded = seed_attendees(session, maybe)
+        pool_seeded = seed_attendees(session, pool, rank_override)
+        overflow_seeded = seed_attendees(session, overflow, rank_override)
+        maybe_seeded = seed_attendees(session, maybe, rank_override)
     yes_seeded = pool_seeded + overflow_seeded
     embed = _build_seeding_embed(
         yes_seeded, maybe_seeded, seat_cap=CHAMPIONSHIP_CUT, header=header, cut_label=cut_label)
@@ -931,7 +940,8 @@ async def seating_message_for_event(bot, event_id: str) -> tuple[discord.File | 
     left under the cut and later ones list below it. Returns (file, embed); (None, None) on no data."""
     yes, maybe = await event_rsvps(event_id)
     locked, locked_keys = await _locked_table_names(event_id)
-    yes = await asyncio.to_thread(_rank_ordered_names_sync, yes)
+    rank_override = await asyncio.to_thread(_championship_rank_override_sync, event_id)
+    yes = await asyncio.to_thread(_rank_ordered_names_sync, yes, rank_override)
     pool, overflow = _seating_pool(locked, locked_keys, yes)
     if not pool and not maybe:
         return None, None
@@ -940,7 +950,8 @@ async def seating_message_for_event(bot, event_id: str) -> tuple[discord.File | 
     header = SEEDING_PHASE_LIVE if locked else seeding_phase_projected()
     cut_label = SEEDING_CUT_OVER_CAP if locked else SEEDING_CUT_ALTERNATES
     return await asyncio.to_thread(
-        build_seeding_image_message_for_pool, pool, overflow, maybe, header=header, cut_label=cut_label)
+        build_seeding_image_message_for_pool, pool, overflow, maybe,
+        header=header, cut_label=cut_label, rank_override=rank_override)
 
 
 async def _locked_table_names(event_id: str) -> tuple[list[str], set[str]]:

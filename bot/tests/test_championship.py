@@ -8,6 +8,7 @@ from bot.services.championship import (
     plan_due_for_creation,
     plan_for,
 )
+from bot.services.player_stats import rank_ordered_names, seed_attendees
 from bot.sets import RELEASE_TZ
 
 
@@ -114,6 +115,40 @@ def test_freeze_snapshots_ranked_players_best_first(session, monkeypatch):
     assert count == 2
     assert [s.display_name for s in seeds] == ["Bob", "Alice"]
     assert [s.rank for s in seeds] == [1, 2]
+
+
+def test_frozen_rank_map_keys_by_player(session, monkeypatch):
+    monkeypatch.setattr(championship, "SessionLocal", _session_factory(session))
+    magic_set = _seed_set(session, "MSH")
+    alice = _seed_player(session, "Alice", "1")
+    bob = _seed_player(session, "Bob", "2")
+    _seed_stats(session, alice, magic_set, trophies=2, events=4)
+    _seed_stats(session, bob, magic_set, trophies=5, events=8)
+    event = _seed_event(session)
+    session.commit()
+    championship.freeze_seeds_sync(event.id, "MSH")
+
+    ranks = championship.frozen_rank_by_player_sync(event.id)
+
+    assert ranks == {bob.id: 1, alice.id: 2}
+
+
+def test_frozen_override_seeds_against_live_standings(session):
+    magic_set = _seed_set(session, "MSH")
+    alice = _seed_player(session, "Alice", "1")
+    bob = _seed_player(session, "Bob", "2")
+    _seed_stats(session, alice, magic_set, trophies=2, events=4)
+    _seed_stats(session, bob, magic_set, trophies=5, events=8)
+    session.commit()
+    frozen = {alice.id: 1, bob.id: 2}
+
+    live_order = rank_ordered_names(session, ["Alice", "Bob"])
+    frozen_order = rank_ordered_names(session, ["Alice", "Bob"], frozen)
+    seeded = seed_attendees(session, ["Alice", "Bob"], frozen)
+
+    assert live_order == ["Bob", "Alice"]
+    assert frozen_order == ["Alice", "Bob"]
+    assert [(a.display_name, a.rank) for a in seeded] == [("Alice", 1), ("Bob", 2)]
 
 
 def test_freeze_replaces_a_prior_snapshot(session, monkeypatch):
