@@ -100,3 +100,21 @@ def team_winner(a_wins: int, b_wins: int) -> str | None:
 
 def other_team(team: str) -> str:
     return TEAM_B if team == TEAM_A else TEAM_A
+
+
+def draft_result_line(winner: str | None, winner_names: list[str], a_wins: int, b_wins: int) -> str:
+    """The 🏆 headline a finished team draft shows on the scheduled card: the winning side's members
+    and the final score, or a draw. Shared by the live card result line and the card's persisted
+    fallback so the two surfaces name the winners the same way."""
+    if winner is None:
+        return "🤝 Team draft ends in a draw"
+    verb = "wins" if len(winner_names) == 1 else "win"
+    return f"🏆 {_join_names(winner_names)} {verb} the draft {max(a_wins, b_wins)}-{min(a_wins, b_wins)}"
+
+
+def _join_names(names: list[str]) -> str:
+    if len(names) == 1:
+        return names[0]
+    if len(names) == 2:
+        return f"{names[0]} and {names[1]}"
+    return ", ".join(names[:-1]) + f", and {names[-1]}"

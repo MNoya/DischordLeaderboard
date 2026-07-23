@@ -46,6 +46,8 @@ from bot.services import pod_format_interest as fi
 from bot.services import pod_gathering
 from bot.services import pod_launch
 from bot.services.pod_deck_color import format_deck_color_emojis
+from bot.services import pod_team
+from bot.services.pod_team_board import TeamBoardMember
 from bot.services.pod_draft_manager import set_event_pairing_mode
 from bot.services.pod_tournament import build_replays_link_button
 from bot.services.ping_roles import (
@@ -303,6 +305,42 @@ async def setup(bot: commands.Bot) -> None:
                 view = discord.ui.View(timeout=None)
                 view.add_item(build_replays_link_button(name))
             await ctx.send(embed=embed, view=view)
+
+    @test_group.command(name="teamcard")
+    @commands.is_owner()
+    async def test_teamcard(ctx: commands.Context, minutes: int = 60) -> None:
+        """Owner-only. Preview the team-draft card across its three post-gathering states — draft started,
+        matches in progress, final result — as three static embeds from fixture teams. Look-only: no
+        thread, event, or timed jobs. Shows the Green / Blue roster columns that replace the RSVP columns
+        once a team draft starts, each header carrying the team's running match wins, and the final result
+        headline once every match is in. `minutes` sets how long ago the pod started."""
+        event_time = datetime.now(SCHEDULE_TZ) - timedelta(minutes=minutes)
+        set_code = active_set_code()
+        name = await asyncio.to_thread(pod_launch.ondemand_event_name_sync, set_code, event_time)
+        green = [_roster_name(i) for i in range(0, 8, 2)]
+        blue = [_roster_name(i) for i in range(1, 8, 2)]
+        green_records, blue_records = ["3-0", "2-1", "2-1", "1-2"], ["2-1", "1-2", "1-2", "0-3"]
+        green_colors, blue_colors = ["WU", "BR", "GW", "UB"], ["URg", "WBg", "RG", "WUBRG"]
+        gathering = {
+            pod_team.TEAM_A: [TeamBoardMember(display=n, arena=None) for n in green],
+            pod_team.TEAM_B: [TeamBoardMember(display=n, arena=None) for n in blue],
+        }
+        final = {
+            pod_team.TEAM_A: [TeamBoardMember(green[i], None, green_records[i], green_colors[i]) for i in range(4)],
+            pod_team.TEAM_B: [TeamBoardMember(blue[i], None, blue_records[i], blue_colors[i]) for i in range(4)],
+        }
+        final_line = pod_team.draft_result_line(pod_team.TEAM_A, [f"**{n}**" for n in green], 3, 1)
+
+        for status_line, rosters, wins in (
+            (CARD_STATUS_DRAFTING, gathering, {pod_team.TEAM_A: 0, pod_team.TEAM_B: 0}),
+            (CARD_STATUS_PLAYING, gathering, {pod_team.TEAM_A: 2, pod_team.TEAM_B: 1}),
+            (final_line, final, {pod_team.TEAM_A: 3, pod_team.TEAM_B: 1}),
+        ):
+            embed = build_rsvp_embed(
+                name, event_time, {}, set_code=set_code, status_line=status_line,
+                team_draft=True, team_rosters=rosters, team_wins=wins,
+            )
+            await ctx.send(embed=embed)
 
     @test_group.command(name="secondtable")
     @commands.is_owner()

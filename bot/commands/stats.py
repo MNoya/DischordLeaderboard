@@ -38,7 +38,7 @@ class LeaderboardVisibilityView(discord.ui.View):
 
     def _render_buttons(self) -> None:
         self.clear_items()
-        label = "Hide my rank" if self.opted_in else "Show my rank"
+        label = "Hide My Rank" if self.opted_in else "Show My Rank"
         style = discord.ButtonStyle.secondary if self.opted_in else discord.ButtonStyle.success
         button = discord.ui.Button(label=label, style=style)
         button.callback = self._toggle

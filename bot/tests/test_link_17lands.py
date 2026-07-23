@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import discord
 
-import bot.commands.link_17lands as mod
-from bot.commands.link_17lands import LeaderboardChoicePrompt
+import bot.services.token_link_flow as mod
+from bot.services.token_link_flow import LeaderboardChoicePrompt
 from bot.models import Player
 
 

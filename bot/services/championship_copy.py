@@ -81,7 +81,7 @@ def wave_invite_ping(
         f"{headline}\n\n"
         f"{mentions}\n\n"
         f"Please **Confirm** if you can make it {when}\n"
-        f"Seats go to the [**highest-ranked**](<{standings_url(set_code)}>) among those who show up, "
+        f"Seats go to the top players in the [**leaderboard**](<{standings_url(set_code)}>) who show up, "
         "the rest are alternates.\n\n"
         "-# 8-player Pod Draft, Best-of-Three, three Swiss rounds paired by record. "
         "You can play all rounds even after a loss. "

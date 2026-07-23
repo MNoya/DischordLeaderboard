@@ -8,10 +8,13 @@ from bot.commands.pod_rsvp import (
     CARD_STATUS_PLAYING,
     MULTIPOD_NOTICE,
     POD_CAPACITY,
+    TIME_LABEL,
     build_rsvp_embed,
     parse_new_time,
     refresh_roster_fields,
 )
+from bot.services import pod_team
+from bot.services.pod_team_board import TeamBoardMember
 from bot.models import PodDraftEvent, PodSignal
 from bot.services import pod_format_interest as fi
 from bot.services import pod_signals
@@ -276,6 +279,42 @@ def test_refresh_swaps_status_across_phases_and_keeps_the_note():
     assert embed.description.count(CARD_STATUS_PLAYING) == 1
     assert MULTIPOD_NOTICE not in embed.description
     assert "> bring snacks" in embed.description
+
+
+def test_team_rosters_replace_the_rsvp_columns_in_flight():
+    event_time = datetime(2026, 7, 18, 16, 0, tzinfo=timezone.utc)
+    team_rosters = {
+        pod_team.TEAM_A: [TeamBoardMember("Green One", None), TeamBoardMember("Green Two", None)],
+        pod_team.TEAM_B: [TeamBoardMember("Blue One", None), TeamBoardMember("Blue Two", None)],
+    }
+    team_wins = {pod_team.TEAM_A: 2, pod_team.TEAM_B: 1}
+
+    embed = build_rsvp_embed(
+        "Early Pod", event_time, {RSVP_YES: []}, status_line=CARD_STATUS_PLAYING, team_draft=True,
+        team_rosters=team_rosters, team_wins=team_wins,
+    )
+
+    values = "\n".join(field.value for field in embed.fields)
+    names = "\n".join(field.name for field in embed.fields)
+    assert all(member in values for member in ("Green One", "Blue Two"))
+    assert not any(field.name == TIME_LABEL for field in embed.fields)
+    assert "2" in names and "1" in names
+
+
+def test_team_columns_show_record_and_colors_once_finalized():
+    event_time = datetime(2026, 7, 18, 16, 0, tzinfo=timezone.utc)
+    team_rosters = {
+        pod_team.TEAM_A: [TeamBoardMember("Green One", None, record="3-0", deck_colors="WU")],
+        pod_team.TEAM_B: [TeamBoardMember("Blue One", None, record="1-2", deck_colors="BR")],
+    }
+
+    embed = build_rsvp_embed(
+        "Early Pod", event_time, {RSVP_YES: []}, status_line="🏆 Green One wins the draft 3-1",
+        team_draft=True, team_rosters=team_rosters, team_wins={pod_team.TEAM_A: 3, pod_team.TEAM_B: 1},
+    )
+
+    values = "\n".join(field.value for field in embed.fields)
+    assert "3-0" in values and "1-2" in values
 
 
 CURRENT = datetime(2026, 7, 15, 20, 0, tzinfo=SCHEDULE_TZ)

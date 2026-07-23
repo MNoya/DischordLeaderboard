@@ -53,6 +53,8 @@ REPORT_BUTTON_PREFIX = "podteamreport"
 class TeamBoardMember(NamedTuple):
     display: str
     arena: str | None
+    record: str | None = None
+    deck_colors: str | None = None
 
 
 class TeamBoardData(NamedTuple):
@@ -82,6 +84,8 @@ def build_board_data(
         rosters[team].append(TeamBoardMember(
             display=info.get("display_name") or name,
             arena=info.get("arena"),
+            record=info.get("record"),
+            deck_colors=info.get("deck_colors"),
         ))
 
     for m in matches:
@@ -113,18 +117,18 @@ def build_board_data(
 
 def load_team_board_data(event_id: str) -> TeamBoardData:
     with SessionLocal() as session:
-        team_rows = [
-            (dm_name or display_name, team)
-            for dm_name, display_name, team in session.execute(
-                select(
-                    PodDraftParticipant.draftmancer_name,
-                    PodDraftParticipant.display_name,
-                    PodDraftParticipant.team,
-                )
-                .where(PodDraftParticipant.event_id == event_id, PodDraftParticipant.team.is_not(None))
-                .order_by(PodDraftParticipant.seat_index)
-            ).all()
-        ]
+        participant_rows = session.execute(
+            select(
+                PodDraftParticipant.draftmancer_name,
+                PodDraftParticipant.display_name,
+                PodDraftParticipant.team,
+                PodDraftParticipant.record,
+                PodDraftParticipant.deck_colors,
+            )
+            .where(PodDraftParticipant.event_id == event_id, PodDraftParticipant.team.is_not(None))
+            .order_by(PodDraftParticipant.seat_index)
+        ).all()
+        team_rows = [(dm_name or display_name, team) for dm_name, display_name, team, _, _ in participant_rows]
         matches = [
             {
                 "match_id": row.id,
@@ -144,6 +148,9 @@ def load_team_board_data(event_id: str) -> TeamBoardData:
             select(PodDraftEvent.finalized_at).where(PodDraftEvent.id == event_id)
         ).scalar_one_or_none()
     displays = load_participant_displays(event_id)
+    for dm_name, display_name, _team, record, deck_colors in participant_rows:
+        key = normalize_player_name(dm_name or display_name)
+        displays[key] = {**displays.get(key, {}), "record": record, "deck_colors": deck_colors}
     return build_board_data(event_id, team_rows, matches, displays, finalized_at is not None)
 
 
@@ -243,6 +250,19 @@ def _score_status(a_wins: int, b_wins: int, *, done: bool) -> str | None:
         return "Teams are tied" if a_wins else None
     leader = pod_team.TEAM_A if a_wins > b_wins else pod_team.TEAM_B
     return f"{pod_team.team_label(leader)} lead"
+
+
+def team_result_headline(data: TeamBoardData) -> str | None:
+    """The 🏆 result line for a finished team pod, rebuilt from the board's win counts and rosters so
+    the scheduled card keeps its headline after the live manager is gone. None while any match is still
+    pending. Members are bolded since the card is an embed."""
+    if data.pending > 0:
+        return None
+    a_wins = data.wins.get(pod_team.TEAM_A, 0)
+    b_wins = data.wins.get(pod_team.TEAM_B, 0)
+    winner = pod_team.team_winner(a_wins, b_wins)
+    members = [f"**{member.display}**" for member in data.rosters.get(winner, [])] if winner else []
+    return pod_team.draft_result_line(winner, members, a_wins, b_wins)
 
 
 def team_summary_embed(data: TeamBoardData) -> discord.Embed:

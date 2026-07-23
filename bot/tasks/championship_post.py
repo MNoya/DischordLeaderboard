@@ -33,7 +33,7 @@ log = logging.getLogger(__name__)
 
 _bot: commands.Bot | None = None
 
-CHAMPIONSHIP_TICK_HOUR_ET = 11
+CHAMPIONSHIP_TICK_HOUR_ET = 12
 
 WAVE_OFFSETS_MIN: tuple[int, ...] = (10, 120, 240)
 SEEDING_TALLY_OFFSET_MIN = WAVE_OFFSETS_MIN[-1] + 60
@@ -43,10 +43,10 @@ def init_championship_schedule(bot: commands.Bot) -> None:
     global _bot
     _bot = bot
     bot.pod_scheduler.add_job(
-        fire_championship_tick, "cron", hour=CHAMPIONSHIP_TICK_HOUR_ET, minute=10,
+        fire_championship_tick, "cron", hour=CHAMPIONSHIP_TICK_HOUR_ET, minute=0,
         timezone=SCHEDULE_TZ, id="championship-create", replace_existing=True,
     )
-    log.info(f"scheduled set championship tick at {CHAMPIONSHIP_TICK_HOUR_ET:02d}:10 ET")
+    log.info(f"scheduled set championship tick at {CHAMPIONSHIP_TICK_HOUR_ET:02d}:00 ET")
 
 
 async def fire_championship_tick() -> None:

@@ -19,8 +19,9 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 import discord
+from sqlalchemy import select
 
-from bot import emojis
+from bot import audit, emojis
 from bot.commands.messages import (
     MSG_ARENA_ALREADY_LINKED_NOTE,
     MSG_ARENA_BAD_FORMAT,
@@ -38,6 +39,7 @@ from bot.commands.messages import (
 from bot.commands.pod_guide import render_pod_guide_embed_body
 from bot.database import SessionLocal
 from bot.discord_helpers import extract_avatar_hash, is_pod_coordination_channel, post_welcome, send_welcome
+from bot.models import Player
 from bot.services import pod_format_interest as fi
 from bot.services.pod_active_lobby import active_lobby_link_for
 from bot.services.pod_drafts import (
@@ -62,6 +64,7 @@ from bot.services.pod_schedule import (
     slot_by_weekday,
 )
 from bot.services.pod_signals import slot_event_time, slot_role_name_for_event_time
+from bot.services.token_link_flow import start_link_17lands_flow
 
 
 log = logging.getLogger(__name__)
@@ -193,6 +196,7 @@ def build_grant_embed(
 
 def build_welcome_view(
     guild: discord.Guild, user_mention: str, slot_role: discord.Role | None, *, ping: str | None = None,
+    show_link_17lands: bool = False,
 ) -> discord.ui.LayoutView:
     """First-pod welcome as a Components V2 container: a green accent card whose text block behaves as
     message content, so the newcomer mention pings where an embed mention would stay silent. Folds in
@@ -204,12 +208,13 @@ def build_welcome_view(
     else:
         grant = "Use the buttons below to link your Arena handle, read the Pod Guide and manage Notifications"
     message = MSG_POD_WELCOME.format(user=user_mention, pod_drafters=pod_drafters, grant=grant).rstrip()
-    return _PodButtonCard(message)
+    return _PodButtonCard(message, show_link_17lands_button=show_link_17lands)
 
 
 def build_grant_view(
     role: discord.Role, spec: PingRole, *, ping: str | None = None, arena_name: str | None = None,
     interests: list[str] | None = None, ranking: list[str] | None = None, card_lead: str | None = None,
+    show_link_17lands: bool = False,
 ) -> discord.ui.LayoutView:
     """The ephemeral card a returning drafter gets on a fresh slot grant: the grant line plus the same
     Pod Guide and Notifications buttons as the welcome. No self-mention — the card is ephemeral, so the
@@ -227,7 +232,7 @@ def build_grant_view(
     accent = role.color if role.color.value else discord.Color.blurple()
     return _PodButtonCard(
         text, accent=accent, show_link_button=arena_name is None,
-        show_format_button=arena_name is not None,
+        show_format_button=arena_name is not None, show_link_17lands_button=show_link_17lands,
     )
 
 
@@ -250,7 +255,7 @@ def persistent_pod_card_view() -> discord.ui.LayoutView:
     """A component-only instance for `bot.add_view` so the welcome and grant-card buttons keep
     dispatching after a restart; the placeholder text is never shown — registration routes on the
     button custom_ids, which both cards share."""
-    return _PodButtonCard("welcome", show_format_button=True)
+    return _PodButtonCard("welcome", show_format_button=True, show_link_17lands_button=True)
 
 
 class _PodButtonCard(discord.ui.LayoutView):
@@ -260,7 +265,7 @@ class _PodButtonCard(discord.ui.LayoutView):
 
     def __init__(
         self, text: str, *, accent: discord.Color | None = None, show_link_button: bool = True,
-        show_format_button: bool = False,
+        show_format_button: bool = False, show_link_17lands_button: bool = False,
     ) -> None:
         super().__init__(timeout=None)
         container = discord.ui.Container(accent_colour=accent or discord.Color.green())
@@ -268,6 +273,8 @@ class _PodButtonCard(discord.ui.LayoutView):
         row = discord.ui.ActionRow()
         if show_link_button:
             row.add_item(_LinkArenaButton())
+        if show_link_17lands_button:
+            row.add_item(_Link17LandsButton())
         row.add_item(_PodGuideButton())
         row.add_item(_ManageRolesButton())
         if show_format_button:
@@ -277,6 +284,7 @@ class _PodButtonCard(discord.ui.LayoutView):
 
 
 LINK_ARENA_BUTTON_ID = "pod_welcome_link_arena"
+LINK_17LANDS_BUTTON_ID = "pod_welcome_link_17lands"
 POD_GUIDE_BUTTON_ID = "pod_welcome_guide"
 MANAGE_ROLES_BUTTON_ID = "pod_welcome_roles"
 FORMAT_PREFERENCE_BUTTON_ID = "pod_welcome_format"
@@ -323,6 +331,20 @@ class _LinkArenaButton(discord.ui.Button):
         await interaction.response.send_modal(_LinkArenaModal(existing=existing))
 
 
+class _Link17LandsButton(discord.ui.Button):
+    def __init__(self) -> None:
+        super().__init__(
+            label="Link 17Lands",
+            style=discord.ButtonStyle.primary,
+            emoji=emojis.get_emoji("17lands"),
+            custom_id=LINK_17LANDS_BUTTON_ID,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        audit.event("rsvp_link_17lands_clicked", user_id=str(interaction.user.id))
+        await start_link_17lands_flow(interaction.client, interaction)
+
+
 class _PodGuideButton(discord.ui.Button):
     def __init__(self) -> None:
         super().__init__(
@@ -360,6 +382,14 @@ class _ManageRolesButton(discord.ui.Button):
 def _dm_opt_in_for(discord_id: str) -> bool:
     with SessionLocal() as session:
         return dm_draft_link_enabled(session, discord_id)
+
+
+def _has_seventeenlands_token(discord_id: str) -> bool:
+    with SessionLocal() as session:
+        token = session.execute(
+            select(Player.seventeenlands_token).where(Player.discord_id == discord_id)
+        ).scalar_one_or_none()
+    return bool(token)
 
 
 def _preference_snapshot(discord_id: str) -> tuple[list[str], list[str]]:
@@ -507,9 +537,12 @@ async def announce_pod_grant(
     decide whether its own confirmation still needs to be sent."""
     user = interaction.user
     arena_name = await _linked_arena_handle(str(user.id))
+    has_token = await asyncio.to_thread(_has_seventeenlands_token, str(user.id))
     wants_welcome = first_pod and arena_name is None
     if wants_welcome and _first_welcome_for(user.id):
-        welcome = build_welcome_view(interaction.guild, user.mention, welcome_role, ping=ping)
+        welcome = build_welcome_view(
+            interaction.guild, user.mention, welcome_role, ping=ping, show_link_17lands=not has_token,
+        )
         await post_welcome(interaction, welcome)
         log.info(f"posted first-pod welcome for {user}")
         return "welcome"
@@ -517,7 +550,7 @@ async def announce_pod_grant(
         interests, ranking = await asyncio.to_thread(_preference_snapshot, str(user.id))
         grant = build_grant_view(
             granted_role, spec, ping=ping, arena_name=arena_name, interests=interests, ranking=ranking,
-            card_lead=card_lead,
+            card_lead=card_lead, show_link_17lands=not has_token,
         )
         await interaction.followup.send(
             view=grant, ephemeral=True, allowed_mentions=discord.AllowedMentions.none(),
@@ -541,9 +574,11 @@ async def send_join_confirmation_card(
     user_id = str(interaction.user.id)
     arena_name = await _linked_arena_handle(user_id)
     interests, ranking = await asyncio.to_thread(_preference_snapshot, user_id)
+    has_token = await asyncio.to_thread(_has_seventeenlands_token, user_id)
     card = _PodButtonCard(
         _card_body(lead, arena_name=arena_name, interests=interests, ranking=ranking),
         accent=accent, show_link_button=arena_name is None, show_format_button=arena_name is not None,
+        show_link_17lands_button=not has_token,
     )
     await interaction.followup.send(view=card, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
@@ -559,7 +594,8 @@ async def announce_onboarding_welcome(client: discord.Client, member: discord.Me
     if not _first_welcome_for(member.id):
         log.info(f"onboarding welcome skipped for {member}: already welcomed")
         return
-    welcome = build_welcome_view(member.guild, member.mention, None)
+    has_token = await asyncio.to_thread(_has_seventeenlands_token, str(member.id))
+    welcome = build_welcome_view(member.guild, member.mention, None, show_link_17lands=not has_token)
     posted = await send_welcome(client, member, welcome)
     log.info(f"onboarding welcome {'posted' if posted else 'failed to post'} for {member}")
 
