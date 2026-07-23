@@ -217,11 +217,11 @@ async def refresh_roster_reminder_for_event(event_id: str) -> None:
     if status != "pending":
         return
     rosters, roster_interests = await event_rsvp_rosters(event_id)
-    await _edit_roster_reminder(thread_id, event_name, event_time, rosters, roster_interests)
+    await _edit_roster_reminder(event_id, thread_id, event_name, event_time, rosters, roster_interests)
 
 
 async def _edit_roster_reminder(
-    thread_id: int, event_name: str, event_time: datetime,
+    event_id: str, thread_id: int, event_name: str, event_time: datetime,
     rosters: dict[str, list[str]],
     roster_interests: dict[str, list[tuple[str, tuple[str, ...]]]] | None,
 ) -> None:
@@ -232,8 +232,9 @@ async def _edit_roster_reminder(
     if reminder is None:
         return
     embed = build_roster_embed(event_name, event_time, rosters, roster_interests)
+    view = _reminder_view_builder(event_id) if _reminder_view_builder is not None else None
     try:
-        await reminder.edit(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+        await reminder.edit(embed=embed, view=view, allowed_mentions=discord.AllowedMentions.none())
     except discord.HTTPException:
         log.warning(f"could not edit roster reminder {reminder.id}", exc_info=True)
 

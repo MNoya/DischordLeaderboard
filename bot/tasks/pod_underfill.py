@@ -14,8 +14,10 @@ The nudge is one living message: it is never deleted on a player count, so an 8 
 back to "looking for 1 more" instead of vanishing, and reaching the aim shows the ready line silently.
 It is deleted only when the pod starts (the lobby opens) via `clear_underfill_nudge`, or for a launcher
 slot when it fires or expires via `clear_slot_nudge`. While the nudge is up, RSVP changes keep the count
-current. The nudge is located by scanning channel history for the bot's own message carrying the signup
-link (plus the pod name for launcher slots, which share one launcher URL) — nothing is persisted.
+current. An edit re-carries any role mention the message already holds so a player pinged at T-1h still
+sees why when the text later flips; the edit never re-pings. The nudge is located by scanning channel
+history for the bot's own message carrying the signup link (plus the pod name for launcher slots, which
+share one launcher URL) — nothing is persisted.
 
 A pod pushes at most one last-call ping, claimed on `pod_signals.last_call_pinged_at`, so a caught-up
 T-1h beat after a restart can never ping the slot role twice.
@@ -25,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -447,9 +450,14 @@ async def _safe_post(channel: discord.abc.Messageable, body: str, *, mention_rol
         log.warning("could not post underfill nudge", exc_info=True)
 
 
+_ROLE_MENTION = re.compile(r"<@&\d+>")
+
+
 async def _safe_edit(message: discord.Message, body: str) -> None:
+    match = _ROLE_MENTION.search(message.content)
+    new_content = f"{body} {match.group()}" if match is not None else body
     try:
-        await message.edit(content=body, allowed_mentions=discord.AllowedMentions.none())
+        await message.edit(content=new_content, allowed_mentions=discord.AllowedMentions.none())
     except discord.HTTPException:
         log.warning(f"could not edit underfill nudge {message.id}", exc_info=True)
 

@@ -121,8 +121,8 @@ def build_underfill_message(
 ) -> str:
     """Plain count-toward-target nudge copy; the ready line once the aim is met; or the overflow line
     once Yes plus Maybe reach a second table's worth, which quantifies the RSVPs and the format split.
-    The link stays live since the pod stays open past the aim. Never carries a role mention — pinging
-    is the caller's call."""
+    The link stays live since the pod stays open past the aim. Never adds a role mention — pinging is
+    the caller's call; edits keep a mention already in the message so a pinged player still sees why."""
     name = short_event_name(thread_name)
     unix = int(event_time.timestamp())
     needed = target - yes_count
