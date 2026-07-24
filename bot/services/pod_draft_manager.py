@@ -316,6 +316,7 @@ class PodDraftManager:
         self.max_players = settings.pod_draft_max_players
         self.team_map: dict[str, str] | None = None  # draftmancer_name -> 'A'/'B' for team drafts
         self.team_board_messages: list["discord.Message"] = []
+        self.team_reveal_messages: dict[int, "discord.Message"] = {}  # round -> per-round reveal block
         self.team_vote_message: "discord.Message | None" = None
         self.team_vote_offered = False
         self.team_vote_pending_size: int | None = None

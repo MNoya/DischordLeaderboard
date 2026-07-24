@@ -173,6 +173,27 @@ def display_width(s: str) -> int:
     return sum(2 if unicodedata.east_asian_width(ch) == "W" else 1 for ch in s)
 
 
+def quote_block(lines: list[str], *, trailing: str = "") -> str:
+    """`> `-prefix each line so Discord renders the blockquote vertical bar; a ZWSP when empty."""
+    if not lines:
+        return ZWSP
+    return "\n".join(f"> {line}" for line in lines) + trailing
+
+
+def add_two_column_field(
+    embed: "discord.Embed", label: str, left_lines: list[str], right_lines: list[str],
+    *, trailing: str = "", spacer: bool = False,
+) -> None:
+    """A labelled two-column embed row: blockquoted `left_lines` beside `right_lines`, aligned
+    line-for-line. `spacer` adds an empty third inline field so the following group starts on a fresh
+    row. Shared by the lobby player list and the team-draft rosters so both render identically."""
+    embed.add_field(name=label, value=quote_block(left_lines, trailing=trailing), inline=True)
+    right = "\n".join(right_lines)
+    embed.add_field(name=ZWSP, value=(right or ZWSP) + trailing, inline=True)
+    if spacer:
+        embed.add_field(name=ZWSP, value=ZWSP, inline=True)
+
+
 def player_url(slug: str, set_code: str | None = None) -> str:
     """Public site URL for a player's page, set-scoped when set_code is given."""
     base = settings.player_base_url

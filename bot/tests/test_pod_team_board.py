@@ -7,9 +7,14 @@ from bot.services.pod_team_board import (
     PROGRESS_GAP,
     PROGRESS_PENDING,
     PROGRESS_SKIPPED,
+    REPORT_BUTTON_PREFIX,
+    REVEAL_BUTTON_PREFIX,
     TeamBoardView,
+    _round_all_reported,
+    _round_has_playable_match,
     build_board_data,
     build_team_board_views,
+    build_team_round_view,
     match_line,
     match_progress_bar,
     team_summary_embed,
@@ -122,15 +127,18 @@ def test_summary_embed_column_headers_carry_no_score():
     assert all(not any(ch.isdigit() for ch in field.name) for field in embed.fields)
 
 
-def test_summary_embed_columns_are_quote_barred_rosters_with_arena_handles():
+def test_summary_embed_splits_names_and_arena_handles_into_two_columns():
     embed = team_summary_embed(_fixture_data())
 
-    assert len(embed.fields) == 2
+    assert len(embed.fields) == 6
     assert all(field.inline for field in embed.fields)
-    green_lines = embed.fields[0].value.splitlines()
-    assert len(green_lines) == 3
-    assert all(line.startswith("> ") for line in green_lines)
-    assert any("Ava" in line and "ava#" in line for line in green_lines)
+    name_lines = embed.fields[0].value.splitlines()
+    arena_lines = embed.fields[1].value.splitlines()
+    assert len(name_lines) == len(arena_lines) == 3
+    assert all(line.startswith("> ") for line in name_lines)
+    assert any("Ava" in line for line in name_lines)
+    assert any("ava#" in line for line in arena_lines)
+    assert not any("ava#" in line for line in name_lines)
 
 
 @pytest.mark.parametrize("winner,score,expected_names_order", [
@@ -219,3 +227,54 @@ def test_progress_bar_status_tracks_lead_win_and_fresh_board_with_leader_first_s
     assert "1-0" in blue_tail and pod_team.team_label(pod_team.TEAM_B) in blue_tail
     win_tail = match_progress_bar(all_in).split(PROGRESS_GAP, 1)[1]
     assert "8-1" in win_tail and pod_team.team_label(pod_team.TEAM_A) in win_tail
+
+
+def test_round_has_playable_match_needs_both_players_free_of_prior_rounds():
+    none_done = _fixture_data()
+    one_r1_done = _fixture_data(reported=[(0, "Ava", "2-0")])
+    two_r1_done = _fixture_data(reported=[(0, "Ava", "2-0"), (1, "Dex", "2-1")])
+
+    assert _round_has_playable_match(none_done, 1) is True
+    assert _round_has_playable_match(none_done, 2) is False
+    assert _round_has_playable_match(one_r1_done, 2) is False
+    assert _round_has_playable_match(two_r1_done, 2) is True
+
+
+def test_round_has_playable_match_counts_skips_as_finished():
+    two_done_one_skip = _fixture_data(reported=[(0, "Ava", "2-0"), (1, SKIPPED_SENTINEL, "0-0")])
+
+    assert _round_has_playable_match(two_done_one_skip, 2) is True
+
+
+def test_round_all_reported_only_when_every_match_in_round_has_a_result():
+    partial = _fixture_data(reported=[(0, "Ava", "2-0"), (1, "Dex", "2-1")])
+    full_r1 = _fixture_data(reported=[(0, "Ava", "2-0"), (1, "Dex", "2-1"), (2, "Fern", "2-0")])
+
+    assert _round_all_reported(partial, 1) is False
+    assert _round_all_reported(full_r1, 1) is True
+    assert _round_all_reported(full_r1, 2) is False
+
+
+def test_big_block_and_reveal_use_distinct_button_prefixes():
+    data = _fixture_data()
+
+    big_ids = set().union(*(view.report_custom_ids for view in build_team_board_views(data)))
+    reveal_ids = build_team_round_view(data, 2).report_custom_ids
+
+    assert big_ids and all(i.startswith(f"{REPORT_BUTTON_PREFIX}:") for i in big_ids)
+    assert reveal_ids and all(i.startswith(f"{REVEAL_BUTTON_PREFIX}:") for i in reveal_ids)
+    assert not (big_ids & reveal_ids)
+
+
+def test_reveal_view_footer_is_cumulative_and_round_one_has_none():
+    data = _fixture_data(reported=[(0, "Ava", "2-0"), (1, "Dex", "2-1"), (2, "Fern", "2-0")])
+
+    round_one = build_team_round_view(data, 1)
+    round_two = build_team_round_view(data, 2)
+
+    (c1,) = round_one.children
+    (c2,) = round_two.children
+    r1_bars = [i.content for i in c1.children if isinstance(i, discord.ui.TextDisplay) and "|" in i.content]
+    r2_bars = [i.content for i in c2.children if isinstance(i, discord.ui.TextDisplay) and "|" in i.content]
+    assert r1_bars == []
+    assert r2_bars and r2_bars[0].split(PROGRESS_GAP, 1)[0].count("|") == 5

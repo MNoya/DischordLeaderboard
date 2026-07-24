@@ -101,6 +101,7 @@ MIDDLE = "middle"
 LAST_CHANCE = "last_chance"
 GRACE_SECONDS = 60  # window after round completion during which edits regenerate the next round
 BRACKET_EDIT_BLOCKED_MSG = "That result can't be changed now — a later round already reported a result."
+POD_RESULT_LOCKED_MSG = "This pod draft is finished. Results can no longer be changed."
 MANAGE_ROUND_CUSTOM_PREFIX = "podmanageround"
 ORGANIZER_ROLE_NAMES = frozenset({"admin", "moderator"})
 MSG_FIX_NOT_ORGANIZER = "Only pod organizers can reorganize a round's matches."
@@ -1623,6 +1624,13 @@ async def _handle_result_submission(interaction: discord.Interaction, value: str
         await interaction.response.defer()
     except discord.HTTPException:
         log.warning("could not defer result-submission interaction", exc_info=True)
+
+    if await asyncio.to_thread(event_result_locked, match_id):
+        await interaction.followup.send(
+            POD_RESULT_LOCKED_MSG,
+            ephemeral=(interaction.guild is not None),
+        )
+        return
 
     if await asyncio.to_thread(bracket_edit_blocked, match_id):
         await interaction.followup.send(
@@ -3644,6 +3652,10 @@ async def rehydrate_active_tournaments(bot) -> None:
         if thread is not None and bot.user is not None:
             manager.round_messages = await _find_pinned_round_messages(thread, bot.user)
             manager.standings_message = await _find_pinned_standings(thread, bot.user, row["name"])
+            if manager.pairing_mode == "team":
+                from bot.services.pod_team_board import find_reveal_messages
+
+                manager.team_reveal_messages = await find_reveal_messages(thread, bot.user)
         ACTIVE_POD_MANAGERS[event_id] = manager
         restored += 1
         log.info(
@@ -3941,7 +3953,7 @@ def _arena_matches_display(arena: str, display: str | None) -> bool:
     return base == name or base.startswith(name) or name.startswith(base)
 
 
-def _name_with_arena(display: str, arena: str | None) -> str:
+def name_with_arena(display: str, arena: str | None) -> str:
     """Pairing label: lead with the Draftmancer Arena handle so opponents can find each other in-client,
     appending the Discord name only when it diverges from the handle (e.g. '`driftwood#49190` (Marlo)')."""
     if not arena:
@@ -3989,8 +4001,8 @@ def _match_line(m: dict, *, seat_label: str | None = None, show_arena: bool = Fa
     if winner:
         return f"▫️{NBSP}{NBSP}{format_reported_result(m)}"
     if show_arena:
-        a_disp = _name_with_arena(a_disp, m.get("a_arena"))
-        b_disp = _name_with_arena(b_disp, m.get("b_arena"))
+        a_disp = name_with_arena(a_disp, m.get("a_arena"))
+        b_disp = name_with_arena(b_disp, m.get("b_arena"))
     if seat_label:
         return f"⚔️{NBSP}{NBSP}{a_disp} vs {b_disp} {seat_label}"
     a_wl, b_wl = _parse_wl(m["a_record"]), _parse_wl(m["b_record"])
@@ -4304,6 +4316,18 @@ def bracket_pending_in_round(event_id: str, round_num: int, roster_size: int) ->
             )
         ).scalar_one()
     return max(roster_size // 2 - reported, 0)
+
+
+def event_result_locked(match_id: str) -> bool:
+    """True once the match's event is finalized. Results freeze at finalization so a stale DM dropdown
+    can't rewrite a recorded result. Survives a restart (derived from the persisted finalized_at)."""
+    with SessionLocal() as session:
+        finalized_at = session.execute(
+            select(PodDraftEvent.finalized_at)
+            .join(PodDraftMatch, PodDraftMatch.event_id == PodDraftEvent.id)
+            .where(PodDraftMatch.id == match_id)
+        ).scalar_one_or_none()
+    return finalized_at is not None
 
 
 def bracket_edit_blocked(match_id: str) -> bool:

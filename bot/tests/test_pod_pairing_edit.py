@@ -9,6 +9,7 @@ from bot.services.pod_tournament import (
     FixPairingView,
     _load_champions_sync,
     apply_pairing_swap,
+    event_result_locked,
 )
 
 
@@ -105,6 +106,24 @@ def test_swap_preserves_not_played_marker(session, monkeypatch):
 def test_swap_missing_match_returns_none(session, monkeypatch):
     monkeypatch.setattr(pod_tournament, "SessionLocal", _session_factory(session))
     assert apply_pairing_swap("does-not-exist", "Carol", "Dan") is None
+
+
+def test_result_locked_once_event_finalized(session, monkeypatch):
+    monkeypatch.setattr(pod_tournament, "SessionLocal", _session_factory(session))
+    event = _event(session)
+    match = _match(session, event.id, "Alice", "Bob", winner="Alice", score="2-0")
+
+    assert event_result_locked(match.id) is False
+
+    event.finalized_at = datetime(2026, 7, 14, 23, tzinfo=timezone.utc)
+    session.flush()
+
+    assert event_result_locked(match.id) is True
+
+
+def test_result_lock_ignores_unknown_match(session, monkeypatch):
+    monkeypatch.setattr(pod_tournament, "SessionLocal", _session_factory(session))
+    assert event_result_locked("does-not-exist") is False
 
 
 def _fix_view(*, selected_a="Alice", selected_b="Bob", winner=None, score=None):

@@ -25,7 +25,7 @@ from discord import ui
 from sqlalchemy import select
 
 from bot.database import SessionLocal
-from bot.discord_helpers import NBSP, ZWSP
+from bot.discord_helpers import NBSP, ZWSP, add_two_column_field
 from bot.models import PodDraftEvent, PodDraftMatch, PodDraftParticipant
 from bot.services import pod_team
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
@@ -41,6 +41,7 @@ from bot.services.pod_tournament import (
     format_round_announcement,
     load_participant_displays,
     match_was_played,
+    name_with_arena,
     send_final_submit_deck_dms,
 )
 
@@ -48,6 +49,8 @@ from bot.services.pod_tournament import (
 log = logging.getLogger(__name__)
 
 REPORT_BUTTON_PREFIX = "podteamreport"
+REVEAL_BUTTON_PREFIX = "podteamreveal"  # per-round reveal blocks; distinct so they don't collide with
+# the big block during refresh and restart rediscovery. Must not start with REPORT_BUTTON_PREFIX
 
 
 class TeamBoardMember(NamedTuple):
@@ -93,6 +96,8 @@ def build_board_data(
         b_info = displays.get(normalize_player_name(m["b_name"]), {})
         m["a_display"] = a_info.get("display_name") or m["a_name"]
         m["b_display"] = b_info.get("display_name") or m["b_name"]
+        m["a_arena"] = a_info.get("arena")
+        m["b_arena"] = b_info.get("arena")
         if match_was_played(m):
             m["winner_team"] = teams.get(normalize_player_name(m["winner_name"]))
         else:
@@ -159,9 +164,11 @@ PAGE_BASE = 3     # container + the divider and progress-bar footer
 ROUND_COST = 1    # round header
 SECTION_COST = 3  # section + its text + accessory button
 
-# Invisible run folded into every page's first match line: it holds the shrink-to-fit container
-# open, pushing the report buttons to a fixed right edge, and gives every page the same width
-# driver. The ZWSP anchor keeps Discord's trailing-whitespace trim off the NBSPs; tune to taste
+# Invisible run appended to every round header: it holds the shrink-to-fit container open to one
+# fixed width, so the report buttons land at the same right edge on every round message and don't
+# shift under the cursor. The header carries it (not a match line) because the header has no accessory
+# button eating the right edge, so the run never wraps a match's last word. The ZWSP anchor keeps
+# Discord's trailing-whitespace trim off the NBSPs; lower the count if a header ever wraps
 BOARD_WIDTH_PAD = NBSP * 45 + ZWSP
 
 PROGRESS_GAP = NBSP * 2
@@ -195,39 +202,62 @@ def build_team_board_views(data: TeamBoardData) -> list["TeamBoardView"]:
     ]
 
 
+def build_team_round_view(data: TeamBoardData, round_num: int) -> "TeamBoardView":
+    """One round's matches as its own board message, mirroring the 8-player pod cadence: the round is
+    posted on its own and its report buttons stay live until every match is in. Round 1 carries no
+    footer — its three matches are the whole picture. Later rounds close with a cumulative progress
+    bar (rounds 1..N, so up to 6 squares at round 2 and 9 at round 3) plus the running score, kept
+    current as earlier results land. A 5v5 round still fits one message on its own."""
+    round_matches: list[dict] = []
+    for r, matches in data.rounds:
+        if r == round_num:
+            round_matches = matches
+            break
+    page = [(round_num, round_matches)]
+    if round_num <= 1:
+        return TeamBoardView(data, page, include_footer=False, button_cls=TeamRevealReportButton)
+    cumulative = [(r, matches) for r, matches in data.rounds if r <= round_num]
+    return TeamBoardView(
+        data, page, include_footer=True, button_cls=TeamRevealReportButton, footer_scope=cumulative,
+    )
+
+
 class TeamBoardView(ui.LayoutView):
     """One rounds message: each round's matches as Sections whose accessory button reports (and
-    later recolors to) that match's result. The last page closes with a divider + the match progress
-    bar and running score; every page folds the same invisible pad into its first match line, so all
-    pages share one width driver. The rosters + Wins live in the summary embed above. Build via
-    build_team_board_views, which splits the rounds across pages under the component cap."""
+    later recolors to) that match's result. The footer, when present, closes with a divider + the
+    match progress bar and running score; every round header carries the same invisible width pad, so
+    every message lands its report buttons at one fixed right edge. The rosters + Wins live in the
+    summary embed above. Build a single round with build_team_round_view, or the multi-page combined
+    board with build_team_board_views."""
 
     def __init__(self, data: TeamBoardData, page_rounds: list[tuple[int, list[dict]]],
-                 *, include_footer: bool = True) -> None:
+                 *, include_footer: bool = True, button_cls: type | None = None,
+                 footer_scope: list[tuple[int, list[dict]]] | None = None) -> None:
         super().__init__(timeout=None)
+        button_cls = button_cls or TeamReportButton
         self.report_custom_ids: set[str] = set()
         container = ui.Container(accent_colour=discord.Color.green())
-        for round_index, (round_num, matches) in enumerate(page_rounds):
-            container.add_item(ui.TextDisplay(f"### Round {round_num}"))
-            for match_index, m in enumerate(matches):
-                text = match_line(m)
-                if round_index == 0 and match_index == 0:
-                    text = f"{text}{BOARD_WIDTH_PAD}"
-                button = TeamReportButton.for_match(m, disabled=data.finalized)
+        for round_num, matches in page_rounds:
+            container.add_item(ui.TextDisplay(f"### Round {round_num}{BOARD_WIDTH_PAD}"))
+            for m in matches:
+                button = button_cls.for_match(m, disabled=data.finalized)
                 self.report_custom_ids.add(button.custom_id)
-                container.add_item(ui.Section(text, accessory=button))
+                container.add_item(ui.Section(match_line(m), accessory=button))
         if include_footer:
             container.add_item(ui.Separator())
-            container.add_item(ui.TextDisplay(match_progress_bar(data)))
+            container.add_item(ui.TextDisplay(match_progress_bar(data, footer_scope)))
         self.add_item(container)
 
 
-def match_progress_bar(data: TeamBoardData) -> str:
+def match_progress_bar(
+    data: TeamBoardData, rounds: list[tuple[int, list[dict]]] | None = None,
+) -> str:
     """One square per match in board order, pipe-joined like the Set Awards hype meter — the winning
     team's emoji, pending and skipped squares otherwise — then the running score, leader first, and
-    who leads (or won, once every match is in)."""
+    who leads (or won, once every match is in). `rounds` scopes the squares to a subset (a single
+    round's message shows only its own squares); the running score always reflects the whole draft."""
     icons = []
-    for _, matches in data.rounds:
+    for _, matches in (rounds if rounds is not None else data.rounds):
         for m in matches:
             icon = pod_team.TEAM_EMOJI.get(m.get("winner_team"))
             if icon is None:
@@ -275,65 +305,78 @@ def team_summary_embed(data: TeamBoardData) -> discord.Embed:
 
 
 def add_team_roster_fields(embed: discord.Embed, rosters: dict[str, list[TeamBoardMember]]) -> None:
-    """Both team columns (name + Arena handle) as two inline fields, shared by the board's summary
-    header and the team-draft lobby card so the rosters render identically on both surfaces."""
+    """Each team as its own two-column row: blockquoted Discord names beside code Arena handles,
+    closed by a spacer so the next team starts on a fresh row. Two columns keep a long name and its
+    Arena handle apart instead of wrapping into each other. Shared by the board summary header and the
+    team-draft lobby card so both surfaces render identically."""
     for team in (pod_team.TEAM_A, pod_team.TEAM_B):
-        embed.add_field(
-            name=f"{pod_team.team_emoji(team)} {pod_team.team_label(team)}",
-            value=team_field_value(rosters.get(team, [])) or "—",
-            inline=True,
+        members = rosters.get(team, [])
+        add_two_column_field(
+            embed,
+            f"{pod_team.team_emoji(team)} {pod_team.team_label(team)}",
+            [member.display for member in members],
+            [f"`{member.arena}`" if member.arena else ZWSP for member in members],
+            spacer=True,
         )
 
 
-def team_field_value(members: list[TeamBoardMember]) -> str:
-    """One team's roster column, the Arena handle beside each name, blockquoted so Discord draws the
-    lobby embed's vertical bar. The ZWSP-anchored trailing run keeps the two team columns from
-    sitting shoulder to shoulder. Shared with the reveal embed so the two surfaces can't drift."""
-    column_gap = NBSP * 6 + ZWSP
-    lines = [
-        f"{member.display}  `{member.arena}`" if member.arena else member.display
-        for member in members
-    ]
-    return "\n".join(f"> {line}{column_gap}" for line in lines)
-
-
 def match_line(m: dict) -> str:
-    """One match, Discord display names only — Arena handles live once in the summary embed above.
-    A reported match leads with the winning team's emoji, matching the progress bar."""
+    """One match. A reported match leads with the winning team's emoji and reads by display name,
+    matching the progress bar; a pending matchup leads with each player's Arena handle so opponents
+    can find each other in-client once the round has scrolled past the summary embed."""
     if match_was_played(m):
         marker = pod_team.TEAM_EMOJI.get(m.get("winner_team"), "▫️")
         return f"{marker} {format_reported_result(m)}"
     if m.get("winner_name") == SKIPPED_SENTINEL:
         return f"🚫 Not played: {m['a_display']} vs {m['b_display']}"
-    return f"⚔️ {m['a_display']} vs {m['b_display']}"
+    a = name_with_arena(m["a_display"], m.get("a_arena"))
+    b = name_with_arena(m["b_display"], m.get("b_arena"))
+    return f"⚔️ {a} vs {b}"
+
+
+def _report_button_style(m: dict) -> tuple[discord.ButtonStyle, str]:
+    """(button style, label) for a match: the score on green (Green Team won) or blurple (Blue Team
+    won) once reported so the colour carries the result, grey `Report` while pending."""
+    if m.get("winner_team") == pod_team.TEAM_A:
+        return discord.ButtonStyle.success, m.get("score") or "won"
+    if m.get("winner_team") == pod_team.TEAM_B:
+        return discord.ButtonStyle.primary, m.get("score") or "won"
+    if m.get("winner_name") == SKIPPED_SENTINEL:
+        return discord.ButtonStyle.secondary, "Not played"
+    return discord.ButtonStyle.secondary, "Report"
+
+
+async def _open_report_modal(interaction: discord.Interaction, match_id: str) -> None:
+    """Shared click handler for both the big-block and reveal report buttons: open the report modal
+    over wherever the clicker is, instead of dropping an ephemeral at the bottom of the chat."""
+    state = await asyncio.to_thread(load_match_report_state, match_id)
+    if state is None:
+        await interaction.response.send_message(
+            "This match no longer exists.", ephemeral=(interaction.guild is not None),
+        )
+        return
+    await interaction.response.send_modal(TeamReportModal(state, board_message=interaction.message))
 
 
 class TeamReportButton(
     ui.DynamicItem[ui.Button], template=rf"{REPORT_BUTTON_PREFIX}:(?P<match_id>.+)",
 ):
-    """A match's report button. Grey `Report` while pending; the score on green (Green Team won) or
-    blurple (Blue Team won) once reported — the colour carries the result. Clicking opens the report
-    modal, which overlays wherever the clicker is instead of dropping an ephemeral at the bottom of
-    the chat."""
+    """A match's report button on the big all-rounds block. Recolors to carry the result once
+    reported; clicking opens the report modal."""
+
+    PREFIX = REPORT_BUTTON_PREFIX
 
     def __init__(self, match_id: str, *, style: discord.ButtonStyle = discord.ButtonStyle.secondary,
                  label: str = "Report", disabled: bool = False) -> None:
         super().__init__(ui.Button(
             style=style, label=label, disabled=disabled,
-            custom_id=f"{REPORT_BUTTON_PREFIX}:{match_id}",
+            custom_id=f"{self.PREFIX}:{match_id}",
         ))
         self.match_id = match_id
 
     @classmethod
     def for_match(cls, m: dict, *, disabled: bool) -> "TeamReportButton":
-        if m.get("winner_team") == pod_team.TEAM_A:
-            style, label = discord.ButtonStyle.success, m.get("score") or "won"
-        elif m.get("winner_team") == pod_team.TEAM_B:
-            style, label = discord.ButtonStyle.primary, m.get("score") or "won"
-        elif m.get("winner_name") == SKIPPED_SENTINEL:
-            style, label = discord.ButtonStyle.secondary, "Not played"
-        else:
-            style, label = discord.ButtonStyle.secondary, "Report"
+        style, label = _report_button_style(m)
         return cls(m["match_id"], style=style, label=label, disabled=disabled)
 
     @classmethod
@@ -343,15 +386,39 @@ class TeamReportButton(
         return cls(match["match_id"])
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        state = await asyncio.to_thread(load_match_report_state, self.match_id)
-        if state is None:
-            await interaction.response.send_message(
-                "This match no longer exists.", ephemeral=(interaction.guild is not None),
-            )
-            return
-        await interaction.response.send_modal(
-            TeamReportModal(state, board_message=interaction.message),
-        )
+        await _open_report_modal(interaction, self.match_id)
+
+
+class TeamRevealReportButton(
+    ui.DynamicItem[ui.Button], template=rf"{REVEAL_BUTTON_PREFIX}:(?P<match_id>.+)",
+):
+    """The same match report button, on a per-round reveal block. Its own custom-id namespace keeps
+    reveals separable from the big block during refresh and restart rediscovery; the click and recolor
+    behaviour are identical to TeamReportButton."""
+
+    PREFIX = REVEAL_BUTTON_PREFIX
+
+    def __init__(self, match_id: str, *, style: discord.ButtonStyle = discord.ButtonStyle.secondary,
+                 label: str = "Report", disabled: bool = False) -> None:
+        super().__init__(ui.Button(
+            style=style, label=label, disabled=disabled,
+            custom_id=f"{self.PREFIX}:{match_id}",
+        ))
+        self.match_id = match_id
+
+    @classmethod
+    def for_match(cls, m: dict, *, disabled: bool) -> "TeamRevealReportButton":
+        style, label = _report_button_style(m)
+        return cls(m["match_id"], style=style, label=label, disabled=disabled)
+
+    @classmethod
+    async def from_custom_id(
+        cls, interaction: discord.Interaction, item: ui.Button, match: re.Match,
+    ) -> "TeamRevealReportButton":
+        return cls(match["match_id"])
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await _open_report_modal(interaction, self.match_id)
 
 
 def load_match_report_state(match_id: str) -> dict | None:
@@ -476,6 +543,7 @@ async def handle_team_report(
 
             asyncio.create_task(maybe_post_team_trophy_hype(manager))
     await refresh_board_messages(event_id, data, board_message)
+    await sync_round_reveals(event_id, data)
 
 
 def _player_has_no_pending(data: TeamBoardData, name: str) -> bool:
@@ -484,6 +552,71 @@ def _player_has_no_pending(data: TeamBoardData, name: str) -> bool:
             if not m["winner_name"] and name in (m["a_name"], m["b_name"]):
                 return False
     return True
+
+
+def _round_has_playable_match(data: TeamBoardData, round_num: int) -> bool:
+    """True when at least one match in round_num can be played now: both its players have a reported
+    result (win or skip) in every earlier round. In the fixed 3v3 rotation this first happens once two
+    of the three prior-round matches are in."""
+    if round_num <= 1:
+        return True
+    pending_prior: set[str] = set()
+    for r, matches in data.rounds:
+        if r >= round_num:
+            continue
+        for m in matches:
+            if not m["winner_name"]:
+                pending_prior.add(normalize_player_name(m["a_name"]))
+                pending_prior.add(normalize_player_name(m["b_name"]))
+    for r, matches in data.rounds:
+        if r != round_num:
+            continue
+        for m in matches:
+            a = normalize_player_name(m["a_name"])
+            b = normalize_player_name(m["b_name"])
+            if a not in pending_prior and b not in pending_prior:
+                return True
+    return False
+
+
+def _round_all_reported(data: TeamBoardData, round_num: int) -> bool:
+    for r, matches in data.rounds:
+        if r == round_num:
+            return bool(matches) and all(m["winner_name"] for m in matches)
+    return False
+
+
+async def sync_round_reveals(event_id: str, data: TeamBoardData) -> None:
+    """Post and refresh the per-round reveal blocks for rounds after the first. A round's reveal is
+    posted the first time one of its matches becomes playable, then re-rendered on every later report so
+    its results and cumulative footer stay current. The big block stays the full board; reveals exist so
+    a freshly playable round surfaces without scrolling back up. Best-effort — a reveal that fails to
+    post or edit never blocks the report, which the big block already recorded."""
+    manager = ACTIVE_POD_MANAGERS.get(event_id)
+    if manager is None:
+        return
+    thread = await manager._fetch_thread()
+    if thread is None:
+        return
+    for round_num, _matches in data.rounds:
+        if round_num <= 1:
+            continue
+        existing = manager.team_reveal_messages.get(round_num)
+        if existing is not None:
+            try:
+                await existing.edit(view=build_team_round_view(data, round_num))
+            except discord.HTTPException:
+                log.warning(f"[TEAM] reveal_edit_failed event={event_id} round={round_num}", exc_info=True)
+            continue
+        if _round_all_reported(data, round_num) or not _round_has_playable_match(data, round_num):
+            continue
+        try:
+            message = await thread.send(view=build_team_round_view(data, round_num))
+        except discord.HTTPException:
+            log.warning(f"[TEAM] reveal_post_failed event={event_id} round={round_num}", exc_info=True)
+            continue
+        manager.team_reveal_messages[round_num] = message
+        log.info(f"[TEAM] reveal_posted event={event_id} round={round_num}")
 
 
 async def refresh_board_messages(
@@ -513,14 +646,24 @@ def _message_for_view(view: TeamBoardView, messages: list[discord.Message]) -> d
 
 
 def message_report_ids(message: discord.Message) -> set[str]:
-    """Report-button custom_ids in a message's component tree, walking containers, sections, and
-    section accessories."""
+    """Big-block report-button custom_ids in a message's component tree, walking containers, sections,
+    and section accessories. Reveal buttons carry a different prefix, so they never match here."""
+    return _custom_ids_with_prefix(message, REPORT_BUTTON_PREFIX)
+
+
+def message_reveal_ids(message: discord.Message) -> set[str]:
+    """Reveal-button custom_ids in a message's component tree — the mark of a per-round reveal block,
+    distinct from the big block's report buttons."""
+    return _custom_ids_with_prefix(message, REVEAL_BUTTON_PREFIX)
+
+
+def _custom_ids_with_prefix(message: discord.Message, prefix: str) -> set[str]:
     found: set[str] = set()
 
     def walk(components) -> None:
         for component in components:
             custom_id = getattr(component, "custom_id", None)
-            if custom_id and custom_id.startswith(f"{REPORT_BUTTON_PREFIX}:"):
+            if custom_id and custom_id.startswith(f"{prefix}:"):
                 found.add(custom_id)
             walk(getattr(component, "children", None) or [])
             accessory = getattr(component, "accessory", None)
@@ -549,10 +692,14 @@ async def _resolve_board_messages(
 async def _find_board_messages(
     clicked_message: discord.Message, expected_pages: int,
 ) -> list[discord.Message]:
-    """Rediscover the rounds pages after a restart: the pinned first page, then a bounded history
-    scan for the rest. Rounds pages are the only messages carrying report-button custom_ids, so the
-    filter can't catch other bot messages."""
-    pages: dict[int, discord.Message] = {clicked_message.id: clicked_message}
+    """Rediscover the big-block pages after a restart: the pinned first page, then a bounded history
+    scan for the rest. Big-block pages are the only messages carrying report-button custom_ids (reveal
+    blocks carry a different prefix), so the filter can't catch reveals or other bot messages. The
+    clicked message seeds the set only when it is itself a big-block page — a click may come from a
+    reveal block, which is not one."""
+    pages: dict[int, discord.Message] = {}
+    if message_report_ids(clicked_message):
+        pages[clicked_message.id] = clicked_message
     try:
         for message in await clicked_message.channel.pins():
             if message_report_ids(message):
@@ -569,6 +716,51 @@ async def _find_board_messages(
         except (discord.HTTPException, AttributeError):
             log.warning("could not scan history to rediscover the team board", exc_info=True)
     return sorted(pages.values(), key=lambda m: m.id)
+
+
+_ROUND_HEADER_RE = re.compile(r"### Round (\d+)")
+
+
+async def find_reveal_messages(thread, bot_user) -> dict[int, discord.Message]:
+    """Rediscover per-round reveal blocks after a restart, keyed by round. Reveal blocks are the only
+    messages carrying reveal-button custom_ids; each shows exactly one round, read from its header. Used
+    by the tournament rehydration sweep so reports after a restart refresh reveals instead of posting a
+    duplicate."""
+    out: dict[int, discord.Message] = {}
+    try:
+        async for message in thread.history(limit=BOARD_HISTORY_SCAN_LIMIT):
+            if bot_user is not None and message.author.id != bot_user.id:
+                continue
+            if not message_reveal_ids(message):
+                continue
+            round_num = _reveal_round_of(message)
+            if round_num is not None:
+                out.setdefault(round_num, message)
+    except (discord.HTTPException, AttributeError):
+        log.warning("could not scan history to rediscover team reveals", exc_info=True)
+    return out
+
+
+def _reveal_round_of(message: discord.Message) -> int | None:
+    for content in _text_displays(message):
+        header = _ROUND_HEADER_RE.search(content)
+        if header:
+            return int(header.group(1))
+    return None
+
+
+def _text_displays(message: discord.Message) -> list[str]:
+    found: list[str] = []
+
+    def walk(components) -> None:
+        for component in components:
+            content = getattr(component, "content", None)
+            if content:
+                found.append(content)
+            walk(getattr(component, "children", None) or [])
+
+    walk(message.components)
+    return found
 
 
 def _board_match(data: TeamBoardData, match_id: str) -> dict | None:

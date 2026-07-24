@@ -14,7 +14,7 @@ import discord
 
 from bot import emojis
 from bot.commands import descriptions as desc
-from bot.discord_helpers import command_line
+from bot.discord_helpers import add_two_column_field, command_line, quote_block
 from bot.services import pod_team
 from bot.services.pod_drafts import load_event_id_by_thread_sync, normalize_player_name
 from bot.services.pod_team_board import TeamBoardMember, add_team_roster_fields
@@ -394,12 +394,12 @@ def render(
             waiting_trailing = "\n​" if len(waiting_yes) > len(waiting_maybe) else ""
             embed.add_field(
                 name=f"⌛ Waiting on ({len(waiting_yes)})",
-                value=_quote_block(waiting_yes, trailing=waiting_trailing),
+                value=quote_block(waiting_yes, trailing=waiting_trailing),
                 inline=True,
             )
             embed.add_field(
                 name=f"🤷 Maybe ({len(waiting_maybe)})",
-                value=_quote_block(waiting_maybe),
+                value=quote_block(waiting_maybe),
                 inline=True,
             )
             embed.add_field(name="​", value="​", inline=True)
@@ -567,13 +567,6 @@ def ready_status_banner(
     return [], discord.Color.blurple()
 
 
-def _quote_block(lines: list[str], *, trailing: str = "") -> str:
-    """`> `-prefix each line so Discord renders the blockquote vertical bar."""
-    if not lines:
-        return "​"
-    return "\n".join(f"> {line}" for line in lines) + trailing
-
-
 _ARENA_SUFFIX_RE = re.compile(r"#[0-9?]+$")
 
 
@@ -595,11 +588,12 @@ def _player_columns(
 ) -> None:
     """Two columns from `players` (arena_name, display_name): blockquoted names | code Arena
     handles. `spacer` closes the inline row when another group follows."""
-    embed.add_field(name=label, value=_quote_block([dn for _, dn in players], trailing=trailing), inline=True)
-    arenas = "\n".join(f"`{arena}`" for arena, _ in players)
-    embed.add_field(name="​", value=(arenas or "​") + trailing, inline=True)
-    if spacer:
-        embed.add_field(name="​", value="​", inline=True)
+    add_two_column_field(
+        embed, label,
+        [dn for _, dn in players],
+        [f"`{arena}`" for arena, _ in players],
+        trailing=trailing, spacer=spacer,
+    )
 
 
 def _team_columns(

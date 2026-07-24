@@ -57,6 +57,7 @@ from bot.services.pod_team_board import (
     TeamBoardData,
     build_board_data,
     build_team_board_views,
+    build_team_round_view,
     team_summary_embed,
 )
 from bot.services.pod_team_flow import build_team_final_embed
@@ -592,6 +593,33 @@ def _team_preview_board_data() -> TeamBoardData:
     return build_board_data("team-preview", team_rows, matches, displays, finalized=False)
 
 
+def _team_round_preview_data() -> TeamBoardData:
+    """Fixture for the per-round board snapshot: rounds 1-2 fully reported, round 3 pending, so the
+    preview shows the whole cadence — settled rounds, the fresh active round, and its cumulative
+    9-square footer. Winners alternate so both teams carry Wins. Match ids are fake — buttons inert."""
+    seat_order = [name for pair in zip(_TEAM1, _TEAM2) for name in pair]
+    teams = pod_team.assign_teams(seat_order)
+    team_rows = [(name, teams[name]) for name in seat_order]
+    displays = {
+        normalize_player_name(name): {"display_name": name, "arena": _TEAM_ARENA[name]}
+        for name in seat_order
+    }
+    matches = []
+    for round_num in (1, 2, 3):
+        for a, b in pod_team.pair_round(_TEAM1, _TEAM2, round_num):
+            matches.append({
+                "match_id": f"team-round-preview-{len(matches) + 1}", "round": round_num,
+                "a_name": a, "b_name": b, "winner_name": None, "score": None,
+            })
+    scores = ["2-0", "2-1", "2-1"]
+    for m in matches:
+        if m["round"] in (1, 2):
+            index = matches.index(m)
+            winner = m["a_name"] if index % 2 == 0 else m["b_name"]
+            m.update(winner_name=winner, score=scores[index % len(scores)])
+    return build_board_data("team-round-preview", team_rows, matches, displays, finalized=False)
+
+
 _TEAM_PREVIEW_RECORDS = [(3, 0), (2, 1), (1, 2), (3, 0), (0, 3), (0, 3)]
 _TEAM_PREVIEW_COLORS = ["WU", "BR", "WBg", "UG", "RG", "WB"]
 _TEAM_PREVIEW_CAPTIONS = [
@@ -946,7 +974,7 @@ _VALID_STATES = (
     "drafting", "complete", "submit", "lobby", "lobbyopen", "dmlink", "unlink", "podbracket", "podswiss", "podrandom",
     "podteam", "podlobby",
     "format", "seeding", "trophyhype", "round1", "round2", "round3", "voicelink", "review", "table",
-    "teams", "teamstandings", "teamchamp", "teamhype", "teamvote", "formatpoll", "linkpicker",
+    "teams", "teamround", "teamstandings", "teamchamp", "teamhype", "teamvote", "formatpoll", "linkpicker",
 )
 
 _LIVE_POD_MODES = {
@@ -1157,6 +1185,9 @@ async def setup(bot: commands.Bot) -> None:
         `teamchamp` shows the two-gallery team championship card; `teamhype` the combined 3-0 hype card.
         `teams` is the no-DB snapshot of the Components V2 team board (team headers + all three rounds,
         one row per match); its Report buttons are inert — use `podteam` to drive reports.
+        `teamround` is the no-DB snapshot of the live model: the big all-rounds block, then the Round
+        2 and Round 3 reveal blocks that post as each round becomes playable, with cumulative footers.
+        Buttons are inert here — use `podteam` to drive real reports and reveals.
         `teamvote` shows the Team-Draft offer card with a working 🤝 vote button and three votes
         prefilled — your click is the fourth, locking it to Team Draft and proposing a Ready Check.
         `formatpoll` shows the flashback format tally with a working button per option and prefilled
@@ -1287,6 +1318,15 @@ async def setup(bot: commands.Bot) -> None:
             await ctx.send(embed=team_summary_embed(preview_data))
             for view in build_team_board_views(preview_data):
                 await ctx.send(view=view)
+            return
+
+        if state == "teamround":
+            preview_data = _team_round_preview_data()
+            await ctx.send(embed=team_summary_embed(preview_data))
+            for view in build_team_board_views(preview_data):
+                await ctx.send(view=view)
+            for round_num in (2, 3):
+                await ctx.send(view=build_team_round_view(preview_data, round_num))
             return
 
         if state == "round1":
