@@ -42,7 +42,7 @@ from bot.models import PodDraftEvent, PodSignal
 from bot.services import pod_launch
 from bot.services.pod_deck_color import format_deck_color_emojis
 from bot.services.pod_draft_manager import notify_seeding_change
-from bot.services.pod_tournament import champion_card_line
+from bot.services.pod_tournament import champion_card_line, load_solo_card_drafters
 from bot.services.ping_roles import (
     announce_pod_grant,
     auto_grant_spec_for_event,
@@ -365,10 +365,10 @@ ROSTER_GAP = NBSP * 2
 
 def _locked_roster_text(players: list[DraftedPlayer], draft_complete: bool) -> str:
     """The locked-roster block the card shows once the draft starts, in place of the RSVP columns:
-    the actual drafters under a bold header. While the pod runs they list unranked in seat order with
-    only the running W-L record — deck colors stay hidden so an opponent can't scout mid-draft. On
-    completion the roster reorders by placement and reads as the final standings, with medals,
-    records, and colors."""
+    the actual drafters under a bold header. While the pod runs they list in seat order by name alone —
+    the card re-renders only on lifecycle transitions, not per match report, so a running record would
+    freeze at its draft-done value and drift as results come in. On completion the roster reorders by
+    placement and reads as the final standings, with medals, records, and colors."""
     ordered = _order_locked_roster(players, draft_complete)
     if draft_complete:
         rows = [_final_standings_row(rank, player) for rank, player in enumerate(ordered, 1)]
@@ -386,8 +386,7 @@ def _order_locked_roster(players: list[DraftedPlayer], draft_complete: bool) -> 
 
 
 def _drafter_row(player: DraftedPlayer) -> str:
-    record = f"{ROSTER_GAP}{player.record}" if player.record else ""
-    return f"> {player.display_name}{record}"
+    return f"> {player.display_name}"
 
 
 def _final_standings_row(rank: int, player: DraftedPlayer) -> str:
@@ -1029,12 +1028,14 @@ async def _edit_scheduled_card(bot: commands.Bot, event_id: str, name: str, even
     pairing_mode = await asyncio.to_thread(load_event_pairing_mode_sync, event_id)
     status_line = await resolve_card_status_line(event_id)
     team_rosters = await _team_card_rosters(event_id, pairing_mode, status_line)
+    locked_roster, draft_complete = await _solo_card_roster(event_id, pairing_mode, status_line)
     try:
         message = await channel.fetch_message(int(message_id))
         await message.edit(embed=build_rsvp_embed(
             name, event_time, rosters, slot_time, description, set_code=set_code,
             team_draft=pairing_mode == "team", status_line=status_line,
-            roster_interests=roster_interests, team_rosters=team_rosters))
+            roster_interests=roster_interests, team_rosters=team_rosters,
+            locked_roster=locked_roster, draft_complete=draft_complete))
     except discord.HTTPException:
         log.warning(f"could not edit scheduled card {message_id}", exc_info=True)
 
@@ -1059,6 +1060,28 @@ async def _team_card_rosters(
     if not any(rosters.values()):
         return None
     return rosters
+
+
+async def _solo_card_roster(
+    event_id: str, pairing_mode: str | None, status_line: str | None,
+) -> tuple[list[DraftedPlayer] | None, bool]:
+    """The locked drafters that replace a non-team pod's RSVP columns once the draft starts, and whether
+    the pod is finalized. None while the pod still gathers or before the draft seeds its seats, so the
+    card keeps its RSVP columns until real drafters exist. In flight the rows carry seat order and the
+    running record only; deck colors ride along but stay hidden until the final standings render."""
+    if pairing_mode == "team" or status_line is None:
+        return None, False
+    drafters, finalized = await asyncio.to_thread(load_solo_card_drafters, event_id)
+    if not drafters:
+        return None, False
+    roster = [
+        DraftedPlayer(
+            display_name=drafter.display_name, seat_index=drafter.seat_index,
+            record=drafter.record, placement=drafter.placement, deck_colors=drafter.deck_colors,
+        )
+        for drafter in drafters
+    ]
+    return roster, finalized
 
 
 async def refresh_scheduled_card(bot: commands.Bot, event_id: str) -> None:

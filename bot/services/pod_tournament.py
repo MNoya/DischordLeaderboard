@@ -2459,6 +2459,40 @@ async def champion_card_line(event_id: str) -> str | None:
     return f"🏆 {_format_champion_thread_callout(champions)}"
 
 
+class CardDrafter(NamedTuple):
+    display_name: str
+    seat_index: int | None
+    record: str | None
+    placement: int | None
+    deck_colors: str | None
+
+
+def load_solo_card_drafters(event_id: str) -> tuple[list[CardDrafter], bool]:
+    """The seated drafters of a non-team pod for the scheduled card's locked-roster body, plus whether
+    the pod is finalized. Prefers each seat's linked Discord display name so the card reads the same as
+    the champion line, and falls back to the Draftmancer seat name for an unlinked seat. Empty until the
+    draft seeds participants, which drops the card back to its RSVP columns."""
+    with SessionLocal() as session:
+        rows = session.execute(
+            select(
+                PodDraftParticipant.display_name, DbPlayer.display_name,
+                PodDraftParticipant.seat_index, PodDraftParticipant.record,
+                PodDraftParticipant.placement, PodDraftParticipant.deck_colors,
+            )
+            .outerjoin(DbPlayer, DbPlayer.id == PodDraftParticipant.player_id)
+            .where(PodDraftParticipant.event_id == event_id, PodDraftParticipant.team.is_(None))
+            .order_by(PodDraftParticipant.seat_index)
+        ).all()
+        finalized_at = session.execute(
+            select(PodDraftEvent.finalized_at).where(PodDraftEvent.id == event_id)
+        ).scalar_one_or_none()
+    drafters = [
+        CardDrafter(player_display or seat_name, seat_index, record, placement, deck_colors)
+        for seat_name, player_display, seat_index, record, placement, deck_colors in rows
+    ]
+    return drafters, finalized_at is not None
+
+
 def build_champion_announcement_view(
     standings: list[pod_swiss.Standing],
     *,
