@@ -386,6 +386,7 @@ class PodSignal(Base):
     opened_by        = Column(String, nullable=True)
     notify_role      = Column(String, nullable=True)
     description      = Column(String, nullable=True)
+    format_locked    = Column(Boolean, nullable=False, server_default=text("false"))
     event_id         = Column(String, ForeignKey("pod_draft_events.id", ondelete="SET NULL"), nullable=True)
     created_at       = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     last_activity_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

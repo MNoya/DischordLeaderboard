@@ -76,6 +76,6 @@ Report your results in the thread as you play. Winning games earns pod points on
 
 ## For mods
 
-Beyond the daily launcher, you can schedule a pod at any time with the `/draft` command. Pick "Right now" to open a live lobby immediately, or pick a time to post a scheduled signup card that behaves exactly like a launcher slot. You can preset the set, pairing style, pick timer, and which role gets notified.
+Beyond the daily launcher, you can schedule a pod at any time with the `/draft` command. Pick "Right now" to open a live lobby immediately, or pick a time to post a scheduled signup card. You can preset the set, pairing style, pick timer, and which role gets notified. A `/draft` pod plays the one set you pick, so its card and reminder show a single Yes / Maybe / No roster with no Latest and Flashback split and no format vote. The signup buttons and thread work the same as a launcher slot.
 
 Inside a pod thread, the pod controls (ready check, start, team draft, pause, restart, seeding, standings, champion) run the draft. The daily launcher, reminders, format votes, and second-table offers all run on their own, so most pods need no hands-on management.

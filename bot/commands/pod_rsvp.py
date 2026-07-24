@@ -38,7 +38,7 @@ from bot.services.lobby_embed import SettingsButton
 from sqlalchemy import select
 
 from bot.services.pod_active import ACTIVE_POD_MANAGERS
-from bot.models import PodDraftEvent
+from bot.models import PodDraftEvent, PodSignal
 from bot.services import pod_launch
 from bot.services.pod_deck_color import format_deck_color_emojis
 from bot.services.pod_draft_manager import notify_seeding_change
@@ -575,10 +575,14 @@ async def post_scheduled_card(
     preseed_yes: list[tuple[str, str]] | None = None, ping_role: bool = True,
     notify_role_name: str | None = None, description: str | None = None,
     pairing_mode: str | None = None, seating_mode: str | None = None, pick_timer: int | None = None,
-    content_override: str | None = None, card_body: str | None = None,
+    content_override: str | None = None, card_body: str | None = None, format_locked: bool = True,
 ) -> str | None:
     """Create a scheduled pod end to end and return its event id, or None when the thread or the
     card could not be posted. The signal is born fired, so the RSVP buttons never close.
+
+    `format_locked` defaults on: the organizer chose the set, so the card shows a plain Yes / Maybe
+    roster and every preference surface stays off. A graduated launcher slot passes False, since it is
+    the flex surface that resolves its format from the roster's Latest/Flashback preferences.
 
     The thread hangs off the card, so a single edit to the card updates both the channel and the
     thread starter. A starter's own buttons render dead in-thread, so the registered embed carries
@@ -616,7 +620,7 @@ async def post_scheduled_card(
     signal_id = await asyncio.to_thread(
         pod_launch.create_scheduled_signal_sync,
         guild_id=str(guild.id), channel_id=str(channel.id), message_id=str(message.id),
-        event_time=event_time, pick_timer=pick_timer,
+        event_time=event_time, pick_timer=pick_timer, format_locked=format_locked,
     )
     if preseed_yes:
         await asyncio.to_thread(pod_launch.seed_yes_members_sync, signal_id, preseed_yes)
@@ -1020,6 +1024,8 @@ async def _edit_scheduled_card(bot: commands.Bot, event_id: str, name: str, even
     if roster_interests is None:
         return
     rosters = {state: [name for name, _ in members] for state, members in roster_interests.items()}
+    if await asyncio.to_thread(pod_launch.format_locked_for_event_sync, event_id):
+        roster_interests = None
     channel = await fetch_channel(bot, channel_id)
     if channel is None:
         return
@@ -1105,6 +1111,28 @@ def _recent_finished_event_ids_sync() -> list[str]:
             select(PodDraftEvent.id).where(
                 PodDraftEvent.socket_status.in_(("connected", "draft_done", "complete")),
                 PodDraftEvent.event_time >= cutoff,
+            )
+        ).all()
+    return [row[0] for row in rows]
+
+
+async def heal_format_locked_cards(bot: commands.Bot) -> None:
+    """Re-render the still-gathering cards of format-locked pods on startup, so a card posted before the
+    format lock existed drops its stale Latest/Flashback split for a plain roster. Also refreshes the
+    roster reminder, which no-ops when the pod has not reached its T-60 reminder yet."""
+    event_ids = await asyncio.to_thread(_pending_format_locked_event_ids_sync)
+    for event_id in event_ids:
+        await refresh_event_rsvp_surfaces(bot, event_id)
+
+
+def _pending_format_locked_event_ids_sync() -> list[str]:
+    with SessionLocal() as session:
+        rows = session.execute(
+            select(PodDraftEvent.id)
+            .join(PodSignal, PodSignal.event_id == PodDraftEvent.id)
+            .where(
+                PodSignal.format_locked.is_(True),
+                PodDraftEvent.socket_status.in_(("pending", "reminded")),
             )
         ).all()
     return [row[0] for row in rows]

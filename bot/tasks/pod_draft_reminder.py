@@ -45,7 +45,7 @@ log = logging.getLogger(__name__)
 
 _bot: commands.Bot | None = None
 
-ReminderViewBuilder = Callable[[str], "discord.ui.View"]
+ReminderViewBuilder = Callable[[str, bool], "discord.ui.View"]
 _reminder_view_builder: ReminderViewBuilder | None = None
 
 
@@ -117,7 +117,8 @@ async def fire_roster_reminder(event_id: str) -> None:
 
     rosters, roster_interests = await event_rsvp_rosters(event_id)
     embed = build_roster_embed(event_name, event_time, rosters, roster_interests)
-    view = _reminder_view_builder(event_id) if _reminder_view_builder is not None else None
+    format_locked = await asyncio.to_thread(signal_format_locked_sync, event_id)
+    view = _reminder_view_builder(event_id, format_locked) if _reminder_view_builder is not None else None
     try:
         await thread.send(embed=embed, view=view, allowed_mentions=discord.AllowedMentions.none())
     except discord.HTTPException:
@@ -175,7 +176,7 @@ def schedule_format_split_assessment(scheduler, event_id: str, event_time: datet
     now = datetime.now(timezone.utc)
     run_at = event_time - timedelta(minutes=FORMAT_SPLIT_SETTLE_LEAD_MIN)
     job_id = f"pod-formatsplit-{event_id}"
-    if run_at <= now:
+    if run_at <= now or signal_format_locked_sync(event_id):
         with contextlib.suppress(Exception):
             scheduler.remove_job(job_id)
         return
@@ -232,7 +233,8 @@ async def _edit_roster_reminder(
     if reminder is None:
         return
     embed = build_roster_embed(event_name, event_time, rosters, roster_interests)
-    view = _reminder_view_builder(event_id) if _reminder_view_builder is not None else None
+    format_locked = await asyncio.to_thread(signal_format_locked_sync, event_id)
+    view = _reminder_view_builder(event_id, format_locked) if _reminder_view_builder is not None else None
     try:
         await reminder.edit(embed=embed, view=view, allowed_mentions=discord.AllowedMentions.none())
     except discord.HTTPException:
@@ -300,10 +302,11 @@ def signal_rsvps_sync(event_id: str) -> tuple[list[str], list[str]] | None:
 
 def signal_rsvp_rosters_sync(
     event_id: str,
-) -> tuple[dict[str, list[str]], dict[str, list[tuple[str, tuple[str, ...]]]]] | None:
+) -> tuple[dict[str, list[str]], dict[str, list[tuple[str, tuple[str, ...]]]] | None] | None:
     """Interest-carrying twin of `signal_rsvps_sync`: Yes / Maybe rosters off the signal that created
     the pod, each member paired with the format interest they signed up with, so the reminder can group
-    by format the same way the card does. None when the pod has no signal."""
+    by format the same way the card does. The interests are None for a format-locked pod, which renders
+    a plain Yes / Maybe pair; None overall when the pod has no signal."""
     with SessionLocal() as session:
         signal = session.execute(
             select(PodSignal).where(PodSignal.event_id == event_id)
@@ -315,12 +318,23 @@ def signal_rsvp_rosters_sync(
             .where(PodSignalMember.signal_id == signal.id)
             .order_by(PodSignalMember.created_at)
         ).all()
+        format_locked = signal.format_locked
     interests: dict[str, list[tuple[str, tuple[str, ...]]]] = {RSVP_YES: [], RSVP_MAYBE: []}
     for state, name, interest in rows:
         if state in interests:
             interests[state].append((name, tuple(interest or ())))
     rosters = {state: [name for name, _ in members] for state, members in interests.items()}
-    return rosters, interests
+    return rosters, (None if format_locked else interests)
+
+
+def signal_format_locked_sync(event_id: str) -> bool:
+    """Whether the pod behind this event locked its format at creation, so the roster reminder drops
+    the Format Preference button and the second-table format split never arms. False when no signal."""
+    with SessionLocal() as session:
+        locked = session.execute(
+            select(PodSignal.format_locked).where(PodSignal.event_id == event_id)
+        ).scalar_one_or_none()
+        return bool(locked)
 
 
 def build_lobby_open_body(draftmancer_url: str, mention_block: str) -> str:

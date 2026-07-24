@@ -452,13 +452,15 @@ async def open_interest_prompt_from_reminder(interaction: discord.Interaction, e
     await _send_interest_prompt(interaction, launcher_message_id, signal_date, event_id=event_id)
 
 
-def build_reminder_view(event_id: str) -> discord.ui.View:
+def build_reminder_view(event_id: str, format_locked: bool = False) -> discord.ui.View:
     """The roster reminder's controls: Sign Up / Can't recording against the pod, and Format Preference
-    opening the Save-only picker. All three carry the event id so they resolve the pod after a restart."""
+    opening the Save-only picker. All carry the event id so they resolve the pod after a restart. A
+    format-locked pod drops Format Preference, since its set never resolves from the roster."""
     view = discord.ui.View(timeout=None)
     view.add_item(ReminderRsvpButton(RSVP_YES, event_id))
     view.add_item(ReminderRsvpButton(RSVP_NO, event_id))
-    view.add_item(ReminderFormatPreferenceButton(event_id))
+    if not format_locked:
+        view.add_item(ReminderFormatPreferenceButton(event_id))
     return view
 
 
@@ -905,7 +907,7 @@ async def _launch_slot(bot: commands.Bot, state, message_id: str) -> None:
         announcement = _fire_announcement(channel.guild, slot_time)
         event_id = await post_scheduled_card(
             bot, channel, set_code=set_code, event_time=slot_time, name=name, preseed_yes=signups,
-            ping_role=False, content_override=announcement,
+            ping_role=False, content_override=announcement, format_locked=False,
         )
     if event_id is None:
         await asyncio.to_thread(pod_launch.release_fire_sync, state.signal_id)

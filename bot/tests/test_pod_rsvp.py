@@ -241,6 +241,43 @@ def test_committed_slot_keeps_each_name_bound_to_its_own_interest(session):
     assert slot.interests == (("latest",), ("flashback",))
 
 
+def _flashback_split_pod(session, slot_time: datetime, *, format_locked: bool) -> None:
+    event_id = _pod_event(session, slot_time)
+    signal = PodSignal(
+        kind=pod_signals.KIND_SCHEDULED, bucket=pod_signals.SCHEDULED_BUCKET, guild_id="1",
+        channel_id="2", message_id="card-1", signal_date=slot_time.date(), slot_time=slot_time,
+        status=pod_signals.STATUS_FIRED, event_id=event_id, format_locked=format_locked,
+    )
+    session.add(signal)
+    session.flush()
+    _standing_interest(session, "u0", "Latest Player", [fi.LATEST])
+    _standing_interest(session, "u1", "Flashback Player", [fi.FLASHBACK])
+    set_rsvp(session, "card-1", "u0", "Latest Player", pod_signals.RSVP_YES)
+
+
+def test_flex_card_carries_member_interests_for_the_split(session):
+    slot_time = datetime.now(timezone.utc) + timedelta(days=1)
+    _flashback_split_pod(session, slot_time, format_locked=False)
+
+    result = set_rsvp(session, "card-1", "u1", "Flashback Player", pod_signals.RSVP_YES)
+
+    assert result.state.format_locked is False
+    assert result.roster_interests[pod_signals.RSVP_YES] == [
+        ("Latest Player", ("latest",)), ("Flashback Player", ("flashback",)),
+    ]
+
+
+def test_format_locked_card_drops_member_interests(session):
+    slot_time = datetime.now(timezone.utc) + timedelta(days=1)
+    _flashback_split_pod(session, slot_time, format_locked=True)
+
+    result = set_rsvp(session, "card-1", "u1", "Flashback Player", pod_signals.RSVP_YES)
+
+    assert result.state.format_locked is True
+    assert result.roster_interests is None
+    assert result.rosters[pod_signals.RSVP_YES] == ["Latest Player", "Flashback Player"]
+
+
 def test_refresh_never_stacks_the_multipod_notice():
     event_time = datetime(2026, 7, 18, 16, 0, tzinfo=timezone.utc)
     embed = build_rsvp_embed("Early Pod", event_time, {RSVP_YES: []})

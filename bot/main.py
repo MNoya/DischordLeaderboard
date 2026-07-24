@@ -88,6 +88,7 @@ from bot.commands.pod_rsvp import (
     PodRsvpView,
     ReminderRsvpButton,
     heal_finished_cards,
+    heal_format_locked_cards,
 )
 from bot.tasks.pod_draft_reminder import init_reminder
 from bot.tasks.pod_daily_poll import PodPollView, ReminderFormatPreferenceButton, init_daily_poll
@@ -563,6 +564,7 @@ def build_bot(guild_id: int) -> commands.Bot:
             await rehydrate_active_tournaments(bot)
             await rehydrate_active_lobbies(bot)
             await heal_finished_cards(bot)
+            await heal_format_locked_cards(bot)
             await reconcile_unannounced_championships(bot)
             try:
                 await reconcile_ping_roles(bot)

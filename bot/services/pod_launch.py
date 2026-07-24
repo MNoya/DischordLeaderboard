@@ -33,7 +33,6 @@ from bot.services import pod_signals
 from bot.services.pod_draft_manager import set_card_cancel_hook, set_card_close_hook, start_manager
 from bot.services.pod_drafts import (
     draftmancer_url_for,
-    event_member_interests_sync,
     get_cube_choices,
     get_flashback_ranking,
     get_format_interests,
@@ -83,6 +82,7 @@ class SignalState:
     opened_by: str | None = None
     notify_role: str | None = None
     description: str | None = None
+    format_locked: bool = False
 
 
 @dataclass(frozen=True)
@@ -208,6 +208,7 @@ def create_queue_signal_sync(
             pick_timer=pick_timer,
             notify_role=notify_role,
             description=description,
+            format_locked=True,
         )
         session.add(signal)
         session.commit()
@@ -302,11 +303,15 @@ def joinable_signals_sync(guild_id: str, *, now: datetime, within: timedelta) ->
 
 def create_scheduled_signal_sync(
     *, guild_id: str, channel_id: str, message_id: str, event_time: datetime,
-    pick_timer: int | None = None,
+    pick_timer: int | None = None, format_locked: bool = True,
 ) -> str:
     """A scheduled pod's signal is born fired with the caller linking its event right after: RSVPs
     stay open forever for over-signups and expiry never applies. Pairing and seating live on the
-    event; only the pick timer rides the signal, since it is live-only and applied at lobby open."""
+    event; only the pick timer rides the signal, since it is live-only and applied at lobby open.
+
+    `format_locked` is the default: a /draft card, a championship, or a mock draft each carry a set the
+    organizer chose, so the Latest/Flashback preference system never applies. Only a graduated launcher
+    slot opts out, since it is the flex surface that resolves its format from the roster's preferences."""
     with SessionLocal() as session:
         signal = PodSignal(
             kind=pod_signals.KIND_SCHEDULED,
@@ -318,6 +323,7 @@ def create_scheduled_signal_sync(
             slot_time=event_time,
             status=pod_signals.STATUS_FIRED,
             pick_timer=pick_timer,
+            format_locked=format_locked,
         )
         session.add(signal)
         session.commit()
@@ -350,7 +356,7 @@ def set_rsvp(
         yes_count = len(rosters[pod_signals.RSVP_YES])
         return RsvpResult(
             _state(signal, yes_count), rosters, rsvp=None, joined=False, closed=True,
-            roster_interests=_members_by_rsvp_with_interest(session, signal.id),
+            roster_interests=_render_interests(session, signal),
         )
 
     tracks_no = _signal_is_championship(session, signal)
@@ -381,7 +387,7 @@ def set_rsvp(
             existing.display_name = display_name
     session.flush()
     rosters = _members_by_rsvp(session, signal.id)
-    roster_interests = _members_by_rsvp_with_interest(session, signal.id)
+    roster_interests = _render_interests(session, signal)
     yes_count = len(rosters[pod_signals.RSVP_YES])
     yes_changed = was_yes != (recorded == pod_signals.RSVP_YES)
     return RsvpResult(
@@ -1096,14 +1102,6 @@ async def open_ondemand_lobby(bot: commands.Bot, event_id: str) -> None:
 
     mention_block = " ".join(f"<@{did}>" for did, _ in roster)
 
-    manager = await start_manager(
-        bot, event_id, session_id, thread_id, set_code, len(display_names),
-        event_name=event_name, draftmancer_url=draftmancer_url,
-        rsvps_yes=display_names, rsvps_maybe=maybe_names,
-    )
-    if manager is not None:
-        await manager.await_ownership()
-
     body = build_lobby_open_body(draftmancer_url, mention_block)
     try:
         await thread.send(
@@ -1112,7 +1110,14 @@ async def open_ondemand_lobby(bot: commands.Bot, event_id: str) -> None:
         )
     except discord.HTTPException:
         log.warning(f"open_ondemand_lobby: could not post in thread {thread_id}", exc_info=True)
-        return
+
+    manager = await start_manager(
+        bot, event_id, session_id, thread_id, set_code, len(display_names),
+        event_name=event_name, draftmancer_url=draftmancer_url,
+        rsvps_yes=display_names, rsvps_maybe=maybe_names,
+    )
+    if manager is not None:
+        await manager.await_ownership()
 
     with SessionLocal() as session:
         event = session.get(PodDraftEvent, event_id)
@@ -1131,9 +1136,6 @@ async def open_ondemand_lobby(bot: commands.Bot, event_id: str) -> None:
 
     if manager is not None:
         manager.arm_team_vote_offer(len(display_names))
-        interests = await asyncio.to_thread(event_member_interests_sync, event_id)
-        if fi.should_offer_format_poll(fi.composition(interests)):
-            await manager.offer_format_poll()
         pick_timer = await asyncio.to_thread(scheduled_pick_timer_for_event_sync, event_id)
         if pick_timer is not None:
             await manager.apply_pick_timer(pick_timer)
@@ -1568,10 +1570,32 @@ def _members_by_rsvp_with_interest(
     return rosters
 
 
+def _render_interests(
+    session: Session, signal: PodSignal,
+) -> dict[str, list[tuple[str, tuple[str, ...]]]] | None:
+    """Per-member format interests for the card render, or None when the pod is format-locked so the
+    card drops the Latest/Flashback split and shows a plain Yes / Maybe roster."""
+    if signal.format_locked:
+        return None
+    return _members_by_rsvp_with_interest(session, signal.id)
+
+
+def format_locked_for_event_sync(event_id: str) -> bool:
+    """Whether the pod behind this event locked its format at creation, so every preference surface
+    (card columns, the roster reminder's Format Preference button, the in-lobby flashback vote, the
+    second-table format split) stays off. False when the pod has no signal."""
+    with SessionLocal() as session:
+        locked = session.execute(
+            select(PodSignal.format_locked).where(PodSignal.event_id == event_id)
+        ).scalar_one_or_none()
+        return bool(locked)
+
+
 def _state(signal: PodSignal, count: int) -> SignalState:
     return SignalState(
         signal.id, signal.kind, signal.bucket, signal.status, count, signal.slot_time, signal.event_id,
         signal.set_code, signal.created_at, signal.opened_by, signal.notify_role, signal.description,
+        signal.format_locked,
     )
 
 

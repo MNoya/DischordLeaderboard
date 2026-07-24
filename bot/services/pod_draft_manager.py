@@ -1733,24 +1733,50 @@ class PodDraftManager:
     async def offer_team_vote_manual(self) -> str | None:
         """Post the Team-Draft vote on demand from /pod-team. A proposal, not a commitment, so it takes
         any pod of at least four and leaves the parity to settle before start — unlike the auto nudge,
-        which waits for an even lobby. Returns an error string when the pod can't take a vote right now,
-        else None."""
+        which waits for an even lobby. Re-running with a vote already up deletes that card and re-posts it
+        at the bottom of the thread, carrying its votes over. Returns an error string when the pod can't
+        take a vote right now, else None."""
         if self.pairing_mode == "team":
             return "This pod is already a Team Draft."
         if self.drafting or self.draft_complete:
             return "The draft has already started."
-        if self.team_vote_offered:
-            return "A Team-Draft vote is already up in this thread."
         count = len(self.player_session_users())
         if count < 4:
             return "Team Draft needs at least four players in the Draftmancer lobby."
-        await self.offer_team_vote(count)
+        thread = await self._fetch_thread()
+        if thread is None:
+            return "Could not reach the pod thread. Try again."
+        team, wait = await self._clear_existing_team_vote(thread)
+        self.team_vote_offered = False
+        self.team_vote_message = None
+        await self.offer_team_vote(count, team=team, wait=wait)
         return None
 
-    async def offer_team_vote(self, pod_size: int) -> None:
+    async def _clear_existing_team_vote(self, thread: "discord.Thread") -> tuple[list[str], list[str]]:
+        """Delete the pod's current Team-Draft card and return its (team, wait) tally, so a re-offer keeps the
+        votes already cast. The card message is the source of truth, since clicks edit it directly, not the
+        manager's cached handle; an empty pair when no gathering card is up."""
+        card = await find_team_vote_card(thread, self.event_id)
+        if card is None:
+            return [], []
+        team: list[str] = []
+        wait: list[str] = []
+        if card.embeds:
+            team = team_voters_from_embed(card.embeds[0])
+            wait = wait_voters_from_embed(card.embeds[0])
+        try:
+            await card.delete()
+        except discord.HTTPException:
+            log.info(f"[TEAM_VOTE] reoffer_delete_failed event={self.event_id}", exc_info=True)
+        return team, wait
+
+    async def offer_team_vote(
+        self, pod_size: int, *, team: list[str] | None = None, wait: list[str] | None = None,
+    ) -> None:
         """Post the one-time Team-Draft vote offer for a settled small pod. The caller decides the pod is
-        eligible (even, at most six); `pod_size` fixes the majority the vote needs to lock. No-op once
-        offered, already a team pod, or the draft is under way."""
+        eligible (even, at most six); `pod_size` fixes the majority the vote needs to lock. `team`/`wait`
+        seed the columns when a re-offer carries votes over. No-op once offered, already a team pod, or the
+        draft is under way."""
         if self.team_vote_offered or self.pairing_mode == "team" or self.drafting or self.draft_complete:
             return
         thread = await self._fetch_thread()
@@ -1760,7 +1786,7 @@ class PodDraftManager:
         self.team_vote_offered = True
         try:
             self.team_vote_message = await thread.send(
-                embed=build_team_vote_offer_embed([], [], pod_size),
+                embed=build_team_vote_offer_embed(team or [], wait or [], pod_size),
                 view=build_team_vote_view(self.event_id),
             )
         except discord.HTTPException:
@@ -1796,6 +1822,18 @@ class PodDraftManager:
             await message.delete()
         except discord.HTTPException:
             log.info(f"[TEAM_VOTE] offer_delete_failed event={self.event_id}", exc_info=True)
+
+    async def offer_format_poll_manual(self) -> str | None:
+        """Post the Format Vote on demand from /vote-format. Returns an error string when the pod can't take
+        a poll right now, else None."""
+        if self.drafting or self.draft_complete:
+            return "The draft has already started."
+        if self.format_poll_offered:
+            return "A Format Vote is already up in this thread."
+        await self.offer_format_poll()
+        if not self.format_poll_offered:
+            return "Could not post the Format Vote. Try again."
+        return None
 
     async def offer_format_poll(self) -> None:
         """Post the one-time format tally for a pod with flashback demand. The present players' standing

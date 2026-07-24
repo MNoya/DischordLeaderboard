@@ -829,7 +829,7 @@ async def _schedule_pod(
     event_id = await post_scheduled_card(
         interaction.client, channel, set_code=resolved_set, event_time=when, name=name,
         preseed_yes=opener, ping_role=False, notify_role_name=role, description=description,
-        pairing_mode=pairing_mode, pick_timer=pick_timer,
+        pairing_mode=pairing_mode, pick_timer=pick_timer, format_locked=True,
     )
     if event_id is None:
         await interaction.edit_original_response(content=LAUNCHER_SCHEDULE_FAILED, view=None)

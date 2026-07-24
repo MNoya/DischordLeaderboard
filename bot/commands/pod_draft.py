@@ -174,6 +174,22 @@ class PodDraft(commands.Cog):
         else:
             await interaction.followup.send("Team-Draft vote posted — check the thread.", ephemeral=True)
 
+    @app_commands.command(name="vote-format", description=desc.VOTE_FORMAT)
+    @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
+    @app_commands.allowed_installs(guilds=True, users=False)
+    async def vote_format(self, interaction: discord.Interaction) -> None:
+        manager = _find_manager_for_thread(interaction)
+        if manager is None:
+            await interaction.response.send_message(MSG_NO_ACTIVE_POD, ephemeral=True)
+            return
+        log.info(f"vote-format: {interaction.user} posting format vote in thread {interaction.channel_id}")
+        await interaction.response.defer(ephemeral=True, thinking=False)
+        err = await manager.offer_format_poll_manual()
+        if err is not None:
+            await interaction.followup.send(f"⚠️ {err}", ephemeral=True)
+        else:
+            await interaction.followup.send("Format Vote posted — check the thread.", ephemeral=True)
+
     @app_commands.command(name="pod-pause", description=desc.POD_PAUSE)
     @app_commands.allowed_contexts(guilds=True, dms=False, private_channels=False)
     @app_commands.allowed_installs(guilds=True, users=False)

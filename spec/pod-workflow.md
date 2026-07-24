@@ -20,7 +20,7 @@ A signup is **never a binding contract**. People click, then don't show. The sys
 Two ways a pod comes into existence, both feeding the same `PodSignal` → `PodDraftEvent` spine:
 
 - **Daily Pod Launcher** (`bot/tasks/pod_daily_poll.py`, `bot/services/pod_signals.py`, `bot/services/pod_launch.py`) — the recurring "who's playing today" post with fixed slots. The default path.
-- **Ad-hoc `/draft`** — a mod schedules a pod at any time with custom signups, independent of the launcher slots. "Right now" opens a live queue; a custom time posts a scheduled RSVP card just like a graduated launcher slot.
+- **Ad-hoc `/draft`** — a mod schedules a pod at any time with custom signups, independent of the launcher slots. "Right now" opens a live queue; a custom time posts a scheduled RSVP card just like a graduated launcher slot. Either way the mod picked the set, so a `/draft` pod is **format-locked** (see section 4): no Latest/Flashback preference system.
 
 The old fixed **weekly schedule poster** (`bot/services/pod_schedule.py`, `WEEKLY_SLOTS`, Wed/Thu/Sat, the `/create` template flow) is **deprecated** — not part of the current model and not to be supported or extended.
 
@@ -28,7 +28,7 @@ The old fixed **weekly schedule poster** (`bot/services/pod_schedule.py`, `WEEKL
 
 Interest is gathered on a `PodSignal`; when it fires it produces a `PodDraftEvent` (the pod), and `PodSignalMember` rows are the roster that carries across. All in `bot/models.py`.
 
-- **`PodSignal`** — one interest surface. `kind` is `poll` (a launcher slot), `queue` (a `/draft` "right now" lobby), or `scheduled` (a graduated RSVP card). `status` is `open` → `fired` → `expired`. Carries `bucket`, `signal_date`, `slot_time`, `set_code`, pairing/seating/timer config, and `event_id` once fired. No SQLAlchemy `Enum` types anywhere in the pod models — status/kind/rsvp are plain strings.
+- **`PodSignal`** — one interest surface. `kind` is `poll` (a launcher slot), `queue` (a `/draft` "right now" lobby), or `scheduled` (a graduated RSVP card). `status` is `open` → `fired` → `expired`. Carries `bucket`, `signal_date`, `slot_time`, `set_code`, pairing/seating/timer config, `format_locked`, and `event_id` once fired. `format_locked` gates the whole Latest/Flashback preference system off: only a graduated launcher slot is flex (`format_locked` false), where the format resolves from the roster; every `/draft` pod, championship, and mock chose its set up front and is locked. No SQLAlchemy `Enum` types anywhere in the pod models — status/kind/rsvp are plain strings.
 - **`PodSignalMember`** — one roster row per `(signal_id, discord_user_id)`. `rsvp` is `yes` / `maybe` / `no` (default `yes`); `format_interest` is a string array.
 - **`PodDraftEvent`** — the pod itself. `socket_status` walks `pending` → `reminded` → `connected` → `draft_done` → `complete`. `kind` is `tournament` (default) or `mock`. Holds `draftmancer_session`, thread ids, pairing/seating mode, bracket/team state, and the draft log. Children: `PodDraftParticipant`, `PodDraftMatch`, `PodDraftDmMessage`, `PodDraftReplay`.
 
@@ -65,6 +65,8 @@ Ad-hoc `/draft` (`DraftLauncherView` in `bot/commands/pod_queue.py`) covers both
 Only scheduled cards use the full Yes / Maybe / No mechanics; poll and queue members are implicit Yes. States are plain strings (`RSVP_YES/MAYBE/NO` in `pod_signals.py`) on `PodSignalMember.rsvp`. `set_rsvp` upserts Yes/Maybe; **No deletes the roster row** (there is no tracked "not coming" list). The card (`PodRsvpView` in `pod_rsvp.py`) re-renders on every change, grants the `Pod Drafters` role, moves thread membership (Yes/Maybe in, No out), syncs the native event tally, and refreshes the underfill nudge. Pod capacity is 8.
 
 ### 4. Format preference and the flashback vote
+
+The whole preference system in this section applies to **flex** pods only — graduated launcher slots, whose `PodSignal.format_locked` is false. A **format-locked** pod (any `/draft` card or queue, championship, or mock) carries the set its organizer chose, so it renders a plain Yes / Maybe roster with no Latest/Flashback split, its roster reminder drops the Format Preference button, and neither the in-lobby flashback vote nor the second-table format split ever fires. The lock is read per surface from the signal (`pod_launch.format_locked_for_event_sync`, `pod_draft_reminder.signal_format_locked_sync`), and a startup sweep (`pod_rsvp.heal_format_locked_cards`) re-renders a still-gathering locked card that predates the lock so it drops any stale split.
 
 Vocabulary in `pod_format_interest.py`: `latest`, `flashback`, `cube`. "Flashback" means any set that is not the active/latest set (from `bot/sets.py:active_set_code()`); custom cubes (Peasant, Samp) are separate. "Flexible" is not stored — holding both `latest` and `flashback` is what flexible means (`Player.is_flexible`).
 

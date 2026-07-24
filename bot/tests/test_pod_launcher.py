@@ -78,6 +78,13 @@ def test_reminder_view_confirms_yes_or_no_and_opens_format_preference():
     assert custom_ids == ["podreminderrsvp:yes:EVT9", "podreminderrsvp:no:EVT9", "podremindfmt:EVT9"]
 
 
+def test_format_locked_reminder_view_drops_format_preference():
+    view = build_reminder_view("EVT9", format_locked=True)
+
+    custom_ids = [child.custom_id for child in view.children]
+    assert custom_ids == ["podreminderrsvp:yes:EVT9", "podreminderrsvp:no:EVT9"]
+
+
 def test_open_slot_button_is_enabled_a_closed_one_disabled():
     view = PodPollView([_lazy("AFTERNOON", STATUS_EXPIRED), _lazy("EARLY", STATUS_OPEN)])
 
