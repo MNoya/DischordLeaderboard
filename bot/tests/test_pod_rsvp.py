@@ -324,18 +324,15 @@ def test_team_rosters_replace_the_rsvp_columns_in_flight():
         pod_team.TEAM_A: [TeamBoardMember("Green One", None), TeamBoardMember("Green Two", None)],
         pod_team.TEAM_B: [TeamBoardMember("Blue One", None), TeamBoardMember("Blue Two", None)],
     }
-    team_wins = {pod_team.TEAM_A: 2, pod_team.TEAM_B: 1}
 
     embed = build_rsvp_embed(
         "Early Pod", event_time, {RSVP_YES: []}, status_line=CARD_STATUS_PLAYING, team_draft=True,
-        team_rosters=team_rosters, team_wins=team_wins,
+        team_rosters=team_rosters,
     )
 
     values = "\n".join(field.value for field in embed.fields)
-    names = "\n".join(field.name for field in embed.fields)
     assert all(member in values for member in ("Green One", "Blue Two"))
     assert not any(field.name == TIME_LABEL for field in embed.fields)
-    assert "2" in names and "1" in names
 
 
 def test_team_columns_show_record_and_colors_once_finalized():
@@ -347,7 +344,7 @@ def test_team_columns_show_record_and_colors_once_finalized():
 
     embed = build_rsvp_embed(
         "Early Pod", event_time, {RSVP_YES: []}, status_line="🏆 Green One wins the draft 3-1",
-        team_draft=True, team_rosters=team_rosters, team_wins={pod_team.TEAM_A: 3, pod_team.TEAM_B: 1},
+        team_draft=True, team_rosters=team_rosters,
     )
 
     values = "\n".join(field.value for field in embed.fields)

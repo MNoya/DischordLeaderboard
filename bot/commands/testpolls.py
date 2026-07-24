@@ -331,14 +331,14 @@ async def setup(bot: commands.Bot) -> None:
         }
         final_line = pod_team.draft_result_line(pod_team.TEAM_A, [f"**{n}**" for n in green], 3, 1)
 
-        for status_line, rosters, wins in (
-            (CARD_STATUS_DRAFTING, gathering, {pod_team.TEAM_A: 0, pod_team.TEAM_B: 0}),
-            (CARD_STATUS_PLAYING, gathering, {pod_team.TEAM_A: 2, pod_team.TEAM_B: 1}),
-            (final_line, final, {pod_team.TEAM_A: 3, pod_team.TEAM_B: 1}),
+        for status_line, rosters in (
+            (CARD_STATUS_DRAFTING, gathering),
+            (CARD_STATUS_PLAYING, gathering),
+            (final_line, final),
         ):
             embed = build_rsvp_embed(
                 name, event_time, {}, set_code=set_code, status_line=status_line,
-                team_draft=True, team_rosters=rosters, team_wins=wins,
+                team_draft=True, team_rosters=rosters,
             )
             await ctx.send(embed=embed)
 

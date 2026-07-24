@@ -284,7 +284,6 @@ def build_rsvp_embed(
     roster_interests: dict[str, list[tuple[str, tuple[str, ...]]]] | None = None,
     locked_roster: list[DraftedPlayer] | None = None, draft_complete: bool = False,
     team_rosters: dict[str, list[TeamBoardMember]] | None = None,
-    team_wins: dict[str, int] | None = None,
 ) -> discord.Embed:
     """The RSVP surface. Time and the roster columns are embed fields so sesh's vertical breathing
     room comes for free. `role_time` keys the slot emoji; it defaults to `event_time` and callers
@@ -300,9 +299,8 @@ def build_rsvp_embed(
     absolute time and calendar link — those help someone deciding to sign up, not a draft in flight —
     and closes on how long ago the pod started, since the pod name already carries the date.
     `team_rosters` maps team key to its members and takes the same in-flight treatment for a team
-    draft, rendering the two team columns in place of the RSVP columns; `team_wins` folds each team's
-    running match-win count into its column header. Once the draft finalizes the members carry each
-    player's record and deck colors, which the column then shows beside the name."""
+    draft, rendering the two team columns in place of the RSVP columns. Once the draft finalizes the
+    members carry each player's record and deck colors, which the column then shows beside the name."""
     unix = int(event_time.timestamp())
     note = f"\n> {description}" if description else ""
     symbol = emojis.get(set_code.lower()) if set_code else ""
@@ -312,7 +310,7 @@ def build_rsvp_embed(
     if team_rosters is not None:
         header = f"{title}\n{status_line}" if status_line else title
         embed = discord.Embed(description=f"{header}{note}", color=discord.Color.green())
-        _add_team_columns(embed, team_rosters, team_wins)
+        _add_team_columns(embed, team_rosters)
         embed.add_field(name=NBSP, value=f"<t:{unix}:R>", inline=False)
         return embed
     if locked_roster is not None:
@@ -405,17 +403,14 @@ def _final_standings_row(rank: int, player: DraftedPlayer) -> str:
 
 
 def _add_team_columns(
-    embed: discord.Embed, team_rosters: dict[str, list[TeamBoardMember]], team_wins: dict[str, int] | None,
+    embed: discord.Embed, team_rosters: dict[str, list[TeamBoardMember]],
 ) -> None:
-    """Green / Blue roster columns for a team draft in flight, Discord names only, each header carrying
-    the team's running match wins. Mirrors the team board's roster header, the surface these players
-    report on, so the two never drift. Once the draft finalizes each row also carries the player's
-    record and deck colors."""
+    """Green / Blue roster columns for a team draft in flight, Discord names only. Mirrors the team
+    board's roster header, the surface these players report on, so the two never drift. Once the draft
+    finalizes each row also carries the player's record and deck colors."""
     for team in (pod_team.TEAM_A, pod_team.TEAM_B):
         members = team_rosters.get(team) or []
         header = f"{pod_team.team_emoji(team)} {pod_team.team_label(team)}"
-        if team_wins is not None:
-            header = f"{header}{ROSTER_GAP}{team_wins.get(team, 0)}"
         value = "\n".join(_team_member_row(member) for member in members) or "—"
         embed.add_field(name=header, value=value, inline=True)
 
@@ -1033,26 +1028,26 @@ async def _edit_scheduled_card(bot: commands.Bot, event_id: str, name: str, even
     set_code = await asyncio.to_thread(load_event_set_code_sync, event_id)
     pairing_mode = await asyncio.to_thread(load_event_pairing_mode_sync, event_id)
     status_line = await resolve_card_status_line(event_id)
-    team_rosters, team_wins = await _team_card_rosters(event_id, pairing_mode, status_line)
+    team_rosters = await _team_card_rosters(event_id, pairing_mode, status_line)
     try:
         message = await channel.fetch_message(int(message_id))
         await message.edit(embed=build_rsvp_embed(
             name, event_time, rosters, slot_time, description, set_code=set_code,
             team_draft=pairing_mode == "team", status_line=status_line,
-            roster_interests=roster_interests, team_rosters=team_rosters, team_wins=team_wins))
+            roster_interests=roster_interests, team_rosters=team_rosters))
     except discord.HTTPException:
         log.warning(f"could not edit scheduled card {message_id}", exc_info=True)
 
 
 async def _team_card_rosters(
     event_id: str, pairing_mode: str | None, status_line: str | None,
-) -> tuple[dict[str, list[TeamBoardMember]] | None, dict[str, int] | None]:
-    """Green / Blue rosters plus running wins for a team draft past gathering, read from the same board
-    rows the players report on. None while the pod still gathers or before teams are assigned, so the
-    card keeps its RSVP columns until the draft locks the teams in. Records and deck colors ride the
-    members only once the draft finalizes, so an opponent can't scout colors while matches are live."""
+) -> dict[str, list[TeamBoardMember]] | None:
+    """Green / Blue rosters for a team draft past gathering, read from the same board rows the players
+    report on. None while the pod still gathers or before teams are assigned, so the card keeps its
+    RSVP columns until the draft locks the teams in. Records and deck colors ride the members only once
+    the draft finalizes, so an opponent can't scout colors while matches are live."""
     if pairing_mode != "team" or status_line is None:
-        return None, None
+        return None
     board = await asyncio.to_thread(load_team_board_data, event_id)
     if board.finalized:
         rosters = board.rosters
@@ -1062,8 +1057,8 @@ async def _team_card_rosters(
             for team, members in board.rosters.items()
         }
     if not any(rosters.values()):
-        return None, None
-    return rosters, board.wins
+        return None
+    return rosters
 
 
 async def refresh_scheduled_card(bot: commands.Bot, event_id: str) -> None:
