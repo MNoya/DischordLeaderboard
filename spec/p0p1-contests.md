@@ -1,0 +1,214 @@
+# P0P1 Multiple Set Support
+
+Support for future p0p1 contests. Today everything is hard-coded to MSH — set code, name,
+voting deadline, scoring date, the eligible-card pool, and the ratings fixture wiring. This
+spec makes adding a future contest a repeatable operation, and designs (pending maintainer
+sign-off) a participant-history view across contests.
+
+This came out of a grilling/domain-modeling session.
+
+## Human-written high-level summary
+
+- Support contests for future sets
+- Support archived contests
+- (To discuss) - Participant history pages where you can see past performance across previous contests
+  - The actual pages are outside the scope of the work of this spec, but we would
+    ideally decide if we want this now because it requires a decision on how we
+    would link participants across contests - the identity approach should be decided now.
+    (See the Participant History implementation section below)
+
+## Glossary
+
+- **Contest** — one P0P1 event per set, identified by set code. Per-set data:
+  `{ code, name, previewsOpen, votingDeadline, cardPool, ratingsSnapshot }`.
+- **Allowlist** — the set codes that have a P0P1 contest = the keys of `P0P1_CONTESTS`.
+  A set with no entry is not a contest.
+- **Featured contest** — the single contest shown at `/p0p1`. Resolved from dates (see rule below).
+- **Frozen contest** — a finished contest, permanently browsable at a stable URL.
+- **Voting window** — `[previewsOpen → votingDeadline)`; picks can be submitted/changed.
+  `votingDeadline` defaults to `release` but can be set earlier per contest.
+- **Reveal window** — `[release → release+28d)`; results shown (midway, then final).
+- **Slots** — the shared 8-slot skeleton (5 mono-color commons, 1 multicolor uncommon, 2
+  wildcards), **set-independent**. Filters by rarity + color only.
+- Dates: `release` and `name` come from `public_sets` (already driven by `bot/sets.py`).
+  `previewsOpen` and optionally `votingDeadline` are the P0P1-specific per-set scalars.
+  Reveal end = `release + 28d`.
+
+## Decisions (settled)
+
+1. **Rotate + keep archive.** One featured contest at a time; past contests frozen and
+   permanently browsable at a stable URL.
+2. **Slots are a shared constant** across all sets (`SLOTS` in `p0p1Slots.ts` stays as-is; the
+   per-set MSH constants leave).
+3. **Featured-contest rule** (evaluate over allowlisted sets, dates from `public_sets`):
+   1. If any set's **voting** window contains now → feature it (**voting wins** on overlap;
+      newest release breaks a multi-match).
+   2. Else if any set's **reveal** window contains now → feature it.
+   3. Else feature the most recently finished contest (max `release+28d ≤ now`).
+4. **Overlap tiebreak = voting wins.** Rationale: voting is time-boxed (miss the release deadline
+   and it's gone forever); a reveal is static and stays reachable at its archived URL, so it can
+   lose the front slot a few days early at no real cost. Additionally, the setup skill **warns**
+   when a new contest's `previewsOpen` falls before the prior set's `release+28d` (i.e. it's about
+   to create an overlap) — so the overlap is deliberate, not a surprise.
+5. **Finalize-ordering guard.** The setup skill **warns** if the outgoing set's ratings fixture
+   isn't `phase: final` before the incoming set could become featured, so an archived contest
+   never gets stuck mid-reveal.
+6. **Frontend data via `import.meta.glob`.** Card pools and ratings fixtures become lazily-loaded,
+   code-split chunks, auto-discovered by filename (`cards-<code>.ts`,
+   `p0p1-ratings-<code>.json`). No per-set import wiring in `realApi.ts`/`mockApi.ts`; no bundle
+   growth as contests accumulate. A missing ratings file (true during voting) is simply absent
+   from the glob map and treated as the existing pre-results kill switch — no placeholder fixture
+   needed.
+7. **Only static per-set config is `P0P1_CONTESTS`.** `name`/dates derive from `public_sets`;
+   each entry carries `previewsOpen` and optionally `votingDeadline` (defaults to `release`).
+8. **Card fixtures standardize on `export default`** (migrate `cards-msh.ts` off its named
+   `cardsMshFixture` export) so the glob loader can load them uniformly.
+9. **Generator emits common + uncommon only** — no rare/mythic. No slot filter accepts rarity
+   `rare` today (checked: `buildBestTeam` only ever considers slot-eligible cards, and every slot
+   filters to common/uncommon), so rares are currently dead weight. Can add a rare tier later if a
+   future slot needs one. Also excludes bonus-sheet / Special Guest printings (17lands folds these
+   under the same expansion code, but they're not part of the drafted set).
+10. **Multi-face card handling.** MSH's only multi-face cards are mythic (out of the pool by rule
+    9), which is why this was never hit. HOB introduces **uncommon Adventures**, which will be in
+    the pool. Two parts:
+    - **Generator:** per-layout field extraction (table below). Slot classification always uses
+      top-level `colors` + `rarity` (so an uncommon Adventure lands correctly in
+      `wildcard_uncommon`, or `multicolor_uncommon` if its combined color identity is 2+).
+    - **Scoring join:** add front-face name normalization
+      (`name.split(" // ")[0].trim()`) applied on both sides of the ratings lookup, so Scryfall's
+      `"Brazen Borrower // Petty Theft"` matches 17lands' `"Brazen Borrower"`.
+    - Adventures are implemented this round; transform/modal-DFC layouts are specified below but
+      not built until a set actually needs them.
+
+    | layout                                        | name (display)       | mana_cost                 | colors    | image                      |
+    | --------------------------------------------- | -------------------- | ------------------------- | --------- | -------------------------- |
+    | normal                                        | top-level            | top-level                 | top-level | top-level `image_uris`     |
+    | adventure                                     | `card_faces[0].name` | `card_faces[0].mana_cost` | top-level | top-level `image_uris`     |
+    | transform / modal dfc(spec only, not built)\_ | `card_faces[0].name` | `card_faces[0].mana_cost` | top-level | `card_faces[0].image_uris` |
+
+## Open questions — **for the maintainer**, not to be decided unilaterally
+
+- **Is participant history in the same PR as the core plumbing, or a fast-follow?** It's designed
+  below and is fairly self-contained.
+
+## Implementation — core (multi-set plumbing + generator + Adventure handling)
+
+### Frontend: contest registry + featured resolution
+
+- `frontend/src/data/p0p1Slots.ts`: keep `SLOTS` and the slot filter helpers. Remove
+  `P0P1_SET_CODE` / `P0P1_SET_NAME` / `P0P1_VOTING_DEADLINE` / `P0P1_SCORING_DATE` /
+  `P0P1_NEXT_SET_CODE` / `P0P1_NEXT_SET_NAME`. Add:
+  - `P0P1_CONTESTS: Record<string, { previewsOpen: string; votingDeadline?: string }>` — the
+    allowlist + per-set config (the setup skill appends one entry per set). `votingDeadline`
+    defaults to the set's `release` date from `public_sets` when omitted.
+  - `resolveFeaturedContest(sets, now)` implementing the rule in Decision 3, where `sets` comes
+    from `public_sets` (release date + name) intersected with the allowlist. Returns
+    `{ code, name, previewsOpen, votingDeadline, revealEnd, isVoting/isReveal/isFrozen }`.
+- `frontend/src/data/realApi.ts` (currently around L1513-1526): replace the static
+  `cards-msh` / `p0p1-ratings-msh` imports with:
+
+  ```ts
+  const cardLoaders = import.meta.glob("./fixtures/cards-*.ts", {
+    import: "default",
+  });
+  const ratingLoaders = import.meta.glob("./fixtures/p0p1-ratings-*.json");
+  ```
+
+  `fetchP0P1Cards(code)` / `fetchP0P1Ratings(code)` index by `code` and `await` the matching
+  loader; ratings resolves to `null` when absent. Mirror the same change in
+  `frontend/src/data/mockApi.ts`.
+
+- `frontend/src/data/useP0P1Ballot.ts` (`deriveP0P1Phase` and its inputs): source the featured
+  contest's code + dates from `resolveFeaturedContest(...)` instead of the module constants. Phase
+  derivation logic itself is unchanged.
+- `frontend/src/data/fixtures/cards-msh.ts`: convert its named export to `export default`.
+
+### Frontend: name normalization (Adventures)
+
+- `frontend/src/data/p0p1Results.ts`: add `normalizeCardName(name)`. Apply it when building the
+  ratings lookup and when looking up a pick's rating (see Decision 10). `buildBestTeam` already
+  only considers slot-eligible cards — no other change needed there.
+
+### Frontend: archive routing
+
+- `frontend/src/App.tsx`: add `/p0p1/:setCode` → `P0P1Page`, rendering a frozen/terminal view for
+  any allowlisted set regardless of date (reuses `FinalResults`). `/p0p1` (no param) stays = the
+  resolved featured contest.
+- `frontend/src/pages/P0P1Page.tsx`: take the contest code from the route param, falling back to
+  the resolved featured contest for the bare `/p0p1`.
+- **Out of scope:** a discovery UI (an index/list page to _find_ old contests without already
+  knowing the code). Stable URLs work; reaching them requires the code or a link (e.g. a future
+  result-row click). Follow-up.
+
+### Bot: card-pool generator
+
+- New `bot/scripts/fetch_p0p1_cards.py`: pull `set:<scryfall_code>` from Scryfall, filter to
+  **common + uncommon**, exclude bonus-sheet / Special Guest printings and non-draftable extras,
+  and emit `frontend/src/data/fixtures/cards-<code>.ts` (`export default Card[]`) using the
+  per-layout extraction table in Decision 10. Confirm the Scryfall set code vs the 17lands
+  expansion code up front — they can diverge for promos/Alchemy/supplemental sets, and a mismatch
+  breaks the ratings join silently.
+
+### New skill: p0p1-contest-setup
+
+Runs the generator, appends the `P0P1_CONTESTS` entry, and validates the handoff. Never
+commits or pushes (matches `p0p1-phase`'s convention). Must:
+
+- Warn on overlap (Decision 4) and on finalize-ordering (Decision 5).
+- Run at/after full spoiler (voting needs the complete card pool); a late-spoiler top-up re-run is
+  fine.
+- Report a ratings join-check when a ratings fixture exists: for each pool card, did it match a
+  rating by normalized name? Flag misses (especially `//` and special-character names). Note that
+  a pool-vs-ratings count gap is _expected_ (17lands folds bonus sheets into the same expansion
+  code; the pool excludes rare/mythic) and is not itself an error signal — only unmatched
+  _pool_ cards are.
+
+`p0p1-phase` is **unchanged** — it still produces `p0p1-ratings-<code>.json` weeks later (midway,
+then final), independent of setup. Ordering dependency: the next set must already be in
+`bot/sets.py` (via `/add-set`) before its contest can resolve dates.
+
+## Participant history — **pending maintainer sign-off on identity approach**
+
+- **Identity (open question).** The original `public_p0p1_ballots` view deliberately used an
+  unstable `dense_rank()` `ballot_id` to avoid correlating voters across fetches. History needs
+  a stable identifier. Two options:
+  1. **Expose `user_id` directly** — it's the Supabase auth UUID, already on `p0p1_voters`
+     (a regular table, no `auth.users` join, so the Supabase lint that motivated the original
+     migration doesn't apply). Simpler, no schema change.
+  2. **Add a random `public_id`** column to `p0p1_voters` — extra indirection so the auth UUID
+     never appears in URLs or API responses.
+- **Routing:** `/p0p1/players/:id` → a history page (`:id` is whichever identifier above).
+- **Page logic:** query the set codes where this voter has ballots (participation-scoped,
+  not a full archive scan), then for each, load that contest's ballots + card fixture + ratings
+  fixture and reuse the existing `rankBallots` / `buildStandingsList` to compute that entrant's
+  finish per set. **No new score table.** Caveat: finish is recomputed with _current_ scoring
+  logic against frozen fixtures — a future scoring-formula change would retroactively restate
+  history.
+- **Entry point:** a result-row click in `FinalResults` targets the history page. Bonus cleanup
+  this unlocks: the "your row" highlight could stop parsing the Discord id out of the avatar URL
+  (`findUserBallot` in `p0p1Results.ts`) and use the stable identifier instead.
+
+## Out of scope / follow-ups
+
+- Archive discovery UI (a browsable index of past contests).
+- transform / modal_dfc generator path (specified, not built until a set needs it).
+- Moving P0P1 config into the database (the TODO that used to sit in `p0p1Slots.ts`) — the glob +
+  `P0P1_CONTESTS` map supersede the need for this.
+
+## Verification (for whoever implements)
+
+- **Multi-set plumbing:** add a second fixture pair (`cards-<code>.ts` +
+  `p0p1-ratings-<code>.json`) and a `P0P1_CONTESTS` entry with dates that make it the featured
+  contest; `npm run dev`, confirm `/p0p1` renders it, the 8 slots populate from its pool, and
+  `/p0p1/msh` still renders MSH frozen.
+- **Featured resolution:** unit-test `resolveFeaturedContest` for voting-only, reveal-only, gap,
+  and the overlap case (voting wins).
+- **Adventure handling:** run the generator on HOB (or another Adventure set), confirm an
+  uncommon Adventure appears with the creature's name/cost/art and lands in
+  `wildcard_uncommon`; with a ratings fixture present, confirm the normalized join matches it (no
+  silent zero score).
+- **Generator filters:** confirm output is common+uncommon only and excludes Special Guests.
+- **Bundle:** `npm run build`, confirm card/ratings fixtures split into separate chunks rather
+  than inflating the main bundle.
+- **Participant history (if built):** `alembic upgrade head` + `alembic check`; a result-row
+  click loads the history page and shows finishes only for sets the player actually entered.
