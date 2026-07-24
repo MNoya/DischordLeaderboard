@@ -230,6 +230,7 @@ class PodDraftEvent(Base):
     created_at          = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     finalized_at        = Column(DateTime(timezone=True), nullable=True)
     championship_posted_at = Column(DateTime(timezone=True), nullable=True)
+    closed_decklist     = Column(Boolean, nullable=False, server_default=text("false"))
 
     participants = relationship(
         "PodDraftParticipant",

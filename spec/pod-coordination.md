@@ -66,6 +66,12 @@ On busy nights, once the first table fills, the bot offers a **second table** to
 
 Report your results in the thread as you play. Winning games earns pod points on the leaderboard, so a good run in a pod moves you up the standings the same as a strong ladder result. Pod results are always public: you do not need to opt in, and playing pods is enough to appear on the board.
 
+## Closed decklists
+
+Some pods hide their decklists and draft log on the website until the pod finishes, so nobody can scout an opponent's cards mid-tournament. Standings, pairings, and round results stay visible the whole time. Set Championship pods start closed; a mod can turn Closed Decklist on or off for any pod from the pod Settings panel.
+
+While a pod is closed, sign in with Discord on the website to see your own deck and scroll through your own draft during the rounds. Every decklist opens for everyone once the pod finishes.
+
 ## Your first pod, start to finish
 
 1. See the Daily Pod Launcher post and click a slot that fits your day.
@@ -77,5 +83,7 @@ Report your results in the thread as you play. Winning games earns pod points on
 ## For mods
 
 Beyond the daily launcher, you can schedule a pod at any time with the `/draft` command. Pick "Right now" to open a live lobby immediately, or pick a time to post a scheduled signup card. You can preset the set, pairing style, pick timer, and which role gets notified. A `/draft` pod plays the one set you pick, so its card and reminder show a single Yes / Maybe / No roster with no Latest and Flashback split and no format vote. The signup buttons and thread work the same as a launcher slot.
+
+The pod Settings panel also carries a Closed Decklist toggle: turn it on to hide that pod's decklists on the website until it finishes. Set Championship pods start with it on.
 
 Inside a pod thread, the pod controls (ready check, start, team draft, pause, restart, seeding, standings, champion) run the draft. The daily launcher, reminders, format votes, and second-table offers all run on their own, so most pods need no hands-on management.

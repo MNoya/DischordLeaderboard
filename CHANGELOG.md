@@ -1,5 +1,10 @@
 # LLU Updates
 
+## Jul 23, 2026
+🔒 New Closed Decklist mode hides a pod's decklists and draft log on the website until the pod finishes
+🏆 Set Championship pods start with Closed Decklist on; mods can toggle it for any pod from the pod Settings panel
+👤 Sign in with Discord to see your own deck and scroll through your own draft while a closed pod is still running
+
 ## Jul 18, 2026
 🔒 Old daily launchers now close out, marked Signups Closed with the signup buttons removed
 🗑️ Canceling a pod marks its card canceled and clears the RSVP buttons

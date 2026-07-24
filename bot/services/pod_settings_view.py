@@ -78,6 +78,12 @@ def max_players_notice(actor: str, count: int) -> str:
     return settings_change_message(actor, "Max players", str(count))
 
 
+def closed_decklist_notice(actor: str, closed: bool) -> str:
+    subtext = ("Decklists and the draft logs stay hidden on the website until the pod finishes"
+               if closed else "Decklists and the draft log show on the website now")
+    return settings_change_message(actor, "Closed Decklist", "On" if closed else "Off", subtext=subtext)
+
+
 class PodSettingsView(ui.View):
     def __init__(self, *, on_format: Apply | None = None, on_pairing: Apply | None = None,
                  current_code: str | None = None, current_mode: str | None = None,
@@ -94,6 +100,7 @@ class PodSettingsView(ui.View):
                  on_link: LinkApply | None = None,
                  on_cancel: CancelApply | None = None,
                  on_reschedule: Apply | None = None,
+                 on_closed_decklist: Apply | None = None, current_closed_decklist: bool = False,
                  event_name: str | None = None,
                  notice_channel: discord.abc.Messageable | None = None) -> None:
         super().__init__(timeout=300)
@@ -118,6 +125,8 @@ class PodSettingsView(ui.View):
         self.on_link = on_link
         self.on_cancel = on_cancel
         self.on_reschedule = on_reschedule
+        self.on_closed_decklist = on_closed_decklist
+        self.current_closed_decklist = current_closed_decklist
         self.event_name = event_name
         if on_format is not None:
             self.add_item(_FormatSetting(current_code))
@@ -137,6 +146,8 @@ class PodSettingsView(ui.View):
             self.add_item(_LinkPlayersButton(row=3))
         if kick_targets_provider is not None and on_kick is not None:
             self.add_item(_KickPlayerButton(row=3))
+        if on_closed_decklist is not None:
+            self.add_item(_ClosedDecklistButton(current_closed_decklist, row=4))
         if on_reschedule is not None:
             self.add_item(_RescheduleButton(row=4))
         if on_cancel is not None:
@@ -171,7 +182,10 @@ class PodSettingsView(ui.View):
             on_max_players=self.on_max_players, current_max_players=self.current_max_players,
             kick_targets_provider=self.kick_targets_provider, on_kick=self.on_kick,
             link_targets_provider=self.link_targets_provider, on_link=self.on_link,
-            on_cancel=self.on_cancel, on_reschedule=self.on_reschedule, event_name=self.event_name,
+            on_cancel=self.on_cancel, on_reschedule=self.on_reschedule,
+            on_closed_decklist=self.on_closed_decklist,
+            current_closed_decklist=self.current_closed_decklist,
+            event_name=self.event_name,
             notice_channel=self.notice_channel,
         ))
         channel = self.notice_channel or interaction.channel
@@ -186,6 +200,16 @@ class PodSettingsView(ui.View):
             seating_mode=self.current_seating,
             championship=is_championship(self.event_name),
         )
+
+    async def _apply_closed_decklist(self, interaction: discord.Interaction, closed: bool) -> None:
+        await interaction.response.defer()
+        err = await self.on_closed_decklist(interaction, "1" if closed else "0")
+        if err:
+            await interaction.followup.send(f"⚠️ {err}", ephemeral=True)
+            return
+        self.current_closed_decklist = closed
+        notice = closed_decklist_notice(actor_label(interaction), closed)
+        await self._render(interaction, [(notice, settings_notice_marker("Closed Decklist"))])
 
     async def _apply_format_code(self, interaction: discord.Interaction, code: str) -> None:
         if not await self._commit(interaction, self.on_format, "current_code", code):
@@ -334,6 +358,17 @@ class _MaxPlayersSelect(ui.Select):
                 max_players_notice(actor_label(interaction), count),
                 marker=settings_notice_marker("Max Players"),
             )
+
+
+class _ClosedDecklistButton(ui.Button):
+    def __init__(self, closed: bool, row: int | None = None) -> None:
+        super().__init__(
+            label=f"Closed Decklist: {'On' if closed else 'Off'}",
+            emoji="🔒" if closed else "🔓", style=discord.ButtonStyle.grey, row=row,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await self.view._apply_closed_decklist(interaction, not self.view.current_closed_decklist)
 
 
 class _RescheduleButton(ui.Button):

@@ -41,6 +41,7 @@ import {
   useSets,
 } from "../data/hooks";
 import { resolveDeck } from "../data/draft-artifact";
+import { usePodDecklistAccess } from "../data/podDecklistAccess";
 import type {
   PodEventParticipantRow,
   PodEventSummary,
@@ -682,6 +683,7 @@ function EventStandings({ event }: { event: PodEventSummary }) {
   const { data: rows, isLoading } = usePodEventParticipants(event.eventId);
   const [deckTarget, setDeckTarget] = useState<PodEventParticipantRow | null>(null);
   const { data: draftArtifact } = usePodDraftArtifact(event.eventId);
+  const decklistAccess = usePodDecklistAccess(event);
   const deckTargetMainboard = useMemo(
     () =>
       draftArtifact && deckTarget?.seatIndex != null
@@ -699,7 +701,13 @@ function EventStandings({ event }: { event: PodEventSummary }) {
     if (!deckTarget || visible.length === 0) return;
     const index = visible.indexOf(deckTarget);
     if (index === -1) return;
-    setDeckTarget(visible[(index + direction + visible.length) % visible.length]);
+    for (let step = 1; step <= visible.length; step++) {
+      const next = visible[(((index + direction * step) % visible.length) + visible.length) % visible.length];
+      if (decklistAccess.canViewSeat(next.avatarUrl)) {
+        setDeckTarget(next);
+        return;
+      }
+    }
   };
   return (
     <>
@@ -710,10 +718,10 @@ function EventStandings({ event }: { event: PodEventSummary }) {
             : visible.map((p) => (
                 <StandingRow
                   key={`${p.eventId}-${p.displayName}`}
-                  p={p}
+                  p={decklistAccess.canViewSeat(p.avatarUrl) ? p : { ...p, deckColors: null }}
                   profileHref={p.playerSlug ? playerPath(p.playerSlug, event.setCode) : null}
-                  logHref={draftArtifact ? `/pods/${event.slug}/${p.playerSlug ?? p.seatIndex}` : null}
-                  onShowDeck={p.deckScreenshotUrl ? () => setDeckTarget(p) : undefined}
+                  logHref={draftArtifact && decklistAccess.canViewSeat(p.avatarUrl) ? `/pods/${event.slug}/${p.playerSlug ?? p.seatIndex}` : null}
+                  onShowDeck={p.deckScreenshotUrl && decklistAccess.canViewSeat(p.avatarUrl) ? () => setDeckTarget(p) : undefined}
                 />
               ))}
         </div>
@@ -754,7 +762,9 @@ function EventStandings({ event }: { event: PodEventSummary }) {
             record: deckTarget.record,
           }}
           draftLogHref={
-            draftArtifact ? `/pods/${event.slug}/${deckTarget.playerSlug ?? deckTarget.seatIndex}` : null
+            draftArtifact && decklistAccess.canViewSeat(deckTarget.avatarUrl)
+              ? `/pods/${event.slug}/${deckTarget.playerSlug ?? deckTarget.seatIndex}`
+              : null
           }
           breakdownHref={`/pods/${event.slug}?player=${encodeURIComponent(podDiscordName(deckTarget))}`}
           onClose={() => setDeckTarget(null)}

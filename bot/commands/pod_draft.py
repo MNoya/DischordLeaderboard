@@ -34,6 +34,7 @@ from bot.services.pod_draft_manager import (
 )
 from bot.services.pod_drafts import (
     is_championship,
+    load_event_closed_decklist_sync,
     load_event_id_by_name_sync,
     load_event_id_by_thread_sync,
     load_event_name_sync,
@@ -45,6 +46,7 @@ from bot.services.pod_drafts import (
     attach_arena_alias,
     lobby_match_status,
     search_event_names_sync,
+    set_event_closed_decklist_sync,
 )
 from bot.commands.pod_rsvp import (
     fetch_channel,
@@ -897,6 +899,12 @@ async def build_pod_settings_view(bot, event_id: str, *, is_owner: bool) -> PodS
     async def on_max_players(inter: discord.Interaction, value: str) -> str | None:
         return await set_event_max_players(event_id, int(value))
 
+    current_closed_decklist = await asyncio.to_thread(load_event_closed_decklist_sync, event_id)
+
+    async def on_closed_decklist(inter: discord.Interaction, value: str) -> str | None:
+        await asyncio.to_thread(set_event_closed_decklist_sync, event_id, value == "1")
+        return None
+
     on_seating = None
     seat_order_provider = None
     kick_targets_provider = None
@@ -945,7 +953,9 @@ async def build_pod_settings_view(bot, event_id: str, *, is_owner: bool) -> PodS
         current_max_players=current_max_players,
         kick_targets_provider=kick_targets_provider, on_kick=on_kick,
         link_targets_provider=link_targets_provider, on_link=on_link,
-        on_cancel=on_cancel, on_reschedule=on_reschedule, event_name=event_name,
+        on_cancel=on_cancel, on_reschedule=on_reschedule,
+        on_closed_decklist=on_closed_decklist, current_closed_decklist=current_closed_decklist,
+        event_name=event_name,
         notice_channel=notice_channel,
     )
 

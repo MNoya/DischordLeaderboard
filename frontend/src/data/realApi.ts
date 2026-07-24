@@ -1439,6 +1439,7 @@ function adaptPodEvent(row: Record<string, unknown>): PodEventSummary {
     ordinal: (row.ordinal ?? null) as number | null,
     tableIndex: (row.table_index ?? 1) as number,
     isTeamDraft: (row.is_team_draft ?? false) as boolean,
+    closedDecklist: (row.closed_decklist ?? false) as boolean,
   };
 }
 

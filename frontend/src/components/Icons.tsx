@@ -12,6 +12,7 @@ import {
   Headphones as LR_Headphones,
   Image as LR_Image,
   Info as LR_Info,
+  Lock as LR_Lock,
   Music as LR_Music,
   RefreshCw as LR_RefreshCw,
   Trophy as LR_Trophy,
@@ -53,6 +54,7 @@ export const ChevronLeft = withShrink(LR_ChevronLeft);
 export const ChevronRight = withShrink(LR_ChevronRight);
 export const ChevronsRight = withShrink(LR_ChevronsRight);
 export const Clock = withShrink(LR_Clock);
+export const Lock = withShrink(LR_Lock);
 export const ExternalLink = withShrink(LR_ExternalLink);
 export const Globe = withShrink(LR_Globe);
 export const Headphones = withShrink(LR_Headphones);

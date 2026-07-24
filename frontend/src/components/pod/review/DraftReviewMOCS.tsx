@@ -47,9 +47,12 @@ interface DraftReviewMOCSProps {
   onNavigate?: (seatIndex: number, pack: number, pick: number) => void;
   eventId?: string;
   seatInfo?: ReviewSeatInfo[];
+  // Pin the review to one seat in scroll-only mode: no seat switching, no table, no other-seat decks.
+  soloSeat?: number;
 }
 
-export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, initialPack = 0, initialPick = 0, onClose, backHref, onNavigate, eventId, seatInfo }: DraftReviewMOCSProps) {
+export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, initialPack = 0, initialPick = 0, onClose, backHref, onNavigate, eventId, seatInfo, soloSeat }: DraftReviewMOCSProps) {
+  const solo = soloSeat != null;
   const setSymbol = `/set-symbols/${meta.setCode.toLowerCase()}.png`;
   const eventTitle = useMemo(() => cleanPodEventName(meta.name, meta.setCode), [meta]);
   const N = artifact.seats.length;
@@ -83,6 +86,7 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, initialPack =
   const [pack, setPack] = useState(startPack);
   const [pick, setPick] = useState(startPick);
   const [viewMode, setViewMode] = usePersistentState<"step" | "scroll">("draftReviewViewMode", defaultViewMode());
+  const effectiveViewMode = solo ? "scroll" : viewMode;
   const [showTable, setShowTable] = usePersistentBool("draftReviewShowTable", false);
   const [deckLayout, setDeckLayout] = usePersistentState<"order" | "columns">("draftReviewDeckLayout", "columns");
   const [revealMode, setRevealMode] = usePersistentState<RevealMode>("draftReviewRevealMode", "revealed");
@@ -144,6 +148,7 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, initialPack =
     setRevealed(false);
   };
   const changeSeat = (i: number) => {
+    if (solo) return;
     if (linearIndex === totalPicks - 1) {
       setPack(0);
       setPick(0);
@@ -268,8 +273,9 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, initialPack =
         onSelectRight={() => changeSeat(right)}
         onClose={onClose}
         backHref={backHref}
-        scrollOn={viewMode === "scroll"}
+        scrollOn={effectiveViewMode === "scroll"}
         onToggleScroll={() => setViewMode(viewMode === "scroll" ? "step" : "scroll")}
+        solo={solo}
       />
       <Header
         setSymbol={setSymbol}
@@ -290,12 +296,13 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, initialPack =
         onRevealMode={changeReveal}
         showTable={showTable}
         onToggleTable={() => setShowTable((v) => !v)}
-        viewMode={viewMode}
+        viewMode={effectiveViewMode}
         onViewMode={setViewMode}
+        solo={solo}
       />
       <div className="relative flex min-h-0 flex-1">
         <section className="relative flex min-w-0 flex-1 flex-col">
-          {viewMode === "scroll" ? (
+          {effectiveViewMode === "scroll" ? (
             <>
               <div className="absolute right-2 top-1 z-20 lg:hidden">
                 <MobileToggle
@@ -353,23 +360,25 @@ export function DraftReviewMOCS({ artifact, meta, initialSeat = 0, initialPack =
             </>
           )}
         </section>
-        <aside
-          className={cn(
-            "relative hidden shrink-0 overflow-hidden bg-surface/40 transition-[width] duration-200 lg:block",
-            showTable ? "w-[300px] border-l border-border" : "w-0",
-          )}
-        >
-          <div className="h-full w-[300px]">
-            <PlayerGrid
-              seats={seats}
-              activeSeat={seat}
-              onSelect={changeSeat}
-              passRight={dir === 1}
-            />
-          </div>
-        </aside>
+        {!solo && (
+          <aside
+            className={cn(
+              "relative hidden shrink-0 overflow-hidden bg-surface/40 transition-[width] duration-200 lg:block",
+              showTable ? "w-[300px] border-l border-border" : "w-0",
+            )}
+          >
+            <div className="h-full w-[300px]">
+              <PlayerGrid
+                seats={seats}
+                activeSeat={seat}
+                onSelect={changeSeat}
+                passRight={dir === 1}
+              />
+            </div>
+          </aside>
+        )}
       </div>
-      {viewMode === "step" && (
+      {effectiveViewMode === "step" && (
         <BottomPanel
           defaultHeight={deckPanelHeight}
           activeName={active.name}
@@ -502,6 +511,7 @@ function MobileTopBar({
   backHref,
   scrollOn,
   onToggleScroll,
+  solo = false,
 }: {
   setSymbol: string;
   eventTitle: string;
@@ -515,6 +525,7 @@ function MobileTopBar({
   backHref?: string;
   scrollOn: boolean;
   onToggleScroll: () => void;
+  solo?: boolean;
 }) {
   const arrow = passRight ? "»" : "«";
   const name = "truncate font-display text-[13px] tracking-[0.04em] text-subtle [-webkit-tap-highlight-color:transparent] active:text-text";
@@ -540,19 +551,29 @@ function MobileTopBar({
         </button>
       )}
       <div className="flex min-w-0 flex-1 items-center justify-center gap-1.5">
-        <button onClick={onSelectLeft} className={cn(name, "max-w-[78px]")}>
-          {left.name}
-        </button>
-        <span className="shrink-0 font-mono text-[13px] text-subtle">{arrow}</span>
+        {!solo && (
+          <>
+            <button onClick={onSelectLeft} className={cn(name, "max-w-[78px]")}>
+              {left.name}
+            </button>
+            <span className="shrink-0 font-mono text-[13px] text-subtle">{arrow}</span>
+          </>
+        )}
         <span className="max-w-[96px] shrink truncate text-center font-display text-[15px] tracking-[0.06em] text-green">
           {active.name}
         </span>
-        <span className="shrink-0 font-mono text-[13px] text-subtle">{arrow}</span>
-        <button onClick={onSelectRight} className={cn(name, "max-w-[78px]")}>
-          {right.name}
-        </button>
+        {!solo && (
+          <>
+            <span className="shrink-0 font-mono text-[13px] text-subtle">{arrow}</span>
+            <button onClick={onSelectRight} className={cn(name, "max-w-[78px]")}>
+              {right.name}
+            </button>
+          </>
+        )}
       </div>
-      <MobileToggle label="SCROLL" ariaLabel="Scroll the whole draft" on={scrollOn} onToggle={onToggleScroll} />
+      {!solo && (
+        <MobileToggle label="SCROLL" ariaLabel="Scroll the whole draft" on={scrollOn} onToggle={onToggleScroll} />
+      )}
     </div>
   );
 }
@@ -595,6 +616,7 @@ function Header({
   onToggleTable,
   viewMode,
   onViewMode,
+  solo = false,
 }: {
   setSymbol: string;
   eventTitle: string;
@@ -616,6 +638,7 @@ function Header({
   onToggleTable: () => void;
   viewMode: "step" | "scroll";
   onViewMode: (m: "step" | "scroll") => void;
+  solo?: boolean;
 }) {
   const revealControl = awaitingReveal ? (
     <Tooltip label="Reveal picked card" side="bottom">
@@ -689,14 +712,18 @@ function Header({
 
       <div className="flex flex-1 items-center justify-end gap-2">
         {showPicksToggle}
-        <ScrollToggle on={viewMode === "scroll"} onToggle={() => onViewMode(viewMode === "scroll" ? "step" : "scroll")} />
-        <SwitchToggle
-          label="TABLE"
-          on={showTable}
-          onToggle={onToggleTable}
-          ariaLabel="Show table"
-          tooltip={showTable ? "Hide table" : "Show table"}
-        />
+        {!solo && (
+          <ScrollToggle on={viewMode === "scroll"} onToggle={() => onViewMode(viewMode === "scroll" ? "step" : "scroll")} />
+        )}
+        {!solo && (
+          <SwitchToggle
+            label="TABLE"
+            on={showTable}
+            onToggle={onToggleTable}
+            ariaLabel="Show table"
+            tooltip={showTable ? "Hide table" : "Show table"}
+          />
+        )}
         <button
           onClick={onClose}
           aria-label="Close"

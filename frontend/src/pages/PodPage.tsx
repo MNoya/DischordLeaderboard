@@ -20,6 +20,7 @@ import {
   usePodEvents,
 } from "../data/hooks";
 import { resolveDeck } from "../data/draft-artifact";
+import { usePodDecklistAccess } from "../data/podDecklistAccess";
 import { useCardImageMap } from "../data/cardImages";
 import { podDiscordName, podEventTitle, podSeatName } from "../data/utils";
 import type {
@@ -79,6 +80,7 @@ export function PodPage() {
   const [deckInitialTab, setDeckInitialTab] = useState<DeckTab>("screenshot");
 
   const openDeck = (seat: PodSeat, tab: DeckTab = "screenshot") => {
+    if (!decklistAccess.canViewSeat(seat.avatarUrl)) return;
     setDeckInitialTab(tab);
     setDeckTarget(seat);
   };
@@ -126,11 +128,18 @@ export function PodPage() {
     if (!deckTarget || seats.length === 0) return;
     const index = seats.findIndex((s) => s.seatIndex === deckTarget.seatIndex);
     if (index === -1) return;
-    setDeckTarget(seats[(index + direction + seats.length) % seats.length]);
+    for (let step = 1; step <= seats.length; step++) {
+      const next = seats[(((index + direction * step) % seats.length) + seats.length) % seats.length];
+      if (decklistAccess.canViewSeat(next.avatarUrl)) {
+        setDeckTarget(next);
+        return;
+      }
+    }
   };
   const { data: matches, isLoading: matchesLoading } = usePodEventMatches(eventId);
   const { data: replays, isLoading: replaysLoading } = usePodEventReplays(eventId);
   const { data: setEvents } = usePodEvents(event?.setCode);
+  const decklistAccess = usePodDecklistAccess(event);
 
   const { prevSlug, nextSlug } = useMemo(() => {
     if (!setEvents || !event) return { prevSlug: null, nextSlug: null };
@@ -188,13 +197,12 @@ export function PodPage() {
 
   const seats = useMemo<PodSeat[]>(() => {
     if (!participantRows) return [];
-    const base = assignSeats(participantRows);
-    if (!draftArtifact) return base;
-    return base.map((s) => ({
+    return assignSeats(participantRows).map((s) => ({
       ...s,
-      hasDeckList: resolveDeck(draftArtifact, s.seatIndex) !== null,
+      deckColors: decklistAccess.canViewSeat(s.avatarUrl) ? s.deckColors : null,
+      ...(draftArtifact ? { hasDeckList: resolveDeck(draftArtifact, s.seatIndex) !== null } : {}),
     }));
-  }, [participantRows, draftArtifact]);
+  }, [participantRows, draftArtifact, decklistAccess]);
 
   const participantsBySeatName = useMemo(() => {
     const m = new Map<string, PodSeat>();
@@ -324,7 +332,9 @@ export function PodPage() {
   const eventLabel = podEventTitle(event).toUpperCase();
   const medallionLabel = podEventTitle(event, { teamAsSuffix: false }).toUpperCase();
   const deckLogHref =
-    draftArtifact && deckTarget ? `/pods/${event.slug}/${deckTarget.playerSlug ?? deckTarget.seatIndex}` : null;
+    draftArtifact && deckTarget && decklistAccess.canViewSeat(deckTarget.avatarUrl)
+      ? `/pods/${event.slug}/${deckTarget.playerSlug ?? deckTarget.seatIndex}`
+      : null;
   const open = selectedParticipant !== null;
   const tableMaxPx = open ? TABLE_MAX_SHRUNK : TABLE_MAX_WIDE;
   const loadedMatches = matches ?? [];
@@ -349,6 +359,8 @@ export function PodPage() {
           selectedSeat={selectedSeat}
           onSelect={handleSelectSeat}
           onShowDeck={openDeck}
+          canViewSeat={decklistAccess.canViewSeat}
+          podFinalized={event.isFinalized}
           eventLabel={eventLabel}
           setCode={event.setCode}
           eventSlug={event.slug}
@@ -413,6 +425,7 @@ export function PodPage() {
               highlightedOutcome={highlightedOutcome}
               onSelect={handleSelectSeat}
               onShowDeck={openDeck}
+              canViewDeck={decklistAccess.canViewSeat}
               eventLabel={medallionLabel}
               teamDraft={event.isTeamDraft ?? false}
               eventSlug={event.slug}
@@ -445,6 +458,8 @@ export function PodPage() {
                     setCode={event.setCode}
                     eventSlug={event.slug}
                     hasDraftLog={!!draftArtifact}
+                    canViewSeat={decklistAccess.canViewSeat}
+                    podFinalized={event.isFinalized}
                     onRoundHover={handleRoundHover}
                     onShowDeck={openDeck}
                     isMock={event.kind === "mock"}
@@ -490,6 +505,7 @@ export function PodDraftLogRoute() {
   const eventId = event?.eventId;
   const { data: participantRows, isLoading: participantsLoading } = usePodEventParticipants(eventId);
   const { data: artifact, isLoading: artifactLoading } = usePodDraftArtifact(eventId);
+  const decklistAccess = usePodDecklistAccess(event);
 
   const seats = useMemo(
     () => (participantRows ? assignSeats(participantRows) : []),
@@ -525,6 +541,13 @@ export function PodDraftLogRoute() {
   const current = resolved != null ? seats.find((s) => s.seatIndex === resolved) : null;
   const backHref = `/pods/${slug}${current ? `?player=${encodeURIComponent(current.discordName)}` : ""}`;
 
+  // While the pod is closed a player gets their own draft in scroll-only mode; only organizers and
+  // finished pods open the whole-table review.
+  const soloOwnSeat = !decklistAccess.canViewAll;
+  if (soloOwnSeat && !(current && decklistAccess.canViewSeat(current.avatarUrl))) {
+    return <Navigate to={`/pods/${slug}`} replace />;
+  }
+
   return (
     <DraftReviewMOCS
       artifact={artifact}
@@ -542,6 +565,7 @@ export function PodDraftLogRoute() {
       }}
       eventId={event.eventId}
       seatInfo={seatInfo}
+      soloSeat={soloOwnSeat ? initialSeat : undefined}
     />
   );
 }

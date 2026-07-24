@@ -17,6 +17,8 @@ interface Props {
   selectedSeat: number | null;
   onSelect: (seat: number | null) => void;
   onShowDeck: (p: PodSeat, tab?: DeckTab) => void;
+  canViewSeat?: (playerSlug: string | null | undefined) => boolean;
+  podFinalized?: boolean;
   eventLabel: string;
   setCode: string;
   eventSlug: string;
@@ -132,6 +134,8 @@ export function MobileSeatStack({
   selectedSeat,
   onSelect,
   onShowDeck,
+  canViewSeat = () => true,
+  podFinalized = true,
   eventLabel,
   setCode,
   eventSlug,
@@ -173,6 +177,8 @@ export function MobileSeatStack({
                 setCode={setCode}
                 eventSlug={eventSlug}
                 hasDraftLog={hasDraftLog}
+                canViewSeat={canViewSeat}
+                podFinalized={podFinalized}
                 onShowDeck={onShowDeck}
                 isMock={isMock}
               />

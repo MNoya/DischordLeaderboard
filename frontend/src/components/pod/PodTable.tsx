@@ -17,6 +17,7 @@ interface Props {
   highlightedOutcome?: RoundOutcome | null;
   onSelect: (seat: number | null) => void;
   onShowDeck?: (p: PodSeat) => void;
+  canViewDeck?: (playerSlug: string | null | undefined) => boolean;
   eventLabel: string;
   teamDraft?: boolean;
   eventSlug: string;
@@ -45,6 +46,7 @@ export function PodTable({
   highlightedOutcome = null,
   onSelect,
   onShowDeck,
+  canViewDeck = () => true,
   eventLabel,
   teamDraft = false,
   eventSlug,
@@ -152,6 +154,7 @@ export function PodTable({
                 onShowDeck={onShowDeck}
                 eventSlug={eventSlug}
                 hasDraftLog={hasDraftLog}
+                canViewDeck={canViewDeck(p.avatarUrl)}
                 scale={scale}
               />
             )}
@@ -168,6 +171,7 @@ function ShieldActions({
   onShowDeck,
   eventSlug,
   hasDraftLog,
+  canViewDeck,
   scale,
 }: {
   angle: number;
@@ -175,10 +179,11 @@ function ShieldActions({
   onShowDeck: (p: PodSeat) => void;
   eventSlug: string;
   hasDraftLog: boolean;
+  canViewDeck: boolean;
   scale: number;
 }) {
-  const hasDeck = !!participant.deckScreenshotUrl || !!participant.hasDeckList;
-  const logInternalHref = hasDraftLog
+  const hasDeck = canViewDeck && (!!participant.deckScreenshotUrl || !!participant.hasDeckList);
+  const logInternalHref = hasDraftLog && canViewDeck
     ? `/pods/${eventSlug}/${participant.playerSlug ?? participant.seatIndex}`
     : null;
   const showLog = logInternalHref !== null;

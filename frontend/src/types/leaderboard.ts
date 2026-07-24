@@ -151,6 +151,8 @@ export interface PodEventSummary {
   ordinal?: number | null;
   tableIndex?: number;
   isTeamDraft?: boolean;
+  // Hides decklists + pick-by-pick draft log on the site until the pod finishes
+  closedDecklist?: boolean;
 }
 
 export interface MainboardCard {

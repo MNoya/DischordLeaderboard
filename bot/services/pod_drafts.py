@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import NamedTuple, Sequence
 from urllib.parse import quote
 
-from sqlalchemy import any_, delete, func, select
+from sqlalchemy import any_, delete, func, select, update
 from sqlalchemy.orm import Session
 
 from bot.config import settings
@@ -609,6 +609,7 @@ def record_ondemand_event(
         discord_thread_id=discord_thread_id,
         socket_status="pending",
         kind="tournament",
+        closed_decklist=is_championship(name),
     )
     session.add(event)
     session.flush()
@@ -676,6 +677,7 @@ def record_table_event(session: Session, *, source_event_id: str, format_code: s
         kind="tournament",
         pairing_mode=source.pairing_mode,
         seating_mode=source.seating_mode,
+        closed_decklist=source.closed_decklist,
     )
     session.add(event)
     session.flush()
@@ -788,6 +790,22 @@ def load_event_name_sync(event_id: str) -> str:
         return session.execute(
             select(PodDraftEvent.name).where(PodDraftEvent.id == event_id)
         ).scalar_one_or_none() or "Pod Draft"
+
+
+def load_event_closed_decklist_sync(event_id: str) -> bool:
+    """Whether the pod hides its decklists and draft log on the website until it finishes."""
+    with SessionLocal() as session:
+        return bool(session.execute(
+            select(PodDraftEvent.closed_decklist).where(PodDraftEvent.id == event_id)
+        ).scalar_one_or_none())
+
+
+def set_event_closed_decklist_sync(event_id: str, closed: bool) -> None:
+    with SessionLocal() as session:
+        session.execute(
+            update(PodDraftEvent).where(PodDraftEvent.id == event_id).values(closed_decklist=closed)
+        )
+        session.commit()
 
 
 def delete_event_sync(event_id: str) -> None:

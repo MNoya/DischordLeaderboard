@@ -118,6 +118,15 @@ def test_is_championship_detects_name_case_insensitively():
     assert not is_championship(None)
 
 
+def test_record_ondemand_event_closes_decklist_only_for_championship_name(session):
+    _seed_set(session)
+    champ = _make_event(session, attendees=(), name="SOS Community Championship Pod Draft")
+    normal = _make_event(session, attendees=(), name="SOS Pod Draft #14")
+
+    assert champ.closed_decklist is True
+    assert normal.closed_decklist is False
+
+
 def test_record_event_with_no_matching_set_leaves_set_id_null(session):
     event = _make_event(session, set_code="CUBE")
     assert event.set_id is None
